@@ -1,5 +1,61 @@
 # Shipped — the record
 
+## v0.448.1 — 2026-09-17 — a reprocess stops flattening a picture the app itself finished
+
+*(Builder, branch `claude/sweet-babbage-owmvv3` — PRIORITY 1-adjacent (the displayed picture) / 3 (trust), from
+observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903). **Built concurrently with PR #906
+and reworked on top of it** — see the collision note below. Upgrade-safe: no config, schema, on-disk or
+API-shape change; `ReprocessAllBody.auto_edit` still defaults `False`, so an old client or bookmark posts
+exactly what it always did, and `kept_finished` is an added summary key an older frontend ignores.)*
+
+**Where this sits.** v0.447.2 made the reprocess dialog *say* that a restack without "also auto-edit" replaces
+each target's displayed picture with a flat linear stack, with a count; v0.448.0 made the Library wall say which
+targets are in that state. Neither *prevents* it. The open entry that survived those two named the fix this
+ships as its own **"cheaper alternative worth costing first"**: carry the superseded run's finish onto the fresh
+run, leaving cover semantics alone entirely.
+
+**What ships.** `webapp.pipeline._picture_is_auto_finished` asks, per target and **before** the restack (after it
+the fresh run is the newest and the question is unanswerable): is the picture this target displays one the *app
+itself* finished? True only when no run is pinned as the cover — a pinned cover already outranks the newest run
+everywhere, so nothing regresses — and the run `finishedpicture.displayed_picture_run` picks carries the
+`editor_auto_baked_look` stamp. `submit_reprocess_all` then finishes the fresh run through the existing
+`_auto_edit_process_run`, and counts it apart as **`kept_finished`**, which `reprocessSummary` words as
+*"auto-edited 2 to keep finished pictures finished"* — so a batch nobody asked to auto-edit says why it did.
+
+**Two deliberate choices.**
+
+- **Re-derive Auto rather than copy the old recipe verbatim.** The point of a reprocess is the *new* engine's
+  pixels, and Auto fitted to them is exactly what the app would have produced. Copying a recipe expressed
+  against the old canvas is the thing `webapp/stale_crop.py` exists because of.
+- **Scoped to the baked stamp, not to "has a recipe".** A recipe with no stamp is somebody's own work, and
+  Auto's look is no evidence of what they wanted — the same line `_auto_edit_process_run` already draws
+  internally, where it refuses to write over a look it did not bake. The hand-edited subset stays open in the
+  backlog with the crop problem named; v0.447.2's warning and v0.448.0's chip cover it meanwhile.
+
+**Declined, unchanged from the open entry:** option (2) (seed the switch from `settings.auto_edit_on_autostack`)
+buys this owner nothing — that setting is off on his install, so his dialog would be byte-identical. Option (3)
+(pin the superseded run as `cover_stack_run_id`) is untouched by this: nothing is pinned, and a cover pin is
+permanent, so it would freeze the wall on the next clear night unless an unpin rule the column cannot carry were
+designed first.
+
+**Collision #16, recorded because it changed the work.** This branch was cut from `bf20d9c8` and built all three
+of PR #906's items independently; the merge fetch found #906 already on `main`. Two of the three (the `#901`
+per-pixel-depth phrase, the wall chip) were dropped wholesale as duplicates, and the third was *reduced*: PR
+#906's `reprocessPictureWarning` is a better copy fix than the `editNote` rewrite this branch had — it carries
+the affected count and renders under the switch as well as in the confirm — so that half was discarded and
+`Settings.tsx`/`Settings.test.tsx` taken from `main` unchanged. What survived is the half neither #906 nor the
+backlog had built. `_picture_is_auto_finished` was then rewritten to read #906's own
+`finishedpicture.displayed_picture_run` instead of re-walking the run list, so there is one definition of "which
+run is the displayed picture", not two. Process note: the branch fetched at start of run and again before this
+task — the second fetch is what caught it, and it caught it *after* the first task was written, which is the
+window §11 says is the dangerous one.
+
+**Tests.** `tests/webapp/test_reprocess_all.py` +5: the helper's three arms (ours / hand-saved / pinned cover), a
+previewless later run not masking the finished one beneath it, the end-to-end carry-forward with the switch off,
+the hand-saved stand-down, and the switch-on case attributing nothing to the carry-forward. The carry-forward
+test was checked against a reverted fix and fails `assert 0 == 2` without it. `Jobs.test.tsx` +3, including an
+older backend that sends no `kept_finished`.
+
 ## v0.448.0 — 2026-09-16 — the Library wall says which pictures haven't been stretched yet
 
 *(Builder, branch `claude/sweet-babbage-oar5bq` — 🌟 NEW BEGINNER FEATURE, PRIORITY 3 (friendliness + trust). The Scout's entry filed the same morning, motivated by observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903). New read-only endpoint + one badge: no config, schema, on-disk, API-shape or default change.)*

@@ -1242,6 +1242,32 @@ describe("reprocessSummary", () => {
       failed: [],
     });
   });
+  it("says when an auto-edit was to keep an already-finished picture finished", () => {
+    // The switch was off, so the only reason anything was auto-edited is that
+    // those targets were already showing a finished picture and the fresh run
+    // would otherwise have flattened them on every wall surface (issue #903).
+    expect(reprocessSummary({
+      total: 5, stacked: 5, auto_edited: 2, kept_finished: 2, failed: [],
+    })).toEqual({
+      line: "Restacked 5/5 targets — auto-edited 2 to keep finished pictures finished.",
+      failed: [],
+    });
+    // Switch on *and* some carried forward: the count says how many of the
+    // auto-edits were the carry-forward rather than the option.
+    expect(reprocessSummary({
+      total: 5, stacked: 5, auto_edited: 5, kept_finished: 2, failed: [],
+    })).toEqual({
+      line: "Restacked 5/5 targets — auto-edited 5 (2 to keep a finished picture finished).",
+      failed: [],
+    });
+    // Nothing needed carrying forward, and an older backend that never sent the
+    // key, both read as today's plain line.
+    expect(reprocessSummary({
+      total: 5, stacked: 5, auto_edited: 5, kept_finished: 0, failed: [],
+    })).toEqual({ line: "Restacked 5/5 targets — auto-edited 5.", failed: [] });
+    expect(reprocessSummary({ total: 5, stacked: 5, auto_edited: 5, failed: [] }))
+      .toEqual({ line: "Restacked 5/5 targets — auto-edited 5.", failed: [] });
+  });
 });
 
 describe("processTargetSummary", () => {

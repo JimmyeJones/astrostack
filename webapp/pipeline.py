@@ -1343,6 +1343,70 @@ def _refresh_target(settings: Settings, jm: JobManager, job: Job,
         log.warning("reprocess-all deep-rescan failed for %s: %s", safe, exc)
 
 
+def _picture_is_auto_finished(lib: Library, safe: str) -> bool:
+    """Is this target's **displayed** picture a finished auto-edit that a restack
+    is about to supersede?
+
+    ``reprocess_all`` records each restack as a *new* run, and the picture every
+    wall surface shows is the newest one — the library stamps
+    ``last_stack_preview`` from it, and
+    :func:`webapp.routers.targets.current_picture_path` falls back to it. So a
+    batch run with the auto-edit switch **off** replaces a whole library of
+    finished pictures with flat linear masters: the Library wall, the life list,
+    the wishlist thumbnails and the all-sky map all go flat at once, with nothing
+    on any of them saying why. The edits themselves are not lost (each stays on
+    its own run and is reachable in History) — which is exactly why the dialog's
+    "your existing edits are untouched" promise reads as true while the pictures
+    change anyway. Seen twice on the owner's install.
+
+    So the batch asks this per target, *before* the restack, and finishes the
+    fresh run the same way where the answer is yes. That is "re-do what this
+    picture already had", not a new opinion about it. True only when:
+
+    * **no run is pinned as the cover** — a pinned cover already outranks the
+      newest run everywhere, so nothing regresses and nothing needs doing; and
+    * the run :func:`webapp.finishedpicture.displayed_picture_run` picks was
+      auto-edited by **us**, i.e. it has an ``editor_auto_baked_look`` stamp. A
+      saved recipe with no stamp is somebody's own work, and Auto's look is no
+      evidence of what they wanted — there we stand down, and ``v0.447.2``'s
+      dialog warning (``reprocess_status.finished_pictures``) plus ``v0.448.0``'s
+      "Not stretched yet" wall chip are what name the consequence instead.
+
+    Note the stamp, not "has a recipe": this deliberately asks a *narrower*
+    question than :func:`webapp.finishedpicture.run_is_a_finished_picture`, which
+    counts any enabled recipe because it is answering "should the wall say this
+    isn't finished?". Here the answer decides whether to *write* something, and
+    re-deriving Auto is only unambiguously right where Auto is what made the
+    picture. It is also why the fresh run is auto-edited rather than handed the
+    old recipe verbatim: a reprocess exists for the new engine's pixels, and a
+    saved ``geometry.crop`` is expressed against the canvas it was cropped on.
+
+    Fail-soft on purpose: anything unreadable answers ``False``, which is the
+    behaviour every install had before this existed.
+    """
+    from seestack.io.project import Project
+    from webapp.routers.editor import AUTO_EDIT_BAKED_LOOK_PREFIX
+
+    try:
+        entry = lib.find_target(safe)
+        if entry is None or entry.cover_stack_run_id is not None:
+            return False
+        proj = Project.open(lib.target_dir(entry))
+        try:
+            # Which run the wall is showing is ``finishedpicture``'s question, not
+            # a second copy of it here — the cover arm is already answered above,
+            # so what is being asked for is "the newest run with a preview".
+            shown = _displayed_picture_run(list(proj.iter_stack_runs()), None)
+            if shown is None:
+                return False
+            return bool(proj.get_meta(
+                f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{shown.id}"))
+        finally:
+            proj.close()
+    except Exception:  # noqa: BLE001 — an unreadable target keeps today's behaviour
+        return False
+
+
 def _reprocess_yield(settings: Settings, jm: JobManager, job: Job, waiting_kind: str, *,
                      remaining: list[str], counters: dict[str, Any],
                      stale_only: bool, deep_rescan: bool,
@@ -1379,6 +1443,7 @@ def _reprocess_yield(settings: Settings, jm: JobManager, job: Job, waiting_kind:
         "skipped": int(counters.get("skipped") or 0),
         "rescanned": int(counters.get("rescanned") or 0),
         "auto_edited": int(counters.get("auto_edited") or 0),
+        "kept_finished": int(counters.get("kept_finished") or 0),
         "failed": list(counters.get("failed") or []),
         "cancelled": False,
         # Additive: this slice stopped early *on purpose* and the work continues
@@ -1442,6 +1507,18 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
     preview thumbnail (never an existing run's saved edit), is best-effort per run (a
     failure never fails the batch), and is fully reversible in the editor (Reset/undo).
 
+    **With it off, a target whose picture is already a finished auto-edit still
+    gets one.** Off used to mean "every restacked run is a flat linear master" —
+    and since the newest run *is* the picture the Library wall, the life list, the
+    wishlist and the all-sky map show, a batch nobody asked to auto-edit silently
+    flattened every finished picture in the library. Nothing was lost, and that is
+    what made it so hard to see: the edits sat safely on their own runs while the
+    pictures changed. So the off case now carries each target's existing finish
+    forward — only where the app itself baked it (:func:`_picture_is_auto_finished`),
+    never over somebody's own saved recipe — and reports how many in
+    ``kept_finished``. The switch still means what it said: finish *every* result,
+    including targets that have never been edited at all.
+
     **It hands the worker back to a waiting import, between targets.** The job
     manager is one queue and one thread on purpose (two stacks at once on a
     RAM-capped NAS is an OOM kill), so a batch that runs for days holds the
@@ -1485,6 +1562,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
             skipped = int(prior.get("skipped") or 0)
             rescanned = int(prior.get("rescanned") or 0)
             auto_edited = int(prior.get("auto_edited") or 0)
+            kept_finished = int(prior.get("kept_finished") or 0)
             failed: list[dict[str, str]] = list(prior.get("failed") or [])
             cancelled = False
             for i, entry in enumerate(targets):
@@ -1506,6 +1584,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                             "total": total, "done": done_before + i,
                             "stacked": stacked, "skipped": skipped,
                             "rescanned": rescanned, "auto_edited": auto_edited,
+                            "kept_finished": kept_finished,
                             "failed": failed,
                         },
                         stale_only=stale_only, deep_rescan=deep_rescan,
@@ -1532,6 +1611,15 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                         cancelled = True
                         break
                 reuse = _last_stack_options_for_target(lib, safe)
+                # Asked *before* the restack, because afterwards the fresh run is
+                # the newest one and the question can no longer be answered: is
+                # the picture this target currently shows a finished auto-edit
+                # that the new run is about to replace with a flat linear master?
+                # Where it is, the fresh run gets the same finish — see
+                # ``_picture_is_auto_finished``. Skipped entirely when the switch
+                # is on, since then every run is finished anyway.
+                keep_finish = (not auto_edit
+                               and _picture_is_auto_finished(lib, safe))
                 # Write to a fresh, version-tagged basename so the reprocessed run
                 # lands *alongside* the target's existing output instead of
                 # archiving/orphaning its ``master`` (the reused options carry the
@@ -1558,7 +1646,8 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                         break
                     stacked += 1
                     run_id = res.get("run_id")
-                    if auto_edit and run_id is not None and not job.cancel_requested():
+                    if ((auto_edit or keep_finish) and run_id is not None
+                            and not job.cancel_requested()):
                         # Chain the one-click Auto recipe onto the fresh master so the
                         # reprocess yields a finished *picture*, not a flat linear
                         # stack — same helper the single-target Process action uses.
@@ -1567,6 +1656,11 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                                 lib, safe, run_id,
                                 auto_crop=settings.auto_crop_border) is not None:
                             auto_edited += 1
+                            # Counted apart so the job summary can say *why* a
+                            # batch nobody asked to auto-edit auto-edited some
+                            # runs: it was keeping a finished picture finished.
+                            if keep_finish:
+                                kept_finished += 1
                 job.set_progress("reprocess", done_before + i + 1, total,
                                  f"{done_before + i + 1}/{total} targets")
                 jm.maybe_flush(job)
@@ -1576,6 +1670,11 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                 "skipped": skipped,
                 "rescanned": rescanned,
                 "auto_edited": auto_edited,
+                # The subset of ``auto_edited`` that happened to keep an
+                # already-finished picture finished rather than because the
+                # switch asked for it. Always present so a reader never has to
+                # tell "none needed it" apart from "an older build".
+                "kept_finished": kept_finished,
                 "failed": failed,
                 "cancelled": cancelled,
                 # Always present so a reader never has to tell "did not yield"

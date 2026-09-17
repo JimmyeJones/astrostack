@@ -18,6 +18,49 @@ is a queue.
 
 ---
 
+## 2026-09-17 — Collision #16: three items, two lost, one *reshaped* by the other run's work
+
+*(Builder, branch `claude/sweet-babbage-owmvv3`. Cut from `bf20d9c8`; PR #906 merged at 9dde4ce5 while this run
+was working.)*
+
+The run planned three tasks off the top of the backlog — observer issue **#903** (the reprocess flattening the
+wall), **#901** (the Stack form's "on each patch of sky"), and the Scout's **"finished / not stretched yet" wall
+chip** feature idea. PR #906 shipped **all three** as v0.447.2 / v0.447.3 / v0.448.0. Both runs read the same
+section of the same file and both picked from the top; nothing in the backlog could have prevented it.
+
+**What the timing actually was, because it is the interesting part.** This run fetched at start (`bf20d9c8` was
+tip) and again before task 2, exactly as §11 says. The second fetch is what caught it. But `origin/main` moved
+between those two fetches, so the first task was already written, tested and pushed against a tree that had
+since been superseded — which is precisely the window §11 calls the dangerous one. **The lesson is not "fetch
+more"; it is that a run holding a plan for 3 items is holding 3 chances to be scooped, and the fetch cadence
+bounds how *early* that is found, never whether it happens.** A run that had picked one item and shipped it
+would have collided on one.
+
+**Two were dropped wholesale; the third got *better* from the collision, which is new.** #901 and the wall chip
+were duplicates and were discarded. On #903 the two runs had built **different halves**: #906 shipped option (1)
+— name the consequence in the dialog, with a count (`reprocess_status.finished_pictures`,
+`reprocessPictureWarning`) — and explicitly declined option (3). This run had built option (1) *and* a structural
+half nobody had: carry the finish forward onto the fresh run. So the merge was not "keep mine or keep theirs":
+
+- #906's copy fix is **better** than this branch's `editNote` rewrite (it carries the affected count and renders
+  under the switch as well as in the confirm), so this branch's half was **deleted** and `Settings.tsx` /
+  `Settings.test.tsx` taken from `main` untouched — including deleting the two tests written for it an hour
+  earlier.
+- The surviving half was **rewritten to stand on #906's code**: `_picture_is_auto_finished` now reads #906's
+  `finishedpicture.displayed_picture_run` instead of re-walking the run list, so "which run is the displayed
+  picture" has one definition rather than two.
+- And #906 had, in the open remainder it left behind, *specified* the surviving half as the "cheaper alternative
+  worth costing first" — so the merge turned an accidental duplicate into a filed, sized item with the shipper
+  already holding the implementation.
+
+**The transferable bit:** on a collision, diff the two *fixes*, not the two *items*. Three of the last fifteen
+collision events were logged as "the other run shipped it, work discarded" when the two runs had in fact fixed
+different parts of the same entry. The question to ask of a scooped branch is **"which of my hunks is still not
+on `main`?"** — and then whether the part that *is* on main is better than yours, because it often is, and
+deleting your own tested code is the cheap outcome compared with shipping a second copy of the same sentence.
+
+---
+
 ## 2026-09-16 — Builder run (branch `claude/sweet-babbage-oar5bq`, PR #906): three tasks, and a backlog that came out shorter than it went in
 
 **Shipped:** v0.447.2 (observer #903 option 1), v0.447.3 (observer #901), v0.448.0

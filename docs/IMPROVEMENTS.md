@@ -106,10 +106,21 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   that is itself finished), which is state the cover column does not carry — a manual pin and an auto-pin are
   the same NULL-or-int today, and §9 forbids repurposing the existing column's meaning. So (3) is really "an
   auto-cover with provenance" and wants its own design pass.
-  **Cheaper alternative worth costing first:** carry the superseded run's **saved recipe** onto the fresh run
-  when the batch restacks a target whose displayed picture was finished. The reprocess already reuses that
-  target's *stack* settings on exactly that principle, and it leaves cover semantics alone entirely. It changes
-  what an unattended batch writes, so it wants its own slice and its own tests.
+  **Cheaper alternative — ✅ ITS LARGER HALF SHIPPED AS v0.448.1; read this before re-picking it.** The idea
+  was: carry the superseded run's finish onto the fresh run when the batch restacks a target whose displayed
+  picture was finished, leaving cover semantics alone entirely. v0.448.1 ships that for the subset where it is
+  unambiguously right — a picture the **app itself** baked (`editor_auto_baked_look` stamped on the run
+  `finishedpicture.displayed_picture_run` picks, no cover pinned) gets a fresh Auto edit, via
+  `pipeline._picture_is_auto_finished` → the existing `_auto_edit_process_run`, reported as `kept_finished`.
+  Re-deriving Auto rather than copying the old recipe verbatim is deliberate there: the whole point of a
+  reprocess is the *new* engine's pixels, and Auto fitted to them is what the app would have produced anyway.
+  **What is still open is the hand-edited subset** — a recipe somebody saved themselves, which has no baked
+  stamp. Copying it verbatim is the only way to preserve *their* look, and that is not a drive-by: a saved
+  `geometry.crop` is expressed against the old canvas, and the over-trim machinery
+  (`webapp/stale_crop.py`, `mosaicTrim.ts`) exists because a crop that no longer fits its coverage bound is a
+  real failure mode. So this slice needs the crop re-derived or re-validated against the fresh run's coverage
+  map, plus a test per direction. The wall chip (v0.448.0) is what makes the remaining cases visible meanwhile.
+  **(3) is unchanged by v0.448.1** — nothing was pinned and the cover column's meaning is untouched.
 
 - **🟠 BUG (autonomy / data-integrity, Scout 2026-09-14 — mechanism traced end-to-end from observer issue
   [#878](https://github.com/JimmyeJones/astrostack/issues/878)) — a mosaic's raw-subs folder is minted as a
@@ -3414,6 +3425,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.448.1** — 🟠 BUG (trust — PRIORITY 1-adjacent (the displayed picture) / 3, observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903)): **a reprocess no longer flattens a picture the app itself finished — it *prevents* the regression v0.447.2 announced.** New `pipeline._picture_is_auto_finished` asks, per target and before the restack, whether the run `finishedpicture.displayed_picture_run` picks carries the app's own `editor_auto_baked_look` stamp (and no cover is pinned); where it does, the fresh run gets the same Auto finish, counted apart as `kept_finished` and worded by `reprocessSummary`. This is the open entry's own "cheaper alternative", for the subset where re-deriving Auto is unambiguously right; carrying a **hand-saved** recipe forward stays open there (its crop may not fit the new canvas). No cover semantics touched.
 - **v0.448.0** — 🌟 NEW BEGINNER FEATURE (PRIORITY 3): the Library wall badges the pictures that are still flat linear stacks — `GET /api/unstretched-pictures` + `Library.tsx`'s "Not stretched yet" chip, off one shared definition (`webapp/finishedpicture.py`). From observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903). Full entry, and the three next slices, in [`SHIPPED.md`](SHIPPED.md). (#906)
 - **v0.447.3** — 🟡 BUG (trust, PRIORITY 3): the Stack form's "about N subs on each patch of sky" stops quoting the thinnest pointing cluster — new `pixel_depth` on `/stack-estimate` (`routers/stack._pixel_depth` → `field_fulls_of_sky`); `panel_depth` keeps its meaning for method selection. Observer issue [#901](https://github.com/JimmyeJones/astrostack/issues/901). Full entry in [`SHIPPED.md`](SHIPPED.md). (#906)
 - **v0.447.2** — 🟠 BUG (trust, PRIORITY 1-adjacent / 3): "Reprocess everything" names what it does to the pictures on the wall — `reprocess_status.finished_pictures` + `reprocessPictureWarning`, so an unedited restack replacing each target's displayed picture is a choice rather than a silent change. Observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903), option (1) of 3; (2) declined and (3) re-sized, both with reasons in the open entry. (#906)
