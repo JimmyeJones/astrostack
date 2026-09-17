@@ -18,6 +18,40 @@ is a queue.
 
 ---
 
+## 2026-09-17 — `--mosaic` dogfood after v0.451.x: CLEAN, and the third reproduction of the mosaic-effort lead became its fix
+
+*(Builder, branch `claude/sweet-babbage-ivepzn`. A QA sweep record, not a task — filed here per the three-file
+rule.)*
+
+**Result: CLEAN on both targets**, at 1440 px and 420 px — `nothing overflowing, no console errors` on the
+field sample and on the 2×2 mosaic, on the pre-change build and again on a rebuilt one. Auto's trim on the
+mosaic canvas is **7.9 %**, unchanged and well under the ~15 % bar. Page heights inside the shipped standings
+(phone `/tonight` 3,635 px, the mosaic Target page 3,572 → **3,592 px** after this run's change — one wrapped
+line, no new element).
+
+**The one finding was the already-filed `mosaicEffort` lead, reproduced a third time — and this time the gate
+that had kept it filed turned out not to cover the whole of it.** The lead is gated on a measurement only the
+owner's library can give (does the existing 2×2's depth sit inside a proposed 3×3?). What *this* pass could
+settle is narrower and was settled in one request: `GET /api/targets/Sample_M42_mosaic_2_2/stack-runs/1/framing`
+answers `{"level":"partial", …, "canvas":"mosaic"}`, i.e. the app already knows, at the exact call site, that
+the picture being priced is itself a mosaic. So the *misreading* (three sentences in a row, the first two about
+what is left, the third silently about the whole job) is fixable without the gated measurement — by saying the
+scope out loud rather than subtracting anything. Shipped as **v0.451.1**; the subtraction is still gated,
+still filed, still not to be blind-taken.
+
+**The generalisable half, for the next run that meets a filed-and-gated lead:** a gate is on a *claim*, not on
+the entry. Ask which sentence of the finding the gate actually covers — here it covered "~10 h of that is
+still to shoot" and never covered "this figure is the whole grid", which is the half a reader is getting wrong.
+
+**One tooling note worth having, cost: one wasted pass.** `agent-dogfood.sh` rebuilds the frontend only on
+`--build` or when `webapp/static/index.html` is missing — so a pass run *after* an earlier `npx vite build` in
+the same session photographs the **older** bundle, silently. The first pass here duly showed the unfixed
+sentence on a tree that already carried the fix, which reads exactly like "the change doesn't work". If a pass
+is meant to verify a frontend change made in this session, pass `--build` (with `--no-stack`, the scratch
+library is reused and the re-probe is minutes).
+
+---
+
 ## 2026-09-17 — Scout run: issue-inbox triage (3 closed), a focused adversarial sweep (CLEAN), one new beginner feature
 
 *(Scout, branch `claude/admiring-brahmagupta-v2ph9n`. A record, not a task — filed here per the three-file
