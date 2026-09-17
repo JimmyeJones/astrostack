@@ -363,9 +363,11 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
             (proj.get_meta(f"{baked_look_prefix}{run.id}")
              if baked_look_prefix else None),
         ),
-        # …and, off the row already read above rather than a fourth read, whether
-        # this run's picture is finished at all. Same shared definition the Library
-        # wall's chip and the reprocess warning use.
+        # …and, off the run's own row rather than any further read, whether this
+        # run's picture is finished at all. Same shared definition the Library
+        # wall's chip and the reprocess warning use — and it reads the same
+        # ``preview_display_space`` mark the ``unexported_edit`` call above
+        # does, so the two can no longer say opposite things about one run.
         finished=run_is_a_finished_picture_from(run.options_json, saved_recipe),
     )
 

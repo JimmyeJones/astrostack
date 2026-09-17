@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Library, UNSTRETCHED_HINT, expo } from "./Library";
+import { UNSTRETCHED_UNEXPORTED_HINT } from "../unstretched";
 import * as client from "../api/client";
 import type { Target } from "../api/client";
 
@@ -236,6 +237,42 @@ describe("Library — the \"Not stretched yet\" chip", () => {
     expect(chip.closest("[title]")).toHaveAttribute("title", UNSTRETCHED_HINT);
     expect(UNSTRETCHED_HINT).toContain("press Auto");
     expect(UNSTRETCHED_HINT).toContain("reversible");
+  });
+
+  it("stops telling someone with a saved edit to press Auto", async () => {
+    // Auto *replaces* the recipe in the editor, so the standing hint's advice is
+    // the one thing to withhold from a card that is unstretched because its
+    // owner's edit was never exported — they did stretch this picture; what is
+    // missing is the export. Same state History and the Gallery label
+    // "edit not exported".
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Andromeda", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 1,
+      items: [{ safe: "Andromeda", target_name: "Andromeda", run_id: 7,
+                unexported_edit: true }],
+    });
+    renderLibrary();
+
+    const chip = await screen.findByText("Not stretched yet");
+    const title = chip.closest("[title]")?.getAttribute("title") ?? "";
+    expect(title).toBe(UNSTRETCHED_UNEXPORTED_HINT);
+    expect(title).toContain("never exported it");
+    expect(title).not.toContain("press Auto to stretch");
+    expect(title).toContain("don't press Auto");
+  });
+
+  it("keeps the ordinary hint when an older backend omits the flag", async () => {
+    // The field is additive, so its absence has to read as "an ordinary
+    // unstretched card" rather than as either kind of guess.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Andromeda", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 1,
+      items: [{ safe: "Andromeda", target_name: "Andromeda", run_id: 7 }],
+    });
+    renderLibrary();
+
+    const chip = await screen.findByText("Not stretched yet");
+    expect(chip.closest("[title]")).toHaveAttribute("title", UNSTRETCHED_HINT);
   });
 
   it("shows no chips on a library where every picture is finished", async () => {
