@@ -18,6 +18,63 @@ is a queue.
 
 ---
 
+## 2026-09-17 — Scout run: issue-inbox triage (3 closed), a focused adversarial sweep (CLEAN), one new beginner feature
+
+*(Scout, branch `claude/admiring-brahmagupta-v2ph9n`. A record, not a task — filed here per the three-file
+rule. No code shipped this run; the deliverable is a triaged issue inbox and a vetted backlog.)*
+
+**Issue inbox — closed 3, left 3 open as tracked.** Verified each against the tree at `main` `5a56e370`:
+- **#901** (mosaic "subs on each patch of sky" 0.10× off) → **CLOSED**, fix shipped v0.447.3 exactly as the
+  observer suggested: `/stack-estimate` now serves `pixel_depth` (`routers/stack._pixel_depth` →
+  `field_fulls_of_sky`) and the frontend consumes `pixel_depth ?? panel_depth` (`Stack.tsx`,
+  `samplesPerPixel.ts`), wording the phrase and every per-pixel caution off the canvas measure while
+  `panel_depth` keeps its thinnest-cluster meaning only for method selection. Backend **and** frontend
+  switch confirmed present.
+- **#877** (baked-crop previews with NULL `preview_crop_json` placed as full-canvas) → **CLOSED**, fix
+  shipped v0.441.2: `webapp/preview_orient.recovered_preview_crop` resolves NULL by the PNG's own shape and
+  returns `UNKNOWN` ("decline to place geometry") rather than a fabricated rectangle; all consumers go through
+  it (verified `routers/sky.py` and siblings import it).
+- **#876** (stale over-aggressive crops in 42 saved recipes) → **CLOSED**, fix shipped v0.416.0 + v0.417.0
+  (`webapp/stale_crop.py` + `frontend/.../mosaicTrim.ts` on three surfaces, judges-never-rewrites, one-click
+  re-seed). Its two deliberate residuals (the `0.25` vs `0.8` gap; declining to judge when the border rule
+  proposes no trim) are documented stand-downs with numbers on both sides — not re-openable without a fresh
+  measurement of how many of the owner's 42 each choice names. The already-CLOSED backlog entry was cut from
+  "Bugs" this run (three-file rule: that section is open bugs and nothing else).
+- **#903** (reprocess-all silently replaced 44/77 displayed pictures), **#878** (mosaic double-registration),
+  **#880** (mosaic-output-only accepted-but-unstackable targets) → **left OPEN**: all three are triaged in the
+  backlog with their remaining work either an open remainder being driven (#903) or routed to owner sign-off
+  (the existing-duplicate merge migration for #878/#880, which must never touch `incoming/`, §10). Recurrence
+  for #878/#880 is already closed in code (the `_apply_seestar_convention` device-output skip). Nothing new to
+  add; not re-verified this run.
+
+**Focused adversarial sweep — CLEAN (no bug filed).** Per the AGENTS.md §0 rotation (the Scout's kickoff
+prompt is stale and points at the closed single-field engine core; AGENTS.md's rotation and "closed until a
+new bug is found" note win). Read adversarially, on data shaped like the owner's where relevant:
+- **webapp routers / freshest observer-driven modules** — `thinpicture.py`, `finishedpicture.py`,
+  `routers/unstretched.py`, `derived_light.stacking_field_fulls`, `field_fulls.field_fulls_of_sky`. The
+  depth/thin machinery is well-hardened (NaN/None-safe, crop-aware, JS↔Py mirror guarded, errs *low* on
+  purpose so it never tells a beginner to stop shooting). No defect.
+- **ASTAP filesystem side effects (rotation item 3), against the §10 `incoming/` read-only guardrail** —
+  `seestack/solve/astap.py` always solves a **scratch copy** in a `TemporaryDirectory` (`shutil.copy2`), so
+  the `.wcs`/`.ini` sidecars land in the temp dir, never beside the owner's raw in `incoming/`; `-update` is
+  deliberately omitted. Guardrail respected. No defect.
+- **Mosaic/walk-away divergence (rotation item 2)** — the walk-away auto-stack hold uses `_auto_stack_panel_depth`
+  → `typical_panel_depth` (a per-panel measure, held *without* stamping the attempt marker, so it only delays
+  and never corrupts). The 0.25° over-clustering that #901 documented is deliberately retained here for method
+  selection; benign for the owner (auto_stack off, thousands of subs). No new bug.
+- **Watcher/ingest** — `webapp/watcher.py` handles in-place rewrites, stranded batches and torn cross-thread
+  reads carefully; read-only over `incoming/`. No defect.
+
+No dogfood re-run this run: a full `--mosaic` pass on this exact tree was recorded CLEAN today (block below,
+Builder, post-v0.450.0). Re-running would reproduce it and the known `mosaicEffort` lead (already reproduced
+twice) — busywork per AGENTS.md §2.
+
+**New beginner feature filed** — "One frame vs your stack" (a shareable single-sub-vs-stack side-by-side),
+into "Features that serve real workflows". Grep-checked first: `/compare` weighs two *runs* (a single sub is
+not a run), and print-sizes/annotations/labelled-share/collage are all already shipped — this is the gap.
+
+---
+
 ## 2026-09-17 — `--mosaic` dogfood pass after v0.450.0: CLEAN, and the sample cannot draw the new chip either
 
 *(Builder, branch `claude/sweet-babbage-4cmy9w`, run against the merged v0.450.0 tree. A QA sweep record, not

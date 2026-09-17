@@ -272,47 +272,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   permanently un-accept a good frame. Any change here must restore `accept` in that branch too, and needs a
   test for the blip-then-recover path. **(c)** is answered by the #878 note above.
 
-- **⚪ ~~BUG (trust, Scout 2026-09-14 — verified from observer issue~~ — ✅ ALREADY SHIPPED; CLOSED
-  [#876](https://github.com/JimmyeJones/astrostack/issues/876)) — 42 saved edit recipes on 35 targets carry
-  the old over-aggressive auto-crop (worst keeps 2.91 % of canvas), and `_load_saved_recipe` serves each
-  back verbatim; 41 of 42 violate the D1 fix's own `TRIM_KEEP_RATIO = 0.8` against their run's coverage
-  bound.** *(Pillar: trust — PRIORITY 1-adjacent (editor) / 4; size S. Severity: low-to-medium — **no live
-  picture is cropped** (observer ruled out three ways: 0/77 live previews cropped, `_target_pick` lands on
-  an uncropped run for all 35, `cover_stack_run_id` NULL on all 89). Exposure is: open History → an older
-  run → the editor loads a 3–70 % crop as "your saved edit", and every export/share/wallpaper from that run
-  renders it. Confidence: **measured and traced**.)* Will **not** self-heal: `pipeline.py:3627`'s
-  unattended auto-edit refuses to overwrite a recipe lacking an `editor_auto_baked_look:` stamp (the stamp
-  postdates these 42), treating each as the user's own work — the guard is correct, the consequence is
-  permanence. **Fix (observer's, and the right shape):** do NOT rewrite the 42 recipes (that breaks the same
-  promise the `_baked_look` guard keeps). Instead make `_load_saved_recipe` / the editor recipe response
-  **flag** a saved crop whose kept area is below `TRIM_KEEP_RATIO` of the run's coverage bound and offer
-  "re-trim this" — both numbers are already computable from the sibling coverage map `_trim_rect_for_run`
-  (`webapp/routers/editor.py:294`) reads. **Do NOT re-open the trim algorithm** on the strength of the low
-  absolute percentages: the observer's control shows today's trim sits at 0.81–1.00 of its coverage bound on
-  the owner's *current* runs; the low numbers are sparse union canvases, not over-trimming.
-  **✅ CLOSED BY BUILDER VERIFICATION 2026-09-14 (branch `claude/sweet-babbage-f0hdap`) — the fix this entry
-  asks for shipped as v0.416.0 + v0.417.0 and is in the tree today; do not build it again.** The entry's own
-  prescription — *"make `_load_saved_recipe` / the editor recipe response **flag** a saved crop whose kept
-  area is below the run's coverage bound and offer 're-trim this'"* — is exactly `webapp/stale_crop.py`
-  (`STALE_CROP_KEEP_RATIO`, `crop_is_stale`, `stale_crop_verdict`) and its frontend twin
-  `frontend/src/components/editor/mosaicTrim.ts` (`OVER_TRIM_KEEP_RATIO`, `overTrimmedVerdict`,
-  `overTrimmedSentence`), on three surfaces: the editor's own note (`routes/Editor.tsx:1291`), the Target
-  page (`OverTrimmedTargetNote.tsx`), and a library-wide Dashboard count (`routers/overtrim.py`,
-  `OverTrimmedNote.tsx`). It judges and never rewrites, offers a one-click re-seed that replaces only the
-  crop op, and `tests/test_stale_crop.py` greps the TypeScript so the two thresholds cannot drift. **The
-  triage that re-filed this missed the note at the top of this very section** (the 2026-09-11 owner-answers
-  block: *"✅ IT HAS SINCE SHIPPED, don't go looking for it; all three surfaces closed in v0.416.0 +
-  v0.417.0"*) — which is the "grep before you build" rule, AGENTS.md §1, costing a slot.
-  **Two real residuals, recorded so they are not re-discovered as the whole bug:** (1) the shipped rule uses
-  `0.25` where the observer measured against `TRIM_KEEP_RATIO = 0.8`, so it flags only a 4× gap — deliberate
-  (`stale_crop.py` argues a half would accuse someone framing on the middle 40 % of their mosaic), but it
-  means well short of 41 of the 42 are named; (2) both halves **decline to judge** when the border rule
-  proposes no trim, which is every single-field run — also deliberate and documented in
-  `stale_crop_verdict`'s docstring ("catching it in one surface and not the others would be worse than
-  missing it in all three"). Either is a *threshold/scope* question with numbers already recorded on both
-  sides, i.e. a stand-down per AGENTS.md §1 — do not blind-flip either; re-open only with a measurement of
-  how many of the owner's 42 each choice would actually name.
-
 - **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
   question is closed unanswerable. Read before prioritising the audit's items.**
   - **The pre-D1 saved-recipe crop (⭐ item below — ✅ IT HAS SINCE SHIPPED, don't go looking for it; all three
@@ -2521,6 +2480,36 @@ missing. Don't re-file it.)*
 *(The Scout's 2026-09-12 "draw the full Moon to scale" entry shipped as v0.432.0 and was cut to
 [`SHIPPED.md`](SHIPPED.md) — `ScaleBar.moon_fraction` + `skymarks._moon_disc_box` + `frontend/src/moonDisc.ts`,
 off by default. Don't re-file it.)*
+
+- **🌟 NEW BEGINNER FEATURE (Scout 2026-09-17) — a ready-to-paste, copy-to-clipboard caption for a shared
+  picture: the object, the story, and the acquisition stats, in one line a beginner can post as-is.**
+  *(Pillar: enjoy/share + understand — PRIORITY 3; size **S–M**. Beginner bar: **yes** — a non-expert who
+  just made their first good Andromeda shot wants to post it and has no idea what to write; the app already
+  knows everything the caption needs. Sane default, plain language, offline, additive. Not pro/niche.)*
+  **The gap — checked, and it is narrow on purpose.** The app *does* attach a caption when you share, but it
+  is name + date only: `sharePictureText` returns `"<Name> — captured <date>"` (`frontend/src/share.ts:117`),
+  and the burned-in **labelled picture** (v0.407.0) writes text *onto* the image. What is missing is a
+  **copy-paste text caption** for the post itself — the words that go beside the photo on a phone or a forum —
+  and it is missing the two things that make such a caption worth posting: *what the object is*, and *how much
+  work it represents*. The app has both already. The annotation pipeline resolves the frame's primary
+  catalogue object with a plain-language type/description (`frontend/src/components/fieldObjectList.ts`,
+  `AnnotatedImage`, the bundled Messier/deep-sky catalogue — offline), and the run carries total exposure,
+  sub count and capture window (the same figures `formatCaptureNights` and the "finished picture" surfaces
+  read). So the caption a beginner cannot write themselves — *"M31, the Andromeda Galaxy — a spiral galaxy
+  ~2.5 million light-years away. 512 subs, 1 h 25 m total, shot over 3 nights."* — is one the app can assemble
+  from data it already holds, offered behind a **Copy caption** button next to the existing share controls.
+  **Why a Scout idea, and the three things to check first.** (1) **It must degrade honestly.** A target that
+  is not a catalogue object (a bare pointing, a comet, a custom name) has no description — the caption then
+  drops the story clause and keeps name + stats, exactly the no-date branch `sharePictureText` already models;
+  don't invent a description. (2) **No gear it doesn't know.** Owner Facts forbid hard-coding a scope model
+  (the "ZWO Seestar S50" bug); derive focal length from the frame's own `FOCALLEN` if a gear clause is wanted
+  at all, or omit gear entirely (safer). (3) **Reuse, don't fork, the object-name resolution** — route it
+  through the same helper the annotation overlay uses so the caption and the on-image labels can never name the
+  object two different ways (the `removed.ts`/`fullres.ts` "one place owns the wording" pattern this codebase
+  favours). **Guardrails:** frontend-only or one additive read-only field; no config/schema/on-disk/default
+  change, no network, nothing written to `incoming/`. **Sensible first slice:** the Copy-caption button on the
+  Target hero and Gallery lightbox with name + object description + integration stats; leave a multi-line
+  "detailed" variant and per-platform hashtag flavour for later (or never — clutter is the standing complaint).
 
 - **NEXT SLICES of the "finished / not stretched / thin" card signal — the Library wall shipped as v0.448.0;
   three pieces are left.** *(Scout 2026-09-16, first slice built by the Builder the same day. Pillar:
