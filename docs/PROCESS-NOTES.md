@@ -18,6 +18,43 @@ is a queue.
 
 ---
 
+## 2026-09-17 — `--big --editor` dogfood after v0.453.4: CLEAN, and the finding this run shipped came from *reading the ops*, not from running them
+
+*(Builder, branch `claude/sweet-babbage-dqhm8l`. A QA sweep record, not a task — filed here per the three-file
+rule.)*
+
+**Result: CLEAN**, at 1440 px and 420 px, on both samples — `nothing overflowing, no console errors` — and
+**both** editor drives came back `editor drive clean` across all 21 ops plus Undo and Redo. The `--big`
+sample reached the decimated preview it exists for: canvas **1693×1150**, `2.0× larger` on export,
+`[full-size check] available=True`. Page heights inside the shipped standings (phone `/tonight` 3,639 px, the
+full-size mosaic Target page 3,538 px, its editor 3,317 px, `/` 3,115 px, `/life-list` 3,094 px).
+
+**Both paragraph blocks read clean, on both samples.** On the field sample the coaching card, the readiness
+card and the framing verdict all say one thing — *15 % of Orion is in this picture, more time cannot bring
+the rest in, shoot it as a 2×2* — and the readiness card carries v0.444.2's scoping clause (*"~2 h … for this
+single field"*) rather than pricing the canvas the card beside it just said to stop shooting. On the
+full-size mosaic the four cards agree the same way (4 min over ~4 fields, thin at the top-right by ~30 s,
+*"Nicely framed"*). Nothing to file.
+
+**The advisories behaved exactly as their predicates promise, which is the half a browser can check and a
+unit test cannot.** At 1:1 the field sample's drive printed **no** advisory at all through all 21 ops; at
+2.0× the big sample printed the preview-scale caption on every op, the sharpen advisory from the moment Auto
+seeded (v0.390.0 opens on Auto, whose recipe carries `detail.sharpen`), and the star-reduce one only while
+`stars.reduce` was enabled. No SCNR advisory — correctly, because v0.453.3 fixed that op rather than
+captioning it.
+
+**So the run's finding did not come from this pass, and that is the note worth keeping.** Both of this run's
+tasks came from *reading* `seestack/edit/ops/*.py` adversarially for the A2 shape — a pixel-unit measure
+handed to a filter without `proxy_scale` — and then measuring what the read suggested. The dogfood pass is
+the instrument for *sentences a page says* and *things a click breaks*; it photographs a preview, it cannot
+tell you the preview is 0.68× of its own export. Three instruments, three blind spots, now written down in
+each other's files: the per-op parity file covers what someone remembered, the whole-recipe file covers what
+moves a global statistic, the dogfood pass covers what a reader sees, and the new
+`tests/test_edit_neighbourhood_drift.py` covers the source itself. None of them is a sweep on its own; the
+SCNR bug was invisible to the first three simultaneously for five months.
+
+---
+
 ## 2026-09-17 — `--big --editor` dogfood after v0.453.0: CLEAN, and the finding came from a *menu*, not a page
 
 *(Builder, branch `claude/sweet-babbage-f4u6pf`. A QA sweep record, not a task — filed here per the three-file
