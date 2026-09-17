@@ -948,7 +948,12 @@ the repo.
 > **160×120** because generation + QC is per-frame — so the surfaces that scale
 > with the frame **count** are exercised and the ones that scale with *pixels*
 > are not. Use it on any run that touches the frames table, a per-sub list, or
-> anything whose cost grows with a target's depth; use `--big` for pixels.
+> anything whose cost grows with a target's depth; use `--big` for pixels. **One
+> side effect to expect rather than investigate:** the deep target is by far the
+> deepest thing in the scratch library, so every prescriptive card on `/tonight`
+> names it — which is them working, but it makes a `--deep` pass a poor one on
+> which to read that column as one paragraph. Read that block on an ordinary or
+> `--mosaic` pass.
 >
 > **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
 > installed): the same probe against an app with **no data at all**. Every
