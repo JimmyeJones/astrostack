@@ -247,3 +247,153 @@ def test_one_broken_project_does_not_cost_the_whole_answer(
     r = solved_client.get("/api/unstretched-pictures")
     assert r.status_code == 200
     assert [i["safe"] for i in r.json()["items"]] == [good]
+
+
+# --------------------------------------------------------------------------- #
+# The Gallery's per-run half of the same answer (`GalleryItem.finished`)
+#
+# The endpoint above answers per *target*, about the one run it displays. The
+# Gallery lists every run of every target, so reusing that answer here would
+# badge the displayed run correctly and say nothing at all about the older linear
+# runs beside it — on the page whose whole job is looking at pictures.
+# --------------------------------------------------------------------------- #
+
+def test_the_gallery_answers_finished_per_run_not_per_target(
+        solved_client, solved_library):
+    """A target holding one edited run and one linear run gets one of each
+    answer — which is the thing the per-target endpoint structurally cannot say."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            old = _seed(proj, basename="master")
+            _edit(proj, old)
+            fresh = _seed(proj, basename="master_v2")   # no recipe: linear
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    items = solved_client.get("/api/gallery").json()["items"]
+    by_run = {i["run_id"]: i for i in items}
+    assert by_run[old]["finished"] is True
+    assert by_run[fresh]["finished"] is False
+    # …and the per-target endpoint names the target, because the run it *shows*
+    # (the newest with a preview) is the linear one. The two are consistent, and
+    # the Gallery's is the finer-grained answer.
+    named = [i["safe"] for i in
+             solved_client.get("/api/unstretched-pictures").json()["items"]]
+    assert named == [safe]
+
+
+def test_the_gallery_and_the_wall_agree_about_the_displayed_run(
+        solved_client, solved_library):
+    """One definition, two surfaces: for the run the wall is judging, the
+    Gallery's per-run `finished` is the negation of being named unstretched."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        a, b = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(a)
+        try:
+            _edit(proj, _seed(proj))            # finished
+        finally:
+            proj.close()
+        proj = lib.open_target(b)
+        try:
+            _seed(proj)                          # linear
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    named = {i["safe"] for i in
+             solved_client.get("/api/unstretched-pictures").json()["items"]}
+    assert named == {b}
+    items = solved_client.get("/api/gallery").json()["items"]
+    # Each target has exactly one run here, so each run *is* its displayed picture.
+    for it in items:
+        assert it["finished"] is (it["safe"] not in named), it
+
+
+def test_the_gallery_counts_an_editor_export_as_finished(
+        solved_client, solved_library):
+    """Same second shape the wall honours: an export's stacked pixels are already
+    tone-mapped, so its preview is a picture in its own right even with no recipe
+    saved against it."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            run_id = _seed(proj, basename="export",
+                           options={"editor_recipe": {"ops": _OPS},
+                                    "display_space": True})
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    items = solved_client.get("/api/gallery").json()["items"]
+    assert next(i for i in items if i["run_id"] == run_id)["finished"] is True
+
+
+def test_an_all_disabled_recipe_is_not_a_finished_gallery_card(
+        solved_client, solved_library):
+    """A recipe whose every op is off renders the linear stack, so the card must
+    say so — the same arm the wall already pins, asserted here because this is a
+    second call site of the shared rule rather than a second rule."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            run_id = _seed(proj)
+            _edit(proj, run_id,
+                  ops=[{"id": "tone.curves", "enabled": False, "params": {}}])
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    items = solved_client.get("/api/gallery").json()["items"]
+    assert next(i for i in items if i["run_id"] == run_id)["finished"] is False
+
+
+def test_the_two_finished_picture_forms_answer_identically(solved_library):
+    """`run_is_a_finished_picture_from` exists only so the Gallery can reuse a
+    recipe row it has already read; it must never become a second definition."""
+    from webapp.finishedpicture import (
+        run_is_a_finished_picture,
+        run_is_a_finished_picture_from,
+    )
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            plain = _seed(proj)
+            edited = _seed(proj, basename="m2")
+            _edit(proj, edited)
+            disabled = _seed(proj, basename="m3")
+            _edit(proj, disabled,
+                  ops=[{"id": "tone.curves", "enabled": False, "params": {}}])
+            export = _seed(proj, basename="m4",
+                           options={"editor_recipe": {"ops": _OPS}})
+            for run in proj.iter_stack_runs():
+                recipe = proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}")
+                assert run_is_a_finished_picture(proj, run) is (
+                    run_is_a_finished_picture_from(run.options_json, recipe)), run.id
+            # …and the expected answers, so an "identical" that is identically
+            # wrong cannot pass.
+            answers = {r.id: run_is_a_finished_picture(proj, r)
+                       for r in proj.iter_stack_runs()}
+            assert answers[plain] is False
+            assert answers[edited] is True
+            assert answers[disabled] is False
+            assert answers[export] is True
+        finally:
+            proj.close()
+    finally:
+        lib.close()

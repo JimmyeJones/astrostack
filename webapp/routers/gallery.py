@@ -28,6 +28,7 @@ from webapp.derived_light import (
     with_inherited_light_facts,
 )
 from webapp.field_fulls import native_frame_shape
+from webapp.finishedpicture import run_is_a_finished_picture_from
 from webapp.run_options import parse_run_options, run_has_reusable_options
 from webapp.site_location import resolve_site_lon
 
@@ -113,6 +114,17 @@ class GalleryItem(BaseModel):
     # History card use — one definition, so the three surfaces can't drift.
     # Additive with a False default, which is what every ordinary run is.
     unexported_edit: bool = False
+    # False when this run's picture is a flat linear stack rather than a finished
+    # one — the per-run form of the Library wall's "Not stretched yet" chip
+    # (v0.448.0), off the same shared definition (:mod:`webapp.finishedpicture`).
+    # The wall's own endpoint answers per *target*, about the one run it displays;
+    # the Gallery lists every run of every target, so an older linear run would be
+    # mis-badged by that answer and a beginner looking at the picture — which is
+    # what this page is for — would be told nothing about it.
+    #
+    # ``None`` means "not asked", never "linear": that is what an older frontend
+    # reading this field sees, and the chip renders only on an explicit ``False``.
+    finished: bool | None = None
     # Does this run carry the "what stacking removed" map beside its FITS, so the
     # full-screen viewer can offer the tint? Answered from the same per-item
     # stat() sweep `has_fits`/`has_preview`/`has_tiff` already do — the identical
@@ -302,6 +314,10 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
     """One finished stack's gallery card. Split out so the loop above can skip a
     single unreadable run without losing every other target's pictures."""
     has_preview = bool(run.preview_path and Path(run.preview_path).exists())
+    # Read once and shared by the two answers below it — `unexported_edit` and
+    # `finished` both turn on this run's saved recipe, and this endpoint pays its
+    # meta reads once per run of every target.
+    saved_recipe = proj.get_meta(f"{recipe_prefix}{run.id}")
     options = parse_run_options(run.options_json)
     night_start, night_end = capture_night_range(
         run.capture_start_utc, run.capture_end_utc, lon_deg)
@@ -342,11 +358,15 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         # this affordable library-wide.
         unexported_edit=unexported_edit(
             run.options_json,
-            proj.get_meta(f"{recipe_prefix}{run.id}"),
+            saved_recipe,
             proj.get_meta(f"{exported_prefix}{run.id}"),
             (proj.get_meta(f"{baked_look_prefix}{run.id}")
              if baked_look_prefix else None),
         ),
+        # …and, off the row already read above rather than a fourth read, whether
+        # this run's picture is finished at all. Same shared definition the Library
+        # wall's chip and the reprocess warning use.
+        finished=run_is_a_finished_picture_from(run.options_json, saved_recipe),
     )
 
 

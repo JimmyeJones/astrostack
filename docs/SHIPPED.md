@@ -1,5 +1,52 @@
 # Shipped — the record
 
+## v0.448.2 — 2026-09-17 — the Gallery wall says which pictures aren't finished, per run
+
+*(Builder, branch `claude/sweet-babbage-owmvv3` — PRIORITY 3 (understand + trust), slice (a) of the
+"finished / not stretched / thin" card signal whose first slice shipped as v0.448.0, plus its slice (c) answered
+for this surface. Beginner bar: yes, and the Library half is the proof. Upgrade-safe: one added response field
+with a `None` default, no config, schema, on-disk or default change; the chip renders only on an explicit
+`False`, so an older backend badges nothing.)*
+
+**Why the Gallery and not just the Library.** A linear master and a finished picture are the same dark-ish
+rectangle on a card, and only one of them has had its histogram stretched. v0.448.0 said which on the Library
+wall. The Gallery is the other wall — and the one where people actually *look* at pictures rather than navigate
+past them.
+
+**Where the filed slice was wrong, and it mattered.** It said this was "`Gallery.tsx` reading the same query".
+`GET /api/unstretched-pictures` answers per **target**, about the one run it displays; the Gallery lists **every
+run of every target**. Reusing that answer would have badged each target's displayed run and said nothing at all
+about the older linear runs sitting beside it — on the page whose whole job is browsing pictures. So this is a
+per-run answer: `GalleryItem.finished`.
+
+**How it costs nothing.** `/api/gallery` already reads every run's saved-recipe meta row, to decide
+`unexported_edit`, once per run of every target — the endpoint whose meta reads are the counted ones. New
+`finishedpicture.run_is_a_finished_picture_from(options_json, recipe_json)` takes that row, and the existing
+`run_is_a_finished_picture(proj, run)` is now a two-line wrapper over it, so there is still exactly **one**
+definition of "finished" behind the Library chip, the reprocess warning and this. `_gallery_item` reads the row
+once into a local and feeds both answers. A test asserts the two forms can never disagree, *and* pins the four
+expected answers, so an "identical" that is identically wrong cannot pass.
+
+**Slice (c), the one-click deep link, is answered here without building it.** A Gallery card already carries an
+**Edit image** button straight to `/targets/<safe>/edit/<run_id>`, and since v0.390.0 that editor opens *on* Auto
+rather than on a nudge to press it. So the chip's hint names that button. A clickable chip would have been a
+second link to the same place — the duplicate surface the owner's standing clutter complaint is about. It stays
+open on the **Library** card, where the original blocker is unchanged and is in fact bigger than filed: the whole
+card is one `<Link>`, and the run id is not even on `TargetOut`.
+
+**Copy is now one module.** `frontend/src/unstretched.ts` holds the shared label, both hints and
+`showsUnstretchedChip`; `Library.tsx` imports and re-exports `UNSTRETCHED_HINT` so its own tests keep importing it
+from there. The two hints deliberately differ in one clause only — the way in each card can actually offer — and a
+test pins both the shared half and the difference. `components/UnstretchedBadge.tsx` follows
+`UnexportedEditBadge`'s pattern for the same stated reason.
+
+**Tests.** `tests/webapp/test_unstretched.py` **+5**: per-run vs per-target on a target holding one edited and one
+linear run (the thing the endpoint structurally cannot say), the two surfaces agreeing about the displayed run, an
+editor export counting as finished, an all-disabled recipe not counting, and the two `finished` forms answering
+identically with their expected values. Three of them fail against a scratch revert that drops the field
+(`assert None is True`). `Gallery.test.tsx` **+2** (badges only the linear run and names the button its hint
+points at; silent when the field is absent or null) and new `src/unstretched.test.ts` **+4**.
+
 ## v0.448.1 — 2026-09-17 — a reprocess stops flattening a picture the app itself finished
 
 *(Builder, branch `claude/sweet-babbage-owmvv3` — PRIORITY 1-adjacent (the displayed picture) / 3 (trust), from
