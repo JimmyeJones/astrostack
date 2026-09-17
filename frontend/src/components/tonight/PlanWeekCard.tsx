@@ -8,6 +8,7 @@ import { api } from "../../api/client";
 import {
   closingRowFor, closingWeekNote, nightInProgressDate, otherTargetNights,
   targetNightPhrase, weekDarkPhrase, weekEmptyReason, weekHeadline, weekMoonNote,
+  weekMoonParts,
   weekNightLabel,
 } from "../../planweek";
 import { formatClock, formatMinutes } from "../../tonight";
@@ -103,7 +104,7 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
           <Table.Tbody>
             {placed.map((n) => {
               const best = n.best!;
-              const moon = weekMoonNote(n);
+              const moon = weekMoonParts(n);
               return (
                 <Table.Tr key={n.date}>
                   <Table.Td>
@@ -117,9 +118,21 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
                       to={`/targets/${encodeURIComponent(best.safe)}`}>
                       {best.name}
                     </Anchor>
+                    {/* Two lines, not one badge. A badge truncates, and in this
+                        column on a phone the caution came out as "Moon 92%, up…"
+                        — losing the one word ("all" / "part of") that decides
+                        whether the night is worth going out for, with no hover to
+                        recover it. The number keeps the yellow; the qualifier
+                        wraps freely beneath, the way "71 min" / "peaks 39°" two
+                        columns over already does. The full sentence stays on the
+                        title for a desktop hover. */}
                     {moon ? (
-                      <div>
-                        <Badge size="xs" variant="light" color="yellow">{moon}</Badge>
+                      <div title={weekMoonNote(n) ?? undefined}
+                        data-testid="plan-week-moon">
+                        <Badge size="xs" variant="light" color="yellow">
+                          {moon.badge}
+                        </Badge>
+                        <Text size="xs" c="dimmed">{moon.detail}</Text>
                       </div>
                     ) : null}
                   </Table.Td>
