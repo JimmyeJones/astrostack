@@ -18,7 +18,11 @@ from seestack.edit.proxy import rejection_map_path_for
 from seestack.io.project import readable_frame_path
 from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, preview_crop_json
-from seestack.stackhealth import grain_verdict, stored_seam_verdict_for
+from seestack.stackhealth import (
+    grain_verdict,
+    stored_hazy_verdict_for,
+    stored_seam_verdict_for,
+)
 from webapp import deps, estimate_cache, pipeline
 from webapp.capture_nights import capture_night_count, capture_night_range
 from webapp.derived_light import stacking_field_fulls, with_inherited_light_facts
@@ -994,6 +998,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             capture_night_end=night_end,
             capture_nights=nights,
             transparency_ratio=r.transparency_ratio,
+            hazy_verdict=stored_hazy_verdict_for(r),
             noise_sigma=r.noise_sigma,
             stack_fwhm_px=r.stack_fwhm_px,
             **geometry,

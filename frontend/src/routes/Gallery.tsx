@@ -460,7 +460,7 @@ function GalleryCard({ item, labels, onView, selected, onToggleSelect }: {
       </Text>
       <Group gap={4} mt={4}>
         <RejectionBadge options={item.options} />
-        <HazyNightBadge ratio={item.transparency_ratio} />
+        <HazyNightBadge ratio={item.transparency_ratio} verdict={item.hazy_verdict} />
         <PanelSeamsBadge verdict={item.seam_verdict} grain={item.grain_verdict} />
         <CalibrationBadge calstat={item.calstat} />
         {/* This card's thumbnail is the run's baked preview, so a saved-but-

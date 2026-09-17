@@ -3700,8 +3700,14 @@ def run_stack(
         applied_cal = calibration.describe() if calibration is not None else None
         if applied_cal in (None, "", "none"):
             applied_cal = None
+        from seestack.stackhealth import TRANSPARENCY_ESTIMATOR_GENERATION
+
         capture_start, capture_end = _capture_window(frames)
         capture_hours = _capture_hours(frames)
+        # Named before the row so the figure and the generation stamped beside it
+        # are read off one expression — a second call here could disagree with
+        # the first the moment the estimator's inputs are not deterministic.
+        transparency_ratio = _compute_transparency_ratio(project, frames)
         run_id = project.add_stack_run(StackRunRow(
             id=None,
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
@@ -3754,7 +3760,14 @@ def run_stack(
             # with four; only this says which.
             capture_hours_json=(
                 _json.dumps(capture_hours) if capture_hours else None),
-            transparency_ratio=_compute_transparency_ratio(project, frames),
+            transparency_ratio=transparency_ratio,
+            # …and which estimator wrote it, stamped beside the figure for the
+            # same reason ``seam_scale`` is: the number carries no scale of its
+            # own, v0.304.2 changed what it means on a mosaic, and a reader
+            # holding only the number cannot tell a hazy night from a panel with
+            # a poorer star field. NULL when there is no figure to date.
+            transparency_scale=(TRANSPARENCY_ESTIMATOR_GENERATION
+                                if transparency_ratio is not None else None),
             noise_sigma=noise_sigma,
             calstat=applied_cal,
             is_mosaic=bool(is_mosaic_canvas),
