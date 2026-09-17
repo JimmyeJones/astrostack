@@ -6,7 +6,7 @@ import type {
 import {
   bestNightOfWeek, closingRowFor, closingWeekNote, nightInProgressDate,
   otherTargetNights, targetNightPhrase, weekDarkPhrase, weekEmptyReason,
-  weekHeadline, weekMoonNote, weekNightLabel, weekNightLabelInline,
+  weekHeadline, weekMoonNote, weekMoonParts, weekNightLabel, weekNightLabelInline,
 } from "./planweek";
 
 // A Wednesday evening, so the weekday labels below are unambiguous.
@@ -384,6 +384,44 @@ describe("weekMoonNote", () => {
       date: "2026-09-05", moon_illumination: 0.6,
       best: pick({ moon_up_fraction: 0.5 }),
     }))).toBe("Moon 60%, up part of the night");
+  });
+
+  it("splits into a badge and a qualifier the table can show on two lines", () => {
+    // A Mantine badge truncates, and in the week table's "Point at" column on a
+    // phone the whole sentence came out as "Moon 92%, up…" — losing the one word
+    // that decides whether the night is worth going out for, with no hover to
+    // recover it. The number keeps the badge; the qualifier gets its own line.
+    expect(weekMoonParts(night({
+      date: "2026-09-05", moon_illumination: 0.92,
+      best: pick({ moon_up_fraction: 0.5 }),
+    }))).toEqual({ badge: "Moon 92%", detail: "up part of the night" });
+    expect(weekMoonParts(night({
+      date: "2026-09-05", moon_illumination: 0.85,
+      best: pick({ moon_up_fraction: 1.0 }),
+    }))).toEqual({ badge: "Moon 85%", detail: "up all night" });
+  });
+
+  it("keeps the one-line form composed from the split, so the two cannot drift", () => {
+    // `weekMoonNote` is still what the hover title shows, and it is built from
+    // the parts rather than spelled a second time.
+    for (const [illum, up] of [[0.92, 0.5], [0.85, 1.0], [0.4, 0.2]] as const) {
+      const n = night({
+        date: "2026-09-05", moon_illumination: illum,
+        best: pick({ moon_up_fraction: up }),
+      });
+      const parts = weekMoonParts(n);
+      expect(weekMoonNote(n)).toBe(
+        parts === null ? null : `${parts.badge}, ${parts.detail}`);
+    }
+  });
+
+  it("stays silent in both forms together", () => {
+    const down = night({
+      date: "2026-09-05", moon_illumination: 1.0,
+      best: pick({ moon_up_fraction: 0.0 }),
+    });
+    expect(weekMoonParts(down)).toBeNull();
+    expect(weekMoonNote(down)).toBeNull();
   });
 
   it("is silent when the fraction is unknown or the night is unplaced", () => {

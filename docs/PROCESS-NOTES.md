@@ -18,6 +18,42 @@ is a queue.
 
 ---
 
+## 2026-09-17 — The dogfood sample can never draw the "Not stretched yet" chip, on either wall
+
+*(Builder, branch `claude/sweet-babbage-owmvv3`, found while verifying v0.448.2 in a running app. A tooling
+blind spot, filed here rather than as a bug: nothing in the app is wrong.)*
+
+**What happened.** A `--mosaic` pass was run specifically to see the new Gallery chip in a browser. It did not
+appear — on either sample target, on either wall, beside two thumbnails that look exactly like flat linear
+stacks. That reads as a broken feature, and it is not one. Read out of the scratch library directly:
+
+    Sample_M42_mosaic_2_2: run 1  preview=True  finished=True  recipe='{"version": 1, ... "ops": [...]}'
+    Sample_Orion_Nebula_M42: run 1  preview=True  finished=True  recipe='{"version": 1, ... "ops": [...]}'
+
+Both sample runs carry a saved editor recipe, so both are genuinely finished and **the correct answer is no
+chip**. (The thumbnails look linear because the sample's pixels are synthetic noise, not because they are
+unstretched — which is its own small trap when reading these screenshots.) The feature agreeing with the running
+app is a real result and is why this is a note rather than a finding.
+
+**The blind spot.** Every target this tooling produces is auto-edited, so `finished` is `True` for every run it
+will ever show, and **neither the Library wall's chip (v0.448.0) nor the Gallery's (v0.448.2) has ever been drawn
+by a browser** — nor can be, as things stand. Both are pinned by jsdom alone. This is the same shape as the four
+holes already recorded above: the missing observing site, the empty `incoming/`, the click-only Compare modes,
+and the preview that never decimated. Each was invisible for the same reason — the pass could not produce the
+*state* the surface is gated on, so the surface was structurally unreachable and every "CLEAN" was silent about
+it.
+
+**The cheap close, for whoever picks it up.** A flag (`--linear`, say) that loads the sample and stacks it but
+skips the auto-edit for one target, so one card on each wall is genuinely unfinished and both chips are in front
+of a browser. It should be a *flag*, not the default, for the reason `--incoming-lag` is one: an unstretched
+picture is a state worth showing on demand, but making it the default would put a yellow chip into every Library
+and Gallery screenshot and every page-height baseline, which makes "CLEAN" mean less rather than more. The
+generalisable rule this is the sixth instance of: **when you ship a surface that only appears in a state the
+sample never reaches, extend the sample in the same run — otherwise the tooling's "CLEAN" is a statement about a
+screen your feature is not on.**
+
+---
+
 ## 2026-09-17 — Collision #16: three items, two lost, one *reshaped* by the other run's work
 
 *(Builder, branch `claude/sweet-babbage-owmvv3`. Cut from `bf20d9c8`; PR #906 merged at 9dde4ce5 while this run
