@@ -330,6 +330,17 @@ def plan_incoming_units(
     not. ``tests/test_incoming_plan.py`` pins that against a real tree by running
     both over it.
 
+    **One place the plan deliberately over-offers** *(v0.455.0)*. The scan also
+    passes over a unit whose own frames declare themselves darks/flats/biases
+    (:func:`_calibration_units`), and that verdict comes from *headers*, which
+    this function may not read — it exists to be cheap enough to run on every
+    watcher poll. So a calibration folder is still planned here. Nothing
+    downstream reports it: the one consumer that would,
+    :mod:`webapp.incominglag`, is handed the same folders the Calibration page's
+    build offer lists and excludes them there. That is why the scanner's skip
+    carries ``discover.MIN_FRAMES`` — it makes those two sets identical, so the
+    exclusion needs no second header read.
+
     **One deliberate approximation.** The real scan recognises a whole-device
     *container* (``incoming/MyWorks/{M 31_sub, …}``) with
     :func:`_looks_like_seestar_container`, which reads the directory; here the
@@ -918,12 +929,46 @@ class TargetScanResult:
     n_output_frames_rejected: int = 0
 
 
+@dataclass(frozen=True)
+class SkippedCalibrationFolder:
+    """A unit the scan passed over because its own frames say they are
+    calibration frames, not subs.
+
+    The app both *expects* and *invites* darks under ``incoming/``: the
+    Calibration page's build form is placeheld with ``/data/incoming/darks`` and
+    tells the owner to point at "a Seestar ``Dark`` folder on your NAS", and
+    ``GET /api/calibration/incoming`` is an entire feature whose premise is that
+    they live there. The scan, meanwhile, had no notion of a calibration frame at
+    all, so exactly those folders became light targets — a "Darks 10s" of six
+    lights on the Library wall and in the Gallery, counted into the campaign
+    stats, offered by the planner, chipped "Not stretched yet", and stackable
+    into a picture of nothing.
+
+    Unlike the two skips :class:`SkippedOutputFolder` records, this one is
+    **vouched for by the frames themselves** rather than inferred from a name, so
+    it needs no "you may have lost some subs" caveat and is kept in its own list
+    (see :data:`ScanResult.skipped_calibration_folders`) rather than folded into
+    the unvouched machinery.
+    """
+
+    target_name: str   # the target this would have become
+    kind: str          # "dark" | "flat" | "bias" — the master slot it fills
+    n_files: int       # FITS files in the unit
+    declared: dict[str, int]  # what the sampled frames actually said
+
+
 @dataclass
 class ScanResult:
     """Outcome of a whole ``scan_and_organize`` pass."""
 
     root: str
     targets: list[TargetScanResult] = field(default_factory=list)
+    # Units passed over because their frames declare themselves darks/flats/
+    # biases. Additive and separate from ``skipped_output_folders``: nothing that
+    # reads the "we skipped this, shall I bring it in?" report should offer to
+    # ingest a folder of darks as subs. See :class:`SkippedCalibrationFolder`.
+    skipped_calibration_folders: list[SkippedCalibrationFolder] = field(
+        default_factory=list)
     # Bare "<T>/" folders the Seestar convention passed over because a "<T>_sub/"
     # sibling was there. Reported rather than dropped: the skip is right for the
     # device's own finished picture and wrong for a plainly-named folder of a
@@ -966,6 +1011,62 @@ class ScanResult:
     @property
     def total_added(self) -> int:
         return sum(t.n_frames_added for t in self.targets)
+
+
+def _calibration_units(
+    units: list[tuple[str, list[Path]]],
+) -> tuple[list[tuple[str, list[Path]]], list[SkippedCalibrationFolder]]:
+    """Split ``units`` into the ones to ingest and the ones that are calibration.
+
+    The rule is :func:`seestack.calibrate.discover.classify_frames` — the *same*
+    function the Calibration page's "you already have darks, shall I build the
+    master?" offer is decided by — so the set of folders the app offers to build
+    from and the set the scan leaves alone are the same set by construction, not
+    by two implementations agreeing.
+
+    That rule is strict and one-sided: **every** sampled header must declare a
+    recognised calibration kind, all mapping to one slot, and a frame that says
+    nothing (which is what an ordinary Seestar sub says — it writes no
+    ``IMAGETYP``) rules the unit out on the first read. So the cost on a healthy
+    library is one header per folder, and a night of real subs cannot be skipped
+    by it however the folder is named.
+
+    ``min_frames`` is :data:`~seestack.calibrate.discover.MIN_FRAMES`, the
+    *offer's* own floor, and it is applied here deliberately even though the
+    question "is this a target?" would not need it. It is what makes the two sets
+    **identical**, and one thing downstream depends on that: the "subs waiting in
+    incoming/" note excludes the folders the Calibration page lists, and it is
+    allowed to, because it may not open anything under ``incoming/`` itself
+    (AGENTS.md §10) and so has no other way to know what the scan passed over. The
+    honest residue is a folder of one to four declared darks, which is still
+    ingested as a target — a fragment nobody shoots, and a state the note would
+    otherwise nag about for ever.
+
+    Never raises: a unit whose headers cannot be read is simply ingested exactly
+    as it is today. Getting frames in is the scan's job, and a note about
+    calibration must never be the reason a sub does not reach the library.
+    """
+    from seestack.calibrate.discover import MIN_FRAMES, classify_frames
+
+    keep: list[tuple[str, list[Path]]] = []
+    skipped: list[SkippedCalibrationFolder] = []
+    for target_name, files in units:
+        found = None
+        if len(files) >= MIN_FRAMES:
+            try:
+                found = classify_frames(sorted(files, key=lambda p: p.name.lower()))
+            except Exception:  # noqa: BLE001 — see the docstring: ingest, don't guess
+                log.debug("calibration check failed for %r", target_name,
+                          exc_info=True)
+                found = None
+        if found is None:
+            keep.append((target_name, files))
+            continue
+        kind, declared, _infos = found
+        skipped.append(SkippedCalibrationFolder(
+            target_name=target_name, kind=kind, n_files=len(files),
+            declared=dict(declared)))
+    return keep, skipped
 
 
 def scan_and_organize(
@@ -1091,6 +1192,20 @@ def scan_and_organize(
     output_bases = _seestar_output_bases(subdirs_with_fits, parents)
     if loose:
         units.append((UNSORTED_TARGET_NAME, loose))
+
+    # A unit whose own frames all say "I am a dark" is not a target. See
+    # :class:`SkippedCalibrationFolder` for why that folder is there at all — the
+    # Calibration page asks for it — and :func:`_calibration_units` for the rule,
+    # which is literally the one the build offer is decided by.
+    units, cal_skips = _calibration_units(units)
+    result.skipped_calibration_folders.extend(cal_skips)
+    for cal in cal_skips:
+        log.info(
+            "Skipped %r (%d file(s)) — every frame sampled says it is a %s "
+            "frame, so it is calibration data rather than a target. Nothing was "
+            "changed on disk; build a master from it on the Calibration page.",
+            cal.target_name, cal.n_files, cal.kind,
+        )
 
     total = len(units)
     for i, (target_name, files) in enumerate(units):
