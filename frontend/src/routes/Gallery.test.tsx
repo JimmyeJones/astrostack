@@ -1082,22 +1082,26 @@ describe("Gallery — what stacking removed, full screen", () => {
 
   it("offers nothing on a run that recorded no map", async () => {
     galleryWith();
-    const info = vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({} as never);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({} as never);
     await openFirst();
     expect(screen.queryByTestId("show-removed-view")).not.toBeInTheDocument();
-    expect(info).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("lightbox-overlay")).not.toBeInTheDocument();
   });
 
-  it("tints on request, captions it, and asks for the number only then", async () => {
+  it("tints on request and captions it with the measured fraction", async () => {
     galleryWith({ has_rejection_map: true });
     const info = vi.spyOn(client.api, "stackRunInfo")
       .mockResolvedValue({ rejection: { mode: "sigma-clip", fraction: 0.004 } } as never);
     await openFirst();
 
     const toggle = await screen.findByTestId("show-removed-view");
-    // Opening a picture must cost nothing extra: off by default, nothing fetched.
+    // Off by default — nothing is drawn over the picture until it is asked for.
+    // (The run's own facts *are* read when a picture opens, because the shared
+    // caption's scale clause needs the same row; this used to assert nothing was
+    // fetched, which stopped being true when that shipped. One request per
+    // opened picture, cached for as long as the page lives.)
     expect(screen.queryByTestId("lightbox-overlay")).not.toBeInTheDocument();
-    expect(info).not.toHaveBeenCalled();
+    expect(info.mock.calls).toEqual([["M_42", 1]]);
 
     fireEvent.click(toggle);
 
@@ -1120,6 +1124,156 @@ describe("Gallery — what stacking removed, full screen", () => {
       "src", "/api/targets/M_42/stack-runs/1/rejection-overlay?north_up=true"));
     expect(screen.getByRole("dialog").querySelector("img")).toHaveAttribute(
       "src", "/api/targets/M_42/stack-runs/1/preview?north_up=true");
+  });
+});
+
+// The same picture, shared from the Gallery, used to arrive with a different
+// caption from the one the Target hero and every History card hand over — "M 42
+// — captured 15 Nov 2024" against the ready-to-post sentence `postCaption`
+// builds. Same run, same bytes, two stories, decided only by which page it was
+// opened from — on the page whose whole job is looking at pictures.
+describe("Gallery — the caption a shared picture carries", () => {
+  function stubShare(share: (d?: ShareData) => Promise<void>) {
+    const nav = navigator as unknown as Record<string, unknown>;
+    nav.canShare = () => true;
+    nav.share = share;
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob([new Uint8Array([1])], { type: "image/jpeg" }),
+    })));
+    return () => { delete nav.canShare; delete nav.share; };
+  }
+
+  function galleryWith(over: Partial<GalleryItem> = {}) {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{
+        ...item(1), has_preview: true, preview_url: "/p/1.png",
+        n_frames_used: 240, total_exposure_s: 2400,
+        capture_night_start: "2024-11-15", capture_night_end: "2024-11-15",
+        ...over,
+      }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+  }
+
+  const identity = (over: Partial<client.ObjectInfo> = {}): client.ObjectInfo => ({
+    id: "M42", name: "Orion Nebula", type: "nebula",
+    constellation: "Orion", constellation_abbr: "Ori",
+    ra_deg: 83.82, dec_deg: -5.39, matched_by: "name", ...over,
+  });
+
+  const shareFromFirstPicture = async (share: ReturnType<typeof vi.fn>) => {
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+    // The caption is built from three answers; wait for the last of them before
+    // sharing, exactly as a reader would.
+    await waitFor(() => expect(client.api.identifyTarget).toHaveBeenCalled());
+    await waitFor(() => expect(client.api.stackRunInfo).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText("Share picture"));
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+    return (share.mock.calls[0][0] as ShareData).text ?? "";
+  };
+
+  it("shares the ready-to-post sentence, not the bare name and date", async () => {
+    galleryWith();
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(
+      identity({ blurb: "A vast stellar nursery." }));
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1920, height: 1080, objects: [], north_up_deg: null,
+      scale_bar: { moon_comparison: "the whole frame is about 5.4 full Moons wide" },
+    } as never);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({} as never);
+    const share = vi.fn(async (_d?: ShareData) => {});
+    const restore = stubShare(share);
+
+    const text = await shareFromFirstPicture(share);
+
+    expect(text).toContain("Orion Nebula (M42)");
+    expect(text).toContain("a stack of 240 subs (40 min total)");
+    expect(text).toContain("shot on 15 Nov 2024 with a Seestar");
+    expect(text).toContain("A vast stellar nursery.");
+    expect(text).toContain("The whole frame is about 5.4 full Moons wide.");
+    // The sheet's *title* and the file's name are a label and a slug, and stay
+    // exactly what they were.
+    const data = share.mock.calls[0][0] as ShareData;
+    expect(data.title).toBe("M_42 · 15 Nov 2024");
+    expect(data.files?.[0].name).toBe("m-42.jpg");
+    restore();
+  });
+
+  it("measures the scale clause on the picture, not on the canvas behind it",
+    async () => {
+      // A "Process target" run's stored preview is a border-trimmed crop of its
+      // canvas, and the canvas bar would claim a wider field than the picture
+      // has — in the one sentence a beginner pastes publicly. The run's own
+      // geometry, off the info endpoint, is what picks the honest bar.
+      galleryWith();
+      vi.spyOn(client.api, "identifyTarget").mockResolvedValue(identity());
+      vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+        width: 1920, height: 1080, objects: [], north_up_deg: null,
+        scale_bar: { moon_comparison: "the whole frame is about 5.4 full Moons wide" },
+        preview_scale_bar: {
+          moon_comparison: "the whole frame is about 3.8 full Moons wide",
+        },
+      } as never);
+      vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+        preview_crop: { x0: 0.1, y0: 0.1, x1: 0.8, y1: 0.8 },
+      } as never);
+      const share = vi.fn(async (_d?: ShareData) => {});
+      const restore = stubShare(share);
+
+      const text = await shareFromFirstPicture(share);
+
+      expect(text).toContain("The whole frame is about 3.8 full Moons wide.");
+      expect(text).not.toContain("5.4");
+      restore();
+    });
+
+  it("says nothing about scale when the geometry can't be reconciled", async () => {
+    galleryWith();
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(identity());
+    vi.spyOn(client.api, "stackAnnotations").mockResolvedValue({
+      width: 1920, height: 1080, objects: [], north_up_deg: null,
+      scale_bar: { moon_comparison: "the whole frame is about 5.4 full Moons wide" },
+    } as never);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      preview_geometry_unknown: true,
+    } as never);
+    const share = vi.fn(async (_d?: ShareData) => {});
+    const restore = stubShare(share);
+
+    const text = await shareFromFirstPicture(share);
+
+    expect(text).toContain("Orion Nebula (M42)");
+    expect(text).not.toContain("full Moons");
+    restore();
+  });
+
+  it("still captions an unidentified target under the name it shows", async () => {
+    galleryWith({ target_name: "My backyard field", has_fits: false });
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(null);
+    const info = vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({} as never);
+    const share = vi.fn(async (_d?: ShareData) => {});
+    const restore = stubShare(share);
+
+    renderGallery();
+    await waitFor(() => expect(screen.getAllByRole("img").length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByRole("img")[0]);
+    await waitFor(() => expect(client.api.identifyTarget).toHaveBeenCalled());
+    fireEvent.click(await screen.findByLabelText("Share picture"));
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+
+    const text = (share.mock.calls[0][0] as ShareData).text ?? "";
+    expect(text).toContain("My backyard field — a stack of 240 subs (40 min total)");
+    expect(text).toContain("shot on 15 Nov 2024 with a Seestar");
+    expect(text).not.toContain("full Moons");
+    // A preview-only run has no FITS to read a header from, so neither the
+    // geometry nor the annotations are asked for — and the caption is simply
+    // shorter, rather than absent.
+    expect(info).not.toHaveBeenCalled();
+    restore();
   });
 });
 

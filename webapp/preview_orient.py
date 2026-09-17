@@ -268,3 +268,42 @@ def recovered_preview_crop(run):  # noqa: ANN001, ANN201
     log.debug("run %s: stored preview %s is not a downscale of %s — declining to "
               "place geometry on it", getattr(run, "id", "?"), stored, expected)
     return UNKNOWN
+
+
+def preview_geometry_out(run) -> dict[str, object]:  # noqa: ANN001
+    """The three response fields that say what a run's **stored preview** shows.
+
+    Anything measured on the un-cropped FITS grid — the object pins, the scale
+    bar, and the "about N full Moons wide" sentence a shared caption carries —
+    has to be placed on the bytes a viewer is actually looking at, and these are
+    the facts that make that possible: the turn a past "Adjust → North up → Save"
+    baked in, the rectangle of the canvas a border trim left, and whether the two
+    can be reconciled at all.
+
+    It is a function rather than three lines at the call site because **two**
+    endpoints answer it — the run listing (``GET …/stack-runs``) and the
+    single-run info panel (``GET …/stack-runs/<id>/info``) — and a caption built
+    from one while the picture is drawn from the other must not be able to
+    describe two different pictures. A test asserts the two agree on the same
+    run in every state.
+
+    A recorded North-up angle is passed through verbatim, including an explicit
+    ``0.0`` (that is a statement that the bytes are on the canvas grid, not an
+    absence); only a run from before the column existed falls through to the
+    recovery, and a recovered ``0.0`` is reported as ``None`` because there is
+    nothing to correct for.
+    """
+    from seestack.previewcrop import UNKNOWN, PreviewCrop
+
+    crop = recovered_preview_crop(run)
+    recorded = getattr(run, "preview_north_up_deg", None)
+    return {
+        "preview_north_up_deg": (
+            recorded if recorded is not None else (recovered_north_up_deg(run) or None)
+        ),
+        "preview_crop": (
+            {"x0": crop.x0, "y0": crop.y0, "x1": crop.x1, "y1": crop.y1}
+            if isinstance(crop, PreviewCrop) else None
+        ),
+        "preview_geometry_unknown": crop == UNKNOWN,
+    }

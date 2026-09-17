@@ -12,7 +12,7 @@ import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type
 import {
   formatCaptureNights, formatIntegration, formatStampDateTime,
 } from "../format";
-import { postCaption } from "../components/postCaption";
+import { postCaptionForRun } from "../components/postCaption";
 import { HintAnchor } from "../components/HintAnchor";
 import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
@@ -1022,19 +1022,8 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   // shared picture arrives with its words — the same accurate sentence as "Copy
   // caption", minus the scale clause unless the run's annotations happen to be
   // loaded already (the share flow is synchronous; we don't block it on a fetch).
-  const shareCaption = postCaption({
-    name: identity?.name,
-    catalogId: identity?.id,
-    type: identity?.type,
-    blurb: identity?.blurb,
-    nFrames: run.n_frames_used,
-    integrationS: run.total_exposure_s,
-    captureNightStart: run.capture_night_start,
-    captureNightEnd: run.capture_night_end,
-    captureNights: run.capture_nights,
-    scaleBar: storedPreviewScaleBar(annotations.data, run),
-    fallbackName: shareName,
-  });
+  const shareCaption = postCaptionForRun(
+    run, identity, storedPreviewScaleBar(annotations.data, run), shareName);
 
   const previewSrc = `${api.stackArtifactUrl(safe, run.id, "preview")}${cacheBust ? `?v=${cacheBust}` : ""}`;
   // While the first suggestion fetch is still in flight, keep showing the STF

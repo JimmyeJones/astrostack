@@ -1,5 +1,149 @@
 # Shipped — the record
 
+## v0.453.2 — 2026-09-17 — the last surface in the class: "My best pictures" shares its pictures with their story
+
+*(Builder, branch `claude/sweet-babbage-f4u6pf`, closing the class v0.453.0 and v0.453.1 opened. One additive
+pair of response fields on one endpoint; no config, schema, on-disk, default or existing-response-shape
+change.)*
+
+**The page you open to show someone your pictures was the one sharing them namelessly.** `BestPictures.tsx`'s
+viewer built its share text from `sharePictureText` — *"M31 — captured 2 May 2026"* — while the identical run,
+opened from the Target page, History or the Gallery, went out as *"Orion Nebula (M42) — a stack of 240 subs
+(40 min total), shot on 15 Nov 2024 with a Seestar. A vast stellar nursery. The whole frame is about 5.4 full
+Moons wide."* Three surfaces had been fixed; this was the fourth and last.
+
+**The identity comes off the row, not a per-picture lookup — because the endpoint had already done the
+lookup.** `GET /api/gallery/best` calls `identify_object` once per target to fill `object_type` and `blurb`
+(added so the slideshow could caption a picture away from its target page), and then dropped the match's
+`id` and `name` on the floor. Those two now ride along as `object_id` / `object_name`: same call, same match,
+zero extra work, and no `/identify` request per opened picture. A test asserts they are the catalogue's own
+answer rather than the folder name echoed back — which is exactly what a caption built from the row alone
+would have had to settle for.
+
+**The scale clause takes the same route as the Gallery's (v0.453.0):** `…/stack-runs/<id>/info` for the run's
+stored-preview geometry and `…/annotations` for the bar, both only once a picture is open and only on a
+FITS-backed run, both on the cache keys the other viewers use — so a picture already opened elsewhere has
+paid for it. A trimmed preview gets `preview_scale_bar`, never the wider canvas's.
+
+**Every fallback is the behaviour this page already had.** An unmatched target, an older backend that sends
+neither field, or a preview-only run with no FITS: the caption is the shorter sentence under the name the wall
+itself shows. The share sheet's title and the file's name are unchanged.
+
+**Tests (+4, all red under a scratch revert).** One in `tests/webapp/test_gallery_best.py` (the two fields are
+the same lookup's answer, are never omitted, and are `""` on the catalog-knows-nothing path, asserted beside
+its neighbours), and three in `BestPictures.test.tsx`: the full sentence named off the row with
+`identifyTarget` asserted **not** called; the scale clause taken from the trimmed preview's bar (3.8 Moons,
+not the canvas's 5.4); and an unnamed target captioned under the wall's own name with neither read made.
+
+## v0.453.1 — 2026-09-17 — "Copy caption" and "Share picture", one item apart in the same menu, described the same picture two different ways
+
+*(Builder, branch `claude/sweet-babbage-f4u6pf`. Found while shipping v0.453.0 — the lead that fix was built
+from asserted that "the Target hero and History hand the OS sheet `postCaption`'s full sentence", and only
+half of that was true. Frontend-only; no endpoint, config, schema, on-disk, API-shape or default change.)*
+
+**What was wrong, on the app's most prominent picture.** `SavePictureMenu` has carried "Copy caption" since
+v0.385.0 — the ready-to-post `postCaption` sentence, with the object's name, what it is, the sub count, the
+integration, the capture window and the picture's scale. Its **share** items got that sentence only if the
+caller passed a `shareCaption` prop, and of the menu's two callers **only History did**. So on the Target
+page's hero:
+
+    Copy caption   → "Orion Nebula (M42) — a stack of 240 subs (40 min total), shot on 15 Nov 2024
+                      with a Seestar. A vast stellar nursery. The whole frame is about 5.4 full
+                      Moons wide."
+    Share picture  → "M42 — captured 15 Nov 2024"
+
+two items apart, in one dropdown, about one picture. The hero's **lightbox** share was the same text again:
+`LatestPictureCard` passed `sharePictureText`'s `text` straight through.
+
+**The fix is that nobody passes the caption in any more — the menu builds it.** `shareCaption` stays as an
+explicit override (History still computes its own, identically), but with it absent `SavePictureMenu` now
+builds exactly what its own "Copy caption" item builds, so the two cannot be wired up differently again. The
+scale clause comes from a **non-fetching** `useQuery` on the annotations key (`enabled: false`): it costs
+nothing on a page load, never issues a request, and still re-renders when something else puts the
+measurement in the cache — "What's in it?", opening the picture big, or the menu's own "Copy caption". A
+share is a synchronous response to a tap, so the caption is never blocked on a fetch; a run nobody has asked
+about shares the same sentence minus its scale clause, which is exactly what History has documented doing
+since v0.385.0.
+
+**And the mapping itself is now written once.** New pure `postCaption.postCaptionForRun(run, identity,
+scaleBar, fallbackName)` — which run column feeds which clause — replaces the four surfaces that each spelled
+it out: the hero menu, the hero lightbox, every History card and the Gallery viewer (v0.453.0). It is typed
+structurally, so a `StackRun` and a `GalleryItem` both satisfy it without adapting: they are one row served by
+two endpoints, and a test pins that they caption identically. `scaleBar` stays an argument rather than being
+derived inside, because only `storedPreviewScaleBar` can decide which bar honestly describes the *stored
+preview*, and the surfaces hold that geometry differently.
+
+**Nothing removed, nothing renamed.** The share sheet's **title** and the shared file's **name** still come
+from `sharePictureText` — they are a short label and a slug, where a caption would be wrong — and every
+existing caller keeps working: `shareCaption` is still honoured first.
+
+**Tests (+7 net; 7 red under a scratch revert).** Three in `Target.test.tsx`: the existing date-property
+assertions re-pinned against the new sentence (they asserted equality with `sharePictureText`'s output, which
+is the thing this deliberately replaces — the property they were about, *never the stack day*, is asserted
+harder than before), plus a new one that drives the real menu and asserts the **shared** text is
+byte-identical to the **copied** text. Three in `LatestPictureCard.test.tsx` for the lightbox's own share: the
+full sentence with its scale clause; the clause dropped on a trimmed preview the canvas bar would overstate;
+and an unidentified target captioned under the name the page shows. Three in `postCaption.test.ts` for the new
+helper — the full mapping, the two row shapes agreeing, and silence for what it does not have.
+
+## v0.453.0 — 2026-09-17 — the same picture, the same caption, whichever page you opened it from
+
+*(Builder, branch `claude/sweet-babbage-f4u6pf`. The "Gallery lightbox" lead filed 2026-09-17 under "Features
+that serve real workflows", built as its own shape **(a)**. Additive throughout — one shared helper, three
+additive response fields on one endpoint, no config, schema, on-disk, default or existing-response-shape
+change.)*
+
+**What was wrong.** `postCaption` — the ready-to-post sentence a beginner can paste under their photo — has
+been what the Target hero and every History card hand the OS share sheet since v0.385.0, and since v0.451.0 it
+tells the catalogue's own sentence about the object too. The **Gallery's** full-screen viewer built its share
+text from `sharePictureText` instead: *"M 42 — captured 15 Nov 2024"*, a name and a date. So the identical run,
+the identical bytes, went out with its story or without it depending only on which page it had been opened
+from — and the Gallery is the page whose whole job is looking at pictures.
+
+**The gate the lead filed it on was the scale clause, and it was half the size the lead thought.** That clause
+("The whole frame is about 5.4 full Moons wide.") is a claim about the **stored preview**, which on a "Process
+target" run is a border-trimmed crop of its canvas — so it has to come from `storedPreviewScaleBar`, which
+needs the run's `preview_crop` / `preview_north_up_deg` / `preview_geometry_unknown`. The lead costed two
+shapes and warned, correctly, not to pass the plain canvas `scale_bar` through (on a cropped preview it
+overstates the field, in the one sentence that gets pasted publicly). Two things it had not checked:
+
+- **The annotations are already fetched.** `Gallery.tsx` has queried `…/annotations` on every lightbox open
+  since the North-up view toggle shipped — it is how it decides whether turning the picture would move it. The
+  bar itself was therefore in hand all along; the gate was only ever the run's *geometry*.
+- **The geometry is three lines the run listing already computes**, and the honest way to serve them twice is
+  not to write them twice. New `webapp/preview_orient.preview_geometry_out(run)` is now the single answer to
+  "what is this run's stored preview, relative to its canvas?", and **both** `GET …/stack-runs` (which the
+  Target page and History draw from) and `GET …/stack-runs/<id>/info` (the only per-run endpoint a page that
+  lists runs across *every* target can ask) return it. A test asserts the two agree on one run in all three
+  states — never processed, auto-edit-trimmed, and geometry that can't be reconciled — because two independent
+  copies of "is this preview a crop?" is exactly how a caption ends up describing a different picture from the
+  one on screen.
+
+**What it costs.** One extra request per *opened* picture, and only on a run with a FITS behind it (the info
+endpoint is a header read and 404s without one). Drawing the grid still costs nothing, however many cards it
+has, and re-opening the same picture is free (`staleTime: Infinity`, the key History's own copy of the tint
+already uses — so the removed-tint caption now rides on the same fetch rather than making a second one). The
+identity comes off `…/identify` on the cache key the Target page and the editor share, so opening a picture
+here *warms* the answer there.
+
+**Every clause degrades to silence, as `postCaption` intends.** No identity → the target's display name, never
+the URL slug. No annotations, no info, an older backend, or `preview_geometry_unknown` → no scale sentence
+rather than a wrong one. A preview-only run asks for neither and simply gets a shorter caption. The share
+sheet's *title* and the shared file's *name* are unchanged: they are a short label and a slug, not a caption.
+
+**Tests (+5; the four frontend ones red under a scratch revert, the Python one red under its own).**
+`tests/webapp/test_preview_crop_geometry.py` gains the listing-vs-info agreement across the three states
+(including that a recorded `0.0` North-up angle — the auto-edit's positive "these bytes are on the canvas
+grid" — is passed through verbatim by both, not reported as the absence a *recovered* zero would be).
+`Gallery.test.tsx` gains four: the full sentence on the wire through a stubbed `navigator.share`; the scale
+clause taken from `preview_scale_bar` on a cropped run and **not** from the canvas bar (3.8 Moons, not 5.4 —
+the lead's named trap, pinned); silence on unreconcilable geometry; and an unidentified preview-only target
+captioned under the name the card shows, with no info request made. Two existing assertions in the
+"what stacking removed" block were **deliberately rewritten, not weakened**: they asserted that opening a
+picture fetched nothing, which is a claim this change knowingly retires — they now pin what the tint itself
+still costs (nothing beyond the one request the picture already made) and that nothing is drawn over the
+picture until it is asked for.
+
 ## v0.452.2 — 2026-09-17 — the dogfood pass can reach the note it just changed, and the mixed note stops saying one thing twice
 
 *(Builder, branch `claude/sweet-babbage-10p2wj`, found by actually running v0.452.1 in a browser. Tooling +

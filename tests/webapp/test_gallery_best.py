@@ -314,6 +314,50 @@ def test_best_carries_what_each_picture_is_so_a_slideshow_can_say_it(
         assert isinstance(item["blurb"], str)
 
 
+def test_best_also_names_the_object_the_same_lookup_already_found(
+        client, solved_library):
+    """The type and the blurb *describe* the object; the designation and the
+    common name *name* it — and the wall's viewer opens its shareable caption on
+    the name ("Orion Nebula (M42) — a stack of …").
+
+    They come off the *same* ``identify_object`` match this endpoint already
+    makes to fill the two fields above, so carrying them costs nothing; the
+    alternative was one ``/identify`` request per picture opened. Same
+    never-omitted shape as its neighbours, so an unmatched target reads as empty
+    strings rather than as a missing key.
+    """
+    targets = client.get("/api/targets").json()
+    m42 = next(t["safe_name"] for t in targets if "42" in t["name"])
+    other = next(t["safe_name"] for t in targets if t["safe_name"] != m42)
+    _register_preview_run(solved_library, m42, basename="orion",
+                          n_frames=500, exposure_s=15000, noise_sigma=0.01,
+                          coverage_max=500)
+    _register_preview_run(solved_library, other, basename="veil",
+                          n_frames=20, exposure_s=600, noise_sigma=0.09,
+                          coverage_max=20)
+
+    items = client.get("/api/gallery/best").json()["items"]
+    orion = next(i for i in items if i["safe"] == m42)
+    assert orion["object_id"]
+    assert orion["object_name"]
+    # …and it is the *catalogue's* answer for this field, not the folder name
+    # echoed back — which is what a caption built from the row alone would have
+    # had to fall back to.
+    from seestack.nightplan import load_catalog
+    from seestack.objectinfo import identify_object
+
+    target = next(t for t in client.get("/api/targets").json()
+                  if t["safe_name"] == m42)
+    info = identify_object(target["name"], target["ra_deg"], target["dec_deg"],
+                           catalog=load_catalog())
+    assert info is not None
+    assert orion["object_id"] == info.id
+    assert orion["object_name"] == info.name
+    for item in items:
+        assert isinstance(item["object_id"], str)
+        assert isinstance(item["object_name"], str)
+
+
 def test_best_still_ranks_a_target_the_catalog_has_never_heard_of(
         client, solved_library, monkeypatch):
     """A target the offline catalog can't identify (a custom name, an odd patch of
@@ -337,6 +381,7 @@ def test_best_still_ranks_a_target_the_catalog_has_never_heard_of(
     items = client.get("/api/gallery/best").json()["items"]
     assert len(items) == 2
     assert all(i["object_type"] == "" and i["blurb"] == "" for i in items)
+    assert all(i["object_id"] == "" and i["object_name"] == "" for i in items)
 
 
 # ---------------------------------------------------------------------------
