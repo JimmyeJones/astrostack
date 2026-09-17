@@ -1450,6 +1450,12 @@ export interface StackRun {
    *  Absent for a run recorded before the app tracked it; say nothing then. */
   capture_nights?: number | null;
   transparency_ratio?: number | null;
+  /** Whether that figure may be *read* as haze: "hazy", or null when there
+   *  is nothing honest to say — no measurement, a clear night, or a mosaic
+   *  run whose figure predates the v0.304.2 per-panel estimator and is on a
+   *  different scale from the bar it would be read through. `undefined` is an
+   *  older backend, where the badge falls back to reading the ratio. */
+  hazy_verdict?: string | null;
   noise_sigma?: number | null;
   // This stack's own measured median star size (FWHM) in native-frame pixels,
   // lower = sharper. Null for runs recorded before the column existed (schema
@@ -2133,6 +2139,12 @@ export interface GalleryItem {
    *  Absent for a run recorded before the app tracked it; say nothing then. */
   capture_nights?: number | null;
   transparency_ratio?: number | null;
+  /** Whether that figure may be *read* as haze: "hazy", or null when there
+   *  is nothing honest to say — no measurement, a clear night, or a mosaic
+   *  run whose figure predates the v0.304.2 per-panel estimator and is on a
+   *  different scale from the bar it would be read through. `undefined` is an
+   *  older backend, where the badge falls back to reading the ratio. */
+  hazy_verdict?: string | null;
   noise_sigma?: number | null;
   calstat?: string | null;
   /** False when this run's picture is still a flat linear stack rather than a

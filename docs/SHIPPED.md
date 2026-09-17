@@ -1,5 +1,103 @@
 # Shipped — the record
 
+## v0.454.0 — 2026-09-17 — a clear mosaic kept its "Hazy night" badge, because v0.304.2 fixed the estimator and dated nothing
+
+*(Builder, branch `claude/sweet-babbage-d26gns`. Worked from the open "estimator drift" lead under
+"Infra / maintainability" — `seam_residual` was one stored measurement whose estimator moved under it, and
+nothing had asked which of the others did. `transparency_ratio` is the second, and unlike the first lead
+that entry named (`noise_sigma`, checked and cleared 2026-09-17) this one holds.)*
+
+**The bug, reproduced before anything was written.** `transparency_score` is the median flux of a frame's
+brightest **stars**, so it is a property of where the scope pointed as much as of the sky. Up to v0.304.1 the
+per-run `transparency_ratio` divided a run's median by **one target-wide `p90` baseline** — which on a mosaic
+is set by whichever panel has the richest star field, so every other panel read as haze. v0.304.2 fixed that
+(`stacker._panel_transparency_ratios`, each panel against its own baseline, combined by median) and
+**re-measured nothing and dated nothing**. The bar it is read through — `HAZY_RATIO = 0.6` — lives in today's
+code; the figure does not.
+
+Measured on the three-panel fixture `tests/test_transparency_mosaic.py` already ships (three panels 1° apart,
+star fields 10000/5000/4000, one steady sky, six subs each):
+
+| | stored by v0.304.1 | measured today |
+|---|---|---|
+| a clear mosaic | **0.5001** → "Hazy night" | 0.9996 → nothing |
+| a mosaic at 0.4× its own clear baseline | 0.2002 → "Hazy night" | 0.4002 → "Hazy night" |
+
+So **every mosaic run stacked before 2026-08-30 still wears a "Hazy night" badge** on History, Gallery and
+Compare, with a tooltip claiming *"median transparency ~50% below this target's clearest nights"* and advising
+the owner to **reject his haziest subs** — on nights where, by construction, nothing about the weather
+changed. The owner is a heavy mosaic user (26 of 104 targets) with months of runs behind that date, which is
+the whole reachable population.
+
+**The remedy is to date the figure and read it on its own scale — not to re-measure it, and the difference is
+forced.** `seam_residual` heals, because its input (the master and its coverage map) is still sitting on disk
+beside the run. This figure's input is *which frames the run used*, and no column records that: `stack_runs`
+carries `n_frames_used` and a capture window, not a frame set. Re-deriving from the window would be a
+different measurement of a different population presented as that run's. So:
+
+* **`stack_runs.transparency_scale`** — the generation beside the figure, `TRANSPARENCY_ESTIMATOR_GENERATION`
+  (= 2), stamped by `run_stack` whenever it writes a ratio. Added **without** a `SCHEMA_VERSION` bump, exactly
+  like `seam_scale`, `duration_s` and the `grain_*` columns: an older build refuses to open a project stamped
+  newer than itself, so bumping would make this upgrade one-way. Every existing row stays NULL.
+* **`stackhealth.transparency_scale_is_current`** — the stamp wins outright; a row without one (every run
+  recorded before the column, which is the population this is about) is dated by `engine_version`, i.e. by the
+  release that stacked it, nothing having re-measured the figure since. An unreadable or absent version is
+  `False`, which is the only answer that cannot turn a figure nobody can date into a claim about a picture.
+* **`stackhealth.readable_transparency_ratio`** — the figure, or `None` when its scale cannot be vouched for.
+  Precisely scoped: a **single-field** run is never withheld, because `_panel_transparency_ratios` returns
+  `[]` — byte-for-byte the old target-wide answer — on a target whose pointings do not split, so the estimator
+  never moved there. Only a **mosaic** row from before the fix goes quiet.
+* **`stackhealth.hazy_verdict` / `stored_hazy_verdict_for`** and `HAZY_RATIO` — the bar moves out of
+  `HazyNightBadge.tsx` into the engine, the way `seam_verdict`'s thresholds already live there, so the three
+  surfaces that draw this chip read one decision. Served as an additive `hazy_verdict` on the run listing
+  (`schemas.StackRunOut`) and the Gallery/Compare listing (`routers.gallery.GalleryItem`).
+
+**Why silence rather than the seam's one-sided rule, measured rather than assumed.** v0.313.1's seam change
+could only ever *lower* a figure, so `stored_seam_verdict` keeps `"flat"` and withholds only `"check"`. This
+one moves both ways. Over 300 randomised mosaics (2–4 panels, star fields 2,000–20,000, per-panel
+transparency 0.3–1.0) today's estimator read **higher on 251** (up to +0.72) and **lower on 49** (up to
+−0.27). A figure that bounds today's in neither direction can only honestly say nothing — and a
+`tests/test_transparency_mosaic.py` case asserts that two-sidedness, so if it ever stops being true the rule
+can be revisited rather than rediscovered.
+
+**The honest cost, stated rather than buried:** an owner whose *genuinely* hazy pre-v0.304.2 mosaic run would
+have been badged loses that warning until the target is re-stacked (which re-stamps it). That is the right
+trade the moment the badge is wrong on a clear night, because what it says is not "this looks hazy" but "go
+and reject subs" — and the reachable wrong-direction population is every clear mosaic, against a wrong-silence
+population of only the hazy ones.
+
+**The export path, which would otherwise have laundered the badge past the fix.** An editor export records a
+`stack_runs` row of its own and, since v0.438.7, inherits `transparency_ratio` from the stack it re-rendered —
+but deliberately **not** `is_mosaic` (the editor reads that behaviourally, `editor._run_is_mosaic`), and its
+`engine_version` is today's. So a raw copy of a stale mosaic figure would arrive on the new row looking
+perfectly current. Both halves of the inheritance now read the source through
+`readable_transparency_ratio`: `pipeline._apply_editor_to_run` at write time, and
+`derived_light.with_inherited_light_facts` at read time via a new `_INHERIT_READERS` hook — and the existing
+drift guard that pins the two lists as one set now pins them as one *reading*, not just one set of names.
+
+**Upgrade-safe (§9).** One additive nullable column reached by the un-gated `ALTER` + `_reconcile_table_columns`
+(no `SCHEMA_VERSION` bump, so the upgrade stays rollable); two additive optional response fields, with the
+badge falling back to reading the ratio against a backend that omits them (`undefined`) and honouring an
+explicit `null` from this one; no config, on-disk, default or response-shape change; no stored figure is
+rewritten or cleared anywhere — this is entirely a read-side rule.
+
+**Tests (+17 — 13 Python, 4 frontend; several fail-before).** `tests/test_transparency_mosaic.py` (+8): the stored generation-1 figure
+for a clear mosaic falls the wrong side of the bar and now says nothing; a stamped or post-fix mosaic row is
+read normally; an equally old single-field row is never withheld; an undatable version says nothing; the
+withholding costs the claim and never the number; the two-sidedness sweep; the column round-trips; and the
+rollback-safety case (drop the column, reopen, `user_version` unchanged, every figure kept).
+`tests/test_stack_pipeline.py` (+1): `run_stack` stamps the generation beside a figure and stamps nothing
+beside a run that had none. `tests/webapp/test_gallery.py` (+1): the listing withholds the old mosaic's
+verdict, keeps the old single field's, and still carries the raw ratio. `tests/webapp/test_derived_light.py`
+(+2) and `tests/webapp/test_editor_export_carries_the_light.py` (+1): the export declines a figure its stack
+cannot date and keeps the two that have no estimator behind them. `HazyNightBadge.test.tsx` (+4): an explicit
+`null` withholds, a `"hazy"` shows even at the bar, `undefined` falls back to the ratio, and a verdict with no
+figure keeps the sentence instead of printing "NaN%". **Fail-before verified twice by reverting the fix in a
+scratch script:** reading the stored figure raw turns two engine tests red, and deleting the `ALTER` step
+turns the frozen-DDL migration guard red with `stack_runs is missing ['transparency_scale']`.
+
+---
+
 ## v0.453.6 — 2026-09-17 — the editor was the fifth surface, and the one where the picture is actually finished
 
 *(Builder, branch `claude/sweet-babbage-y1a42c`. Frontend-only: no endpoint, config, schema, on-disk, default

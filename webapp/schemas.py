@@ -820,8 +820,16 @@ class StackRunOut(BaseModel):
     capture_nights: int | None = None
     # Median transparency of the stacked frames ÷ the target's clear-sky
     # baseline (< ~0.6 ⇒ hazy). None for pre-schema-5 runs or when not
-    # computable; lets the card show a "hazy night" badge at a glance.
+    # computable; the figure behind the "hazy night" badge's tooltip percentage.
     transparency_ratio: float | None = None
+    # ...and whether that figure may be *read* as haze: "hazy", or None when
+    # there is nothing honest to say — no measurement, a clear night, or a
+    # **mosaic** run whose figure predates v0.304.2 and is therefore on a
+    # different scale from the bar it would be read through (the same shape as
+    # ``seam_verdict`` below, one metric over). Computed server-side by
+    # `seestack.stackhealth.stored_hazy_verdict_for`, so the three surfaces that
+    # draw this badge cannot disagree about one run. Additive and optional.
+    hazy_verdict: str | None = None
     # Background-noise σ of the stacked image, normalized to its own signal range
     # so it's comparable across gain/exposure (lower = cleaner). None for
     # pre-schema-6 runs or when not computable; lets the UI show a noise readout
