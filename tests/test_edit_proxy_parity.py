@@ -538,6 +538,168 @@ def test_the_colour_blotch_smoothing_previews_what_it_exports(_noisy_field):
     assert denoise_understates_on_proxy("chroma", 0.9, 6.0) is False
 
 
+# --------------------------------------------------------------------------- #
+# tone.scnr — the green-excess smoothing, the other Auto op measured in pixels
+# --------------------------------------------------------------------------- #
+
+def _synth_green_field(h: int = 1000, w: int = 1500, n_stars: int = 60,
+                       seed: int = 11, noise: float = 0.0030):
+    """A noisy sky carrying a green cast that has *structure*, not just a level.
+
+    A flat green cast cannot show this bug at all: both smoothing radii return
+    the same constant, so preview and export agree exactly however wrong the
+    radius is. What separates them is green at the scale the radius is *about* —
+    knots a few pixels across, which is what a green cast on real nebulosity
+    looks like. The fixture carries three widths (sigma 2/4/8 full-res px) plus
+    the broad level, so it measures both halves at once.
+    """
+    rng = np.random.default_rng(seed)
+    sky = 0.05
+    rad = 6
+    yy, xx = np.mgrid[-rad:rad + 1, -rad:rad + 1]
+    kern = np.exp(-(xx ** 2 + yy ** 2) / (2 * _STAR_SIGMA_PX ** 2)).astype(np.float32)
+    stars = np.zeros((h, w), dtype=np.float32)
+    ys = rng.integers(rad + 2, h - rad - 2, n_stars)
+    xs = rng.integers(rad + 2, w - rad - 2, n_stars)
+    amps = 10 ** rng.uniform(-1.4, -0.2, n_stars).astype(np.float32)
+    for y, x, a in zip(ys, xs, amps, strict=True):
+        stars[y - rad:y + rad + 1, x - rad:x + rad + 1] += a * kern
+
+    knots = np.zeros((h, w), dtype=np.float32)
+    krad = 14
+    kyy, kxx = np.mgrid[-krad:krad + 1, -krad:krad + 1]
+    for sig in (2.0, 4.0, 8.0):
+        kk = np.exp(-(kxx ** 2 + kyy ** 2) / (2 * sig ** 2)).astype(np.float32)
+        for _ in range(12):
+            y = int(rng.integers(krad + 2, h - krad - 2))
+            x = int(rng.integers(krad + 2, w - krad - 2))
+            knots[y - krad:y + krad + 1, x - krad:x + krad + 1] += 0.02 * kk
+
+    rgb = np.empty((h, w, 3), dtype=np.float32)
+    grey = rng.normal(0.0, noise, size=(h, w)).astype(np.float32)
+    for c in range(3):
+        rgb[..., c] = sky + stars + grey
+    rgb[..., 1] += np.float32(0.004) + knots   # the cast: a level *and* structure
+    return np.ascontiguousarray(rgb)
+
+
+@pytest.fixture(scope="module")
+def _green_field():
+    return _synth_green_field()
+
+
+def _green_removed(before: np.ndarray, after: np.ndarray) -> np.ndarray:
+    """How much green the op took out, per pixel — SCNR only ever subtracts."""
+    return np.asarray(before[..., 1] - after[..., 1], dtype=np.float64)
+
+
+@pytest.mark.parametrize("step,least", [(2, 0.97), (3, 0.95), (4, 0.90)])
+def test_the_scnr_preview_removes_the_green_the_export_removes(
+        _green_field, step, least):
+    """``tone.scnr`` is in the one-click Auto recipe (``presets.py``, amount ~0.7),
+    and its noise-protected default estimates the green excess through a Gaussian
+    whose sigma is a **full-resolution** pixel measure. It was applied unscaled at
+    both resolutions, so on a decimated proxy it smoothed ``proxy_scale`` times
+    more sky than the export did — and a smoothed excess is a *flattened* excess,
+    so the preview under-removed green everywhere the cast had structure.
+
+    Measured on the knot cores (the top 0.5 % of the export's removals), the
+    preview took out **0.83x** the export's green at step 2, **0.68x** at step 3
+    and **0.45x** at step 6. The direction is the dangerous one for the owner's
+    workflow: someone judging ``amount`` on a mosaic preview sees green still
+    sitting on the nebula, pushes the slider up, and saves a picture corrected
+    harder than the one they looked at. Scaled by ``proxy_scale`` the same
+    measurement lands at 1.00 / 1.00 / 0.83.
+    """
+    full = _green_field
+    params = {"amount": 0.7}
+    rem_export = _green_removed(full, _apply("tone.scnr", full, 1.0, params))
+
+    proxy = np.ascontiguousarray(full[::step, ::step])
+    rem_seen = np.ascontiguousarray(rem_export[::step, ::step])
+    rem_preview = _green_removed(
+        proxy, _apply("tone.scnr", proxy, float(step), params))
+
+    # The trap this file exists to avoid (AGENTS.md §8): an op that removed
+    # nothing would read 1.00 for the wrong reason, and a *flat* fixture would
+    # too. Prove the structure is really there and really removed first.
+    cores = rem_seen > np.percentile(rem_seen, 99.5)
+    assert rem_seen[cores].mean() > 2.0 * rem_seen.mean(), (
+        "this fixture's green cast has no structure above its own level, so it "
+        "cannot show a preview/export divergence at all")
+
+    ratio = rem_preview[cores].mean() / rem_seen[cores].mean()
+    assert ratio >= least, (
+        f"on a step-{step} proxy the preview now removes {ratio:.2f}x the green "
+        "the export removes from the same knots — the live preview and the "
+        "saved picture have stopped agreeing about the colour")
+    assert ratio <= 1.1, (
+        f"the preview now *over*-removes green ({ratio:.2f}x) — the floor in "
+        "scnr_noise_sigma is meant to bound the noise, not widen the excess")
+
+
+def test_the_scnr_export_is_bit_for_bit_unchanged(_green_field):
+    """The scaling must be invisible to every picture already saved: at
+    ``proxy_scale`` 1 the sigma is ``_SCNR_NOISE_SIGMA`` exactly, and the loupe's
+    1:1 window renders through the same path."""
+    from seestack.edit.ops.tone import _SCNR_NOISE_SIGMA, scnr_noise_sigma
+
+    assert scnr_noise_sigma(1.0) == _SCNR_NOISE_SIGMA
+    assert scnr_noise_sigma(0.5) == _SCNR_NOISE_SIGMA   # never widened below 1x
+
+    full = _green_field
+    params = {"amount": 0.7}
+    a = _apply("tone.scnr", full, 1.0, params)
+    b = _apply("tone.scnr", full, 1.0, params)
+    assert np.array_equal(a, b)
+    # …and the value the render asks for, pinned so a moved constant can't
+    # silently re-render every saved picture.
+    assert scnr_noise_sigma(2.0) == 1.5
+    assert scnr_noise_sigma(3.0) == 1.0
+    assert scnr_noise_sigma(6.0) == 1.0                 # the floor, not 0.5
+
+
+def test_the_scnr_preview_still_refuses_to_magenta_a_neutral_noisy_sky():
+    """The floor is the other half of the trade, so it gets its own guard.
+
+    The smoothing exists because the per-pixel estimator (``protect_noise`` off)
+    rectifies chroma noise and drags a genuinely neutral sky magenta. Shrinking
+    the radius for the proxy gives that bias some of its room back, which is why
+    ``scnr_noise_sigma`` floors at 1 px rather than dividing all the way down.
+    Measured as green wrongly removed, in % of sky level: the unprotected path
+    is +2.05 %, the export +0.20 %, an unfloored 1/proxy_scale +1.34 % at step 6,
+    and the floored preview +0.59 %. Pinned as "still far closer to the export
+    than to the estimator it replaced", at every step.
+    """
+    rng = np.random.default_rng(5)
+    level = 0.05
+    sky = np.empty((700, 900, 3), dtype=np.float32)
+    for c in range(3):
+        sky[..., c] = level + rng.normal(0.0, 0.0030, size=(700, 900)).astype(np.float32)
+    sky = np.ascontiguousarray(sky)
+    params = {"amount": 0.7}
+
+    def bias(img: np.ndarray, scale: float, extra: dict | None = None) -> float:
+        merged = dict(params, **(extra or {}))
+        out = _apply("tone.scnr", img, scale, merged)
+        return float(_green_removed(img, out).mean() / level * 100.0)
+
+    unprotected = bias(sky, 1.0, {"protect_noise": False})
+    exported = bias(sky, 1.0)
+    assert unprotected > 1.5, (
+        "the per-pixel estimator no longer biases a neutral sky, so this test "
+        "cannot show what the smoothing is for")
+    assert exported < 0.3
+
+    for step in (2, 3, 4, 6):
+        proxy = np.ascontiguousarray(sky[::step, ::step])
+        on_proxy = bias(proxy, float(step))
+        assert on_proxy < 0.35 * unprotected, (
+            f"on a step-{step} proxy SCNR now removes {on_proxy:.3f} % of the "
+            "sky's green from a neutral sky — the preview is drifting back "
+            "towards the magenta cast the noise protection exists to prevent")
+
+
 def test_the_full_size_check_really_does_what_its_advisories_now_promise():
     """Two advisories tell the reader the preview shows them nothing, and now
     name "Check it at full size" as the way to see it. That is a claim about the

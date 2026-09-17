@@ -213,7 +213,39 @@ def _neutralize_background(rgb: np.ndarray, params: dict, ctx: EditContext) -> n
 # (noise-protected) SCNR path. Wide enough that per-pixel chroma noise averages
 # out (so a truly neutral but noisy sky isn't dragged magenta) while real green
 # structure — always broader than a few px — survives and is still removed.
+# This is a **full-resolution** pixel measure; see ``scnr_noise_sigma``.
 _SCNR_NOISE_SIGMA = 3.0
+
+# The smallest smoothing the decimated preview proxy is allowed to shrink to.
+# Below ~1 px a Gaussian is dominated by its own centre tap, so the "smoothing"
+# stops being smoothing and the estimator degenerates back towards the per-pixel
+# one this path exists to replace — taking its magenta bias with it. Measured on
+# a neutral noisy sky, as green wrongly removed (% of sky level): the unprotected
+# per-pixel cap sits at **+2.05 %**, the export at **+0.20 %**, and an unfloored
+# 1/proxy_scale reaches **+1.34 %** at proxy step 6 — two thirds of the way back
+# to the estimator it replaced. The floor caps it at **+0.59 %**.
+_SCNR_PROXY_SIGMA_FLOOR = 1.0
+
+
+def scnr_noise_sigma(proxy_scale: float) -> float:
+    """The green-excess smoothing radius, in pixels of a render at ``proxy_scale``.
+
+    ``_SCNR_NOISE_SIGMA`` is a full-resolution measure, so on the decimated
+    live-preview proxy it has to shrink by ``proxy_scale`` for the preview to
+    estimate the excess over the same *physical* patch of sky as the export.
+    Unscaled it did not, and the preview under-removed green wherever the cast
+    had structure at all — measured on green knots a few pixels across, the
+    preview took out **0.83x** the export's green at proxy step 2, **0.68x** at
+    step 3 and **0.45x** at step 6, i.e. someone tuning ``amount`` on a mosaic
+    preview saved a picture greener-corrected than the one they judged. Scaled,
+    the same measurement lands at 1.00 / 1.00 / 0.83, and the whole-canvas
+    divergence falls from 5.5-15.6 % to 0.3-5.5 %.
+
+    Pure, so the tests can pin it. On the export (``proxy_scale <= 1``) this is
+    ``_SCNR_NOISE_SIGMA`` exactly, so no saved picture moves by a bit.
+    """
+    return max(_SCNR_PROXY_SIGMA_FLOOR,
+               _SCNR_NOISE_SIGMA / max(1.0, float(proxy_scale)))
 
 
 def _scnr(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
@@ -245,17 +277,21 @@ def _scnr(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
     # zero-mean per-pixel noise doesn't bias it (no more magenta sky). Smooth on a
     # NaN-filled copy and keep NaN gaps as NaN — never invent green over a mosaic
     # hole. Green is only ever *reduced* (excess clipped at 0), never added.
+    # The radius is a full-res pixel measure shrunk for the proxy, so the preview
+    # and the export estimate the excess over the same patch of sky — see
+    # ``scnr_noise_sigma``. Identity on the export.
     from scipy.ndimage import gaussian_filter
 
+    sigma = scnr_noise_sigma(float(ctx.proxy_scale))
     mask = finite_mask(out)
     g_fill = np.where(mask, g, np.nan)
     n_fill = np.where(mask, neutral, np.nan)
     g_med = float(np.nanmedian(g_fill)) if mask.any() else 0.0
     n_med = float(np.nanmedian(n_fill)) if mask.any() else 0.0
     g_s = gaussian_filter(np.where(mask, g, g_med).astype(np.float32),
-                          sigma=_SCNR_NOISE_SIGMA, mode="nearest")
+                          sigma=sigma, mode="nearest")
     n_s = gaussian_filter(np.where(mask, neutral, n_med).astype(np.float32),
-                          sigma=_SCNR_NOISE_SIGMA, mode="nearest")
+                          sigma=sigma, mode="nearest")
     excess = np.clip(g_s - n_s, 0.0, None)
     out[..., 1] = g - amount * excess  # g is NaN over gaps → stays NaN
     return out
