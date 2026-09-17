@@ -6,7 +6,7 @@ import { IconChevronRight, IconSearch, IconStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type Target } from "../api/client";
+import { api, type Target, type ThinPictureItem } from "../api/client";
 import { CleanupSuggestionsCard } from "../components/CleanupSuggestionsCard";
 import { SkippedFoldersCard } from "../components/SkippedFoldersCard";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
@@ -14,6 +14,9 @@ import { MergeSuggestionsCard } from "../components/MergeSuggestionsCard";
 import { QueryError } from "../components/QueryError";
 import { UploadFits } from "../components/UploadFits";
 import { formatIntegration } from "../format";
+import {
+  THIN_PICTURE_LABEL, thinStackWarning,
+} from "../components/target/thinStack";
 import { UNSTRETCHED_HINT, UNSTRETCHED_LABEL, unstretchedHint } from "../unstretched";
 
 // Target-card exposure. Delegates to the app-wide `formatIntegration` so the
@@ -89,9 +92,27 @@ function sortTargets(targets: Target[], key: SortKey): Target[] {
 export { UNSTRETCHED_HINT };
 
 function TargetCard(
-  { t, unstretched, unexportedEdit }:
-  { t: Target; unstretched?: boolean; unexportedEdit?: boolean },
+  { t, unstretched, unexportedEdit, thin }:
+  { t: Target; unstretched?: boolean; unexportedEdit?: boolean;
+    thin?: ThinPictureItem },
 ) {
+  // The wall's one chip slot, and why depth wins it when a card is both.
+  //
+  // A card that is thin *and* unstretched gets the depth sentence, because the
+  // stretch chip's advice is "press Auto" and Auto cannot make a one-sub stack
+  // anything but a stretched one-sub stack — stretching noise only makes it
+  // easier to see. The upstream problem is the one worth naming, and the card
+  // links to the target where both are explained. One chip rather than two for
+  // the reason the "Finished" chip was never added: the owner's standing
+  // complaint about this app is clutter (AGENTS.md §1).
+  //
+  // `thinStackWarning` is the Gallery badge's own function, asked the same
+  // question with the same two numbers, so the two walls cannot say different
+  // things about one picture. `"open-it"` because a wall card carries no
+  // "rejected" count for the sentence to point at.
+  const thinWarn = thin
+    ? thinStackWarning(thin.n_frames_used, thin.field_fulls, "open-it")
+    : null;
   return (
     <Card shadow="sm" padding="lg" radius="md" withBorder component={Link} to={`/targets/${t.safe_name}`}>
       <Card.Section>
@@ -122,7 +143,13 @@ function TargetCard(
         {/* Only the cards that need something. A "Finished" chip on the other
             nine in ten would be a wall of badges saying nothing — and the
             owner's standing complaint about this app is clutter. */}
-        {unstretched ? (
+        {thinWarn ? (
+          <Badge variant="light"
+            color={thinWarn.level === "single" ? "orange" : "yellow"}
+            title={thinWarn.message}>
+            {THIN_PICTURE_LABEL}
+          </Badge>
+        ) : unstretched ? (
           <Badge variant="light" color="yellow"
             title={unstretchedHint(unexportedEdit)}>
             {UNSTRETCHED_LABEL}
@@ -173,6 +200,15 @@ export function Library() {
   const unstretchedSafe = useMemo(
     () => new Map((unstretched.data?.items ?? [])
       .map((i) => [i.safe, i.unexported_edit === true] as const)),
+    [unstretched.data],
+  );
+  // …and which are showing a picture only a few subs deep on any one patch of
+  // sky. The same response, because it is the same scan of the same library —
+  // and the same "absent ⇒ no chips" rule, so an older backend leaves the wall
+  // exactly as it was.
+  const thinSafe = useMemo(
+    () => new Map((unstretched.data?.thin ?? [])
+      .map((i) => [i.safe, i] as const)),
     [unstretched.data],
   );
 
@@ -281,7 +317,8 @@ export function Library() {
           {visible.map((t) => (
             <TargetCard key={t.safe_name} t={t}
               unstretched={unstretchedSafe.has(t.safe_name)}
-              unexportedEdit={unstretchedSafe.get(t.safe_name)} />
+              unexportedEdit={unstretchedSafe.get(t.safe_name)}
+              thin={thinSafe.get(t.safe_name)} />
           ))}
         </SimpleGrid>
       )}

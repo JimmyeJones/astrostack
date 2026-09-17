@@ -87,3 +87,33 @@ describe("thinStackWarning", () => {
     });
   });
 });
+
+describe("where the reader is sent to see why subs were dropped", () => {
+  // The Library wall's chip (v0.450.0) shows this same sentence on a card that
+  // has no "rejected" count on it, so "see the count above" would point at
+  // nothing. Everything else keeps the wording it has always had.
+
+  it("defaults to the count on the page, unchanged", () => {
+    const plain = thinStackWarning(1);
+    expect(plain?.message).toContain('see the "rejected" count above');
+    expect(thinStackWarning(1, null, "this-page")).toEqual(plain);
+  });
+
+  it("sends a wall card one click in instead", () => {
+    const wall = thinStackWarning(1, null, "open-it");
+    expect(wall?.message).toContain('open it and check the "rejected" count');
+    expect(wall?.message).not.toContain("count above");
+    // Only the pointer moves: the level, the depth and the rest of the advice
+    // are the same claim about the same picture.
+    expect(wall?.level).toBe(thinStackWarning(1)?.level);
+    expect(wall?.frames).toBe(thinStackWarning(1)?.frames);
+    expect(wall?.message).toContain("a stack only gets cleaner");
+  });
+
+  it("carries the mosaic's own two figures either way", () => {
+    const wall = thinStackWarning(30, 9, "open-it");
+    expect(wall?.message).toContain(
+      "Your 30 subs are spread across about 9 fields of sky");
+    expect(wall?.frames).toBe(3);
+  });
+});
