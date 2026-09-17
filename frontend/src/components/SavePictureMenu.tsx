@@ -1,7 +1,7 @@
 import { CSSProperties, useState } from "react";
 import { Box, Button, Loader, Menu } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconChevronDown, IconClipboardText, IconDeviceMobile, IconDownload,
   IconPhotoDown, IconVideo,
@@ -13,7 +13,7 @@ import { keepsakeFilename, sharePictureText } from "../share";
 import { tiffDownloadHint } from "../tiffDownload";
 import { storedPreviewScaleBar } from "./AnnotatedImage";
 import { DownloadMenuItem } from "./DownloadMenuItem";
-import { postCaption } from "./postCaption";
+import { postCaptionForRun } from "./postCaption";
 import { SharePictureButton } from "./SharePictureButton";
 import { WallpaperMenuItems } from "./WallpaperMenu";
 
@@ -88,8 +88,13 @@ export function SavePictureMenu({
   /** The night the subs were **shot** (`formatCaptureNights`), never the day the
    *  stack ran — the share sheet says "captured <this>". */
   captureLabel?: CaptureLabel | null;
-  /** A ready-made sentence to pre-fill the OS share sheet with. Optional: a
-   *  surface that hasn't built one shares with `sharePictureText`'s default. */
+  /** A ready-made sentence to pre-fill the OS share sheet with. Optional, and an
+   *  **override**: left out, the menu builds the same `postCaption` sentence its
+   *  own "Copy caption" item produces, so the two can't hand out two different
+   *  captions for one picture. (They did: this prop was the only way the full
+   *  sentence ever reached the share sheet, and only History passed it — so on
+   *  the Target hero, "Copy caption" and "Share picture", one item apart in this
+   *  very menu, described the same picture differently.) */
   shareCaption?: string;
   /** The target's catalog identity, so "Copy caption" can name the object. */
   identity?: ObjectInfo | null;
@@ -118,6 +123,18 @@ export function SavePictureMenu({
 }) {
   const qc = useQueryClient();
   const [copyingCaption, setCopyingCaption] = useState(false);
+  // A read-only subscription to the run's annotations: `enabled: false` never
+  // fetches, so this costs nothing on a page load, but the component still
+  // re-renders when something *else* puts them in the cache — "What's in it?",
+  // opening the picture big, or this menu's own "Copy caption". That is what
+  // lets the share sheet's caption pick up its scale sentence the moment the
+  // measurement is known, without this menu ever asking for it.
+  const cachedAnnotations = useQuery({
+    queryKey: ["annotations", safe, run.id],
+    queryFn: () => api.stackAnnotations(safe, run.id),
+    enabled: false,
+    staleTime: Infinity,
+  });
 
   // Nothing to save and nothing to share — offer no menu at all rather than an
   // empty dropdown.
@@ -125,6 +142,14 @@ export function SavePictureMenu({
 
   const name = (shareName ?? "").trim();
   const shareText = sharePictureText(shareName, captureLabel);
+  // The sentence the OS share sheet is pre-filled with, unless the caller
+  // overrode it. Built exactly as "Copy caption" builds it, from whatever is
+  // known *now*: a share is a synchronous response to a tap, so this never
+  // blocks on a fetch, and a run whose annotations nobody has asked for shares
+  // the same caption minus its scale clause.
+  const builtCaption = postCaptionForRun(
+    run, identity, storedPreviewScaleBar(cachedAnnotations.data, run),
+    name || safe);
 
   // "Copy caption" — one correct, friendly sentence to paste wherever the user
   // is sharing (chat, socials). Built purely from facts the app already knows:
@@ -153,19 +178,7 @@ export function SavePictureMenu({
           scaleBar = null;  // no WCS / read failed → caption omits the scale clause
         }
       }
-      const text = postCaption({
-        name: identity?.name,
-        catalogId: identity?.id,
-        type: identity?.type,
-        blurb: identity?.blurb,
-        nFrames: run.n_frames_used,
-        integrationS: run.total_exposure_s,
-        captureNightStart: run.capture_night_start,
-        captureNightEnd: run.capture_night_end,
-        captureNights: run.capture_nights,
-        scaleBar,
-        fallbackName: name || safe,
-      });
+      const text = postCaptionForRun(run, identity, scaleBar, name || safe);
       try {
         await navigator.clipboard.writeText(text);
         notifications.show({
@@ -310,7 +323,7 @@ export function SavePictureMenu({
               asMenuItem
               url={api.stackArtifactUrl(safe, run.id, "jpeg", northUp, nameplate)}
               {...shareText}
-              {...(shareCaption ? { text: shareCaption } : {})}
+              text={shareCaption ?? builtCaption}
             />
             {/* Share the *framed* variant. This is the one that matters on
                 Instagram or a printed 6×4: a share-sheet caption doesn't travel
@@ -336,7 +349,7 @@ export function SavePictureMenu({
               url={api.stackArtifactUrl(
                 safe, run.id, "jpeg", northUp, false, true, true, true)}
               {...shareText}
-              {...(shareCaption ? { text: shareCaption } : {})}
+              text={shareCaption ?? builtCaption}
               filename={keepsakeFilename(shareText.filename)}
             />
             {/* The QR opens in a modal owned by the page, not a popover owned by

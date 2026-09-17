@@ -30,7 +30,7 @@ import {
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { storedPreviewScaleBar } from "../components/AnnotatedImage";
-import { postCaption } from "../components/postCaption";
+import { postCaptionForRun } from "../components/postCaption";
 import {
   NorthUpViewToggle, loadNorthUpView, saveNorthUpView,
 } from "../components/NorthUpViewToggle";
@@ -656,20 +656,10 @@ export function GalleryView() {
   // backend, or geometry that can't be reconciled → no scale sentence, exactly as
   // `postCaption` intends.
   const viewingCaption = viewing
-    ? postCaption({
-        name: viewingIdentity.data?.name,
-        catalogId: viewingIdentity.data?.id,
-        type: viewingIdentity.data?.type,
-        blurb: viewingIdentity.data?.blurb,
-        nFrames: viewing.n_frames_used,
-        integrationS: viewing.total_exposure_s,
-        captureNightStart: viewing.capture_night_start,
-        captureNightEnd: viewing.capture_night_end,
-        captureNights: viewing.capture_nights,
-        scaleBar: storedPreviewScaleBar(
-          viewingAnnotations.data, viewingInfo.data ?? {}),
-        fallbackName: viewing.target_name,
-      })
+    ? postCaptionForRun(
+        viewing, viewingIdentity.data,
+        storedPreviewScaleBar(viewingAnnotations.data, viewingInfo.data ?? {}),
+        viewing.target_name)
     : undefined;
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<GallerySort>("newest");

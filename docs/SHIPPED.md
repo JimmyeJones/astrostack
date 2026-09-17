@@ -1,5 +1,56 @@
 # Shipped — the record
 
+## v0.453.1 — 2026-09-17 — "Copy caption" and "Share picture", one item apart in the same menu, described the same picture two different ways
+
+*(Builder, branch `claude/sweet-babbage-f4u6pf`. Found while shipping v0.453.0 — the lead that fix was built
+from asserted that "the Target hero and History hand the OS sheet `postCaption`'s full sentence", and only
+half of that was true. Frontend-only; no endpoint, config, schema, on-disk, API-shape or default change.)*
+
+**What was wrong, on the app's most prominent picture.** `SavePictureMenu` has carried "Copy caption" since
+v0.385.0 — the ready-to-post `postCaption` sentence, with the object's name, what it is, the sub count, the
+integration, the capture window and the picture's scale. Its **share** items got that sentence only if the
+caller passed a `shareCaption` prop, and of the menu's two callers **only History did**. So on the Target
+page's hero:
+
+    Copy caption   → "Orion Nebula (M42) — a stack of 240 subs (40 min total), shot on 15 Nov 2024
+                      with a Seestar. A vast stellar nursery. The whole frame is about 5.4 full
+                      Moons wide."
+    Share picture  → "M42 — captured 15 Nov 2024"
+
+two items apart, in one dropdown, about one picture. The hero's **lightbox** share was the same text again:
+`LatestPictureCard` passed `sharePictureText`'s `text` straight through.
+
+**The fix is that nobody passes the caption in any more — the menu builds it.** `shareCaption` stays as an
+explicit override (History still computes its own, identically), but with it absent `SavePictureMenu` now
+builds exactly what its own "Copy caption" item builds, so the two cannot be wired up differently again. The
+scale clause comes from a **non-fetching** `useQuery` on the annotations key (`enabled: false`): it costs
+nothing on a page load, never issues a request, and still re-renders when something else puts the
+measurement in the cache — "What's in it?", opening the picture big, or the menu's own "Copy caption". A
+share is a synchronous response to a tap, so the caption is never blocked on a fetch; a run nobody has asked
+about shares the same sentence minus its scale clause, which is exactly what History has documented doing
+since v0.385.0.
+
+**And the mapping itself is now written once.** New pure `postCaption.postCaptionForRun(run, identity,
+scaleBar, fallbackName)` — which run column feeds which clause — replaces the four surfaces that each spelled
+it out: the hero menu, the hero lightbox, every History card and the Gallery viewer (v0.453.0). It is typed
+structurally, so a `StackRun` and a `GalleryItem` both satisfy it without adapting: they are one row served by
+two endpoints, and a test pins that they caption identically. `scaleBar` stays an argument rather than being
+derived inside, because only `storedPreviewScaleBar` can decide which bar honestly describes the *stored
+preview*, and the surfaces hold that geometry differently.
+
+**Nothing removed, nothing renamed.** The share sheet's **title** and the shared file's **name** still come
+from `sharePictureText` — they are a short label and a slug, where a caption would be wrong — and every
+existing caller keeps working: `shareCaption` is still honoured first.
+
+**Tests (+7 net; 7 red under a scratch revert).** Three in `Target.test.tsx`: the existing date-property
+assertions re-pinned against the new sentence (they asserted equality with `sharePictureText`'s output, which
+is the thing this deliberately replaces — the property they were about, *never the stack day*, is asserted
+harder than before), plus a new one that drives the real menu and asserts the **shared** text is
+byte-identical to the **copied** text. Three in `LatestPictureCard.test.tsx` for the lightbox's own share: the
+full sentence with its scale clause; the clause dropped on a trimmed preview the canvas bar would overstate;
+and an unidentified target captioned under the name the page shows. Three in `postCaption.test.ts` for the new
+helper — the full mapping, the two row shapes agreeing, and silence for what it does not have.
+
 ## v0.453.0 — 2026-09-17 — the same picture, the same caption, whichever page you opened it from
 
 *(Builder, branch `claude/sweet-babbage-f4u6pf`. The "Gallery lightbox" lead filed 2026-09-17 under "Features

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { postCaption } from "./postCaption";
+import { postCaption, postCaptionForRun } from "./postCaption";
 
 describe("postCaption", () => {
   it("builds the full sentence from every fact", () => {
@@ -207,5 +207,46 @@ describe("postCaption", () => {
       scaleBar: { moon_comparison: "the whole frame is about 5.4 full Moons wide" },
     });
     expect(c).toContain("ancient stars. The whole frame");
+  });
+});
+
+// `postCaptionForRun` is the *field mapping* — which run column feeds which
+// clause — pulled out of four surfaces that were each spelling it out again, and
+// where the one that never spelled it out at all (the Target hero's share sheet)
+// is how a picture ended up with two captions.
+describe("postCaptionForRun", () => {
+  const run = {
+    n_frames_used: 240, total_exposure_s: 2400,
+    capture_night_start: "2024-11-15", capture_night_end: "2024-11-15",
+    capture_nights: 1,
+  };
+  const identity = {
+    id: "M42", name: "Orion Nebula", type: "nebula",
+    blurb: "A vast stellar nursery.",
+  };
+
+  it("maps every column onto the clause it belongs to", () => {
+    const c = postCaptionForRun(run, identity, {
+      moon_comparison: "the whole frame is about 5.4 full Moons wide",
+    }, "M_42");
+    expect(c).toBe(
+      "Orion Nebula (M42) — a stack of 240 subs (40 min total), shot on "
+      + "15 Nov 2024 with a Seestar. A vast stellar nursery. The whole frame is "
+      + "about 5.4 full Moons wide.");
+  });
+
+  it("is the same caption for the same row, whichever endpoint served it", () => {
+    // A `StackRun` and a `GalleryItem` are one row served twice, and the Gallery
+    // viewer and the Target hero hand out the same bytes — so the only honest
+    // answer is one function. Extra fields a caller happens to carry are ignored
+    // rather than changing the sentence.
+    const asGalleryItem = { ...run, safe: "M_42", run_id: 7, preview_url: "/p" };
+    expect(postCaptionForRun(asGalleryItem, identity, null, "M_42"))
+      .toBe(postCaptionForRun(run, identity, null, "M_42"));
+  });
+
+  it("drops what it does not have rather than guessing", () => {
+    expect(postCaptionForRun({}, null, null, "My backyard field"))
+      .toBe("My backyard field — shot with a Seestar.");
   });
 });
