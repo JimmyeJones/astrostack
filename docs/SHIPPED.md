@@ -1,5 +1,43 @@
 # Shipped — the record
 
+## v0.455.7 — 2026-09-17 — the Target page and the Stack form asked the identical question under two cache keys
+
+*(Builder, branch `claude/sweet-babbage-dmpc84`, the third and last finding from this run's lens, and the
+smallest. Same defect class as v0.455.6: the complete frame list, fetched again for data already in memory.)*
+
+**The bug.** `routes/Stack.tsx` read a target's frame list under `["frames", safe]`; `routes/Target.tsx`
+reads it under `["frames", safe, sort, order]`. Both call `api.listFrames(safe)` — whose defaults are
+`sort=id`, `order=asc`, i.e. **one identical request** — so clicking "Stack" from the page you were just
+looking at re-downloaded the whole list under a cold key. At the measured 531 bytes a row that is 2.9 MB on
+the owner's 5,477-sub target and **19.1 MB over 18 sequential requests** on his 35,894-sub one, for rows
+already sitting in the cache, and it blocks: several of the Stack form's pre-flight advisories are gated on
+`!frames.isLoading`.
+
+**The fix** is the key: `["frames", safe, "id", "asc"]`, which is the Target page's own default-sort entry.
+Nothing on the Stack form reads the list *in order* — it is four `.filter().length`s and
+`detectMixedPointings` — so sharing the default-sort entry is sound whatever the table happens to be sorted
+by, and a re-sorted table simply leaves the form its own entry exactly as today. Every
+`invalidateQueries(["frames", safe])` in the file still matches by prefix, so nothing about freshness
+changes.
+
+**And the test needed the app's real numbers, which is the part worth keeping.** The claim is about
+*caching*, and under TanStack Query's bare default (`staleTime: 0`) every entry is stale the instant it
+lands — so a hand-written test client refetches and the claim is untestable for a reason that has nothing to
+do with the code. The app's defaults lived inline in `main.tsx`, which a test cannot import because
+importing it renders the app. They are now `frontend/src/queryDefaults.ts` (`QUERY_DEFAULTS`,
+`QUERY_STALE_TIME_MS`), imported by `main.tsx` and by the test — so the test asserts the configuration that
+ships rather than a plausible copy of it, and the 10 s window has one definition.
+
+**Upgrade-safe (§9):** frontend-only, one query key and one extracted constant. No endpoint, config, schema,
+on-disk layout, API shape or default change; `QUERY_DEFAULTS` holds exactly the two options `main.tsx` set.
+
+**Tests (+2):** the Stack form seeded with the Target page's entry issues **no** request (red under a
+scratch revert of the key: *"expected listFrames to not be called at all, but actually been called 1
+times"*), and with nothing cached it still fetches — so the sharing cannot be mistaken for the list quietly
+not being read.
+
+---
+
 ## v0.455.6 — 2026-09-17 — grading one sub re-downloaded every sub: 19.1 MB per keystroke on the owner's deepest target
 
 *(Builder, branch `claude/sweet-babbage-dmpc84`, the same run as v0.455.5 and the second finding from the
