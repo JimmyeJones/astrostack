@@ -29,6 +29,14 @@ on the run :func:`~webapp.finishedpicture.displayed_picture_run` picks, the same
 functions :func:`webapp.pipeline.reprocess_status` counts with — so the chip and
 the dialog can never name different targets. A test pins that.
 
+**And "finished" is about the stored bytes, not about a saved recipe**
+*(v0.449.0)*. Saving an edit in the editor writes the recipe and re-renders
+nothing, so the card keeps showing the linear autostretch — and the chip used to
+*withdraw* at that moment, from the one card where the user's work is invisible
+as well as unstretched. It now asks whether something baked the preview, which is
+the same fact ``routers.stack._unexported_edit`` reads, so the two stop
+contradicting each other about one run.
+
 **It names; it never acts.** Whether a picture is worth finishing is the owner's
 call (a linear master is the honest data, and some people export exactly that),
 so nothing here writes a recipe and there is no "fix them all" button: the chip
