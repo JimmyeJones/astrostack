@@ -3,10 +3,11 @@ import { Alert, Anchor, Button, Group, Paper, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api, type FieldObject, type StackRun } from "../../api/client";
+import { api, type FieldObject, type ObjectInfo, type StackRun } from "../../api/client";
 import { formatCaptureNights, formatIntegration, pictureDateLabel } from "../../format";
 import {
-  AnnotatedImage, croppedAnnotationView, objectLabel, turnedPreviewView,
+  AnnotatedImage, croppedAnnotationView, objectLabel, storedPreviewScaleBar,
+  turnedPreviewView,
 } from "../AnnotatedImage";
 import { ImageLightbox } from "../ImageLightbox";
 import { NorthUpViewToggle, loadNorthUpView, saveNorthUpView } from "../NorthUpViewToggle";
@@ -14,6 +15,7 @@ import { ShowRemovedToggle } from "../ShowRemovedToggle";
 import { removedOverlayCaption } from "../../removed";
 import { isJobPollAbort, pollJobUntilDone } from "../editor/pollJob";
 import { sharePictureText } from "../../share";
+import { postCaptionForRun } from "../postCaption";
 
 /**
  * The one-line provenance caption under the picture. Pure/testable.
@@ -74,11 +76,16 @@ export function inThisPictureSentence(objects: FieldObject[], limit = 6): string
  * pre-stack "First look" reassurance covers that case, unchanged.
  */
 export function LatestPictureCard({
-  safe, name, run, pinnedCover = false,
+  safe, name, run, identity, pinnedCover = false,
 }: {
   safe: string;
   name?: string;
   run?: StackRun | null;
+  /** The target's catalog identity, so the lightbox's share sheet can hand over
+   *  the same ready-to-post sentence the "Save / share" menu above it does. The
+   *  parent already has it (the "What am I looking at?" card runs the query), so
+   *  this costs no request; without it the caption is simply the shorter one. */
+  identity?: ObjectInfo | null;
   // True when `run` is the cover the user pinned *and* a newer stack exists.
   // Without this the page silently shows an older picture than the one just
   // made, which reads as "my new stack didn't work" — so say which it is, and
@@ -183,6 +190,16 @@ export function LatestPictureCard({
   // stack ran — a run with no recorded capture window shares without one.
   const share = sharePictureText(
     name, formatCaptureNights(run.capture_night_start, run.capture_night_end));
+  // …and the caption that goes with it: the same ready-to-post sentence the
+  // "Save / share" menu at the top of this page hands over, rather than the
+  // name-and-date `share.text` above (which stays the sheet's *title* and the
+  // file's name, where a short label is what is wanted). The annotations are
+  // already in hand here whenever the picture is open — this lightbox's own
+  // query fetches them to answer "would turning it North-up move anything?" —
+  // so the scale clause costs nothing extra, and is dropped on a run that has
+  // no WCS to measure it from.
+  const shareCaption = postCaptionForRun(
+    run, identity, storedPreviewScaleBar(annotations.data, run), name || safe);
   // The pins are measured on the run's un-rotated, un-cropped FITS grid, and this
   // card always shows the *stored* preview bytes. A crop the one-click auto-edit
   // baked in composes exactly here (shift the pixels into the trim); a baked-in
@@ -402,7 +419,7 @@ export function LatestPictureCard({
         ) : undefined}
         shareFilename={share.filename}
         shareTitle={share.title}
-        shareText={share.text}
+        shareText={shareCaption}
         onClose={() => setLight(false)}
       />
     </Paper>

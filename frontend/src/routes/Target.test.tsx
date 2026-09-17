@@ -2503,10 +2503,15 @@ describe("TargetView share text", () => {
       timestamp_utc: "2026-08-17T03:30:00Z",
       capture_night_start: "2024-11-15", capture_night_end: "2024-11-18",
     });
+    // The caption is now `postCaption`'s full sentence rather than
+    // `sharePictureText`'s name-and-date — the two items in this one menu
+    // disagreed about the same picture — so this asserts the date *property*
+    // the test was always about instead of equality with the shorter text. The
+    // sheet's title is a label rather than a caption, is unchanged, and is
+    // still pinned here.
     const expected = sharePictureText("M42", formatCaptureNights("2024-11-15", "2024-11-18"));
-    expect(data.text).toBe(expected.text);
     expect(data.title).toBe(expected.title);
-    expect(data.text).toContain("captured 15–18 Nov 2024");
+    expect(data.text).toContain("shot between 15 and 18 Nov 2024");
     expect(data.text).not.toContain("2026");
     // …and specifically not the ambiguous numeric form it used to send.
     expect(data.text).not.toMatch(/\d+\/\d+\/\d{4}/);
@@ -2517,7 +2522,7 @@ describe("TargetView share text", () => {
       timestamp_utc: "2026-08-17T03:30:00Z",
       capture_night_start: "2024-11-15", capture_night_end: "2024-11-15",
     });
-    expect(data.text).toBe(sharePictureText("M42", formatCaptureNights("2024-11-15", "2024-11-15")).text);
+    expect(data.text).toContain("shot on 15 Nov 2024");
     expect(data.text).not.toContain("2026");
   });
 
@@ -2527,8 +2532,56 @@ describe("TargetView share text", () => {
     const data = await shareFrom("Share picture", {
       timestamp_utc: "2026-08-17T03:30:00Z",
     });
-    expect(data.text).toBe("M42");
+    expect(data.text).toContain("shot with a Seestar");
     expect(data.text).not.toContain("captured");
+    expect(data.text).not.toMatch(/\d{4}/);
+  });
+
+  // The bug this block was extended for: "Copy caption" and "Share picture" sit
+  // one item apart in this one menu and described the same picture two
+  // different ways — the first the ready-to-post sentence, the second the
+  // target's name and a date. Only History ever passed the caption in, and the
+  // Target hero is the app's most prominent picture.
+  it("shares the same sentence its own “Copy caption” item copies", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget({ name: "M42" }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun({
+      id: 9, n_frames_used: 240, total_exposure_s: 2400,
+      capture_night_start: "2024-11-15", capture_night_end: "2024-11-15",
+    })]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue({
+      id: "M42", name: "Orion Nebula", type: "nebula", constellation: "Orion",
+      constellation_abbr: "Ori", ra_deg: 83.82, dec_deg: -5.39,
+      matched_by: "name", blurb: "A vast stellar nursery.",
+    } as client.ObjectInfo);
+
+    const copied: string[] = [];
+    Object.assign(navigator, {
+      clipboard: { writeText: async (t: string) => { copied.push(t); } },
+    });
+    const share = vi.fn(async (_d?: ShareData) => {});
+    const restore = stubShare(share);
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob([new Uint8Array([1])], { type: "image/jpeg" }),
+    })));
+
+    renderTarget();
+    await openSaveShare();
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Copy caption/ }));
+    await waitFor(() => expect(copied.length).toBe(1));
+
+    await openSaveShare();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Share picture" }));
+    await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
+
+    const shared = (share.mock.calls[0][0] as ShareData).text;
+    expect(shared).toBe(copied[0]);
+    expect(shared).toContain("Orion Nebula (M42)");
+    expect(shared).toContain("a stack of 240 subs (40 min total)");
+    expect(shared).toContain("A vast stellar nursery.");
+    restore();
+    vi.unstubAllGlobals();
   });
 });
 

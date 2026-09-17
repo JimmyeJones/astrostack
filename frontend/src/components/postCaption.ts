@@ -159,3 +159,61 @@ export function postCaption(input: PostCaptionInput): string {
   // when its datum exists.
   return [first, story, last].filter(Boolean).join(" ");
 }
+
+/** Whatever a surface holds about one stack run, in the shape this caption reads.
+ *  A `StackRun` and a `GalleryItem` both satisfy it structurally — they are the
+ *  same row served by two endpoints — so no caller has to adapt its own type. */
+export interface PostCaptionRun {
+  n_frames_used?: number | null;
+  total_exposure_s?: number | null;
+  capture_night_start?: string | null;
+  capture_night_end?: string | null;
+  capture_nights?: number | null;
+}
+
+/** The catalogue identity, as `postCaption` reads it (`ObjectInfo`, structurally). */
+export interface PostCaptionIdentity {
+  id?: string | null;
+  name?: string | null;
+  type?: string | null;
+  blurb?: string | null;
+}
+
+/**
+ * The caption for **one run**, from the three things a surface has about it.
+ *
+ * This is the field mapping — which run column feeds which clause — rather than
+ * the sentence, which is {@link postCaption} above. It exists because four
+ * surfaces hand out the same picture (the Target hero's "Save / share" menu and
+ * its lightbox, every History run card, and the Gallery's viewer) and every one
+ * of them was spelling the mapping out again. Three of the four then drifted in
+ * the way a duplicated mapping always does — not by getting a field wrong, but by
+ * one of them never being wired up at all: the Target page's menu offered "Copy
+ * caption" (the full sentence) and "Share picture" (the target's name and a date)
+ * one item apart, about the same picture.
+ *
+ * `scaleBar` is passed in rather than derived here: it has to be the bar for the
+ * *stored preview*, which only `storedPreviewScaleBar` can decide, and that needs
+ * the run's preview geometry — which some surfaces hold on the run row and others
+ * have to fetch. Pass `null` where it isn't known; the clause is simply dropped.
+ */
+export function postCaptionForRun(
+  run: PostCaptionRun,
+  identity: PostCaptionIdentity | null | undefined,
+  scaleBar: { moon_comparison?: string | null } | null | undefined,
+  fallbackName?: string | null,
+): string {
+  return postCaption({
+    name: identity?.name,
+    catalogId: identity?.id,
+    type: identity?.type,
+    blurb: identity?.blurb,
+    nFrames: run.n_frames_used,
+    integrationS: run.total_exposure_s,
+    captureNightStart: run.capture_night_start,
+    captureNightEnd: run.capture_night_end,
+    captureNights: run.capture_nights,
+    scaleBar,
+    fallbackName,
+  });
+}
