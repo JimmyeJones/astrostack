@@ -18,6 +18,75 @@ is a queue.
 
 ---
 
+## 2026-09-17 — the estimator-drift lead, swept end to end; and a post-v0.454.0 `--mosaic` dogfood sweep (CLEAN)
+
+*(Builder, branch `claude/sweet-babbage-d26gns`, the run that shipped v0.454.0. A record, not a task.)*
+
+**The audit that found v0.454.0, because the method is the transferable part.** The 2026-09-15 lead under
+"Infra / maintainability" asked one question of nine stored `stack_runs` columns: *has this number's estimator
+moved since rows were written, and if so in which direction?* It also said how to answer it — `docs/SHIPPED.md`
+rather than `git log -L`, because the clone an agent gets is **shallow** — and that instruction is what made
+the whole sweep affordable. Grepping SHIPPED for each column's estimator by name, newest-first, answers "has
+anything touched this since the column shipped?" in one read per column.
+
+Nine columns, **one finding**:
+
+| column | verdict |
+|---|---|
+| `transparency_ratio` | **FINDING** — v0.304.2. Shipped as v0.454.0. |
+| `noise_sigma` | non-finding (answered 2026-09-17 by the previous run) |
+| `grain_ratio` + `grain_thin_frames` / `grain_deep_frames` / `grain_thin_share` | non-finding — shipped *with* `measure_coverage_grain` (v0.406.0); later grain work changed the sentence, never the σ |
+| `stack_fwhm_px` | non-finding — the only post-v0.194.0 change to its chain is v0.345.4, whose own entry pins the masked call as **bit-identical** |
+| `rejection_fraction` | non-finding — a tally of what the combine actually rejected, not an estimate |
+| `duration_s` | non-finding — a wall clock |
+| `coverage_thin_frac` / `coverage_median_depth` / `uncovered_frac` | already dated, and correctly, by `coverage_shares_version` (v0.389.2) + `backfill_coverage_shares` |
+
+**What the one finding cost to establish, and the shape worth copying.** The entry says *"only file a bug for
+a column where the change is actually found, with the direction measured"* — and the direction is what decided
+the remedy rather than decorating it. v0.313.1's seam change was **one-sided**, so `stored_seam_verdict` keeps
+`"flat"` and withholds only `"check"`. I assumed by analogy that this one would be too, then measured it: over
+300 randomised mosaics (2–4 panels, star fields 2,000–20,000, per-panel transparency 0.3–1.0) today's estimator
+reads **higher on 251** (to +0.72) and **lower on 49** (to −0.27). Two-sided, so no half of a stored figure can
+be read around, so the rule is silence. **The assumption and the measurement gave different answers**, which is
+the whole argument for the entry's instruction. A test now pins the two-sidedness so a future run can revisit
+the rule rather than rediscover the property.
+
+**And the other thing the direction decided: withhold, not heal.** `seam_residual` heals because its input —
+the master and its coverage map — is still on disk beside the run. `transparency_ratio`'s input is *which
+frames the run used*, and no column records that (`n_frames_used` and a capture window are not a frame set).
+Re-deriving from the window would be a different measurement of a different population presented as that run's.
+**The generalisable test is not "can this be re-measured?" but "is the run's own input still addressable?"**
+
+**A trap of my own, recorded because it cost a suite run.** AGENTS.md §7 says not to edit a source file while
+the suite is running. I did not edit one — I ran `git stash` and `git stash pop` twice, to diff `ruff` output
+against the baseline, while the full suite was at 30 %. That is the same hazard wearing a different hat: every
+tracked file left and returned inside the window. The run had to be killed and restarted (~7 minutes).
+**Read the rule as "do not let the working tree move", not "do not open an editor"** — `stash`, `checkout`,
+`reset` and `ruff --fix` all move it.
+
+**Dogfood: `--mosaic`, CLEAN on both targets.** `nothing overflowing, no console errors` at 1440 px and 420 px,
+on the field sample and the mosaic. Page heights inside the shipped standings (`/tonight` 3,635; the mosaic
+Target page 3,592; the mosaic editor 3,378; `/` 3,115; `/life-list` 3,094). Auto's mosaic trim unchanged.
+
+**Read as one paragraph, which is the check that actually finds things, the mosaic Target page holds
+together — and v0.444.2 is visibly why.** The coaching card and the framing verdict both say *add panels*
+(55 % of the object is in), and the readiness card prices **~7.3 h** for the canvas that already exists. Those
+two would have been the classic disagreement — "how much more do I need?" answered about a canvas the same
+screen has just recommended replacing — except the readiness sentence now carries `readinessCanvasScope`'s
+clause: *"4 min of ~7.3 h **for this mosaic**"*, and *"1 min of ~2 h **for this single field**"* on the other
+target. One clause, and the paragraph stops being ambiguous. The server-side half agrees with itself too: the
+panel map's *"about 30 s behind… it evens out on its own"* and the grain note's *"1.4× grainier … but it's
+only about 30 s behind, so it evens out"* are now the same fact twice rather than two prescriptions, which is
+the later grain gate holding.
+
+**One state this run shipped is structurally unreachable by the dogfood tooling, and that is fine here.** The
+interesting case for v0.454.0 is a mosaic run whose figure **predates v0.304.2**, and every dogfood pass stacks
+fresh — so the badge it withholds can never appear on a scratch install, the same blind spot as the missing
+observing site (v0.436.1), click-only Compare (v0.440.2) and the empty `incoming/` (v0.442.0). Unlike those, it
+needs no new flag: the case is pinned by `tests/webapp/test_gallery.py` against a **real** TestClient and a
+real project DB, which is a stronger instrument than a browser would be here. Recorded so a future run does not
+file it as a fifth hole.
+
 ## 2026-09-17 — the caption class had a fifth surface, and the way to find it was to stop following the callers
 
 *(Builder, branch `claude/sweet-babbage-y1a42c`, the run that shipped v0.453.6. A record, not a task.)*
