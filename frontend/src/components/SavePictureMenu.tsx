@@ -157,6 +157,7 @@ export function SavePictureMenu({
         name: identity?.name,
         catalogId: identity?.id,
         type: identity?.type,
+        blurb: identity?.blurb,
         nFrames: run.n_frames_used,
         integrationS: run.total_exposure_s,
         captureNightStart: run.capture_night_start,
