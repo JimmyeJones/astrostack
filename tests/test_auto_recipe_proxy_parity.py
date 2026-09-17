@@ -2,12 +2,25 @@
 
 ``tests/test_edit_proxy_parity.py`` measures the A2 class one op at a time: does
 *this* pixel-unit parameter get scaled by the proxy factor? That is how the class
-was found, and a 2026-09-09 sweep confirmed every current op passes it. But no
+was found. But no
 test ever renders the recipe Auto actually *builds* — eleven ops, several of
 which measure the image and hand their answer to the next — twice, and compares
 the two pictures. That composition is where the class hides next: an op can scale
 its own parameter correctly and still be handed a differently-fitted input,
 and a per-op assertion cannot see it.
+
+**⚠ This paragraph used to end "and a 2026-09-09 sweep confirmed every current op
+passes it". It did not, and the correction is the useful part** *(2026-09-17)*.
+``tone.scnr``'s green-excess smoothing had been unscaled since it was written and
+was not in that file at all — the sweep checked the ops somebody had thought to
+add. **And this file could not have caught it either**, which is the part worth
+knowing before trusting the budget below: the SCNR divergence is *localised*
+(1.00x on a flat green cast, 0.68x on knots a few pixels across), so it moved no
+summary statistic here far enough to spend :data:`_PARITY_BUDGET`, and this suite
+stayed green through both the bug and its fix. A global check and a per-op check
+are different instruments; neither is a sweep. The exhaustive one is
+``tests/test_edit_neighbourhood_drift.py``, which reads the source rather than
+the pictures.
 
 So this file renders the same recipe on the decimated live-preview proxy and on
 the native canvas, and asks whether a beginner clicking Auto is looking at the
