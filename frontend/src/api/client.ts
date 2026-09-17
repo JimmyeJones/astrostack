@@ -2125,6 +2125,12 @@ export interface GalleryItem {
   transparency_ratio?: number | null;
   noise_sigma?: number | null;
   calstat?: string | null;
+  /** False when this run's picture is still a flat linear stack rather than a
+   *  finished one — the per-run form of the Library wall's "Not stretched yet"
+   *  chip, off the same shared server-side definition. `undefined`/`null` is
+   *  "the backend didn't say" (an older build), never "linear": the chip renders
+   *  only on an explicit `false`. */
+  finished?: boolean | null;
   // Panel-flatness verdict for a mosaic run ("flat" | "check"), or null/absent
   // when there's nothing honest to say. Resolved server-side from the same
   // thresholds the "How's my stack?" seam notes use — see `StackRun`.
