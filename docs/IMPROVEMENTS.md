@@ -121,6 +121,22 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   real failure mode. So this slice needs the crop re-derived or re-validated against the fresh run's coverage
   map, plus a test per direction. The wall chip (v0.448.0) is what makes the remaining cases visible meanwhile.
   **(3) is unchanged by v0.448.1** — nothing was pinned and the cover column's meaning is untouched.
+  **⚠ BUILDER FINDING 2026-09-17, while shipping v0.448.1 — the hand-edited slice has a SECOND gate this entry
+  does not name, and it is the harder one.** The crop is the gate everyone sees: a saved `geometry.crop` is
+  expressed against the canvas it was cropped on, and `webapp/stale_crop.py` exists because a crop that no longer
+  fits its coverage bound is a real failure mode. That one is *solvable* — the border rule can re-derive the rect
+  against the fresh run's own coverage map, which is exactly what the editor's "re-trim this" offer already does.
+  The gate nobody has named is the **tone chain**: a hand-tuned stretch, black point or curve is fitted to *one
+  master's* noise floor and histogram, and the whole point of a reprocess is that the new master's are different
+  (deeper, cleaner, possibly a different canvas and a different `photometric_normalize` outcome). Replaying that
+  curve verbatim can clip a core it used to hold, or leave a sky it used to lift — and unlike the crop there is no
+  existing measurement that says whether it did. So "copy the recipe forward" is **not** the safe half of this
+  entry; it is the half that needs a way to *check* the replayed look before it becomes the target's picture.
+  Sketch worth costing: replay it, then compare the result against the same two measurements the unattended
+  auto-edit already records for its own output (`AUTO_EDIT_SKYCAST_PREFIX` sky cast, `AUTO_EDIT_HIGHLIGHT_PREFIX`
+  blown-core fraction) and stand down to "leave it linear, the wall chip will say so" when either is worse than
+  the run being superseded. That keeps the promise the entry is about without guessing. Do NOT ship a verbatim
+  copy without it.
 
 - **🟠 BUG (autonomy / data-integrity, Scout 2026-09-14 — mechanism traced end-to-end from observer issue
   [#878](https://github.com/JimmyeJones/astrostack/issues/878)) — a mosaic's raw-subs folder is minted as a
