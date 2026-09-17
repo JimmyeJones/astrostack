@@ -18,6 +18,47 @@ is a queue.
 
 ---
 
+## 2026-09-17 — a `--mosaic --editor` sweep (CLEAN), and where the *next* blind spot was found instead
+
+*(Builder, branch `claude/sweet-babbage-90ekf4`, the run that shipped v0.455.0/v0.455.1. A record, not a
+task.)*
+
+**The sweep, first, because it is the part that found nothing.** `scripts/agent-dogfood.sh --mosaic --editor`
+against v0.454.0: both samples loaded and stacked, all 21 ops added one at a time on both the field and the
+mosaic run with the preview re-rendering each time, undo and redo applied, no console error, no failed
+request, nothing overflowing. Page heights `/tonight` 3635 px, the mosaic Target page 3592 px, its editor
+3378 px, `/` 3115 px, `/life-list` 3094 px — no page moved materially against the v0.437.0-era standings. The
+"read them as one paragraph" blocks were read as one paragraph, on both targets, and the mosaic's three
+prescriptive cards agree: `next-best-move` and `framing-verdict` both say add panels, and the readiness card
+carries v0.444.2's `readinessCanvasScope` clause ("…of ~7.3 h **for this mosaic**"), which is the fragment
+disclosure working. **CLEAN.**
+
+**What the run did about that, and the rule worth keeping.** A clean sweep plus a backlog whose open entries
+are, almost without exception, gated on the owner's own data is not a signal to invent work (AGENTS.md §2).
+It is a signal to ask the question the tooling's own history keeps answering: *what state has this script
+never been in?* Every named answer so far has paid immediately — the missing observing site (v0.436.1), the
+empty `incoming/` (v0.442.0), the click-only Compare modes (v0.440.2), the 1:1 editor preview (v0.446.0).
+
+The next one was **calibration**: no pass has ever held a master dark or flat, so the Calibration page's
+masters list, `/api/calibration/incoming`'s one-click offer, `/api/calibration/defects` and its repair offer,
+the per-target `calibration-suggestions`, `auto_bind_calibration` and the "darks were applied" half of the
+health vocabulary had only ever been photographed empty — on an app that tells the owner, on *every* stack,
+that adding darks is the single biggest cleanup available to him. **It paid before the flag was finished**:
+`grep -i 'dark\|flat\|calib'` over `seestack/io/scanner.py` returns two unrelated comments, i.e. the scan
+had no notion of a calibration frame, while the Calibration page's build form is placeheld
+`/data/incoming/darks`. Reproduced in six lines, shipped as **v0.455.0**.
+
+**And the flag found its own bug on its first run, which is worth recording as a shape.** `stack_target`
+returns early on any existing run — right for every other flag, wrong for this one: a `--calibration` pass
+against a scratch root an earlier pass had stacked turned auto-bind on and then measured the *uncalibrated*
+picture, and said so in the one way that looks like success, by the health note still reading "no darks or
+flats were applied". That is the empty state wearing the clothes of the thing meant to escape it, and it is
+the third time this script has needed the same guard (`location_source`, `proxy_scale`, now the run's own
+`/options` provenance). **A seeding flag needs a line that proves the state was reached, not a line that is
+silent when it was not.**
+
+---
+
 ## 2026-09-17 — the estimator-drift lead, swept end to end; and a post-v0.454.0 `--mosaic` dogfood sweep (CLEAN)
 
 *(Builder, branch `claude/sweet-babbage-d26gns`, the run that shipped v0.454.0. A record, not a task.)*
