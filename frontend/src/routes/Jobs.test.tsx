@@ -14,6 +14,7 @@ import {
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
   rescueUnsolvedNote,
   skippedFolders, videoFoldersNote, broughtFolderInNote,
+  unreadableSubs, unreadableSubsLine,
 } from "./Jobs";
 import * as client from "../api/client";
 import type { Job } from "../api/client";
@@ -1952,5 +1953,156 @@ describe("JobRow offers the rescue where the solve just failed", () => {
     await waitFor(() =>
       expect(screen.getByText(/Located all 40 of them/)).toBeInTheDocument());
     expect(read).not.toHaveBeenCalled();
+  });
+});
+
+describe("unreadableSubs", () => {
+  it("is silent on every healthy scan", () => {
+    expect(unreadableSubs({ scanned: 42 })).toBeNull();
+    // A backend that sent the key but nothing in it, and one whose row counts
+    // zero, both read as "nothing to say" rather than as an empty alert.
+    expect(unreadableSubs({ unreadable_targets: [] })).toBeNull();
+    expect(unreadableSubs({ unreadable_targets: [{ target: "M 42", n: 0 }] })).toBeNull();
+  });
+
+  it("reads the targets and totals them from the rows it kept", () => {
+    const got = unreadableSubs({
+      unreadable: 999,  // deliberately wrong — the rows are the truth
+      unreadable_targets: [
+        { target: "M 101", safe: "M_101", n: 2, examples: ["a.fit", "b.fit"] },
+        { target: "M 81", safe: "M_81", n: 1, examples: ["c.fit"] },
+      ],
+    });
+    expect(got).not.toBeNull();
+    expect(got!.total).toBe(3);
+    expect(got!.rest).toBe(0);
+    expect(got!.targets).toEqual([
+      { target: "M 101", safe: "M_101", n: 2, examples: ["a.fit", "b.fit"] },
+      { target: "M 81", safe: "M_81", n: 1, examples: ["c.fit"] },
+    ]);
+  });
+
+  it("drops junk rows rather than rendering them", () => {
+    const got = unreadableSubs({
+      unreadable_targets: [
+        null, "nope", { n: "x" },
+        { target: "M 42", safe: "M_42", n: 3, examples: ["ok.fit", 7, ""] },
+      ],
+    });
+    expect(got!.targets).toEqual([
+      { target: "M 42", safe: "M_42", n: 3, examples: ["ok.fit"] },
+    ]);
+    expect(got!.total).toBe(3);
+  });
+
+  it("degrades on an older backend that sends no safe name or examples", () => {
+    const got = unreadableSubs({ unreadable_targets: [{ target: "M 42", n: 1 }] });
+    expect(got!.targets).toEqual([
+      { target: "M 42", safe: "", n: 1, examples: [] },
+    ]);
+  });
+
+  it("stops listing targets once a whole archive is damaged", () => {
+    const got = unreadableSubs({
+      unreadable_targets: Array.from({ length: 9 }, (_, i) => (
+        { target: `T${i}`, safe: `T${i}`, n: 2, examples: [] })),
+    });
+    expect(got!.total).toBe(18);
+    expect(got!.named).toHaveLength(6);
+    expect(got!.rest).toBe(3);
+  });
+});
+
+describe("unreadableSubsLine", () => {
+  it("names the files when it has them", () => {
+    expect(unreadableSubsLine(
+      { target: "M 101", safe: "M_101", n: 1, examples: ["Light_0002.fit"] },
+    )).toBe(" — 1 file: Light_0002.fit");
+  });
+
+  it("says there are more when the sample is short of the count", () => {
+    expect(unreadableSubsLine(
+      { target: "M 101", safe: "M_101", n: 8, examples: ["a.fit", "b.fit"] },
+    )).toBe(" — 8 files: a.fit, b.fit, and more");
+  });
+
+  it("falls back to the count alone on an older backend", () => {
+    expect(unreadableSubsLine(
+      { target: "M 101", safe: "M_101", n: 2, examples: [] },
+    )).toBe(" — 2 files");
+  });
+});
+
+describe("JobsView unreadable-subs alert", () => {
+  function renderJobsRouted() {
+    const qc = new QueryClient();
+    return render(
+      <MantineProvider>
+        <Notifications />
+        <QueryClientProvider client={qc}>
+          <MemoryRouter>
+            <JobsView />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </MantineProvider>,
+    );
+  }
+
+  it("names the damaged subs and links to the target they belong to", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-u1", kind: "pipeline", target: null, state: "done",
+        result: {
+          scanned: 3, auto_stacked: [], unreadable: 2,
+          unreadable_targets: [
+            { target: "M 101", safe: "M_101", n: 2,
+              examples: ["Light_0002.fit", "Light_0003.fit"] },
+          ],
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    // The headline number is on the summary line too — "Imported 3 new frames"
+    // out of a folder of five otherwise reads as a complete success.
+    expect(await screen.findByText(
+      "Imported 3 new frames · 2 subs couldn't be read.",
+    )).toBeInTheDocument();
+    expect(screen.getByText("2 of your subs couldn't be read")).toBeInTheDocument();
+    expect(screen.getByText(
+      /— 2 files: Light_0002\.fit, Light_0003\.fit/,
+    )).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "M 101" }))
+      .toHaveAttribute("href", "/targets/M_101");
+  });
+
+  it("says nothing at all on a scan that read everything", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-u2", kind: "pipeline", target: null, state: "done",
+        result: { scanned: 3, auto_stacked: [] },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText("Imported 3 new frames.")).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't be read/)).not.toBeInTheDocument();
+  });
+
+  it("uses singular wording for a single damaged sub", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "pl-u3", kind: "pipeline", target: null, state: "done",
+        result: {
+          scanned: 0, auto_stacked: [],
+          unreadable_targets: [
+            { target: "M 81", safe: "M_81", n: 1, examples: ["Light_0002.fit"] },
+          ],
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(
+      "No new frames · 1 sub couldn't be read.",
+    )).toBeInTheDocument();
+    expect(screen.getByText("One of your subs couldn't be read")).toBeInTheDocument();
   });
 });

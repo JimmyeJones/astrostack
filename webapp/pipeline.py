@@ -266,6 +266,31 @@ def _pipeline_body(
                     with contextlib.suppress(OSError):
                         invalidate_frame_thumbs(lib.targets_dir / t.safe_name, fid)
             summary["scanned"] = scan.total_added
+            # Subs the scan could not read at all — a file whose FITS header
+            # won't parse yields no frame row, so it leaves no trace anywhere in
+            # the library: no row, no reject reason, no count. The scanner has
+            # always tallied them (``TargetScanResult.n_errors``) and the legacy
+            # desktop dialog has always printed the tally; on a container install
+            # — which is how this app is actually run — nothing read it, so an
+            # unreadable sub was dropped, retried on the next scan, dropped
+            # again, and never mentioned. Reported here, never acted on, exactly
+            # like the skipped folders and the video captures below: the files
+            # themselves are left alone (AGENTS.md §10) and are re-tried every
+            # scan, so the report renews itself for as long as the problem lasts
+            # and goes quiet the moment it is fixed.
+            #
+            # Deliberately *not* folded into the QC/solve error counters below:
+            # those are target-level failures ("this target couldn't finish"),
+            # and a beginner reading "1 couldn't finish" about a whole target
+            # learns nothing about one damaged file among 4,000 good ones.
+            unreadable = [
+                {"target": t.target_name, "safe": t.safe_name, "n": t.n_errors,
+                 "examples": list(t.unreadable_examples)}
+                for t in scan.targets if t.n_errors > 0
+            ]
+            if unreadable:
+                summary["unreadable"] = sum(int(u["n"]) for u in unreadable)
+                summary["unreadable_targets"] = unreadable
             # Folders the Seestar convention passed over as "the device's own
             # finished picture" that hold files its naming can't vouch for — i.e.
             # possibly a user's own raw subs sitting in a plainly-named folder
