@@ -43,16 +43,31 @@ seeded (v0.390.0 opens on Auto, whose recipe carries `detail.sharpen`), and the 
 `stars.reduce` was enabled. No SCNR advisory — correctly, because v0.453.3 fixed that op rather than
 captioning it.
 
-**One harness note, so the next run does not read it as a red `main`** *(same run)*. The pre-merge full
-suite came back `1 failed, 6204 passed` on
-`tests/webapp/test_skipped_folders.py::test_a_scan_remembers_the_folder_it_could_not_account_for`, and the
-failure was **`job … did not finish in 60s`** — a wall-clock timeout in that file's own `_wait_job`, not an
-assertion. The captured log shows the scan ran and emitted its warning; it simply had not finished. That file
-takes **82 s on its own**, so a 60 s per-job budget under `-n 4` alongside the rest of the suite is tight
-rather than generous. Re-run alone on the identical tree: **17 passed**. The same suite was green on this
-tree before the run's changes, and a scan job never executes an editor op, so it is unrelated to
-`tone.scnr` by construction as well as by measurement. **If it recurs, the fix is the budget in
-`_wait_job`, not the scanner** — but it has been seen once, so it is recorded rather than filed.
+**A pre-existing flaky test on `main`, found by this run and fixed** *(same run; this replaces an earlier
+note that called it a one-off, which two more runs disproved)*. The pre-merge full suite came back
+`1 failed, 6204 passed` on
+`tests/webapp/test_skipped_folders.py::test_a_scan_remembers_the_folder_it_could_not_account_for`, failing on
+**`job … did not finish in 60s`** — a wall-clock timeout in that file's own `_wait_job`, not an assertion,
+with the captured log showing the scan had run and emitted its warning. It failed again on the next full run,
+so the honest next step was to stop calling it a flake and ask whose it was. **Run on unmodified
+`origin/main` under the same conditions it fails identically** (`1 failed, 6194 passed` — the 10-test
+difference is exactly this run's additions), and `tests/webapp` alone under `-n 4` passes all 2,339. So it is
+`main`'s, not the branch's, and AGENTS.md §2 makes it this run's first task rather than something to merge
+past.
+
+**The fix is the harness's patience, and it moves toward the repo's own convention rather than away from it.**
+This file was the only one in `tests/webapp` waiting on a *scan* for 60 s: `test_pipeline.py` passes
+`timeout=120` at every scan call site, `test_incoming_readonly_guard.py` waits 180, and the editor, archive
+and channel-combine suites all wait 120. Under `-n 4` on 4 cores a scan sharing the box with three
+numpy-heavy stacking workers simply takes longer than a minute. It is now a named `_JOB_TIMEOUT_S = 180`
+with the measurement in its comment. **Nothing is loosened** — every assertion in the file is about what the
+scan *remembered*, all untouched, and a job that genuinely never finishes still fails, two minutes later
+instead of one.
+
+**Why it had never been seen:** it is load- and ordering-dependent, so it passes alone (17 passed, 82 s for
+the file) and passed the first full suite of this session on a fresh box. It wants the *fourth* suite of a
+run, which is the same shape as the `/tmp/pytest-of-root` trap in AGENTS.md §7 — and reads exactly like a red
+`main`, which §2 makes task #1. This time it actually was one.
 
 **So the run's finding did not come from this pass, and that is the note worth keeping.** Both of this run's
 tasks came from *reading* `seestack/edit/ops/*.py` adversarially for the A2 shape — a pixel-unit measure
