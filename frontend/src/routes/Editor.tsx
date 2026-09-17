@@ -18,6 +18,7 @@ import { useUndoable } from "../hooks/useUndoable";
 import { HintAnchor } from "../components/HintAnchor";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { ObjectInfoCard } from "../components/ObjectInfoCard";
+import { postCaptionForRun } from "../components/postCaption";
 import {
   FramingVerdictNote, useStackFraming,
 } from "../components/target/FramingVerdictNote";
@@ -243,6 +244,17 @@ export function EditorView() {
     queryFn: () => api.identifyTarget(safe),
     staleTime: 60_000,
   });
+  // The run row being edited, read for one thing only: the caption this editor
+  // hands out when the user shares the finished picture (see `postableCaption`).
+  // Shares the `["runs", safe]` key the Target and History pages already warm —
+  // and the editor is reached *from* one of them — so this is normally a cache
+  // hit, and a failure just falls back to the server's own terse blurb.
+  const runs = useQuery({
+    queryKey: ["runs", safe],
+    queryFn: () => api.listStackRuns(safe),
+    staleTime: 60_000,
+  });
+  const editedRun = runs.data?.find((r) => r.id === rid) ?? null;
   // One-click "trim the ragged mosaic border": the largest well-covered rectangle
   // of this run's coverage map, offered only on a mosaic (the endpoint returns a
   // null crop for a single-field stack, so the button simply doesn't appear).
@@ -954,6 +966,29 @@ export function EditorView() {
   // editor's "Share to app" button so desktop browsers without it never see it.
   const [canShareToApp] = useState(() => canSharePictureFiles());
   const [shareBlurb, setShareBlurb] = useState<string | null>(null);
+  // The sentence this editor hands out — the same `postCaption` the Target
+  // hero's "Save / share" menu, every History run card, the Gallery viewer and
+  // the "My best pictures" wall all hand out about the same picture. The editor
+  // was the fifth surface and the only one still handing over the engine's terse
+  // `share_blurb` line ("M 42 · 15–18 Nov 2024 · 3.2 h · 152 subs"), which is
+  // the v0.453.1 divergence one screen further along — and on the screen where a
+  // beginner has *just finished* the picture they want to post.
+  //
+  // `scaleBar` is deliberately null, so the caption never says how wide the
+  // frame is. Every other surface captions the run's **stored preview**, whose
+  // geometry `storedPreviewScaleBar` knows; the editor renders the master
+  // through the user's own recipe, so a crop or a rotate makes the run's bar
+  // describe a different rectangle. Dropping the clause is the same graceful
+  // degradation `postCaption` already applies to a run with no WCS, and it is
+  // strictly more than the old line said. Reinstating it would need the *edited*
+  // canvas's own angular width, which only the export knows.
+  const postableCaption = editedRun
+    ? postCaptionForRun(editedRun, identity.data, null, target.data?.name ?? safe)
+    : null;
+  // What the "Caption to paste" line shows and its copy button copies. Still
+  // gated on a share image having been rendered — that is when the offer makes
+  // sense — but the words are the app's one caption, not the job result's.
+  const captionToPaste = shareBlurb ? (postableCaption ?? shareBlurb) : null;
   // Bake the acquisition details onto the shared image (off by default so the
   // shared pixels are unchanged unless the user chooses the caption look).
   const [nameplate, setNameplate] = useState(false);
@@ -1062,8 +1097,11 @@ export function EditorView() {
       const outcome = await sharePicture({
         url: api.editShareUrl(safe, rid, jobId),
         filename,
+        // Title stays the terse one-liner — a share sheet's title is a label,
+        // and this is the same split `SavePictureMenu` settled on: the short
+        // form titles the share, the full sentence is the text you post.
         title: blurb ?? undefined,
-        text: blurb ?? undefined,
+        text: postableCaption ?? blurb ?? undefined,
       });
       if (outcome === "error") {
         notifications.show({
@@ -2976,12 +3014,12 @@ export function EditorView() {
               {printSizes.data?.bigger?.text ? (
                 <Text size="xs" c="dimmed" mt={4}>{printSizes.data.bigger.text}</Text>
               ) : null}
-              {shareBlurb ? (
+              {captionToPaste ? (
                 <Group gap="xs" mt={6} wrap="nowrap" align="center">
                   <Text size="xs" c="dimmed" style={{ flex: 1 }}>
-                    Caption to paste: <Text span fw={500} c="inherit">{shareBlurb}</Text>
+                    Caption to paste: <Text span fw={500} c="inherit">{captionToPaste}</Text>
                   </Text>
-                  <CopyButton value={shareBlurb}>
+                  <CopyButton value={captionToPaste}>
                     {({ copied, copy }) => (
                       <Tooltip label={copied ? "Copied" : "Copy caption"} withArrow>
                         <ActionIcon variant="subtle" color={copied ? "teal" : "gray"} onClick={copy}
