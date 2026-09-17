@@ -1,19 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
+  DRIZZLE_MIN_SAMPLES_PER_PIXEL,
   samplesPerPixel,
   samplesPerPixelPhrase,
   spreadAcrossPanels,
 } from "./samplesPerPixel";
 
 describe("samplesPerPixel", () => {
-  it("is the frame count on a single field, where panel_depth is null", () => {
+  it("is the frame count on a single field, where the depth is null", () => {
     expect(samplesPerPixel(250, null)).toBe(250);
     expect(spreadAcrossPanels(250, null)).toBe(false);
   });
 
-  it("is the panel depth on a mosaic — the owner's 3x3 case", () => {
-    // 225 subs across nine panels: a pixel has seen about 25, an order of
-    // magnitude below the total every caution used to quote.
+  it("is the canvas depth on a mosaic — the owner's 3x3 case", () => {
+    // 225 subs across nine field-fulls of sky: a pixel has seen about 25, an
+    // order of magnitude below the total every caution used to quote.
     expect(samplesPerPixel(225, 25)).toBe(25);
     expect(spreadAcrossPanels(225, 25)).toBe(true);
   });
@@ -52,5 +53,40 @@ describe("samplesPerPixelPhrase", () => {
 
   it("says 'sub', singular, on a one-deep mosaic", () => {
     expect(samplesPerPixelPhrase(9, 1)).toContain("about 1 sub on each patch");
+  });
+});
+
+describe("the depth the caller passes (#901)", () => {
+  // The callers feed `pixel_depth ?? panel_depth`, and the two are different
+  // measures of different things. `panel_depth` is the *thinnest* pointing
+  // cluster — the right answer to "can this rejection bite anywhere?" and, on
+  // the owner's mosaics, ~0.10x the real per-pixel depth, because pointings
+  // spaced under a frame's footprint are separate clusters while a pixel sees
+  // several of them. These pin what that substitution costs at the one bar the
+  // form acts on.
+
+  it("stops sending a deep mosaic the 'turn Drizzle off' advice", () => {
+    // Six of the owner's drizzle runs, worded from the thinnest cluster:
+    const thinnestCluster = 12;
+    expect(samplesPerPixel(1500, thinnestCluster))
+      .toBeLessThan(DRIZZLE_MIN_SAMPLES_PER_PIXEL);   // "turn Drizzle off"
+    // …and from the canvas, which is what the coverage maps actually measure:
+    const perPixel = 128.4;
+    expect(samplesPerPixel(1500, perPixel))
+      .toBeGreaterThanOrEqual(DRIZZLE_MIN_SAMPLES_PER_PIXEL);  // no caution
+  });
+
+  it("still fires the caution on a mosaic that really is thin per pixel", () => {
+    // The fix is not "always say the total": a widely-spread raster stays under
+    // the bar, and the caution it earns is still correct.
+    expect(samplesPerPixel(240, 5.2))
+      .toBeLessThan(DRIZZLE_MIN_SAMPLES_PER_PIXEL);
+  });
+
+  it("words the phrase from whichever number it is given", () => {
+    expect(samplesPerPixelPhrase(1500, 12))
+      .toContain("about 12 subs on each patch of sky");
+    expect(samplesPerPixelPhrase(1500, 128.4))
+      .toContain("about 128 subs on each patch of sky");
   });
 });

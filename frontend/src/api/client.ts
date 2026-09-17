@@ -1531,6 +1531,22 @@ export interface ReprocessStatus {
   outdated: number;      // targets whose current image was made by an older version
   up_to_date: number;    // targets already stacked on the running version
   total_targets: number;
+  /**
+   * How many targets currently *display* a finished (edited) picture. A
+   * reprocess saves each restack as a new run, and the newest run is the one
+   * every wall shows — so with "also auto-edit each result" off, all of these
+   * go back to showing a flat linear stack until they are edited or re-run.
+   * The edits themselves are untouched (they stay on their own runs, reachable
+   * in History); it is the *displayed* picture that changes.
+   *
+   * `_stale_only` is the same count restricted to the targets a "only targets
+   * not already stacked on this version" batch would actually restack.
+   *
+   * Optional: an older backend sends neither, and the dialog then says nothing
+   * about it — exactly what it did before.
+   */
+  finished_pictures?: number;
+  finished_pictures_stale_only?: number;
 }
 
 export interface AutoCastSummary {
@@ -1916,12 +1932,20 @@ export interface StackEstimate {
   output_w: number;
   output_h: number;
   is_mosaic: boolean;
+  // The **thinnest** substantial pointing cluster's depth (`auto_reject_depth`)
+  // — the number the rejection answers on this response are computed from,
+  // because "can this method bite *anywhere*?" is a question about the thinnest
+  // part of the raster. null on a single field. Deliberately NOT what the form's
+  // sentences are worded from: see `pixel_depth`.
+  panel_depth?: number | null;
   // How many subs land on one *spot* of this canvas — the denominator every
   // per-pixel caution on the Stack form is about (drizzle's dither samples, the
-  // per-pixel σ κ-σ estimates, min/max's `2k+1` frames per pixel). null on a
-  // single field, where the frame count already is that number. Optional so an
-  // older backend simply leaves every caution worded in frames, as before.
-  panel_depth?: number | null;
+  // per-pixel σ κ-σ estimates, min/max's `2k+1` frames per pixel). Canvas area ÷
+  // frame footprint, the same measure `perPixel.ts` uses after a run. null when
+  // the canvas is no bigger than one frame (a single field, or a mosaic forced
+  // onto the reference canvas), where the frame count already is that number.
+  // Optional so an older backend falls back to `panel_depth`, as before.
+  pixel_depth?: number | null;
   peak_bytes: number;
   peak_gb: number;
   budget_bytes: number;
@@ -2859,6 +2883,15 @@ export interface OverTrimmedItem {
   run_id: number;
   stored_keep_fraction?: number | null;
   suggested_keep_fraction?: number | null;
+}
+
+/** One target whose *displayed* picture is still a flat linear stack — see
+ * `/api/unstretched-pictures`. `run_id` is the run whose linear preview is the
+ * picture being shown, so a caller can link straight to it in the editor. */
+export interface UnstretchedItem {
+  safe: string;
+  target_name: string;
+  run_id: number;
 }
 
 /** One folder of `incoming/` holding subs the library has no frame row for —
@@ -3901,6 +3934,14 @@ export const api = {
   // never rewrites a recipe.
   getOverTrimmedPictures: () =>
     req<{ count: number; items: OverTrimmedItem[] }>("/api/over-trimmed-pictures"),
+
+  // Which targets are showing a flat linear stack instead of a finished picture.
+  // A linear master and a finished auto-edit are both a dark-ish square on a
+  // 160px card, so the wall could not tell them apart and neither can a
+  // beginner — the app can, and this is where it says so. Read-only; it never
+  // writes a recipe.
+  getUnstretchedPictures: () =>
+    req<{ count: number; items: UnstretchedItem[] }>("/api/unstretched-pictures"),
 
   // Which folders of `incoming/` hold subs that never reached the library. Its
   // own endpoint for the same reason as the three above, and a different

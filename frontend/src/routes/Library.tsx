@@ -81,7 +81,18 @@ function sortTargets(targets: Target[], key: SortKey): Target[] {
   }
 }
 
-function TargetCard({ t }: { t: Target }) {
+/** The plain-language sentence behind the "Not stretched yet" chip.
+ *
+ * Exported so the copy is testable on its own and so no second surface has to
+ * re-word it. Deliberately says what to *do* — the chip is on a card that
+ * already links to the target, and the one-click Auto is one screen further in.
+ */
+export const UNSTRETCHED_HINT =
+  "This is the stack straight out of the stacker, so almost all of it is "
+  + "squashed into the darkest part of the range. Open it and press Auto to "
+  + "stretch it into a finished picture — it's reversible.";
+
+function TargetCard({ t, unstretched }: { t: Target; unstretched?: boolean }) {
   return (
     <Card shadow="sm" padding="lg" radius="md" withBorder component={Link} to={`/targets/${t.safe_name}`}>
       <Card.Section>
@@ -109,6 +120,14 @@ function TargetCard({ t }: { t: Target }) {
         <Badge variant="light" color="gray">
           {expo(t.total_exposure_s)}
         </Badge>
+        {/* Only the cards that need something. A "Finished" chip on the other
+            nine in ten would be a wall of badges saying nothing — and the
+            owner's standing complaint about this app is clutter. */}
+        {unstretched ? (
+          <Badge variant="light" color="yellow" title={UNSTRETCHED_HINT}>
+            Not stretched yet
+          </Badge>
+        ) : null}
       </Group>
       {t.tags.length ? (
         <Group gap={4} mt="xs">
@@ -136,6 +155,22 @@ export function Library() {
   }, [search, sort, activeTags]);
 
   const targets = useMemo(() => data ?? [], [data]);
+
+  // Which of these are showing a flat linear stack rather than a finished
+  // picture. Its own endpoint on purpose: answering it needs each target's
+  // project DB, and `/api/targets` is the light list this wall renders from —
+  // the same reason the over-trim and new-subs notes have their own. Long
+  // staleTime: it is a cross-target read about recipes already on disk.
+  // Absent/failed ⇒ no chips, which is exactly the wall as it was.
+  const unstretched = useQuery({
+    queryKey: ["unstretched-pictures"],
+    queryFn: api.getUnstretchedPictures,
+    staleTime: 300_000,
+  });
+  const unstretchedSafe = useMemo(
+    () => new Set((unstretched.data?.items ?? []).map((i) => i.safe)),
+    [unstretched.data],
+  );
 
   const allTags = useMemo(() => {
     const set = new Set<string>();
@@ -240,7 +275,8 @@ export function Library() {
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>
           {visible.map((t) => (
-            <TargetCard key={t.safe_name} t={t} />
+            <TargetCard key={t.safe_name} t={t}
+              unstretched={unstretchedSafe.has(t.safe_name)} />
           ))}
         </SimpleGrid>
       )}
