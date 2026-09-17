@@ -1,5 +1,208 @@
 # Shipped — the record
 
+## v0.455.7 — 2026-09-17 — the Target page and the Stack form asked the identical question under two cache keys
+
+*(Builder, branch `claude/sweet-babbage-dmpc84`, the third and last finding from this run's lens, and the
+smallest. Same defect class as v0.455.6: the complete frame list, fetched again for data already in memory.)*
+
+**The bug.** `routes/Stack.tsx` read a target's frame list under `["frames", safe]`; `routes/Target.tsx`
+reads it under `["frames", safe, sort, order]`. Both call `api.listFrames(safe)` — whose defaults are
+`sort=id`, `order=asc`, i.e. **one identical request** — so clicking "Stack" from the page you were just
+looking at re-downloaded the whole list under a cold key. At the measured 531 bytes a row that is 2.9 MB on
+the owner's 5,477-sub target and **19.1 MB over 18 sequential requests** on his 35,894-sub one, for rows
+already sitting in the cache, and it blocks: several of the Stack form's pre-flight advisories are gated on
+`!frames.isLoading`.
+
+**The fix** is the key: `["frames", safe, "id", "asc"]`, which is the Target page's own default-sort entry.
+Nothing on the Stack form reads the list *in order* — it is four `.filter().length`s and
+`detectMixedPointings` — so sharing the default-sort entry is sound whatever the table happens to be sorted
+by, and a re-sorted table simply leaves the form its own entry exactly as today. Every
+`invalidateQueries(["frames", safe])` in the file still matches by prefix, so nothing about freshness
+changes.
+
+**And the test needed the app's real numbers, which is the part worth keeping.** The claim is about
+*caching*, and under TanStack Query's bare default (`staleTime: 0`) every entry is stale the instant it
+lands — so a hand-written test client refetches and the claim is untestable for a reason that has nothing to
+do with the code. The app's defaults lived inline in `main.tsx`, which a test cannot import because
+importing it renders the app. They are now `frontend/src/queryDefaults.ts` (`QUERY_DEFAULTS`,
+`QUERY_STALE_TIME_MS`), imported by `main.tsx` and by the test — so the test asserts the configuration that
+ships rather than a plausible copy of it, and the 10 s window has one definition.
+
+**Upgrade-safe (§9):** frontend-only, one query key and one extracted constant. No endpoint, config, schema,
+on-disk layout, API shape or default change; `QUERY_DEFAULTS` holds exactly the two options `main.tsx` set.
+
+**Tests (+2):** the Stack form seeded with the Target page's entry issues **no** request (red under a
+scratch revert of the key: *"expected listFrames to not be called at all, but actually been called 1
+times"*), and with nothing cached it still fetches — so the sharing cannot be mistaken for the list quietly
+not being read.
+
+---
+
+## v0.455.6 — 2026-09-17 — grading one sub re-downloaded every sub: 19.1 MB per keystroke on the owner's deepest target
+
+*(Builder, branch `claude/sweet-babbage-dmpc84`, the same run as v0.455.5 and the second finding from the
+same lens. Measured on the running app, not estimated.)*
+
+**The bug.** `routes/Target.tsx`'s single-frame `patch` mutation — the `a`/`r` keyboard grades and the
+accept toggle on every row — ended in `invalidateQueries(["frames", safe])`. That key prefix-matches the
+page's own `["frames", safe, sort, order]` *and* the Stack form's `["frames", safe]`, and the list behind
+it is deliberately **complete**: `api.listFrames` pages until it holds every sub, because a fixed 2,000-row
+cap once hid the newest frames from the table, the keyboard grading and the Stack pre-flight guards.
+
+So the cost of grading one sub is a re-download of all of them. Measured against the endpoint on the
+running dogfood install — 1,200 rows, 636,988 bytes, i.e. **531 bytes a row**, and that is a floor because
+the sample's filenames are shorter than a Seestar's:
+
+| subs | re-downloaded per grade | requests (sequential) |
+|------|-------------------------|-----------------------|
+| 200 | 106 KB | 1 |
+| 1,200 | 637 KB | 1 |
+| 5,477 | **2.9 MB** | 3 |
+| 35,894 | **19.1 MB** | 18 |
+
+5,477 and 35,894 are the owner's two deepest targets. The pages are sequential by construction (each waits
+for the last to prove it was not short), and grading is the one action on this page done dozens of times in
+a row — the keyboard shortcut exists because it is. Over a NAS from a phone, that is the feature being
+unusable at exactly the depth that makes it worth having.
+
+**The fix is exact, not a heuristic.** `PATCH /api/targets/{safe}/frames/{id}` (`routers/frames.py`)
+writes **one** row — `accept`, `reject_reason`, `user_override` or `bayer_pattern`, per `FramePatch` — and
+returns that row in full as `FrameOut`. Nothing else in the list changes. So the fresh list a refetch would
+produce differs from the cached one in precisely that row, and `qc.setQueriesData` swaps it in, across every
+cached sort/order variant at once, for no bytes. New pure `components/target/frameCache.ts`
+(`replaceFrameInList`) does the swap.
+
+Two properties make an in-place swap safe rather than merely cheap:
+
+- **A graded row cannot move.** The table's sort keys are `id`, `timestamp_utc` and the five QC metrics
+  (`frameColumns.ts::SortKey`), and **none of them is a field `FramePatch` can change** — so there is no
+  re-ordering for the discarded refetch to have done.
+- **The replacement is identity-stable.** A list that does not hold the id comes back as *the same array*,
+  so a cached list for another target is not replaced by an equal copy, and the untouched rows stay the
+  same objects.
+
+**A bulk action is deliberately left invalidating.** It changes many rows, writes server-computed reject
+reasons (`bulk:worst:fwhm_px`), returns ids rather than rows, and is a deliberate click rather than a
+keystroke — so there is nothing exact to swap in and nothing to gain by guessing. `["target", safe]` and
+`["reject-summary", safe]` are still invalidated on a grade, unchanged: they are small, and they really do
+change.
+
+**Upgrade-safe (§9):** frontend-only. No endpoint, config, schema, on-disk layout, API shape or default
+touched, and the page shows exactly what it showed before.
+
+**Tests (+6).** Four on `replaceFrameInList` (the swap; no mutation of the input; the same-array return for
+an absent id; the empty list), and two on the real page. The page ones are shaped so the **request count**
+is what fails, not a timeout: the refetch mock is set to answer with the graded row too, so the row flips
+under either implementation and the only thing that distinguishes them is whether the full list was fetched
+again. Under a scratch revert the first goes red with `expected 2 to be 1` — one grade, one extra full
+download of the target.
+
+---
+
+## v0.455.5 — 2026-09-17 — the mixed-pointing guard was O(n²) on a bound that had been removed under it: 15.3 s of frozen tab on the owner's deepest target
+
+*(Builder, branch `claude/sweet-babbage-dmpc84`. Found by asking the previous run's question one more
+time — not "what state has the tooling never been in?" but "what **magnitude**?" — of a surface the
+`--deep` flag cannot reach, because `--deep` is not stacked and this code wants solved pointings.)*
+
+**The bug, in the code's own words.** `frontend/src/components/target/mixedPointings.ts` clusters a
+target's accepted+solved subs to catch "this folder holds two different targets" before a stack wastes
+itself on it. Its linkage loop tested **every pair**, and said so:
+
+> `// (dot ≥ cos(threshold)) share a cluster. O(n²), bounded by the 2000-frame`
+> `// list cap, and only recomputed when the frames data changes.`
+
+That cap does not exist. `api.listFrames` pages until it holds every sub — deliberately, and for a good
+reason its own comment gives: *"one good S30 night is ~2,100 × 10 s subs, so a fixed limit silently hid
+the newest frames from the table, keyboard grading, 'Reject worst' ordering and the Stack pre-flight
+guards."* So the fix for the truncation bug removed the bound this loop was resting on, and nothing here
+noticed. **A comment is not a bound**; this one outlived the thing it described.
+
+**Measured, on this exact code, on a single dithered pointing (dither is arc-minutes, so every pair is
+inside the 3° link distance — the worst case *is* the common case):**
+
+| subs | all-pairs linkage |
+|------|-------------------|
+| 200 | 9 ms |
+| 1,200 | 23 ms |
+| 5,477 | 232–474 ms |
+| 12,000 | 1.4 s |
+| 35,894 | **14.0–15.3 s** |
+
+5,477 and 35,894 are the owner's two deepest targets. And this is not a slow number on a page — it runs
+**synchronously inside a `useMemo` during render**, on `routes/Target.tsx` (the page he opens every
+session) *and* `routes/Stack.tsx`. There is no spinner for it: the tab stops responding. From a phone,
+worse than these figures, which are node on a desktop container.
+
+**The fix is the same partition, found with a spatial grid.** Unit vectors are bucketed into cubes of
+side `chord(3°)/√3`, and two rules do the work:
+
+1. A cube's body diagonal is exactly the link chord, so **any two points sharing a cube are within the
+   link distance by construction** — they are unioned with no distance test at all. That is the case
+   this exists for: all 35,894 subs of one dithered pointing land in one cube.
+2. Cubes offset by 3 or more indices on any axis are at least 2 cells apart — further than the chord —
+   so only the ±2 neighbourhood is visited. A cube pair already in one component is skipped; and because
+   rule 1 leaves every cube internally connected, the **first** linking pair found between two cubes
+   merges both whole, so the scan stops there.
+
+Nothing is approximated and no threshold moved. `LINK_DIST_DEG` (3.0) and `MIN_POINTING_FRAMES` (5) are
+untouched, and the result is the identical partition, hence identical counts, centroids, separation and
+`minorityIds`.
+
+**Measured after:**
+
+| scene | before | after |
+|-------|--------|-------|
+| one pointing, 5,477 subs | 474 ms | 0.3 ms |
+| one pointing, 35,894 subs | 15,305 ms | **3.2 ms** |
+| 25-panel mosaic, 5,477 subs | 291 ms | 2.3 ms |
+| 25-panel mosaic, 35,894 subs | 11,286 ms | **25.4 ms** |
+
+**How it is pinned, and why that is two tests rather than one.**
+
+- **An exhaustive all-pairs oracle**, written out longhand in the test file as a deliberate *copy* rather
+  than an export — an oracle that shares code with the thing it checks checks nothing — run against the
+  real function over **250 random skies** from a seeded PRNG: 1–4 blobs, random sky positions including
+  within a degree of both poles and across the RA=0 seam, and spreads drawn from a set that straddles the
+  link distance on both sides (2.9° and 3.1°), which is where an approximation would show. It compares
+  `pointings`, `majority`, `others` and the full `minorityIds` list. This test passes **both** before and
+  after, which is its job: it is the parity claim, not the defect.
+- **A budget assertion at the owner's scale** — 30,000 subs as one pointing, as two targets, and as a
+  24-panel mosaic, each asserted under **1,500 ms** with the elapsed time in the failure message. Under a
+  scratch revert of the grid these go red at **10,992 / 6,945 / 7,800 ms**; after, they are single-digit
+  milliseconds, so there is ~40× of headroom on a loaded CI box and the reverted code still misses by
+  3–8×. The budget is asserted rather than left to a test timeout so the failure names the number.
+
+**Upgrade-safe (§9):** frontend-only, one pure function's internals. No endpoint, config, schema, on-disk
+layout, API shape or default touched, and no user-visible behaviour change — the warning fires on exactly
+the same batches it fired on before, just without the freeze.
+
+**The transferable part.** The previous run's note narrowed "CLEAN" a third time, to *a measure that a
+container fixes is not a measure of what the container holds*. This is the same lesson pointed at a
+comment: **a stated complexity bound is a claim about a caller, and callers change.** The grep that finds
+the rest of this class is not "find the O(n²) loops" — it is `O(n` in the frontend tree, read against
+what the caller does today. The rest of that list was read this run and is clean: every other pass over
+the full frame list on the Target page (`countQcUncheckable`, `countNewSubsSinceStack`, `needsProcessing`,
+`selectedFrame`, `visible`) and on the Stack form (four `.filter().length`s) is linear, and
+`trailedAccepted` is two sorts, i.e. O(n log n). This was the only superlinear one.
+
+**And there is a second half worth carrying, added while sweeping for siblings: the engine has its own copy
+of this exact rule, and it had already been fixed.** `seestack/stack/pointings.py::detect_mixed_pointings`
+is the same verdict for the same batches, used by the walk-away pre-flight (`pipeline._mixed_pointing_check`),
+and a previous run measured *it* at **2.65 s for a 5,477-sub target** and gave it a fold onto a 0.01° grid,
+with `seestack/mosaicmap.py` getting the same treatment ("5,400 subs took 2.2 s unfolded and 0.05 s folded").
+Both carry the measurement in their docstrings. The TypeScript copy — which computes the identical verdict,
+for the same owner, on the two pages he actually opens — was not touched, because the sweep that found the
+cost followed Python callers. **So the miss was not "nobody thought about the cost"; it was that one rule
+living at two layers has two independent cost stories, and fixing one reads as fixing the thing.** Checked
+this run: the two agree on the verdict (Python filters `accepted_only` + `wcs_json`, the frontend
+`accept && solved &&` finite coordinates; same `LINK_DIST_DEG` 3.0 and `MIN_POINTING_FRAMES` 5), and the
+only remaining difference is that the engine's fold is an approximation for a pair within ~3 % of the link
+distance while the grid here is exact — which the engine's own constant documents as safe in both
+directions, so it is left alone rather than churned.
+
+---
+
 ## v0.455.3 — 2026-09-17 — `scripts/agent-dogfood.sh --deep`: no dogfood pass had ever held the owner's *scale*
 
 *(Builder, branch `claude/sweet-babbage-ro1k5s`, shipped beside v0.455.2 — the bug that found this hole,

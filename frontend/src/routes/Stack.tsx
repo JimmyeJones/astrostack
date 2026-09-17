@@ -90,7 +90,23 @@ export function StackView() {
     if (!summary) return null;
     return { summary, lines: rows.map((p) => pinnedLine(p, schema.data)) };
   }, [pinned.data, schema.data]);
-  const frames = useQuery({ queryKey: ["frames", safe], queryFn: () => api.listFrames(safe) });
+  // The **same** cache entry the Target page's frames table fills, not a second
+  // one. Both ask `listFrames(safe)`, whose defaults are sort=id / order=asc —
+  // one identical request — but this key used to be `["frames", safe]` against
+  // the table's `["frames", safe, sort, order]`, so clicking "Stack" from the
+  // page you were just looking at re-downloaded the whole list under a cold
+  // key. That list is deliberately complete (it pages until it holds every
+  // sub), and it is 531 bytes a row measured on the wire: 2.9 MB on the owner's
+  // 5,477-sub target and 19.1 MB over 18 sequential requests on his 35,894-sub
+  // one, for data already in memory. Nothing here reads the list in order — it
+  // is four `.filter().length`s and `detectMixedPointings` — so sharing the
+  // table's *default*-sort entry is sound whatever the table is sorted by; a
+  // re-sorted table simply leaves this its own entry, as today. Every
+  // `invalidateQueries(["frames", safe])` in this file still matches by prefix.
+  const frames = useQuery({
+    queryKey: ["frames", safe, "id", "asc"],
+    queryFn: () => api.listFrames(safe),
+  });
   // Offline catalog identity for this target. The Target page already fetches it
   // (same query key, so it's usually warm) — here it's read only for its
   // background-flatten advice: a big emission nebula needs Luminance mode, and

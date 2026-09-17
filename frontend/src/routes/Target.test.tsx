@@ -2897,3 +2897,54 @@ describe("TargetView frames table at the owner's scale", () => {
     await waitFor(() => expect(bodyRows()).toBe(2 * FRAME_WINDOW_STEP + 1));
   });
 });
+
+// Grading a frame used to end in `invalidateQueries(["frames", safe])`, which
+// refetches the *whole* list — and that list is deliberately complete
+// (`api.listFrames` pages until it holds every sub). Measured on the running
+// app a frame row is 531 bytes on the wire, so one keystroke re-downloaded
+// 2.9 MB on the owner's 5,477-sub target and 19.1 MB over 18 sequential
+// requests on his 35,894-sub one, on the one action you do dozens of times in
+// a row. The endpoint returns the whole updated row and touches no other, so
+// the row is swapped into the cache instead. See `components/target/frameCache.ts`.
+describe("TargetView grading a single frame", () => {
+  async function renderWithFrames(frames: Frame[]) {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: frames.length, n_frames_accepted: frames.length }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    const listFrames = vi.spyOn(client.api, "listFrames").mockResolvedValue(frames);
+    renderTarget();
+    await screen.findAllByLabelText("Reject frame");
+    return listFrames;
+  }
+
+  it("does not re-download every sub when one frame is graded", async () => {
+    const graded = mkFrame(1, { accept: false, reject_reason: "user", user_override: true });
+    const listFrames = await renderWithFrames([mkFrame(1), mkFrame(2)]);
+    // A refetch would answer with the graded row too, so the row flipping is
+    // *not* what distinguishes the two implementations — the request count is,
+    // and it is the whole point. Both are asserted, in that order.
+    listFrames.mockResolvedValue([graded, mkFrame(2)]);
+    const patchFrame = vi.spyOn(client.api, "patchFrame").mockResolvedValue(graded);
+    const callsBefore = listFrames.mock.calls.length;
+
+    fireEvent.click(screen.getAllByLabelText("Reject frame")[0]);
+
+    await waitFor(() => expect(patchFrame).toHaveBeenCalledWith("M_42", 1, { accept: false }));
+    // The row flips, so the cache really was brought up to date…
+    await waitFor(() => expect(screen.getAllByLabelText("Accept frame")).toHaveLength(1));
+    // …and not one byte of the complete list was fetched again to do it.
+    expect(listFrames.mock.calls.length).toBe(callsBefore);
+  });
+
+  it("leaves the other rows alone", async () => {
+    await renderWithFrames([mkFrame(1), mkFrame(2), mkFrame(3)]);
+    vi.spyOn(client.api, "patchFrame")
+      .mockResolvedValue(mkFrame(2, { accept: false, reject_reason: "user", user_override: true }));
+
+    fireEvent.click(screen.getAllByLabelText("Reject frame")[1]);
+
+    await waitFor(() => expect(screen.getAllByLabelText("Accept frame")).toHaveLength(1));
+    expect(screen.getAllByLabelText("Reject frame")).toHaveLength(2);
+  });
+});

@@ -7,6 +7,7 @@ import { notifications } from "@mantine/notifications";
 import { StackView } from "./Stack";
 import * as client from "../api/client";
 import { stackPlacementMismatches } from "../test/stackOptionPlacement";
+import { QUERY_DEFAULTS } from "../queryDefaults";
 
 /**
  * Mock `GET /api/stack/options` — and refuse a fixture that puts a control
@@ -35,10 +36,11 @@ function mockSchema(fields: client.StackOptionField[]) {
 }
 
 
-function renderStackAt(path: string) {
+function renderStackAt(path: string, client?: QueryClient) {
   // Retries off so a deliberately-rejected query fails fast (no exponential
   // backoff) in tests that exercise error paths.
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const qc = client
+    ?? new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <MantineProvider>
       <QueryClientProvider client={qc}>
@@ -2890,5 +2892,59 @@ describe("StackView — the sizing panel doesn't blink between answers", () => {
     await act(async () => { land(sizing(250)); });
     await waitFor(() =>
       expect(screen.getByText(/250 accepted, solved frames/)).toBeInTheDocument());
+  });
+});
+
+// Clicking "Stack" from the Target page used to re-download every sub, because
+// the two screens asked the identical request under two different cache keys —
+// `["frames", safe]` here against the table's `["frames", safe, sort, order]`.
+// The list is deliberately complete and measures 531 bytes a row on the wire,
+// so that was 2.9 MB on the owner's 5,477-sub target and 19.1 MB over 18
+// sequential requests on his 35,894-sub one, for data already in memory.
+describe("StackView frame list", () => {
+  function mkFrame(id: number, overrides: Partial<client.Frame> = {}): client.Frame {
+    return {
+      id, name: `f${id}.fits`, timestamp_utc: "2026-01-01T00:00:00",
+      exposure_s: 30, gain: 100, width_px: 480, height_px: 320,
+      bayer_pattern: "RGGB", solved: true, ra_center_deg: 10, dec_center_deg: 20,
+      ra_hint_deg: null, dec_hint_deg: null, fwhm_px: 2.5, star_count: 100,
+      sky_adu_median: 500, eccentricity_median: 0.4, transparency_score: 5000,
+      streak_detected: false,
+      accept: true, reject_reason: null, user_override: false, ...overrides,
+    };
+  }
+
+  it("reuses the Target page's frame list instead of fetching its own copy", async () => {
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    const listFrames = vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+
+    // The app's own defaults, imported rather than re-typed: a hand-written
+    // client gets `staleTime: 0`, under which every cache entry is stale the
+    // moment it lands and this claim is untestable for a reason that has
+    // nothing to do with the code.
+    const qc = new QueryClient({
+      defaultOptions: {
+        ...QUERY_DEFAULTS,
+        queries: { ...QUERY_DEFAULTS.queries, retry: false },
+      },
+    });
+    // Exactly what the Target page leaves behind: its default-sort entry.
+    qc.setQueryData(["frames", "M_42", "id", "asc"], [mkFrame(1), mkFrame(2)]);
+
+    renderStackAt("/targets/M_42/stack", qc);
+
+    await waitFor(() => expect(screen.getByText("Start stacking")).toBeInTheDocument());
+    expect(listFrames).not.toHaveBeenCalled();
+  });
+
+  it("still fetches the list when nothing has filled that entry", async () => {
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    const listFrames = vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+
+    renderStack();
+
+    await waitFor(() => expect(listFrames).toHaveBeenCalledWith("M_42"));
   });
 });
