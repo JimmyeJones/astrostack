@@ -691,6 +691,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Only if the existing pointings genuinely fall inside the proposed grid is there a *"~10 h of that is still
   to shoot"* to say — and even then it wants to be a clause on the existing sentence, not a third figure in
   hours (the standing "extremely busy" priority). **Do not blind-subtract the banked hours.**
+  **↳ REPRODUCED A SECOND TIME, 2026-09-17** (Builder, a post-v0.450.0 `--mosaic` pass that was otherwise
+  CLEAN — record in [`PROCESS-NOTES.md`](PROCESS-NOTES.md)). Unchanged, word for word, on the same 2×2. The
+  gate is unchanged too: it is the owner's own library that decides, not this sample. Noted so the count of
+  reproductions is honest rather than to re-argue the entry.
 
 - ~~**LEAD (Builder 2026-09-14, photographed on the bundled single field while shipping the v0.443.0 framing
   rung) — the readiness card still prices the canvas the coaching card has just told you to stop shooting.**~~
