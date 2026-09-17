@@ -163,6 +163,7 @@ export function reprocessSummary(r: Record<string, unknown>): {
   const skipped = Number(r.skipped ?? 0);
   const rescanned = Number(r.rescanned ?? 0);
   const autoEdited = Number(r.auto_edited ?? 0);
+  const keptFinished = Number(r.kept_finished ?? 0);
   const failedArr = Array.isArray(r.failed) ? r.failed : [];
   const failed = failedArr
     .map((f) => (f && typeof f === "object"
@@ -178,7 +179,19 @@ export function reprocessSummary(r: Record<string, unknown>): {
   // Only present when the deep-rescan option was used (re-ran QC/solve/grade first).
   if (rescanned > 0) line += ` — re-ran QC/solve/grade on ${rescanned}`;
   // Only present when the auto-edit option was used (finished pictures, not linear).
-  if (autoEdited > 0) line += ` — auto-edited ${autoEdited}`;
+  if (autoEdited > 0) {
+    line += ` — auto-edited ${autoEdited}`;
+    // Says *why* a batch nobody asked to auto-edit auto-edited some runs: those
+    // targets were already showing a finished picture, and the newest run is the
+    // one every wall surface shows, so leaving them linear would have flattened
+    // them. Silent when nothing needed it, and when the switch was on (then
+    // every restack was going to be finished regardless).
+    if (keptFinished > 0 && keptFinished < autoEdited) {
+      line += ` (${keptFinished} to keep a finished picture finished)`;
+    } else if (keptFinished > 0) {
+      line += " to keep finished pictures finished";
+    }
+  }
   if (skipped > 0) line += ` — ${skipped} already up to date`;
   if (failed.length) line += ` — ${failed.length} failed`;
   return { line: `${line}.`, failed };

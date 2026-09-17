@@ -963,6 +963,195 @@ def test_reprocess_all_default_does_not_auto_edit(solved_library, monkeypatch):
     assert calls == []                      # helper never invoked
 
 
+# --------------------------------------------------------------------------- #
+# Keeping an already-finished picture finished (observer issue #903)
+#
+# A restack lands as the *newest* run, and the newest run is the picture the
+# Library wall / life list / wishlist / all-sky map all show — so a batch with
+# the auto-edit switch off used to replace every finished picture in the library
+# with a flat linear master. Nothing was lost (the edits stayed on their own
+# runs), which is exactly why nobody could see what had happened.
+# --------------------------------------------------------------------------- #
+
+def _seed_finished_run(proj, *, version="0.0.1", baked=True, recipe=True):
+    """A run shaped like one the wall is showing: it has a preview, and — unless
+    told otherwise — the ``editor_auto_baked_look`` stamp an unattended auto-edit
+    writes beside the bytes it baked. Returns the run id.
+
+    ``baked=False, recipe=True`` is the hand-edited case: a saved recipe that did
+    *not* come from us, which the carry-forward must leave alone."""
+    from webapp.routers.editor import (
+        AUTO_EDIT_BAKED_LOOK_PREFIX,
+        RECIPE_META_PREFIX,
+    )
+
+    run_id = proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-05-01T00:00:00Z",
+        output_basename="master", fits_path=None, tiff_path=None,
+        preview_path="/tmp/does-not-need-to-exist/preview.png",
+        n_frames_used=3, canvas_h=10, canvas_w=10,
+        coverage_min=1, coverage_max=3,
+        options_json=json.dumps({"method": "sigma", "sigma_kappa": 4.25}),
+        engine_version=version,
+    ))
+    recipe_json = json.dumps(
+        {"ops": [{"id": "tone.stretch", "enabled": True, "params": {"amount": 1.0}}]})
+    if recipe:
+        proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe_json)
+    if baked:
+        from webapp.routers.stack import _recipe_look
+        proj.set_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run_id}",
+                      json.dumps(_recipe_look(recipe_json)))
+    return run_id
+
+
+def _record_auto_edits(monkeypatch) -> list[tuple[str, int]]:
+    edited: list[tuple[str, int]] = []
+
+    def _fake(lib, safe, run_id, auto_crop=True):  # noqa: ANN001
+        edited.append((safe, run_id))
+        return 3
+
+    monkeypatch.setattr("webapp.pipeline._auto_edit_process_run", _fake)
+    return edited
+
+
+def test_picture_is_auto_finished_reads_the_newest_previewed_run(solved_library):
+    """The helper answers for the run the wall is actually showing: the newest one
+    with a preview, and only when *we* baked its look."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        a, b = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(a)
+        try:
+            _seed_finished_run(proj)
+        finally:
+            proj.close()
+        proj = lib.open_target(b)
+        try:
+            _seed_finished_run(proj, baked=False)   # hand-edited: not ours
+        finally:
+            proj.close()
+        assert pipeline._picture_is_auto_finished(lib, a) is True
+        assert pipeline._picture_is_auto_finished(lib, b) is False
+        # A pinned cover already outranks the newest run everywhere, so a restack
+        # regresses nothing and there is nothing to carry forward.
+        proj = lib.open_target(a)
+        try:
+            cover = next(iter(proj.iter_stack_runs())).id
+        finally:
+            proj.close()
+        lib.set_target_cover(a, cover)
+        assert pipeline._picture_is_auto_finished(lib, a) is False
+    finally:
+        lib.close()
+
+
+def test_picture_is_auto_finished_skips_runs_with_no_preview(solved_library):
+    """A run with no preview is not the picture anyone is looking at, so a later
+    previewless restack must not hide the finished picture underneath it."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            _seed_finished_run(proj)
+            _seed_run(proj, version="0.0.2", basename="master_v0.0.2")  # no preview
+        finally:
+            proj.close()
+        assert pipeline._picture_is_auto_finished(lib, safe) is True
+    finally:
+        lib.close()
+
+
+def test_reprocess_all_keeps_an_auto_finished_picture_finished(
+        solved_library, monkeypatch):
+    """Regression (observer issue #903): with the auto-edit switch **off**, a
+    target whose displayed picture is an auto-edit the app baked gets a fresh Auto
+    edit anyway — otherwise its new, flat linear master silently becomes the
+    picture on the Library wall, the life list and the sky map.
+
+    Before the fix the chain never ran with the switch off, so both targets ended
+    the batch showing a flat stack and ``kept_finished`` did not exist."""
+    _patch_run_stack(monkeypatch)
+    edited = _record_auto_edits(monkeypatch)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                _seed_finished_run(proj)
+            finally:
+                proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 2
+    assert summary["kept_finished"] == 2
+    # They *are* auto-edits, so the existing count stays honest about them.
+    assert summary["auto_edited"] == 2
+    assert len(edited) == 2
+
+
+def test_reprocess_all_leaves_a_hand_saved_edit_to_its_owner(
+        solved_library, monkeypatch):
+    """A saved recipe with no baked-look stamp is somebody's own work, and Auto's
+    look is no evidence of what they wanted — so the carry-forward stands down and
+    the dialog copy is what tells them their card will show the flat stack."""
+    _patch_run_stack(monkeypatch)
+    edited = _record_auto_edits(monkeypatch)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                _seed_finished_run(proj, baked=False)
+            finally:
+                proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 2
+    assert summary["kept_finished"] == 0
+    assert summary["auto_edited"] == 0
+    assert edited == []
+
+
+def test_reprocess_all_switch_on_does_not_double_count_as_kept(
+        solved_library, monkeypatch):
+    """With the switch on every result is finished regardless, so nothing is
+    attributable to the carry-forward — ``kept_finished`` stays 0 and the summary
+    line keeps reading as the plain "auto-edited N" the user asked for."""
+    _patch_run_stack(monkeypatch)
+    edited = _record_auto_edits(monkeypatch)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                _seed_finished_run(proj)
+            finally:
+                proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job, auto_edit=True)
+    finally:
+        lib.close()
+
+    assert summary["auto_edited"] == 2
+    assert summary["kept_finished"] == 0
+    assert len(edited) == 2
+
+
 def test_reprocess_all_cancels_between_targets(solved_library, monkeypatch):
     calls: list = []
 

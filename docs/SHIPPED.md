@@ -1,5 +1,108 @@
 # Shipped — the record
 
+## v0.448.0 — 2026-09-17 — "Reprocess everything" stops flattening every finished picture on the wall
+
+*(Builder, branch `claude/sweet-babbage-owmvv3` — PRIORITY 1-adjacent (the displayed picture) / 3 (trust),
+from the top entry of "Bugs (fix these first)", filed by the Scout 2026-09-16 off observer issue
+[#903](https://github.com/JimmyeJones/astrostack/issues/903). Upgrade-safe: no config, schema, on-disk or
+API-shape change; the request body's `auto_edit` still defaults `False`, so an old client or bookmark posts
+exactly what it always did.)*
+
+**The bug.** `reprocess_all` writes each restack as a *new* run, and the picture every wall surface shows is
+the newest one — `cover_stack_run_id` is NULL on a library nobody has pinned covers on, so
+`current_picture_path` falls through to `last_stack_preview`, which a restack re-stamps from its own preview.
+With the dialog's auto-edit switch **off** (its default), each fresh run had no recipe, so its preview was a
+flat linear autostretch — and that became the target's picture on the Library wall, the life list, the
+wishlist thumbnails and the all-sky "My map". Nothing was lost, and that is precisely why it was invisible:
+every edit stayed on its own run and remained reachable in History, so the dialog's "your existing edits are
+untouched" and "nothing is ever lost" were both literally true while the pictures changed anyway. Recorded
+twice in the owner's job history.
+
+**What shipped — the two halves the entry called (1) and a narrower (3).**
+
+- **`webapp.pipeline._picture_is_auto_finished`** (new) answers, per target and *before* the restack (after it
+  the fresh run is the newest and the question is unanswerable): is the picture this target currently displays
+  a finished auto-edit the new run is about to supersede? True only when no run is pinned as the cover (a
+  pinned cover already outranks the newest run everywhere, so nothing regresses) and the newest run *carrying a
+  preview* has the `editor_auto_baked_look` stamp — i.e. the app baked that look itself. `submit_reprocess_all`
+  then finishes the fresh run the same way, which is "re-do what this picture already had", not a new opinion
+  about it. Counted apart as **`kept_finished`** in the job summary, always present, and surfaced by
+  `reprocessSummary` as *"auto-edited 2 to keep finished pictures finished"* — so a batch nobody asked to
+  auto-edit says why it did.
+- **The dialog names the consequence** when the switch is off (`Settings.tsx`'s `editNote`, and the switch's
+  own description): the fresh results are flat linear stacks, the newest result is what the Library, life list
+  and sky map show, app-finished pictures don't go flat, and a hand-made edit keeps its own result but its card
+  shows the flat stack until the editor is opened.
+
+**Deliberately NOT done, with reasons.** Option (2) — defaulting the switch from `settings.auto_edit_on_autostack`
+— buys this owner nothing at all: that setting is **off** on his install (AGENTS.md §1 "Live settings"), so the
+switch would still initialise off and the bug would still fire. Option (3) as written — pinning the superseded
+edited run as `cover_stack_run_id` — was rejected as a *worse* fix than it looks: a cover pin is sticky, so the
+wall would keep showing the old run after the new one was finished, and "I reprocessed and the picture didn't
+change" is a second bug. Carrying the finish forward onto the new run gets the owner the *current engine's*
+pixels **and** a finished picture, introduces no new state, and never touches a saved recipe.
+
+**One named residual.** A target whose displayed picture came from a recipe **somebody saved by hand** (no
+baked-look stamp) still shows its flat new stack until the editor is opened. That is a stand-down, not an
+oversight: Auto's look is no evidence of what a hand-editing user wanted, and `_auto_edit_process_run` draws
+exactly the same line internally. The dialog copy is what covers it. The standing general answer is the Scout's
+**"finished / not stretched yet" wall chip** idea (still open under "Features that serve real workflows"), which
+makes an unfinished picture visible wherever the picture is shown, whatever produced it.
+
+**Tests.** `tests/webapp/test_reprocess_all.py` +5: the helper's three arms (ours / hand-saved / pinned cover),
+a previewless later run not hiding the finished one underneath it, the end-to-end carry-forward with the switch
+off, the hand-saved stand-down, and that the switch being on attributes nothing to the carry-forward. The
+carry-forward test was checked against a reverted fix and fails `assert 0 == 2` without it. Frontend: three
+cases in `Jobs.test.tsx` (including an older backend that sends no `kept_finished`) and two in
+`Settings.test.tsx` (the warning appears with the switch off and is gone with it on).
+
+<details><summary>The Scout's original entry, as filed</summary>
+
+  - **🟠 BUG (trust / friendliness — PRIORITY 1-adjacent (the displayed picture) / 3, Scout 2026-09-16 — mechanism
+    traced end-to-end in code from observer issue
+    [#903](https://github.com/JimmyeJones/astrostack/issues/903)) — `reprocess_all` with the auto-edit switch OFF
+    silently REPLACES each target's *displayed* picture with a flat linear stack, because the displayed picture is
+    the NEWEST run and a switch-off restack writes an unedited linear autostretch.** *(Pillar: trust — PRIORITY
+    1-adjacent; size M (safe slice) to L (full). Severity: **broken-UX / trust, bordering wrong-result** — the
+    finished picture the owner sees regresses across every wall surface; NOT data loss, the edits survive on the
+    old runs and are reachable in History. Confidence: **mechanism TRACED end-to-end in code**; the owner's
+    44-of-77 pixel measurements (median background 47.7 → 15.7, all 44 pinned in the 15.0–16.3 autostretch band)
+    are the observer's, gated on his library.)*
+    **Root cause, confirmed by reading the two paths:** `current_picture_path` (`webapp/routers/targets.py:1550`)
+    resolves cover → `last_stack_preview` → newest run with a preview; `cover_stack_run_id` is NULL on all 89
+    targets, so the **newest run always wins**, and a restack re-stamps `last_stack_preview` to its own preview.
+    `submit_reprocess_all` (`webapp/pipeline.py:1349`, body ~`:1408`) takes its own `auto_edit: bool = False` and
+    gates on it directly — it does **not** read `settings.auto_edit_on_autostack` or `_wants_auto_edit_for`, unlike
+    the ingest auto-stack path (`webapp/pipeline.py:580`). `ReprocessAllBody.auto_edit` defaults `False`
+    (`webapp/routers/system.py:203`); the Settings switch is `useState(false)` (`frontend/src/routes/Settings.tsx:350`).
+    So with the switch off, each restacked run has no recipe → a plain linear preview → and, being newest, becomes
+    the picture on the library wall (`routers/targets.py:87`), the life list (`routers/lifelist.py:406`), the
+    wishlist thumbnails (`routers/wishlist.py:92`) and the all-sky "My map" (`seestack/post/skymap.py:301`) — all of
+    which read `entry.last_stack_preview` directly. **The confirm/switch copy is literally true and points away from
+    this:** "your existing edits are untouched" (`Settings.tsx:399`), "non-destructive … nothing is ever lost"
+    (`Settings.tsx:408`,`:426`), switch description `Settings.tsx:454`. The edits *are* not lost — the *displayed
+    picture* changes anyway. **Not self-correcting:** no cover pinned anywhere (NULL 89/89), recipes are per-run and
+    never carried forward, and this is the **second** occurrence in the recorded job history (`ec2dd5b63436`,
+    2026-09-04→09, `stacked 75 · auto_edited 0`). **Repro (traced):** on a library whose targets display baked
+    auto-edits, run `reprocess_all` with `auto_edit` off → every restacked target's newest run is a linear master →
+    `current_picture_path` returns it → the wall shows the flat stack until the target is re-edited or auto-stacked.
+    **Fix options (observer's, with Scout's upgrade-safety notes; a Builder should pick — do NOT blind-take L):**
+    (1) **Dialog copy names the consequence** when the switch is off — *"the newest result becomes each target's
+    displayed picture, so targets currently showing a finished auto-edit will show a flat linear stack until you
+    edit or re-run them."* Cheapest, purely additive, turns a silent change into a choice. Safe drive-by size S.
+    (2) **Default the reprocess auto-edit from `settings.auto_edit_on_autostack`** (honouring `_wants_auto_edit_for`).
+    ⚠ **§9 care:** flipping the *backend* default changes behaviour on installs where that setting is on — do it as
+    the *frontend switch's initial checked state* reading the setting (still a visible choice), not a silent backend
+    default flip, and keep `auto_edit=False` as the API default so an old client/bookmark is unchanged.
+    (3) **Pin the cover on supersede** — when a restack supersedes a run that carried a baked auto-edit
+    (`editor_auto_baked_look` stamp), stamp the superseded (edited) run as `cover_stack_run_id` so the finished
+    picture survives until the new one is finished. Robust structural fix; additive (uses existing nullable
+    `cover_stack_run_id`), but touches cover semantics — pin **only** when superseding an edited run and only where
+    the user hasn't set a cover, so a manual cover choice is never overridden; needs an upgrade/migration test.
+    (1)+(3) together fully close it; (1) alone is the safe immediate win.
+
+</details>
+
 ## v0.447.1 — 2026-09-15 — two rows both called "Tonight", in the small hours the page is actually read in
 
 *(Builder, branch `claude/sweet-babbage-p5k2l2` — PRIORITY 3 (friendliness), found by a `--mosaic --editor`

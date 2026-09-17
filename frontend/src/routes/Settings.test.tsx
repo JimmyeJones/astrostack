@@ -413,6 +413,33 @@ describe("Maintenance — reprocess everything", () => {
     await waitFor(() => expect(call).toHaveBeenCalledWith(true, false, true));
   });
 
+  it("names what leaving the auto-edit switch off does to the displayed picture", async () => {
+    // Issue #903: the newest result is the picture the Library, life list and sky
+    // map show, so a batch with this switch off changed every finished picture on
+    // the wall — while the dialog's "nothing is lost" (true: the edits stay on
+    // their own results) read as "nothing changes". The choice has to name it.
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderMaintenance();
+    fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
+
+    const text = String(confirm.mock.calls[0][0]);
+    expect(text).toMatch(/flat linear stack/);
+    expect(text).toMatch(/newest result is what your Library/);
+    // …and that the app carries an already-finished picture forward for you.
+    expect(text).toMatch(/don't go flat/);
+  });
+
+  it("drops that warning once the auto-edit switch is on", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderMaintenance();
+    fireEvent.click(screen.getByLabelText(/auto-edit each result into a finished picture/));
+    fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
+
+    const text = String(confirm.mock.calls[0][0]);
+    expect(text).toMatch(/opens as a finished picture/);
+    expect(text).not.toMatch(/don't go flat/);
+  });
+
   it("surfaces the already-running case", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.spyOn(client.api, "reprocessAll")

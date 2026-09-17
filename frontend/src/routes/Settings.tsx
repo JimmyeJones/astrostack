@@ -398,7 +398,17 @@ export function Maintenance() {
         + "opens as a finished picture, not a flat linear stack. This only sets "
         + "the new results' edits — your existing edits are untouched, and every "
         + "auto-edit is reversible in the editor.\n\n"
-      : "";
+      // With the switch off, name what the user is actually choosing. The newest
+      // result is the picture the Library, life list, wishlist and sky map all
+      // show, so "nothing is lost" — true, the old edits stay on their own
+      // results — used to read as "nothing changes", which it wasn't.
+      : "Each fresh result is a flat linear stack rather than a finished "
+        + "picture, and the newest result is what your Library, life list and "
+        + "sky map show.\n\nTargets whose picture the app finished for you get a "
+        + "fresh Auto edit, so those don't go flat. A target you edited by hand "
+        + "keeps that edit on its old result, but its card will show the flat "
+        + "stack until you open it in the editor — switch on \"Also auto-edit "
+        + "each result\" to finish every one of them.\n\n";
     if (
       window.confirm(
         scope
@@ -451,7 +461,7 @@ export function Maintenance() {
           checked={autoEdit}
           onChange={(e) => setAutoEdit(e.currentTarget.checked)}
           label="Also auto-edit each result into a finished picture"
-          description="Applies the one-click Auto look to every restacked result so it opens as a finished picture instead of a flat linear stack. Only sets the new results' edits; your existing edits are untouched and every auto-edit is reversible."
+          description="Applies the one-click Auto look to every restacked result so it opens as a finished picture instead of a flat linear stack. Only sets the new results' edits; your existing edits are untouched and every auto-edit is reversible. Left off, a target whose picture the app finished for you still gets a fresh Auto edit — one you made by hand shows its flat new stack until you open the editor."
         />
         <Group>
           <Button
