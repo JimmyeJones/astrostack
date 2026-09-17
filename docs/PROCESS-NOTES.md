@@ -18,6 +18,66 @@ is a queue.
 
 ---
 
+## 2026-09-17 — the question that found this run's work: not "what state has the tooling never been in?" but "what **magnitude**?"
+
+*(Builder, branch `claude/sweet-babbage-ro1k5s`, the run that shipped v0.455.2 and v0.455.3. A record, not a
+task.)*
+
+**Where the run started, and why it did not start with the backlog.** Baseline green (6,233 passed). Then a
+read of "Bugs (fix these first)" top-down: every open entry is gated on the owner's own data, routed to owner
+sign-off, or stood down *with the measurement already recorded* — #903's remainder closed by the run that
+measured its premise, #878's live half already in the code, #880's (a) not user-facing and (b) deliberate,
+`astap_timeout_s`'s behavioural half declined with the 3× → 1.5× arithmetic written down. "Features that serve
+real workflows" is the same: five open items, of which two are explicit declines and two are marked
+mostly-already-built. That is not a queue to drain; AGENTS.md §2 says so in as many words.
+
+**The question that worked.** The tooling's own history keeps answering one: *what state has this script never
+been in?* — the missing observing site (v0.436.1), the empty `incoming/` (v0.442.0), the click-only Compare
+modes (v0.440.2), the 1:1 editor preview (v0.446.0), the absent master dark (v0.455.1). Five for five. The
+previous run's note ends by recommending exactly that question.
+
+Asked again, the honest answer was that the named *states* are getting thin — and that the axis had been
+mis-stated. The hole this run found is not a state at all:
+
+> Every sample this tooling can load is **six subs per pointing**. The owner's library is **5,477** subs on one
+> target and **35,894** on another. The tooling has never held his **magnitude**.
+
+**And the probe was structurally unable to notice.** It measures **page height**. The frames table lives inside
+`<Table.ScrollContainer mah="65vh">`, whose height is by construction independent of how many rows it holds. So
+a table rendering one DOM row per sub measured *exactly the same* as one rendering six — and it was rendering
+one per sub: measured in Chromium on 1,200 real subs at **28,266 DOM nodes and 4.5 s to first paint**, which
+extrapolates to ~129,000 nodes on the owner's 5,477-sub target and ~845,000 on his 35,894-sub one, on the page
+he opens every session, from a phone. Shipped as **v0.455.2**; the flag that can see it as **v0.455.3**.
+
+**The transferable part is which measure you pick.** "CLEAN" has already had to be narrowed twice in this file —
+from "nothing errored" to "look at the pixels" (v0.406.0) to "read the sentences as one paragraph" (v0.406.2).
+This is the third narrowing and it is about *dimension* rather than about *content*: **a measure that a
+container fixes is not a measure of what the container holds.** The height of a `65vh` box says nothing about
+its rows; the count does. So `dogfood_deep.mjs` prints node counts, and the `--deep` flag exists to make the
+count large enough to mean something.
+
+**Two smaller method notes worth keeping.**
+
+- **The fail-before revert is worth doing twice — once in jsdom, once in the browser.** Reverting the window in
+  a scratch copy of the route made three of the four new unit tests fail (the fourth is the parity test, whose
+  job is to pass both ways). Reverting it again behind a real `vite build` made the *finder* fire its own
+  detector (`ONE ROW PER SUB — the table is unwindowed at 1200 subs`). The second revert is what turns a new
+  drive from a hope into a finder that has been shown to detect the defect it exists for — and it cost one
+  rebuild.
+- **jsdom cannot cover an `IntersectionObserver`, so it cannot cover an auto-grow.** The window grows as the
+  table is scrolled, and the unit suite can only ever exercise the explicit "Show all N" button. The scroll path
+  was verified in exactly one place — the `--deep` pass, which reported `after scrolling to the foot: 601 rows
+  (grew — the observer fired)`. Anything gated on an observer, a resize or a layout belongs on that list beside
+  the click-only Compare modes.
+
+**One bug the new drive found in itself on its first run**, recorded because the shape recurs: it read the sub
+count with an in-page `fetch` *before* the first navigation, when the page's origin is `null`. CORS refused it,
+the count read **0**, the one-row-per-sub check was silently disarmed, and the only error logged was about the
+drive rather than about the app. A finder whose own failure mode is "reports nothing and looks fine" is the
+empty state wearing a better hat, one level up. It now asks through playwright's request context.
+
+---
+
 ## 2026-09-17 — a `--mosaic --editor` sweep (CLEAN), and where the *next* blind spot was found instead
 
 *(Builder, branch `claude/sweet-babbage-90ekf4`, the run that shipped v0.455.0/v0.455.1. A record, not a
