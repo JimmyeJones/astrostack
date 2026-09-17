@@ -43,6 +43,17 @@ seeded (v0.390.0 opens on Auto, whose recipe carries `detail.sharpen`), and the 
 `stars.reduce` was enabled. No SCNR advisory — correctly, because v0.453.3 fixed that op rather than
 captioning it.
 
+**One harness note, so the next run does not read it as a red `main`** *(same run)*. The pre-merge full
+suite came back `1 failed, 6204 passed` on
+`tests/webapp/test_skipped_folders.py::test_a_scan_remembers_the_folder_it_could_not_account_for`, and the
+failure was **`job … did not finish in 60s`** — a wall-clock timeout in that file's own `_wait_job`, not an
+assertion. The captured log shows the scan ran and emitted its warning; it simply had not finished. That file
+takes **82 s on its own**, so a 60 s per-job budget under `-n 4` alongside the rest of the suite is tight
+rather than generous. Re-run alone on the identical tree: **17 passed**. The same suite was green on this
+tree before the run's changes, and a scan job never executes an editor op, so it is unrelated to
+`tone.scnr` by construction as well as by measurement. **If it recurs, the fix is the budget in
+`_wait_job`, not the scanner** — but it has been seen once, so it is recorded rather than filed.
+
 **So the run's finding did not come from this pass, and that is the note worth keeping.** Both of this run's
 tasks came from *reading* `seestack/edit/ops/*.py` adversarially for the A2 shape — a pixel-unit measure
 handed to a filter without `proxy_scale` — and then measuring what the read suggested. The dogfood pass is
