@@ -76,7 +76,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **`scripts/agent-dogfood.sh --calibration`** — the last named structural blind spot in the dogfood
+  tooling: no pass has ever had a master dark or flat, so every calibration surface (the masters list,
+  `/api/calibration/incoming`'s one-click offer, `/api/calibration/defects`, the per-target
+  `calibration-suggestions`, `auto_bind_calibration` and the "darks were applied" branch of the health
+  vocabulary) has only ever been photographed in its empty state. Same shape as the missing observing site
+  (v0.436.1), the empty `incoming/` (v0.442.0) and the click-only Compare modes (v0.440.2), each of which
+  found a real bug on its first run. Branch `claude/sweet-babbage-90ekf4` (Builder 2026-09-17).
 
 ---
 
