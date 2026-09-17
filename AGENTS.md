@@ -901,6 +901,31 @@ the repo.
 > rather than more. Run it on any run that touches ingest, the watcher, or the
 > Dashboard's notice board.
 >
+> **And no pass has ever held a master dark — `--calibration`** *(added 2026-09-17
+> with v0.455.1)*. The scratch install's calibration registry is **empty on every
+> run ever recorded**, so the Calibration page's masters list,
+> `/api/calibration/incoming`'s one-click "you already have darks, shall I build
+> one?" offer, `/api/calibration/defects` and its repair offer, the per-target
+> `calibration-suggestions`, `auto_bind_calibration` and the **"darks were
+> applied"** half of the stack-health vocabulary have only ever been photographed
+> in their empty state — on an app whose health card tells the owner, on *every*
+> stack, that adding master darks is "the single biggest cleanup for a noisy
+> image". The app has been pushing him toward a state its own tooling had never
+> once occupied: the same hole as the missing observing site, the empty
+> `incoming/` and the click-only Compare modes, and like all three it paid
+> immediately — **v0.455.0 was found while building it**, before the flag itself
+> was finished (a folder of darks under `incoming/` was being ingested as a target
+> of lights, in the one place the Calibration page's own build form asks the owner
+> to put them). It seeds generated darks and flats into the scratch `incoming/`
+> and then makes the app **discover and build them itself** through the endpoints
+> a beginner would use, turns on `auto_bind_calibration`, and stacks after that so
+> the calibrated branch is the one on screen. **Read its one caveat before
+> believing a calibrated picture:** the samples' *lights* carry no hot pixels and
+> no vignette (their pixels are pinned bit-identical by every earlier baseline),
+> so the masters reach the *surfaces* without improving the *picture*. Run it on
+> any run that touches calibration, the scanner's folder classification, or the
+> health card's vocabulary.
+>
 > **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
 > installed): the same probe against an app with **no data at all**. Every
 > measurement this script took before 2026-09-07 was of the *sample-loaded* app, so
