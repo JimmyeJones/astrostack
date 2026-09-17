@@ -257,11 +257,38 @@ export function closingWeekNote(
  * otherwise would send a beginner indoors on a perfectly good night.
  */
 export function weekMoonNote(night: WeekNight): string | null {
+  const parts = weekMoonParts(night);
+  return parts && `${parts.badge}, ${parts.detail}`;
+}
+
+/**
+ * The same caution, split where the week table can actually show both halves.
+ *
+ * It used to render as one `Badge`, and a Mantine badge truncates: in the "Point
+ * at" column of a four-column table on a phone (measured: a 79 px box against a
+ * 166 px label) it came out as **"Moon 92%, up…"**. The half that went is the
+ * half that matters — *all night* and *part of the night* are opposite advice,
+ * and "up…" is equally consistent with either. There is no recovering it, since
+ * a phone has no hover and an ellipsis does not expand, on the page an
+ * astrophotographer checks on a phone.
+ *
+ * So the number keeps the badge (it is the caution, and yellow is the signal)
+ * and the qualifier goes on its own dimmed line beneath it — which is the idiom
+ * that column's neighbours already use, "71 min" over "peaks 39°" and "Tonight"
+ * over "2.2 h left". `weekMoonNote` is composed from this, so the one-line form
+ * that other callers and the hover title use cannot drift from what is drawn.
+ */
+export function weekMoonParts(
+  night: WeekNight,
+): { badge: string; detail: string } | null {
   const up = night.best?.moon_up_fraction;
   if (up === null || up === undefined || up <= 0.1) return null;
   if (night.moon_illumination < 0.4) return null;
   const pct = Math.round(night.moon_illumination * 100);
-  return up >= 0.9 ? `Moon ${pct}%, up all night` : `Moon ${pct}%, up part of the night`;
+  return {
+    badge: `Moon ${pct}%`,
+    detail: up >= 0.9 ? "up all night" : "up part of the night",
+  };
 }
 
 /**

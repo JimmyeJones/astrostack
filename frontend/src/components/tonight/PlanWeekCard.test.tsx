@@ -170,8 +170,46 @@ describe("PlanWeekCard", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("plan-week")).toBeInTheDocument());
-    expect(screen.getByText("Moon 92%, up all night")).toBeInTheDocument();
+    // Rewritten deliberately with the render, not weakened: it used to assert the
+    // whole caution as ONE text node, which is exactly the shape that truncated.
+    // Both halves must now be on the page as their own nodes — the phone bug was
+    // that the second one wasn't reachable at all.
+    expect(screen.getByText("Moon 92%")).toBeInTheDocument();
+    expect(screen.getByText("up all night")).toBeInTheDocument();
+    // …and the one-line form is still there for a desktop hover.
+    expect(screen.getByTestId("plan-week-moon"))
+      .toHaveAttribute("title", "Moon 92%, up all night");
     expect(screen.queryByText(/Moon 99%/)).not.toBeInTheDocument();
+  });
+
+  it("never hides the half of the Moon caution that carries the advice", async () => {
+    // Regression: in the "Point at" column of this four-column table on a phone
+    // (a 79px box against a 166px label) the single badge rendered as
+    // "Moon 92%, up…". "up all night" and "up part of the night" are opposite
+    // advice and "up…" is equally consistent with either, with no hover on a
+    // phone and no way to expand an ellipsis. Both nights below are bright and
+    // up, and each must show its own qualifier in full.
+    vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+      nights: [
+        night("2026-09-03", {
+          moon_illumination: 0.92,
+          best: { ...night("2026-09-03").best!, moon_up_fraction: 0.5 },
+        }),
+        night("2026-09-04", {
+          moon_illumination: 0.7,
+          best: { ...night("2026-09-04").best!, moon_up_fraction: 1.0 },
+        }),
+      ],
+    }));
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-week")).toBeInTheDocument());
+    expect(screen.getByText("up part of the night")).toBeInTheDocument();
+    expect(screen.getByText("up all night")).toBeInTheDocument();
+    // The qualifier is its own node rather than part of the badge's label —
+    // which is what lets it wrap instead of being clipped.
+    expect(screen.getByText("Moon 92%").textContent).toBe("Moon 92%");
   });
 
   it("is honest when a big library was trimmed by the scan cap", async () => {
