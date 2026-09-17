@@ -1,5 +1,63 @@
 # Shipped — the record
 
+## v0.453.0 — 2026-09-17 — the same picture, the same caption, whichever page you opened it from
+
+*(Builder, branch `claude/sweet-babbage-f4u6pf`. The "Gallery lightbox" lead filed 2026-09-17 under "Features
+that serve real workflows", built as its own shape **(a)**. Additive throughout — one shared helper, three
+additive response fields on one endpoint, no config, schema, on-disk, default or existing-response-shape
+change.)*
+
+**What was wrong.** `postCaption` — the ready-to-post sentence a beginner can paste under their photo — has
+been what the Target hero and every History card hand the OS share sheet since v0.385.0, and since v0.451.0 it
+tells the catalogue's own sentence about the object too. The **Gallery's** full-screen viewer built its share
+text from `sharePictureText` instead: *"M 42 — captured 15 Nov 2024"*, a name and a date. So the identical run,
+the identical bytes, went out with its story or without it depending only on which page it had been opened
+from — and the Gallery is the page whose whole job is looking at pictures.
+
+**The gate the lead filed it on was the scale clause, and it was half the size the lead thought.** That clause
+("The whole frame is about 5.4 full Moons wide.") is a claim about the **stored preview**, which on a "Process
+target" run is a border-trimmed crop of its canvas — so it has to come from `storedPreviewScaleBar`, which
+needs the run's `preview_crop` / `preview_north_up_deg` / `preview_geometry_unknown`. The lead costed two
+shapes and warned, correctly, not to pass the plain canvas `scale_bar` through (on a cropped preview it
+overstates the field, in the one sentence that gets pasted publicly). Two things it had not checked:
+
+- **The annotations are already fetched.** `Gallery.tsx` has queried `…/annotations` on every lightbox open
+  since the North-up view toggle shipped — it is how it decides whether turning the picture would move it. The
+  bar itself was therefore in hand all along; the gate was only ever the run's *geometry*.
+- **The geometry is three lines the run listing already computes**, and the honest way to serve them twice is
+  not to write them twice. New `webapp/preview_orient.preview_geometry_out(run)` is now the single answer to
+  "what is this run's stored preview, relative to its canvas?", and **both** `GET …/stack-runs` (which the
+  Target page and History draw from) and `GET …/stack-runs/<id>/info` (the only per-run endpoint a page that
+  lists runs across *every* target can ask) return it. A test asserts the two agree on one run in all three
+  states — never processed, auto-edit-trimmed, and geometry that can't be reconciled — because two independent
+  copies of "is this preview a crop?" is exactly how a caption ends up describing a different picture from the
+  one on screen.
+
+**What it costs.** One extra request per *opened* picture, and only on a run with a FITS behind it (the info
+endpoint is a header read and 404s without one). Drawing the grid still costs nothing, however many cards it
+has, and re-opening the same picture is free (`staleTime: Infinity`, the key History's own copy of the tint
+already uses — so the removed-tint caption now rides on the same fetch rather than making a second one). The
+identity comes off `…/identify` on the cache key the Target page and the editor share, so opening a picture
+here *warms* the answer there.
+
+**Every clause degrades to silence, as `postCaption` intends.** No identity → the target's display name, never
+the URL slug. No annotations, no info, an older backend, or `preview_geometry_unknown` → no scale sentence
+rather than a wrong one. A preview-only run asks for neither and simply gets a shorter caption. The share
+sheet's *title* and the shared file's *name* are unchanged: they are a short label and a slug, not a caption.
+
+**Tests (+5; the four frontend ones red under a scratch revert, the Python one red under its own).**
+`tests/webapp/test_preview_crop_geometry.py` gains the listing-vs-info agreement across the three states
+(including that a recorded `0.0` North-up angle — the auto-edit's positive "these bytes are on the canvas
+grid" — is passed through verbatim by both, not reported as the absence a *recovered* zero would be).
+`Gallery.test.tsx` gains four: the full sentence on the wire through a stubbed `navigator.share`; the scale
+clause taken from `preview_scale_bar` on a cropped run and **not** from the canvas bar (3.8 Moons, not 5.4 —
+the lead's named trap, pinned); silence on unreconcilable geometry; and an unidentified preview-only target
+captioned under the name the card shows, with no info request made. Two existing assertions in the
+"what stacking removed" block were **deliberately rewritten, not weakened**: they asserted that opening a
+picture fetched nothing, which is a claim this change knowingly retires — they now pin what the tint itself
+still costs (nothing beyond the one request the picture already made) and that nothing is drawn over the
+picture until it is asked for.
+
 ## v0.452.2 — 2026-09-17 — the dogfood pass can reach the note it just changed, and the mixed note stops saying one thing twice
 
 *(Builder, branch `claude/sweet-babbage-10p2wj`, found by actually running v0.452.1 in a browser. Tooling +
