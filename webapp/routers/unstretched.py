@@ -72,6 +72,15 @@ class UnstretchedItem(BaseModel):
     #: The run whose linear preview is the picture being shown, so a caller can
     #: link straight to it in the editor.
     run_id: int
+    #: True when that run carries an edit its owner **saved and never exported**,
+    #: so this card is unstretched *and* their work is invisible on it. The two
+    #: states want opposite advice — the chip's standing hint says "press Auto",
+    #: which is the one thing somebody who already has a saved edit should not be
+    #: told, because Auto replaces it. Same `routers.stack._unexported_edit`
+    #: decision History, the Gallery and the Target hero use, so a fourth surface
+    #: does not invent a fourth opinion. Additive, `False` default — which is what
+    #: every ordinary unstretched card is, and what an older frontend reads.
+    unexported_edit: bool = False
 
 
 class UnstretchedResponse(BaseModel):
@@ -92,6 +101,13 @@ def scan_unstretched(lib) -> list[UnstretchedItem]:  # noqa: ANN001
     """
     from seestack.io.project import Project
 
+    from webapp.routers.editor import (
+        AUTO_EDIT_BAKED_LOOK_PREFIX,
+        EXPORTED_RECIPE_META_PREFIX,
+        RECIPE_META_PREFIX,
+    )
+    from webapp.routers.stack import _unexported_edit
+
     found: list[UnstretchedItem] = []
     for t in lib.list_targets():
         proj = None
@@ -104,13 +120,24 @@ def scan_unstretched(lib) -> list[UnstretchedItem]:  # noqa: ANN001
                 continue  # no picture yet — nothing to stretch
             if run_is_a_finished_picture(proj, shown):
                 continue
+            # Only now, on the cards that are getting a chip anyway: which
+            # *kind* of unstretched is this? Three keyed meta reads on the one
+            # run being shown — not per run, and never on a library whose
+            # pictures are all finished.
+            unexported = _unexported_edit(
+                shown.options_json,
+                proj.get_meta(f"{RECIPE_META_PREFIX}{shown.id}"),
+                proj.get_meta(f"{EXPORTED_RECIPE_META_PREFIX}{shown.id}"),
+                proj.get_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{shown.id}"),
+            )
         except Exception:  # noqa: BLE001 — one broken project must not 500 a wall
             continue
         finally:
             if proj is not None:
                 proj.close()
         found.append(UnstretchedItem(
-            safe=t.safe_name, target_name=t.name, run_id=shown.id))
+            safe=t.safe_name, target_name=t.name, run_id=shown.id,
+            unexported_edit=unexported))
     # By name, so the order is stable between polls and between the wall's own
     # sort orders — this list is looked up by `safe`, never read top-down.
     found.sort(key=lambda it: it.target_name)

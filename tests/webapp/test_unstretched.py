@@ -452,6 +452,62 @@ def test_saving_an_edit_does_not_make_an_unstretched_card_look_finished(
     assert by_target[baked] is True
 
 
+def test_an_unstretched_card_says_which_kind_of_unstretched_it_is(
+        solved_client, solved_library):
+    """Both cards get the chip, and only one of them should be told to press
+    Auto.
+
+    A card unstretched because nobody has edited it wants "open it and press
+    Auto"; a card unstretched because its owner's edit was never exported wants
+    the opposite, since Auto replaces a saved recipe. The wall could not tell
+    them apart because the item carried no such fact — the Gallery's own card
+    has carried ``unexported_edit`` all along."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        untouched, saved_only = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(untouched)
+        try:
+            _seed(proj)
+        finally:
+            proj.close()
+        proj = lib.open_target(saved_only)
+        try:
+            _save_only(proj, _seed(proj))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    items = {i["safe"]: i for i in
+             solved_client.get("/api/unstretched-pictures").json()["items"]}
+    assert set(items) == {untouched, saved_only}
+    assert items[untouched]["unexported_edit"] is False
+    assert items[saved_only]["unexported_edit"] is True
+
+
+def test_the_wall_and_the_gallery_agree_about_an_unexported_edit(
+        solved_client, solved_library):
+    """One predicate, two surfaces: the Gallery has reported this state per run
+    since before the wall did, and the two must not name different pictures."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            run_id = _seed(proj)
+            _save_only(proj, run_id)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    wall = solved_client.get("/api/unstretched-pictures").json()["items"]
+    gallery = solved_client.get("/api/gallery").json()["items"]
+    assert next(i for i in wall if i["safe"] == safe)["unexported_edit"] is (
+        next(i for i in gallery if i["run_id"] == run_id)["unexported_edit"])
+    assert next(i for i in wall if i["safe"] == safe)["unexported_edit"] is True
+
+
 def test_the_reprocess_warning_stops_counting_a_saved_only_edit_as_finished(
         solved_client, solved_library):
     """The third surface off the same definition: the "Reprocess everything"

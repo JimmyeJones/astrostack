@@ -1,5 +1,38 @@
 # Shipped — the record
 
+## v0.449.1 — 2026-09-17 — the wall stops telling someone with a saved edit to press Auto
+
+*(Builder, branch `claude/sweet-babbage-97be46`, filed and built in the same run as v0.449.0 because that fix
+is what makes this state visible. PRIORITY 3 (friendliness). Upgrade-safe: one additive response field with a
+`False` default and one additive optional TS field; no config, schema, on-disk, endpoint or default change, and
+an older frontend reading the item sees exactly the wall it saw before.)*
+
+**Why now.** v0.449.0 corrected "finished" to mean *the preview was baked*, which puts the "Not stretched yet"
+chip back on every card whose owner saved an edit and never exported it — on the owner's library, the state
+the observer measured at **42 saved recipes across 35 targets**. The chip is right about those cards. Its
+**hint is not**: it says *"Open it and press Auto to stretch it into a finished picture"*, and Auto replaces
+the recipe in the editor, so following that advice discards the work the card is complaining about. It is also
+wrong about the cause — they did stretch this picture; what is missing is the export that would put it in the
+bytes.
+
+**What ships.** `UnstretchedItem.unexported_edit`, decided by `routers.stack._unexported_edit` — the same
+predicate History, the Gallery card and the Target hero's "Finish my edit" offer already read, so a fourth
+surface is not a fourth opinion — and `unstretchedHint()` picks the wording from it. The new sentence is
+`UnexportedEditBadge`'s own title plus the one thing that badge has no reason to say: *don't* press Auto.
+
+**One badge, not two.** The card keeps the single chip it had; only its hint changes. Two badges saying
+overlapping things about one picture is the clutter the owner's standing complaint (AGENTS.md §1) is about,
+and "Not stretched yet" is true of both states.
+
+**Costs nothing on a healthy library.** The three keyed meta reads happen only for a target that has already
+failed the finished test, on the one run being displayed — so a library whose pictures are all finished pays
+for none of them.
+
+**Tests +4:** two server-side (each kind of unstretched card reports the right flag; the wall and the Gallery
+give the identical answer about one run, which is the drift this module exists to stop) and two in
+`Library.test.tsx` (the hint switches and no longer says "press Auto to stretch"; an older backend omitting
+the field keeps the ordinary hint).
+
 ## v0.449.0 — 2026-09-17 — saving an edit stopped making an unstretched card look finished
 
 *(Builder, branch `claude/sweet-babbage-97be46` — PRIORITY 3 (friendliness) / trust, on the shipped
