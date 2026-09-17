@@ -9,6 +9,7 @@ import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
 import { formatCaptureNights } from "../format";
 import { sharePictureText } from "../share";
+import { FRAME_WINDOW_STEP } from "../frameWindow";
 
 function mkFrame(id: number, overrides: Partial<Frame> = {}): Frame {
   return {
@@ -2822,5 +2823,77 @@ describe("TargetView left-out breakdown has a home a phone can reach", () => {
     const insights = await screen.findByTestId("target-insights");
     await waitFor(() => expect(client.api.rejectSummary).toHaveBeenCalled());
     expect(insights).not.toHaveTextContent("Why some frames were left out");
+  });
+});
+
+// The frames table renders one row per sub, and a row costs ~22 DOM nodes.
+// Measured with this component: 20 subs → 673 nodes, 200 → 4,633, 2,000 →
+// 44,233 — so the owner's own 5,477-sub target is ~121,000 nodes and his
+// 35,894-sub one ~790,000, in a table inside a 65vh scroll container that can
+// show about twenty rows. The page *height* never showed it (the container caps
+// that), which is why every dogfood baseline passed. `../frameWindow`.
+describe("TargetView frames table at the owner's scale", () => {
+  const manyFrames = (n: number) =>
+    Array.from({ length: n }, (_, i) => mkFrame(i + 1));
+
+  function mockDeepTarget(n: number) {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ n_frames: n, n_frames_accepted: n }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(manyFrames(n));
+  }
+
+  const bodyRows = () =>
+    screen.getByTestId("frames-table-body").querySelectorAll("tr").length;
+
+  it("renders one window of rows, not one per sub, and says so", async () => {
+    mockDeepTarget(FRAME_WINDOW_STEP + 120);
+    renderTarget();
+
+    await screen.findByTestId("frames-table-body");
+    // The window, plus its foot.
+    await waitFor(() => expect(bodyRows()).toBe(FRAME_WINDOW_STEP + 1));
+    expect(screen.getByTestId("frame-window-foot")).toHaveTextContent(
+      `Showing the first ${FRAME_WINDOW_STEP} of ${(FRAME_WINDOW_STEP + 120).toLocaleString()} subs.`);
+  });
+
+  it("keeps every sub reachable in one click — nothing is removed", async () => {
+    const n = FRAME_WINDOW_STEP + 120;
+    mockDeepTarget(n);
+    renderTarget();
+
+    await screen.findByTestId("frame-window-foot");
+    screen.getByRole("button", { name: `Show all ${n.toLocaleString()}` }).click();
+
+    // Every row, and the foot withdraws because there is nothing left to say.
+    await waitFor(() => expect(bodyRows()).toBe(n));
+    expect(screen.queryByTestId("frame-window-foot")).toBeNull();
+  });
+
+  it("leaves a target smaller than one window exactly as it was", async () => {
+    mockDeepTarget(8);
+    renderTarget();
+
+    await screen.findByTestId("frames-table-body");
+    await waitFor(() => expect(bodyRows()).toBe(8));
+    expect(screen.queryByTestId("frame-window-foot")).toBeNull();
+  });
+
+  it("grows the window when keyboard grading walks off the end of it", async () => {
+    // Deeper than two windows, so the growth is visible as a *window* rather
+    // than as "the whole list happened to fit".
+    mockDeepTarget(3 * FRAME_WINDOW_STEP);
+    renderTarget();
+
+    await screen.findByTestId("frames-table-body");
+    await waitFor(() => expect(bodyRows()).toBe(FRAME_WINDOW_STEP + 1));
+
+    // Select the last *rendered* sub, then press j once more. Without the
+    // window growing, the selection would be a frame with no row at all.
+    const rows = screen.getByTestId("frames-table-body").querySelectorAll("tr");
+    fireEvent.click(rows[FRAME_WINDOW_STEP - 1]);
+    fireEvent.keyDown(window, { key: "j" });
+
+    await waitFor(() => expect(bodyRows()).toBe(2 * FRAME_WINDOW_STEP + 1));
   });
 });
