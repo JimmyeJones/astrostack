@@ -135,4 +135,77 @@ describe("postCaption", () => {
     expect(c).toContain("shot with a Seestar");
     expect(c).not.toContain("—date");
   });
+
+  it("tells the object's story, between the picture and its scale", () => {
+    expect(
+      postCaption({
+        name: "Andromeda Galaxy",
+        catalogId: "M31",
+        type: "galaxy",
+        blurb: "The nearest large spiral galaxy to our own, about 2.5 million "
+          + "light-years away.",
+        nFrames: 512,
+        integrationS: 85 * 60,
+        captureNightStart: "2026-11-03",
+        captureNightEnd: "2026-11-06",
+        captureNights: 3,
+        scaleBar: { moon_comparison: "the whole frame is about 2.4 full Moons wide" },
+      }),
+    ).toBe(
+      "Andromeda Galaxy (M31) — a stack of 512 subs (1.4 h total), "
+        + "shot over 3 nights, between 3 and 6 Nov 2026 with a Seestar. "
+        + "The nearest large spiral galaxy to our own, about 2.5 million "
+        + "light-years away. "
+        + "The whole frame is about 2.4 full Moons wide.",
+    );
+  });
+
+  it("drops the bare type word when there is a story, and keeps it when there isn't", () => {
+    // The blurb says the type in better words; both together stutter.
+    const told = postCaption({
+      name: "North America Nebula", catalogId: "NGC 7000", type: "nebula",
+      blurb: "A vast emission nebula in Cygnus shaped like the continent of "
+        + "North America.",
+      nFrames: 50,
+    });
+    expect(told).toContain("North America Nebula (NGC 7000) — a stack of 50 subs");
+    expect(told).not.toContain(", a nebula —");
+    // …and an uncurated object is exactly what it was before this existed.
+    expect(postCaption({
+      name: "North America Nebula", catalogId: "NGC 7000", type: "nebula", nFrames: 50,
+    })).toBe("North America Nebula (NGC 7000), a nebula — a stack of 50 subs, "
+      + "shot with a Seestar.");
+  });
+
+  it("says nothing extra for a blank blurb or an older backend that omits it", () => {
+    const bare = "Ring Nebula (M57), a planetary nebula — a stack of 40 subs, "
+      + "shot with a Seestar.";
+    expect(postCaption({
+      name: "Ring Nebula", catalogId: "M57", type: "planetary nebula", nFrames: 40,
+      blurb: "   ",
+    })).toBe(bare);
+    expect(postCaption({
+      name: "Ring Nebula", catalogId: "M57", type: "planetary nebula", nFrames: 40,
+      blurb: null,
+    })).toBe(bare);
+  });
+
+  it("never tells a story about a target it could not identify", () => {
+    // A blurb only reaches a caller from a catalogue match, so one arriving
+    // beside no identity describes something we never named — say nothing.
+    const c = postCaption({
+      fallbackName: "My backyard field", nFrames: 12,
+      blurb: "A vast emission nebula in Cygnus.",
+    });
+    expect(c).toBe("My backyard field — a stack of 12 subs, shot with a Seestar.");
+  });
+
+  it("finishes a story that forgot its full stop, so it can't run into the scale", () => {
+    const c = postCaption({
+      name: "M13", nFrames: 10,
+      blurb: "A tight ball of several hundred thousand ancient stars",
+      scaleBar: { moon_comparison: "the whole frame is about 5.4 full Moons wide" },
+    });
+    expect(c).toContain("ancient stars. The whole frame");
+  });
 });
