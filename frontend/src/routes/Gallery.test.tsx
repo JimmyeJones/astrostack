@@ -860,6 +860,45 @@ describe("Gallery unfinished-edit honesty", () => {
   });
 });
 
+describe("Gallery \"Not stretched yet\" chip", () => {
+  it("badges only the runs whose picture is still a flat linear stack", async () => {
+    // The per-run half of the Library wall's chip (v0.448.0). The wall's endpoint
+    // answers per *target*, about the one run it displays; this page lists every
+    // run of every target, so each card needs its own answer.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [{ ...item(1), finished: false }, { ...item(2), finished: true }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getAllByText("Not stretched yet")).toHaveLength(1));
+    // …and it points at the control already on the card rather than leaving a
+    // beginner to work out what "not stretched" is fixed by.
+    expect(screen.getByText("Not stretched yet").closest("[title]"))
+      .toHaveAttribute("title", expect.stringContaining("Edit image"));
+    // The button that hint names is really there, on every card.
+    expect(screen.getAllByText("Edit image").length).toBe(2);
+  });
+
+  it("stays silent on an older backend that doesn't send the field", async () => {
+    // A missing `finished` is "nobody asked", never "linear" — a chip that
+    // appeared because a field was absent would accuse every picture in the
+    // library on the first boot after an upgrade.
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({
+      items: [item(1), { ...item(2), finished: null }],
+    });
+    vi.spyOn(client.api, "optionsSchema").mockResolvedValue([]);
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+
+    renderGallery();
+
+    await waitFor(() => expect(screen.getAllByText("5 frames").length).toBe(2));
+    expect(screen.queryByText("Not stretched yet")).not.toBeInTheDocument();
+  });
+});
+
 describe("Gallery card layout", () => {
   it("never squeezes the card's own primary action under its label", async () => {
     // Measured in a real build: `wrap="nowrap"` + `flex: 1` (basis 0) gave the

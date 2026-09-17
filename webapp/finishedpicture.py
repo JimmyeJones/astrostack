@@ -76,10 +76,31 @@ def run_is_a_finished_picture(proj: Any, run: Any) -> bool:
     Best-effort and read-only: an unreadable meta row answers ``False`` rather
     than failing a scan that only drives a note.
     """
-    from seestack.edit.recipe import recipe_from_json
     from webapp.routers.editor import RECIPE_META_PREFIX
 
-    options_json = getattr(run, "options_json", None)
+    try:
+        recipe_json = proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}")
+    except Exception:  # noqa: BLE001 — a note's count never fails the page
+        return False
+    return run_is_a_finished_picture_from(
+        getattr(run, "options_json", None), recipe_json)
+
+
+def run_is_a_finished_picture_from(options_json: str | None,
+                                  recipe_json: str | None) -> bool:
+    """The same answer as :func:`run_is_a_finished_picture`, for a caller that has
+    **already read** the run's saved recipe.
+
+    The Gallery list is that caller: it reads every run's recipe row anyway, to
+    decide ``unexported_edit``, and it does so once per run of every target — so
+    asking the project for the same row a second time would double the reads on
+    the one endpoint where they are counted. Split out rather than inlined so the
+    two callers share one rule; the ``proj``-taking form above is a two-line
+    wrapper over this, which is why there is still only one definition of
+    "finished".
+    """
+    from seestack.edit.recipe import recipe_from_json
+
     if options_json:
         try:
             data = json.loads(options_json)
@@ -88,7 +109,7 @@ def run_is_a_finished_picture(proj: Any, run: Any) -> bool:
         if isinstance(data, dict) and any(data.get(k) for k in _EXPORT_KEYS):
             return True
     try:
-        recipe = recipe_from_json(proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}"))
+        recipe = recipe_from_json(recipe_json)
     except Exception:  # noqa: BLE001 — a note's count never fails the page
         return False
     return any(op.enabled for op in recipe.ops)
