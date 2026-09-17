@@ -224,6 +224,61 @@ def test_the_run_listing_reports_the_baked_crop(client, solved_library):
     assert row()["preview_geometry_unknown"] is True
 
 
+def test_the_run_info_says_the_same_thing_as_the_listing(client, solved_library):
+    """One run, one answer — whichever endpoint asked.
+
+    The Gallery lists runs across *every* target, so it has no per-target run row
+    to read; the single-run info panel is the only per-run endpoint it can ask,
+    and it needs these three facts before it can put a scale sentence in the
+    caption of a picture it is about to share. Two independent copies of "is this
+    preview a crop?" is exactly how a caption ends up describing a different
+    picture from the one on screen, so both endpoints answer through
+    ``preview_geometry_out`` and this pins that they agree — in every state,
+    including the two a run only reaches after being processed.
+    """
+    from seestack.previewcrop import preview_crop_json
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, _fits_path, _preview = _make_trimmable_mosaic_run(solved_library, safe)
+
+    keys = ("preview_crop", "preview_geometry_unknown", "preview_north_up_deg")
+
+    def listing():
+        row = next(r for r in client.get(f"/api/targets/{safe}/stack-runs").json()
+                   if r["id"] == run_id)
+        return {k: row[k] for k in keys}
+
+    def info():
+        body = client.get(
+            f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+        return {k: body[k] for k in keys}
+
+    # Never processed: the whole canvas, no turn.
+    assert info() == listing()
+    assert info() == {"preview_crop": None, "preview_geometry_unknown": False,
+                      "preview_north_up_deg": None}
+
+    # Auto-edited: a real border trim, and the info panel names the same rectangle.
+    assert _auto_edit(solved_library, safe, run_id) is not None
+    crop = parse_preview_crop(
+        _run_row(solved_library, safe, run_id).preview_crop_json)
+    assert isinstance(crop, PreviewCrop)
+    assert info() == listing()
+    assert info()["preview_crop"] == {
+        "x0": crop.x0, "y0": crop.y0, "x1": crop.x1, "y1": crop.y1}
+
+    # Geometry that can't be reconciled: both refuse, rather than one of them
+    # handing out a rectangle the other has withdrawn.
+    _set_crop(solved_library, safe, run_id, preview_crop_json(UNKNOWN))
+    assert info() == listing()
+    assert info()["preview_crop"] is None
+    assert info()["preview_geometry_unknown"] is True
+    # And the angle the auto-edit *recorded* — an explicit 0.0, "these bytes are
+    # on the canvas grid" — is passed through verbatim by both, rather than one
+    # of them reporting the absence a recovered zero would read as.
+    assert info()["preview_north_up_deg"] == 0.0
+
+
 # ---- the Sky-map coverage overlay --------------------------------------
 
 def test_sky_overlay_alpha_follows_a_cropped_picture(client, solved_library):

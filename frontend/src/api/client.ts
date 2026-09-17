@@ -1923,6 +1923,16 @@ export interface StackRunInfo {
   calibration_warnings?: string[] | null;
   processing?: StackProcessingStep[];
   cards: StackInfoCard[];
+  // What this run's *stored preview PNG* is, relative to its canvas — the same
+  // three facts the per-target run listing carries (`StackRun`), served here too
+  // because the Gallery lists runs across every target and has no run row of its
+  // own. Anything measured on the un-cropped FITS grid (the scale bar, and so the
+  // "about N full Moons wide" sentence a shared caption ends on) has to be placed
+  // through them or it describes a picture nobody is looking at. Optional: an
+  // older backend omits them and a caller then says nothing rather than guessing.
+  preview_north_up_deg?: number | null;
+  preview_crop?: { x0: number; y0: number; x1: number; y1: number } | null;
+  preview_geometry_unknown?: boolean;
 }
 
 export interface StackEstimate {

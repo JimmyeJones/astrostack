@@ -29,6 +29,8 @@ import {
 } from "../components/RejectionBadge";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { ImageLightbox } from "../components/ImageLightbox";
+import { storedPreviewScaleBar } from "../components/AnnotatedImage";
+import { postCaption } from "../components/postCaption";
 import {
   NorthUpViewToggle, loadNorthUpView, saveNorthUpView,
 } from "../components/NorthUpViewToggle";
@@ -613,15 +615,62 @@ export function GalleryView() {
   // so most pictures get no control rather than an inert one.
   const [showRemoved, setShowRemoved] = useState(false);
   const viewingHasRemoved = !!viewing?.has_rejection_map;
-  // The caption's measured fraction, on the endpoint and cache key History's
-  // copy of this tint already uses. Fetched only once the tint is switched on,
-  // so opening a picture costs nothing extra.
-  const removedInfo = useQuery({
+  // The run's own facts about the picture on screen, on the endpoint and cache
+  // key History's copy of this tint already uses: the tint caption's measured
+  // fraction, and the stored-preview geometry the shared caption's scale clause
+  // is placed through. Only once a picture is open, and only when there is a
+  // FITS behind it (the endpoint is a header read and 404s without one) — an
+  // ordinary Gallery load makes no extra request, however many cards it draws,
+  // and re-opening the same picture is free.
+  const viewingInfo = useQuery({
     queryKey: ["stack-info", viewing?.safe, viewing?.run_id],
     queryFn: () => api.stackRunInfo(viewing!.safe, viewing!.run_id),
-    enabled: showRemoved && viewingHasRemoved,
+    enabled: !!viewing?.has_fits,
     staleTime: Infinity,
   });
+  // "What am I looking at?" — the same offline catalog lookup, cache key and
+  // endpoint the Target page and the editor use, so opening a picture here warms
+  // the answer there. It is what lets the caption below name the object and tell
+  // the catalogue's own sentence about it instead of posting a folder name.
+  const viewingIdentity = useQuery({
+    queryKey: ["identify", viewing?.safe],
+    queryFn: () => api.identifyTarget(viewing!.safe),
+    enabled: !!viewing,
+    staleTime: 60_000,
+  });
+  // The ready-to-post caption for the picture in the viewer — the *same*
+  // sentence the Target hero and every History card hand the OS share sheet
+  // (`postCaption`), built from the same facts.
+  //
+  // This viewer used to share `sharePictureText`'s "M 42 — captured 15 Nov 2024"
+  // and nothing else, so the identical picture arrived with its story or without
+  // it depending only on which page it was opened from — and the Gallery is the
+  // page whose whole job is looking at pictures.
+  //
+  // The scale clause is the one that needs care: it describes the **stored
+  // preview**, which on a "Process target" run is a border-trimmed crop of the
+  // canvas, so `storedPreviewScaleBar` is asked through the run's own geometry
+  // rather than the canvas bar being passed straight through (that would claim a
+  // wider field than the picture has, in the one sentence a beginner pastes
+  // publicly). Both halves degrade to silence: no annotations, no info, an older
+  // backend, or geometry that can't be reconciled → no scale sentence, exactly as
+  // `postCaption` intends.
+  const viewingCaption = viewing
+    ? postCaption({
+        name: viewingIdentity.data?.name,
+        catalogId: viewingIdentity.data?.id,
+        type: viewingIdentity.data?.type,
+        blurb: viewingIdentity.data?.blurb,
+        nFrames: viewing.n_frames_used,
+        integrationS: viewing.total_exposure_s,
+        captureNightStart: viewing.capture_night_start,
+        captureNightEnd: viewing.capture_night_end,
+        captureNights: viewing.capture_nights,
+        scaleBar: storedPreviewScaleBar(
+          viewingAnnotations.data, viewingInfo.data ?? {}),
+        fallbackName: viewing.target_name,
+      })
+    : undefined;
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<GallerySort>("newest");
   const [calFilter, setCalFilter] = useState<CalFilter>("all");
@@ -875,7 +924,7 @@ export function GalleryView() {
         overlaySrc={viewing && showRemoved && viewingHasRemoved
           ? api.stackRejectionOverlayUrl(viewing.safe, viewing.run_id, viewingTurned)
           : null}
-        overlayNote={removedOverlayCaption(removedInfo.data?.rejection)}
+        overlayNote={removedOverlayCaption(viewingInfo.data?.rejection)}
         toolbarExtra={viewing?.has_preview
           ? (
             <Group gap={4} wrap="nowrap">
@@ -910,12 +959,19 @@ export function GalleryView() {
           ) : undefined}
         {...(viewing?.has_preview
           ? (() => {
+              // The sheet's *title* and the file's name still come from here —
+              // they are a short label and a slug, not a caption. Only the text
+              // changed, to the full `postCaption` sentence the other two
+              // surfaces already share.
               const { title, text, filename } = sharePictureText(
                 viewing.target_name,
                 formatCaptureNights(
                   viewing.capture_night_start, viewing.capture_night_end),
               );
-              return { shareFilename: filename, shareTitle: title, shareText: text };
+              return {
+                shareFilename: filename, shareTitle: title,
+                shareText: viewingCaption ?? text,
+              };
             })()
           : {})}
         onClose={() => setViewing(null)}

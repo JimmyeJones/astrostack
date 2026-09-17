@@ -25,7 +25,7 @@ from webapp.derived_light import stacking_field_fulls, with_inherited_light_fact
 from webapp.field_fulls import native_frame_shape
 from webapp.preview_orient import (
     baked_north_up_deg,
-    recovered_north_up_deg,
+    preview_geometry_out,
     recovered_preview_crop,
     remaining_north_up_deg,
 )
@@ -956,9 +956,12 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
     out = []
     for r in runs:
         # What the stored preview shows of the canvas — an auto-edit border trim,
-        # or geometry we can't reconcile at all. The pins/scale bar are measured
-        # on the un-cropped FITS grid, so the UI needs both to draw on those bytes.
-        crop = recovered_preview_crop(r)
+        # a baked North-up turn, or geometry we can't reconcile at all. The
+        # pins/scale bar are measured on the un-cropped FITS grid, so the UI needs
+        # all three to draw on those bytes. Shared with the single-run info
+        # endpoint (`preview_geometry_out`) so the two can't describe one run's
+        # picture differently.
+        geometry = preview_geometry_out(r)
         night_start, night_end = capture_night_range(
             r.capture_start_utc, r.capture_end_utc, lon)
         nights = capture_night_count(
@@ -993,19 +996,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             transparency_ratio=r.transparency_ratio,
             noise_sigma=r.noise_sigma,
             stack_fwhm_px=r.stack_fwhm_px,
-            # A recorded angle is passed through verbatim (including an explicit
-            # 0.0 — that is a statement, not an absence); only a run from before
-            # the column existed falls through to the recovery, so History stops
-            # drawing its pins and scale bar on a picture an old save turned.
-            preview_north_up_deg=(
-                r.preview_north_up_deg if r.preview_north_up_deg is not None
-                else (recovered_north_up_deg(r) or None)
-            ),
-            preview_crop=(
-                {"x0": crop.x0, "y0": crop.y0, "x1": crop.x1, "y1": crop.y1}
-                if isinstance(crop, PreviewCrop) else None
-            ),
-            preview_geometry_unknown=(crop == CROP_UNKNOWN),
+            **geometry,
             seam_residual=r.seam_residual,
             seam_verdict=stored_seam_verdict_for(r),
             grain_verdict=grain_verdict(r.grain_ratio),
@@ -3727,8 +3718,19 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     Lets the History view show "how this stack was made" (integration time,
     frame count, method, dates) straight from the self-documenting FITS header —
     no extra storage, just a cheap header read.
+
+    It also carries the run's **stored-preview geometry** (the turn and the crop
+    its bytes are, via :func:`~webapp.preview_orient.preview_geometry_out`), which
+    is not a header fact at all: it is here because this is the one per-run
+    endpoint a surface that lists runs *across targets* — the Gallery — can ask,
+    and without it that page cannot tell whether the picture it is about to share
+    is a crop of its canvas, i.e. whether the caption's "N full Moons wide"
+    sentence describes what the viewer is looking at. The row is already read
+    above to find the FITS, so this costs nothing beyond one PNG header read on a
+    legacy run whose crop column is NULL.
     """
-    _, fits_path = _run_fits_path(request, safe, run_id)
+    run = _run_row(request, safe, run_id)
+    fits_path = run.fits_path
     if not fits_path or not Path(fits_path).exists():
         raise HTTPException(status_code=404, detail="No FITS for this run")
 
@@ -3961,7 +3963,8 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             "calibration_advice": calibration_advice,
             "calibration_skipped": calibration_skipped,
             "calibration_warnings": calibration_warnings,
-            "processing": processing, "cards": cards}
+            "processing": processing, "cards": cards,
+            **preview_geometry_out(run)}
 
 
 def _uncalibrated_advice(request: Request, safe: str) -> str | None:
