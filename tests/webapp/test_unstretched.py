@@ -54,6 +54,22 @@ def _seed(proj, *, basename="master", preview="p.png", options=None):
 
 
 def _edit(proj, run_id, ops=None):
+    """Bake a finished look into a run's preview, the way an in-place auto-edit
+    does: the recipe **and** the ``preview_display_space`` mark that says the
+    stored bytes are that recipe's render rather than the linear autostretch.
+
+    Both halves, because only the second one is what makes the picture finished
+    — see ``_save_only`` for the other case, and
+    ``webapp.finishedpicture.run_is_a_finished_picture``."""
+    proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", json.dumps({"ops": ops or _OPS}))
+    proj.set_run_preview_display_space(run_id)
+
+
+def _save_only(proj, run_id, ops=None):
+    """A recipe somebody **saved in the editor and never baked** — which is what
+    Save does and all it does: ``put_recipe`` writes the row and re-renders
+    nothing, so the run's preview is still the plain autostretch of its linear
+    master and the picture on the wall has not changed."""
     proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", json.dumps({"ops": ops or _OPS}))
 
 
@@ -361,8 +377,8 @@ def test_an_all_disabled_recipe_is_not_a_finished_gallery_card(
 
 
 def test_the_two_finished_picture_forms_answer_identically(solved_library):
-    """`run_is_a_finished_picture_from` exists only so the Gallery can reuse a
-    recipe row it has already read; it must never become a second definition."""
+    """`run_is_a_finished_picture_from` exists only so the Gallery can answer off
+    a column it has already selected; it must never become a second definition."""
     from webapp.finishedpicture import (
         run_is_a_finished_picture,
         run_is_a_finished_picture_from,
@@ -376,9 +392,8 @@ def test_the_two_finished_picture_forms_answer_identically(solved_library):
             plain = _seed(proj)
             edited = _seed(proj, basename="m2")
             _edit(proj, edited)
-            disabled = _seed(proj, basename="m3")
-            _edit(proj, disabled,
-                  ops=[{"id": "tone.curves", "enabled": False, "params": {}}])
+            saved_only = _seed(proj, basename="m3")
+            _save_only(proj, saved_only)
             export = _seed(proj, basename="m4",
                            options={"editor_recipe": {"ops": _OPS}})
             for run in proj.iter_stack_runs():
@@ -391,9 +406,75 @@ def test_the_two_finished_picture_forms_answer_identically(solved_library):
                        for r in proj.iter_stack_runs()}
             assert answers[plain] is False
             assert answers[edited] is True
-            assert answers[disabled] is False
+            # The one the old rule got backwards: a recipe nothing baked leaves
+            # the preview exactly as it was.
+            assert answers[saved_only] is False
             assert answers[export] is True
         finally:
             proj.close()
     finally:
         lib.close()
+
+
+def test_saving_an_edit_does_not_make_an_unstretched_card_look_finished(
+        solved_client, solved_library):
+    """Regression (v0.449.0): the chip used to **vanish** when a user saved an
+    edit, on a card whose bytes had not changed.
+
+    ``put_recipe`` writes the recipe row and re-renders nothing, so the wall is
+    still showing ``_write_preview_png``'s autostretch of the linear master —
+    and the app says so itself, on the same screens, through
+    ``unexported_edit``. Withdrawing the chip there is exactly backwards: that
+    picture is unstretched *and* the user's work is invisible on it."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        saved_only, baked = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(saved_only)
+        try:
+            _save_only(proj, _seed(proj))
+        finally:
+            proj.close()
+        proj = lib.open_target(baked)
+        try:
+            _edit(proj, _seed(proj))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = solved_client.get("/api/unstretched-pictures").json()
+    assert [i["safe"] for i in body["items"]] == [saved_only]
+    # The Gallery's per-run chip is the same rule, so it cannot say the opposite
+    # about the very same run — which is what made this findable.
+    items = solved_client.get("/api/gallery").json()["items"]
+    by_target = {i["safe"]: i["finished"] for i in items}
+    assert by_target[saved_only] is False
+    assert by_target[baked] is True
+
+
+def test_the_reprocess_warning_stops_counting_a_saved_only_edit_as_finished(
+        solved_client, solved_library):
+    """The third surface off the same definition: the "Reprocess everything"
+    dialog warns how many finished pictures an unedited restack would replace.
+
+    A target whose newest run merely carries a saved recipe has nothing to
+    replace — its card is already the linear autostretch — so counting it
+    inflated the warning that exists to be believed."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        saved_only, baked = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(saved_only)
+        try:
+            _save_only(proj, _seed(proj))
+        finally:
+            proj.close()
+        proj = lib.open_target(baked)
+        try:
+            _edit(proj, _seed(proj))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    status = solved_client.get("/api/reprocess-status").json()
+    assert status["finished_pictures"] == 1

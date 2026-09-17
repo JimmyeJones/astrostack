@@ -979,7 +979,12 @@ def _seed_finished_run(proj, *, version="0.0.1", baked=True, recipe=True):
     writes beside the bytes it baked. Returns the run id.
 
     ``baked=False, recipe=True`` is the hand-edited case: a saved recipe that did
-    *not* come from us, which the carry-forward must leave alone."""
+    *not* come from us, which the carry-forward must leave alone.
+
+    Note that ``baked`` writes **both** marks the in-place auto-edit writes — the
+    stamp *and* ``preview_display_space`` — because the preview it re-renders is
+    what makes the picture finished (v0.449.0). A stamp on its own would be a run
+    nothing rendered, which no path produces."""
     from webapp.routers.editor import (
         AUTO_EDIT_BAKED_LOOK_PREFIX,
         RECIPE_META_PREFIX,
@@ -1002,6 +1007,7 @@ def _seed_finished_run(proj, *, version="0.0.1", baked=True, recipe=True):
         from webapp.routers.stack import _recipe_look
         proj.set_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run_id}",
                       json.dumps(_recipe_look(recipe_json)))
+        proj.set_run_preview_display_space(run_id)
     return run_id
 
 
@@ -1562,10 +1568,19 @@ def _seed_run_with_preview(proj, *, version, basename="master", options=None,
     return max(r.id for r in proj.iter_stack_runs())
 
 
-def _save_recipe(proj, run_id, ops):
+def _bake_edit(proj, run_id, ops):
+    """Make a run's preview a *finished* picture, the way an in-place auto-edit
+    does: the recipe, **and** the ``preview_display_space`` mark saying the
+    stored bytes are that recipe's render.
+
+    Both halves. Saving a recipe alone re-renders nothing (``put_recipe`` writes
+    the row and stops there), so a run with only the recipe is still showing the
+    linear autostretch and is deliberately *not* counted here — see
+    ``webapp.finishedpicture`` and the v0.449.0 entry."""
     from webapp.routers.editor import RECIPE_META_PREFIX
 
     proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", json.dumps({"ops": ops}))
+    proj.set_run_preview_display_space(run_id)
 
 
 _AUTO_OPS = [{"id": "tone.curves", "enabled": True, "params": {}}]
@@ -1581,7 +1596,7 @@ def test_finished_picture_count_names_targets_whose_wall_picture_would_regress(
         proj = lib.open_target(edited)
         try:
             run_id = _seed_run_with_preview(proj, version="0.0.1")
-            _save_recipe(proj, run_id, _AUTO_OPS)
+            _bake_edit(proj, run_id, _AUTO_OPS)
         finally:
             proj.close()
         proj = lib.open_target(plain)
@@ -1611,7 +1626,7 @@ def test_a_finished_picture_already_on_this_version_is_outside_a_stale_only_batc
             proj = lib.open_target(safe)
             try:
                 run_id = _seed_run_with_preview(proj, version=ver)
-                _save_recipe(proj, run_id, _AUTO_OPS)
+                _bake_edit(proj, run_id, _AUTO_OPS)
             finally:
                 proj.close()
         status = pipeline.reprocess_status(lib)
@@ -1633,7 +1648,7 @@ def test_an_edit_saved_on_an_older_run_does_not_count_the_displayed_one(
         proj = lib.open_target(safe)
         try:
             old = _seed_run_with_preview(proj, version="0.0.1", basename="old")
-            _save_recipe(proj, old, _AUTO_OPS)
+            _bake_edit(proj, old, _AUTO_OPS)
             _seed_run_with_preview(proj, version="0.0.1", basename="new")
         finally:
             proj.close()
@@ -1654,7 +1669,7 @@ def test_a_pinned_cover_is_the_displayed_picture_even_when_it_is_not_newest(
         proj = lib.open_target(safe)
         try:
             old = _seed_run_with_preview(proj, version="0.0.1", basename="old")
-            _save_recipe(proj, old, _AUTO_OPS)
+            _bake_edit(proj, old, _AUTO_OPS)
             _seed_run_with_preview(proj, version="0.0.1", basename="new")
         finally:
             proj.close()
@@ -1693,19 +1708,22 @@ def test_an_editor_export_run_counts_as_a_finished_picture(solved_library):
 
 def test_a_recipe_with_no_enabled_ops_is_not_a_finished_picture(solved_library):
     """An empty or all-disabled recipe renders as the plain linear stack, so it
-    must not inflate a count whose whole job is "would this visibly change?"."""
+    must not inflate a count whose whole job is "would this visibly change?".
+
+    Both runs here are *baked*, so this pins that the enabled-op half of the rule
+    is still necessary in its own right and not merely implied by the mark."""
     lib = Library.open_or_create(solved_library / "library")
     try:
         empty, disabled = [e.safe_name for e in lib.list_targets()]
         proj = lib.open_target(empty)
         try:
-            _save_recipe(proj, _seed_run_with_preview(proj, version="0.0.1"), [])
+            _bake_edit(proj, _seed_run_with_preview(proj, version="0.0.1"), [])
         finally:
             proj.close()
         proj = lib.open_target(disabled)
         try:
-            _save_recipe(proj, _seed_run_with_preview(proj, version="0.0.1"),
-                         [{"id": "tone.curves", "enabled": False, "params": {}}])
+            _bake_edit(proj, _seed_run_with_preview(proj, version="0.0.1"),
+                       [{"id": "tone.curves", "enabled": False, "params": {}}])
         finally:
             proj.close()
         status = pipeline.reprocess_status(lib)
@@ -1724,8 +1742,8 @@ def test_reprocess_status_endpoint_serves_the_finished_picture_counts(
         safe = next(e.safe_name for e in lib.list_targets())
         proj = lib.open_target(safe)
         try:
-            _save_recipe(proj, _seed_run_with_preview(proj, version="0.0.1"),
-                         _AUTO_OPS)
+            _bake_edit(proj, _seed_run_with_preview(proj, version="0.0.1"),
+                       _AUTO_OPS)
         finally:
             proj.close()
     finally:

@@ -137,6 +137,37 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   blown-core fraction) and stand down to "leave it linear, the wall chip will say so" when either is worse than
   the run being superseded. That keeps the promise the entry is about without guessing. Do NOT ship a verbatim
   copy without it.
+  **✅ CLOSED 2026-09-17 by the Builder who built the carry and then measured its premise — the hand-edited
+  slice has nothing to carry, and both gates above are moot. Do not re-open it; the finding it produced
+  shipped as v0.449.0.** I implemented the verbatim copy with the crop gate the entry asks for (canvas-shape
+  check + `stale_crop` re-validation against the fresh run's own coverage, 21 tests, both gates fail-before),
+  then probed the premise on the running app and **abandoned it unmerged**. The premise is that a restack
+  flattens the picture a hand editor was looking at. It does not, because **there was never a stretched
+  picture to flatten**: `routers.editor.put_recipe` writes the recipe row to the project DB and *nothing
+  else* — **no path re-renders a preview on Save** — so a run carrying a hand-saved recipe is still showing
+  `_write_preview_png`'s plain autostretch of the linear master. Measured, not reasoned: saving a recipe
+  through the real endpoint leaves the preview PNG's sha1 **unchanged**, and the same run's listing reports
+  `unexported_edit: true`, which is the app's own words for the same fact. It also matches the observer's
+  measurement on the owner's library — his 42 saved recipes carry 3–70 % crops and **0 of 77 live previews are
+  cropped**, i.e. none of those recipes is in the bytes. So a carry would not have preserved a picture; it
+  would have put a look on the wall that had never been there, unprompted, in a batch operation.
+  **The tone-chain gate above is closed by the same measurement** — there is no displayed hand-tuned look
+  whose fidelity is at stake — and it was good judgement on a premise nobody had checked, which is why the
+  measurement is recorded here rather than the disagreement.
+  **What the probe *did* find is a real bug on three shipped surfaces, and it is fixed:** the same
+  false premise lived in `finishedpicture.run_is_a_finished_picture`, which counted a saved recipe as a
+  finished picture — so **saving an edit made the "Not stretched yet" chip vanish** from the Library wall and
+  the Gallery, and shrank the reprocess warning's count, on a card whose bytes had not changed. Shipped as
+  **v0.449.0**: a preview is finished when something *baked* it (an export's own pixels, or
+  `preview_display_space`), which is the mark `_unexported_edit` already reads, so the two stop contradicting
+  each other about one run. Entry in [`SHIPPED.md`](SHIPPED.md).
+  **One genuinely open leftover, filed small and honestly optional (S, autonomy — PRIORITY 2):** after a
+  reprocess, the user's saved recipe stays on the superseded run, so getting their look onto the new pixels
+  means re-doing it in the editor. Copying the recipe onto the fresh run **without re-rendering its preview**
+  would save that — the wall is unchanged either way (still the autostretch, still correctly chipped), so it
+  changes no displayed pixel and the tone-chain judgement happens where it belongs, in front of the user in
+  the editor. It would, correctly, make the fresh run report `unexported_edit`. Worth doing only if the owner
+  asks; it is a convenience, not a regression fix, and this entry has already cost two runs.
 
 - **🟠 BUG (autonomy / data-integrity, Scout 2026-09-14 — mechanism traced end-to-end from observer issue
   [#878](https://github.com/JimmyeJones/astrostack/issues/878)) — a mosaic's raw-subs folder is minted as a
@@ -3453,6 +3484,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.449.0** — 🟡 BUG (friendliness / trust — PRIORITY 3), on three **shipped** surfaces at once, found by probing the premise of the open half of observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903) on the running app rather than building it: **saving an edit made the "Not stretched yet" chip vanish from a card whose bytes had not changed.** `finishedpicture.run_is_a_finished_picture` counted *"the run carries a saved recipe with an enabled op"* as a finished picture — but `routers.editor.put_recipe` writes the recipe row and **nothing else**; no path re-renders a preview on Save. Measured through the real endpoints: the preview PNG's sha1 is unchanged across the save, and the same run's listing says `unexported_edit: true`, i.e. the app already knew. So the chip withdrew from the one card that is unstretched *and* has the user's work invisible on it, the Gallery's per-run chip (v0.448.2) said the same, and the reprocess warning (v0.447.2) over-counted — all three off the one shared predicate. Now a preview is finished when something **baked** it: an editor export's own tone-mapped pixels, or the `preview_display_space` mark `pipeline._auto_edit_process_run` writes beside the bytes — the identical mark `routers.stack._unexported_edit` reads, so the two stop contradicting each other about one run. The enabled-op test is kept as the other necessary half (a bake through an all-disabled recipe renders the linear stack). Tests +3, all three red under a scratch revert; the suite's `_edit` helper now bakes and a new `_save_only` covers the other state, so no existing test was loosened. The #903 remainder is **closed with the measurement** — a hand-saved recipe was never on the wall, so there is nothing for a reprocess to flatten and nothing to carry. Full entry, and the withdrawn carry-forward, in [`SHIPPED.md`](SHIPPED.md).
 - **v0.448.2** — 🌟 NEW BEGINNER FEATURE (PRIORITY 3), slice (a) of the "finished / not stretched / thin" signal, plus (c) answered for this surface: **the Gallery wall badges the runs whose picture is still a flat linear stack, per *run*.** New `GalleryItem.finished` off new `finishedpicture.run_is_a_finished_picture_from` (fed the recipe row `_gallery_item` already reads, so no extra DB read), rendered by `components/UnstretchedBadge.tsx`; the two walls' copy is now one module, `frontend/src/unstretched.ts`. The filed slice's "read the same query" would have been wrong — that endpoint answers per target and the Gallery lists every run — and the hint names the **Edit image** button already on the card rather than adding a second link to it. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.448.1** — 🟠 BUG (trust — PRIORITY 1-adjacent (the displayed picture) / 3, observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903)): **a reprocess no longer flattens a picture the app itself finished — it *prevents* the regression v0.447.2 announced.** New `pipeline._picture_is_auto_finished` asks, per target and before the restack, whether the run `finishedpicture.displayed_picture_run` picks carries the app's own `editor_auto_baked_look` stamp (and no cover is pinned); where it does, the fresh run gets the same Auto finish, counted apart as `kept_finished` and worded by `reprocessSummary`. This is the open entry's own "cheaper alternative", for the subset where re-deriving Auto is unambiguously right; carrying a **hand-saved** recipe forward stays open there (its crop may not fit the new canvas). No cover semantics touched.
 - **v0.448.0** — 🌟 NEW BEGINNER FEATURE (PRIORITY 3): the Library wall badges the pictures that are still flat linear stacks — `GET /api/unstretched-pictures` + `Library.tsx`'s "Not stretched yet" chip, off one shared definition (`webapp/finishedpicture.py`). From observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903). Full entry, and the three next slices, in [`SHIPPED.md`](SHIPPED.md). (#906)

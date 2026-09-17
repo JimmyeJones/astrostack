@@ -1,5 +1,60 @@
 # Shipped — the record
 
+## v0.449.0 — 2026-09-17 — saving an edit stopped making an unstretched card look finished
+
+*(Builder, branch `claude/sweet-babbage-97be46` — PRIORITY 3 (friendliness) / trust, on the shipped
+"Not stretched yet" surfaces. Upgrade-safe: no config, schema, on-disk, endpoint or API-shape change; one
+shared predicate's rule corrected, and every consumer reads it through the module that exists so they cannot
+disagree.)*
+
+**Reproduced on the shipped endpoint before a line was written.** Register a run, read
+`GET /api/unstretched-pictures` — the target is named, correctly, because its card is the plain autostretch of
+a linear master. `PUT .../editor/recipe` with a stretch. Read it again: `count: 0`. **The preview PNG is
+byte-identical** (sha1 unchanged across the save), and the very same run, in the same response cycle, is
+reported by the runs listing as `unexported_edit: true` — the app's own words for *"the user edited, pressed
+Save, and the stored preview does not show it"*.
+
+So the chip that exists to tell a beginner *"this picture hasn't been stretched yet"* **withdrew** from the one
+card where the picture is unstretched **and** the user's work is invisible on it. The Gallery's per-run chip
+(v0.448.2) and the reprocess dialog's warning count (v0.447.2) read the same predicate, so all three were
+wrong together — which is exactly the shared-definition design working, in the direction nobody wants.
+
+**Root cause, one line.** `finishedpicture.run_is_a_finished_picture` accepted *"the run carries a saved editor
+recipe with at least one enabled op"* as one of its two shapes. But `routers.editor.put_recipe` writes the
+recipe row to the project DB and **nothing else** — no path re-renders a preview on Save — so a saved recipe
+is not evidence about the bytes at all. The rule was answering "did somebody make an edit?" while its name, its
+module docstring and all three of its callers were asking "does this picture show one?".
+
+**The fix.** A preview is finished when it was *baked*: the run **is** an editor export (its own pixels are
+tone-mapped, `options_json` carrying `editor_recipe`/`display_space`), or something re-rendered the preview
+through a recipe and recorded it — `preview_display_space`, written by `pipeline._auto_edit_process_run` in the
+same breath as the bytes, and the identical mark `routers.stack._unexported_edit` reads for its own question.
+The enabled-op test is **kept** as the other necessary half, because a bake through an all-disabled recipe
+renders the linear stack (an arm the suite already pinned, on both surfaces, and which still passes).
+
+What is deliberately *not* asked: whether the saved recipe still agrees with the baked look. A run the app
+baked and the user has since tweaked is showing the look the app baked, which is a finished picture — that
+drift is `_unexported_edit`'s question, and answering it here would put two opinions on one run again.
+
+**Tests +3, all three red under a scratch revert** of the new condition: the wall and the Gallery agree that a
+saved-only edit is not finished while a baked one is (one assertion across both endpoints, because the two
+disagreeing about one run is what made this findable); the reprocess warning stops counting it; and the
+two-forms parity test gains the case that separates the rules. The file's `_edit` helper now bakes — recipe
+*and* mark, the way an auto-edit does — with a new `_save_only` for the other state, so every existing test
+keeps meaning what its name says rather than being loosened.
+
+## v0.449.0 (withdrawn before merge) — the hand-edited reprocess carry-forward
+
+*(Same branch, built first and **abandoned unmerged** when the probe above disproved its premise. Recorded so
+the next run does not rebuild it — see the closed remainder of #903 in `IMPROVEMENTS.md`.)*
+
+It replayed a hand-saved recipe onto the run a reprocess had just made, to stop a restack flattening a picture
+somebody edited. Two gates (same canvas shape; the carried crop re-validated against the fresh run's own
+coverage through `stale_crop`), 21 tests, both gates fail-before. **The premise is false**: for that
+population the displayed picture was *already* the plain autostretch, because nothing bakes a saved recipe. So
+the feature was not preserving a picture, it was putting a look on the wall that had never been there —
+unprompted, in a batch operation. Dropped rather than shipped.
+
 ## v0.448.2 — 2026-09-17 — the Gallery wall says which pictures aren't finished, per run
 
 *(Builder, branch `claude/sweet-babbage-owmvv3` — PRIORITY 3 (understand + trust), slice (a) of the
