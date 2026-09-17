@@ -198,6 +198,35 @@ describe("SavePictureMenu", () => {
     expect(caption).toContain("240");
   });
 
+  it("carries the catalogue's story of the object into the copied caption", async () => {
+    // The sentence a beginner cannot write themselves — and the one the "What am
+    // I looking at?" card already shows, so the two can't describe one object two
+    // ways. Fails before: the menu passed the bare type word and nothing else.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText }, configurable: true,
+    });
+    vi.spyOn(api, "stackAnnotations").mockResolvedValue(
+      { objects: [], scale_bar: null } as unknown as Awaited<
+        ReturnType<typeof api.stackAnnotations>>);
+
+    renderMenu({
+      identity: {
+        id: "M 42", name: "Orion Nebula", type: "Nebula",
+        constellation: "Orion", constellation_abbr: "Ori",
+        ra_deg: 83.8, dec_deg: -5.4, matched_by: "name",
+        blurb: "The brightest nebula in the sky and a vast stellar nursery "
+          + "about 1,340 light-years away.",
+      },
+    });
+    open();
+    fireEvent.click(await item("Copy caption"));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const caption = writeText.mock.calls[0][0] as string;
+    expect(caption).toContain("a vast stellar nursery about 1,340 light-years away.");
+  });
+
   it("carries the Moon disc into the marked download when the card asks for it", async () => {
     // The disc is a per-card *view* toggle, like North-up and the nameplate: the
     // file carries what the screen is showing, rather than the menu growing a

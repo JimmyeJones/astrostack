@@ -22,6 +22,17 @@
  * the picture was "shot". Those are the same day only if you stacked the night
  * you shot; re-stack a back catalogue and the caption you post publicly is out
  * by years. It now takes the run's capture window and nothing else.
+ *
+ * The other half of a caption worth posting is **what the object is**, and for
+ * that the caption used to have only the catalog's bare type word ("a galaxy").
+ * The bundled catalogue already carries the same plain-language sentence the
+ * "What am I looking at?" card shows (`ObjectInfo.blurb`, offline, curated for
+ * all 157 bundled objects), so when there is one it is told here too — and it
+ * *replaces* the terse appositive rather than sitting beside it, because the
+ * blurb says the type in better words and "…, a nebula — … A vast emission
+ * nebula in Cygnus…" reads as a stutter. Nothing is invented: no blurb (an
+ * uncurated object, an unidentified target, an older backend) and the caption is
+ * exactly what it was before, type word included.
  */
 
 import { captureNightsClause, formatIntegration } from "../format";
@@ -33,6 +44,12 @@ export interface PostCaptionInput {
   catalogId?: string | null;
   /** Plain-language object type ("nebula", "galaxy"), or "" / null. */
   type?: string | null;
+  /** The catalogue's beginner-friendly one-liner about the object — the same
+   *  sentence the "What am I looking at?" card shows (`ObjectInfo.blurb`), so
+   *  the caption and the card can never describe one object two ways. "" / null
+   *  / absent for an uncurated object and for an older backend: the caption then
+   *  keeps the bare type word, exactly as it did before this existed. */
+  blurb?: string | null;
   /** Frames that actually went into the stack (`run.n_frames_used`). */
   nFrames?: number | null;
   /** Total integration in seconds (`run.total_exposure_s`), or null. */
@@ -73,6 +90,15 @@ function capitalise(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/** A clause turned into a sentence — the catalogue's blurbs all end in a full
+ *  stop today, and a hand-added entry that forgets one must not run into the
+ *  scale sentence that may follow it. */
+function asSentence(s: string): string {
+  const text = s.trim();
+  if (!text) return "";
+  return /[.!?]$/.test(text) ? text : `${text}.`;
+}
+
 /**
  * Build the shareable caption from whatever facts are present. Never throws;
  * always returns a non-empty string (the generic fallback subject guarantees
@@ -83,6 +109,11 @@ export function postCaption(input: PostCaptionInput): string {
   const catalogId = (input.catalogId ?? "").trim();
   const type = (input.type ?? "").trim();
   const identified = !!(name || catalogId);
+  // The object's story, told only about an object we actually identified — a
+  // blurb reaches us from the catalogue match, so an unidentified target has
+  // none, and one arriving alongside no identity at all would be describing
+  // something we never named.
+  const story = identified ? asSentence(input.blurb ?? "") : "";
 
   // Subject: prefer the common name with its designation in parentheses, then a
   // bare designation, then the fallback display name, then a generic.
@@ -93,8 +124,10 @@ export function postCaption(input: PostCaptionInput): string {
   else subject = (input.fallbackName ?? "").trim() || "My astrophoto";
 
   // Educational appositive — only when we actually identified the object, so we
-  // never tack a type onto a bare user target name we're unsure about.
-  if (identified && type) subject = `${subject}, ${withArticle(type)}`;
+  // never tack a type onto a bare user target name we're unsure about, and only
+  // when there is no story below: the blurb names the type in better words, and
+  // both together read as a stutter.
+  if (identified && type && !story) subject = `${subject}, ${withArticle(type)}`;
 
   // Stack clause: "a stack of N subs" (+ integration when known). Singular grammar.
   const clauses: string[] = [];
@@ -120,7 +153,9 @@ export function postCaption(input: PostCaptionInput): string {
 
   // Scale sentence, when the run has a usable WCS.
   const moon = (input.scaleBar?.moon_comparison ?? "").trim();
-  const second = moon ? `${capitalise(moon)}.` : "";
+  const last = moon ? `${capitalise(moon)}.` : "";
 
-  return second ? `${first} ${second}` : first;
+  // The picture, then the object, then the picture's scale — each sentence only
+  // when its datum exists.
+  return [first, story, last].filter(Boolean).join(" ");
 }
