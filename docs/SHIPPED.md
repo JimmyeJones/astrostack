@@ -1,5 +1,66 @@
 # Shipped — the record
 
+## v0.455.6 — 2026-09-17 — grading one sub re-downloaded every sub: 19.1 MB per keystroke on the owner's deepest target
+
+*(Builder, branch `claude/sweet-babbage-dmpc84`, the same run as v0.455.5 and the second finding from the
+same lens. Measured on the running app, not estimated.)*
+
+**The bug.** `routes/Target.tsx`'s single-frame `patch` mutation — the `a`/`r` keyboard grades and the
+accept toggle on every row — ended in `invalidateQueries(["frames", safe])`. That key prefix-matches the
+page's own `["frames", safe, sort, order]` *and* the Stack form's `["frames", safe]`, and the list behind
+it is deliberately **complete**: `api.listFrames` pages until it holds every sub, because a fixed 2,000-row
+cap once hid the newest frames from the table, the keyboard grading and the Stack pre-flight guards.
+
+So the cost of grading one sub is a re-download of all of them. Measured against the endpoint on the
+running dogfood install — 1,200 rows, 636,988 bytes, i.e. **531 bytes a row**, and that is a floor because
+the sample's filenames are shorter than a Seestar's:
+
+| subs | re-downloaded per grade | requests (sequential) |
+|------|-------------------------|-----------------------|
+| 200 | 106 KB | 1 |
+| 1,200 | 637 KB | 1 |
+| 5,477 | **2.9 MB** | 3 |
+| 35,894 | **19.1 MB** | 18 |
+
+5,477 and 35,894 are the owner's two deepest targets. The pages are sequential by construction (each waits
+for the last to prove it was not short), and grading is the one action on this page done dozens of times in
+a row — the keyboard shortcut exists because it is. Over a NAS from a phone, that is the feature being
+unusable at exactly the depth that makes it worth having.
+
+**The fix is exact, not a heuristic.** `PATCH /api/targets/{safe}/frames/{id}` (`routers/frames.py`)
+writes **one** row — `accept`, `reject_reason`, `user_override` or `bayer_pattern`, per `FramePatch` — and
+returns that row in full as `FrameOut`. Nothing else in the list changes. So the fresh list a refetch would
+produce differs from the cached one in precisely that row, and `qc.setQueriesData` swaps it in, across every
+cached sort/order variant at once, for no bytes. New pure `components/target/frameCache.ts`
+(`replaceFrameInList`) does the swap.
+
+Two properties make an in-place swap safe rather than merely cheap:
+
+- **A graded row cannot move.** The table's sort keys are `id`, `timestamp_utc` and the five QC metrics
+  (`frameColumns.ts::SortKey`), and **none of them is a field `FramePatch` can change** — so there is no
+  re-ordering for the discarded refetch to have done.
+- **The replacement is identity-stable.** A list that does not hold the id comes back as *the same array*,
+  so a cached list for another target is not replaced by an equal copy, and the untouched rows stay the
+  same objects.
+
+**A bulk action is deliberately left invalidating.** It changes many rows, writes server-computed reject
+reasons (`bulk:worst:fwhm_px`), returns ids rather than rows, and is a deliberate click rather than a
+keystroke — so there is nothing exact to swap in and nothing to gain by guessing. `["target", safe]` and
+`["reject-summary", safe]` are still invalidated on a grade, unchanged: they are small, and they really do
+change.
+
+**Upgrade-safe (§9):** frontend-only. No endpoint, config, schema, on-disk layout, API shape or default
+touched, and the page shows exactly what it showed before.
+
+**Tests (+6).** Four on `replaceFrameInList` (the swap; no mutation of the input; the same-array return for
+an absent id; the empty list), and two on the real page. The page ones are shaped so the **request count**
+is what fails, not a timeout: the refetch mock is set to answer with the graded row too, so the row flips
+under either implementation and the only thing that distinguishes them is whether the full list was fetched
+again. Under a scratch revert the first goes red with `expected 2 to be 1` — one grade, one extra full
+download of the target.
+
+---
+
 ## v0.455.5 — 2026-09-17 — the mixed-pointing guard was O(n²) on a bound that had been removed under it: 15.3 s of frozen tab on the owner's deepest target
 
 *(Builder, branch `claude/sweet-babbage-dmpc84`. Found by asking the previous run's question one more
@@ -86,6 +147,21 @@ what the caller does today. The rest of that list was read this run and is clean
 the full frame list on the Target page (`countQcUncheckable`, `countNewSubsSinceStack`, `needsProcessing`,
 `selectedFrame`, `visible`) and on the Stack form (four `.filter().length`s) is linear, and
 `trailedAccepted` is two sorts, i.e. O(n log n). This was the only superlinear one.
+
+**And there is a second half worth carrying, added while sweeping for siblings: the engine has its own copy
+of this exact rule, and it had already been fixed.** `seestack/stack/pointings.py::detect_mixed_pointings`
+is the same verdict for the same batches, used by the walk-away pre-flight (`pipeline._mixed_pointing_check`),
+and a previous run measured *it* at **2.65 s for a 5,477-sub target** and gave it a fold onto a 0.01° grid,
+with `seestack/mosaicmap.py` getting the same treatment ("5,400 subs took 2.2 s unfolded and 0.05 s folded").
+Both carry the measurement in their docstrings. The TypeScript copy — which computes the identical verdict,
+for the same owner, on the two pages he actually opens — was not touched, because the sweep that found the
+cost followed Python callers. **So the miss was not "nobody thought about the cost"; it was that one rule
+living at two layers has two independent cost stories, and fixing one reads as fixing the thing.** Checked
+this run: the two agree on the verdict (Python filters `accepted_only` + `wcs_json`, the frontend
+`accept && solved &&` finite coordinates; same `LINK_DIST_DEG` 3.0 and `MIN_POINTING_FRAMES` 5), and the
+only remaining difference is that the engine's fold is an approximation for a pair within ~3 % of the link
+distance while the grid here is exact — which the engine's own constant documents as safe in both
+directions, so it is left alone rather than churned.
 
 ---
 

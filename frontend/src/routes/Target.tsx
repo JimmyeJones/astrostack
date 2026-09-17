@@ -62,6 +62,7 @@ import { OverTrimmedTargetNote } from "../components/target/OverTrimmedTargetNot
 import { LatestPictureCard } from "../components/target/LatestPictureCard";
 import { FrameColumnGuide } from "../components/target/FrameColumnGuide";
 import { FRAME_COLUMNS, type SortKey } from "../components/target/frameColumns";
+import { replaceFrameInList } from "../components/target/frameCache";
 import { cardGrainProjection } from "../components/target/grainProjection";
 import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
 import {
@@ -594,8 +595,17 @@ export function TargetView() {
   const patch = useMutation({
     mutationFn: ({ id, body }: { id: number; body: Record<string, unknown> }) =>
       api.patchFrame(safe, id, body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["frames", safe] });
+    onSuccess: (updated) => {
+      // Swap the one row this wrote into every cached frame list, rather than
+      // invalidating and re-downloading every sub of the target — 19 MB over 18
+      // sequential requests on the owner's deepest one, per keystroke. The
+      // endpoint returns the whole updated row and touches no other, and no
+      // field it can change is one of the table's sort keys, so this is the
+      // list a refetch would have produced. See `frameCache.ts`.
+      qc.setQueriesData<Frame[]>(
+        { queryKey: ["frames", safe] },
+        (old) => (old ? replaceFrameInList(old, updated) : old),
+      );
       qc.invalidateQueries({ queryKey: ["target", safe] });
       // A single accept/reject changes the "why frames were left out" breakdown
       // too — invalidate it like every sibling bulk mutation does, or the
