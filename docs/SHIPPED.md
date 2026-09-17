@@ -1,5 +1,36 @@
 # Shipped — the record
 
+## v0.452.2 — 2026-09-17 — the dogfood pass can reach the note it just changed, and the mixed note stops saying one thing twice
+
+*(Builder, branch `claude/sweet-babbage-10p2wj`, found by actually running v0.452.1 in a browser. Tooling +
+copy only — no engine, endpoint, schema, config or default change.)*
+
+**The tooling half.** Both of this run's changes are about a *fault* state: files in `incoming/` the app has
+opened and cannot read. `scripts/agent-dogfood.sh --incoming-lag` seeds only *good* unimported subs, so the
+first pass photographed the healthy branch and the branch this run had actually written was structurally
+unreachable — the missing-observing-site hole (v0.436.1), the click-only Compare modes (v0.440.2) and the
+empty `incoming/` (v0.442.0) a fourth time. The rule generalises one more step: **a state you can only reach
+by putting the app into it is a state no flag will photograph unless the flag puts it there.** This one needs
+*two* things at once — a file that will not parse **and** a whole-library scan that has recorded it (only a
+whole-library scan may write that record) — so seeding a bad file alone would not have been enough either.
+`--incoming-lag` now writes one unreadable sub, scans once, and only then lays down the good waiting ones,
+which leaves the folder in the **mixed** state a real install is in; `DOGFOOD_LAG_DAMAGED=0` gives the
+pre-v0.452.1 shape back and `DOGFOOD_LAG_SUBS=0` reaches the all-damaged branch. The pass prints
+`N of them cannot be read at all` beside the waiting count, so a seeding that silently failed cannot pass
+for the old state.
+
+**The copy half, which only the browser could show.** On the mixed note the new sentence ended *"Nothing else
+is affected, and AstroStack never changes anything in that folder"* — two lines under the note's own
+reassurance, *"Nothing is lost — your subs are safe exactly where they are, and AstroStack never writes to
+that folder."* The board keeps two notes inline, and spending a paragraph of that saying one thing twice is
+exactly the trio v0.444.3 fixed. The clause moved into the all-damaged branch, where the generic reassurance
+stands aside and it is therefore said exactly once; the advice sentence was tightened to one clause in the
+same pass. Two tests now pin both directions — the all-damaged branch contains it, the mixed branch must not.
+
+**Verified in the running app, both branches.** `nothing overflowing, no console errors` at 1440 px and
+420 px on two passes; phone `/` 2,726 px healthy → 2,921 px with the note's extra paragraph, which is one
+paragraph and no new element. Sweep record in [`PROCESS-NOTES.md`](PROCESS-NOTES.md).
+
 ## v0.452.1 — 2026-09-17 — the Dashboard stops offering a scan that can never help
 
 *(Builder, branch `claude/sweet-babbage-10p2wj`, filed and built in the same run as v0.452.0 because that fix
