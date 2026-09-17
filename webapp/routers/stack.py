@@ -567,6 +567,47 @@ def trigger_stack(safe: str, body: dict[str, Any], request: Request) -> dict[str
     return {"job_id": job.id}
 
 
+def _pixel_depth(est: Any, basis: Any) -> float | None:
+    """How many subs land on **one pixel** of the canvas this stack would make —
+    or ``None`` when that is simply the frame count.
+
+    The Stack form has two different questions that both sound like "how deep is
+    this?", and they need two different numbers:
+
+    * *Can this rejection method bite anywhere?* — that is about the **thinnest**
+      part of the raster, and ``StackCanvasBasis.panel_depth``
+      (``stacker.auto_reject_depth``, the thinnest substantial pointing cluster)
+      is the right answer. Nothing here touches it.
+    * *How many subs are on each patch of sky?* — that is about a **typical**
+      pixel, and the thinnest cluster is not it. ``PANEL_LINK_DIST_DEG`` is
+      0.25°, about a fifth of a Seestar frame's short side, so heavily
+      overlapping pointings are labelled *different* clusters: a pixel is covered
+      by several clusters' frames at once, and the thinnest cluster's count is
+      not a per-pixel sample count at all. Measured against the owner's own
+      coverage maps it came out ~0.10× the real depth on 12 of 17 mosaics, which
+      had the form telling him to turn Drizzle off on pictures measured 117–153
+      deep — above the engine's own 100-sample bar (observer issue #901).
+
+    The honest per-pixel answer is canvas area ÷ frame footprint, which is
+    :func:`webapp.field_fulls.field_fulls_of_sky` — deliberately that function
+    and not a second spelling of the same arithmetic, since four other surfaces
+    already answer "how deep is a pixel of this run?" with it. ``est.canvas_w/h``
+    is the **pre-drizzle** canvas, so no drizzle-scale correction applies here.
+
+    ``None`` whenever the canvas is no bigger than one frame — a single field, or
+    a mosaic forced onto the reference canvas — where the caller's existing
+    behaviour is already right and this must not change it.
+    """
+    from webapp.field_fulls import field_fulls_of_sky
+
+    fulls = field_fulls_of_sky(est.canvas_w, est.canvas_h,
+                               frame_w=basis.ref_shape[1],
+                               frame_h=basis.ref_shape[0])
+    if fulls is None or fulls <= 1.0 or est.n_frames <= 0:
+        return None
+    return float(est.n_frames) / fulls
+
+
 @router.get("/api/targets/{safe}/stack-estimate")
 def stack_estimate(
     safe: str, request: Request,
@@ -687,6 +728,7 @@ def stack_estimate(
     best = rejection_reach(
         replace(options, auto_reject=True, drizzle_reject=True),
         est.n_frames, depth=est.panel_depth)
+    pixel_depth = _pixel_depth(est, basis)
     return {
         "n_frames": est.n_frames,
         "canvas_w": est.canvas_w,
@@ -702,6 +744,11 @@ def stack_estimate(
         # drizzle, κ and min/max-k cautions can read the same depth the rejection
         # answers above are computed from, rather than the target's total.
         "panel_depth": est.panel_depth,
+        # …and the same question answered from the canvas rather than from the
+        # pointing clusters — see ``_pixel_depth`` above. This is the one the
+        # form's *sentences* use; ``panel_depth`` stays the one its rejection
+        # answers are computed from, because they mean different things.
+        "pixel_depth": pixel_depth,
         "peak_bytes": est.peak_bytes,
         "peak_gb": round(est.peak_bytes / 1e9, 2),
         "budget_bytes": est.budget_bytes,

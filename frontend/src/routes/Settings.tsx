@@ -277,6 +277,46 @@ export function reprocessNudgeText(status: ReprocessStatus | undefined): string 
   );
 }
 
+/**
+ * What a reprocess run with "also auto-edit each result" **off** would do to the
+ * pictures on the wall — or null when it would do nothing worth saying.
+ *
+ * Every restack is saved as a new result, and the picture a target shows is its
+ * newest result, so an unedited restack quietly becomes the picture on the
+ * Library wall, the life list, the wishlist and the sky map. The dialog's other
+ * promises are all literally true and all answer a different question ("your
+ * existing edits are untouched", "nothing is ever lost") — the edits do survive
+ * on their own runs. It is the *displayed* picture that changes, and until now
+ * nothing said so.
+ *
+ * `staleOnly` picks the count that matches the scope the user chose, so the
+ * sentence can never quote a number bigger than the batch will touch. Null when
+ * the switch is on (the restacks are finished pictures too, so nothing
+ * regresses), when nothing is affected, and on an older backend that doesn't
+ * send the counts.
+ */
+export function reprocessPictureWarning(
+  status: ReprocessStatus | undefined,
+  opts: { staleOnly: boolean; autoEdit: boolean },
+): string | null {
+  if (!status || opts.autoEdit) return null;
+  const n = opts.staleOnly
+    ? status.finished_pictures_stale_only
+    : status.finished_pictures;
+  if (n == null || !Number.isFinite(n) || n <= 0) return null;
+  const subj = n === 1
+    ? "1 of your targets currently shows a finished, edited picture"
+    : `${n} of your targets currently show a finished, edited picture`;
+  return (
+    `${subj}. With this switch off, each restacked target's newest result `
+    + `becomes the picture you see — so ${n === 1 ? "it" : "they"} will show a `
+    + `flat, unstretched stack until you edit or re-run `
+    + `${n === 1 ? "it" : "them"}. Your existing edits aren't lost: they stay `
+    + `with the results that have them, in History. Turn this switch on to keep `
+    + `finished pictures on the wall.`
+  );
+}
+
 // Read-only self-check on Auto's colour path: every unattended auto-edit stamps
 // its finished sky-background cast, and this turns that per-run signal into one
 // plain library-wide answer — of the auto-edited results, how many landed neutral
@@ -355,6 +395,11 @@ export function Maintenance() {
     staleTime: 60_000,
   });
   const nudge = reprocessNudgeText(status.data);
+  // What the batch would do to the pictures on the wall, in the scope actually
+  // chosen. Self-hides entirely when the auto-edit switch is on, when no target
+  // displays a finished picture, and on a backend that doesn't send the counts.
+  const pictureWarning = reprocessPictureWarning(status.data,
+                                                 { staleOnly, autoEdit });
   const castSummary = useQuery({
     queryKey: ["auto-cast-summary"],
     queryFn: api.autoCastSummary,
@@ -398,17 +443,12 @@ export function Maintenance() {
         + "opens as a finished picture, not a flat linear stack. This only sets "
         + "the new results' edits — your existing edits are untouched, and every "
         + "auto-edit is reversible in the editor.\n\n"
-      // With the switch off, name what the user is actually choosing. The newest
-      // result is the picture the Library, life list, wishlist and sky map all
-      // show, so "nothing is lost" — true, the old edits stay on their own
-      // results — used to read as "nothing changes", which it wasn't.
-      : "Each fresh result is a flat linear stack rather than a finished "
-        + "picture, and the newest result is what your Library, life list and "
-        + "sky map show.\n\nTargets whose picture the app finished for you get a "
-        + "fresh Auto edit, so those don't go flat. A target you edited by hand "
-        + "keeps that edit on its old result, but its card will show the flat "
-        + "stack until you open it in the editor — switch on \"Also auto-edit "
-        + "each result\" to finish every one of them.\n\n";
+      // With it off, the newest (unedited) result becomes each target's
+      // displayed picture. That is the one consequence the rest of this dialog
+      // doesn't state — every other sentence is about what is *kept*.
+      : pictureWarning
+        ? `${pictureWarning}\n\n`
+        : "";
     if (
       window.confirm(
         scope
@@ -461,8 +501,13 @@ export function Maintenance() {
           checked={autoEdit}
           onChange={(e) => setAutoEdit(e.currentTarget.checked)}
           label="Also auto-edit each result into a finished picture"
-          description="Applies the one-click Auto look to every restacked result so it opens as a finished picture instead of a flat linear stack. Only sets the new results' edits; your existing edits are untouched and every auto-edit is reversible. Left off, a target whose picture the app finished for you still gets a fresh Auto edit — one you made by hand shows its flat new stack until you open the editor."
+          description="Applies the one-click Auto look to every restacked result so it opens as a finished picture instead of a flat linear stack. Only sets the new results' edits; your existing edits are untouched and every auto-edit is reversible."
         />
+        {pictureWarning && (
+          <Text size="xs" c="dimmed" mt={-8}>
+            {pictureWarning}
+          </Text>
+        )}
         <Group>
           <Button
             color="grape"
