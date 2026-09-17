@@ -1,5 +1,59 @@
 # Shipped — the record
 
+## v0.451.0 — 2026-09-17 — the caption you paste under your picture says what the object *is*
+
+*(Builder, branch `claude/sweet-babbage-ivepzn`. The one genuinely missing half of the Scout's 2026-09-17
+"ready-to-paste share caption" entry — the rest of it turned out to have shipped as v0.385.0, see below.
+PRIORITY 3 (enjoy/share + understand). Frontend-only, offline, no new surface: no config, schema, on-disk,
+endpoint, API-shape or default change, and not one new element on any screen.)*
+
+**What the entry asked for, and what grepping first found.** The idea was a copy-to-clipboard caption carrying
+"the object, the story, and the acquisition stats". Two of those three already existed: **"Copy caption" has
+been in `SavePictureMenu` since v0.385.0**, on the Target hero and on every History run card, built by
+`frontend/src/components/postCaption.ts` from the catalogue identity, the run's sub count, integration, capture
+window and night count, and the stored preview's own scale bar — degrading exactly as the entry wanted (no
+identity → the target's own name; no WCS → no scale clause; no window → no date). The entry's grep had landed
+on `sharePictureText`, which is the **OS share sheet's** title/filename helper and a different thing.
+
+**The missing term was the story.** All the caption could say about *what the reader is looking at* was the
+catalogue's bare type word — *"Andromeda Galaxy (M31), a galaxy — …"* — while the "What am I looking at?" card
+sitting beside the same picture showed the curated sentence the bundled catalogue already carries
+(`ObjectInfo.blurb`: offline, **157 of 157** bundled objects have one, 1–2 sentences, mean 110 characters for
+the first). The endpoint already served it (`webapp/schemas.py`, `routers/targets.py`) and the frontend type
+already declared it; nothing consumed it here. So:
+
+    Andromeda Galaxy (M31) — a stack of 512 subs (1.4 h total), shot over 3 nights,
+    between 3 and 6 Nov 2026 with a Seestar. The nearest large spiral galaxy to our
+    own, about 2.5 million light-years away. The whole frame is about 2.4 full
+    Moons wide.
+
+**The blurb *replaces* the type appositive rather than sitting beside it.** Measured against the real catalogue,
+keeping both stutters — *"North America Nebula (NGC 7000), a nebula — … A vast emission nebula in Cygnus…"* —
+and the blurb says the type in better words in every one of the 157. The appositive stays exactly where it was
+for an object with no blurb, which is what makes this additive rather than a rewrite.
+
+**Nothing is invented, and nothing changes without data.** A blank/absent blurb (an uncurated object, an older
+backend, an unidentified target) gives a caption **byte-identical** to the one before this shipped — the
+existing full-sentence tests were not touched and still pass verbatim. A blurb arriving beside no identity at
+all is ignored rather than told: a blurb only reaches a caller from a catalogue match, so one without an
+identity would be describing something the caption never named. A blurb missing its full stop gets one, so it
+cannot run into the scale sentence behind it.
+
+**Both call sites, so the two surfaces cannot drift:** the menu's `copyCaption` and History's `shareCaption`
+(the sentence that pre-fills the OS share sheet) each pass `identity?.blurb`. One place still owns the wording.
+
+**Tests (+7):** five in `postCaption.test.ts` (the full sentence with a story; the appositive dropped with one
+and kept without; a blank/`null` blurb byte-identical to before; a story never told about an unidentified
+target; an unterminated blurb finished), one in `SavePictureMenu.test.tsx` and one in `History.test.tsx` (the
+end-to-end path through the real `identifyTarget` query). **Five of the seven fail before** — verified by
+stashing the three production files and watching them go red; the other two pin the unchanged branches on
+purpose. `tsc --noEmit` clean, 4,135 vitest tests green, `vite build` clean, Python suite unaffected and green.
+
+**Still open, filed as a lead in [`IMPROVEMENTS.md`](IMPROVEMENTS.md):** the Gallery lightbox still shares with
+the thin `sharePictureText` caption, and the gate is that `GalleryItem` (and `StackRunInfo`) carry none of the
+three preview-geometry fields `storedPreviewScaleBar` needs to keep the scale clause honest on a cropped
+preview.
+
 ## v0.450.0 — 2026-09-17 — the Library wall says which pictures are still too thin to look good
 
 *(Builder, branch `claude/sweet-babbage-4cmy9w`. NEW BEGINNER FEATURE, PRIORITY 3 (understand + trust) with a

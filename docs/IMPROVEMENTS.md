@@ -2481,35 +2481,31 @@ missing. Don't re-file it.)*
 [`SHIPPED.md`](SHIPPED.md) — `ScaleBar.moon_fraction` + `skymarks._moon_disc_box` + `frontend/src/moonDisc.ts`,
 off by default. Don't re-file it.)*
 
-- **🌟 NEW BEGINNER FEATURE (Scout 2026-09-17) — a ready-to-paste, copy-to-clipboard caption for a shared
-  picture: the object, the story, and the acquisition stats, in one line a beginner can post as-is.**
-  *(Pillar: enjoy/share + understand — PRIORITY 3; size **S–M**. Beginner bar: **yes** — a non-expert who
-  just made their first good Andromeda shot wants to post it and has no idea what to write; the app already
-  knows everything the caption needs. Sane default, plain language, offline, additive. Not pro/niche.)*
-  **The gap — checked, and it is narrow on purpose.** The app *does* attach a caption when you share, but it
-  is name + date only: `sharePictureText` returns `"<Name> — captured <date>"` (`frontend/src/share.ts:117`),
-  and the burned-in **labelled picture** (v0.407.0) writes text *onto* the image. What is missing is a
-  **copy-paste text caption** for the post itself — the words that go beside the photo on a phone or a forum —
-  and it is missing the two things that make such a caption worth posting: *what the object is*, and *how much
-  work it represents*. The app has both already. The annotation pipeline resolves the frame's primary
-  catalogue object with a plain-language type/description (`frontend/src/components/fieldObjectList.ts`,
-  `AnnotatedImage`, the bundled Messier/deep-sky catalogue — offline), and the run carries total exposure,
-  sub count and capture window (the same figures `formatCaptureNights` and the "finished picture" surfaces
-  read). So the caption a beginner cannot write themselves — *"M31, the Andromeda Galaxy — a spiral galaxy
-  ~2.5 million light-years away. 512 subs, 1 h 25 m total, shot over 3 nights."* — is one the app can assemble
-  from data it already holds, offered behind a **Copy caption** button next to the existing share controls.
-  **Why a Scout idea, and the three things to check first.** (1) **It must degrade honestly.** A target that
-  is not a catalogue object (a bare pointing, a comet, a custom name) has no description — the caption then
-  drops the story clause and keeps name + stats, exactly the no-date branch `sharePictureText` already models;
-  don't invent a description. (2) **No gear it doesn't know.** Owner Facts forbid hard-coding a scope model
-  (the "ZWO Seestar S50" bug); derive focal length from the frame's own `FOCALLEN` if a gear clause is wanted
-  at all, or omit gear entirely (safer). (3) **Reuse, don't fork, the object-name resolution** — route it
-  through the same helper the annotation overlay uses so the caption and the on-image labels can never name the
-  object two different ways (the `removed.ts`/`fullres.ts` "one place owns the wording" pattern this codebase
-  favours). **Guardrails:** frontend-only or one additive read-only field; no config/schema/on-disk/default
-  change, no network, nothing written to `incoming/`. **Sensible first slice:** the Copy-caption button on the
-  Target hero and Gallery lightbox with name + object description + integration stats; leave a multi-line
-  "detailed" variant and per-platform hashtag flavour for later (or never — clutter is the standing complaint).
+- ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-17) — a ready-to-paste, copy-to-clipboard caption for a shared
+  picture.**~~ — **✅ MOSTLY ALREADY BUILT; the one genuinely missing half shipped as v0.451.0. Entry cut to
+  [`SHIPPED.md`](SHIPPED.md); do not re-pick it.** *(Builder 2026-09-17, grepped before building.)* "Copy
+  caption" has existed since **v0.385.0** (`frontend/src/components/postCaption.ts`, in `SavePictureMenu` on the
+  Target hero and every History run card), already carrying identity, subs, integration, capture window, nights
+  and scale bar, degrading exactly as the entry asks; the entry's grep had landed on `sharePictureText`, the OS
+  share sheet's title/filename helper. What was missing was the entry's middle term — *what the object is* — and
+  v0.451.0 tells the catalogue's own sentence (`ObjectInfo.blurb`, 157/157 bundled objects) in place of the bare
+  type word. One piece is still open: the lead below.
+
+- **LEAD (Builder 2026-09-17, the one piece of the caption entry above that is still open) — the Gallery
+  lightbox shares a picture with the thin `sharePictureText` caption, not the ready-to-post one.**
+  *(Pillar: enjoy/share — PRIORITY 3; size S **if** the gate below is answered, and the gate is the whole
+  item. Low urgency.)* `routes/Gallery.tsx`'s viewer builds its share text from `sharePictureText` (name + date),
+  where the Target hero and History hand the OS sheet `postCaption`'s full sentence — so the same picture is
+  captioned two ways depending on which page you opened it from. **The gate, measured rather than guessed:**
+  the caption's scale clause must describe the *stored preview*, which `storedPreviewScaleBar` decides from
+  `preview_crop` / `preview_north_up_deg` / `preview_geometry_unknown` — and **`GalleryItem` carries none of
+  the three**, nor does `StackRunInfo` (the per-run endpoint the viewer already fetches for the removed-tint
+  caption). Serving them on the listing is not free either: `recovered_preview_crop` costs a **PNG header read
+  per NULL-column run**, and this listing already walks every run of every target. So the shapes worth costing
+  are (a) put the three on `StackRunInfo` and fetch it when the lightbox opens — one extra per-picture request,
+  no library-wide cost — or (b) accept a Gallery caption with no scale clause, which is honest but makes the
+  same picture read differently on two pages. Do **not** pass the plain `scale_bar` through: on a cropped
+  preview that overstates the field, which is the bug `storedPreviewScaleBar` exists to prevent.
 
 - **NEXT SLICES of the "finished / not stretched / thin" card signal — the Library wall shipped as v0.448.0;
   three pieces are left.** *(Scout 2026-09-16, first slice built by the Builder the same day. Pillar:
@@ -3493,6 +3489,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 ## Shipped
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.451.0** — 🌟 PRIORITY 3 (enjoy/share + understand), the one genuinely missing half of the Scout's 2026-09-17 share-caption entry (the rest of it shipped as v0.385.0 — grepped, not assumed): **the caption you paste under your picture now says what the object *is*.** "Copy caption" already carried the identity, sub count, integration, capture window, nights and scale bar; all it could say about the subject was the catalogue's bare type word (*"a galaxy"*), while the "What am I looking at?" card beside the same picture showed the curated sentence the bundled catalogue holds for **157 of 157** objects. `postCaption` now tells it — `ObjectInfo.blurb` through `SavePictureMenu.copyCaption` and History's `shareCaption` — *in place of* the terse appositive, because both together stutter (*", a nebula — … A vast emission nebula …"*). No blurb → the caption is byte-identical to before, existing full-sentence tests untouched; a blurb beside no identity is ignored rather than told; one missing its full stop gets one so it cannot run into the scale sentence. Frontend-only, offline, **no new element on any screen**. Tests +7, five red under a scratch revert. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.450.0** — 🌟 NEW BEGINNER FEATURE (PRIORITY 3, with a PRIORITY 4 motive), slice (b) of the "finished / not stretched / thin" card signal: **the Library wall says which pictures are still too thin to look good.** A card's two numbers are target *totals*, and on a mosaic a total says nothing about what one patch of sky got — thirty subs over a 3×3 raster is three everywhere, and the owner has 26 mosaics — so his own "gibberish" case sat on the wall reading `30/30 frames`. `GET /api/unstretched-pictures` gains `thin`/`thin_count` off the scan it already makes (one endpoint, one wall, one visit), with the depth measured against `derived_light.stacking_field_fulls` so a finished picture's crop cannot read as depth. **No new sentence:** the chip's hint is `thinStackWarning`'s own — the function the Gallery card's orange frame badge already asks — so the two walls cannot disagree about one picture; new `webapp/thinpicture.py` is the *decision* only, a mirror of `THIN_STACK_MAX_FRAMES` (rounding included — JS takes a half up, Python takes it to even) guarded by `tests/test_thin_picture_mirror.py`. **Depth takes the card's one chip slot** when a card is both thin and unstretched: Auto cannot make a one-sub stack anything but a stretched one-sub stack. Tests +20, every substantive one red under a scratch revert (twice: the denominator alone, and the wall's precedence + pointer). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.449.1** — 🟡 PRIORITY 3 (friendliness), filed and built in the same run as v0.449.0 because that fix is what makes the state visible: **the Library wall stops telling someone with a saved edit to press Auto.** The chip's standing hint says *"Open it and press Auto to stretch it into a finished picture"* — and Auto replaces the recipe in the editor, so on a card that is unstretched *because its owner's edit was never exported* that advice discards the work the chip is complaining about (and is wrong about the cause: they did stretch it; the export is what's missing). New additive `UnstretchedItem.unexported_edit`, decided by the same `routers.stack._unexported_edit` History, the Gallery card and the Target hero already read, picks the wording through new `unstretchedHint()`. **One badge, not two** — only the hint changes, because two badges about one picture is the clutter the standing IA priority is about. The three keyed meta reads happen only for a card already failing the finished test, so a healthy library pays for none of them. Tests +4 (two server-side including a wall-vs-Gallery agreement check, two rendered). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.449.0** — 🟡 BUG (friendliness / trust — PRIORITY 3), on three **shipped** surfaces at once, found by probing the premise of the open half of observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903) on the running app rather than building it: **saving an edit made the "Not stretched yet" chip vanish from a card whose bytes had not changed.** `finishedpicture.run_is_a_finished_picture` counted *"the run carries a saved recipe with an enabled op"* as a finished picture — but `routers.editor.put_recipe` writes the recipe row and **nothing else**; no path re-renders a preview on Save. Measured through the real endpoints: the preview PNG's sha1 is unchanged across the save, and the same run's listing says `unexported_edit: true`, i.e. the app already knew. So the chip withdrew from the one card that is unstretched *and* has the user's work invisible on it, the Gallery's per-run chip (v0.448.2) said the same, and the reprocess warning (v0.447.2) over-counted — all three off the one shared predicate. Now a preview is finished when something **baked** it: an editor export's own tone-mapped pixels, or the `preview_display_space` mark `pipeline._auto_edit_process_run` writes beside the bytes — the identical mark `routers.stack._unexported_edit` reads, so the two stop contradicting each other about one run. The enabled-op test is kept as the other necessary half (a bake through an all-disabled recipe renders the linear stack). Tests +3, all three red under a scratch revert; the suite's `_edit` helper now bakes and a new `_save_only` covers the other state, so no existing test was loosened. The #903 remainder is **closed with the measurement** — a hand-saved recipe was never on the wall, so there is nothing for a reprocess to flatten and nothing to carry. Full entry, and the withdrawn carry-forward, in [`SHIPPED.md`](SHIPPED.md).

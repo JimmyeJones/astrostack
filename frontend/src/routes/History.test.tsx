@@ -761,6 +761,36 @@ describe("HistoryView", () => {
     );
   });
 
+  it("carries the catalogue's story of the object into that caption", async () => {
+    // End-to-end through the real identify query: the blurb the "What am I
+    // looking at?" card shows is the sentence the caption posts, in place of the
+    // bare type word. Fails before — the blurb never left `identifyTarget`.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ has_preview: true, has_fits: false, n_frames_used: 240,
+        total_exposure_s: 40 * 60, timestamp_utc: "2026-08-30T22:14:03",
+        capture_night_start: "2026-07-20", capture_night_end: "2026-07-20" }),
+    ]);
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(mkIdentity({
+      blurb: "The brightest nebula in the sky and a vast stellar nursery about "
+        + "1,340 light-years away.",
+    }));
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openSaveShare();
+    fireEvent.click(await menuItem("Copy caption"));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(writeText).toHaveBeenCalledWith(
+      "Orion Nebula (M42) — a stack of 240 subs (40 min total), " +
+        "shot on 20 Jul 2026 with a Seestar. " +
+        "The brightest nebula in the sky and a vast stellar nursery about " +
+        "1,340 light-years away.",
+    );
+  });
+
   it("still copies an honest caption when the target isn't identified", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ has_preview: true, has_fits: false, n_frames_used: 12,
