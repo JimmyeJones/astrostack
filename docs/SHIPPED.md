@@ -1,5 +1,74 @@
 # Shipped — the record
 
+## v0.450.0 — 2026-09-17 — the Library wall says which pictures are still too thin to look good
+
+*(Builder, branch `claude/sweet-babbage-4cmy9w`. NEW BEGINNER FEATURE, PRIORITY 3 (understand + trust) with a
+PRIORITY 4 (image quality) motive. Slice (b) of the "finished / not stretched / thin" card signal filed by the
+Scout 2026-09-16 — (a) shipped as v0.448.0 + v0.448.2. Upgrade-safe: two additive response fields with `0`/`[]`
+defaults, two additive optional TS fields, one optional parameter on a shared frontend helper whose default is
+today's wording; no config, schema, on-disk, endpoint, API-shape or default change. An older frontend ignores
+the fields; an older backend omitting them leaves the wall exactly as it was.)*
+
+**The gap.** A Library card carries two numbers: `N/M frames` and an integration time. Both are **target
+totals**, and on a mosaic a total is the flattering number this app has now corrected in five other places —
+900 subs over a 12×8 raster is about nine on each patch of sky, thirty over a 3×3 is three, and the owner is a
+heavy mosaic user with 26 of them. So a picture that is one sub deep everywhere — his own "gibberish" case,
+per-pixel colour speckle — sat on the wall reading `30/30 frames`, indistinguishable from a good one at 160 px.
+The **Gallery card of the very same run** already turns its frame badge orange for exactly this
+(`FrameCountBadge` → `thinStackWarning`, v0.419.1). The wall said nothing at all.
+
+**What the slice asked for, and what checking it first changed.** The entry said to word it from the per-pixel
+depth that landed in v0.447.3 and *"check what the Target page's readiness card already says before adding a
+second voice on the wall"*. Doing that is what kept this small: there is no second voice, because there is **no
+new sentence**. The chip's hint is `thinStackWarning`'s own message — the same function, asked the same
+question, with the same two numbers — so the wall and the Gallery cannot say different things about one
+picture. The only thing written for this surface is the chip's label.
+
+**Backend.** `GET /api/unstretched-pictures` gains `thin` / `thin_count` beside `items` / `count`. One endpoint
+because it is one wall on one visit: a second would open every project a second time, and this one already
+opens each to pick the displayed run. `scan_unstretched` became `scan_wall_chips`, returning both lists (the
+old name survives as a two-line wrapper).
+
+* **The two lists are not exclusive and neither is a subset of the other.** Stretch is a decision somebody has
+  or hasn't made; depth is a fact about the light. A *finished* one-sub stack is precisely the case worth
+  naming, because it is the one that looks like a picture — so the depth is measured on every target with a
+  picture, including the ones the scan has already decided are finished.
+* **The denominator is `derived_light.stacking_field_fulls`, not the displayed run's own canvas.** A finished
+  picture is a crop (the editor seeds Auto on first open, Auto trims the border), and an editor export records
+  the canvas it *wrote* while carrying the source's frame count forward whole — measuring that against itself
+  reads the picture as deeper than its pixels are, which is the direction that tells a beginner to stop
+  shooting. Pinned by its own test, red under a scratch revert to the row's own canvas.
+* **Cost:** one extra `LIMIT 1` frame row per target for the native sub shape. No file read, no canvas.
+
+**`webapp/thinpicture.py`** is the decision, and only the decision — the threshold has to be applied before the
+list goes on the wire, where the TypeScript cannot reach. `THIN_PICTURE_MAX_SAMPLES` is a hand-mirror of
+`THIN_STACK_MAX_FRAMES`, guarded by `tests/test_thin_picture_mirror.py` the way `test_fullres_cap_mirror.py`
+guards the full-res cap: a stale copy would chip a card the Gallery calls healthy with nothing failing. The
+*rounding* is mirrored too, and it is not decoration — JavaScript's `Math.round` takes a half up and Python's
+`round` takes it to even, so a mosaic measured at exactly 4.5 subs a patch would be thin in one language and
+healthy in the other (`math.floor(x + 0.5)`, with a test at 9 subs over 2.0 fields).
+
+**The wall.** One chip slot, and **depth wins it** when a card is both thin and unstretched: "press Auto"
+cannot make a one-sub stack anything but a stretched one-sub stack — stretching noise only makes it easier to
+see — and the upstream problem is the one worth naming. One chip rather than two for the reason the "Finished"
+chip was never added: clutter is the owner's standing complaint (AGENTS.md §1). Colour follows
+`FrameCountBadge`'s own rule (orange at one sub deep, yellow at 2–4).
+
+**The one new sentence fragment**, and why the shared helper grew a parameter: `thinStackWarning`'s advice ends
+*"check that your subs plate-solved and weren't over-rejected (see the "rejected" count above)"*, which is true
+on the Target, Gallery and Jobs pages and points at nothing on a wall card. A third optional argument
+(`"this-page"` — the default, byte-for-byte today's wording — or `"open-it"`) swaps that clause for *"open it
+and check the "rejected" count"*. Only the pointer moves; the level, the depth and the rest of the advice are
+the same claim about the same picture, asserted as such.
+
+**Tests: +7 Python endpoint, +6 Python mirror/unit, +4 rendered, +3 unit.** The substantive ones are red under
+a scratch revert, verified twice rather than claimed: reverting the depth to the raw frame count fails
+`test_a_mosaic_whose_total_flatters_it_is_named_thin`, `test_the_wall_gets_both_numbers_its_sentence_names`,
+the crop test and both mirror tests; reverting the denominator alone to the row's own canvas fails the crop
+test by itself; and reverting the wall to "stretch wins the slot" with the default wording fails the two
+frontend claims that pin the precedence and the pointer. Nothing was loosened, skipped or rewritten.
+
+
 ## v0.449.1 — 2026-09-17 — the wall stops telling someone with a saved edit to press Auto
 
 *(Builder, branch `claude/sweet-babbage-97be46`, filed and built in the same run as v0.449.0 because that fix

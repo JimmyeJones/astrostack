@@ -2906,6 +2906,24 @@ export interface UnstretchedItem {
   unexported_edit?: boolean;
 }
 
+/** One target whose *displayed* picture is only a few subs deep on any one patch
+ * of sky — see `/api/unstretched-pictures`.
+ *
+ * The count and the field-fulls scale travel rather than the quotient, because
+ * `thinStackWarning` names *both* on a mosaic ("your 30 subs are spread across
+ * about 9 fields of sky, so each part …"), and that is the same function the
+ * Gallery card's badge already asks. */
+export interface ThinPictureItem {
+  safe: string;
+  target_name: string;
+  run_id: number;
+  n_frames_used: number;
+  /** How many single-frame field-fulls of sky the run's canvas covers. Null on a
+   *  single field and wherever the shape can't be measured — the depth is then
+   *  the frame count, exactly as every other consumer of this figure reads it. */
+  field_fulls?: number | null;
+}
+
 /** One folder of `incoming/` holding subs the library has no frame row for —
  * see `/api/incoming-lag`. Every field is defaulted server-side, so an older
  * backend that has no such endpoint simply reports nothing. */
@@ -3947,13 +3965,23 @@ export const api = {
   getOverTrimmedPictures: () =>
     req<{ count: number; items: OverTrimmedItem[] }>("/api/over-trimmed-pictures"),
 
-  // Which targets are showing a flat linear stack instead of a finished picture.
-  // A linear master and a finished auto-edit are both a dark-ish square on a
-  // 160px card, so the wall could not tell them apart and neither can a
-  // beginner — the app can, and this is where it says so. Read-only; it never
-  // writes a recipe.
+  // Which targets are showing a flat linear stack instead of a finished picture,
+  // and which are showing one only a few subs deep. A linear master and a
+  // finished auto-edit are both a dark-ish square on a 160px card, so the wall
+  // could not tell them apart and neither can a beginner — and the only number
+  // on the card is a target total, which on a mosaic says nothing about what one
+  // patch of sky actually got. The app can answer both, and this is where it
+  // says so. One endpoint because it is one wall on one visit: a second would
+  // open every project a second time. Read-only; it never writes a recipe.
+  // `thin`/`thin_count` are optional so an older backend reads as "nothing to
+  // chip", which is what the wall did before they existed.
   getUnstretchedPictures: () =>
-    req<{ count: number; items: UnstretchedItem[] }>("/api/unstretched-pictures"),
+    req<{
+      count: number;
+      items: UnstretchedItem[];
+      thin_count?: number;
+      thin?: ThinPictureItem[];
+    }>("/api/unstretched-pictures"),
 
   // Which folders of `incoming/` hold subs that never reached the library. Its
   // own endpoint for the same reason as the three above, and a different
