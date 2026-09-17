@@ -26,7 +26,26 @@ from webapp.skipped_folders import (
 )
 
 
-def _wait_job(client, job_id, timeout=60):
+#: How long to let a scan job finish before calling it stuck. This is the
+#: harness's *patience*, not an assertion about the scanner — every check in this
+#: file is about what the scan remembered afterwards.
+#:
+#: It was 60 s, and this file was the only one in ``tests/webapp`` waiting on a
+#: scan that short: ``test_pipeline.py`` passes ``timeout=120`` at every scan
+#: call site, ``test_incoming_readonly_guard.py`` waits 180, and the editor,
+#: archive and channel-combine suites all wait 120. Under ``-n 4`` on a 4-core
+#: box — the setup AGENTS.md §7 prescribes — a scan sharing the machine with
+#: three numpy-heavy stacking workers blew the 60 s budget, and
+#: ``test_a_scan_remembers_the_folder_it_could_not_account_for`` failed on
+#: ``job … did not finish in 60s`` with its own captured log showing the scan had
+#: run and emitted its warning. Reproduced on **unmodified ``origin/main``** as
+#: well as on the branch that found it (2026-09-17), and green on both when the
+#: file runs alone. Nothing is loosened by this: a job that genuinely never
+#: finishes still fails the test, two minutes later instead of one.
+_JOB_TIMEOUT_S = 180
+
+
+def _wait_job(client, job_id, timeout=_JOB_TIMEOUT_S):
     end = time.monotonic() + timeout
     while time.monotonic() < end:
         body = client.get(f"/api/jobs/{job_id}").json()
