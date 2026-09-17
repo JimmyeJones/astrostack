@@ -18,6 +18,38 @@ is a queue.
 
 ---
 
+## 2026-09-17 — `--mosaic` dogfood pass after v0.450.0: CLEAN, and the sample cannot draw the new chip either
+
+*(Builder, branch `claude/sweet-babbage-4cmy9w`, run against the merged v0.450.0 tree. A QA sweep record, not
+a bug — filed here per the three-file rule.)*
+
+**Result: CLEAN on both targets.** `nothing overflowing, no console errors` on the field sample and on the 2×2
+mosaic, at 1440 px and 420 px. Auto's trim on the mosaic canvas is **7.9 %**, unchanged and well under the
+~15 % bar AGENTS.md §1 calls a bug. Page heights sit inside the shipped standings — phone `/tonight` 3,635 px,
+the mosaic Target page 3,572 px, `/` 3,115 px, `/life-list` 3,094 px — so no page needs an IA slice on this
+evidence either.
+
+**The new "Thin — keep shooting" chip is structurally invisible to this tooling, and that is deliberate.**
+Both samples measure ~6 subs on a patch (the field sample is 6 subs on one field; the mosaic is 21 over ~3.5
+field-fulls), i.e. comfortably over `THIN_STACK_MAX_FRAMES` — so the default pass stays healthy, no new banner
+enters any page-height baseline, and the chip was verified in jsdom and by the endpoint's own tests instead.
+This is the **same shape** as the blind spot recorded in the block above for the "Not stretched yet" chip, and
+the same answer applies: a sample shaped like a *fault* would make "CLEAN" mean less rather than more (the
+`--incoming-lag` reasoning, v0.442.0). Worth a third, opt-in sample shape only if a second finding ever turns
+up on a wall chip.
+
+**The one thing the "read it as one paragraph" block surfaced is already filed, and this is its second
+reproduction.** On `Sample_M42_mosaic_2_2` — a target that **is** a 2×2 mosaic carrying 4 min — the framing
+verdict still reads *"About a 3×3 mosaic (9 panels) covers all of it. Giving all 9 panels the depth you'd give
+one field (~2 h each) is about 18 h of shooting."*, the identical sentence the single field gets. That is the
+open LEAD in `IMPROVEMENTS.md` → "Autonomy & friendliness" (*"the mosaic effort clause prices the grid from
+scratch on a target that is already a mosaic"*), and it remains real-data-gated for the reason filed there: a
+3×3's panel centres are not a superset of a 2×2's, so whether there is banked depth to subtract cannot be
+settled on this sample. Recorded here only so the count of reproductions is honest — **do not blind-subtract
+the banked hours**.
+
+---
+
 ## 2026-09-17 — The dogfood sample can never draw the "Not stretched yet" chip, on either wall
 
 *(Builder, branch `claude/sweet-babbage-owmvv3`, found while verifying v0.448.2 in a running app. A tooling
