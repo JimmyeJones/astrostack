@@ -71,9 +71,31 @@ SAMPLE_MOSAIC_TARGET_NAME = "Sample: M42 mosaic (2×2)"
 # permanent blind spot.
 SAMPLE_BIG_TARGET_NAME = "Sample: M42 mosaic (2×2, full size)"
 
+# The fourth, opt-in demo: one ordinary single field shot **many hundreds of
+# times**, so a pass finally holds the owner's *magnitude* rather than his shape.
+#
+# Why it exists: every sample above is six subs per pointing, and the owner's
+# library is 104 targets with 5,477 subs on one of them and **35,894** on
+# another. So every surface whose cost is a function of *how much he has* had
+# only ever been exercised at a size where nothing can go wrong — and the dogfood
+# probe could not see it either, because it measures **page height**, and the
+# frames table that carried v0.455.2 lives inside a ``mah="65vh"`` scroll
+# container whose height is by construction independent of its rows. That defect
+# — one DOM row per sub, ~121,000 nodes on his 5,477-sub target — had to be found
+# by reading the code and measuring in jsdom, which is exactly the evidence this
+# demo exists to produce instead.
+#
+# **Read this before believing a "deep" pass:** what it reproduces is the number
+# of *rows*, not the size of a picture. Its sensor is deliberately a third of the
+# others' (see ``_DEEP_WIDTH``) because generation and QC are per-frame and the
+# whole point is to afford hundreds of them — so the surfaces that scale with the
+# frame **count** are genuinely exercised, and the ones that scale with *pixels*
+# are not. Use ``big`` for those.
+SAMPLE_DEEP_TARGET_NAME = "Sample: M42 (deep, many subs)"
+
 #: Which demo to load / ask about. ``"field"`` is the default everywhere, so an
 #: existing caller (and the Dashboard button) is unchanged.
-SampleShape = Literal["field", "mosaic", "big"]
+SampleShape = Literal["field", "mosaic", "big", "deep"]
 
 # Subfolder (inside the target dir) that holds the generated source subs, so a
 # ``remove_files=True`` delete of the target sweeps them away too.
@@ -89,6 +111,23 @@ _PIXSCALE_ARCSEC = 5.0
 # M42 centre (deg) — the demo pretends to be the Orion Nebula.
 _RA_CENTER_DEG = 83.82
 _DEC_CENTER_DEG = -5.39
+
+# The deep sample (see ``SAMPLE_DEEP_TARGET_NAME``): many subs of one pointing.
+#
+# The count is what the demo is *for*. 1,200 is four times the frames table's
+# render window (``frontend/src/frameWindow.ts``: 300) and an order of magnitude
+# past anything this tooling has ever held, while costing about two minutes:
+# generation + ingest + QC is per-frame and measured at ~0.09 s on a 160×120
+# frame against ~0.41 s on the field sample's 480×320, which is the entire reason
+# the sensor is smaller rather than a claim that the owner's is.
+_DEEP_N_SUBS = 1200
+_DEEP_WIDTH = 160
+_DEEP_HEIGHT = 120
+_DEEP_N_STARS = 14
+# One sub every two minutes from 21:00, which is a plausible session and — unlike
+# the field sample's ``22:{10 + index:02d}`` — stays a valid clock past sub 49.
+_DEEP_START_HOUR = 21
+_DEEP_CADENCE_S = 120
 
 
 @dataclass(frozen=True)
@@ -489,6 +528,8 @@ def _dither_offsets(n: int) -> list[tuple[float, float]]:
 
 def sample_target_name(shape: SampleShape = "field") -> str:
     """The reserved display name for one demo shape."""
+    if shape == "deep":
+        return SAMPLE_DEEP_TARGET_NAME
     cfg = _MOSAIC_SAMPLES.get(shape)
     return cfg.name if cfg is not None else SAMPLE_TARGET_NAME
 
@@ -518,6 +559,8 @@ def load_sample(lib: Library, shape: SampleShape = "field") -> SampleStatus:
     the default is the single field the Dashboard's "Try it" button has always
     loaded.
     """
+    if shape == "deep":
+        return _load_deep_sample(lib)
     cfg = _MOSAIC_SAMPLES.get(shape)
     if cfg is not None:
         return _load_mosaic_sample(lib, cfg)
@@ -782,6 +825,110 @@ def write_sample_calibration_frames(
     return n
 
 
+# --- the deep sample -------------------------------------------------------
+
+
+def _deep_date_obs(index: int) -> str:
+    """``DATE-OBS`` for sub ``index`` of the deep session.
+
+    Real arithmetic rather than the field sample's minute-field interpolation:
+    that one is correct for six subs and would write ``22:60:00`` at sub 50.
+    """
+    from datetime import datetime, timedelta
+
+    start = datetime(2024, 11, 15, _DEEP_START_HOUR, 0, 0)
+    return (start + timedelta(seconds=_DEEP_CADENCE_S * index)).strftime(
+        "%Y-%m-%dT%H:%M:%S.000")
+
+
+def _write_deep_fits(
+    path: Path, *, index: int, star_shift: tuple[float, float],
+    stars: list[tuple[int, int, float]],
+) -> None:
+    """One sub of the deep session — the small sensor, a real clock, no WCS.
+
+    ``stars`` is passed in rather than drawn per frame: the catalog is the same
+    sky for every sub (that is what makes them a *session*) and drawing it once
+    keeps 1,200 frames to one catalog rather than 1,200 identical ones.
+    """
+    from astropy.io import fits
+
+    data = _render_star_field(
+        stars, noise_seed=100 + index, star_shift=star_shift,
+        frame=(_DEEP_WIDTH, _DEEP_HEIGHT),
+    )
+    hdu = fits.PrimaryHDU(data=data)
+    hdu.header["BAYERPAT"] = "RGGB"
+    hdu.header["EXPTIME"] = 10.0
+    hdu.header["GAIN"] = 80.0
+    hdu.header["CCD-TEMP"] = -10.0
+    hdu.header["DATE-OBS"] = _deep_date_obs(index)
+    hdu.header["INSTRUME"] = "Seestar S50"
+    hdu.header["OBJECT"] = "M42 (sample)"
+    hdu.writeto(path, overwrite=True)
+
+
+def _load_deep_sample(lib: Library, *, n_subs: int | None = None) -> SampleStatus:
+    """Build the deep demo: one pointing, ``n_subs`` subs, QC'd and solved.
+
+    Shaped like :func:`load_sample`'s single field — same sky centre, same dither
+    pattern, same inject-the-true-WCS step, so the target behaves like an
+    ordinary solved one everywhere — and different only in the two things the
+    demo is about: how many subs it has, and how cheap each one is.
+    """
+    # Read at call time, not bound as a default: the constant is what a caller
+    # (and the suite) overrides, and a default argument would freeze it at import.
+    n_subs = _DEEP_N_SUBS if n_subs is None else n_subs
+    existing = get_sample_status(lib, shape="deep")
+    if existing.loaded:
+        return existing
+
+    entry, proj = lib.create_target(
+        SAMPLE_DEEP_TARGET_NAME, ra_deg=_RA_CENTER_DEG, dec_deg=_DEC_CENTER_DEG,
+        notes="A generated demo target — remove it any time from the Dashboard.",
+    )
+    frame = (_DEEP_WIDTH, _DEEP_HEIGHT)
+    try:
+        sample_dir = lib.target_dir(entry) / _SAMPLE_SUBDIR
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        stars = _star_catalog(
+            seed=42, width=_DEEP_WIDTH, height=_DEEP_HEIGHT, n_stars=_DEEP_N_STARS)
+        offsets = _dither_offsets(n_subs)
+        for i, shift in enumerate(offsets):
+            _write_deep_fits(
+                sample_dir / f"deep_{i:05d}.fit", index=i, star_shift=shift,
+                stars=stars)
+
+        cache = CacheManager(lib.target_dir(entry))
+        sources = sorted(sample_dir.glob("*.fit"))
+        for _ in ingest_files(proj, cache, sources, copy_to_cache=True):
+            pass
+
+        run_qc_and_solve(proj, run_qc=True, run_solve=False, serial=True)
+
+        frames = sorted(proj.iter_frames(), key=lambda f: f.source_path)
+        for db_frame, shift in zip(frames, offsets):
+            if db_frame.id is None:
+                continue
+            ra, dec = _frame_center_deg(shift, frame=frame)
+            proj.update_frame(
+                db_frame.id,
+                wcs_json=_wcs_header_text(shift, frame=frame),
+                ra_center_deg=ra,
+                dec_center_deg=dec,
+                pixscale_arcsec=_PIXSCALE_ARCSEC,
+                width_px=_DEEP_WIDTH,
+                height_px=_DEEP_HEIGHT,
+                bayer_pattern="RGGB",
+            )
+        n_frames = sum(1 for _ in proj.iter_frames())
+    finally:
+        proj.close()
+
+    lib.refresh_target_stats(entry.safe_name)
+    return SampleStatus(loaded=True, safe=entry.safe_name, n_frames=n_frames)
+
+
 def remove_sample(lib: Library) -> bool:
     """Delete the demo targets and their generated files.
 
@@ -789,7 +936,7 @@ def remove_sample(lib: Library) -> bool:
     user asked for — and returns False only when none existed.
     """
     removed = False
-    for shape in ("field", "mosaic", "big"):
+    for shape in ("field", "mosaic", "big", "deep"):
         entry = lib.find_target(sample_target_name(shape))  # type: ignore[arg-type]
         if entry is None:
             continue

@@ -1,5 +1,158 @@
 # Shipped — the record
 
+## v0.455.3 — 2026-09-17 — `scripts/agent-dogfood.sh --deep`: no dogfood pass had ever held the owner's *scale*
+
+*(Builder, branch `claude/sweet-babbage-ro1k5s`, shipped beside v0.455.2 — the bug that found this hole,
+rather than the other way round.)*
+
+**The hole.** Every dogfood pass ever recorded ran a sample of **six subs per pointing**. The owner's library
+is 104 targets, 26 of them mosaics, 64 nights, 271 GB, with **5,477** subs on one target and **35,894** on
+another. So every surface whose cost is a function of *how much he has* had only ever been exercised at a size
+where nothing can go wrong — and the page probe could not see it either, because it measures **height**, and
+the frames table lives inside `<Table.ScrollContainer mah="65vh">` whose height is by construction independent
+of its rows. A table rendering one row per sub measured exactly the same as a table rendering six.
+
+That is the same shape as the missing observing site (v0.436.1), the empty `incoming/` (v0.442.0), the
+click-only Compare modes (v0.440.2), the 1:1 editor preview (v0.446.0) and the absent master dark (v0.455.1)
+— one layer down. Not a *state* the tooling never reached: a **magnitude**. And it had already cost: v0.455.2
+(one DOM row per sub, 28,266 nodes and 4.5 s to first paint on 1,200 subs in Chromium) had to be found by
+reading the route and measuring in jsdom, which is exactly the evidence a flag should produce instead.
+
+**What it does.** `sample_data.load_sample(lib, shape="deep")` builds a fourth demo target — one ordinary
+single field, same sky centre and dither pattern and inject-the-true-WCS step as the field sample, so it
+behaves like an ordinary solved target everywhere — shot **1,200 times**. `_DEEP_N_SUBS` is four times the
+frames table's render window and an order of magnitude past anything this tooling had held, for about two
+minutes of wall clock.
+
+Three design calls worth keeping:
+
+- **The sensor is 160×120, a third of the other samples'.** Generation + ingest + QC is per-frame, measured at
+  ~0.09 s there against ~0.41 s on the field sample's 480×320, and affording hundreds of frames is the entire
+  point. Stated in the flag's own help and in the module docstring, because it is the one caveat that decides
+  what a deep pass is evidence *about*: the surfaces that scale with the frame **count** are exercised, the
+  ones that scale with *pixels* are not. `--big` is for those.
+- **It is deliberately not stacked.** 1,200 subs is a stack nobody in a scheduled run waits for, and nothing
+  this flag measures needs a picture. Pinned by a test, because "stack everything" is the obvious-looking edit.
+- **The pass proves it reached the scale.** `-- deep target: … with 1200 subs`, and an explicit
+  `FEWER THAN 400 SUBS — … this pass is NOT at scale` when it did not. Third time this lesson has been paid
+  for (`location_source`, `proxy_scale`, then `--calibration`'s own first run): a seeding flag needs a line
+  that proves the state was reached, not a line that goes quiet when it was not.
+
+**`scripts/dogfood_deep.mjs` is a measurement rather than a photograph.** It opens the deep target's page and
+prints the three numbers that move with the rows — rows rendered against the app's own sub count, the page's
+total DOM node count, and first-paint time — and then **scrolls to the table's foot** and reports whether the
+window grew. That last one is the only path jsdom structurally cannot cover: it has no `IntersectionObserver`,
+so v0.455.2's auto-grow is unreachable by the unit suite and reachable only from here.
+
+**Both directions verified on the real thing, which is what makes it a finder rather than a hope.** Against
+the fix: `301 rows of 1200 subs · 7,494 nodes · 1,646 ms`, foot reading *"Showing the first 300 of 1,200
+subs / Show all 1,200"*, and `after scrolling to the foot: 601 rows (grew — the observer fired)`, no console
+errors, no failed requests. Against the window reverted in a scratch copy: `1200 rows of 1200 subs · 28,266
+nodes · 4,522 ms`, and the drive's own detector fired — *"ONE ROW PER SUB — the table is unwindowed at 1200
+subs"*. A finder that has been shown to detect the defect it exists for.
+
+One bug in the drive found by its own first run and fixed before it shipped: the sub count was read with an
+in-page `fetch` *before* the first navigation, when the page's origin is `null` — so CORS refused it, the
+count read 0, the one-row-per-sub check was silently disarmed, and the only error logged was about the drive
+rather than the app. It now asks through playwright's own request context.
+
+**Upgrade-safe (§9).** Purely additive: a new `SampleShape` value, a new reserved target name, three additive
+and defaulted response fields (`deep_loaded` / `deep_safe` / `deep_n_frames`) beside the mosaic and big ones,
+and `"deep"` added to the shapes one "remove the sample" sweeps. No existing setting, schema, on-disk path,
+response shape or default changes; nothing in the product UI calls the new shape, exactly like `mosaic` and
+`big`. The existing byte-identity pin on the other two samples' generated pixels still passes untouched.
+
+**Tests (+13).** `tests/webapp/test_sample_data.py` (+5): many subs of one *solved* pointing, all accepted, at
+the deep sensor size and published to the library row; the clock staying a valid time past sub 49 (the field
+sample writes `22:{10 + index:02d}`, which would emit `22:60:00` at sub 50 — a per-frame astropy rejection deep
+into a two-minute generation, which is why the deep session does real arithmetic); the default being past the
+frontend's render window, read out of `frameWindow.ts` by regex because the two constants live in different
+languages and nothing else would notice one moving; a fourth separate target swept by one remove, idempotent;
+and the API round trip leaving the other three untouched. `tests/test_dogfood_deep_anchors.py` (+8): the
+fourth member of the `--big`/`--lag`/probe anchors family — the flag off by default and in the `-h` header,
+the shape literal being one the request model accepts, both status keys existing and defaulting, the
+proved-it-reached-the-scale lines, the deliberate absence of a stack, every `data-testid` the drive addresses
+being one a component really renders, the three browser-only measurements still being made, and the
+past-the-window claim checked against both constants.
+
+## v0.455.2 — 2026-09-17 — the Target page rendered one DOM row per sub, so a 5,477-sub target put ~121,000 nodes on screen
+
+*(Builder, branch `claude/sweet-babbage-ro1k5s`. Found by reading the one page the owner opens every session
+against the one thing no dogfood pass has ever held — his own number of subs — and then measuring it.)*
+
+**The defect.** `routes/Target.tsx` rendered the frames table as `list.map(...)` over the **complete** frame
+list. That list is complete on purpose: `api.listFrames` pages until a short page proves it has every row (the
+2000-frame truncation bug is why), and every badge, count and outlier test on the page — `streakedAccepted`,
+`trailedAccepted`, `countQcUncheckable`, `detectMixedPointings`, `countNewSubsSinceStack` — is computed over
+all of it and has to stay exact. The **rows** are a different question, and nothing had ever asked it.
+
+**Measured, with the real component in jsdom, not estimated.** A frame row costs ~22 DOM nodes — icons,
+tooltips, badges, the accept control:
+
+| subs | nodes before | nodes after | first paint before | after |
+|------|--------------|-------------|--------------------|-------|
+|    20 |         673 |         673 |  0.9 s |  0.8 s |
+|   200 |       4,633 |       4,633 |  2.2 s |  2.1 s |
+| 2,000 |      44,233 |   **6,840** | 13.6 s |  3.0 s |
+| 5,477 |     120,727 |   **6,840** | 41.1 s |  2.6 s |
+
+5,477 is not a synthetic number: it is the size of the owner's largest target as measured by the run that
+shipped `webapp/estimate_cache.py` (v0.424.2), and his library holds one of **35,894**, which is ~790,000
+nodes. The cost is now **flat** in the number of subs, which is the durable property rather than the ratio.
+
+**And then in a real browser, on 1,200 real subs** — the `--deep` sample v0.455.3 added in the same run, so
+this is Chromium rather than jsdom and the app's own data rather than a mock: **1,200 rows / 28,266 nodes /
+4,522 ms** to first paint before, **301 rows / 7,494 nodes / 1,646 ms** after. That pass is also the only
+place the **auto-grow** is exercised at all — jsdom has no `IntersectionObserver` — and it reported
+`after scrolling to the foot: 601 rows (grew — the observer fired)`.
+
+**Why no page-height baseline ever saw it.** The table lives inside `<Table.ScrollContainer mah="65vh">`, so
+the page does not grow with the rows — the whole cost is nodes, render time and memory, on a page opened from
+a phone. Every `scripts/agent-dogfood.sh` probe measures *height*, against a sample of **six** subs. This is
+the same class of blind spot as the missing observing site, the empty `incoming/` and the absent master dark,
+one layer down: the tooling has never held the owner's **scale**. Filed as the next flag under
+"Infra / maintainability".
+
+**The fix, and why nothing is removed.** New pure `frontend/src/frameWindow.ts` holds the window arithmetic
+and the one sentence: `FRAME_WINDOW_STEP` (300 — about fifteen screens of scrolling before the first growth,
+for the node cost of a 300-sub target), `growFrameWindow`, `frameWindowForIndex` and `frameWindowNote`. The
+table renders `list.slice(0, shown)`. The owner's one hard constraint is that nothing may be removed, so the
+window **grows as you scroll**: an `IntersectionObserver` on the table's foot row, with `root` left null
+deliberately — intersection is computed against the viewport *clipped by every scrolling ancestor*, which is
+exactly the question when the foot sits inside a 65vh scroll container, and it needs no handle on Mantine's
+`ScrollArea` internals. `rootMargin: "600px"` grows a screen early, so the rows are there before the reader
+arrives and scrolling feels as it always did. The foot also carries **"Show all N"**, which is the guaranteed
+path: a browser without `IntersectionObserver` keeps every sub one click away rather than none.
+
+Three details that are the difference between a window and a truncation:
+
+- **Keyboard grading grows it.** `j`/`ArrowDown` walks the full list, so it could select a frame the window
+  had not rendered — a selection highlighting nothing, beside a preview pane showing a frame with no row.
+  `frameWindowForIndex` grows in whole steps to cover the index, so the keyboard and the mouse look at one
+  table.
+- **A re-sort starts at the top again.** The window means "the head of this ordering"; carrying a grown one
+  across a sort change would render 900 rows of a list nobody has scrolled. Sorting is **server-side**, which
+  is also why a window is honest here: the worst subs are a column-heading tap away, never at the bottom of a
+  list nobody reaches.
+- **`list.length` is deliberately not in that reset.** Accepting or rejecting a frame invalidates the frames
+  query, and a window that reset on every refetch would snap the reader back to row 300 mid-grading.
+
+**The note says nothing in the ordinary case.** `frameWindowNote` returns `null` when every sub is rendered,
+so a target smaller than one window is byte-identical to before — no extra row, no "showing all 12 of 12" on
+a page whose standing complaint is clutter. Verified as a test rather than asserted in prose.
+
+**Upgrade-safe (§9).** Frontend-only: no endpoint, response shape, config, schema, on-disk layout or default
+change. Nothing persists, so an upgrade and a fresh load are indistinguishable.
+
+**Tests (+12).** `frontend/src/frameWindow.test.ts` (8, pure): a step, the clamp at the end of the list, the
+shared default step, the off-by-one at the window's last row (the direction that would render one row short of
+the selection), growth in whole steps, never shrinking, silence when everything is shown, and the sentence
+with both numbers grouped. `routes/Target.test.tsx` (4, on the real page): one window of rows rather than one
+per sub plus the sentence; "Show all N" rendering every row and the foot then withdrawing; a target smaller
+than one window left exactly as it was; and the keyboard walking off the end growing the window. **Three of
+the four fail before** — verified by reverting the window in a scratch copy of the route and re-running (3
+failed, 1 passed), the one that passes being the parity test, whose job is to pass both ways.
+
 ## v0.455.1 — 2026-09-17 — `scripts/agent-dogfood.sh --calibration`: no dogfood pass had ever held a master dark
 
 *(Builder, branch `claude/sweet-babbage-90ekf4`, shipped beside v0.455.0 — the bug that building this flag

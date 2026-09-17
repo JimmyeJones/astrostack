@@ -25,6 +25,8 @@
 #                                           #   (one of them damaged, and scanned, so the
 #                                           #    "these can't be read" note is reachable too)
 #   scripts/agent-dogfood.sh --calibration   # ALSO build a master dark + flat and stack WITH them
+#   scripts/agent-dogfood.sh --deep         # ALSO one field shot 1,200 times: the owner's SCALE,
+#                                           #   and the only pass that measures DOM node counts
 #
 # --no-site turns OFF something a normal pass now does by default. Every pass
 # before 2026-09-12 left the scratch install with no site at all: the bundled
@@ -161,7 +163,7 @@ REPO="$PWD"
 
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
 DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0; DO_MOSAIC=0
-DO_BIG=0
+DO_BIG=0; DO_DEEP=0
 DO_SITE=1; DO_LAG=0; DO_CAL=0
 # How many aged subs --incoming-lag leaves in the scratch incoming/, and how old
 # it makes them. Eleven days is the observer's own measurement; the count is
@@ -195,6 +197,7 @@ for arg in "$@"; do
     --no-site) DO_SITE=0 ;;
     --incoming-lag) DO_LAG=1 ;;
     --calibration) DO_CAL=1 ;;
+    --deep) DO_DEEP=1 ;;
     # The whole header block, found rather than hard-coded: a fixed line count
     # silently truncates -h every time the header grows, which it has.
     -h|--help) sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;;
@@ -504,6 +507,42 @@ wait_job() {  # wait_job <job_id> [tries] -> prints the final state
   done
   echo "${state:-unknown}"
 }
+
+# 3d-bis. The deep sample (--deep): one ordinary field shot 1,200 times, so a
+#     pass finally holds the owner's *magnitude*. Every other sample here is six
+#     subs per pointing and his library has 5,477 on one target and 35,894 on
+#     another — and the page probe measures **height**, which the frames table's
+#     `mah="65vh"` scroll container makes independent of its rows by
+#     construction. That is how v0.455.2 (one DOM row per sub, ~121,000 nodes on
+#     his 5,477-sub target) survived every clean pass ever recorded and had to be
+#     found by reading the code instead.
+#
+#     Deliberately NOT stacked: 1,200 subs is a stack nobody in a scheduled run
+#     will wait for, and nothing this flag exists to measure needs a picture. And
+#     read its one caveat before believing a deep pass: its sensor is 160x120,
+#     a third of the other samples', because generation + QC is per-frame
+#     (~0.09 s against ~0.41 s) and the whole point is to afford hundreds. So the
+#     surfaces that scale with the frame **count** are exercised and the ones
+#     that scale with *pixels* are not — that is what --big is for.
+DEEP_SAFE=""
+if [ "$DO_DEEP" = 1 ] && [ "$DO_EMPTY" = 0 ]; then
+  echo "-- loading the bundled DEEP sample (one field, ~1,200 subs; ~2 min)"
+  curl -sf -X POST "$BASE/api/sample" -H 'Content-Type: application/json' \
+       -d '{"shape":"deep"}' >/dev/null || echo "warn: deep sample load failed"
+  DEEP_SAFE="$(curl -sf "$BASE/api/sample" \
+               | python -c 'import json,sys; print(json.load(sys.stdin).get("deep_safe") or "")' \
+               2>/dev/null || true)"
+  DEEP_N="$(curl -sf "$BASE/api/sample" \
+            | python -c 'import json,sys; print(json.load(sys.stdin).get("deep_n_frames") or 0)' \
+            2>/dev/null || echo 0)"
+  # A line that proves the state was reached, not a line that is silent when it
+  # was not — the guard --calibration's own first run had to learn (v0.455.1).
+  echo "-- deep target: ${DEEP_SAFE:-<none>} with ${DEEP_N} subs"
+  if [ "${DEEP_N:-0}" -lt 400 ]; then
+    echo "   [deep] FEWER THAN 400 SUBS — the frames table's render window is 300,"
+    echo "   [deep] so this pass is NOT at scale and measures nothing this flag is for"
+  fi
+fi
 
 # 3e. Master darks and flats (--calibration). See the header block: the scratch
 #     install's calibration registry has been EMPTY on every pass ever recorded,
@@ -843,6 +882,18 @@ if [ "$DO_PROBE" = 1 ] || [ "$DO_EDITOR" = 1 ]; then
            TARGET_SAFE="$BIG_SAFE" TARGET_RUN_ID="$BIG_RUN" node editor.mjs) \
           || echo "warn: full-size editor drive failed"
       fi
+    fi
+    # …and the deep target, which is measured rather than photographed: row
+    # counts and DOM node counts against the app's own sub count, plus the
+    # auto-grow, which is the one path jsdom structurally cannot reach (it has
+    # no IntersectionObserver).
+    if [ -n "$DEEP_SAFE" ]; then
+      mkdir -p "$SHOTS/deep"
+      echo "-- measuring the frames table at SCALE on the deep target"
+      cp "$REPO/scripts/dogfood_deep.mjs" "$PW_DIR/deep.mjs"
+      (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS/deep" \
+         TARGET_SAFE="$DEEP_SAFE" node deep.mjs) \
+        || echo "warn: deep drive failed"
     fi
     echo "-- screenshots: $SHOTS"
   fi

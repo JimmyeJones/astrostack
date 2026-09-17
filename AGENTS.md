@@ -926,6 +926,30 @@ the repo.
 > any run that touches calibration, the scanner's folder classification, or the
 > health card's vocabulary.
 >
+> **And no pass had ever held the owner's *scale* — `--deep`** *(added 2026-09-17
+> with v0.455.3)*. Every sample here is **six subs per pointing**; his library has
+> **5,477** subs on one target and **35,894** on another. So every surface whose
+> cost is a function of *how much he has* had only ever been exercised where
+> nothing can go wrong — and this probe could not see it either, because it
+> measures **page height**, and the frames table sits in a `mah="65vh"` scroll
+> container whose height is by construction independent of its rows. A table
+> rendering one DOM row per sub measured exactly the same as one rendering six,
+> which is how **v0.455.2** (28,266 nodes and 4.5 s to first paint on 1,200 subs
+> in Chromium) survived every clean pass and had to be found by reading the
+> route. This is the missing-site / empty-`incoming/` / click-only-Compare /
+> no-master-dark hole **one layer down: a magnitude, not a state.** `--deep`
+> loads a fourth sample — one ordinary field shot **1,200 times** — and
+> `scripts/dogfood_deep.mjs` prints the three numbers that move with the rows
+> (rows rendered against the app's own sub count, DOM nodes, first paint) and
+> then **scrolls the table's foot** to check the window grows, which is the one
+> path jsdom can never cover (it has no `IntersectionObserver`). Two caveats,
+> both load-bearing: it is **not stacked** (1,200 subs is a stack nobody in a
+> run waits for, and nothing here needs a picture), and its sensor is
+> **160×120** because generation + QC is per-frame — so the surfaces that scale
+> with the frame **count** are exercised and the ones that scale with *pixels*
+> are not. Use it on any run that touches the frames table, a per-sub list, or
+> anything whose cost grows with a target's depth; use `--big` for pixels.
+>
 > **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
 > installed): the same probe against an app with **no data at all**. Every
 > measurement this script took before 2026-09-07 was of the *sample-loaded* app, so
