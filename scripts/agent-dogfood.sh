@@ -517,6 +517,14 @@ wait_job() {  # wait_job <job_id> [tries] -> prints the final state
 #     his 5,477-sub target) survived every clean pass ever recorded and had to be
 #     found by reading the code instead.
 #
+#     One side effect to expect rather than investigate: this target is by far
+#     the deepest one in the scratch library, so on a --deep pass the planner's
+#     prescriptive cards ("your best night is …", the week plan, next-best-move)
+#     all name it. That is them working, not drifting — but it does mean a --deep
+#     pass is a poor one on which to read the Tonight column as one paragraph,
+#     because every card is answering about the same target for the same reason.
+#     Read that block on an ordinary or --mosaic pass.
+#
 #     Deliberately NOT stacked: 1,200 subs is a stack nobody in a scheduled run
 #     will wait for, and nothing this flag exists to measure needs a picture. And
 #     read its one caveat before believing a deep pass: its sensor is 160x120,
