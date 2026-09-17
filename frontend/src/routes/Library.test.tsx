@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Library, UNSTRETCHED_HINT, expo } from "./Library";
 import { UNSTRETCHED_UNEXPORTED_HINT } from "../unstretched";
+import { thinStackWarning } from "../components/target/thinStack";
 import * as client from "../api/client";
 import type { Target } from "../api/client";
 
@@ -298,5 +299,84 @@ describe("Library — the \"Not stretched yet\" chip", () => {
     await waitFor(() =>
       expect(screen.getByText("Orion Nebula")).toBeInTheDocument());
     expect(screen.queryByText("Not stretched yet")).not.toBeInTheDocument();
+  });
+});
+
+describe("Library — the \"Thin — keep shooting\" chip", () => {
+  // The other thing a Library card could not say about itself. The only number
+  // on it is the target's *total* frame count, which on a mosaic says nothing
+  // about what one patch of sky got: thirty subs over a 3x3 raster is three
+  // everywhere. The Gallery card of the very same run already turns its frame
+  // badge orange; the wall said nothing at all.
+
+  it("chips a mosaic whose total flatters it, and not a deep single field", async () => {
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([
+      mk("Orion Nebula", []), mk("Andromeda", []),
+    ]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 0, items: [], thin_count: 1,
+      thin: [{ safe: "Andromeda", target_name: "Andromeda", run_id: 7,
+               n_frames_used: 30, field_fulls: 9 }],
+    });
+    renderLibrary();
+
+    await waitFor(() =>
+      expect(screen.getByText("Thin — keep shooting")).toBeInTheDocument());
+    expect(screen.getAllByText("Thin — keep shooting")).toHaveLength(1);
+  });
+
+  it("says both numbers, so the card and the Gallery agree about one picture", async () => {
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Andromeda", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 0, items: [], thin_count: 1,
+      thin: [{ safe: "Andromeda", target_name: "Andromeda", run_id: 7,
+               n_frames_used: 30, field_fulls: 9 }],
+    });
+    renderLibrary();
+
+    const chip = await screen.findByText("Thin — keep shooting");
+    const title = chip.closest("[title]")?.getAttribute("title") ?? "";
+    // `thinStackWarning`'s own sentence, word for word — not a second one.
+    expect(title).toBe(
+      thinStackWarning(30, 9, "open-it")?.message);
+    expect(title).toContain("Your 30 subs are spread across about 9 fields of sky");
+    expect(title).toContain("only about 3 subs on it");
+    // A wall card carries no "rejected" count for the sentence to point at.
+    expect(title).toContain('open it and check the "rejected" count');
+    expect(title).not.toContain("count above");
+  });
+
+  it("gives depth the slot when a card is both thin and unstretched", async () => {
+    // "Press Auto" cannot make a one-sub stack anything but a stretched one-sub
+    // stack — stretching noise only makes it easier to see. The upstream
+    // problem is the one worth naming, and one chip rather than two because
+    // clutter is the owner's standing complaint.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Andromeda", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 1,
+      items: [{ safe: "Andromeda", target_name: "Andromeda", run_id: 7 }],
+      thin_count: 1,
+      thin: [{ safe: "Andromeda", target_name: "Andromeda", run_id: 7,
+               n_frames_used: 1, field_fulls: null }],
+    });
+    renderLibrary();
+
+    await waitFor(() =>
+      expect(screen.getByText("Thin — keep shooting")).toBeInTheDocument());
+    expect(screen.queryByText("Not stretched yet")).not.toBeInTheDocument();
+  });
+
+  it("renders the wall exactly as before when the backend omits the list", async () => {
+    // Additive fields: an older backend must read as "nothing to chip", never
+    // as a chip on everything.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Orion Nebula", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 0, items: [],
+    });
+    renderLibrary();
+
+    await waitFor(() =>
+      expect(screen.getByText("Orion Nebula")).toBeInTheDocument());
+    expect(screen.queryByText("Thin — keep shooting")).not.toBeInTheDocument();
   });
 });
