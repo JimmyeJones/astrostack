@@ -651,6 +651,137 @@ def _load_mosaic_sample(lib: Library, cfg: _MosaicSample = _MOSAIC_SMALL) -> Sam
     return SampleStatus(loaded=True, safe=entry.safe_name, n_frames=n_frames)
 
 
+# ---- generated calibration frames (dogfood tooling only) -------------------
+#
+# Nothing in the running app calls these: ``POST /api/sample`` writes *lights*
+# into the library and has no business putting folders into anybody's
+# ``incoming/``. They exist so ``scripts/agent-dogfood.sh --calibration`` can put
+# a scratch install into the one state no pass has ever been in — holding a
+# master dark and a master flat — without hand-rolling FITS in a shell heredoc,
+# exactly as ``--incoming-lag`` reuses ``_write_sample_fits``.
+#
+# Why that state matters: every calibration surface in this app (the masters
+# list, ``/api/calibration/incoming``'s one-click offer, the defect census, the
+# per-target suggestions, ``auto_bind_calibration``, and the "darks were applied"
+# branch of the health vocabulary) has only ever been photographed empty, and the
+# health card tells the owner on *every* stack that adding darks is the single
+# biggest cleanup available to him. The app has been pushing him toward a state
+# its own tooling has never once occupied.
+
+#: Frames per generated calibration folder. Above ``discover.MIN_FRAMES`` (5) so
+#: the folder is actually offered, and small enough that a pass stays quick.
+_CAL_N_FRAMES = 6
+
+#: The sensor pedestal the lights already carry. ``_render_star_field`` draws its
+#: sky at 1000 ADU, so a dark at this level leaves ~400 ADU of genuine sky behind
+#: once it is subtracted — a physically sensible split rather than a number that
+#: would drive the stack negative.
+_CAL_BIAS_ADU = 600.0
+
+#: Read noise on a single dark, in ADU. Well under the lights' own 50, so the
+#: median of six frames is a clean pedestal rather than something that would add
+#: grain to every calibrated sub.
+_CAL_DARK_SIGMA = 8.0
+
+#: Fixed-pattern hot pixels planted in every dark frame, as a fraction of the
+#: sensor's pixels, and how far above the pedestal they sit. Fixed positions
+#: across the set is what *makes* them hot pixels rather than noise, and it is
+#: what the defect census reads a master dark for.
+#:
+#: **Read this before believing a calibrated sample picture:** the sample's
+#: *lights* carry no hot pixels (their pixels are pinned bit-identical by the
+#: baselines every earlier pass was measured on, and v0.386.0's parity test), so
+#: repairing these costs the lights a few interpolated pixels and gains them
+#: nothing. That is fine for what the flag is for — putting the defect census and
+#: its repair offer in front of a browser — and dishonest if read as "calibration
+#: improved this picture". The script says so in its own output.
+_CAL_HOT_PIXEL_FRAC = 0.0002
+_CAL_HOT_PIXEL_ADU = 12000.0
+
+#: Corner falloff of the generated flat, as a fraction of the centre level.
+#: Deliberately *gentle*: the sample's lights are drawn with no vignette at all,
+#: so dividing by a strongly vignetted flat would brighten their corners by the
+#: same amount and put an artefact into the picture that no real install has.
+#: Five percent is enough for the flat to be a real flat and small enough that
+#: the final gradient pass absorbs it.
+_CAL_FLAT_VIGNETTE = 0.05
+
+#: Level the flat is drawn at. Flats are shot to about half well depth.
+_CAL_FLAT_ADU = 30000.0
+_CAL_FLAT_SIGMA = 120.0
+
+
+def _calibration_frame(kind: str, *, index: int,
+                       frame: tuple[int, int]) -> np.ndarray:
+    """One generated calibration frame's raw Bayer pixels, uint16.
+
+    ``kind`` is the FITS frame kind (``"dark"``/``"bias"``/``"flat"``). Every
+    frame of a set shares its fixed pattern (hot pixels, vignette) and draws its
+    own noise, which is exactly the structure a median combine exists to exploit.
+    """
+    width, height = frame
+    rng = np.random.default_rng(9_000 + index)
+    if kind == "flat":
+        yy, xx = np.indices((height, width))
+        # Radius normalised so the *corner* is 1.0, i.e. the falloff constant
+        # means what it says whatever the sensor's aspect ratio.
+        cx, cy = (width - 1) / 2.0, (height - 1) / 2.0
+        r2 = ((xx - cx) ** 2 + (yy - cy) ** 2) / (cx * cx + cy * cy)
+        img = _CAL_FLAT_ADU * (1.0 - _CAL_FLAT_VIGNETTE * r2)
+        img = img + rng.normal(0.0, _CAL_FLAT_SIGMA, size=(height, width))
+        return np.clip(img, 0, 65535).astype(np.uint16)
+
+    img = rng.normal(_CAL_BIAS_ADU, _CAL_DARK_SIGMA, size=(height, width))
+    if kind == "dark":
+        n_hot = max(1, int(round(width * height * _CAL_HOT_PIXEL_FRAC)))
+        # A separate, index-independent stream: the hot pixels must land in the
+        # *same* places in every frame of the set or they are not a fixed
+        # pattern, and a median combine would erase them.
+        hot = np.random.default_rng(4242)
+        ys = hot.integers(0, height, size=n_hot)
+        xs = hot.integers(0, width, size=n_hot)
+        img[ys, xs] += _CAL_HOT_PIXEL_ADU
+    return np.clip(img, 0, 65535).astype(np.uint16)
+
+
+def write_sample_calibration_frames(
+    folder: Path | str, kind: str, *, n: int = _CAL_N_FRAMES,
+    frame: tuple[int, int] | None = None,
+) -> int:
+    """Write ``n`` generated calibration frames of ``kind`` into ``folder``.
+
+    ``kind`` is ``"dark"``, ``"flat"`` or ``"bias"``. The headers match the
+    sample lights' own acquisition (same sensor size, ``EXPTIME``, ``GAIN``,
+    ``CCD-TEMP``, ``BAYERPAT``) so a master built from them is a *matching*
+    master — a mismatched one is refused by the registry, which would leave the
+    pass in the empty state it is trying to escape. A flat is the exception on
+    exposure, as a real one is: it is shot short.
+
+    Every frame declares itself with ``IMAGETYP``, because that card — never the
+    folder's name — is the only thing :mod:`seestack.calibrate.discover` will
+    classify a folder from. Returns the number of files written.
+    """
+    from astropy.io import fits
+
+    if kind not in ("dark", "flat", "bias"):
+        raise ValueError(f"kind must be dark/flat/bias, not {kind!r}")
+    size = frame if frame is not None else (_WIDTH, _HEIGHT)
+    out = Path(folder)
+    out.mkdir(parents=True, exist_ok=True)
+    exptime = {"dark": 10.0, "bias": 0.0, "flat": 2.0}[kind]
+    for i in range(n):
+        hdu = fits.PrimaryHDU(data=_calibration_frame(kind, index=i, frame=size))
+        hdu.header["IMAGETYP"] = kind.capitalize()
+        hdu.header["BAYERPAT"] = "RGGB"
+        hdu.header["EXPTIME"] = exptime
+        hdu.header["GAIN"] = 80.0
+        hdu.header["CCD-TEMP"] = -10.0
+        hdu.header["DATE-OBS"] = f"2024-11-15T21:{30 + i:02d}:00.000"
+        hdu.header["INSTRUME"] = "Seestar S50"
+        hdu.writeto(out / f"{kind}_{i:03d}.fit", overwrite=True)
+    return n
+
+
 def remove_sample(lib: Library) -> bool:
     """Delete the demo targets and their generated files.
 

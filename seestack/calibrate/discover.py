@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -183,27 +184,42 @@ def _sample_indices(n: int, k: int) -> list[int]:
     return seen
 
 
-def classify_folder(
-    folder: str | Path,
+def classify_frames(
+    paths: Sequence[Path],
     *,
-    min_frames: int = MIN_FRAMES,
     sample: int = SAMPLE_HEADERS,
     load_header: Any = None,
-) -> tuple[str, dict[str, int], list[Any], int] | None:
-    """Decide whether ``folder`` holds calibration frames of one kind.
+) -> tuple[str, dict[str, int], list[Any]] | None:
+    """Do these frames, by their own headers, all declare **one** calibration slot?
 
-    Returns ``(master_kind, declared_tally, sampled_header_infos, n_files)``, or
-    ``None`` when the folder is not a confident calibration folder. The rule is
-    deliberately strict, because the cost of a false positive (a "master dark"
-    built out of somebody's subs) is far higher than the cost of staying quiet:
+    Returns ``(master_kind, declared_tally, sampled_header_infos)`` or ``None``.
+    ``paths`` is already-sorted (see :func:`_fits_files_in`), because the even
+    sampling below has to pick the same frames on every pass.
 
-    * at least ``min_frames`` FITS files directly inside it;
+    Split out of :func:`classify_folder` so the **scanner** can ask the identical
+    question of a unit's files before ingesting them as a target
+    (:func:`seestack.io.scanner.scan_and_organize`). A folder of darks under
+    ``incoming/`` is a folder this module offers to build a master from *and* a
+    folder the scan used to turn into a light target called "Darks" — two parts of
+    one app disagreeing about what the same files are. They now read the frames
+    with one function, so the set the offer lists and the set the scan passes over
+    cannot drift apart.
+
+    The rule is deliberately strict, because the cost of a false positive (a
+    "master dark" built out of somebody's subs, or a night of real subs silently
+    not ingested) is far higher than the cost of staying quiet:
+
     * **every** sampled frame declares a kind we recognise — one that said
-      nothing means we don't know, and "don't know" is not an offer;
+      nothing means we don't know, and "don't know" is not an answer;
     * every declaration maps to the **same** master slot (``dark``/``flat``/
       ``bias``), with flat-darks counting as darks;
     * nothing declares itself a **light**. One sub in the sample rules the
-      folder out immediately.
+      set out immediately.
+
+    Note what is *not* here: the :data:`MIN_FRAMES` floor. That is the **offer's**
+    bar — "is this worth combining into a master?" — and it is the wrong question
+    for the scanner, where three frames that all say "I am a dark" are no more a
+    target than six are.
 
     ``load_header`` is injectable for tests; it defaults to
     :func:`seestack.io.fits_loader.load_header`.
@@ -213,10 +229,8 @@ def classify_folder(
         load_header = _load
     from seestack.io.fits_loader import frame_kind_from_header
 
-    paths = _fits_files_in(Path(folder))
-    if len(paths) < min_frames:
+    if not paths:
         return None
-
     declared: dict[str, int] = {}
     infos: list[Any] = []
     master_kind: str | None = None
@@ -243,6 +257,30 @@ def classify_folder(
 
     if master_kind is None or not infos:
         return None
+    return master_kind, declared, infos
+
+
+def classify_folder(
+    folder: str | Path,
+    *,
+    min_frames: int = MIN_FRAMES,
+    sample: int = SAMPLE_HEADERS,
+    load_header: Any = None,
+) -> tuple[str, dict[str, int], list[Any], int] | None:
+    """Decide whether ``folder`` holds calibration frames of one kind.
+
+    Returns ``(master_kind, declared_tally, sampled_header_infos, n_files)``, or
+    ``None`` when the folder is not a confident calibration folder — the frame
+    rule of :func:`classify_frames` plus this module's own ``min_frames`` floor,
+    which is the *offer's* bar and belongs here rather than in the shared rule.
+    """
+    paths = _fits_files_in(Path(folder))
+    if len(paths) < min_frames:
+        return None
+    found = classify_frames(paths, sample=sample, load_header=load_header)
+    if found is None:
+        return None
+    master_kind, declared, infos = found
     return master_kind, declared, infos, len(paths)
 
 

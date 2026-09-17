@@ -1,5 +1,96 @@
 # Shipped — the record
 
+## v0.455.0 — 2026-09-17 — a folder of darks under `incoming/` became a light target, in the one place the app itself asked for it
+
+*(Builder, branch `claude/sweet-babbage-90ekf4`. Not from the backlog: found by going looking for the next
+structural blind spot in `scripts/agent-dogfood.sh`, on the observation that every previous one — the missing
+observing site (v0.436.1), the empty `incoming/` (v0.442.0), the click-only Compare modes (v0.440.2), the 1:1
+editor preview (v0.446.0) — found a real bug on its first run. The blind spot was **calibration**: no dogfood
+pass has ever had a master dark or a master flat, so the Calibration page, the incoming-folder offer, the
+defect census, the per-target suggestions and `auto_bind_calibration` had only ever been photographed empty —
+while the health card tells the owner on **every** stack that adding darks is the single biggest cleanup
+available to him. The app has been pushing him toward a state its own tooling had never once occupied. The
+bug was found before the tooling to reach it was finished.)*
+
+**The bug, reproduced before anything was written.** Put six frames declaring `IMAGETYP = 'Dark'` and six
+declaring `'Flat'` into `incoming/` and run `scan_and_organize`:
+
+```
+TARGETS IN THE LIBRARY after one scan of incoming/:
+    'Darks 10s' | safe: Darks_10s | frames: 6
+    'Flats'     | safe: Flats     | frames: 6
+```
+
+Two light targets. On the Library wall and in the Gallery, counted into `campaign_stats`, offered by the
+planner and the life list, chipped "Not stretched yet" by v0.448.0, and stackable into a picture of nothing.
+It is the junk-target shape of observer issue #880 arriving from a folder **the app asked the owner to
+create**.
+
+**Why the folder is there at all — this is not a user error.** Three parts of this app expect calibration
+frames under `incoming/`:
+
+* the Calibration page's *Build a master* form is placeheld **`/data/incoming/darks`**, and its help reads
+  *"Point at a server-side folder of raw dark/flat FITS frames (e.g. a Seestar `Dark` folder on your NAS)"*;
+* `GET /api/calibration/incoming` (`seestack/calibrate/discover.py`) is an entire shipped feature that
+  **walks `incoming/` looking for exactly these folders** and offers a one-click build — written so a
+  beginner who has never heard of a master dark does not have to find the folder himself;
+* the Seestar writes its darks to a `Dark` folder on the device, which is what gets copied over SMB.
+
+Meanwhile `seestack/io/scanner.py` had no notion of a calibration frame anywhere in it (`grep -i
+'dark\|flat\|calib'` over the whole module returns two unrelated comments). So one half of the app offered
+to build a master from a folder the other half had just turned into a target of lights.
+
+**The fix: one rule, two callers.** `discover.classify_frames(paths)` is extracted out of the existing
+`classify_folder` — the same function, unchanged in behaviour, now reachable from a list of paths — and
+`scanner._calibration_units` asks it of every unit before the ingest loop. So the set of folders the
+Calibration page offers to build from and the set the scan passes over are **one set by construction**, not
+two implementations that happen to agree today. A test states that as the invariant rather than comparing two
+lists.
+
+**The rule is strict, one-sided, and cheap, which is what makes it safe on the hot path.** Every sampled
+header must declare a recognised calibration kind, all mapping to one master slot; a frame that says nothing
+— which is what an ordinary Seestar sub says, since it writes no `IMAGETYP` — rules the unit out on the
+**first** read. A healthy library therefore pays exactly one header per folder, and a night of real subs
+cannot be lost to it however the folder is named. Four of the seven new scanner tests are about *not*
+skipping: a folder somebody called "Darks" that holds subs, one light dropped in among the darks, a folder
+below the offer's floor, and a folder whose headers will not parse at all (which ingests exactly as it did
+before — getting frames in is the scan's job, and a note about calibration must never be why a sub does not
+reach the library).
+
+**`MIN_FRAMES` on the skip is deliberate, and the reason is downstream.** "Is this a target?" would not need
+the offer's five-frame floor. It is there because it makes the two sets *identical*, and one thing depends on
+that: `webapp/incominglag.py` — the "subs waiting in `incoming/`" note — must exclude these folders or it
+complains for ever about the folder the app asked for, and it may not open anything under `incoming/` to
+work out which ones they are (AGENTS.md §10). It is handed the set off the walk
+`calibration.cached_incoming_folders` already keeps for the offer, and that is only correct because the two
+sets cannot differ. The honest residue is recorded rather than hidden: a fragment of one to four declared
+darks is still ingested as a target.
+
+**And the one place the plan and the scan now diverge is pinned, not left to be discovered.**
+`plan_incoming_units` still offers a calibration folder, because its whole value is being path-only — it runs
+on every watcher poll and may not read a header. Nothing downstream reports it (the lag note excludes it one
+layer up), and `tests/test_incoming_plan.py` now says so out loud beside the parity test that would otherwise
+have quietly stopped being true.
+
+**Upgrade-safe (§9).** A library that already holds a "Darks" target **keeps it** — nothing is deleted,
+renamed, moved or re-QC'd; new scans simply stop minting more. One additive `ScanResult` field
+(`skipped_calibration_folders`), kept out of the existing `unvouched_skips` machinery on purpose so nothing
+that offers to "bring this folder in" offers to bring in a folder of darks as subs. No config, schema,
+on-disk, API-shape or default change.
+
+**Tests (+14).** `tests/test_scan_skips_calibration.py` (7 — two shapes of the bug, four refusals, and the
+offer/skip invariant), `tests/test_incoming_lag.py` (+2, including that the exclusion is exact rather than by
+prefix), `tests/webapp/test_incoming_lag.py` (+1, end to end through the real endpoint, asserting the offer
+*does* see the folder first so a walk that found nothing could not pass the test), `tests/test_incoming_plan.py`
+(+1, the deliberate divergence) and `tests/webapp/test_sample_data.py` (+4 over the generated frames).
+Fail-before verified twice by scratch revert: three scanner tests red with the skip removed, the endpoint test
+red with the router's wiring removed.
+
+**The tooling that found it ships beside it** — `webapp.sample_data.write_sample_calibration_frames` and
+`scripts/agent-dogfood.sh --calibration`. See the v0.455.1 entry.
+
+---
+
 ## v0.454.0 — 2026-09-17 — a clear mosaic kept its "Hazy night" badge, because v0.304.2 fixed the estimator and dated nothing
 
 *(Builder, branch `claude/sweet-babbage-d26gns`. Worked from the open "estimator drift" lead under

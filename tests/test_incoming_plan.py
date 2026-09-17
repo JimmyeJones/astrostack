@@ -157,3 +157,35 @@ def test_paths_outside_the_root_and_non_fits_are_ignored(tmp_path: Path) -> None
 
 def test_an_empty_listing_plans_nothing(tmp_path: Path) -> None:
     assert plan_incoming_units(tmp_path, {}) == []
+
+
+def test_the_plan_still_offers_a_calibration_folder_the_scan_skips(
+    tmp_path: Path,
+) -> None:
+    """The one place plan and scan diverge on purpose, pinned rather than left
+    to be discovered (v0.455.0).
+
+    The scan passes over a folder whose frames declare themselves darks; that
+    verdict comes from *headers*, and the plan may not read any — it runs on
+    every watcher poll and its whole value is being path-only. So the plan still
+    names it, and the exclusion happens one layer up, in ``webapp.incominglag``,
+    off the folder list the Calibration page's build offer already holds.
+    """
+    from webapp.sample_data import write_sample_calibration_frames
+
+    incoming = tmp_path / "incoming"
+    write_sample_calibration_frames(incoming / "Darks 10s", "dark")
+    _fits(incoming / "M 42_sub" / "frame_001.fit", 1)
+
+    planned = {u.folder for u in plan_incoming_units(incoming, _listing(incoming))}
+
+    lib = Library.open_or_create(tmp_path / "library")
+    try:
+        result = scan_and_organize(lib, incoming, copy_to_cache=False)
+    finally:
+        lib.close()
+
+    assert planned == {"Darks 10s", "M 42_sub"}
+    assert [t.target_name for t in result.targets] == ["M 42"]
+    assert [s.target_name for s in result.skipped_calibration_folders] \
+        == ["Darks 10s"]

@@ -57,7 +57,7 @@ no filesystem.
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -137,6 +137,7 @@ def incoming_lag(
     *,
     min_age_s: float = LAG_MIN_AGE_S,
     unreadable: Mapping[str, int] | None = None,
+    skip_folders: Collection[str] | None = None,
 ) -> list[FolderLag]:
     """Folders whose files a scan would ingest but the library has no row for,
     most-waiting first.
@@ -156,10 +157,24 @@ def incoming_lag(
     about a sub that is not in a picture. Omitted (an install that has not
     scanned since this existed) reads as zero everywhere, which is the previous
     behaviour exactly.
+
+    ``skip_folders`` names folders the scan **deliberately does not ingest**
+    because their own frames say they are calibration data, spelled as
+    :attr:`~seestack.io.scanner.PlannedUnit.folder` does. Those files are not
+    waiting for anything and never will be — they are a master dark somebody has
+    not built yet, not a night that did not land — so reporting them would turn
+    this note into a permanent complaint about the folder the Calibration page
+    asked the owner to create. The caller supplies the set (it comes from the
+    same discovery the Calibration page's offer is built from), because this
+    module may not open anything under ``incoming/`` to find out for itself.
+    Omitted ⇒ nothing is skipped, i.e. the previous behaviour exactly.
     """
     unreadable = unreadable or {}
+    skip = set(skip_folders or ())
     out: list[FolderLag] = []
     for unit in planned:
+        if unit.folder in skip:
+            continue
         n_imported = _rollup(imported, unit.folder)
         waiting = unit.n_files - n_imported
         if waiting <= 0:
