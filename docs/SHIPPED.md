@@ -1,5 +1,56 @@
 # Shipped — the record
 
+## v0.453.4 — 2026-09-17 — the preview↔export class is pinned by the source, not by memory
+
+*(Builder, branch `claude/sweet-babbage-dqhm8l`, filed with the v0.453.3 fix directly above it. Test-only:
+one new file, no production code touched.)*
+
+**Why, in one sentence:** `tone.scnr` sat unscaled on the one-click Auto path for five months with
+`tests/test_edit_proxy_parity.py` — a file whose entire subject is that class, whose header says a 2026-09-09
+sweep "confirmed every current op passes it" — standing right beside it, because that file covers the ops
+somebody *remembered* to add and nobody remembered SCNR.
+
+**And the composition test could not have caught it either.** `tests/test_auto_recipe_proxy_parity.py` renders
+the whole eleven-op Auto recipe twice and compares summary statistics against a budget. The SCNR divergence is
+**localised** — it is 1.00x on a flat cast and 0.68x on green knots a few pixels across — so it moves no
+summary statistic far enough to spend the budget. Two tests aimed at this class, one blind by omission and the
+other by construction.
+
+**The guard.** `tests/test_edit_neighbourhood_drift.py` walks `seestack/edit` with `ast`, finds every call to
+a scipy-ndimage neighbourhood filter (18 names), resolves what each was handed as its `sigma` / `size` /
+`footprint`, and requires it to trace back to `proxy_scale` — through local assignments, and through
+*enclosing* scopes, which is load-bearing: sharpen and deconvolution both scale their radius in the op body
+and filter inside a nested `run`, so a scan reading only the innermost scope cries wolf twice on correct code
+and teaches the reader to ignore it. Anything that does not trace must be named in `_UNSCALED_BY_DESIGN` with
+the reason. Same shape as `test_no_float_to_integer_pack_truncates_anywhere_in_the_app`.
+
+**Thirteen call sites; eight resolve, five are exempt, and the exemptions are the deliverable.** Each was
+triaged once, and the sentence is what the next reader gets instead of a constant:
+
+- `coverage_trim._border_trim_rect`'s `binary_dilation` — no size at all; the default 3x3 structure asks
+  *connectivity* ("does this poor-coverage blob touch the outside?"), which is the right question at every
+  scale.
+- `detail._box_blur3`'s `uniform_filter(width)` — a private helper whose `width` comes from the `sigma` it was
+  handed, and whose one caller passes `ctx.scaled_px(radius)`. The scaling is real, one call up where the scan
+  cannot follow; pinned behaviourally by the chroma-denoise parity test.
+- the three in `presets._extended_chroma` / `presets.classify_target` — **measured** rather than argued, on one
+  unchanging synthetic sky at proxy steps 1 / 2 / 3 / 5 / 8: `chroma` 0.032 on a galaxy and 0.447 on a nebula
+  at every step, `ext_frac` 0.0254 / 0.0254 / 0.0254 / 0.0255 / 0.0253, and galaxy and nebula classify
+  identically throughout. The one place scale shows is a sparse star cluster at step 5+, where the cues fall
+  under the "essentially blank" floor and `classify_target` returns `None` rather than guessing — the honest
+  degradation, and it needs a >=7500 px canvas to reach.
+
+**The trap is armed, three ways, because a guard that cannot fail is the thing it is guarding against.**
+`test_the_drift_guard_can_see_an_unscaled_filter` runs the **pre-v0.453.3 spelling of `_scnr`** through the
+same resolver and asserts it is refused, then asserts the shipped spelling passes — so the guard is neither
+blind nor merely strict. `test_the_resolver_follows_a_radius_scaled_in_an_outer_scope` pins the three sites
+the naive scan got wrong. `test_the_exemption_list_has_no_stale_entries` deletes-by-failing an exemption that
+outlives the code it was written about. And run against the real tree with `scnr_noise_sigma` scratch-reverted,
+the guard goes red naming
+`seestack/edit/ops/tone.py::_scnr::gaussian_filter(_SCNR_NOISE_SIGMA)` — today's bug, by its exact site.
+
+**Tests +5.** No production code, no config, schema, on-disk, API or default change.
+
 ## v0.453.3 — 2026-09-17 — the one-click Auto recipe's green-cast removal previewed less green than it saved
 
 *(Builder, branch `claude/sweet-babbage-dqhm8l`. Found by an adversarial read of the editor ops for
