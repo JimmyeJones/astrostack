@@ -87,3 +87,31 @@ def test_the_worst_folder_is_first_and_the_order_is_stable() -> None:
         [_unit("a_sub", 10), _unit("b_sub", 100), _unit("c_sub", 10)],
         {}, NOW)
     assert [f.folder for f in found] == ["b_sub", "a_sub", "c_sub"]
+
+
+def test_a_calibration_folder_is_never_reported_as_waiting() -> None:
+    """Darks are not a night that did not land — they are a master somebody has
+    not built yet, and the scan passes them over on purpose (v0.455.0). Without
+    this the note would complain forever about the folder the Calibration page's
+    own build form asked the owner to create.
+
+    The caller supplies the set because this module may not open anything under
+    ``incoming/`` to work it out for itself (AGENTS.md §10)."""
+    units = [_unit("Darks 10s", 30), _unit("M 42_sub", 40, target="M 42")]
+
+    assert [f.folder for f in incoming_lag(units, {}, NOW)] \
+        == ["M 42_sub", "Darks 10s"]
+    assert [f.folder for f in
+            incoming_lag(units, {}, NOW, skip_folders={"Darks 10s"})] \
+        == ["M 42_sub"]
+
+
+def test_skipping_is_exact_not_by_prefix() -> None:
+    """A folder is excluded because *it* is the calibration folder, never
+    because its name starts like one — ``Darks 10s notes`` is somebody else's
+    folder and its subs are still waiting."""
+    units = [_unit("Darks 10s", 30), _unit("Darks 10s notes", 5)]
+
+    assert [f.folder for f in
+            incoming_lag(units, {}, NOW, skip_folders={"Darks 10s"})] \
+        == ["Darks 10s notes"]

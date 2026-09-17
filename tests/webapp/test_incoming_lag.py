@@ -306,3 +306,30 @@ def test_a_repaired_sub_leaves_the_record_on_the_next_scan(built_library, client
     body = client.get("/api/incoming-lag").json()
     assert body["n_unreadable"] == 0
     assert body["n_waiting"] == 0
+
+
+def test_darks_in_the_drop_folder_are_not_reported_as_waiting(built_library, client):
+    """End to end, through the real endpoint: a folder of frames that declare
+    themselves darks is calibration data the scan passes over on purpose
+    (v0.455.0), so it is not a night that failed to land and this note must not
+    say it is.
+
+    The exclusion comes off the same ``incoming/`` walk the Calibration page's
+    "shall I build the master?" offer is built from, so nothing extra is opened
+    under a folder this app may only read (AGENTS.md §10)."""
+    from webapp.sample_data import write_sample_calibration_frames
+
+    write_sample_calibration_frames(
+        built_library / "incoming" / "Darks 10s", "dark")
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    # The offer sees it — this is the set the note excludes, so a test that
+    # asserted only silence would pass just as well if the walk found nothing.
+    offer = client.get("/api/calibration/incoming").json()
+    assert [f["name"] for f in offer["folders"]] == ["Darks 10s"]
+
+    body = client.get("/api/incoming-lag").json()
+    assert body["checked"] is True
+    assert body["n_waiting"] == 0
+    assert body["items"] == []

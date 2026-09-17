@@ -162,8 +162,39 @@ def scan_incoming_lag(
             unreadable = {}
     finally:
         lib.close()
-    return (incoming_lag(units, imported, now_epoch, unreadable=unreadable),
+    return (incoming_lag(units, imported, now_epoch, unreadable=unreadable,
+                         skip_folders=_calibration_folders(request)),
             polled_at)
+
+
+def _calibration_folders(request: Request) -> set[str]:
+    """Folders under ``incoming/`` the scan passes over as calibration data.
+
+    These hold darks or flats — the Calibration page's own build form asks the
+    owner to put them exactly there — and since v0.455.0 the scan leaves them
+    alone instead of minting a "Darks 10s" target of six lights. They are
+    therefore not waiting for an import and never will be, so this note must not
+    name them; without this it would complain forever about the folder the app
+    itself asked for.
+
+    Read off the walk :func:`webapp.calibration.cached_incoming_folders` already
+    keeps for the Calibration page's offer, so nothing extra is opened under
+    ``incoming/`` and the two surfaces answer from one list. That is also *why*
+    the scanner's skip carries ``discover.MIN_FRAMES``: the set it skips and the
+    set this reads are then the same set, and a folder could not fall between
+    them. Never raises — on any failure the note simply behaves as it did before.
+    """
+    from webapp import calibration
+
+    try:
+        settings = deps.get_settings(request)
+        folders = calibration.cached_incoming_folders(
+            request.app.state, settings.resolved_incoming_dir)
+    except Exception:  # noqa: BLE001 — a refinement must not 500 the note
+        return set()
+    # ``rel_path`` is posix-spelled for display; ``PlannedUnit.folder`` uses the
+    # platform separator, and these two strings have to compare equal.
+    return {str(f.rel_path).replace("/", os.sep) for f in folders}
 
 
 @router.get("/api/incoming-lag", response_model=IncomingLagResponse)
