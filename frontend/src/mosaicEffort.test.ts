@@ -109,6 +109,34 @@ describe("mosaicDepthText", () => {
     expect(mosaicDepthText(plan(3, 2), null)).toContain("about 24 h of shooting");
   });
 
+  it("names its own scope on a picture that is already a mosaic", () => {
+    // Read in place, this sentence lands third: "adding more panels next session
+    // would capture the rest" → "about a 3x3 covers all of it" → the hours. The
+    // first two are about what's left, so the third has to say it isn't.
+    expect(mosaicDepthText(plan(3, 3), "Emission nebula", undefined,
+      { alreadyAMosaic: true }))
+      .toBe("Giving all 9 panels the depth you'd give one field (~4 h each) "
+        + "is about 36 h of shooting — the whole grid from scratch, not counting "
+        + "what this picture already has.");
+  });
+
+  it("subtracts nothing, and says nothing extra on an unstarted target", () => {
+    // The clause states the assumption; it never claims an hours-remaining
+    // figure, because whether the panels already shot even fall inside the
+    // proposed grid is not something this arithmetic knows.
+    const scoped = mosaicDepthText(plan(3, 3), "Emission nebula", undefined,
+      { alreadyAMosaic: true });
+    expect(scoped).toContain("about 36 h of shooting");
+    // …and every caller that cannot tell keeps today's sentence exactly.
+    const plainSentence = "Giving all 9 panels the depth you'd give one field "
+      + "(~4 h each) is about 36 h of shooting.";
+    expect(mosaicDepthText(plan(3, 3), "Emission nebula")).toBe(plainSentence);
+    expect(mosaicDepthText(plan(3, 3), "Emission nebula", undefined, {}))
+      .toBe(plainSentence);
+    expect(mosaicDepthText(plan(3, 3), "Emission nebula", undefined,
+      { alreadyAMosaic: false })).toBe(plainSentence);
+  });
+
   it("says nothing when there is no grid to price", () => {
     expect(mosaicDepthText(null, "Galaxy")).toBeNull();
     expect(mosaicDepthText(undefined, "Galaxy")).toBeNull();
