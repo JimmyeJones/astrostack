@@ -10,6 +10,8 @@ import { api, type BestPicture } from "../api/client";
 import { formatCaptureNights } from "../format";
 import { sharePictureText } from "../share";
 import { ImageLightbox } from "../components/ImageLightbox";
+import { storedPreviewScaleBar } from "../components/AnnotatedImage";
+import { postCaptionForRun } from "../components/postCaption";
 import { WallpaperMenu } from "../components/WallpaperMenu";
 import { QueryError } from "../components/QueryError";
 import { bestPictureReason, pinnedNote, rankingHint } from "../components/bestPictures";
@@ -79,6 +81,45 @@ export function BestPicturesView() {
   // query key the show itself uses, so the two share one cached response.
   const gallery = useQuery({ queryKey: ["gallery"], queryFn: api.getGallery });
   const [viewing, setViewing] = useState<BestPicture | null>(null);
+  // The run's stored-preview geometry, which decides whether the caption's
+  // "N full Moons wide" sentence describes the picture being handed over or the
+  // wider canvas behind it. Only on a FITS-backed run: the endpoint is a header
+  // read and 404s without one, and a run with no FITS has no bar to place either.
+  const viewingInfo = useQuery({
+    queryKey: ["stack-info", viewing?.safe, viewing?.run_id],
+    queryFn: () => api.stackRunInfo(viewing!.safe, viewing!.run_id),
+    enabled: !!viewing?.has_fits,
+    staleTime: Infinity,
+  });
+  // The bar itself comes from the annotations, on the same key and staleness the
+  // Gallery viewer and the Target hero use — so a picture opened on one of those
+  // pages has already paid for this one.
+  const viewingAnnotations = useQuery({
+    queryKey: ["annotations", viewing?.safe, viewing?.run_id],
+    queryFn: () => api.stackAnnotations(viewing!.safe, viewing!.run_id),
+    enabled: !!viewing?.has_fits,
+    staleTime: Infinity,
+  });
+  // "My best pictures" is the page you open to show someone your pictures, and
+  // its viewer was handing the OS share sheet the target's name and a date while
+  // the same picture, shared from the Target page or History or the Gallery,
+  // went out with its whole story. One builder, one sentence, every surface.
+  //
+  // The identity comes off the row rather than a per-picture lookup: the wall's
+  // own endpoint already resolves the catalogue match to fill `object_type` and
+  // `blurb`, so `object_id`/`object_name` ride along for nothing. An unmatched
+  // target, or an older backend that sends neither, captions under the name the
+  // wall shows — which is what this viewer did for every picture before.
+  const viewingCaption = viewing
+    ? postCaptionForRun(
+        viewing,
+        {
+          id: viewing.object_id, name: viewing.object_name,
+          type: viewing.object_type, blurb: viewing.blurb,
+        },
+        storedPreviewScaleBar(viewingAnnotations.data, viewingInfo.data ?? {}),
+        viewing.target_name)
+    : undefined;
 
   if (best.isError && !best.data) {
     return <QueryError error={best.error} onRetry={() => best.refetch()} />;
@@ -189,7 +230,12 @@ export function BestPicturesView() {
                 formatCaptureNights(
                   viewing.capture_night_start, viewing.capture_night_end),
               );
-              return { shareFilename: filename, shareTitle: title, shareText: text };
+              // Title and filename stay a short label and a slug; only the
+              // caption is the full sentence.
+              return {
+                shareFilename: filename, shareTitle: title,
+                shareText: viewingCaption ?? text,
+              };
             })()
           : {})}
         onClose={() => setViewing(null)}

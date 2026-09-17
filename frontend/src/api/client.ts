@@ -2408,6 +2408,14 @@ export interface BestPicture {
   // target.
   object_type?: string;
   blurb?: string;
+  // The other half of the same already-resolved catalogue match: the designation
+  // ("M42") and the common name ("Orion Nebula"). The type and the blurb
+  // *describe* the object; these two *name* it, which is what the viewer's
+  // ready-to-post share caption opens on. Optional/"" for an unmatched target and
+  // on an older backend — the caption then falls back to the target's own name,
+  // exactly as it did before.
+  object_id?: string;
+  object_name?: string;
   /** How many single-frame field-fulls of sky this picture's canvas covers
    *  (`webapp/field_fulls.py`) — the same per-run figure the Gallery card and
    *  the History listing carry. `total_exposure_s` and `n_frames_used` above are

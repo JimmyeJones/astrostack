@@ -1,5 +1,40 @@
 # Shipped — the record
 
+## v0.453.2 — 2026-09-17 — the last surface in the class: "My best pictures" shares its pictures with their story
+
+*(Builder, branch `claude/sweet-babbage-f4u6pf`, closing the class v0.453.0 and v0.453.1 opened. One additive
+pair of response fields on one endpoint; no config, schema, on-disk, default or existing-response-shape
+change.)*
+
+**The page you open to show someone your pictures was the one sharing them namelessly.** `BestPictures.tsx`'s
+viewer built its share text from `sharePictureText` — *"M31 — captured 2 May 2026"* — while the identical run,
+opened from the Target page, History or the Gallery, went out as *"Orion Nebula (M42) — a stack of 240 subs
+(40 min total), shot on 15 Nov 2024 with a Seestar. A vast stellar nursery. The whole frame is about 5.4 full
+Moons wide."* Three surfaces had been fixed; this was the fourth and last.
+
+**The identity comes off the row, not a per-picture lookup — because the endpoint had already done the
+lookup.** `GET /api/gallery/best` calls `identify_object` once per target to fill `object_type` and `blurb`
+(added so the slideshow could caption a picture away from its target page), and then dropped the match's
+`id` and `name` on the floor. Those two now ride along as `object_id` / `object_name`: same call, same match,
+zero extra work, and no `/identify` request per opened picture. A test asserts they are the catalogue's own
+answer rather than the folder name echoed back — which is exactly what a caption built from the row alone
+would have had to settle for.
+
+**The scale clause takes the same route as the Gallery's (v0.453.0):** `…/stack-runs/<id>/info` for the run's
+stored-preview geometry and `…/annotations` for the bar, both only once a picture is open and only on a
+FITS-backed run, both on the cache keys the other viewers use — so a picture already opened elsewhere has
+paid for it. A trimmed preview gets `preview_scale_bar`, never the wider canvas's.
+
+**Every fallback is the behaviour this page already had.** An unmatched target, an older backend that sends
+neither field, or a preview-only run with no FITS: the caption is the shorter sentence under the name the wall
+itself shows. The share sheet's title and the file's name are unchanged.
+
+**Tests (+4, all red under a scratch revert).** One in `tests/webapp/test_gallery_best.py` (the two fields are
+the same lookup's answer, are never omitted, and are `""` on the catalog-knows-nothing path, asserted beside
+its neighbours), and three in `BestPictures.test.tsx`: the full sentence named off the row with
+`identifyTarget` asserted **not** called; the scale clause taken from the trimmed preview's bar (3.8 Moons,
+not the canvas's 5.4); and an unnamed target captioned under the wall's own name with neither read made.
+
 ## v0.453.1 — 2026-09-17 — "Copy caption" and "Share picture", one item apart in the same menu, described the same picture two different ways
 
 *(Builder, branch `claude/sweet-babbage-f4u6pf`. Found while shipping v0.453.0 — the lead that fix was built
