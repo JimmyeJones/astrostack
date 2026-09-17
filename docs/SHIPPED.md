@@ -1,5 +1,56 @@
 # Shipped — the record
 
+## v0.453.3 — 2026-09-17 — the editor was the fifth surface, and the one where the picture is actually finished
+
+*(Builder, branch `claude/sweet-babbage-y1a42c`. Frontend-only: no endpoint, config, schema, on-disk, default
+or response-shape change, and the server's `blurb` is still returned and still used.)*
+
+**v0.453.0–.2 fixed four surfaces that hand out one picture's caption. There were five.** The doc comment on
+`postCaptionForRun` names the four it was written for — the Target hero's "Save / share" menu, that hero's
+lightbox, every History run card, the Gallery viewer — and v0.453.2 added the "My best pictures" wall as the
+fourth-and-last. None of them is the **editor**, which has its own share path, its own job, and its own
+caption built server-side. So the screen where a beginner has *just finished* the picture they want to post
+was the one still handing over `seestack.sharecard.share_blurb`'s terse line —
+*"M 42 · 15–18 Nov 2024 · 3.2 h · 152 subs"* — as both the "Caption to paste" it shows under the Export panel
+and the text it gives the OS share sheet.
+
+**Why the sweep missed it.** `share_blurb` has exactly one production caller in the tree,
+`pipeline.submit_editor_share`, and the divergence is not visible from either end: the four fixed surfaces
+were all found by following `SavePictureMenu`'s callers, and the editor calls none of them. It is the same
+blind spot the 2026-09-17 `--big --editor` sweep record generalises — *a claim that only leaves the app is
+invisible to every probe that reads the DOM* — except this one **is** in the DOM, as a dimmed line nobody had
+read against the menu on the page it was reached from.
+
+**The fix is the mapping, not new words.** `Editor.tsx` now builds `postCaptionForRun` from the run row and
+the catalogue identity it already holds: `identity` is the same `["identify", safe]` query the page has
+fetched since the background-flatten advice shipped, and the run row comes off a `["runs", safe]` `useQuery`
+— the key the Target and History pages already warm, and the editor is reached *from* one of them, so on the
+owner's own path this is a cache hit. The share sheet's **title** stays the terse line, which is the split
+`SavePictureMenu` settled on in v0.453.1: a short form labels the share, the sentence is what you post.
+
+**`scaleBar` is deliberately null, and that is the one judgement in this change.** Every other surface
+captions the run's **stored preview**, whose geometry `storedPreviewScaleBar` knows; the editor renders the
+*master* through the user's own recipe, so a crop or a rotate makes the run's bar describe a different
+rectangle — and a wrong "about 5.4 full Moons wide" in someone's public post is worse than no clause. Dropping
+it is the graceful degradation `postCaption` already applies to a run with no WCS, and the caption is still
+strictly more than the line it replaces. Reinstating it would need the *edited* canvas's own angular width,
+which only the export knows.
+
+**Every fallback is today's behaviour.** A run not in the list, a failed or slow list read, an older backend:
+`postableCaption` is null and the job result's `blurb` is shown and shared exactly as before. The "Caption to
+paste" line is still gated on a share image having been rendered, so nothing new appears on the panel.
+
+**This closes the class.** The remaining `sharePicture` callers are not per-picture captions and are correctly
+separate: `shareStillText` for a Moon/Sun video still (the app never learns when the clip was *shot*, and that
+function exists to say so), and the two reel cards, which share an animation of a stack building up.
+
+**Tests (+2, both red under a scratch revert of `Editor.tsx`).** In `Editor.test.tsx`: the caption to paste is
+the `postCaption` sentence — object, blurb, subs, integration, nights — with the terse line asserted *absent*
+and no scale clause claimed; and the share sheet is given that sentence as `text` while `title` stays the
+terse line. The existing "reveals a copy-friendly caption blurb" test is unchanged and now pins the
+**fallback** (nothing mocks `listStackRuns` there), which is what it was really testing all along; a comment
+says so.
+
 ## v0.453.2 — 2026-09-17 — the last surface in the class: "My best pictures" shares its pictures with their story
 
 *(Builder, branch `claude/sweet-babbage-f4u6pf`, closing the class v0.453.0 and v0.453.1 opened. One additive
