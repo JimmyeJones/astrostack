@@ -15,6 +15,16 @@ Three places now need the same answer and must not each invent it:
 Modelled on :mod:`webapp.stale_crop` and :mod:`webapp.field_fulls`: a small pure
 module the router and the pipeline both read, so no two screens can disagree
 about the same target.
+
+**The question is about the stored preview's bytes, not about intent**
+*(sharpened v0.449.0, after the first version answered a different one)*. Saving
+a recipe in the editor writes it to the project DB and re-renders nothing, so a
+run carrying somebody's own saved edit is still showing a plain autostretch of
+the linear master — and counting that as finished made the chips vanish from the
+very cards that most needed them. What makes a preview a picture is that
+something *baked* it: an editor export's own tone-mapped pixels, or the
+``preview_display_space`` mark an in-place auto-edit writes beside the bytes it
+renders.
 """
 
 from __future__ import annotations
@@ -31,11 +41,18 @@ from typing import Any
 # rather than a constant anyone exports, so this is one more hand-spelling of
 # them, not a second definition of anything.
 #
-# (The saved *recipe's* meta prefix is a real constant, and the function below
-# imports it from ``webapp.routers.editor`` rather than re-spelling it. The
-# import is inside the function so this module stays importable from anywhere
-# without dragging a router in at import time.)
+# (There used to be a third hand-spelling here, of the saved recipe's meta
+# prefix. v0.449.0 removed the need for it: the answer below is entirely in the
+# run's own ``options_json``, so this module no longer reads project meta and no
+# longer imports a router.)
 _EXPORT_KEYS = ("editor_recipe", "display_space")
+
+#: The mark an *in-place* bake leaves on the run it re-rendered — written by
+#: ``pipeline._auto_edit_process_run`` in the same breath as the preview bytes,
+#: and read by ``routers.stack._unexported_edit`` for the same purpose: it is the
+#: one on-disk fact that says "this preview is a tone-mapped picture, not the
+#: autostretch ``_write_preview_png`` writes for a linear master".
+_BAKED_PREVIEW_KEY = "preview_display_space"
 
 
 def displayed_picture_run(runs: list[Any], cover_stack_run_id: int | None) -> Any:
@@ -59,19 +76,37 @@ def displayed_picture_run(runs: list[Any], cover_stack_run_id: int | None) -> An
 
 
 def run_is_a_finished_picture(proj: Any, run: Any) -> bool:
-    """True when ``run``'s preview is a *finished* picture rather than a flat
-    linear stack.
+    """True when ``run``'s **stored preview** is a *finished* picture rather than
+    the plain autostretch of a linear stack.
 
-    Two shapes count, because the app makes finished pictures two ways:
+    Two shapes count, because the app makes a finished picture two ways:
 
-    * the run carries a **saved editor recipe** with at least one enabled op
-      (the one-click Auto look, an unattended auto-edit, or the owner's own
-      edit) — read through ``recipe_from_json`` so a recipe whose ops have all
-      gone stale reads as "not finished", the same way the editor would render
-      it; and
     * the run **is** an editor export (``options_json`` carrying
       ``editor_recipe``/``display_space``), whose stacked pixels are already
-      tone-mapped and whose preview is therefore a picture in its own right.
+      tone-mapped and whose preview is therefore a picture in its own right; or
+    * something **baked** the run's preview through a recipe — which takes
+      *both* a recipe with at least one enabled op (an all-disabled one renders
+      the linear stack, exactly as the editor would) *and* the
+      ``preview_display_space`` mark written beside those bytes by
+      ``pipeline._auto_edit_process_run``.
+
+    **That second mark is new here, and its absence was a bug** *(v0.449.0)*.
+    The rule used to accept a saved recipe on its own — but ``put_recipe``
+    writes the recipe row to the project DB and **nothing else**; no path
+    re-renders a preview on Save. So a run carrying somebody's own saved edit is
+    still showing ``_write_preview_png``'s plain autostretch of the linear
+    master, and counting it as finished made the Library and Gallery chips
+    *disappear* the moment a user saved an edit, on a card whose bytes had not
+    changed. Exactly backwards: that card is unstretched **and** the user's work
+    is invisible on it. The app already said so elsewhere on the same screens —
+    ``routers.stack._unexported_edit`` calls this state "the user edited, pressed
+    Save, and the stored preview does not show it" — so the two agree now
+    instead of contradicting each other about one run.
+
+    Note what is deliberately *not* asked: whether the saved recipe still agrees
+    with the baked look. A run we baked and the user has since tweaked is showing
+    the look we baked, which is a finished picture. That drift is
+    ``_unexported_edit``'s question, not this one.
 
     Best-effort and read-only: an unreadable meta row answers ``False`` rather
     than failing a scan that only drives a note.
@@ -87,7 +122,7 @@ def run_is_a_finished_picture(proj: Any, run: Any) -> bool:
 
 
 def run_is_a_finished_picture_from(options_json: str | None,
-                                  recipe_json: str | None) -> bool:
+                                   recipe_json: str | None) -> bool:
     """The same answer as :func:`run_is_a_finished_picture`, for a caller that has
     **already read** the run's saved recipe.
 
@@ -101,13 +136,20 @@ def run_is_a_finished_picture_from(options_json: str | None,
     """
     from seestack.edit.recipe import recipe_from_json
 
+    data: Any = None
     if options_json:
         try:
             data = json.loads(options_json)
         except (json.JSONDecodeError, TypeError, ValueError):
             data = None
-        if isinstance(data, dict) and any(data.get(k) for k in _EXPORT_KEYS):
-            return True
+    if not isinstance(data, dict):
+        data = {}
+    if any(data.get(k) for k in _EXPORT_KEYS):
+        return True
+    # Nothing baked this preview, so whatever the recipe says, the bytes on disk
+    # are the plain autostretch of a linear master.
+    if not data.get(_BAKED_PREVIEW_KEY):
+        return False
     try:
         recipe = recipe_from_json(recipe_json)
     except Exception:  # noqa: BLE001 — a note's count never fails the page

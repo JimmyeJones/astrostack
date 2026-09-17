@@ -25,6 +25,31 @@ export const UNSTRETCHED_HINT =
 /** The chip's label. One string, so the two walls read identically. */
 export const UNSTRETCHED_LABEL = "Not stretched yet";
 
+/** The hint for a card that is unstretched **because the edit on it was never
+ * exported** — a different state, wanting the opposite advice.
+ *
+ * `UNSTRETCHED_HINT` says "press Auto", which is exactly what somebody who
+ * already has a saved edit must not be told: Auto replaces the recipe in the
+ * editor, so following that advice discards their own work. It is also simply
+ * wrong about the cause — they *did* stretch this picture; what is missing is
+ * the export that would put it in the bytes.
+ *
+ * Worded from `UnexportedEditBadge`'s title, which History, the Gallery and the
+ * Target hero already show for this state, so a fourth surface is not a fourth
+ * explanation. This is a hint rather than a second chip: the card gets one
+ * badge either way, and the owner's standing complaint about this app is
+ * clutter.
+ */
+export const UNSTRETCHED_UNEXPORTED_HINT =
+  "You saved an edit for this picture but never exported it, so the card still "
+  + "shows the un-edited version. Open it and export your edit — don't press "
+  + "Auto, which would replace what you saved.";
+
+/** The hint to show on a Library card, given whether its edit is unexported. */
+export function unstretchedHint(unexportedEdit?: boolean): string {
+  return unexportedEdit ? UNSTRETCHED_UNEXPORTED_HINT : UNSTRETCHED_HINT;
+}
+
 /** The Gallery's variant of the hint, which can name the button that fixes it.
  *
  * The Library card has to say the vaguer "open it": the whole card is one

@@ -2898,6 +2898,12 @@ export interface UnstretchedItem {
   safe: string;
   target_name: string;
   run_id: number;
+  /** True when that run carries an edit its owner saved and never exported, so
+   * the card is unstretched *and* their work is invisible on it. The standing
+   * hint's advice ("press Auto") is the one thing to withhold there — Auto
+   * replaces a saved recipe. Optional: an older backend omits it, and the wall
+   * then says exactly what it said before. */
+  unexported_edit?: boolean;
 }
 
 /** One folder of `incoming/` holding subs the library has no frame row for —
