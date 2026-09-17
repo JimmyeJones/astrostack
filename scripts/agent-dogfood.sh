@@ -24,6 +24,7 @@
 #   scripts/agent-dogfood.sh --incoming-lag  # ALSO leave subs in incoming/ the library never imported
 #                                           #   (one of them damaged, and scanned, so the
 #                                           #    "these can't be read" note is reachable too)
+#   scripts/agent-dogfood.sh --calibration   # ALSO build a master dark + flat and stack WITH them
 #
 # --no-site turns OFF something a normal pass now does by default. Every pass
 # before 2026-09-12 left the scratch install with no site at all: the bundled
@@ -103,6 +104,40 @@
 # a minute over --mosaic. It prints what the app answers about the shrunk
 # preview (`/editor/loupe-info`) and, with --editor, drives the editor on it.
 #
+# --calibration exists because NO PASS HAS EVER HELD A MASTER. The scratch
+# install's calibration registry is empty on every run ever recorded, so the
+# Calibration page's masters list, `/api/calibration/incoming`'s one-click
+# "you already have darks, shall I build one?" offer, `/api/calibration/defects`
+# and its repair offer, the per-target `calibration-suggestions`,
+# `auto_bind_calibration`, and the "darks were applied" half of the stack-health
+# vocabulary have only ever been photographed in their EMPTY state — while the
+# health card tells the owner, on every single stack, that adding master darks is
+# the biggest cleanup available to him. The app has been pushing him toward a
+# state its own tooling had never once occupied. That is the same shape of hole as
+# the missing observing site, the empty `incoming/` and the click-only Compare
+# modes, and every one of those found a real bug on its first run; this one found
+# v0.455.0 before it was even finished (a folder of darks under `incoming/` was
+# being ingested as a target of lights).
+#
+# It writes generated dark and flat frames into the scratch `incoming/` with the
+# app's own `webapp.sample_data.write_sample_calibration_frames` — matching the
+# sample lights' sensor size, EXPTIME, GAIN and CCD-TEMP, so the master is a
+# *matching* one and the registry does not quietly refuse it — then lets the app
+# **discover and build them itself** through the endpoints a beginner would use,
+# turns on `auto_bind_calibration`, and stacks after that so the calibrated branch
+# of every downstream sentence is the one on screen.
+#
+# ⚠ READ THIS BEFORE BELIEVING A CALIBRATED SAMPLE PICTURE. The sample's *lights*
+# carry no hot pixels and no vignette — their pixels are pinned bit-identical by
+# the baselines every earlier pass was measured on — so the darks' planted hot
+# pixels are not in the lights, and repairing them costs a few interpolated
+# pixels and gains nothing. That is fine for what the flag is for (putting the
+# defect census and its repair offer in front of a browser) and dishonest if read
+# as "calibration improved this picture". The flat's vignette is deliberately
+# gentle for the same reason. It is a flag, not the default, because an install
+# with masters is a *further along* install, not a more representative one, and
+# turning it on by default would move every page-height baseline at once.
+#
 # --empty exists because every measurement this script has ever taken was of the
 # sample-loaded app, so the screens a beginner meets *first* — an empty Dashboard,
 # Library, Gallery, life list — had never been in front of a browser. It boots a
@@ -127,7 +162,7 @@ REPO="$PWD"
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
 DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0; DO_MOSAIC=0
 DO_BIG=0
-DO_SITE=1; DO_LAG=0
+DO_SITE=1; DO_LAG=0; DO_CAL=0
 # How many aged subs --incoming-lag leaves in the scratch incoming/, and how old
 # it makes them. Eleven days is the observer's own measurement; the count is
 # small on purpose (this seeds a *state*, not a workload).
@@ -159,6 +194,7 @@ for arg in "$@"; do
     --big) DO_BIG=1 ;;
     --no-site) DO_SITE=0 ;;
     --incoming-lag) DO_LAG=1 ;;
+    --calibration) DO_CAL=1 ;;
     # The whole header block, found rather than hard-coded: a fixed line count
     # silently truncates -h every time the header grows, which it has.
     -h|--help) sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;;
@@ -456,6 +492,101 @@ print("   [incoming-lag] %d of them cannot be read at all"
 ' 2>/dev/null || echo "   [incoming-lag] could not read /api/incoming-lag"
 fi
 
+wait_job() {  # wait_job <job_id> [tries] -> prints the final state
+  [ -n "${1:-}" ] || { echo "(no job)"; return 0; }
+  local state=""
+  for _ in $(seq 1 "${2:-90}"); do
+    state="$(curl -sf "$BASE/api/jobs/$1" \
+             | python -c 'import json,sys; print(json.load(sys.stdin).get("state",""))' \
+             2>/dev/null || true)"
+    case "$state" in done|error|cancelled|interrupted) break ;; esac
+    sleep 2
+  done
+  echo "${state:-unknown}"
+}
+
+# 3e. Master darks and flats (--calibration). See the header block: the scratch
+#     install's calibration registry has been EMPTY on every pass ever recorded,
+#     so every surface built around a master has only been photographed in its
+#     empty state — on an app that tells the owner, on every stack, that adding
+#     darks is the single biggest cleanup available to him.
+#
+#     The frames go into `incoming/` and the app is then asked to find them
+#     ITSELF, through `/api/calibration/incoming` and its one-click build, rather
+#     than through the manual build form: that is the path a beginner takes, it is
+#     the path with the most machinery behind it, and driving it end to end is what
+#     makes the pass evidence about the feature rather than about a fixture. Since
+#     v0.455.0 those folders are also the ones the scan deliberately leaves alone,
+#     so the same seeding exercises that skip as a side effect.
+if [ "$DO_CAL" = 1 ] && [ "$DO_EMPTY" = 0 ]; then
+  echo "-- seeding generated darks and flats into incoming/, for the app to find"
+  echo "   (NB the sample's lights carry no hot pixels and no vignette, so these"
+  echo "    masters reach the SURFACES without improving the picture — see --help)"
+  INCOMING="$DATA/incoming" python - <<'PY'
+import os, pathlib
+from webapp.sample_data import write_sample_calibration_frames
+
+root = pathlib.Path(os.environ["INCOMING"])
+for name, kind in (("Darks 10s", "dark"), ("Flats", "flat")):
+    n = write_sample_calibration_frames(root / name, kind)
+    print(f"   wrote {n} {kind} frame(s) into {name}/")
+PY
+  # What the app makes of them on its own. A pass where this lists nothing has
+  # seeded frames the discovery cannot see, and every surface below it is still
+  # unreached — the same silent failure the observing site's `location_source`
+  # line and --big's `proxy_scale` line exist to stop.
+  CAL_OFFER="$(curl -sf "$BASE/api/calibration/incoming" || echo '{}')"
+  printf '%s' "$CAL_OFFER" | python -c '
+import json, sys
+raw = sys.stdin.read()
+d = json.loads(raw) if raw.strip() else {}
+rows = d.get("folders") or []
+if not rows:
+    print("   [offer] NOTHING FOUND — the seeded frames are invisible to the app,")
+    print("   [offer] so every calibration surface below is STILL unreached")
+for f in rows:
+    print("   [offer] %s -> %s master, %d frame(s), %s  (have one already: %s)"
+          % (f.get("name"), f.get("kind"), f.get("n_frames", 0),
+             f.get("suggested_name"), bool(f.get("have_master"))))
+' 2>/dev/null || echo "   [offer] could not read /api/calibration/incoming"
+  CAL_IDS="$(printf '%s' "$CAL_OFFER" | python -c '
+import json, sys
+raw = sys.stdin.read()
+d = json.loads(raw) if raw.strip() else {}
+print(" ".join(str(f["id"]) for f in (d.get("folders") or [])))
+' 2>/dev/null || true)"
+  for cid in $CAL_IDS; do
+    CAL_JOB="$(curl -sf -X POST "$BASE/api/calibration/incoming/$cid/build" \
+                 | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' \
+               2>/dev/null || true)"
+    echo "   built $cid: $(wait_job "$CAL_JOB")"
+  done
+  # …and what the registry holds now, plus the census the whole defect-repair
+  # offer is built on. Printed, never asserted — a finder, like everything else.
+  curl -sf "$BASE/api/calibration/masters" | python -c '
+import json, sys
+rows = json.load(sys.stdin) or []
+print("   [masters] %d in the registry" % len(rows))
+for m in rows:
+    print("   [masters] %s · %s · %sx%s · %s frame(s)"
+          % (m.get("kind"), m.get("name"), m.get("width_px"), m.get("height_px"),
+             m.get("n_frames")))
+' 2>/dev/null || echo "   [masters] could not read /api/calibration/masters"
+  curl -sf "$BASE/api/calibration/defects" | python -c '
+import json, sys
+d = json.load(sys.stdin) or {}
+print("   [defects] offer=%s · %s" % (d.get("offer_repair"), d.get("summary") or d))
+' 2>/dev/null || echo "   [defects] could not read /api/calibration/defects"
+  # Auto-bind, so the stack below actually APPLIES them. It is off by default in
+  # the product (§9) and turning it on is the whole point here: the "darks were
+  # applied" branch of the health vocabulary, and the auto-bind path itself, are
+  # otherwise as unreachable as the registry was.
+  curl -sf -X PUT "$BASE/api/settings" -H 'Content-Type: application/json' \
+       -d '{"auto_bind_calibration": true}' >/dev/null \
+    && echo "   auto_bind_calibration: on (so the stack below is a calibrated one)" \
+    || echo "   warn: could not turn on auto_bind_calibration — the stack stays raw"
+fi
+
 run_id_of() {  # newest stack run id for a target, or empty
   [ -n "$1" ] || return 0
   curl -sf "$BASE/api/targets/$1/stack-runs" \
@@ -563,6 +694,34 @@ for note in d.get("notes", []):
     print("   [health/%s] %s" % (note.get("kind"), note.get("message")))
 ' 2>/dev/null || echo "   [health] could not read it"
   fi
+fi
+
+# 4d. What a CALIBRATED install says about itself (--calibration). The health
+#     card's calibration note is the one sentence every pass has ever seen in its
+#     "no darks or flats were applied" form, because no pass has ever had any —
+#     so read it here as the paragraph it now belongs to, beside the per-target
+#     advice that is supposed to have gone quiet.
+if [ "$DO_CAL" = 1 ] && [ -n "$SAFE" ]; then
+  echo "-- what a CALIBRATED install SAYS (the branch no pass has ever reached):"
+  curl -sf "$BASE/api/targets/$SAFE/stack-health" \
+    | python -c '
+import json, sys
+d = json.load(sys.stdin) or {}
+notes = d.get("notes", [])
+cal = [n for n in notes if "calib" in str(n.get("kind", ""))]
+if not cal:
+    print("   [health/calibration] SILENT — no calibration note at all. Either the")
+    print("   [health/calibration] masters were applied and it has nothing to say,")
+    print("   [health/calibration] or the stack never saw them; check [masters] above.")
+for n in cal:
+    print("   [health/%s] %s" % (n.get("kind"), n.get("message")))
+' 2>/dev/null || echo "   [health] could not read it"
+  curl -sf "$BASE/api/targets/$SAFE/calibration-suggestions" \
+    | python -c '
+import json, sys
+d = json.load(sys.stdin) or {}
+print("   [suggestions] %s" % json.dumps(d)[:600])
+' 2>/dev/null || echo "   [suggestions] could not read it"
 fi
 
 # 5. The browser half. Two independent drives share one playwright install and
