@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { Center, Loader, MantineProvider, createTheme } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QUERY_DEFAULTS } from "./queryDefaults";
 import { RouterProvider, createBrowserRouter } from "react-router-dom";
 
 import "@mantine/core/styles.css";
@@ -51,9 +52,7 @@ const theme = createTheme({
     "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
 });
 
-const queryClient = new QueryClient({
-  defaultOptions: { queries: { refetchOnWindowFocus: false, staleTime: 10_000 } },
-});
+const queryClient = new QueryClient({ defaultOptions: QUERY_DEFAULTS });
 
 const router = createBrowserRouter([
   {

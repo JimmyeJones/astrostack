@@ -18,6 +18,84 @@ is a queue.
 
 ---
 
+## 2026-09-17 — the magnitude question again, one layer sideways: a stated complexity bound is a claim about a *caller*
+
+*(Builder, branch `claude/sweet-babbage-dmpc84`, the run that shipped v0.455.5, v0.455.6 and v0.455.7. A
+record, not a task.)*
+
+**Where the run started.** Baseline green (6,246 passed, 2 skipped). Then "Bugs (fix these first)" top-down,
+and it is in the state the previous run described: every open entry gated on the owner's own data, routed to
+owner sign-off, or stood down with the measurement written down. The three open GitHub issues (#878, #880,
+#903) each map to one of those entries. "Features that serve real workflows" is drained the same way — its
+open items are two explicit declines and one "mostly already built". So the run's work had to be found, not
+picked.
+
+**The question that worked was the previous run's, pointed sideways.** That run asked *what magnitude has
+this tooling never held?* and answered "1,200 subs against his 35,894". This run asked it of **code the
+`--deep` flag still cannot reach**, because `--deep` is deliberately un-stacked and small-sensor. Three
+findings, all on the Target page, all measured before anything moved:
+
+1. **v0.455.5** — `detectMixedPointings` tested every pair of subs. Its own comment said *"O(n²), bounded by
+   the 2000-frame list cap"* — a cap `api.listFrames` **no longer has**, because the fix for the truncation
+   bug made it page until it holds every sub. 474 ms at 5,477 subs, **15.3 s at 35,894**, synchronously
+   inside the `useMemo` that renders the page. Replaced with an exactly-equivalent cube grid: 3.2 ms.
+2. **v0.455.6** — grading one sub invalidated the whole list, i.e. re-downloaded it. Measured on the
+   running app: **531 bytes a row**, so 19.1 MB over 18 sequential requests per keystroke at his depth.
+3. **v0.455.7** — the Stack form asked the identical question under a different cache key, so clicking
+   "Stack" paid for the list a second time.
+
+**The transferable rule is the first one's.** *A stated complexity bound is a claim about a caller, and
+callers change.* The comment was accurate when it was written and false within weeks, and nothing connects
+the two files. This is the third narrowing of what a "clean" reading buys, after "look at the pixels"
+(v0.406.0) and "read the sentences as one paragraph" (v0.406.2), and the first that is about a *comment*
+rather than about a screen: **the docstring is not the bound.** The cheap grep is `O(n` over the tree, read
+against what each caller does *today* — it found ten sites, and the three Python ones had all already been
+fixed.
+
+**Which is the sharper half, and the reason it is here.** `seestack/stack/pointings.py::detect_mixed_pointings`
+is the **same rule** as the TypeScript one, for the same batches, and a previous run measured it at 2.65 s on
+a 5,477-sub target and gave it a fold; `seestack/mosaicmap.py` got the same treatment the same way. Both
+carry the measurement in their docstrings. The frontend copy — which computes the identical verdict, for the
+same owner, on the two pages he actually opens — was untouched, because the sweep that found the cost
+followed **Python callers**. So the miss was not that nobody thought about the cost. It was that *one rule
+living at two layers has two independent cost stories, and fixing one reads as fixing the thing.* When a
+rule is duplicated across the engine/frontend seam, a fix to either half is a half-fix until the other is
+checked — and the backlog entry, the commit subject and the docstring all name only the half that moved.
+
+**A method note on testing a performance fix.** Two tests, doing different jobs, and it matters that they are
+two:
+
+- The **parity** test — an exhaustive all-pairs oracle written *longhand in the test file*, not imported,
+  over 250 seeded random skies including both poles, the RA=0 seam and spreads at 2.9°/3.1° — **passes both
+  before and after**. That is correct: it is the claim that nothing moved, and an oracle that shares code
+  with the thing it checks checks nothing.
+- The **budget** test is the one that fails before, and it asserts the elapsed milliseconds rather than
+  leaning on the test timeout. Two reasons. `it(name, { timeout }, fn)` silently did not apply in vitest
+  2.1.9 — the reverted code ran 11.4 s under a 5 s "timeout" and **passed** — and even where a timeout works
+  it reports "too slow" without saying how slow. An explicit budget with the number in the failure message
+  (`one pointing, 30,000 subs took 10992 ms: expected 10991.8 to be less than 1500`) names the defect, and
+  with 3.2 ms against 1,500 ms there is ~40× of headroom on a loaded CI box while the old code still misses
+  by 3–8×.
+
+**And a test about caching needs the app's real cache settings.** v0.455.7's claim ("clicking Stack costs no
+request") is true of the app and false under TanStack Query's bare `staleTime: 0`, so the test first failed
+for a reason that had nothing to do with the code. The defaults were inline in `main.tsx`, which a test
+cannot import without rendering the app — they are now `src/queryDefaults.ts`, imported by both. Generalises:
+**when a test hand-writes a client, a provider or a config the app also writes, it is asserting something
+about the copy.**
+
+**Dogfood `--deep` after v0.455.4 — CLEAN.** 1,200-sub target reached and reported; the frames table rendered
+301 of 1,200 rows at 7,519 DOM nodes and 1,218 ms to first paint, the foot said *"Showing the first 300 of
+1,200 subs"*, and scrolling grew it to 601 rows (the observer fired). No console errors, no failed requests,
+nothing overflowing at 1440 px or 420 px. Tallest page `/tonight` at 3,624 px — and as v0.455.4 warns, every
+prescriptive card on it named the deep target, which is a `--deep` pass working rather than a finding. Page
+heights otherwise in line with the standing baselines. The pass is also where the 531 bytes-a-row figure came
+from: its running app was queried directly for the frames endpoint's payload, which is a use for `--serve`
+-shaped tooling that had not been recorded — **a booted dogfood install is a measuring instrument, not only a
+browser**.
+
+---
+
 ## 2026-09-17 — the question that found this run's work: not "what state has the tooling never been in?" but "what **magnitude**?"
 
 *(Builder, branch `claude/sweet-babbage-ro1k5s`, the run that shipped v0.455.2 and v0.455.3. A record, not a
