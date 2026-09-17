@@ -474,6 +474,43 @@ def test_restack_same_basename_keeps_old_run_pointing_at_its_own_image(tmp_path)
         proj.close()
 
 
+def test_stack_stamps_the_transparency_estimator_generation(tmp_path):
+    """``transparency_ratio`` has an estimator behind it and that estimator moved
+    in v0.304.2, so the figure has to be dated at the moment it is written — a
+    reader holding only the number cannot tell a hazy night from a mosaic panel
+    with a poorer star field. NULL when there is no figure to date, so a run the
+    measurement declined records no scale rather than a misleading one."""
+    from seestack.stackhealth import TRANSPARENCY_ESTIMATOR_GENERATION
+
+    proj = _build_project(tmp_path, n=5)
+    try:
+        # A measurable sample on both sides — the frames the fixture writes carry
+        # no QC transparency of their own, and without one the diagnostic (and so
+        # the stamp beside it) correctly declines.
+        proj._conn.execute(
+            "UPDATE frames SET transparency_score = 9000.0 + id * 10")
+        proj._conn.commit()
+        run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                     output_name="transp"), app_version="9.9.9")
+        run = next(iter(proj.iter_stack_runs()))
+        assert run.transparency_ratio is not None
+        assert run.transparency_scale == TRANSPARENCY_ESTIMATOR_GENERATION
+    finally:
+        proj.close()
+
+    subdir = tmp_path / "unmeasured"
+    subdir.mkdir()
+    proj2 = _build_project(subdir, n=5)
+    try:
+        run_stack(proj2, StackOptions(sigma_clip=False, max_workers=2,
+                                      output_name="notransp"))
+        run = next(iter(proj2.iter_stack_runs()))
+        assert run.transparency_ratio is None
+        assert run.transparency_scale is None
+    finally:
+        proj2.close()
+
+
 def test_stack_records_engine_version(tmp_path):
     """run_stack stamps the run record with the app version passed by the caller,
     for provenance ("made with vX") and stale-target reprocessing. Unset

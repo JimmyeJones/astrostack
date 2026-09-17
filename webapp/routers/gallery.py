@@ -19,7 +19,11 @@ from pydantic import BaseModel
 
 from seestack.edit.proxy import rejection_map_path_for
 from seestack.stack.output import save_display_jpeg
-from seestack.stackhealth import grain_verdict, stored_seam_verdict_for
+from seestack.stackhealth import (
+    grain_verdict,
+    stored_hazy_verdict_for,
+    stored_seam_verdict_for,
+)
 from webapp import deps, picturesarchive
 from webapp.capture_nights import capture_night_count, capture_night_range
 from webapp.derived_light import (
@@ -84,8 +88,18 @@ class GalleryItem(BaseModel):
     # than claiming a count it does not have. Additive.
     capture_nights: int | None = None
     # Median transparency of the stacked frames ÷ the target's clear-sky baseline
-    # (< ~0.6 ⇒ hazy). None for pre-schema-5 runs; drives a "hazy night" badge.
+    # (< ~0.6 ⇒ hazy). None for pre-schema-5 runs; the figure behind the "hazy
+    # night" badge's tooltip percentage.
     transparency_ratio: float | None = None
+    # ...and whether that figure may be *read* as haze: "hazy", or None when
+    # there is nothing honest to say — no measurement, a clear night, or a
+    # **mosaic** run whose figure predates v0.304.2 and is therefore on a
+    # different scale from the bar it would be read through. Same
+    # `seestack.stackhealth.stored_hazy_verdict_for` call the run listing uses,
+    # so the badge says one thing wherever it is drawn. Additive: an older
+    # frontend ignores it, and an older backend omitting it leaves the badge
+    # reading the ratio the way it always did.
+    hazy_verdict: str | None = None
     # Background-noise σ of the stacked image, normalized to its own signal range
     # (lower = cleaner). None for pre-schema-6 runs; drives a noise readout.
     noise_sigma: float | None = None
@@ -347,6 +361,7 @@ def _gallery_item(t, run, proj, recipe_prefix: str, exported_prefix: str,
         capture_night_end=night_end,
         capture_nights=nights,
         transparency_ratio=run.transparency_ratio,
+        hazy_verdict=stored_hazy_verdict_for(run),
         noise_sigma=run.noise_sigma,
         calstat=run.calstat,
         seam_verdict=stored_seam_verdict_for(run),

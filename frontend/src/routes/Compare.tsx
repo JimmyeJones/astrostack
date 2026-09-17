@@ -173,7 +173,7 @@ function CardMeta({ item }: { item: GalleryItem }) {
       </Text>
       <Group gap={4}>
         <RejectionBadge options={item.options} />
-        <HazyNightBadge ratio={item.transparency_ratio} />
+        <HazyNightBadge ratio={item.transparency_ratio} verdict={item.hazy_verdict} />
         <PanelSeamsBadge verdict={item.seam_verdict} grain={item.grain_verdict} />
         <CalibrationBadge calstat={item.calstat} />
         {/* Same badge, same figure, as the Gallery card these two were picked

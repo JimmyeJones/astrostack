@@ -22,6 +22,7 @@ from seestack.io.project import count_unreadable_frames, readable_frame_path
 from seestack.io.scanner import ScanResult, run_qc_and_solve, scan_and_organize
 from seestack.render.thumbnail import invalidate_frame_thumbs
 from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
+from seestack.stackhealth import readable_transparency_ratio
 from webapp import __version__ as APP_VERSION
 from webapp import jobqueue
 from webapp.config import Settings
@@ -2251,7 +2252,14 @@ def _apply_editor_to_run(lib: Library, safe: str, run_id: int,
             # reasoning as the capture window below.
             total_exposure_s=run.total_exposure_s,
             calstat=run.calstat,
-            transparency_ratio=run.transparency_ratio,
+            # Read through the source's own scale rather than copied raw: a
+            # mosaic figure written before v0.304.2 is on a different scale from
+            # the bar it would be read through, and an export carries neither
+            # ``is_mosaic`` (deliberately, see below) nor the source's
+            # ``engine_version``, so a raw copy would arrive here looking
+            # perfectly current. ``None`` is the same silence the export already
+            # gives every other unmeasurable fact.
+            transparency_ratio=readable_transparency_ratio(run),
             # Deliberately NOT carried, and the line between the two lists is
             # the whole rule: these describe the *pixels* or the stacking work,
             # both of which an edit changes.
