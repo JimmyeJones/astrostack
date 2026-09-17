@@ -549,11 +549,16 @@ for f in rows:
           % (f.get("name"), f.get("kind"), f.get("n_frames", 0),
              f.get("suggested_name"), bool(f.get("have_master"))))
 ' 2>/dev/null || echo "   [offer] could not read /api/calibration/incoming"
+  # Only the folders the app says it has no master for. Building the rest would
+  # duplicate a master on every re-run against the same scratch root — the offer
+  # already answers this (`have_master`), and ignoring its answer would make the
+  # pass a worse witness of the feature than the feature deserves.
   CAL_IDS="$(printf '%s' "$CAL_OFFER" | python -c '
 import json, sys
 raw = sys.stdin.read()
 d = json.loads(raw) if raw.strip() else {}
-print(" ".join(str(f["id"]) for f in (d.get("folders") or [])))
+print(" ".join(str(f["id"]) for f in (d.get("folders") or [])
+               if not f.get("have_master")))
 ' 2>/dev/null || true)"
   for cid in $CAL_IDS; do
     CAL_JOB="$(curl -sf -X POST "$BASE/api/calibration/incoming/$cid/build" \
@@ -585,6 +590,22 @@ print("   [defects] offer=%s · %s" % (d.get("offer_repair"), d.get("summary") o
        -d '{"auto_bind_calibration": true}' >/dev/null \
     && echo "   auto_bind_calibration: on (so the stack below is a calibrated one)" \
     || echo "   warn: could not turn on auto_bind_calibration — the stack stays raw"
+  # …and a target that ALREADY has a run must be re-processed, or this whole
+  # flag silently measures the uncalibrated stack a previous pass left in the
+  # scratch root. `stack_target` returns early on any existing run (right for
+  # every other flag, wrong for this one, and the failure is invisible: the
+  # health note simply keeps saying "no darks or flats were applied", which is
+  # exactly the empty state --calibration exists to escape). Found on this
+  # flag's own first run.
+  if [ "$DO_STACK" = 1 ] && [ -n "$SAFE" ] \
+     && [ "$(curl -sf "$BASE/api/targets/$SAFE/stack-runs" | tr -d '[:space:]')" != "[]" ]; then
+    echo "   the sample already has a run from an earlier pass — re-processing it"
+    echo "   so the newest picture is a CALIBRATED one (this is the slow part)"
+    CAL_STACK_JOB="$(curl -sf -X POST "$BASE/api/targets/$SAFE/process" \
+                       | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' \
+                     2>/dev/null || true)"
+    echo "   re-process: $(wait_job "$CAL_STACK_JOB" 180)"
+  fi
 fi
 
 run_id_of() {  # newest stack run id for a target, or empty
@@ -703,6 +724,25 @@ fi
 #     advice that is supposed to have gone quiet.
 if [ "$DO_CAL" = 1 ] && [ -n "$SAFE" ]; then
   echo "-- what a CALIBRATED install SAYS (the branch no pass has ever reached):"
+  # First, unambiguously: did the newest run actually USE a master? The health
+  # note going quiet is consistent with "applied" *and* with "this surface never
+  # speaks", and a pass that cannot tell them apart is the empty state wearing a
+  # better hat. `/options` reverse-maps the run's server-resolved calibration
+  # paths back to master ids, so this is the run's own provenance.
+  CAL_RUN="$(run_id_of "$SAFE")"
+  if [ -n "$CAL_RUN" ]; then
+    curl -sf "$BASE/api/targets/$SAFE/stack-runs/$CAL_RUN/options" \
+      | python -c '
+import json, sys
+o = (json.load(sys.stdin) or {}).get("options") or {}
+used = {k: o[k] for k in
+        ("dark_master_id", "flat_master_id", "flat_dark_master_id",
+         "bias_master_id") if o.get(k)}
+print("   [run %s] masters actually applied: %s"
+      % (sys.argv[1], used or "NONE — the stack never saw them"))
+' "$CAL_RUN" 2>/dev/null \
+      || echo "   [run $CAL_RUN] could not read its stack options"
+  fi
   curl -sf "$BASE/api/targets/$SAFE/stack-health" \
     | python -c '
 import json, sys
@@ -710,9 +750,9 @@ d = json.load(sys.stdin) or {}
 notes = d.get("notes", [])
 cal = [n for n in notes if "calib" in str(n.get("kind", ""))]
 if not cal:
-    print("   [health/calibration] SILENT — no calibration note at all. Either the")
-    print("   [health/calibration] masters were applied and it has nothing to say,")
-    print("   [health/calibration] or the stack never saw them; check [masters] above.")
+    print("   [health/calibration] SILENT — the note withdrew. Read the [run] line")
+    print("   [health/calibration] above for which reason: masters applied (right),")
+    print("   [health/calibration] or NONE applied and this surface never speaks.")
 for n in cal:
     print("   [health/%s] %s" % (n.get("kind"), n.get("message")))
 ' 2>/dev/null || echo "   [health] could not read it"
