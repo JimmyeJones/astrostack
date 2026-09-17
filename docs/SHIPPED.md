@@ -1,5 +1,124 @@
 # Shipped — the record
 
+## v0.453.4 — 2026-09-17 — the preview↔export class is pinned by the source, not by memory
+
+*(Builder, branch `claude/sweet-babbage-dqhm8l`, filed with the v0.453.3 fix directly above it. Test-only:
+one new file, no production code touched.)*
+
+**Why, in one sentence:** `tone.scnr` sat unscaled on the one-click Auto path for five months with
+`tests/test_edit_proxy_parity.py` — a file whose entire subject is that class, whose header says a 2026-09-09
+sweep "confirmed every current op passes it" — standing right beside it, because that file covers the ops
+somebody *remembered* to add and nobody remembered SCNR.
+
+**And the composition test could not have caught it either.** `tests/test_auto_recipe_proxy_parity.py` renders
+the whole eleven-op Auto recipe twice and compares summary statistics against a budget. The SCNR divergence is
+**localised** — it is 1.00x on a flat cast and 0.68x on green knots a few pixels across — so it moves no
+summary statistic far enough to spend the budget. Two tests aimed at this class, one blind by omission and the
+other by construction.
+
+**The guard.** `tests/test_edit_neighbourhood_drift.py` walks `seestack/edit` with `ast`, finds every call to
+a scipy-ndimage neighbourhood filter (18 names), resolves what each was handed as its `sigma` / `size` /
+`footprint`, and requires it to trace back to `proxy_scale` — through local assignments, and through
+*enclosing* scopes, which is load-bearing: sharpen and deconvolution both scale their radius in the op body
+and filter inside a nested `run`, so a scan reading only the innermost scope cries wolf twice on correct code
+and teaches the reader to ignore it. Anything that does not trace must be named in `_UNSCALED_BY_DESIGN` with
+the reason. Same shape as `test_no_float_to_integer_pack_truncates_anywhere_in_the_app`.
+
+**Thirteen call sites; eight resolve, five are exempt, and the exemptions are the deliverable.** Each was
+triaged once, and the sentence is what the next reader gets instead of a constant:
+
+- `coverage_trim._border_trim_rect`'s `binary_dilation` — no size at all; the default 3x3 structure asks
+  *connectivity* ("does this poor-coverage blob touch the outside?"), which is the right question at every
+  scale.
+- `detail._box_blur3`'s `uniform_filter(width)` — a private helper whose `width` comes from the `sigma` it was
+  handed, and whose one caller passes `ctx.scaled_px(radius)`. The scaling is real, one call up where the scan
+  cannot follow; pinned behaviourally by the chroma-denoise parity test.
+- the three in `presets._extended_chroma` / `presets.classify_target` — **measured** rather than argued, on one
+  unchanging synthetic sky at proxy steps 1 / 2 / 3 / 5 / 8: `chroma` 0.032 on a galaxy and 0.447 on a nebula
+  at every step, `ext_frac` 0.0254 / 0.0254 / 0.0254 / 0.0255 / 0.0253, and galaxy and nebula classify
+  identically throughout. The one place scale shows is a sparse star cluster at step 5+, where the cues fall
+  under the "essentially blank" floor and `classify_target` returns `None` rather than guessing — the honest
+  degradation, and it needs a >=7500 px canvas to reach.
+
+**The trap is armed, three ways, because a guard that cannot fail is the thing it is guarding against.**
+`test_the_drift_guard_can_see_an_unscaled_filter` runs the **pre-v0.453.3 spelling of `_scnr`** through the
+same resolver and asserts it is refused, then asserts the shipped spelling passes — so the guard is neither
+blind nor merely strict. `test_the_resolver_follows_a_radius_scaled_in_an_outer_scope` pins the three sites
+the naive scan got wrong. `test_the_exemption_list_has_no_stale_entries` deletes-by-failing an exemption that
+outlives the code it was written about. And run against the real tree with `scnr_noise_sigma` scratch-reverted,
+the guard goes red naming
+`seestack/edit/ops/tone.py::_scnr::gaussian_filter(_SCNR_NOISE_SIGMA)` — today's bug, by its exact site.
+
+**Tests +5.** No production code, no config, schema, on-disk, API or default change.
+
+## v0.453.3 — 2026-09-17 — the one-click Auto recipe's green-cast removal previewed less green than it saved
+
+*(Builder, branch `claude/sweet-babbage-dqhm8l`. Found by an adversarial read of the editor ops for
+pixel-unit parameters that are not scaled by `proxy_scale` — the A2 class — and measured before anything was
+changed. Engine-only; one pure function and one call site. No config, schema, on-disk, API-shape or default
+change, and the export is bit-for-bit what it was.)*
+
+**The defect.** `tone.scnr` is in the one-click Auto recipe (`seestack/edit/presets.py`, amount ~0.7), and
+its default noise-protected path estimates the green *excess* by smoothing green and the red/blue neutral
+before differencing them. That smoothing radius, `_SCNR_NOISE_SIGMA = 3.0`, is a **full-resolution** pixel
+measure — and it was handed to `gaussian_filter` unchanged at both resolutions. On the decimated live-preview
+proxy, 3 proxy pixels is `3 x proxy_scale` full-res pixels, so the preview estimated the excess over
+`proxy_scale` times more sky than the export did. A smoothed excess is a *flattened* excess, so wherever the
+green cast had structure rather than a mere level, the preview removed less of it than the save would.
+
+**Measured, on a green cast that has structure (knots of sigma 2 / 4 / 8 full-res px over a broad level,
+plus per-pixel grain), as green removed on the knot cores against the export's own removal at the same
+pixels:**
+
+| proxy step | before | after |
+|---|---|---|
+| 2 | 0.83x | 1.00x |
+| 3 | 0.68x | 1.00x |
+| 4 | 0.57x | 0.95x |
+| 6 | 0.45x | 0.83x |
+
+Whole-canvas, as `rms(preview - export) / rms(export)`: **5.5 / 9.6 / 12.5 / 15.6 %** before, **0.3 / 0.5 /
+2.1 / 5.5 %** after. On a *flat* cast the two always agreed exactly, which is why a flat fixture could never
+have found this and why the fixture added here carries three knot widths.
+
+**Why the direction matters for this owner.** `PROXY_MAX_PX` is 1500 and his mosaics are ~3494x2470 and up,
+so proxy step 2-3 is his everyday state — where the preview was showing him a picture with a third of the
+green still sitting on the nebula that the saved file would not have. Someone judging `amount` on that
+preview pushes the slider up and saves a picture corrected harder than the one they looked at. It is the same
+class as the A2 batch and as `tone.color_calibrate`'s own fix, in the op next door.
+
+**The fix, and the trade it makes visible rather than silent.** New pure
+`seestack/edit/ops/tone.py::scnr_noise_sigma(proxy_scale)` returns
+`max(_SCNR_PROXY_SIGMA_FLOOR, _SCNR_NOISE_SIGMA / max(1.0, proxy_scale))`, and `_scnr` renders with it. At
+`proxy_scale <= 1` that is `_SCNR_NOISE_SIGMA` exactly, so **every export, and the loupe's 1:1 window, is
+byte-identical** — no saved picture moves.
+
+The floor is the part that needed measuring rather than reasoning. The smoothing is not decoration: it exists
+because the per-pixel estimator (`protect_noise` off) rectifies chroma noise through its `clip(..., 0)` and
+drags a genuinely neutral sky magenta — the bug the protected path was built for. Shrinking the radius gives
+that bias room back, and a *stride is not an average*, so the proxy carries full-resolution grain into a
+smaller window. Measured as green wrongly removed from a neutral noisy sky, in % of sky level: the
+unprotected per-pixel cap **+2.05 %**, the export **+0.20 %**, an unfloored `1/proxy_scale` **+1.34 %** at
+step 6 — two thirds of the way back to the estimator it replaced — and the floored preview **+0.59 %**. So
+the change trades a **32-55 % structure divergence** for a **0.4 % of sky level** background one, in the
+preview only, and the floor at 1 px is where a Gaussian stops being a neighbourhood at all (below ~1 px it is
+dominated by its own centre tap). Both directions are now pinned by tests, so the floor cannot be quietly
+removed and the parity cannot quietly regress.
+
+**No sixth advisory.** The five preview-vs-export advisories exist where the residual is *fundamental* (a
+sub-pixel kernel collapsing, a stride that cannot be an average). Here the residual after the fix is <= 5 %
+at every proxy step the owner reaches, and a sixth conditional caption on the priority-1 screen for a 17 %
+residual at a canvas size he does not have is the clutter AGENTS.md §1 warns about. The measurement is
+recorded here instead.
+
+**Tests (+5, in `tests/test_edit_proxy_parity.py` — the file that exists for exactly this class and did not
+carry SCNR).** A new `_synth_green_field` fixture; the knot-core parity at steps 2/3/4, each with a
+fixture-is-honest guard that the cast really has structure above its own level and a ceiling so the floor
+cannot be "fixed" by over-removing; the export's bit-for-bit identity plus the four pinned sigma values; and
+the neutral-noisy-sky guard on the floor. **Four of the five go red under a scratch revert of
+`scnr_noise_sigma`** (the fifth guards the trade, not the bug, and passes both ways on purpose — recorded
+rather than dressed up as a fail-before).
+
 ## v0.453.2 — 2026-09-17 — the last surface in the class: "My best pictures" shares its pictures with their story
 
 *(Builder, branch `claude/sweet-babbage-f4u6pf`, closing the class v0.453.0 and v0.453.1 opened. One additive
