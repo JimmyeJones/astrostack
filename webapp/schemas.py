@@ -655,10 +655,17 @@ class HealthNoteOut(BaseModel):
 class DarkSpecOut(BaseModel):
     """The exposure/gain a beginner should shoot dark frames at (read from the
     target's own subs), powering the "How to add darks" guide's pre-filled
-    numbers. Either field is ``null`` when the subs didn't record it."""
+    numbers. Either field is ``null`` when the subs didn't record it.
+
+    ``exposures_s`` is the set ``exposure_s`` is the median of. It is what stops
+    the guide saying "at the same settings as your subs — 20 s" about a target
+    shot at 10 s and 30 s. Additive and defaulted, so an older client ignores it
+    and an older backend omitting it reads as "one length", which is what every
+    library that has never changed sub length actually has."""
 
     exposure_s: float | None = None
     gain: float | None = None
+    exposures_s: list[float] = []
 
 
 class StackHealthOut(BaseModel):

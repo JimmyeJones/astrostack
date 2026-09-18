@@ -2,27 +2,61 @@ import { Anchor, Collapse, List, Stack, Text } from "@mantine/core";
 import { useState } from "react";
 import type { DarkSpec } from "../../api/client";
 
+/** `10` → `"10 s"`; whole seconds read cleanest, odd values keep one decimal. */
+function formatSeconds(value: number): string {
+  return `${Number.isInteger(value) ? String(value) : value.toFixed(1)} s`;
+}
+
+/** The sub lengths this guide should name: the target's own *distinct* lengths
+ *  when the backend sends them, the median it has always sent otherwise.
+ *
+ *  A target is one **folder**, never one exposure — shoot it at 10 s one night
+ *  and 30 s the next and the median is 20 s, which this guide would then offer
+ *  under the words "at the same settings as your subs". */
+export function darkSpecLengths(spec: DarkSpec | null | undefined): number[] {
+  if (!spec) return [];
+  const set = (spec.exposures_s ?? []).filter((e) => e != null && e > 0);
+  if (set.length > 0) return [...set].sort((a, b) => a - b);
+  const { exposure_s } = spec;
+  return exposure_s != null && exposure_s > 0 ? [exposure_s] : [];
+}
+
 /**
  * Format the target's own exposure/gain into the "match these numbers" phrase,
- * e.g. `"10 s at gain 80"`. Returns `null` when neither number is known, so the
- * guide falls back to generic wording instead of showing a wrong/empty value.
+ * e.g. `"10 s at gain 80"` — or `"10 s and 30 s at gain 80"` for a target shot
+ * at two lengths. Returns `null` when neither number is known, so the guide
+ * falls back to generic wording instead of showing a wrong/empty value.
  * Pure/testable.
  */
 export function formatDarkSpec(spec: DarkSpec | null | undefined): string | null {
   if (!spec) return null;
   const parts: string[] = [];
-  const { exposure_s, gain } = spec;
-  if (exposure_s != null && exposure_s > 0) {
-    // Whole seconds read cleanest ("10 s"); keep one decimal for odd values.
-    const secs = Number.isInteger(exposure_s) ? String(exposure_s) : exposure_s.toFixed(1);
-    parts.push(`${secs} s`);
+  const lengths = darkSpecLengths(spec).map(formatSeconds);
+  if (lengths.length === 1) {
+    parts.push(lengths[0]);
+  } else if (lengths.length > 1) {
+    parts.push(`${lengths.slice(0, -1).join(", ")} and ${lengths[lengths.length - 1]}`);
   }
+  const { gain } = spec;
   if (gain != null) {
     const g = Number.isInteger(gain) ? String(gain) : gain.toFixed(0);
     parts.push(`gain ${g}`);
   }
   if (parts.length === 0) return null;
   return parts.join(" at ");
+}
+
+/** The extra sentence a target shot at more than one sub length needs: one dark
+ *  only subtracts correctly from subs of its own exposure, so two lengths means
+ *  two sets. Empty string on the ordinary single-length target, which is every
+ *  target until someone changes their sub length between nights. */
+export function darkSpecPerLengthNote(spec: DarkSpec | null | undefined): string {
+  const n = darkSpecLengths(spec).length;
+  if (n < 2) return "";
+  return (
+    ` You shot this target at ${n} different sub lengths, so it needs a set of `
+    + `darks at each — one dark only matches subs of its own exposure.`
+  );
 }
 
 /**
@@ -38,6 +72,7 @@ export function DarksGuide({ spec }: { spec?: DarkSpec | null }) {
   const match = formatDarkSpec(spec);
   const step2 = match
     ? `Shoot about 20–30 dark frames at the same settings as your subs — ${match}.`
+      + darkSpecPerLengthNote(spec)
     : "Shoot about 20–30 dark frames at the same exposure and gain as your subs.";
 
   return (
