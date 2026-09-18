@@ -141,6 +141,40 @@ def test_a_target_shot_at_two_exposures_is_warned_about_whichever_sub_is_the_ref
         proj.close()
 
 
+def test_a_target_shot_over_two_seasons_is_warned_about_whichever_sub_is_the_reference(
+        tmp_path):
+    """A target is not necessarily one *temperature* either, and the advisory
+    used to assume it was.
+
+    Fail-before: ``run_stack`` asked the advisory only about the *reference
+    frame's* sensor temperature, so the same target, the same subs and the same
+    dark either warned or said nothing depending on which frame
+    ``pick_reference_frame`` landed on — and when it did warn it named a
+    temperature two-thirds of the subs were not shot at. Unlike the exposure
+    half there is nothing to scale here, so only the telling changes."""
+    proj = _build_project(tmp_path, n=6)
+    try:
+        for i, f in enumerate(proj.iter_frames()):
+            # One target, two seasons: three subs on a mild night, three frozen.
+            proj.update_frame(f.id, exposure_s=10.0,
+                              sensor_temp_c=-20.0 if i >= 3 else 2.0)
+        dark = np.zeros((320, 480), dtype=np.float32)
+        dark_path = tmp_path / "dark_mild.fits"
+        save_master(dark_path, dark,
+                    MasterMeta("dark", 5, 480, 320, "mean", exposure_s=10.0,
+                               sensor_temp_c=2.0))
+        res = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                           dark_path=str(dark_path),
+                                           output_name="mixed_temp_out"))
+        assert len(res.calibration_warnings) == 1
+        warn = res.calibration_warnings[0]
+        assert "-20°C to 2°C" in warn      # the spread named …
+        assert "3 of 6" in warn            # … and how much of it the dark misses
+        assert "your subs are at" not in warn   # … and no single temperature
+    finally:
+        proj.close()
+
+
 def test_stack_reports_no_calibration_warning_for_a_matching_dark(tmp_path):
     """A dark that matches the subs says nothing — the field is empty, not a
     reassurance line, so nothing new appears on an ordinary healthy run."""
