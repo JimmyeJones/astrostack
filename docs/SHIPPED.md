@@ -1,5 +1,40 @@
 # Shipped — the record
 
+## v0.458.2 — 2026-09-18 — …and the crop the card offered to fix it with measured the square too
+
+*(Builder, branch `claude/sweet-babbage-3dy83s`, the same run and the other half of v0.458.1's own object
+box. Filed as "deliberately not changed" an hour earlier and then measured, which is what changed the call.)*
+
+**The bug.** `framing_result_verdict` says *"all in this frame, but sits well off to one side — re-centring it
+next session would give it more room"*, and `recentre_outcome` is the app **doing** that to the picture the
+owner already has: the biggest crop that keeps the frame's aspect, puts the object near the middle, and leaves
+`_RECENTRE_MARGIN` of clear space around it. That clear space was measured around a **square of the major
+axis** — a strictly harder test than the verdict beside it had just passed — so an elongated object could get
+the sentence and then be refused the one button that acts on it.
+
+**Measured.** A 30' x 10' object half-way out to the bottom edge of a 1000 x 800 canvas at 5"/px: the verdict
+is `off_centre` with coverage 1.0, and the offer came back `reason="cramped"`, no crop. Asked about the object's
+real box it returns a crop keeping **46 %** of the frame — comfortably past the `_RECENTRE_MIN_KEPT` 40 % floor
+that exists precisely to stop a bad offer. There was nothing marginal about the crop; the refusal was measuring
+the wrong shape.
+
+**The fix.** `recentre_outcome` (and its `recentre_crop` view) take `size_minor_arcmin` and test the margin
+**per axis** against the same box the verdict lays along the canvas's long edge; `framing_advice.framing_payload`
+hands it the same catalogue number it now hands the verdict. The change can only ever *relax* the margin test —
+the minor half-extent is clamped to the major one — so an offer that existed before still exists and is never
+smaller, which is pinned rather than argued.
+
+**Upgrade-safe (§9):** one optional keyword on each of two pure functions, with a default that reproduces the
+square box term for term; no config, DB-schema, on-disk, API-shape or default change. `_RECENTRE_MARGIN`,
+`_RECENTRE_TOLERANCE` and `_RECENTRE_MIN_KEPT` are untouched.
+
+**Tests (+4).** `tests/test_framing.py` (+3): the 30' x 10' repro, asserting the square refuses `cramped` and
+the shaped box keeps 0.458 — **red under a scratch revert**; an equivalence test that `None` / `0` / a negative
+minor axis gives byte-identical reason, kept and crop across five positions; and a monotonicity guard that a
+minor axis never shrinks an offer that already existed. `tests/webapp/test_stack_framing.py` (+1): the wiring,
+through the real endpoint on the real M 42 row (85' x 60') — red when the `size_minor_arcmin=` argument is
+dropped from `framing_payload`, which is the line a future edit would lose.
+
 ## v0.458.1 — 2026-09-18 — the framing verdict measured a square where the panel count beside it measured a galaxy
 
 *(Builder, branch `claude/sweet-babbage-3dy83s`. Found by reading a `--mosaic` dogfood pass's Target-page
@@ -38,10 +73,11 @@ expression term for term, and a test pins level, coverage and text equal across 
 A catalogue row with its axes the wrong way round can't inflate the object either — the minor half-extent is
 clamped to the major one.
 
-**What it does not change.** `recentre_outcome` still sizes its offer on the major axis: it asks a different
-question ("is there room for the object *plus clear space* in a crop?"), and a rotation-agnostic radius there
-is conservative in the safe direction — it can only withhold an offer, never promise a crop that clips the
-object. Nothing else moved: no threshold, no wording, no response field, no default.
+**What it did not change, and why that did not hold.** This shipped leaving `recentre_outcome` sizing its
+offer on the major axis, on the reasoning that it asks a different question ("is there room for the object
+*plus clear space* in a crop?") and errs in the safe direction. **v0.458.2, immediately below, closes that**:
+the safe direction turned out to be the one where the card makes a promise and then withholds the button that
+keeps it. Nothing else moved here: no threshold, no wording, no response field, no default.
 
 **Tests (+7).** `tests/test_framing.py` (+5): the M 31 repro end to end through `mosaic_plan`'s own grid,
 with the square fallback asserted still to read 0.404 so the change is one of *model* and not of arithmetic;

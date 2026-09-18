@@ -134,6 +134,10 @@ def framing_payload(
     outcome = recentre_outcome(
         x_px=x_px, y_px=y_px, width_px=width, height_px=height,
         arcsec_per_px=scale, size_arcmin=info.size_arcmin,
+        # The same box the verdict above just measured — an offer that asked
+        # about a different shape than the sentence it answers is the drift this
+        # card keeps having to close.
+        size_minor_arcmin=getattr(info, "size_minor_arcmin", None),
     ) if v.level == "off_centre" else None
     rc = outcome.crop if outcome else None
     # "Re-centre it next session" is advice a beginner can't act on without
