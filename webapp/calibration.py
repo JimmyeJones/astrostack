@@ -22,9 +22,10 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1386,17 +1387,84 @@ def _fmt_seconds(value: float) -> str:
 
 #: One target's acquisition signature, as :func:`master_coverage` needs it: the
 #: same five numbers every other binder gates on (median exposure/gain/sensor
-#: temperature of the accepted subs, plus their modal raw frame size). A plain
-#: dict keeps the helper pure and unit-testable without a Library/Project.
+#: temperature of the accepted subs, plus their modal raw frame size), and —
+#: since v0.457.0 — the *set* of distinct sub lengths the median stands in for.
+#: A plain dict keeps the helper pure and unit-testable without a Library/Project.
+#:
+#: ``exposures_s`` is optional and reporting-only: nothing binds through it, so a
+#: caller that omits it gets exactly the answers it always got.
 COVERAGE_TARGET_KEYS = (
-    "name", "safe_name", "exposure_s", "gain", "sensor_temp_c",
+    "name", "safe_name", "exposure_s", "exposures_s", "gain", "sensor_temp_c",
     "width_px", "height_px", "bayer_pattern",
 )
+
+
+def _clean_exposures(values: Any) -> list[float]:
+    """``exposures_s`` off a target dict as a list of positive floats, shortest
+    first — or ``[]`` for anything unusable.
+
+    The caller has usually already grouped them with
+    :func:`seestack.calibrate.apply.distinct_exposures`; this only refuses what
+    would make the copy nonsense (a ``None``, a string, a zero), because a wrong
+    sentence about a mixed target is worse than the generic one.
+    """
+    if not isinstance(values, (list, tuple)):
+        return []
+    out: list[float] = []
+    for v in values:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(f) and f > 0:
+            out.append(f)
+    return sorted(out)
+
+
+def dark_exposure_split(
+    dark_exposure_s: float | None, exposures_s: Any,
+) -> tuple[list[float], list[float]]:
+    """Which of a target's sub lengths this dark matches, and which it doesn't.
+
+    The bind gate is per *exposure*, not per target: a 10 s dark is right for the
+    10 s subs of a target shot at 10 s one night and 30 s the next, and wrong for
+    the rest. Everything else in this module reduces that target to one median
+    and therefore cannot say so. Returns ``(matched, unmatched)``, each shortest
+    first; both empty when the dark's or the target's exposures are unknown, so
+    every caller degrades to the wording it had before.
+
+    Uses :data:`_AUTO_BIND_EXP_MISMATCH_FRAC` — the binder's own threshold — so
+    the page and the stack cannot come to different opinions about which subs a
+    dark reaches.
+    """
+    exps = _clean_exposures(exposures_s)
+    try:
+        dexp = float(dark_exposure_s) if dark_exposure_s is not None else None
+    except (TypeError, ValueError):
+        dexp = None
+    if not exps or not dexp or dexp <= 0 or not math.isfinite(dexp):
+        return [], []
+    matched = [e for e in exps
+               if abs(dexp - e) / e <= _AUTO_BIND_EXP_MISMATCH_FRAC]
+    unmatched = [e for e in exps if e not in matched]
+    return matched, unmatched
+
+
+def join_exposures(values: Sequence[float]) -> str:
+    """``[10, 30]`` -> ``"10s and 30s"``. The engine's own
+    :func:`seestack.calibrate.apply._join_exposures`, re-exposed here so the
+    Calibration page's copy and the finished run's advisory describe one target
+    the same way."""
+    parts = [_fmt_seconds(v) for v in values]
+    if len(parts) <= 1:
+        return "".join(parts)
+    return f"{', '.join(parts[:-1])} and {parts[-1]}"
 
 
 def coverage_miss_reason(
     master: dict[str, Any], *,
     exposure_s: float | None = None,
+    exposures_s: Any = None,
     gain: float | None = None,
     sensor_temp_c: float | None = None,
     width_px: int | None = None,
@@ -1419,6 +1487,13 @@ def coverage_miss_reason(
     first. ``None`` means every gate passes on its own — the master was simply
     passed over for a closer one of its kind, which only the caller (who knows what
     *was* bound) can phrase. Pure, so it needs no library on disk; never raises.
+
+    ``exposures_s`` (optional) is the target's *distinct* sub lengths, and it only
+    ever changes the **wording**: every verdict is still decided by ``exposure_s``,
+    the median the binder itself gates on, so no target changes side by passing it.
+    What it buys is that a target shot at 10 s one night and 30 s the next stops
+    being described as "your subs are 20s" — a length no sub was shot at — and the
+    clause says which of them the dark actually reaches.
     """
     if not master.get("exists", True):
         return "its file is missing from your calibration library"
@@ -1466,6 +1541,18 @@ def coverage_miss_reason(
             return ("it doesn't record its own exposure, so it can't be matched to "
                     "your subs safely")
         if abs(dexp - exposure_s) / exposure_s > _AUTO_BIND_EXP_MISMATCH_FRAC:
+            # Name the *set* when there is one: "your subs are 20s" is false on
+            # every frame of an evenly split 10 s / 30 s target, and a dark that
+            # reaches two-thirds of a target is not the same news as one that
+            # reaches none of it.
+            matched, unmatched = dark_exposure_split(dexp, exposures_s)
+            if unmatched and len(matched) + len(unmatched) > 1:
+                subs = join_exposures(sorted(matched + unmatched))
+                reach = (f"it only matches the {join_exposures(matched)} ones"
+                         if matched else "it matches none of them")
+                return (f"your subs are {subs}, this dark is {_fmt_seconds(dexp)} "
+                        f"— {reach}; build a master bias and AstroStack can scale "
+                        f"it to all of them")
             return (f"your subs are {_fmt_seconds(exposure_s)}, this dark is "
                     f"{_fmt_seconds(dexp)} — build a master bias and AstroStack "
                     f"can scale it to your subs")
@@ -1528,8 +1615,15 @@ def master_coverage(
     frame read. Returns::
 
         {"n_targets": int,
-         "masters": [{"id", "name", "kind", "n_covered", "covered", "missed"}, …],
+         "masters": [{"id", "name", "kind", "n_covered", "covered", "missed",
+                      "missed_detail", "n_partial", "partial_detail"}, …],
          "uncovered": [target names with no master at all]}
+
+    ``partial_detail`` names the targets this master is bound to but only reaches
+    *part* of — a dark against a target shot at two different sub lengths. It is
+    reporting only: ``covered``/``missed`` are the binder's own answer, unchanged,
+    so the roll-up still promises exactly what the app will do. What changes is
+    that it no longer says "covers" and stops.
 
     ``masters`` keeps the input order (the registry's newest-first), and every
     name list is in the caller's target order, so the display is stable between
@@ -1537,6 +1631,8 @@ def master_coverage(
     """
     bound_ids: list[set[int]] = []
     bound_dark: list[bool] = []
+    bound_dark_id: list[int | None] = []
+    bound_dark_scaled: list[bool] = []
     for t in targets:
         try:
             # The *id* form of the same binding the unattended stack uses: this
@@ -1557,6 +1653,15 @@ def master_coverage(
                if (mid := bound.get(key)) is not None}
         bound_ids.append(ids)
         bound_dark.append(bound.get("dark_master_id") is not None)
+        # Which dark was bound, and whether it was bound *scaled*. A scaled dark
+        # is handed each frame's own exposure by ``apply_raw``, so it is correct
+        # on a mixed target by construction and has nothing to report below.
+        try:
+            dark_id = bound.get("dark_master_id")
+            bound_dark_id.append(int(dark_id) if dark_id is not None else None)
+        except (TypeError, ValueError):
+            bound_dark_id.append(None)
+        bound_dark_scaled.append(bool(bound.get("scale_dark_to_light")))
 
     names = [str(t.get("name") or t.get("safe_name") or "?") for t in targets]
     rows: list[dict[str, Any]] = []
@@ -1578,7 +1683,8 @@ def master_coverage(
                 continue
             name = str(t.get("name") or t.get("safe_name") or "?")
             reason = coverage_miss_reason(
-                m, exposure_s=t.get("exposure_s"), gain=t.get("gain"),
+                m, exposure_s=t.get("exposure_s"),
+                exposures_s=t.get("exposures_s"), gain=t.get("gain"),
                 sensor_temp_c=t.get("sensor_temp_c"),
                 width_px=t.get("width_px"), height_px=t.get("height_px"),
                 bayer_pattern=t.get("bayer_pattern"),
@@ -1589,11 +1695,42 @@ def master_coverage(
                     "the bias" if kind == "bias" and has_dark
                     else f"another of your {kind} masters is a closer match")
             detail.append({"name": name, "reason": reason})
+        # Covered, but only for *some* of the target's subs. A target is one
+        # folder, never one exposure: shoot it at 10 s one night and 30 s the
+        # next and the binder still reduces it to a median, so a 20 s dark can be
+        # bound to a target not one of whose frames it matches — and, until now,
+        # the page that exists to answer "do my masters cover my targets?" said
+        # "covers" and stopped there. This never changes *which* masters are
+        # bound (that stays the binder's own answer, reported unchanged above);
+        # it only stops the roll-up being silent about the part it misses.
+        partial = []
+        for t, did, scaled in zip(targets, bound_dark_id, bound_dark_scaled,
+                                  strict=True):
+            if kind != "dark" or did != mid or scaled:
+                continue
+            matched, unmatched = dark_exposure_split(
+                m.get("exposure_s"), t.get("exposures_s"))
+            if not unmatched or len(matched) + len(unmatched) < 2:
+                continue
+            name = str(t.get("name") or t.get("safe_name") or "?")
+            subs = join_exposures(sorted(matched + unmatched))
+            dexp = _fmt_seconds(float(m["exposure_s"]))
+            reach = (f"it matches the {join_exposures(matched)} subs but not the "
+                     f"{join_exposures(unmatched)} ones"
+                     if matched else "it matches none of them")
+            partial.append({
+                "name": name,
+                "reason": (f"{name} was shot at {subs}, and this dark is {dexp} "
+                           f"— {reach}. Build a master bias and AstroStack can "
+                           f"scale this dark to all of them, or build a dark for "
+                           f"each length."),
+            })
         rows.append({
             "id": mid, "name": str(m.get("name") or f"master {mid}"),
             "kind": kind,
             "n_covered": len(covered), "covered": covered, "missed": missed,
             "missed_detail": detail,
+            "n_partial": len(partial), "partial_detail": partial,
         })
     return {
         "n_targets": len(targets),
@@ -1603,8 +1740,13 @@ def master_coverage(
         # a beginner actually stalls at ("build a dark from frames shot the same
         # way" doesn't say which way). Same source as the rest of the roll-up, so
         # it can never disagree with it; additive, so an older client ignores it.
+        # ``exposures_s`` is the honest half of the same answer: the median is
+        # what the binder gates on, but it is not what to go and shoot. On an
+        # evenly split 10 s / 30 s target it is 20 s, and a night of 20 s darks
+        # matches nothing the owner has.
         "uncovered_detail": [
-            {"name": n, "exposure_s": t.get("exposure_s"), "gain": t.get("gain")}
+            {"name": n, "exposure_s": t.get("exposure_s"), "gain": t.get("gain"),
+             "exposures_s": _clean_exposures(t.get("exposures_s"))}
             for n, t, ids in zip(names, targets, bound_ids, strict=True)
             if not ids
         ],

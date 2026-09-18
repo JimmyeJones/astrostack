@@ -772,6 +772,17 @@ export function buildMasterSummary(r: Record<string, unknown>): string {
       .map(([reason, c]) => `${Number(c)} ${reason}`);
     const detail = parts.length ? ` (${parts.join(", ")})` : "";
     line += ` · ${skipped} frame${skipped === 1 ? "" : "s"} set aside${detail}`;
+    // "3 wrong exposure" is a fact, not a next step. A dark's whole content is
+    // its exposure, so a folder holding two lengths holds two masters' worth of
+    // frames — and the frames that were set aside are good ones the owner still
+    // wants a master from. Say what to do with them.
+    if ((Number(buckets["wrong exposure"]) || 0) > 0) {
+      return (
+        `${line}. Those were shot at a different length — a dark only matches `
+        + `subs of its own exposure, so put them in their own folder and build a `
+        + `second master from it.`
+      );
+    }
   }
   return `${line}.`;
 }

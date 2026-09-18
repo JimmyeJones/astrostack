@@ -788,6 +788,11 @@ export interface HealthNote {
 export interface DarkSpec {
   exposure_s: number | null;
   gain: number | null;
+  // The set `exposure_s` is the median of. A target is one *folder*, never one
+  // exposure, so a target shot at 10 s one night and 30 s the next has a median
+  // of 20 s — a length none of its subs was shot at. Optional: an older backend
+  // omits it and the guide keeps its single-length wording.
+  exposures_s?: number[] | null;
 }
 
 export interface StackHealth {
@@ -3172,12 +3177,24 @@ export interface CalibrationCoverage {
     // 10s, this dark is 30s"). Optional: an older backend sends only `missed`, so
     // the tooltip falls back to the bare name list.
     missed_detail?: { name: string; reason: string }[];
+    // Targets this master IS bound to but only reaches *part* of — a dark
+    // against a target shot at two different sub lengths. `covered`/`missed` are
+    // still the binder's own answer; this is the half the roll-up used to be
+    // silent about. Optional: an older backend omits both.
+    n_partial?: number;
+    partial_detail?: { name: string; reason: string }[];
   }[];
   uncovered: string[];
   // The acquisition numbers each uncovered target would need a dark shot at —
   // what turns "build a matching dark" into something a beginner can act on.
   // Optional: an older backend omits it and the nudge stays generic.
-  uncovered_detail?: { name: string; exposure_s: number | null; gain: number | null }[];
+  // `exposures_s` is the set `exposure_s` is the median of: a target shot at
+  // 10 s one night and 30 s the next has a median of 20 s, and a night of 20 s
+  // darks matches nothing the owner owns.
+  uncovered_detail?: {
+    name: string; exposure_s: number | null; gain: number | null;
+    exposures_s?: number[] | null;
+  }[];
   // Whether auto-calibration is actually switched on. With it off (the default) a
   // "covered" master is one the app *can* apply — the user still picks it on the
   // Stack form — so the page must not promise it will be used automatically.
