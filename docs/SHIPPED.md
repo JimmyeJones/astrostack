@@ -57,13 +57,13 @@ write-up says to check before reusing the last fix's shape.
 existing library's numbers change; the measurement in the note (the share, the depths, the grain ratio) was
 never touched, only the closing clause's arithmetic.
 
-**Tests (+7):** four in `tests/test_coverage_grain.py` — the reproduction itself, the shortfall pinned as
+**Tests (+5 cases, from 4 new test functions):** four cases in `tests/test_coverage_grain.py` — the reproduction itself, the shortfall pinned as
 **the same number** the map measured rather than merely the same verdict (so a future basis change shows up
 here before it shows up as two sentences giving opposite advice), and the agreement pin re-run over the shape
-it excludes, parametrised both ways; three in `tests/test_stack_integration_time.py` for the new `None`
-contract. **Three fail before**, verified by reverting the fix to the old median in a scratch copy and
+it excludes, parametrised both ways; one in `tests/test_stack_integration_time.py` covering the new `None`
+contract (four assertions). **Three fail before**, verified by reverting the fix to the old median in a scratch copy and
 watching them go red for the right reason; the fourth (a 3-minute gap, quiet on both surfaces) passes either
-way and is there as the other half of the pin.
+way and is there as the other half of the pin. The suite goes 6,365 -> 6,370.
 
 **Upgrade-safe (§9):** engine-internal only. No config, schema, on-disk, API-shape or default change; no
 stored value is re-derived; a run stacked by any earlier version reads exactly as before unless its own subs
