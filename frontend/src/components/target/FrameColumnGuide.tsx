@@ -1,6 +1,7 @@
-import { Anchor, Collapse, Stack, Text } from "@mantine/core";
+import { Anchor, Collapse, Group, Stack, Text } from "@mantine/core";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { GlossaryLink } from "../GlossaryLink";
 import { FRAME_COLUMNS } from "./frameColumns";
 
 /**
@@ -46,9 +47,23 @@ export function FrameColumnGuide() {
       <Collapse in={open}>
         {open ? (
         <Stack gap={6} pl={4} pb={4}>
+          {/* One sentence each, and — where the column measures something the
+              glossary has a paragraph on — that term's own book glyph beside
+              the heading. The sentence answers "what is this number?"; the
+              glossary answers "what is eccentricity?", which is the question a
+              beginner reading `Ecc.` actually has. The glyph sits in the
+              heading row rather than at the end of the sentence so it is next
+              to the word it explains, and it adds no height (the standing
+              "extremely busy" priority, AGENTS.md §1). */}
           {explained.map((c) => (
             <Text key={c.key} size="xs" c="dimmed">
-              <Text span size="xs" fw={700} c="bright">{c.label}</Text>
+              <Group component="span" gap={4} wrap="nowrap" display="inline-flex"
+                     style={{ verticalAlign: "middle" }}>
+                <Text span size="xs" fw={700} c="bright">{c.label}</Text>
+                {c.glossary
+                  ? <GlossaryLink slug={c.glossary.slug} term={c.glossary.term} />
+                  : null}
+              </Group>
               <Text span size="xs" c="dimmed">{" — "}</Text>
               <Text span size="xs" c="dimmed">{c.hint}</Text>
             </Text>
