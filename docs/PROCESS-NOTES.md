@@ -18,6 +18,73 @@ is a queue.
 
 ---
 
+## 2026-09-18 — don't fix the surface you tripped over: enumerate the family, then pick the one that changes pixels
+
+*(Builder, branch `claude/sweet-babbage-sn6qbd`, the run that shipped v0.457.0, v0.457.1 and v0.458.0. A
+record, not a task.)*
+
+**Where the run started.** Baseline green (6,255 passed, 2 skipped, 10m45s with `-n 4` and the BLAS cap).
+The backlog is in the state the last four runs have each described in turn, and it has not changed: every
+open entry in "Bugs (fix these first)" is gated on the owner's own data, routed to owner sign-off, or stood
+down with the measurement written down; "Features that serve real workflows" is two explicit declines and a
+"mostly already built". So the work had to be found rather than picked, for the fifth run running.
+
+**The starting point was the previous run's own last paragraph, and §11 said not to take it.** That run
+filed `pipeline._auto_bind_for_target` — the third surface of its own finding — as a lead, in a `docs:`
+commit on `main` **57 minutes** before this run began. AGENTS.md §11 calls a freshly filed entry the most
+contended line in the file and says to treat it as claimed-in-spirit. So the question became: *is the lead
+the only thing left, or is it the only thing that was looked for?*
+
+**It was the only thing that was looked for. There were five more surfaces, and one of them changes pixels.**
+The grep is two minutes (`median`/`_med(`/`statistics.` near `exposure_s`), and what it finds is a **family**
+rather than a list:
+
+| # | surface | what it does with the median | shipped |
+|---|---|---|---|
+| 1 | `stacker.run_stack` → `calibration_warnings` | warns, or doesn't | v0.456.0 |
+| 2 | `calibration-suggestions` → Stack form | cautions before the night | v0.456.1 |
+| 3 | `pipeline._auto_bind_for_target` | **binds** a dark | still the filed lead |
+| 4 | `_target_acquisition` → `/api/calibration/coverage` | says a master "covers" a target | **v0.457.0** |
+| 5 | `stackhealth.recommended_dark_spec` → `DarksGuide` | tells you what to go and shoot | **v0.457.1** |
+| 6 | `masters.build_master` | **builds the master itself** | **v0.458.0** |
+
+Surface 6 is the one worth the run. 100 ADU and 300 ADU darks in a folder gave a **200 ADU** master stamped
+**20 s** — a level neither length has and a length no frame was shot at — which is then subtracted
+*unscaled* from every light. Every other member of the family is a sentence; this one is the pedestal.
+
+**The transferable rule, and it is not the previous run's.** That run's rule was *after a fix, re-read the
+contracts of everything that claims to agree with the thing you changed* — which finds surface 2 from
+surface 1, one hop. This run's is one level up: **when a fix has a root cause, enumerate every site that
+shares it before fixing any of them, and rank the sites by what they do with the wrong answer.** Talk, act,
+build. A run that fixes the surface it tripped over ships the cheapest member of the family and leaves the
+expensive one in place — and it leaves it in place *invisibly*, because the entry it wrote says the bug is
+fixed. Three of the six here were found by a grep nobody had run, in a family whose first member had already
+been written up twice.
+
+**A second, smaller one about where to look for a "closed" area's next bug.** AGENTS.md §1 says
+`seestack/calibrate/` is closed until a new bug is found there, and twenty sweeps had found none. This one
+was not found by sweeping that directory; it was found by arriving at it *from the outside*, following one
+fact — "a target is not one exposure" — from the webapp's copy down into the engine. A directory that is
+closed to sweeps is not closed to a question that starts somewhere else.
+
+**On fail-before, and the one test that was worth writing twice.** Eleven of the run's new tests fail on a
+scratch revert, but most of them fail because a field does not exist yet — a shape of fail-before the
+previous run correctly called weak. Two are not like that, and they are the two that matter: the Python one
+that asserts `master_coverage`'s miss reason does **not** contain `20s` (it used to read *"your subs are
+20s, this dark is 30s"*, and it uses no new API at all), and the engine one that asserts the built master's
+**own pixels** are 100 ADU rather than its label. A test that checks the label would have passed the moment
+the stamp changed, while the master stayed a median of two dark currents.
+
+**Two process notes, both cheap to repeat.**
+- `git stash push <paths>` is the safe form of the scratch revert. The previous run recorded losing
+  uncommitted work to `git checkout --`; a path-scoped stash reverts exactly the production files, leaves
+  the tests in place, and `git stash pop` puts it back. Used five times this run, twice with the frontend
+  and Python halves stashed separately so each fail-before named its own cause.
+- A fixture's shape decides what a test can say. The endpoint-level test for surface 5 wanted the *even*
+  split — the case where the median is a length nobody shot — and `solved_library` has **three** accepted
+  subs, so it cannot carry one. Rather than bend the fixture, the sharp case is pinned at engine level and
+  the endpoint test says in its docstring which case it is and is not covering.
+
 ## 2026-09-18 — a representative value is a claim that the set is uniform, and nothing in the data enforces it
 
 *(Builder, branch `claude/sweet-babbage-n9bszz`, the run that shipped v0.456.0 and v0.456.1. A record, not
