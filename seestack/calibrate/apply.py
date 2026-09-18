@@ -10,6 +10,8 @@ Bayer mosaic before debayering.
 from __future__ import annotations
 
 import logging
+import math
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -46,6 +48,52 @@ TEMP_MISMATCH_TOL_C = 5.0
 # Historical private aliases — kept so nothing that referenced them breaks.
 _EXPOSURE_MISMATCH_TOL = EXPOSURE_MISMATCH_TOL
 _TEMP_MISMATCH_TOL_C = TEMP_MISMATCH_TOL_C
+
+
+def distinct_exposures(values: Iterable[float | None]) -> list[float]:
+    """The distinct sub lengths in a set of lights, shortest first.
+
+    Two subs count as the **same** exposure when their lengths agree to within
+    :data:`EXPOSURE_MISMATCH_TOL` — the very question the dark advisory asks,
+    answered once so header rounding (``9.998`` against ``10.0``) can never read
+    as a second exposure while a real Seestar step (10 → 20 → 30 s) always does.
+    Each group is reported by its median, so one mistyped header cannot move the
+    length the group is named by.
+
+    Values that are missing, non-finite or non-positive are dropped rather than
+    grouped: "we don't know how long this sub was" is not an exposure, and
+    treating it as one would invent a mismatch out of a blank FITS card.
+
+    Grouping is against each group's **first** member rather than a running
+    value, so a long ramp of near-neighbours cannot chain two genuinely
+    different exposures into one group.
+    """
+    vals = sorted(
+        float(v) for v in values
+        if v is not None and math.isfinite(float(v)) and float(v) > 0
+    )
+    if not vals:
+        return []
+    groups: list[list[float]] = [[vals[0]]]
+    for v in vals[1:]:
+        first = groups[-1][0]
+        if abs(v / first - 1.0) <= EXPOSURE_MISMATCH_TOL:
+            groups[-1].append(v)
+        else:
+            groups.append([v])
+    out: list[float] = []
+    for g in groups:
+        n = len(g)
+        out.append(g[n // 2] if n % 2 else (g[n // 2 - 1] + g[n // 2]) / 2.0)
+    return out
+
+
+def _join_exposures(values: Sequence[float]) -> str:
+    """``[10, 30]`` → ``"10s and 30s"``; ``[10, 20, 30]`` → ``"10s, 20s and 30s"``."""
+    parts = [f"{v:g}s" for v in values]
+    if len(parts) <= 1:
+        return "".join(parts)
+    return f"{', '.join(parts[:-1])} and {parts[-1]}"
 
 
 def _norm_bayer(pattern: str | None) -> str | None:
@@ -421,6 +469,8 @@ class CalibrationMasters:
         light_exposure_s: float | None,
         light_temp_c: float | None = None,
         light_bayer_pattern: str | None = None,
+        *,
+        light_exposures_s: Iterable[float | None] | None = None,
     ) -> list[str]:
         """Advisory (non-fatal) warnings that the master dark doesn't match the
         lights it's calibrating.
@@ -450,6 +500,17 @@ class CalibrationMasters:
         instead of shipping a silently mis-calibrated stack. Empty when the dark
         matches (or there's nothing to compare, or exposure-scaling is on and will
         correct the exposure difference itself).
+
+        ``light_exposures_s`` is **every** light's exposure, where
+        ``light_exposure_s`` is only the reference frame's. A target is not
+        necessarily one exposure — shoot it at 10 s on one night and 30 s on the
+        next and it is one target with two in it — and then the reference frame
+        stands in for a session it is not representative of: a dark matched to
+        *it* is silently wrong on the rest, and this advisory, asked only about
+        it, says nothing at all. Hand over the whole set and the dark is judged
+        against all of it, and the wording stops claiming "every frame" about a
+        subset. Omit it (every direct caller, and every older one) and the
+        reference frame stands in exactly as before.
         """
         warnings: list[str] = []
         # Whichever pedestal actually reaches the lights (never both — see
@@ -504,7 +565,55 @@ class CalibrationMasters:
             self.scale_dark_to_light and self.dark is not None
             and self.bias is not None and self.bias.shape != self.dark.shape
         )
-        if (not scaling_active and de and de > 0
+        # What the lights actually are, when the caller knows. One distinct
+        # length (the ordinary case, and every caller that omits the set) falls
+        # through to the single-exposure branch below, byte for byte.
+        exposures = (
+            distinct_exposures(light_exposures_s)
+            if light_exposures_s is not None else []
+        )
+        mismatched = (
+            [e for e in exposures if abs(e / float(de) - 1.0) > EXPOSURE_MISMATCH_TOL]
+            if de and de > 0 else []
+        )
+        if not scaling_active and de and de > 0 and len(exposures) > 1 and mismatched:
+            # These subs are not all one length, so "your subs are Ns" would be
+            # false however N were chosen, and so would "on every frame" — the
+            # dark is right for some of them. Say which, and how many lengths
+            # there are, because that is the thing the user has to fix.
+            lengths = _join_exposures(exposures)
+            bad = _join_exposures(mismatched)
+            over = [e for e in mismatched if float(de) > e]
+            under = [e for e in mismatched if float(de) < e]
+            if over and not under:
+                effect = "over-subtracted"
+            elif under and not over:
+                effect = "under-subtracted"
+            else:
+                effect = "over- or under-subtracted"
+            lead = (
+                f"Master dark is {de:g}s but these subs were not all shot at the "
+                f"same length ({lengths}) — its pedestal will be {effect} on the "
+                f"{bad} ones."
+            )
+            if blocked_by_bias_shape:
+                bh, bw = self.bias.shape[0], self.bias.shape[1]
+                dh, dw = self.dark.shape[0], self.dark.shape[1]
+                warnings.append(
+                    f"{lead} Dark exposure-scaling is on, which would have "
+                    f"matched it to each sub, but your master bias is {bw}×{bh} "
+                    f"and the dark is {dw}×{dh}, so it can't hold the readout "
+                    f"pedestal fixed while the dark is rescaled — the dark was "
+                    f"subtracted unscaled. Use a bias built from the same camera "
+                    f"and binning as the dark."
+                )
+            else:
+                warnings.append(
+                    f"{lead} Turn on dark exposure-scaling (needs a master bias) "
+                    f"and the dark is matched to each sub as it goes in, or "
+                    f"stack each exposure on its own with a dark to match."
+                )
+        elif (not scaling_active and de and de > 0
                 and light_exposure_s and light_exposure_s > 0):
             ratio = float(light_exposure_s) / float(de)
             if abs(ratio - 1.0) > EXPOSURE_MISMATCH_TOL:

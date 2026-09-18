@@ -2639,10 +2639,18 @@ def run_stack(
             # doesn't match the lights silently over/under-subtracts on every
             # frame. Log it *and* carry it out on the result, so the walk-away
             # user who never opens the server log still learns why their picture
-            # came out crushed or grainy — the reference frame's exposure/
-            # temperature stands in for the (uniform) session.
+            # came out crushed or grainy — the reference frame's temperature
+            # stands in for the session.
+            #
+            # Its *exposure* does not, and used not to be allowed to: a target
+            # shot at 10 s on one night and 30 s on the next is one target with
+            # two exposures in it, and which of them ``pick_reference_frame``
+            # landed on then decided whether the advisory fired at all. So the
+            # whole set goes over — these are the frames actually being stacked —
+            # and the dark is judged against all of it.
             calib_warnings = list(calibration.calibration_warnings(
-                ref.exposure_s, ref.sensor_temp_c, ref.bayer_pattern
+                ref.exposure_s, ref.sensor_temp_c, ref.bayer_pattern,
+                light_exposures_s=[f.exposure_s for f in frames],
             ))
             for _warn in calib_warnings:
                 log.warning("Calibration: %s", _warn)
