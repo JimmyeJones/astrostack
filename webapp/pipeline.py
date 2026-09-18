@@ -3333,7 +3333,15 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
     :func:`calibration.auto_bind_master_paths` and never mutates the project. Shared
     by :func:`_auto_bind_calibration` (which binds it into a run's options) and
     :func:`_auto_stack_calibration_recheck` (which uses it to decide whether a
-    now-available master should re-trigger a previously-uncalibrated target)."""
+    now-available master should re-trigger a previously-uncalibrated target).
+
+    The subs' **whole** set of exposures goes over too, not only their median: a
+    target shot at 10 s one night and 30 s the next is one target with two lengths
+    in it, and a dark picked against the median alone is bound unscaled onto subs
+    it does not match. Given the set, the binder scales that same dark instead
+    when a confident bias can carry it (see
+    :func:`calibration.auto_bind_master_ids`)."""
+    from seestack.calibrate.apply import distinct_exposures
     from webapp import calibration
 
     frames = list(proj.iter_frames(accepted_only=True))
@@ -3351,6 +3359,7 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
     return calibration.auto_bind_master_paths(
         settings.resolved_library_root, masters,
         exposure_s=_med([f.exposure_s for f in frames]),
+        light_exposures_s=distinct_exposures([f.exposure_s for f in frames]),
         gain=_med([f.gain for f in frames]),
         sensor_temp_c=_med([f.sensor_temp_c for f in frames]),
         width_px=calibration.modal_dim([f.width_px for f in frames]),
