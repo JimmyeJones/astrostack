@@ -188,7 +188,9 @@ export function StackView() {
   // sensor + short focal length under-sample — but drizzle lives in the advanced
   // knobs and is off by default, so a beginner sitting on thousands of subs never
   // reaches for it. We only suggest it once the stack is big enough to be worth it
-  // (matching the field help's "200+ dithered frames") and drizzle is off, and we
+  // (matching the field help's "200+ dithered subs on each output pixel", which
+  // on a single field — the only shape this nudge fires on, see `!is_mosaic`
+  // below — is the frame count) and drizzle is off, and we
   // gate the *suggestion* on a drizzle-on dry-run sizing so we never nudge toward
   // a run that'd be refused for OOM. That sizing used to be a *second*
   // `stackEstimate` request, which re-read every sub's WCS to rebuild the

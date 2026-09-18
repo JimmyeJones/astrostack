@@ -26,7 +26,12 @@ trust than no number at all:
   cost more than onto a single reference frame, so a basis run whose canvas is
   wildly bigger or smaller than the planned one is not evidence for it;
 * **enough subs to generalise from** — a three-frame run is mostly start-up cost,
-  and dividing it by three says nothing about the per-sub rate of a thousand.
+  and dividing it by three says nothing about the per-sub rate of a thousand;
+* **the engine that measured it** — a rate is a measurement of *code*, and this
+  app ships several builds a day. Runs written by the build now running are
+  preferred over older ones, and when only older ones exist the estimate says so
+  (:attr:`StackTimeEstimate.same_engine`) instead of presenting last version's
+  rate as this version's.
 
 What it deliberately does *not* split on is calibration. A run that applies a
 master dark and flat does a little more work per sub than one that does not, but
@@ -40,6 +45,19 @@ When nothing qualifies, :func:`estimate_stack_seconds` returns ``None`` and ever
 caller shows nothing. That is the honest answer on a fresh install, on a target
 that has never been stacked, and on the first run after an upgrade — the column
 is new, so nothing is timed yet, and the app says nothing rather than guessing.
+
+That last sentence used to cover only the *first* upgrade, the one that
+introduced the column. Every upgrade after it leaves the basis **full** of
+timings the previous build measured, and the estimate read them as if this build
+had. Measured on the owner's install (observer issue #933): six restacks whose
+target, sub count, canvas and options were identical to their predecessors all
+took longer after one version boundary — 8.1 % to 36.4 %, median 16.9 %, against
+a same-engine control of +0.4 % (−4.6 % .. +8.1 %) over 11 repeats — so the form
+under-stated all six by 7.0 % to 24.9 %, one direction, 6.0 h shown for 6.9 h of
+work. The app already knows the difference: ``reprocess_status`` counts a target
+as *outdated* on exactly this comparison (``run.engine_version != APP_VERSION``)
+and offers to restack it, and the form then priced that restack from the old
+build's rate without mentioning it. Same fact, two surfaces, one of them silent.
 """
 
 from __future__ import annotations
@@ -90,6 +108,12 @@ class PastStack:
     duration_s: float      # wall clock the stacker measured around itself
     canvas_px: int         # canvas_w × canvas_h of the run's output canvas
     cost_class: str        # see :func:`stack_cost_class`
+    #: The app build that produced the run (``stack_runs.engine_version``), or
+    #: ``None`` for a run that predates version tracking. Optional so every
+    #: existing construction of this record keeps working; a ``None`` here can
+    #: never match a caller's version, which is the safe direction — an unknown
+    #: build is not this one.
+    engine_version: str | None = None
 
 
 @dataclass(frozen=True)
@@ -100,6 +124,13 @@ class StackTimeEstimate:
     per_frame_s: float      # the median rate behind it
     basis_runs: int         # how many past runs the median was taken over
     basis_frames: int       # the largest sub count among them
+    #: Whether the rate was measured by the build that is about to run the
+    #: stack. ``False`` means every basis run came from a different (or
+    #: unrecorded) version, so the number is last build's rate and the caller
+    #: should say so. ``True`` when it matches, and also when the caller asked
+    #: without naming a version — there is nothing to warn about then, and that
+    #: is the pre-v0.462.0 answer, byte for byte.
+    same_engine: bool = True
 
 
 def stack_cost_class(options: Mapping[str, Any], n_frames: int) -> str:
@@ -165,13 +196,16 @@ def past_stack(run: Any) -> PastStack | None:
     if seconds <= 0 or n_frames <= 0 or canvas_px <= 0:
         return None
     return PastStack(n_frames=n_frames, duration_s=seconds, canvas_px=canvas_px,
-                     cost_class=stack_cost_class(options, n_frames))
+                     cost_class=stack_cost_class(options, n_frames),
+                     engine_version=getattr(run, "engine_version", None))
 
 
 def estimate_stack_seconds(history: Iterable[PastStack], *,
                            n_frames: int,
                            canvas_px: int,
-                           cost_class: str) -> StackTimeEstimate | None:
+                           cost_class: str,
+                           engine_version: str | None = None,
+                           ) -> StackTimeEstimate | None:
     """How long a stack of ``n_frames`` subs onto a ``canvas_px`` canvas is
     likely to take, from this target's own comparable runs.
 
@@ -180,19 +214,47 @@ def estimate_stack_seconds(history: Iterable[PastStack], *,
     are used. Returns ``None`` whenever there is no honest answer — no matching
     run, none big enough to generalise from, or a canvas too different to
     compare — and the caller then shows nothing at all.
+
+    ``engine_version`` is the build about to run the stack. Runs it wrote are
+    **preferred**: when the target has any, the rate is the median of those
+    alone, even if that is a single run against five older ones. A rate is a
+    measurement of code, and one run of the code that is about to execute
+    predicts it better than five runs of code that is not — which is the same
+    reason the other three axes above exclude rather than average.
+
+    What it deliberately does **not** do is *discard* the older runs. They are
+    still evidence, only about a slightly different program: measured across one
+    real boundary the rate moved by 8–36 % (see the module docstring), where the
+    three axes above separate jobs whose rates differ by multiples. So when
+    nothing from this build qualifies, the older runs answer exactly as they do
+    today and :attr:`StackTimeEstimate.same_engine` is ``False``, which is the
+    caller's cue to say where the number came from rather than to hide it. Going
+    silent instead would take the form's only answer away on every target for one
+    stack after every upgrade — precisely when the owner is restacking the
+    library because the app has just told him his pictures are outdated.
+
+    Passing ``None`` (or nothing) asks without naming a version and restores the
+    pre-v0.462.0 behaviour exactly: one basis, no preference, ``same_engine``
+    ``True``.
     """
     if n_frames <= 0 or canvas_px <= 0:
         return None
-    basis: list[PastStack] = []
+    current: list[PastStack] = []
+    older: list[PastStack] = []
     for run in history:
         if run.cost_class != cost_class or run.n_frames < MIN_BASIS_FRAMES:
             continue
         ratio = run.canvas_px / float(canvas_px)
         if not (1.0 / MAX_CANVAS_RATIO) <= ratio <= MAX_CANVAS_RATIO:
             continue
-        basis.append(run)
-        if len(basis) >= MAX_BASIS_RUNS:
+        if engine_version is not None and run.engine_version != engine_version:
+            if len(older) < MAX_BASIS_RUNS:
+                older.append(run)
+            continue
+        current.append(run)
+        if len(current) >= MAX_BASIS_RUNS:
             break
+    basis = current or older
     if not basis:
         return None
     rate = float(median(r.duration_s / r.n_frames for r in basis))
@@ -201,14 +263,18 @@ def estimate_stack_seconds(history: Iterable[PastStack], *,
         per_frame_s=rate,
         basis_runs=len(basis),
         basis_frames=max(r.n_frames for r in basis),
+        same_engine=bool(current) or engine_version is None,
     )
 
 
 def estimate_from_runs(runs: Sequence[Any], *, n_frames: int, canvas_px: int,
-                       cost_class: str) -> StackTimeEstimate | None:
+                       cost_class: str,
+                       engine_version: str | None = None,
+                       ) -> StackTimeEstimate | None:
     """:func:`estimate_stack_seconds` over raw ``stack_runs`` rows — the form
     every caller in this app actually holds. Rows that are not evidence are
     dropped (see :func:`past_stack`) rather than rejected."""
     history = [p for p in (past_stack(r) for r in runs) if p is not None]
     return estimate_stack_seconds(history, n_frames=n_frames,
-                                  canvas_px=canvas_px, cost_class=cost_class)
+                                  canvas_px=canvas_px, cost_class=cost_class,
+                                  engine_version=engine_version)

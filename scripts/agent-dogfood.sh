@@ -624,10 +624,30 @@ for m in rows:
           % (m.get("kind"), m.get("name"), m.get("width_px"), m.get("height_px"),
              m.get("n_frames")))
 ' 2>/dev/null || echo "   [masters] could not read /api/calibration/masters"
+  # The keys are `masters` and `repair` — the shape `/api/calibration/defects`
+  # has always returned. This line used to read `offer_repair` and `summary`,
+  # neither of which the endpoint has ever carried, so it printed `offer=None`
+  # followed by the raw dict on an install that *was* offering the repair: the
+  # one line meant to say whether the offer fires said the opposite of the
+  # truth, and then buried it. Hence the explicit "no such key" branch — a probe
+  # that cannot find its subject has to say so rather than answer None.
   curl -sf "$BASE/api/calibration/defects" | python -c '
 import json, sys
 d = json.load(sys.stdin) or {}
-print("   [defects] offer=%s · %s" % (d.get("offer_repair"), d.get("summary") or d))
+if "masters" not in d and "repair" not in d:
+    print("   [defects] payload has neither masters nor repair — the endpoint"
+          " shape moved; fix this probe: %s" % (d,))
+    raise SystemExit(0)
+rows = d.get("masters") or []
+offer = d.get("repair") or None
+print("   [defects] repair offer: %s"
+      % ("(none — nothing worth repairing)" if offer is None else
+         "%s · %s" % (offer.get("state"), offer.get("message"))))
+for m in rows:
+    note = m.get("note") or {}
+    print("   [defects] master %s · %s · %s"
+          % (m.get("id"), note.get("severity"),
+             note.get("message") or "(not measurable)"))
 ' 2>/dev/null || echo "   [defects] could not read /api/calibration/defects"
   # Auto-bind, so the stack below actually APPLIES them. It is off by default in
   # the product (§9) and turning it on is the whole point here: the "darks were

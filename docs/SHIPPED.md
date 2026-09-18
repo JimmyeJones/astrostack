@@ -1,5 +1,185 @@
 # Shipped — the record
 
+## v0.462.2 — 2026-09-18 — the `--calibration` pass's defect line read two keys the endpoint has never sent
+
+*(Builder, branch `claude/sweet-babbage-m3wwgy`, the third task of the v0.462.0 run. Found by running
+`scripts/agent-dogfood.sh --calibration` — the pass v0.455.1 added for exactly this kind of blind spot — and
+reading its output rather than its code.)*
+
+**What it printed, on the install that disproves it.** With a master dark built from seeded darks and the
+repair genuinely on offer:
+
+    [defects] offer=None · {'masters': [{'id': 1, 'n_defects': 31, …
+                             'note': {'severity': 'ok', 'message': '31 hot or dead pixels (0.020%)'…}}],
+                            'repair': {'state': 'off', 'message': 'Repair these on every stack from now on',
+                                       'action': 'Repair them'…}}
+
+`offer=None` — beside a payload whose `repair` block *is* the offer. The probe read `d.get("offer_repair")`
+and `d.get("summary")`, and `/api/calibration/defects` has always returned `{"masters": [...], "repair":
+offer|None}`. Neither name has ever existed, so the line could only ever answer `None`, on every install, in
+every state: a reader skimming for "did the repair offer fire?" gets "no" on a run where it did, and the
+truth is in the raw-dict fallback that only exists because the first lookup failed.
+
+**Why it is worth a slot rather than a shrug.** AGENTS.md's whole case for this tooling is that the bugs
+which survive code-level audits are the ones only a running app shows — and the value of a pass that comes
+back *clean* is a statement about what it saw. A probe that cannot find its subject and answers `None`
+instead of saying so converts "I looked and the offer did not fire" into "I did not look", with no way to
+tell them apart. The repo already states the rule in `tests/test_drizzle_bar_mirror.py`'s own helper ("a
+check that silently passes when it can't find its subject enforces nothing"); this is that rule applied to
+the finder rather than to the suite.
+
+**The fix.** The probe prints the offer's `state` and `message`, then one census line per master
+(`id · severity · message`), and — where it used to fall through to `None` — says *"payload has neither
+masters nor repair — the endpoint shape moved; fix this probe"*. Verified against three payloads: the real
+one this run's pass returned, an empty library (`repair: None` → *"(none — nothing worth repairing)"*), and
+the shape the old probe assumed (→ the explicit complaint).
+
+**The test is the durable half, and it is pinned from both sides.** `tests/webapp/test_dogfood_defects_probe.py`
+extracts the inline Python out of `scripts/agent-dogfood.sh` and checks the names it reads against the names
+a real library's endpoint sends through the ordinary test client; that the two dead names are gone from the
+script; and — the one that stops the guard being vacuous — that the endpoint did not quietly grow them
+instead, which would have meant the probe was right all along and this file was about nothing. **Two of the
+three fail before**, verified by reverting the script to `HEAD` with the tests in place.
+
+Tooling only: no app behaviour, config, schema, on-disk, API-shape or default change.
+
+## v0.462.1 — 2026-09-18 — the bar had a mirror guard for its *number* and none for its *unit*, and the sentence under the checkbox was in the wrong one
+
+*(Builder, branch `claude/sweet-babbage-m3wwgy`, the second task of the v0.462.0 run. Found by asking which
+surfaces quote the drizzle recommendation and in what unit each one counts it.)*
+
+**The rule is already written down, in the module the bar lives in.**
+`seestack/stack/drizzle_path.py`, above `DRIZZLE_MIN_SAMPLES_PER_PIXEL`:
+
+> *"It is a per-**pixel** count, not a target's frame total: on a mosaic the subs are spread across the
+> raster, so a 3x3 raster 225 subs deep in total has only ~25 on any pixel. **Every surface that quotes this
+> bar must feed it the depth, not the total.**"*
+
+v0.436.0 is that rule applied to the Stack form's cautions (`drizzleTooFewHint`, the print panel), and
+`frontend/src/samplesPerPixel.ts` exists to supply the denominator. What nobody had checked is the sentences
+that are not computed — the static copy a beginner reads with their hand on the control:
+
+| surface | said | counted in |
+|---|---|---|
+| `webapp/schemas.py` `drizzle` help (Stack form + Settings' stacking defaults) | "Best with 200+ dithered **frames**" | the target's total |
+| `seestack/data/glossary.md` → *Drizzle*, linked from that control since v0.461.0 | "enable it once you have 200+ aligned **frames**" | the target's total |
+| `seestack/stack/drizzle_path.py` module docstring — **the source both quote** | "lots of dithered **frames** (typically 200+)" | unstated; the unit appears twelve lines later, in the constant's comment |
+
+**Why it matters on this owner's library rather than in principle.** He is a heavy mosaic user — 26 of 104
+targets. A 3×3 raster 900 subs deep in total has about 100 subs on any pixel, so the frame total clears
+"200+" while every pixel is *below the engine's own warn bar*. The error is one-directional and toward harm:
+it says yes on exactly the canvas drizzle handles worst (slower, and at scale > 1 noisier and gappier than
+the ordinary weighted-mean path). And v0.461.0 had just wired the glossary entry to the checkbox, so the
+beginner who does not trust the tooltip and clicks the book got the same wrong unit in more words.
+
+**Two neighbours in the same class, fixed with it.** Both were found by reading every stacking help that
+names a sample threshold:
+
+- **"Auto outlier removal … for your number of subs."** It is not: `_resolve_auto_reject(options, n,
+  depth=)` takes `min(n, depth)`, and on a mosaic `depth` is `auto_reject_depth` — the *thinnest substantial
+  panel*. The help now says so, which also explains the thing a mosaic user would otherwise find inexplicable:
+  why a 2,000-sub target was given min/max.
+- **Min/max's "Needs 3+ frames."** The accumulator's test is per pixel (`count >= 3`, degrading to a plain
+  mean below it), so on a mosaic 12 subs deep in total with one on each pixel it dispatches and protects
+  nothing. The glossary entry has always said this correctly — *"below three subs on a pixel there is no
+  brightest and darkest it can spare"* — so this was the help disagreeing with the app's own dictionary.
+
+The deprecated desktop GUI's drizzle blurb (`seestack/gui/stack_dialog.py`) quoted the bar in frames too and
+is corrected in the same pass — a word, not an extension of a deprioritised surface.
+
+**The test is the durable half.** `tests/test_drizzle_bar_mirror.py` already guarded the bar's *number*
+across the Python/TypeScript mirror. It now also guards its **unit**: the sentence quoting "200+" must name
+the pixel, on the field help, on the glossary entry the control links to, and on the engine docstring both of
+them cite. It fails loudly rather than silently if the bar stops being quoted at all, because a guard that
+passes when it cannot find its subject enforces nothing. **All three fail before**, verified by reverting the
+three files to `HEAD` with the tests in place.
+
+Copy only: no behaviour, config, schema, on-disk, API-shape or default change.
+
+## v0.462.0 — 2026-09-18 — a stack time estimate is a measurement of *code*, and it was still quoting the last build's
+
+*(Builder, branch `claude/sweet-babbage-m3wwgy`. Verified against the code from observer issue
+[#933](https://github.com/JimmyeJones/astrostack/issues/933); the magnitudes below are the observer's
+measurements on the owner's own library, the mechanism is this repo's.)*
+
+**What the estimate stands on.** `seestack/stacktime.py` answers the Stack form's third question — after
+"how big will the picture be?" and "will it fit in memory?" comes *"start it now or in the morning?"* — by
+**measuring** rather than modelling: the median seconds-per-sub of this target's own comparable finished
+runs (`stack_runs.duration_s`), times the planned sub count. Its docstring is explicit that "comparable" is
+deliberately strict, *"because a wrong number here costs more trust than no number at all"*, and it splits
+the basis on three axes: cost class, canvas area ratio, and a minimum basis frame count.
+
+It did not split on **which build measured it**, and nothing else in the path did either:
+`estimate_stack_seconds` took the five most recent qualifying runs whatever engine wrote them. The only
+upgrade the docstring anticipates is the *first* one — *"on the first run after an upgrade … the column is
+new, so nothing is timed yet, and the app says nothing rather than guessing"*. That covers the release that
+**introduced** `duration_s`. It does not cover the next upgrade, when the basis is full of timings from the
+previous engine.
+
+**Measured, on the owner's install, with a control.** Six restacks whose target, sub count combined, output
+canvas in pixels and `options_json` are identical to their predecessors, across one version boundary:
+
+    target                        n_subs   canvas       before    after    delta
+    C_20 - North America Nebula      320   2528x3238    1959.1   2118.2    +8.1%
+    C_28                            1110   2066x3212    6358.9   6986.2    +9.9%
+    Alphecca_mosaic-…                725   3712x7576    4906.1   5636.7   +14.9%
+    Alphecca_mosaic_sub              724   2475x5107    2213.5   2631.0   +18.9%
+    73_Leonis_mosaic-…               400   4473x8252    3823.3   4559.9   +19.3%
+    73_Leonis_mosaic_sub             400   3001x5507    2178.7   2971.5   +36.4%
+
+Median **+16.9 %**. The control — the same comparison *within* one engine, 11 consecutive repeats — is
+**+0.4 %**, range −4.6 % .. +8.1 %; five of the six cross-boundary deltas are above the control's maximum and
+the sixth ties it. Running the app's own `estimate_from_runs` over each target's history *as it stood
+immediately before* each of those runs, i.e. exactly the number the form would have shown, gives **six of six
+under-stated, one direction, 7.0 % to 24.9 %** — 6.0 h of estimate against 6.9 h of work, while a reprocess
+batch walked all 95 targets. (No cause is claimed: there is no bisect, and a host-level change over the eight
+days is not excluded. What is established is that the basis and the run are on opposite sides of a boundary
+the estimate cannot see.)
+
+**The app already knew the difference.** `webapp/pipeline.py::reprocess_status` calls a target *outdated* on
+exactly this comparison — `run.engine_version != APP_VERSION` — and raises the nudge that offers to restack
+it. So one surface used the version to tell the owner his pictures were made by an older build, and the
+surface pricing that very restack read the older build's rate as if it were this one's. Same fact, two
+screens, one of them silent about it.
+
+**The fix, and the shape it deliberately is not.** `estimate_stack_seconds` takes an `engine_version` and
+**prefers** the runs that build wrote: when the target has any, the rate is the median of those alone, even
+if that is one run against five older ones — a rate is a measurement of code, and one run of the code about
+to execute predicts it better than five runs of code that is not, which is the same argument the other three
+axes make. When there are none to prefer it does **not** go silent: the older runs still answer, exactly as
+they do today, and `StackTimeEstimate.same_engine` is `False` so the sentence can say where the number came
+from. Discarding them instead would take the form's only answer away on every target for one stack after
+every upgrade — precisely when the owner is restacking the library *because the app has just told him it is
+outdated* — to avoid an error the measurement puts at 7–25 %, where the three existing axes exclude jobs
+whose rates differ by multiples. The wording is `stackTimeLine`'s, one clause: *"About 1 h to run — from your
+last 2 stacks of this target, **which ran on a different version of AstroStack — the real time may differ**."*
+
+**Details that are load-bearing rather than tidy:**
+
+- **Unknown is not "mine".** `engine_version` is NULL on runs older than schema 9; such a row falls to the
+  flagged side, never silently passes as current.
+- **Asking without naming a build is still supported and pinned** (`engine_version=None` → one basis, no
+  preference, `same_engine` `True`) — so the pre-v0.462.0 behaviour is reachable and tested, and the
+  no-match case produces the identical basis, rate and number it did before.
+- **The preference is an extra axis, not an override.** A same-build run of a different cost class is still
+  not evidence and cannot rescue an estimate the other axes refused.
+- **`undefined` ≠ `false` in the frontend.** An older backend sends no `same_engine`, and that reads as
+  "nothing to say" rather than as a caveat, so a mixed-version install never grows a warning nobody computed.
+
+**Upgrade-safe (§9):** one additive response field with a `True` default, one additive dataclass field with a
+`None` default, no config, DB-schema, on-disk, endpoint or default change; the column it reads
+(`engine_version`, schema 9) long predates the column it joins it to (`duration_s`, schema 23).
+
+**Tests (+11):** seven in `tests/test_stack_time_estimate.py` (this build's runs outvote five older faster
+ones; an older-build-only basis is flagged but still answers with the same rate and number; a NULL version
+never passes as current; asking without a version is byte-for-byte the old answer; the basis cap applies to
+the preferred set and never pads with older runs; the version travels off the row through
+`estimate_from_runs`; and the axes still compose), one in `tests/webapp/test_stack_estimate.py` (the field on
+the wire, both ways, with only the version moving between the two calls), and three in
+`stackTimeEstimate.test.ts` (the clause, its absence, and `undefined` staying quiet). **Five fail before**,
+reverted *inside the logic* with the signature and call sites intact — a `TypeError` from a deleted keyword
+is not a fail-before.
+
 ## v0.461.0 — 2026-09-18 — the glossary promised that "a screen that uses a word can point straight at the word", and one screen did
 
 *(Builder, branch `claude/sweet-babbage-db6205`, the third task of the v0.460.0 run — and a **new beginner

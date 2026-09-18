@@ -142,8 +142,11 @@ An advanced stacking method (originally developed for the Hubble Space Telescope
 that can produce a higher-resolution output than the input frames, *if* the
 frames are slightly offset from each other ("dithered"). The Seestar dithers
 naturally because of small tracking variations. Drizzle is more compute-heavy and
-only helps if you have lots of frames — typical recommendation: enable it once
-you have 200+ aligned frames.
+only helps if lots of frames land on each output pixel — typical recommendation:
+enable it once about 200+ dithered subs cover every pixel. On a **mosaic** that
+is counted per panel rather than over the whole target (see *Panel depth*): 900
+subs spread over a 3×3 raster is about 100 a pixel, not 900, so the total can
+clear the bar long before any pixel does.
 
 ## Sigma clipping
 
