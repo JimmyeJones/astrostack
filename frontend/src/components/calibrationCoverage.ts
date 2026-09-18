@@ -1,4 +1,5 @@
 import type { CalibrationCoverage } from "../api/client";
+import { degC, TEMP_MISMATCH_TOL_C, temperatureSpread } from "../calibrationFit";
 
 // Plain-language copy for the Calibration page's "do my masters actually cover my
 // targets?" roll-up. The page lists the masters you've built but never connects
@@ -104,6 +105,47 @@ export function uncoveredTargetsNote(
   return (
     `${lead} — build a dark from frames shot the same way (same exposure, gain `
     + `and camera), ${then}.${uncoveredDarkSpecHint(coverage.uncovered_detail)}`
+    + `${uncoveredDarkNightHint(coverage.uncovered_detail)}`
+  );
+}
+
+/** *When* to go out and shoot those darks, which on this camera is the same
+ *  question as "at what temperature".
+ *
+ *  The Seestar's sensor is **uncooled**, so its temperature is the ambient. That
+ *  makes the night the owner chooses the only control he has over the one
+ *  acquisition number the spec hint above cannot name — and it is a number the
+ *  app itself judges the finished dark by (`calibration_warnings`, v0.464.0) and
+ *  gives as a reason a dark covers nothing (`_acquisition_reason`). A nudge that
+ *  says "shoot them at 10 s at gain 80" and stops therefore sends him out on any
+ *  night and complains about the result afterwards.
+ *
+ *  One clause on the existing sentence, never a new element. Silent whenever it
+ *  would be a guess: no tally (an older backend, or subs whose headers carried no
+ *  `CCD-TEMP`) says nothing at all. A spread wider than the engine's own mismatch
+ *  tolerance says so instead of averaging it into a night nobody had — the same
+ *  honesty the exposure half already has for a 10 s / 30 s target. */
+export function uncoveredDarkNightHint(
+  detail: CalibrationCoverage["uncovered_detail"],
+): string {
+  const tally: [number, number][] = [];
+  for (const d of detail ?? []) {
+    for (const row of d?.sensor_temps_c ?? []) tally.push(row);
+  }
+  const spread = temperatureSpread(tally);
+  if (!spread) return "";
+  if (spread.hi - spread.lo >= TEMP_MISMATCH_TOL_C) {
+    return (
+      ` They weren't all shot on the same kind of night either `
+      + `(${degC(spread.lo)}°C to ${degC(spread.hi)}°C at the sensor), so no one `
+      + `night's darks will match all of them — shoot on a night like the ones `
+      + `you want calibrated best.`
+    );
+  }
+  return (
+    ` Shoot them on a night around ${degC(spread.median)}°C — this camera's `
+    + `sensor runs at the outside temperature, and a dark only matches subs shot `
+    + `about as warm.`
   );
 }
 

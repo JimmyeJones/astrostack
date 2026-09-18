@@ -1444,8 +1444,33 @@ def _fmt_seconds(value: float) -> str:
 #: caller that omits it gets exactly the answers it always got.
 COVERAGE_TARGET_KEYS = (
     "name", "safe_name", "exposure_s", "exposures_s", "gain", "sensor_temp_c",
-    "width_px", "height_px", "bayer_pattern",
+    "sensor_temps_c", "width_px", "height_px", "bayer_pattern",
 )
+
+
+def _clean_temperature_tally(values: Any) -> list[list[float]]:
+    """A ``[[°C, how many subs], …]`` tally off a target dict, coldest first — or
+    ``[]`` for anything unusable.
+
+    The shape ``webapp.routers.calibration._temperature_tally`` produces, refused
+    rather than repaired when it is something else: a wrong sentence about which
+    night to shoot a dark on is worse than the generic one. Unlike an exposure a
+    temperature may legitimately be zero or negative, so only the unusable is
+    dropped.
+    """
+    if not isinstance(values, (list, tuple)):
+        return []
+    out: list[list[float]] = []
+    for row in values:
+        if not isinstance(row, (list, tuple)) or len(row) != 2:
+            continue
+        try:
+            temp, count = float(row[0]), int(row[1])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(temp) and count > 0:
+            out.append([temp, count])
+    return sorted(out, key=lambda r: r[0])
 
 
 def _clean_exposures(values: Any) -> list[float]:
@@ -1795,9 +1820,17 @@ def master_coverage(
         # what the binder gates on, but it is not what to go and shoot. On an
         # evenly split 10 s / 30 s target it is 20 s, and a night of 20 s darks
         # matches nothing the owner has.
+        # ``sensor_temps_c`` is the same answer's missing third: "shoot a dark
+        # at 10 s, gain 80" is a complete instruction for a *cooled* camera and
+        # an incomplete one for this owner's, where the sensor follows the
+        # ambient. It is the half he sets by choosing **which night** to shoot
+        # the dark on, and the half the finished run's own advisory judges the
+        # dark by (``calibration_warnings``, v0.464.0) — so a nudge that leaves
+        # it out sends him out on the wrong night and then complains about it.
         "uncovered_detail": [
             {"name": n, "exposure_s": t.get("exposure_s"), "gain": t.get("gain"),
-             "exposures_s": _clean_exposures(t.get("exposures_s"))}
+             "exposures_s": _clean_exposures(t.get("exposures_s")),
+             "sensor_temps_c": _clean_temperature_tally(t.get("sensor_temps_c"))}
             for n, t, ids in zip(names, targets, bound_ids, strict=True)
             if not ids
         ],

@@ -531,6 +531,102 @@ describe("StackView", () => {
     expect(screen.queryByText(/not all shot at the same length/)).not.toBeInTheDocument();
   });
 
+  it("warns about a dark that matches the median temperature but not the session", async () => {
+    // The same defect as the exposure one above, in the other column. The
+    // Seestar's sensor is uncooled, so a target shot on a mild night and a
+    // frozen one holds a 22 °C spread; its median is 2 °C, which a 2 °C dark
+    // matches perfectly while being 22 °C out on half the subs. The finished run
+    // judges it against every sub's temperature (v0.464.0) — this is the same
+    // question at pick time, so the two cannot disagree about one target.
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark mild", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: 2,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: 2,
+                sensor_temps_c: [[-20, 3], [2, 3]] },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null,
+      bias_master_id: null, scores: { "1": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Use recommended"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/not all shot at the same temperature \(-20°C to 2°C\)/))
+        .toBeInTheDocument());
+    // …how much of the session it misses …
+    expect(screen.getByText(/3 of 6 are 5°C or more away/)).toBeInTheDocument();
+    // …and never a single temperature the subs were not all shot at.
+    expect(screen.queryByText(/your subs are at 2°C/)).not.toBeInTheDocument();
+  });
+
+  it("keeps today's single-temperature wording for one night's subs", async () => {
+    // One night, one temperature: unchanged, and unchanged again against an
+    // older backend that serves no tally at all.
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark cold", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: -20,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: 2,
+                sensor_temps_c: [[2, 6]] },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null,
+      bias_master_id: null, scores: { "1": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Use recommended"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/shot at -20°C but your subs are at 2°C/))
+        .toBeInTheDocument());
+    expect(screen.queryByText(/not all shot at the same temperature/))
+      .not.toBeInTheDocument();
+  });
+
+  it("does not let one stray cold sub speak for the whole session", async () => {
+    // The share floor, at the surface: one frame in fifty is true and not worth
+    // a sentence — and it is exactly what the old median-only test fired on
+    // whenever that frame happened to set the median.
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark mild", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: 2,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: 2,
+                sensor_temps_c: [[-20, 1], [2, 49]] },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null,
+      bias_master_id: null, scores: { "1": 1 }, n_frames: 50,
+    });
+
+    renderStack();
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Use recommended"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Master dark|Matched to this target/)).toBeInTheDocument());
+    expect(screen.queryByText(/dark current changes with temperature/))
+      .not.toBeInTheDocument();
+  });
+
   it("offers a one-click dark exposure-scaling when a bias is also selected, then confirms", async () => {
     mockSchema([]);
     // A mismatched 120 s dark and a master bias both already selected.
