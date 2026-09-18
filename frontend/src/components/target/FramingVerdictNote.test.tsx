@@ -6,13 +6,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as client from "../../api/client";
 import type { StackFraming } from "../../api/client";
 import { FramingVerdictNote, framingTitle } from "./FramingVerdictNote";
+import type { NextBestMoveKind } from "./nextBestMove";
 
-function renderNote(qc: QueryClient = new QueryClient()) {
+function renderNote(
+  qc: QueryClient = new QueryClient(),
+  coachKind?: NextBestMoveKind | null,
+) {
   return render(
     <MantineProvider>
       <QueryClientProvider client={qc}>
         <MemoryRouter>
-          <FramingVerdictNote safe="M_42" runId={7} />
+          <FramingVerdictNote safe="M_42" runId={7} coachKind={coachKind} />
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
@@ -255,6 +259,62 @@ describe("FramingVerdictNote — the offer tells the truth", () => {
 
     expect(await screen.findByText("It's bigger than this mosaic")).toBeInTheDocument();
     expect(screen.queryByText("It's bigger than one frame")).not.toBeInTheDocument();
+  });
+
+  it("adds the order when the coaching card has chosen depth over width", async () => {
+    // The contradiction this closes, photographed on the bundled 2x2: the
+    // coaching card an inch above asks for "another pass or two over the same
+    // mosaic" while this one asks for more panels — same screen, same night,
+    // and until now no word about which wins.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "partial",
+        canvas: "mosaic",
+        coverage: 0.75,
+        text: "is bigger than this mosaic — only about 75% of it is in this "
+          + "picture. Adding more panels next session would capture the rest.",
+      }));
+    renderNote(new QueryClient(), "integration");
+
+    const clause = await screen.findByTestId("framing-depth-first");
+    expect(clause.textContent).toContain("Most of it is already in this picture");
+    expect(clause.textContent).toContain("panels you already have");
+    // The measurement itself is untouched — the clause adds the order, it does
+    // not withdraw the shortfall.
+    expect(screen.getByText(/only about 75% of it is in this picture/))
+      .toBeInTheDocument();
+  });
+
+  it("says nothing extra on a surface with no coaching card", async () => {
+    // The editor and History render this note without a `coachKind`, so there
+    // is nothing on screen for it to defer to.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "partial",
+        canvas: "mosaic",
+        coverage: 0.75,
+        text: "is bigger than this mosaic — only about 75% of it is in this "
+          + "picture. Adding more panels next session would capture the rest.",
+      }));
+    renderNote();
+
+    await screen.findByText("It's bigger than this mosaic");
+    expect(screen.queryByTestId("framing-depth-first")).not.toBeInTheDocument();
+  });
+
+  it("leaves a fragment's verdict alone, where the two cards already agree", async () => {
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "partial",
+        canvas: "frame",
+        coverage: 0.2,
+        text: "is bigger than your frame — only about 20% of it is in this "
+          + "picture. Shoot it in mosaic mode to capture all of it.",
+      }));
+    renderNote(new QueryClient(), "framing");
+
+    await screen.findByText("It's bigger than one frame");
+    expect(screen.queryByTestId("framing-depth-first")).not.toBeInTheDocument();
   });
 
   it("headlines a clipped mosaic as a mosaic too", async () => {

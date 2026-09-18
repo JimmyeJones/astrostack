@@ -1,4 +1,6 @@
-import { AppShell, Badge, Box, Burger, Button, Group, NavLink, ScrollArea, Text, Title } from "@mantine/core";
+import {
+  AppShell, Badge, Box, Burger, Button, Group, NavLink, ScrollArea, Text, Title, VisuallyHidden,
+} from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { IconActivity, IconPhoto, IconRadar2 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -61,7 +63,24 @@ export function GlobalJobNotifier() {
   return null;
 }
 
-function ActiveJobsBadge() {
+/** "3 running" in the header — the one thing on every screen that says the app is
+ * busy on your behalf, which for a walk-away user checking from a phone is the
+ * whole reason they opened it.
+ *
+ * **The word is dropped below `xs`, and the count never is.** The header row is
+ * `wrap="nowrap"`, so on a phone the badge competes with the title on one side
+ * and the Scan button on the other; a `--mosaic --calibration` dogfood pass with
+ * a job actually running measured the label clipped on **every one of the 14
+ * routes it probed** — a 60 px box against a 63 px word, and the probe's own note
+ * is that scrolling cannot reveal it. (Every earlier pass read "nothing
+ * overflowing" because none of them had a job running while the browser looked.)
+ * Shortening the badge is the header's own existing answer to exactly this — the
+ * Scan button beside it has said `<Box visibleFrom="xs">Scan incoming</Box>`
+ * since it was written — so this is the same idiom rather than a new rule, and
+ * nothing is removed: the phrase stays the badge's accessible name and its
+ * tooltip at every width, and comes back as text from `xs` up.
+ */
+export function ActiveJobsBadge() {
   const { data } = useQuery({
     queryKey: ["jobs"],
     // Wrap so the default limit applies (a bare `api.listJobs` would receive the
@@ -71,9 +90,20 @@ function ActiveJobsBadge() {
   });
   const active = (data ?? []).filter((j) => j.state === "running" || j.state === "queued").length;
   if (!active) return null;
+  const phrase = `${active} ${active === 1 ? "job" : "jobs"} running`;
   return (
-    <Badge color="violet" variant="filled" leftSection={<IconActivity size={12} />}>
-      {active} running
+    <Badge color="violet" variant="filled" leftSection={<IconActivity size={12} />}
+      title={phrase}>
+      {/* The sentence, for a reader who isn't looking at pixels. It is spelled out
+          here rather than left to an `aria-label` because `visibleFrom` hides its
+          word with `display: none`, which hides it from a screen reader too — so
+          below the breakpoint the spoken badge would otherwise be the bare
+          number. Absolutely positioned, so it costs the squeezed row nothing. */}
+      <VisuallyHidden>{phrase}</VisuallyHidden>
+      <Box component="span" aria-hidden>
+        {active}
+        <Box component="span" visibleFrom="xs">{" running"}</Box>
+      </Box>
     </Badge>
   );
 }

@@ -1127,6 +1127,51 @@ describe("HistoryView", () => {
     expect(screen.getByRole("img", { name: /QR code/i })).toBeInTheDocument();
   });
 
+  it("lets a well-earned run's badge row wrap instead of squeezing every badge", async () => {
+    // These cards sit in a `SimpleGrid` up to three columns wide, so a card is
+    // ~390 px however big the screen is. Held to one line the row did not
+    // overflow, it *squeezed*: a dogfood probe measured "Sky even" in a 45 px
+    // box against a 47 px word, "dark+flat" 54 against 56 and "21 frames" 61
+    // against 64, on one calibrated mosaic run. A badge is a whole short fact;
+    // there is no such thing as most of one.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({
+        id: 1, output_basename: "master",
+        calstat: "dark+flat", seam_verdict: "flat", grain_verdict: "even",
+        hazy_verdict: "clear", transparency_ratio: 1.0,
+        unexported_edit: true, field_fulls: 3.7,
+        n_frames_used: 21,
+      }),
+    ]);
+
+    renderHistory();
+    const row = await screen.findByTestId("run-badges");
+    // Mantine's Group publishes its wrapping as a CSS variable; "nowrap" here is
+    // what made the badges give up pixels instead of a line.
+    expect(row.style.getPropertyValue("--group-wrap")).not.toBe("nowrap");
+    // …and the run's own name is not in that row, so it is not competing with
+    // them for the ~390 px a grid cell has. Letting the name yield instead was
+    // the first attempt and it ellipsised "master" to "mas…".
+    expect(row.textContent).not.toContain("master");
+    expect(screen.getByText("master")).not.toBe(row);
+  });
+
+  it("keeps a long run name from pushing the badges off the row", async () => {
+    // A reprocess mints versioned output names, so this heading is not always
+    // the short "master" the samples carry.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 1, output_basename: "master_reprocessed_v0_465_3_second_attempt" }),
+    ]);
+
+    renderHistory();
+    const heading = await screen.findByText("master_reprocessed_v0_465_3_second_attempt");
+    // Truncated with the whole name still reachable — the Gallery card's own
+    // arrangement for the same label.
+    expect(heading.getAttribute("title"))
+      .toBe("master_reprocessed_v0_465_3_second_attempt");
+    expect(heading.getAttribute("data-truncate")).toBe("end");
+  });
+
   it("offers Compare linking to the previous run on all but the oldest card", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ id: 3, output_basename: "newest_run" }),
