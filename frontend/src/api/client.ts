@@ -2084,6 +2084,11 @@ export interface StackEstimate {
     // The largest sub count among them — a rate learned on 40 subs projected
     // onto 4,000 deserves a softer word than one learned on 3,000.
     basis_frames: number;
+    // Whether the build about to run the stack is the one that measured the
+    // rate. `false` means every basis run was timed by a different version, so
+    // the sentence has to say where the number came from. Optional: an older
+    // backend doesn't send it, and "not said" reads as "nothing to say".
+    same_engine?: boolean;
   } | null;
 }
 

@@ -33,9 +33,11 @@ _CANVAS = 480 * 320
 
 
 def _run(n_frames: int, duration_s: float, *, canvas_px: int = _CANVAS,
-         cost_class: str = "sigma-clip") -> PastStack:
+         cost_class: str = "sigma-clip",
+         engine_version: str | None = None) -> PastStack:
     return PastStack(n_frames=n_frames, duration_s=duration_s,
-                     canvas_px=canvas_px, cost_class=cost_class)
+                     canvas_px=canvas_px, cost_class=cost_class,
+                     engine_version=engine_version)
 
 
 def _row(**kw) -> StackRunRow:
@@ -320,3 +322,121 @@ def test_an_old_build_can_still_read_a_project_this_build_wrote(tmp_path):
         assert row["output_basename"] == "new"
     finally:
         conn.close()
+
+
+# --- which build measured the rate (observer issue #933) ---------------------
+#
+# A seconds-per-sub is a measurement of *code*, and this app ships several builds
+# a day. On the owner's install six restacks with identical target, sub count,
+# canvas and options came back 8.1–36.4 % slower across one version boundary
+# (control, same engine, 11 repeats: +0.4 %, −4.6 %..+8.1 %), and the form —
+# which read the old build's timings as if they were this build's — under-stated
+# all six by 7.0–24.9 %, in one direction.
+
+
+def test_the_rate_is_taken_from_this_build_s_own_runs_when_there_are_any():
+    """The substance of the fix: five fast runs from the old build do not get to
+    outvote one run of the code that is actually about to execute."""
+    history = [
+        _run(100, 300.0, engine_version="0.462.0"),      # 3.0 s a sub, this build
+        *[_run(100, 200.0, engine_version="0.401.1")     # 2.0 s a sub, the old one
+          for _ in range(5)],
+    ]
+    est = estimate_stack_seconds(history, n_frames=100, canvas_px=_CANVAS,
+                                 cost_class="sigma-clip",
+                                 engine_version="0.462.0")
+    assert est is not None
+    assert est.per_frame_s == pytest.approx(3.0)
+    assert est.basis_runs == 1
+    assert est.same_engine is True
+    # …and the old build's runs would have said something else entirely.
+    assert estimate_stack_seconds(
+        history, n_frames=100, canvas_px=_CANVAS, cost_class="sigma-clip",
+    ).per_frame_s == pytest.approx(2.0)
+
+
+def test_an_estimate_standing_only_on_an_older_build_says_so():
+    """No same-build run to prefer: the number still comes (silence would take
+    the form's only answer away on every target for one stack after every
+    upgrade), but it is flagged so the sentence can name where it came from."""
+    history = [_run(100, 200.0, engine_version="0.401.1") for _ in range(3)]
+    est = estimate_stack_seconds(history, n_frames=500, canvas_px=_CANVAS,
+                                 cost_class="sigma-clip",
+                                 engine_version="0.462.0")
+    assert est is not None
+    assert est.same_engine is False
+    # Unchanged in every other respect — the same basis, the same rate, the same
+    # number today's build would have shown.
+    assert est.basis_runs == 3
+    assert est.per_frame_s == pytest.approx(2.0)
+    assert est.seconds == pytest.approx(1000.0)
+
+
+def test_a_run_from_before_version_tracking_is_never_mistaken_for_this_build():
+    """``engine_version`` is NULL on runs older than schema 9. Unknown is not
+    "mine": it must fall to the flagged side, never silently pass as current."""
+    est = estimate_stack_seconds([_run(100, 200.0, engine_version=None)],
+                                 n_frames=100, canvas_px=_CANVAS,
+                                 cost_class="sigma-clip",
+                                 engine_version="0.462.0")
+    assert est is not None
+    assert est.same_engine is False
+
+
+def test_asking_without_naming_a_build_answers_exactly_as_before():
+    """The pre-v0.462.0 behaviour, kept reachable and pinned: no version asked,
+    no preference applied, nothing to warn about."""
+    history = [_run(100, 300.0, engine_version="0.462.0"),
+               _run(100, 100.0, engine_version="0.401.1")]
+    est = estimate_stack_seconds(history, n_frames=100, canvas_px=_CANVAS,
+                                 cost_class="sigma-clip")
+    assert est is not None
+    assert est.basis_runs == 2
+    assert est.per_frame_s == pytest.approx(2.0)      # the median of both
+    assert est.same_engine is True
+
+
+def test_only_the_newest_handful_of_this_build_s_runs_are_averaged():
+    """The basis cap applies to the preferred set, not to the scan: a target with
+    more same-build runs than :data:`MAX_BASIS_RUNS` still uses only the newest
+    of them, and never pads the basis out with older-build runs."""
+    history = [*[_run(100, 200.0, engine_version="0.462.0")
+                 for _ in range(MAX_BASIS_RUNS + 3)],
+               _run(100, 999.0, engine_version="0.401.1")]
+    est = estimate_stack_seconds(history, n_frames=100, canvas_px=_CANVAS,
+                                 cost_class="sigma-clip",
+                                 engine_version="0.462.0")
+    assert est is not None
+    assert est.basis_runs == MAX_BASIS_RUNS
+    assert est.per_frame_s == pytest.approx(2.0)
+
+
+def test_the_build_that_wrote_a_row_travels_with_it():
+    """``estimate_from_runs`` reads the column off the row rather than being told
+    — the endpoint hands it whole ``stack_runs`` rows and nothing else."""
+    rows = [_row(id=2, engine_version="0.401.1", duration_s=200.0),
+            _row(id=1, engine_version="0.401.1", duration_s=200.0)]
+    assert past_stack(rows[0]).engine_version == "0.401.1"
+    est = estimate_from_runs(rows, n_frames=100, canvas_px=_CANVAS,
+                             cost_class="sigma-clip",
+                             engine_version="0.462.0")
+    assert est is not None and est.same_engine is False
+    same = estimate_from_runs(rows, n_frames=100, canvas_px=_CANVAS,
+                              cost_class="sigma-clip",
+                              engine_version="0.401.1")
+    assert same is not None and same.same_engine is True
+
+
+def test_a_build_of_this_own_is_still_refused_when_it_is_not_comparable():
+    """The version preference is an extra axis, not an override of the others: a
+    same-build run of a different cost class is still not evidence, and does not
+    rescue an estimate the other axes have already refused."""
+    history = [_run(100, 300.0, cost_class="drizzle", engine_version="0.462.0"),
+               _run(100, 200.0, engine_version="0.401.1")]
+    est = estimate_stack_seconds(history, n_frames=100, canvas_px=_CANVAS,
+                                 cost_class="sigma-clip",
+                                 engine_version="0.462.0")
+    assert est is not None
+    assert est.basis_runs == 1
+    assert est.per_frame_s == pytest.approx(2.0)   # the κ-σ run, old build
+    assert est.same_engine is False

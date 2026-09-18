@@ -716,11 +716,21 @@ def stack_estimate(
     # re-deriving the rule, which is how the two came to disagree on a mosaic.
     eff_options = _resolve_auto_reject(options, est.n_frames,
                                        depth=est.panel_depth)
+    # …and which *build* measured the rate. A stack's seconds-per-sub is a
+    # measurement of code, and this app ships several builds a day: the runs on
+    # the other side of an upgrade were timed by a different stacker. So the
+    # build about to run goes in, the estimate prefers its own timings, and when
+    # only older ones exist it says so rather than quoting last version's rate as
+    # this one's (``same_engine`` below). It is the same comparison
+    # ``reprocess_status`` already makes to call a target outdated.
+    from webapp import __version__ as _app_version
+
     time_estimate = estimate_from_runs(
         past_runs,
         n_frames=est.n_frames,
         canvas_px=int(est.canvas_w) * int(est.canvas_h),
         cost_class=stack_cost_class(asdict(eff_options), est.n_frames),
+        engine_version=_app_version,
     )
     # And the sibling question the form has to answer when the user has turned
     # rejection *off*: "would any setting take this trail out?" Asked of the same
@@ -814,6 +824,11 @@ def stack_estimate(
                 "seconds": round(time_estimate.seconds),
                 "basis_runs": time_estimate.basis_runs,
                 "basis_frames": time_estimate.basis_frames,
+                # False ⇒ every run behind this rate was timed by a different
+                # build. Additive with a ``True`` default meaning "nothing to
+                # say", so an older frontend ignores it and reads exactly the
+                # sentence it read before.
+                "same_engine": time_estimate.same_engine,
             }
             if time_estimate is not None
             else None

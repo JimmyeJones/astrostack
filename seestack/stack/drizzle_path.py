@@ -33,9 +33,17 @@ Trade-offs vs the standard weighted-sum path:
     ``scale > 1`` (which expands the output canvas). Two-pass rejection
     roughly doubles that again.
 
-Recommendation: use drizzle when you have **lots** of dithered frames
-(typically 200+) AND want extra resolution. Otherwise the weighted-mean path
-gives faster, equally clean results on Seestar data.
+Recommendation: use drizzle when **lots** of dithered subs land on each output
+pixel (typically 200+) AND you want extra resolution. Otherwise the weighted-mean
+path gives faster, equally clean results on Seestar data.
+
+The unit is load-bearing and this sentence used to leave it out ("lots of
+dithered *frames*"), which is the reading every surface quoting it then
+inherited: on a mosaic the subs are spread across the raster, so a 3x3 raster
+900 subs deep in total has ~100 on any pixel and a recommendation counted in
+frames says yes on exactly the canvas drizzle handles worst. See
+:data:`DRIZZLE_MIN_SAMPLES_PER_PIXEL` below, which is this bar's *warn* half and
+has always been counted correctly.
 """
 
 from __future__ import annotations
