@@ -121,6 +121,46 @@ describe("uncoveredTargetsNote", () => {
     });
     expect(note).toMatch(/Shoot them at 10s —/);
   });
+  it("names the night to shoot them on, because this sensor is uncooled", () => {
+    // "Shoot them at 10s at gain 80" is a complete instruction for a cooled
+    // camera. On this one the temperature is the ambient, so the night is the
+    // owner's only control over the number the finished run's own advisory
+    // judges the dark by (v0.464.0) — and the nudge never named it.
+    const note = uncoveredTargetsNote({
+      uncovered: ["M 13"], n_targets: 6,
+      uncovered_detail: [
+        { name: "M 13", exposure_s: 10, gain: 80,
+          sensor_temps_c: [[-9.8, 40], [-10.2, 40]] },
+      ],
+    });
+    expect(note).toMatch(/Shoot them at 10s at gain 80/);
+    expect(note).toMatch(/on a night around -10°C/);
+    expect(note).toMatch(/sensor runs at the outside temperature/);
+  });
+  it("is honest when the uncovered subs span more than one kind of night", () => {
+    // Averaging a winter and a summer night gives a temperature nobody shot at
+    // — the same untruth the 10 s / 30 s median was, in the other column.
+    const note = uncoveredTargetsNote({
+      uncovered: ["M 13", "M 51"], n_targets: 6,
+      uncovered_detail: [
+        { name: "M 13", exposure_s: 10, gain: 80, sensor_temps_c: [[-20, 60]] },
+        { name: "M 51", exposure_s: 10, gain: 80, sensor_temps_c: [[2, 60]] },
+      ],
+    });
+    expect(note).toMatch(/weren't all shot on the same kind of night/);
+    expect(note).toMatch(/-20°C to 2°C/);
+    expect(note).not.toMatch(/on a night around/);
+  });
+  it("says nothing about the night when no sub recorded a temperature", () => {
+    // An older backend, or headers with no CCD-TEMP: the rest of the nudge is
+    // unchanged rather than guessing at a night.
+    const note = uncoveredTargetsNote({
+      uncovered: ["M 13"], n_targets: 6,
+      uncovered_detail: [{ name: "M 13", exposure_s: 10, gain: 80 }],
+    });
+    expect(note).toMatch(/Shoot them at 10s at gain 80/);
+    expect(note).not.toMatch(/night/);
+  });
   it("stays silent when every target is covered", () => {
     expect(uncoveredTargetsNote({ uncovered: [], n_targets: 6 })).toBeNull();
   });

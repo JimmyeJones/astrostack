@@ -305,6 +305,12 @@ def _target_acquisition(lib: Any, entry: Any) -> dict[str, Any] | None:
         "gain": _median([f.gain for f in frames if f.gain is not None]),
         "sensor_temp_c": _median(
             [f.sensor_temp_c for f in frames if f.sensor_temp_c is not None]),
+        # …and the set that median stands in for, for the same reason. The
+        # Seestar's sensor is uncooled, so the number here is really *which
+        # nights these were shot on* — which is the one part of "shoot a
+        # matching dark" the owner controls by choosing when to go out, and the
+        # one the finished run's advisory judges the dark on (v0.464.0).
+        "sensor_temps_c": _temperature_tally([f.sensor_temp_c for f in frames]),
         "width_px": calibration.modal_dim([f.width_px for f in frames]),
         "height_px": calibration.modal_dim([f.height_px for f in frames]),
         "bayer_pattern": calibration.modal_bayer(
