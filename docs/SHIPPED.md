@@ -1,5 +1,48 @@
 # Shipped — the record
 
+## v0.462.2 — 2026-09-18 — the `--calibration` pass's defect line read two keys the endpoint has never sent
+
+*(Builder, branch `claude/sweet-babbage-m3wwgy`, the third task of the v0.462.0 run. Found by running
+`scripts/agent-dogfood.sh --calibration` — the pass v0.455.1 added for exactly this kind of blind spot — and
+reading its output rather than its code.)*
+
+**What it printed, on the install that disproves it.** With a master dark built from seeded darks and the
+repair genuinely on offer:
+
+    [defects] offer=None · {'masters': [{'id': 1, 'n_defects': 31, …
+                             'note': {'severity': 'ok', 'message': '31 hot or dead pixels (0.020%)'…}}],
+                            'repair': {'state': 'off', 'message': 'Repair these on every stack from now on',
+                                       'action': 'Repair them'…}}
+
+`offer=None` — beside a payload whose `repair` block *is* the offer. The probe read `d.get("offer_repair")`
+and `d.get("summary")`, and `/api/calibration/defects` has always returned `{"masters": [...], "repair":
+offer|None}`. Neither name has ever existed, so the line could only ever answer `None`, on every install, in
+every state: a reader skimming for "did the repair offer fire?" gets "no" on a run where it did, and the
+truth is in the raw-dict fallback that only exists because the first lookup failed.
+
+**Why it is worth a slot rather than a shrug.** AGENTS.md's whole case for this tooling is that the bugs
+which survive code-level audits are the ones only a running app shows — and the value of a pass that comes
+back *clean* is a statement about what it saw. A probe that cannot find its subject and answers `None`
+instead of saying so converts "I looked and the offer did not fire" into "I did not look", with no way to
+tell them apart. The repo already states the rule in `tests/test_drizzle_bar_mirror.py`'s own helper ("a
+check that silently passes when it can't find its subject enforces nothing"); this is that rule applied to
+the finder rather than to the suite.
+
+**The fix.** The probe prints the offer's `state` and `message`, then one census line per master
+(`id · severity · message`), and — where it used to fall through to `None` — says *"payload has neither
+masters nor repair — the endpoint shape moved; fix this probe"*. Verified against three payloads: the real
+one this run's pass returned, an empty library (`repair: None` → *"(none — nothing worth repairing)"*), and
+the shape the old probe assumed (→ the explicit complaint).
+
+**The test is the durable half, and it is pinned from both sides.** `tests/webapp/test_dogfood_defects_probe.py`
+extracts the inline Python out of `scripts/agent-dogfood.sh` and checks the names it reads against the names
+a real library's endpoint sends through the ordinary test client; that the two dead names are gone from the
+script; and — the one that stops the guard being vacuous — that the endpoint did not quietly grow them
+instead, which would have meant the probe was right all along and this file was about nothing. **Two of the
+three fail before**, verified by reverting the script to `HEAD` with the tests in place.
+
+Tooling only: no app behaviour, config, schema, on-disk, API-shape or default change.
+
 ## v0.462.1 — 2026-09-18 — the bar had a mirror guard for its *number* and none for its *unit*, and the sentence under the checkbox was in the wrong one
 
 *(Builder, branch `claude/sweet-babbage-m3wwgy`, the second task of the v0.462.0 run. Found by asking which

@@ -18,6 +18,63 @@ is a queue.
 
 ---
 
+## 2026-09-18 — Builder: the open issue inbox is a backlog when the backlog is dry, and a dogfood pass that comes back clean
+
+*(Builder, branch `claude/sweet-babbage-m3wwgy`, the run that shipped v0.462.0 and v0.462.1. Baseline
+`6334 passed, 2 skipped`, 9m25s with `-n 4` and the BLAS cap.)*
+
+**Where the work came from, for the sixth run running of a dry backlog.** The three previous notes each
+record the same starting state — every open "Bugs" entry gated on the owner's data, routed to sign-off, or
+stood down with measurements — and each found its work by a different lever (grep the copy for promises;
+grep it for universal quantifiers; enumerate the family around a shortcut). This run's lever was simpler and
+should have been first: **`list_issues` on the repo.** The observer had filed
+[#933](https://github.com/JimmyeJones/astrostack/issues/933) **that morning**, with a measurement, a control
+and a named code path, and nothing in `docs/IMPROVEMENTS.md` pointed at it because the Scout's pass had not
+run since. AGENTS.md gives the inbox to the Scout, which is right for *triage* — but a Builder whose backlog
+is dry is a Builder with no reason not to look at four open issues before deciding the run has nothing to do.
+
+**What made that issue immediately buildable, where a backlog entry would not have been.** Its claim about
+the *code* ("`stacktime.py` does not split its basis on `engine_version`, and nothing else in the path
+does") is checkable in this repo in two minutes, with no access to the owner's library at all. The library
+half — six restacks 8–36 % slower across one version boundary, a same-engine control at +0.4 % — supplies
+what an agent here can never get: whether the defect is worth a slot. **That division is the useful shape:
+the observer measures the world, the repo settles the mechanism, and neither can do the other's half.**
+
+**The design question the issue did not answer, and the argument for the answer taken.** "Split the basis on
+engine version" reads as obvious until you notice this project bumps `__version__` on every shipped task, so
+a *hard* filter empties the basis after every deploy — and the app's own reprocess nudge sends the owner to
+restack his whole library precisely then. So the fix **prefers** this build's runs and, with none to prefer,
+still answers while flagging it. The general rule worth keeping: **when a new axis of strictness would make
+a feature go silent exactly when it is most used, the axis belongs in the wording rather than in the
+filter.** The three existing axes exclude jobs whose rates differ by *multiples*; this one moves the rate by
+7–25 %, which is a caveat, not a disqualification.
+
+**Second task, found by asking the ordinary follow-up question of the first.** #933 is "a stored number read
+through today's code without asking which code wrote it". Asking the same question of the Stack form's
+*other* numbers found the drizzle bar: `drizzle_path.py` states, above the constant, that **"every surface
+that quotes this bar must feed it the depth, not the total"**, and v0.436.0 applied that to the form's
+computed cautions — while the *static* sentences (the field help under the checkbox, the glossary entry the
+control has linked to since v0.461.0, and the engine's own recommendation that both quote) still said
+"frames". A rule written down in the module and enforced on the code paths but not on the prose is a rule
+with a hole in it, and the hole is where a beginner reads. The durable half is that
+`tests/test_drizzle_bar_mirror.py` now guards the bar's **unit** as well as its number.
+
+**Dogfood `--mosaic --editor`: CLEAN.** Both targets probed at 1440 px and 420 px, nothing overflowing, no
+console errors; both editor drives added all 21 ops with the preview re-rendering each time, undo and redo
+applied. Mosaic trim 7.9 % (the bar is ~15 %). Tallest phone page `/tonight` 3,705 px, then the mosaic Target
+page 3,613 px — in line with the standing baselines. The prescriptive blocks were read as one paragraph, per
+the standing instruction, and hold together: on the mosaic the coaching card says "another pass or two over
+the same mosaic" while the framing card says the object is bigger than this mosaic — which is v0.443.0's
+`FRAMING_MAX_COVERAGE` bar working as designed (75 % captured is above the fragment bar, so depth stays the
+prescription and framing stays a fact), not a fresh instance of the class.
+
+**One observation from that pass, recorded so it is not re-investigated as a finding.** On the scratch
+install the Dashboard says *"Plate-solving isn't set up yet … it's required before you can stack anything"*
+while two finished pictures sit in the Gallery of that same install. That is the **sample** rather than the
+app: `tests/synth.py` writes its subs with a synthetic WCS, so they never need solving, and a real Seestar
+sub does. The notice is honest on any install that can actually receive frames.
+
+
 ## 2026-09-18 — Builder method: the same lever, pointed at a *promise the app makes about itself*
 
 *(Builder, branch `claude/sweet-babbage-db6205`, the run that shipped v0.460.0/.1 and v0.461.0. Recorded
