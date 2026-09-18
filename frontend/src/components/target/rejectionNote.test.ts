@@ -84,7 +84,7 @@ describe("rejectionNote", () => {
     // stacked" under a four-panel mosaic names neither the reason nor the depth.
     const note = rejectionNote("min-max-reject", null, 21, 3.5);
     expect(note).toMatch(/Your 21 subs are spread across/);
-    expect(note).toMatch(/about 6 subs on each part of this picture/);
+    expect(note).toMatch(/about 6 subs on a typical part of this picture/);
     expect(note).toMatch(/brightest and darkest value at each pixel/);
     // …and a mosaic whose panels are under the floor says nothing at all.
     expect(rejectionNote("min-max-reject", null, 7, 3.5)).toBeNull();

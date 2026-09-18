@@ -1,5 +1,48 @@
 # Shipped — the record
 
+## v0.460.1 — 2026-09-18 — one alert said "a typical part has 1 sub" and, two clauses later, "waiting until each part has 3"
+
+*(Builder, branch `claude/sweet-babbage-db6205`, the second task of the v0.460.0 run. Same method: read the
+app's own sentences as claims about behaviour.)*
+
+**The bug.** `MosaicThinHoldNote` — the note a beginner meets on the Target page when the walk-away stack
+holds a mosaic back — says:
+
+> *"All 9 of your subs are located — but they're spread over 9 panels, so **a typical part** of the picture
+> has only 1 sub on it. Stacking now would make a picture that's mostly single-frame noise, so the hands-off
+> auto-stack is waiting until **each part** has at least 3."*
+
+Both halves are about the same quantity and only the first is true. The hold releases on
+`stacker.typical_panel_depth`, a **frame-weighted median**, and that is deliberate — its own docstring says
+taking the thinnest panel instead "would strand the whole target on account of one cell", and
+`tests/test_autostack_mosaic_depth.py::test_one_thin_corner_does_not_speak_for_the_whole_mosaic` pins
+`typical_panel_depth([40, 40, 40, 3]) == 40`. So a mosaic stacks itself while one corner is 3 subs deep, and
+the note had promised it would wait. The error is in the direction that surprises: it offers a stronger
+guarantee than the app gives, to the one user whose panels are routinely uneven (AGENTS.md §1 — heavy mosaic
+user, many nights).
+
+**Same substitution, four more sentences.** `thinStackWarning`, both of `nextBestMove`'s mosaic rungs and
+`rejectionNote` all say *"so each part of this picture has …"* over a figure `perPixel.ts` is explicit about:
+*"It is a mean… a mosaic with one deep panel and eight thin ones has pixels on both sides of it."*
+`nextBestMove`'s integration rung says it four lines under a comment reasoning carefully about exactly that
+unevenness. Meanwhile every surface where the **backend** supplies the number already says "a typical part" —
+the Jobs page's two hold lines, the Dashboard's last-night card, the hold note's own first clause,
+`AutoStackThinHoldOut`'s docstring, `webapp/overnight.py`. One quantity, two vocabularies, and the wrong one
+on the frontend's own half.
+
+**The fix** is the phrase in one place: `A_TYPICAL_PART` in `perPixel.ts`, the module that owns the quantity,
+with the reason it is that phrase — so the two halves of one sentence cannot drift apart again. The hold note
+keeps its own wording and simply refers back to the clause it already got right (*"waiting until that's at
+least 3"*), which is exactly what the median measures. Two comments that quoted the old sentence
+(`webapp/routers/unstretched.py`, `frontend/src/api/client.ts`) were updated with it.
+
+**No number moved, no threshold moved, no behaviour changed** — this is what the app already does, said
+accurately. A single-field target's sentences are untouched (the clause is mosaic-only on every surface).
+
+**Tests +3, all three red under a scratch revert of the copy alone** (`thinStack`, `rejectionNote`,
+`MosaicThinHoldNote`), plus the constant's own case; the two existing assertions that pinned the old wording
+were updated, not loosened. `tsc` / `vitest` / `vite build` clean.
+
 ## v0.460.0 — 2026-09-18 — "Combine into one deep target" kept every sub and deleted every picture
 
 *(Builder, branch `claude/sweet-babbage-db6205`. Found by grepping the app's user-facing copy for a sentence

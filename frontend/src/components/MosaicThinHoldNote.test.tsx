@@ -36,6 +36,27 @@ describe("MosaicThinHoldNote", () => {
     expect(screen.queryByText(/Plate Solve/)).not.toBeInTheDocument();
   });
 
+  it("promises the hold the scan actually applies, not a per-panel floor", async () => {
+    // The release condition is `stacker.typical_panel_depth` — a frame-weighted
+    // MEDIAN, which is why `test_autostack_mosaic_depth.py` pins
+    // typical_panel_depth([40, 40, 40, 3]) == 40: a corner lost to cloud after
+    // three subs does not hold the target back, deliberately ("holding it back
+    // would strand the whole target on account of one cell"). So "waiting until
+    // each part has at least 3" promised a floor the walk-away stack does not
+    // wait for — two clauses after the same alert correctly said "a typical
+    // part".
+    vi.spyOn(client.api, "autoStackThinHold").mockResolvedValue({
+      frames: 9, min_frames: 3, panel_depth: 1, panels: 9,
+    });
+    renderNote();
+    await waitFor(() =>
+      expect(screen.getByTestId("mosaic-thin-hold-note")).toBeInTheDocument());
+    const note = screen.getByTestId("mosaic-thin-hold-note").textContent ?? "";
+    expect(note).toContain("a typical part of the picture has only 1 sub on it");
+    expect(note).toContain("waiting until that\u2019s at least 3");
+    expect(note).not.toContain("each part");
+  });
+
   it("pluralises the depth once a panel has more than one sub", async () => {
     vi.spyOn(client.api, "autoStackThinHold").mockResolvedValue({
       frames: 8, min_frames: 3, panel_depth: 2, panels: 4,

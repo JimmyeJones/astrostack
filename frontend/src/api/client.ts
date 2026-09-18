@@ -2961,7 +2961,7 @@ export interface UnstretchedItem {
  *
  * The count and the field-fulls scale travel rather than the quotient, because
  * `thinStackWarning` names *both* on a mosaic ("your 30 subs are spread across
- * about 9 fields of sky, so each part …"), and that is the same function the
+ * about 9 fields of sky, so a typical part …"), and that is the same function the
  * Gallery card's badge already asks. */
 export interface ThinPictureItem {
   safe: string;
