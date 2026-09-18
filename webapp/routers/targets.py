@@ -116,13 +116,22 @@ def create_target(body: TargetCreate, request: Request) -> TargetOut:
 
 @router.post("/merge")
 def merge_targets(body: MergeRequest, request: Request) -> dict:
+    """Combine several folders of the same object into one target.
+
+    ``pictures_kept`` is additive to the response the frontend has always read
+    (``into`` / ``frames_added``): the finished stacks carried over from the
+    source folders this merge then deletes. It exists so the confirmation can
+    say so — the nudge that fires this promises "nothing is deleted", and until
+    :func:`seestack.io.merge.carry_stack_runs` that was not true of the pictures.
+    """
     lib = deps.open_library(request)
     try:
         try:
-            added = lib.merge_targets(body.into, body.sources)
+            result = lib.merge_targets_result(body.into, body.sources)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return {"into": body.into, "frames_added": added}
+        return {"into": body.into, "frames_added": result.frames_added,
+                "pictures_kept": result.pictures_kept}
     finally:
         lib.close()
 

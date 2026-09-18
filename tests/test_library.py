@@ -300,6 +300,119 @@ def test_merge_targets_moves_frames_and_removes_source(tmp_path):
         lib.close()
 
 
+def test_merge_targets_keeps_the_sources_finished_pictures(tmp_path):
+    """The Library nudge that fires this promises "nothing is deleted".
+
+    Merging ends in ``delete_target(..., remove_files=True)`` — an ``rmtree`` of
+    the source target's whole folder — so any stack the app had already made of
+    that object went with it. With ``auto_stack`` on by default (v0.391.0) and a
+    camera that writes one folder per night, those folders normally *do* hold a
+    picture.
+    """
+    from seestack.io.project import StackRunRow
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        ea, pa = lib.create_target("M 31 night 1")
+        try:
+            _add_frame(pa, exposure_s=10.0, ra=10.7, dec=41.27)
+        finally:
+            pa.close()
+        eb, pb = lib.create_target("M 31 night 2")
+        try:
+            _add_frame(pb, exposure_s=10.0, ra=10.8, dec=41.30)
+            out = pb.project_dir / "output"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "master.fits").write_bytes(b"night-two-master")
+            (out / "master_preview.png").write_bytes(b"night-two-preview")
+            run_id = pb.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-09-02T03:00:00Z",
+                output_basename="master",
+                fits_path=str(out / "master.fits"), tiff_path=None,
+                preview_path=str(out / "master_preview.png"),
+                n_frames_used=42, canvas_h=320, canvas_w=480,
+                coverage_min=1, coverage_max=42, options_json="{}",
+                notes="the picture of night two",
+            ))
+            pb.set_meta(f"editor_recipe:{run_id}", '{"ops": []}')
+        finally:
+            pb.close()
+
+        result = lib.merge_targets_result("M_31_night_1", ["M_31_night_2"])
+        assert result.frames_added == 1
+        assert result.pictures_kept == 1
+
+        # The source folder really is gone — this is not a "we stopped deleting"
+        # fix, it is the picture moving out first.
+        assert not (lib.targets_dir / "M_31_night_2").exists()
+
+        dproj = lib.open_target("M_31_night_1")
+        try:
+            runs = list(dproj.iter_stack_runs())
+            assert [r.notes for r in runs] == ["the picture of night two"]
+            assert runs[0].n_frames_used == 42
+            assert Path(runs[0].fits_path).read_bytes() == b"night-two-master"
+            assert Path(runs[0].preview_path).read_bytes() == b"night-two-preview"
+            assert dproj.get_meta(f"editor_recipe:{runs[0].id}") == '{"ops": []}'
+        finally:
+            dproj.close()
+    finally:
+        lib.close()
+
+
+def test_merge_keeps_the_source_folder_when_its_picture_cannot_be_carried(
+        tmp_path, monkeypatch):
+    """Deleting the folder is what makes the loss permanent — so if the pictures
+    did not make it across, the folder stays. Two library entries and nothing
+    lost beats a tidy library and a missing picture."""
+    import seestack.io.merge as merge_mod
+    from seestack.io.project import StackRunRow
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        _, pa = lib.create_target("M 31 night 1")
+        try:
+            _add_frame(pa, exposure_s=10.0, ra=10.7, dec=41.27)
+        finally:
+            pa.close()
+        _, pb = lib.create_target("M 31 night 2")
+        try:
+            _add_frame(pb, exposure_s=10.0, ra=10.8, dec=41.30)
+            out = pb.project_dir / "output"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "master.fits").write_bytes(b"irreplaceable")
+            (out / "master_preview.png").write_bytes(b"irreplaceable-preview")
+            pb.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-09-02T03:00:00Z",
+                output_basename="master", fits_path=str(out / "master.fits"),
+                tiff_path=None, preview_path=str(out / "master_preview.png"),
+                n_frames_used=5, canvas_h=10, canvas_w=10,
+                coverage_min=1, coverage_max=5, options_json="{}",
+            ))
+        finally:
+            pb.close()
+
+        real_copy = merge_mod.shutil.copy2
+
+        def fail_on_the_preview(source, dest, *a, **kw):
+            if str(source).endswith("_preview.png"):
+                raise OSError(28, "No space left on device")
+            return real_copy(source, dest, *a, **kw)
+
+        monkeypatch.setattr(merge_mod.shutil, "copy2", fail_on_the_preview)
+        result = lib.merge_targets_result("M_31_night_1", ["M_31_night_2"])
+
+        assert result.pictures_kept == 0
+        # The frames still merged — that half succeeded and is not undone.
+        assert result.frames_added == 1
+        # …and the picture is still exactly where it was.
+        assert lib.find_target("M_31_night_2") is not None
+        kept = tmp_path / "lib" / "targets" / "M_31_night_2" / "output"
+        assert (kept / "master.fits").read_bytes() == b"irreplaceable"
+    finally:
+        lib.close()
+
+
 def test_merge_targets_unknown_destination_raises(tmp_path):
     lib = Library.create(tmp_path / "lib")
     try:

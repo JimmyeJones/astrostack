@@ -8,6 +8,7 @@ import { formatIntegration } from "../format";
 import {
   describeMergeSuggestion,
   mergeInto,
+  mergeOutcomeMessage,
   mergeSources,
   mergeSuggestionSignature,
 } from "./mergeSuggestions";
@@ -56,10 +57,10 @@ export function MergeSuggestionsCard() {
 
   const merge = useMutation({
     mutationFn: (s: MergeSuggestion) => api.mergeTargets(mergeInto(s), mergeSources(s)),
-    onSuccess: (_data, s) => {
+    onSuccess: (data, s) => {
       const label = s.object_name || s.targets[0]?.name || "target";
       notifications.show({
-        message: `Combined ${s.targets.length} folders of ${label} into one deep target. Re-stack it to get the deeper picture.`,
+        message: mergeOutcomeMessage(s.targets.length, label, data?.pictures_kept),
         color: "grape",
       });
       // The merge removed the source targets and moved their frames — refresh the
@@ -123,7 +124,8 @@ export function MergeSuggestionsCard() {
               </Button>
             </Group>
             <Text size="10px" c="dimmed">
-              Merges into “{s.targets[0]?.name}” (your deepest folder) and keeps every sub — nothing is deleted.
+              Merges into “{s.targets[0]?.name}” (your deepest folder) and keeps every sub — and every
+              picture you’ve already made of it. Nothing is deleted.
             </Text>
           </Stack>
         </Alert>

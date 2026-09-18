@@ -175,6 +175,20 @@ class TargetEntry:
 
 
 @dataclass(frozen=True)
+class MergeTargetsResult:
+    """What :meth:`Library.merge_targets_result` moved into the destination.
+
+    ``pictures_kept`` is the count the merge's own promise is about: the finished
+    stacks carried out of folders this operation then deletes. ``0`` is the
+    ordinary answer for the case the merge was written for (several nights of
+    raw subs that have never been stacked on their own).
+    """
+
+    frames_added: int
+    pictures_kept: int
+
+
+@dataclass(frozen=True)
 class WishlistEntry:
     """One object the owner has saved as "I want to shoot this".
 
@@ -779,17 +793,39 @@ class Library:
 
     def merge_targets(self, into_name_or_safe: str,
                       source_names_or_safes: list[str]) -> int:
+        """Merge one or more targets into ``into_name_or_safe``.
+
+        Returns the number of **frames** added to the destination — the shape
+        every caller of this method has always read. :meth:`merge_targets_result`
+        is the same operation with the pictures counted too.
+        """
+        return self.merge_targets_result(
+            into_name_or_safe, source_names_or_safes).frames_added
+
+    def merge_targets_result(self, into_name_or_safe: str,
+                             source_names_or_safes: list[str]) -> MergeTargetsResult:
         """
         Merge one or more targets into ``into_name_or_safe``.
 
         Every frame from each source target's project is copied into the
         destination project (cached files included, duplicates skipped via
-        source_path), then the source target is removed from the registry
-        and its folder deleted.
+        source_path), **every finished picture with it** — the ``stack_runs``
+        row, its output file set and the per-run annotations the web layer hangs
+        off it, including a saved edit recipe — and then the source target is
+        removed from the registry and its folder deleted.
 
-        Returns the number of frames added to the destination. Use this for
-        the "I have two folders that are really the same target" case the
-        one-folder-per-target scan can't know about.
+        **The pictures travel because the folder does not survive.** This method
+        ends in ``delete_target(..., remove_files=True)``, i.e. an ``rmtree`` of
+        the source target's whole tree: its ``project.sqlite`` and its ``output/``
+        files. ``merge_projects`` carries frame rows and Stage-1 caches and
+        nothing else, so until ``copy_stack_runs`` existed a merge silently
+        destroyed every stack the app had already made of that object — while the
+        Library nudge that fires it says *"keeps every sub — nothing is deleted"*,
+        and, since ``auto_stack`` ships on (v0.391.0) against a camera that writes
+        one folder per night, those source folders normally do hold a picture.
+
+        Use this for the "I have two folders that are really the same target"
+        case the one-folder-per-target scan can't know about.
         """
         from seestack.io.merge import merge_projects
 
@@ -806,22 +842,37 @@ class Library:
             source_entries.append(se)
             source_dirs.append(self.target_dir(se))
         if not source_dirs:
-            return 0
+            return MergeTargetsResult(0, 0)
 
         dest_proj = Project.open(self.target_dir(dest))
         total_added = 0
+        total_runs = 0
+        # merge_projects yields exactly one result per source dir, in order.
+        lost_by_source: list[int] = []
         try:
-            for result in merge_projects(dest_proj, source_dirs):
+            for result in merge_projects(dest_proj, source_dirs,
+                                         copy_stack_runs=True):
                 total_added += result.n_added
+                total_runs += result.n_runs_copied
+                lost_by_source.append(result.n_runs_lost)
         finally:
             dest_proj.close()
 
-        # Remove the now-merged source targets (registry + folder).
-        for se in source_entries:
+        # Remove the now-merged source targets (registry + folder) — except one
+        # whose pictures could not all be carried (a full disk, a permission
+        # error). Deleting that folder is what would make them unrecoverable, so
+        # the safe answer is to leave the target alone: the user sees two entries
+        # and nothing is lost, which beats a tidy library and a missing picture.
+        for se, lost in zip(source_entries, lost_by_source, strict=False):
+            if lost:
+                log.warning(
+                    "not removing '%s' after merge: %d of its pictures could "
+                    "not be carried over", se.safe_name, lost)
+                continue
             self.delete_target(se.safe_name, remove_files=True)
 
         self.refresh_target_stats(dest.safe_name)
-        return total_added
+        return MergeTargetsResult(total_added, total_runs)
 
     # ---- stats ---------------------------------------------------------
 

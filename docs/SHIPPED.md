@@ -1,5 +1,94 @@
 # Shipped — the record
 
+## v0.460.0 — 2026-09-18 — "Combine into one deep target" kept every sub and deleted every picture
+
+*(Builder, branch `claude/sweet-babbage-db6205`. Found by grepping the app's user-facing copy for a sentence
+that is a falsifiable claim about behaviour — the method recorded in `PROCESS-NOTES.md`, 2026-09-18 — and
+traced to the lines before anything was touched.)*
+
+**The bug.** The Library's same-object nudge ends its fine print with
+
+> *"Merges into “M 31 night 2” (your deepest folder) and keeps every sub — nothing is deleted."*
+
+The button under it posts `/api/targets/merge` → `Library.merge_targets`, which calls
+`seestack.io.merge.merge_projects` and then, for every source, `delete_target(safe, remove_files=True)` —
+`shutil.rmtree` of that target's **whole folder**. And `merge_projects` says in its own module docstring what
+it does not carry:
+
+```
+What does NOT get merged:
+  - Stage-2 caches (aligned data — invalidated when the destination's
+    reference frame changes anyway).
+  - Stack runs / project meta — those stay per-source.
+```
+
+"Stay per-source" and "the source is deleted next" are the same sentence read twice. So one click destroyed,
+permanently and with no confirmation: every source folder's `stack_runs` rows, its `output/` tree (the stacked
+FITS, the TIFF, the preview PNG, the coverage and frame-coverage maps, the progress reel, the share render)
+and its per-run `project_meta` — the **saved edit recipe** first among them. The raw subs survive (they live in
+`incoming/`, and their frame rows are copied), so "keeps every sub" was true; "nothing is deleted" was not.
+
+**Why it stopped being theoretical.** `auto_stack` ships **on** for fresh installs (v0.391.0) and the Seestar
+writes **one folder per night** — which is exactly the population `merge_suggestions` clusters and offers to
+combine, and nothing filters a suggestion on "has no stacks". So on a current install the folders this nudge
+points at normally *do* hold a picture the app made by itself. The same "what does my own change make
+reachable?" question the v0.459 run recorded, asked of a default flip three months old.
+
+**The fix: the pictures move out before the folder goes.** New
+`seestack.io.merge.carry_stack_runs(destination, source)` copies each source run's **three things** —
+its history row, its output file set and its per-run annotations:
+
+- **The file set** is resolved the way `webapp.routers.storage.delete_run_artifacts` resolves it: from the
+  stem of the recorded `fits_path`, not from `output_basename`. A re-stack archives the previous set to
+  `{base}_{stamp}.*` and repoints the row's three path columns (`Project.repoint_stack_runs`) while leaving
+  `output_basename` alone — so for every run but the newest, the column and the disk disagree, and a carry
+  that trusted the column would have copied the *newest* run's pixels onto the older run's row, twice. The
+  set moved is `RUN_ARTEFACT_SUFFIXES`, so the basename-resolved siblings (`_coverage.fits`, `_share.png`,
+  the reel) travel with it.
+- **The basename** is made free in the destination first (`_free_basename`). Two nights of the same Seestar
+  convention are both `master`, so a straight copy would have silently replaced the destination's own picture
+  with the source's — losing one while claiming to keep both. The source target's folder name is tried as the
+  suffix (`master_M_31_night_2`) before a bare counter, because a merged History reads better that way.
+- **The annotations** are found by *shape*, `^(.+:)(\d+)$` matching a run id this project actually has, and
+  re-keyed to the new id. The engine cannot import `webapp` (AGENTS.md §6), which owns the nine prefixes
+  `webapp.run_meta.per_run_meta_prefixes()` registers — so the rule is deliberately vocabulary-free, and a
+  prefix added later travels with no change here. `tests/webapp/test_merge_carries_pictures.py` asserts every
+  registered prefix matches that shape, so the two cannot drift.
+
+**And a picture that cannot be carried keeps its folder.** `CarryResult.lost` counts a run whose files exist
+but could not all be copied — a full disk, a permission error. `Library.merge_targets_result` then **does not
+delete that source target**, and takes the partial copies back out of the destination rather than leaving files
+no row names. Two library entries and nothing lost beats a tidy library and a missing picture; deleting the
+folder is the step that makes the loss permanent, so that is the step that is conditional. The frames merge
+either way — that half succeeded and is not undone.
+
+**Copies, not moves**, deliberately: a move would be faster and would not need room for both sets at once (a
+mosaic master is ~100 MB, its share render tens more), but `copy_stack_runs` is a *parameter* and only one
+caller happens to delete the source afterwards — gutting a source project this function does not own would be
+a worse bug than the one it fixes. The transient second copy is freed by that delete, seconds later, on the
+same filesystem.
+
+**What the app now says.** The fine print is *"…and keeps every sub — and every picture you've already made of
+it. Nothing is deleted."*, and the confirmation names the number: *"Combined 2 folders of Andromeda Galaxy into
+one deep target. Your 2 existing pictures came with them — see History. Re-stack it to get the deeper
+picture."* The count comes from an additive `pictures_kept` on the merge response; a backend that omits it
+reads as **unknown**, never as zero, so the sentence degrades to exactly the one this app has always shown.
+
+**Upgrade-safe (§9).** No config, schema, on-disk-layout or default change. `Library.merge_targets` keeps its
+signature and its `int` return (the new `merge_targets_result` is what counts pictures);
+`MergeResult`'s two new fields carry defaults; `merge_projects` still carries no runs unless asked, so this
+module's original "combine three nights of frame rows" job is byte-for-byte unchanged; the merge response only
+gains a key. New engine method `Project.iter_meta()`.
+
+**Tests (+9 Python, +5 frontend).** `tests/test_merge.py` +6 (the carry end to end with its recipe and its
+basename-resolved sibling; the default staying off; the two-`master` collision; a files-gone run not invented
+as an empty row; the archived-basename case; and a copy failure reported as lost with no orphans left behind),
+`tests/test_library.py` +2 (the picture readable after the folder is deleted; the folder kept when the copy
+fails), `tests/webapp/test_merge_carries_pictures.py` +2 (the endpoint's `pictures_kept` and the prefix-drift
+guard). **Fail-before verified by scratch reverts of the logic with every signature intact:** 3 red in
+`test_merge.py`, 1 red in the frontend card test. Frontend +5 (`mergeOutcomeMessage`'s four cases and the
+card's own). `tsc` / `vitest` (4,239) / `vite build` clean.
+
 ## v0.459.2 — 2026-09-18 — the run that scaled its dark on a mixed target either said nothing, or named one of its two sub lengths
 
 *(Builder, branch `claude/sweet-babbage-fwwin8`, the third task of the v0.459.0/.1 run. Found by asking what
