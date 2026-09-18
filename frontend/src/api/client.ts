@@ -3222,6 +3222,13 @@ export interface CalibrationCoverage {
   uncovered_detail?: {
     name: string; exposure_s: number | null; gain: number | null;
     exposures_s?: number[] | null;
+    // …and which *nights* those subs were shot on, as the same `[[°C, how many]]`
+    // tally `calibration-suggestions` serves. "Shoot a dark at 10 s, gain 80" is
+    // a complete instruction for a cooled camera; this one is uncooled, so the
+    // temperature is set by when you go out — and it is what the finished run's
+    // advisory judges the dark by. Optional: an older backend omits it and the
+    // hint keeps today's wording.
+    sensor_temps_c?: [number, number][] | null;
   }[];
   // Whether auto-calibration is actually switched on. With it off (the default) a
   // "covered" master is one the app *can* apply — the user still picks it on the

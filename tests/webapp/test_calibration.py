@@ -1687,9 +1687,9 @@ def test_master_coverage_reports_what_an_uncovered_target_was_shot_at(tmp_path):
     assert cov["uncovered"] == ["M 42", "Long Sub"]
     assert cov["uncovered_detail"] == [
         {"name": "M 42", "exposure_s": 10.0, "gain": 80.0,
-         "exposures_s": [10.0]},
+         "exposures_s": [10.0], "sensor_temps_c": []},
         {"name": "Long Sub", "exposure_s": 60.0, "gain": 200.0,
-         "exposures_s": [60.0]},
+         "exposures_s": [60.0], "sensor_temps_c": []},
     ]
 
 
@@ -2166,6 +2166,57 @@ def test_calibration_coverage_endpoint_serves_the_distinct_exposures(
     body = client.get("/api/calibration/coverage").json()
     assert body["uncovered_detail"], "the fixture has no masters, so nothing covers"
     assert all(d["exposures_s"] == [10.0] for d in body["uncovered_detail"])
+
+
+def test_an_uncovered_target_reports_which_nights_it_was_shot_on(tmp_path):
+    """"Shoot a dark at 10 s, gain 80" is a complete instruction for a *cooled*
+    camera. This one is uncooled, so the sensor temperature is the ambient — the
+    one acquisition number the owner sets by choosing which night to go out, and
+    the one the finished run's advisory judges the dark by (v0.464.0). It has to
+    travel with the rest of the spec."""
+    root = tmp_path / "library"
+    cov = calibration.master_coverage(root, [], [
+        {"name": "Cold", "safe_name": "Cold", "exposure_s": 10.0,
+         "exposures_s": [10.0], "gain": 80.0, "sensor_temp_c": -10.0,
+         "sensor_temps_c": [[-10.2, 3], [-9.8, 3]],
+         "width_px": 480, "height_px": 320},
+    ])
+
+    (row,) = cov["uncovered_detail"]
+    assert row["sensor_temps_c"] == [[-10.2, 3], [-9.8, 3]]
+    # …and the exposure/gain spec it rides beside is untouched.
+    assert row["exposure_s"] == 10.0 and row["gain"] == 80.0
+
+
+def test_the_coverage_roll_up_refuses_a_malformed_temperature_tally(tmp_path):
+    """A wrong sentence about which night to shoot a dark on is worse than the
+    generic one, so anything that is not the tally shape is dropped rather than
+    repaired — and an older caller that sends no tally at all is unaffected."""
+    root = tmp_path / "library"
+    cov = calibration.master_coverage(root, [], [
+        {"name": "Junk", "safe_name": "Junk", "exposure_s": 10.0, "gain": 80.0,
+         "sensor_temp_c": None,
+         "sensor_temps_c": [[float("nan"), 3], ["x", 1], [2.0], [5.0, 0],
+                            [-3.0, 2]],
+         "width_px": 480, "height_px": 320},
+        {"name": "Older", "safe_name": "Older", "exposure_s": 10.0, "gain": 80.0,
+         "sensor_temp_c": None, "width_px": 480, "height_px": 320},
+    ])
+
+    junk, older = cov["uncovered_detail"]
+    assert junk["sensor_temps_c"] == [[-3.0, 2]]
+    assert older["sensor_temps_c"] == []
+
+
+def test_calibration_coverage_endpoint_serves_the_temperature_tally(
+        client, solved_library):
+    """End-to-end: the nights reach the page off the target's own frame rows,
+    through the same tally ``calibration-suggestions`` serves."""
+    body = client.get("/api/calibration/coverage").json()
+    assert body["uncovered_detail"], "the fixture has no masters, so nothing covers"
+    for d in body["uncovered_detail"]:
+        assert isinstance(d["sensor_temps_c"], list)
+        assert all(len(row) == 2 and row[1] > 0 for row in d["sensor_temps_c"])
 
 
 def test_the_roll_up_stops_describing_a_mixed_target_by_a_length_it_never_shot(

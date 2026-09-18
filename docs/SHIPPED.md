@@ -1,5 +1,48 @@
 # Shipped — the record
 
+## v0.465.0 — 2026-09-18 — the nudge that says which dark to shoot never said which *night* to shoot it on
+
+*(Builder, branch `claude/sweet-babbage-cm0qc7`, the third commit of the v0.464.0 run and found by it: once
+the advisory judges a dark against every sub's temperature, the obvious next question is whether anything in
+the app ever told the owner to shoot it at the right one.)*
+
+**The gap.** The Calibration page's uncovered-targets nudge ends *"Shoot them at 10s at gain 80 — that's what
+those subs were shot at."* Three acquisition numbers decide whether a dark matches — exposure, gain and
+temperature — and the app says so itself in three places: `auto_bind_master_ids` gates on all three,
+`_acquisition_reason` gives *"its sensor was −3 °C, your subs were 12 °C"* as a reason a dark covers nothing,
+and `calibration_warnings` complains about it on the finished run. The sentence whose whole job is turning
+"shot the same way" into something actionable named two of the three.
+
+**Why the third one is not optional on this camera.** The Seestar's sensor is **uncooled**: its temperature
+is the ambient. So unlike exposure and gain, which are settings, temperature is chosen by *when the owner
+goes out* — and it is the only one of the three he cannot set from a menu. A nudge that leaves it out sends
+him out on any night and then complains about the result.
+
+**What it says now**, as one clause on the existing sentence rather than a new element (the standing "extremely
+busy" priority):
+
+* *"Shoot them on a night around −10 °C — this camera's sensor runs at the outside temperature, and a dark only
+  matches subs shot about as warm."*
+* and when the uncovered targets span more than the engine's own tolerance: *"They weren't all shot on the same
+  kind of night either (−20 °C to 2 °C at the sensor), so no one night's darks will match all of them"* —
+  because averaging a winter night and a summer one names a night nobody had, which is the identical untruth
+  the 10 s/30 s median was in the exposure column.
+* and **nothing at all** when no sub recorded a `CCD-TEMP`, or against an older backend: the rest of the nudge
+  is unchanged rather than guessing at a night.
+
+**How it gets there.** `_target_acquisition` already reads every accepted frame for the roll-up, so the tally
+rides along at no extra cost — the same `_temperature_tally` v0.464.1 serves the Stack form, through a new
+`COVERAGE_TARGET_KEYS` entry and `_clean_temperature_tally`, which *refuses* a malformed tally rather than
+repairing it (a wrong sentence about which night to shoot on is worse than the generic one). The frontend
+reads it with v0.464.1's own `temperatureSpread`/`degC`, and the wide/narrow bar is the engine's
+`TEMP_MISMATCH_TOL_C` — no new threshold anywhere in this commit.
+
+**Upgrade-safe:** one additive response key and one additive input key, both defaulting to empty; a caller
+that omits it gets today's answer, pinned by a test. No config, schema, on-disk, default or API-shape change.
+
+**Tests +6** (3 backend incl. the malformed-tally and end-to-end cases, 3 `calibrationCoverage.test.ts`). One
+existing exact-dict assertion gained the new key — updated, not loosened.
+
 ## v0.464.1 — 2026-09-18 — and the Stack form asked the median, so the two would have disagreed about one target
 
 *(Builder, branch `claude/sweet-babbage-cm0qc7`, the second half of v0.464.0 and not optional: the
