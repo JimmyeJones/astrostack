@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from webapp import calibration
@@ -1167,6 +1168,67 @@ def test_calibration_suggestions_endpoint(client, solved_library):
     assert body["params"]["exposure_s"] == 30.0
     assert body["dark_master_id"] == good["id"]
     assert body["n_frames"] >= 1
+
+
+def test_calibration_suggestions_serves_every_sub_length_not_just_their_median(
+        client, solved_library):
+    """The median is a claim that the target has one exposure, and nothing makes
+    that true: shoot it at 10 s on one night and 30 s on the next and the median
+    (20 s) names a length no sub was shot at — so the form's "your subs are Ns"
+    was false, and a 20 s dark, a perfect match for that median, drew no caution
+    at all while being wrong on every single frame.
+
+    Fail-before: the endpoint served only ``exposure_s``. The finished run judges
+    the dark against all of them (v0.456.0), and this endpoint's whole contract
+    (see the ``tolerances`` test below) is that the form warns about exactly the
+    pairs the run will complain about."""
+    from seestack.io.library import Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            ids = [f.id for f in proj.iter_frames()]
+            assert len(ids) >= 2, "fixture needs at least two frames to mix"
+            # Two nights on one target: the last sub at 30 s, the rest at 10 s.
+            for i, fid in enumerate(ids):
+                proj.update_frame(fid, exposure_s=30.0 if i == len(ids) - 1 else 10.0)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    params = client.get(
+        f"/api/targets/{safe}/calibration-suggestions").json()["params"]
+    assert params["exposures_s"] == [10.0, 30.0]
+    # …and the median is still served unchanged, so an older client is unaffected.
+    assert params["exposure_s"] == 10.0
+
+
+def test_calibration_suggestions_reports_one_exposure_as_one_exposure(
+        client, solved_library):
+    """The ordinary case: one length in, one length out — and header rounding is
+    not a second exposure, so an honest single-exposure target can never be
+    described to the user as a mixed one."""
+    from seestack.io.library import Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for i, f in enumerate(proj.iter_frames()):
+                proj.update_frame(f.id, exposure_s=10.0 + 0.001 * i)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    params = client.get(
+        f"/api/targets/{safe}/calibration-suggestions").json()["params"]
+    assert len(params["exposures_s"]) == 1
+    assert params["exposures_s"][0] == pytest.approx(10.0, abs=0.01)
 
 
 def test_calibration_suggestions_reports_the_targets_frame_size(client, solved_library):

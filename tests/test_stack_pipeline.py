@@ -104,6 +104,43 @@ def test_stack_carries_the_dark_mismatch_warning_out_on_the_result(tmp_path):
         proj.close()
 
 
+def test_a_target_shot_at_two_exposures_is_warned_about_whichever_sub_is_the_reference(
+        tmp_path):
+    """A target is not necessarily one exposure, and the advisory used to assume
+    it was.
+
+    Fail-before: ``run_stack`` asked the advisory only about the *reference
+    frame's* exposure, so the same target, the same subs and the same 10 s dark
+    either warned or said nothing at all depending on which frame
+    ``pick_reference_frame`` happened to land on — and when it did warn, it said
+    the pedestal was wrong "on every frame", which was false for the two-thirds
+    of them the dark actually matched. The 30 s subs get the 10 s dark
+    subtracted unscaled either way; only the telling was broken."""
+    proj = _build_project(tmp_path, n=6)
+    try:
+        for i, f in enumerate(proj.iter_frames()):
+            # Two nights on one target: four subs at 10 s, two at 30 s.
+            proj.update_frame(f.id, exposure_s=30.0 if i >= 4 else 10.0,
+                              sensor_temp_c=-10.0)
+        dark = np.zeros((320, 480), dtype=np.float32)
+        dark_path = tmp_path / "dark10.fits"
+        save_master(dark_path, dark,
+                    MasterMeta("dark", 5, 480, 320, "mean", exposure_s=10.0,
+                               sensor_temp_c=-10.0))
+        res = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                           dark_path=str(dark_path),
+                                           output_name="mixed_exposure_out"))
+        assert len(res.calibration_warnings) == 1
+        warn = res.calibration_warnings[0]
+        # Names both lengths, and which of them the dark is wrong for …
+        assert "10s and 30s" in warn
+        assert "under-subtracted on the 30s ones" in warn
+        # … and does not claim something about the subs it does match.
+        assert "every frame" not in warn
+    finally:
+        proj.close()
+
+
 def test_stack_reports_no_calibration_warning_for_a_matching_dark(tmp_path):
     """A dark that matches the subs says nothing — the field is empty, not a
     reassurance line, so nothing new appears on an ordinary healthy run."""

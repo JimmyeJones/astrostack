@@ -19,8 +19,9 @@ import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
 import {
   biasSizeWarning, darkScalingBlockedNote, exposureMismatch, flatBayerWarning,
-  flatDarkSizeWarning, flatPickPatch, masterOptionSuffix, masterRecommendation,
-  masterSizeWarning, pickedMasterContentWarnings, tempMismatch,
+  flatDarkSizeWarning, flatPickPatch, joinExposures, masterOptionSuffix,
+  masterRecommendation, masterSizeWarning, mismatchedExposures,
+  pickedMasterContentWarnings, tempMismatch,
 } from "../calibrationFit";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
@@ -508,12 +509,32 @@ export function StackView() {
                        frames: number | null | undefined) =>
     exposureMismatch(master, frames, tolerances);
   const subExp = sug?.params.exposure_s ?? null;
+  // A target is not necessarily one exposure, and `subExp` — a median — is a
+  // claim that it is. Shoot it at 10 s on one night and 30 s on the next and
+  // "your subs are Ns" is false however N is chosen (on an even split it names a
+  // length no sub was shot at). The finished run judges the dark against every
+  // length (v0.456.0); this is the same question at pick time, so the form warns
+  // about exactly the pairs the run will complain about — the contract the
+  // served `tolerances` above exists for. An older backend omits the set and
+  // everything below falls back to today's single number.
+  const subExposures = sug?.params.exposures_s ?? null;
+  const mixedSubExposures = (subExposures?.length ?? 0) > 1;
+  const subsAre = mixedSubExposures && subExposures
+    ? `your subs were not all shot at the same length (${joinExposures(subExposures)})`
+    : `your subs are ${subExp}s`;
   const darkM = masterById(values.dark_master_id);
   // A dark shot at a different exposure than the subs can be rescaled to match —
   // dark = bias + (dark − bias)×(sub ÷ dark exposure) — but only with a master
   // bias selected to hold the readout pedestal fixed. When that's opted in the
   // mismatch is handled, so show a reassurance instead of the warning.
-  const darkExpMismatch = expMismatch(darkM?.exposure_s, subExp);
+  // On a mixed target the dark is mismatched when it fails *any* of the lengths,
+  // not when it fails their median — a 10 s dark matches the 10 s subs perfectly
+  // and is 3x wrong on the 30 s ones, and the median hid both facts.
+  const darkBadExposures = mismatchedExposures(
+    darkM?.exposure_s, subExposures, tolerances);
+  const darkExpMismatch = mixedSubExposures
+    ? darkBadExposures.length > 0
+    : expMismatch(darkM?.exposure_s, subExp);
   const biasM = masterById(values.bias_master_id);
   // …and only when that bias can actually hold the pedestal: the engine's
   // formula needs it to be the dark's size, and silently subtracts the dark
@@ -524,10 +545,14 @@ export function StackView() {
     darkExpMismatch && !!values.scale_dark_to_light && !!values.bias_master_id
     && !darkScalingBlocked;
   const darkWarning = darkExpMismatch && !darkScalingActive
-    ? `This dark was shot at ${darkM?.exposure_s}s but your subs are ${subExp}s — a mismatched dark leaves residual thermal signal or over-subtracts. ${values.bias_master_id ? "Scale it to your sub exposure, or use" : "Add a master bias to scale it to your subs, or use"} a ${subExp}s dark.`
+    ? (mixedSubExposures
+        ? `This dark was shot at ${darkM?.exposure_s}s but ${subsAre} — it will over- or under-subtract on the ${joinExposures(darkBadExposures)} ones, leaving residual thermal signal there. ${values.bias_master_id ? "Scale it to each sub's exposure" : "Add a master bias to scale it to each sub"}, or stack each exposure on its own with a dark to match.`
+        : `This dark was shot at ${darkM?.exposure_s}s but your subs are ${subExp}s — a mismatched dark leaves residual thermal signal or over-subtracts. ${values.bias_master_id ? "Scale it to your sub exposure, or use" : "Add a master bias to scale it to your subs, or use"} a ${subExp}s dark.`)
     : null;
   const darkScaledNote = darkScalingActive
-    ? `Dark exposure-scaling is on — this ${darkM?.exposure_s}s dark will be scaled to match your ${subExp}s subs.`
+    ? (mixedSubExposures && subExposures
+        ? `Dark exposure-scaling is on — this ${darkM?.exposure_s}s dark will be scaled to match each sub (${joinExposures(subExposures)}).`
+        : `Dark exposure-scaling is on — this ${darkM?.exposure_s}s dark will be scaled to match your ${subExp}s subs.`)
     : null;
   // A dark shot at a very different sensor temperature leaves residual dark
   // current even at a matched exposure (dark current ~doubles per 6–7°C) — and,
@@ -1087,7 +1112,9 @@ export function StackView() {
                   <Group gap="xs" justify="space-between" wrap="nowrap">
                     <Text size="xs" c="dimmed">
                       Matched to this target's frames
-                      {sug?.params.exposure_s ? ` (${sug.params.exposure_s}s subs)` : ""}.
+                      {mixedSubExposures && subExposures
+                        ? ` (${joinExposures(subExposures)} subs)`
+                        : sug?.params.exposure_s ? ` (${sug.params.exposure_s}s subs)` : ""}.
                     </Text>
                     <Button size="compact-xs" variant="light" onClick={applyRecommended}>
                       Use recommended
