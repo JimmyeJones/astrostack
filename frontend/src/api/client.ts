@@ -788,6 +788,11 @@ export interface HealthNote {
 export interface DarkSpec {
   exposure_s: number | null;
   gain: number | null;
+  // The set `exposure_s` is the median of. A target is one *folder*, never one
+  // exposure, so a target shot at 10 s one night and 30 s the next has a median
+  // of 20 s — a length none of its subs was shot at. Optional: an older backend
+  // omits it and the guide keeps its single-length wording.
+  exposures_s?: number[] | null;
 }
 
 export interface StackHealth {

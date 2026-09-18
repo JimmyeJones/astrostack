@@ -1,5 +1,45 @@
 # Shipped — the record
 
+## v0.457.1 — 2026-09-18 — and the "How to add darks" guide was telling a beginner to go and shoot a night of them at a length none of their subs was shot at
+
+*(Builder, branch `claude/sweet-babbage-sn6qbd`, the sibling of v0.457.0 shipped the same run. The **sixth**
+surface of the shortcut v0.456.0 named, and the one that actually costs the owner a night outdoors.)*
+
+**The bug, reproduced before anything moved.** `seestack/stackhealth.py::recommended_dark_spec` takes
+`statistics.median(exposures)` over a target's accepted subs, and `DarksGuide` renders it under the words
+*"Shoot about 20–30 dark frames at the same settings as your subs — 20 s at gain 80."* On a target shot at
+10 s on one night and 30 s on the next that median is **20 s** — a length none of those subs was shot at, in
+a sentence whose whole claim is that it *is* their setting. On a 4/2 split it says 10 s and never mentions
+the third of the frames a 10 s dark leaves its dark current and hot-pixel trails in.
+
+This is the app's most-pushed piece of advice: the health card tells the owner, on *every* uncalibrated
+stack, that master darks are "the single biggest cleanup for a noisy image", and this guide is the how-to it
+opens into. Getting the number wrong here spends a real night.
+
+**The fix.** `DarkSpec` gains `exposures_s`, the **distinct** sub lengths, grouped by the engine's own
+`seestack.calibrate.apply.distinct_exposures` — the same grouping the finished run's dark advisory
+(v0.456.0), the Stack form (v0.456.1) and the Calibration page's coverage roll-up (v0.457.0) use, so the
+four cannot disagree about how many exposures a target has. The median is kept and unchanged beside it; it
+is still what every existing reader gates on.
+
+`formatDarkSpec` names the set (*"10 s and 30 s at gain 80"*), and a new `darkSpecPerLengthNote` adds the
+sentence a mixed target needs: *"You shot this target at 2 different sub lengths, so it needs a set of darks
+at each — one dark only matches subs of its own exposure."* On the ordinary single-length target — every
+library until someone changes their sub length between nights — the rendered step is byte-identical, and so
+it is against an older backend that sends no set at all.
+
+**Gain is deliberately untouched.** It has the same shape (a median over a set nothing makes uniform), but
+it is not what varies: a Seestar owner changes *exposure* per target brightness as a matter of course, and
+the copy would have to name a cross product to handle both. Left as it is rather than half-done.
+
+**Tests +11 (5 engine, 2 endpoint, 4 frontend incl. 1 rendered).** The load-bearing fail-before is the
+rendered one, and it prints the bug: on a target with `exposures_s: [10, 30]` the old component rendered
+*"…at the same settings as your subs — 20 s at gain 80."* Every new test fails on a scratch revert.
+
+**Upgrade-safe (§9):** one additive dataclass field with a default, one additive defaulted response field,
+and a frontend that falls back to the median when it is absent. Old and new mix in either direction. No
+config, schema, on-disk, API-shape, default or pixel change.
+
 ## v0.457.0 — 2026-09-18 — the Calibration page told you to shoot darks at a length no sub of yours was shot at
 
 *(Builder, branch `claude/sweet-babbage-sn6qbd`. The **fifth** surface of the shortcut v0.456.0 named — and

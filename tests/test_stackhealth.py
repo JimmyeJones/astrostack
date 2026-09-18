@@ -76,6 +76,53 @@ def test_recommended_dark_spec_degrades_when_metadata_missing():
 def test_recommended_dark_spec_empty_target():
     spec = recommended_dark_spec([])
     assert spec.exposure_s is None and spec.gain is None
+    assert spec.exposures_s == ()
+
+
+# --- "at the same settings as your subs" is a claim about a set --------------
+#
+# A target is one *folder*, never one exposure (`seestack/io/scanner.py` groups
+# by folder and has never heard of exposure), so a Seestar owner who shoots 10 s
+# on a bright night and 30 s on a faint one owns a target with two lengths in it.
+# The median then names a length none of their subs was shot at, under the words
+# "at the same settings as your subs".
+
+
+def test_a_target_shot_at_two_lengths_reports_both_of_them():
+    """The sharpest case: an even 10 s / 30 s split has a median of 20 s, and a
+    night of 20 s darks matches nothing the owner owns."""
+    frames = ([_exp_frame(exposure_s=10.0) for _ in range(3)]
+              + [_exp_frame(exposure_s=30.0) for _ in range(3)])
+    spec = recommended_dark_spec(frames)
+    assert spec.exposure_s == 20.0  # the median every existing reader gates on
+    assert spec.exposures_s == (10.0, 30.0)
+
+
+def test_an_uneven_split_still_reports_the_minority_length():
+    """Two-thirds right is not right: the 30 s subs need their own dark."""
+    frames = ([_exp_frame(exposure_s=10.0) for _ in range(4)]
+              + [_exp_frame(exposure_s=30.0) for _ in range(2)])
+    spec = recommended_dark_spec(frames)
+    assert spec.exposure_s == 10.0
+    assert spec.exposures_s == (10.0, 30.0)
+
+
+def test_the_ordinary_single_length_target_reports_exactly_one():
+    """Every library that has never changed sub length is untouched — and header
+    rounding (9.998 against 10.0) must not read as a second exposure."""
+    assert recommended_dark_spec(
+        [_exp_frame(exposure_s=10.0) for _ in range(5)]).exposures_s == (10.0,)
+    spec = recommended_dark_spec(
+        [_exp_frame(exposure_s=10.0), _exp_frame(exposure_s=9.998)])
+    assert len(spec.exposures_s) == 1
+
+
+def test_a_rejected_frames_length_is_not_offered_as_a_dark_to_shoot():
+    """The set is over the *accepted* subs, like the median beside it — darks for
+    frames that will never be stacked are a wasted night."""
+    frames = [_exp_frame(exposure_s=10.0) for _ in range(4)]
+    frames.append(_exp_frame(accept=False, exposure_s=30.0))
+    assert recommended_dark_spec(frames).exposures_s == (10.0,)
 
 
 def test_healthy_calibrated_stack_reports_a_positive_note():
