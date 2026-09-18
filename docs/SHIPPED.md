@@ -1,5 +1,59 @@
 # Shipped — the record
 
+## v0.465.4 — 2026-09-18 — a History run card gave every badge two pixels rather than give the row a second line
+
+*(Builder, branch `claude/sweet-babbage-rypizn`, found by the pass that verified v0.465.3 — the same
+`clippedLabels` check, one page along, on a run that had finally earned enough badges to be interesting.)*
+
+**The measurement.** On `/targets/<mosaic>/history`, at **desktop** width, on one calibrated mosaic run:
+
+```
+[desktop] …/history: CLIPPED LABEL 45px box vs 47px word — "Sky even"
+[desktop] …/history: CLIPPED LABEL 54px box vs 56px word — "dark+flat"
+[desktop] …/history: CLIPPED LABEL 61px box vs 64px word — "21 frames"
+```
+
+Three badges, two to three pixels each. Not one badge too long — **the row two pixels too short, taxing
+every occupant**.
+
+**Why desktop and not phone, which is the part worth remembering.** These cards live in
+`<SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>`, so a card is about **390 px wide however big the screen
+is** — a 1440 px desktop simply buys three of them. "Desktop" is not a width here, and a row that fits on a
+phone and clips on a desktop is a row inside a grid, not a responsive-layout bug. The run this was measured
+on carried six badges (cleanest, focus, rejection, haze, seams, calibration, unexported edit, depth — the
+set a well-looked-after target accumulates), and the heading sat beside them under `justify="space-between"`.
+
+**The fix is the sibling card's own shape.** The Gallery card of the very same run is badge-for-badge
+identical by design — History's own comment says so — and has always given the run's name the card's whole
+width and put the badges on **their own wrapping row** underneath (`<Text fw={600} truncate mt="sm"
+title=…>` then `<Group gap={4} mt={4}>`, Mantine's default `wrap`). History's shared
+`justify="space-between" wrap="nowrap"` row was the outlier, and now it is that card's arrangement exactly.
+
+**The first attempt was wrong, and the screenshot is what said so.** Keeping the shared row and merely
+letting the badge group wrap does stop the clipping — and the verifying pass showed the heading rendered
+**"mas…"**, because a `space-between` row hands the badges their content width and the name the remainder.
+Trading three two-pixel clips for an ellipsised run name is not a fix: the name is how you tell one of a
+target's stacks from another (History's own docstring says so). With two rows neither has to yield.
+
+**Why wrapping rather than a tighter badge.** A badge here is a whole short fact — "dark+flat", "Sky even"
+— and there is no such thing as most of one. Shortening them would be removing information (§1: nothing may
+be removed); shrinking the gap would buy pixels once and lose them at the next badge. A second line costs
+~22 px on the cards that need it and nothing on the cards that don't.
+
+**Upgrade-safe (§9):** frontend-only, display-only, no config/DB/on-disk/API/default change.
+
+**Tests (+2, both fail-before — verified by restoring `wrap="nowrap"` and the bare heading):**
+`History.test.tsx` — a run carrying the full badge set gets a row that is not `nowrap` (asserted off
+Mantine's own `--group-wrap`, on a new `data-testid="run-badges"`) **and that does not contain the run's
+name**, which is the assertion that pins the failed first attempt; and a long `output_basename` keeps
+`truncate` with the whole name reachable as its `title`, so a reprocess's versioned output name still can't
+widen the card.
+
+**Verified in the browser** by a repeat `--mosaic --calibration` pass: both probes report "nothing
+overflowing, no console errors", and the desktop History screenshot shows the calibrated mosaic run's
+badges on two lines — `MIN-MAX SKY EVEN DARK+FLAT` / `21 FRAMES` — each one whole, under a heading that
+reads in full.
+
 ## v0.465.3 — 2026-09-18 — the one badge that says the app is working for you was clipped on every phone screen, and no pass had ever had a job running while the browser looked
 
 *(Builder, branch `claude/sweet-babbage-rypizn`. Measured by `scripts/agent-dogfood.sh --mosaic
