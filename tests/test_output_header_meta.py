@@ -9,6 +9,7 @@ even for hostile or non-FITS-safe values.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from seestack.stack.output import (
@@ -178,8 +179,8 @@ from seestack.stack.stacker import (  # noqa: E402
 )
 
 
-def _meta_for(*, scale, dark_exp, light_exp, has_bias=True, has_dark=True,
-              bias_shape=(4, 4)):
+def _meta_for(*, scale, dark_exp, light_exp=None, light_exps=None,
+              has_bias=True, has_dark=True, bias_shape=(4, 4)):
     """Header meta for a run whose calibration bundle is the **real** class.
 
     Built as a genuine ``CalibrationMasters`` rather than a stand-in so the stamp
@@ -191,14 +192,18 @@ def _meta_for(*, scale, dark_exp, light_exp, has_bias=True, has_dark=True,
     from seestack.calibrate.apply import CalibrationMasters
 
     proj = SimpleNamespace(get_meta=lambda k: "M42" if k == "name" else None)
-    frames = [SimpleNamespace(exposure_s=light_exp) for _ in range(5)]
+    # ``light_exps`` is the subs' *actual* set, for a target shot at more than one
+    # length; ``light_exp`` is the shorthand for the ordinary uniform case.
+    exps = list(light_exps) if light_exps is not None else [light_exp] * 5
+    frames = [SimpleNamespace(exposure_s=e) for e in exps]
     cal = CalibrationMasters(
         dark=np.zeros((4, 4), dtype=np.float32) if has_dark else None,
         bias=np.zeros(bias_shape, dtype=np.float32) if has_bias else None,
         dark_exposure_s=dark_exp,
         scale_dark_to_light=scale,
     )
-    return _build_output_header_meta(proj, frames, StackOptions(), 5, calibration=cal)
+    return _build_output_header_meta(proj, frames, StackOptions(), len(frames),
+                                     calibration=cal)
 
 
 def test_dark_scaling_provenance_stamped_when_scaled():
@@ -235,6 +240,54 @@ def test_dark_scaling_provenance_absent_when_the_bias_is_the_wrong_shape():
     assert "DARKSCAL" not in _meta_for(
         scale=True, dark_exp=30.0, light_exp=10.0, bias_shape=(8, 8),
     )
+
+
+def test_dark_scaling_provenance_is_stamped_on_a_mixed_target_at_all():
+    """The case that used to vanish. A 10 s dark on a target shot at 10 s and
+    30 s is left alone on the 10 s subs and tripled on the 30 s ones — but the
+    stamp was decided from the subs' *median*, which here is the dark's own
+    length, so the bundle answered "nothing was scaled" and the run said nothing
+    about a dark it had tripled on a third of the frames."""
+    meta = _meta_for(scale=True, dark_exp=10.0,
+                     light_exps=[10.0] * 4 + [30.0] * 2)
+    assert meta["DARKSCAL"][0] == "exposure"
+    assert meta["DARKDEXP"][0] == 10.0
+    # No single length it was scaled *to*, so the set is stamped instead of a
+    # number that would be a claim about one of them.
+    assert "DARKLEXP" not in meta
+    assert meta["DARKLEXS"][0] == "10s and 30s"
+
+
+def test_dark_scaling_provenance_never_names_one_length_of_a_mixed_target():
+    """The other half of the same bug, pointing the other way: with a 30 s dark
+    the median lands on 10 s, so the run stamped "30s → 10s" — true of four subs
+    and false of the two the dark was left unscaled on."""
+    meta = _meta_for(scale=True, dark_exp=30.0,
+                     light_exps=[10.0] * 4 + [30.0] * 2)
+    assert meta["DARKDEXP"][0] == 30.0
+    assert "DARKLEXP" not in meta
+    assert meta["DARKLEXS"][0] == "10s and 30s"
+
+
+def test_a_single_exposure_run_still_stamps_exactly_what_it_always_did():
+    """Every ordinary target: one length, so there *is* a single exposure the
+    dark was scaled to, and the card is the one every existing run carries."""
+    meta = _meta_for(scale=True, dark_exp=30.0, light_exps=[10.0] * 6)
+    assert meta["DARKDEXP"][0] == 30.0
+    assert meta["DARKLEXP"][0] == 10.0
+    assert "DARKLEXS" not in meta
+    # Header rounding is one exposure, not two.
+    rounded = _meta_for(scale=True, dark_exp=30.0,
+                        light_exps=[10.0, 9.998, 10.001, 10.0])
+    assert rounded["DARKLEXP"][0] == pytest.approx(10.0, abs=0.01)
+    assert "DARKLEXS" not in rounded
+
+
+def test_a_mixed_target_whose_every_length_matches_the_dark_claims_nothing():
+    """"Mixed" is not by itself a reason to stamp: if the dark matches all of
+    them, nothing was scaled, exactly as on a uniform target."""
+    assert "DARKSCAL" not in _meta_for(
+        scale=True, dark_exp=30.0, light_exps=[30.0, 29.998, 30.001])
 
 
 # --- Rejection provenance (companion to the "surface rejection clipping" feature) --

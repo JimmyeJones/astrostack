@@ -1628,6 +1628,11 @@ export interface StackDarkScalingSummary {
   mode: string;
   dark_exposure?: number;
   light_exposure?: number;
+  /** Already-worded sub lengths ("10s and 30s") on a target shot at more than
+   *  one — where the scaling is per frame and there is no single exposure the
+   *  dark was scaled *to*. Absent on a single-exposure run (which carries
+   *  `light_exposure` instead) and on any run recorded before v0.459.2. */
+  light_exposures?: string;
 }
 
 export interface StackRejectionSummary {

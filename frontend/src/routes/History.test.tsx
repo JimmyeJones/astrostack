@@ -1622,6 +1622,33 @@ describe("darkScalingSummaryText", () => {
   it("tolerates missing exposures (mode only)", () => {
     expect(darkScalingSummaryText({ mode: "exposure" })).toBe("Dark scaled to sub exposure");
   });
+  it("names the set, not an arrow, on a target shot at more than one length", () => {
+    // The scaling is per frame there, so "30s → 10s" would be a claim about one
+    // of the lengths and false about the other.
+    expect(
+      darkScalingSummaryText({
+        mode: "exposure", dark_exposure: 10, light_exposures: "10s and 30s",
+      }),
+    ).toBe("Dark matched to each sub · 10s dark across 10s and 30s subs");
+  });
+  it("prefers the set over a single length if a run somehow carries both", () => {
+    expect(
+      darkScalingSummaryText({
+        mode: "exposure", dark_exposure: 10, light_exposure: 10,
+        light_exposures: "10s and 30s",
+      }),
+    ).toBe("Dark matched to each sub · 10s dark across 10s and 30s subs");
+  });
+  it("keeps the arrow for every run recorded before the set existed", () => {
+    // An older backend sends no `light_exposures`, and every single-exposure run
+    // never will — both must read exactly as they always have.
+    expect(
+      darkScalingSummaryText({ mode: "exposure", dark_exposure: 30, light_exposure: 10 }),
+    ).toBe("Dark scaled to sub exposure · 30s → 10s");
+    expect(
+      darkScalingSummaryText({ mode: "exposure", light_exposures: "10s and 30s" }),
+    ).toBe("Dark scaled to sub exposure");
+  });
 });
 
 describe("sensorDefectsSummaryText", () => {

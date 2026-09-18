@@ -206,12 +206,22 @@ export function panelGainSummaryText(
 // One-line provenance for dark exposure-scaling — "Dark scaled to sub exposure ·
 // 30s → 10s". Returns null when the run didn't scale its dark (so the card omits
 // the line). Pure so it can be unit-tested and mirrors photometricSummaryText.
+//
+// A target shot at more than one length has no single exposure the dark was
+// scaled *to* — `apply_raw` is handed each sub's own, so one dark is left alone
+// on some frames and tripled on others. Those runs carry the set instead, and
+// the line says "matched to each sub · 10s dark across 10s and 30s subs": the
+// arrow would be a claim about one length, which is the thing that was wrong.
 export function darkScalingSummaryText(
   darkScaling: StackDarkScalingSummary | null | undefined,
 ): string | null {
   if (!darkScaling) return null;
+  const { dark_exposure: de, light_exposure: le,
+          light_exposures: les } = darkScaling;
+  if (typeof de === "number" && les) {
+    return `Dark matched to each sub · ${formatExposure(de)} dark across ${les} subs`;
+  }
   let s = "Dark scaled to sub exposure";
-  const { dark_exposure: de, light_exposure: le } = darkScaling;
   if (typeof de === "number" && typeof le === "number") {
     s += ` · ${formatExposure(de)} → ${formatExposure(le)}`;
   }
