@@ -1102,10 +1102,12 @@ _DESCRIPTORS: list[dict[str, Any]] = [
     {"key": "output_name", "label": "Output name", "type": "str", "group": "simple",
      "help": "Base filename for the stacked outputs."},
     {"key": "auto_reject", "label": "Auto outlier removal", "type": "bool", "group": "simple",
-     "help": "Picks the best outlier removal for your number of subs — min/max on "
-             "small stacks (where sigma clipping can't catch a lone satellite/plane "
-             "trail), sigma clipping on large ones — so you don't have to choose. "
-             "When on, it overrides the two options below."},
+     "help": "Picks the best outlier removal for how many subs land on one pixel "
+             "— min/max where that is a handful (sigma clipping can't catch a lone "
+             "satellite/plane trail there), sigma clipping where it's deep — so you "
+             "don't have to choose. On a mosaic it's the thinnest panel's depth that "
+             "decides, not the target's total. When on, it overrides the two options "
+             "below."},
     {"key": "sigma_clip", "glossary": "sigma-clipping", "label": "Sigma clipping", "type": "bool", "group": "simple",
      "help": "Reject per-pixel outliers (satellites, cosmic rays, planes)."},
     {"key": "sigma_kappa", "glossary": "sigma-clipping", "label": "Sigma κ", "type": "float", "group": "simple",
@@ -1114,8 +1116,10 @@ _DESCRIPTORS: list[dict[str, Any]] = [
     {"key": "min_max_reject", "glossary": "min-max-rejection", "label": "Min/max rejection", "type": "bool", "group": "simple",
      "help": "Drop one per-pixel min and max before averaging. Removes a lone "
              "satellite/plane trail or hot/cold sample even in a small stack, "
-             "where sigma clipping can't. Needs 3+ frames; takes precedence over "
-             "sigma clipping and ignores quality weights."},
+             "where sigma clipping can't. Needs 3 subs on a pixel to have a "
+             "brightest and a darkest it can spare — on a mosaic that's a panel's "
+             "depth, not the target's total. Takes precedence over sigma clipping "
+             "and ignores quality weights."},
     {"key": "min_max_reject_count", "glossary": "min-max-rejection", "label": "Extremes to drop (per side)", "type": "int",
      "group": "advanced", "min": 1, "max": 5, "step": 1, "depends_on": "min_max_reject",
      "help": "How many of the lowest and highest values to drop at each pixel. 1 = "
@@ -1150,7 +1154,10 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "50 = the sharpest half. The finished picture is badged with the same "
              "number (e.g. \"Lucky 50%\")."},
     {"key": "drizzle", "glossary": "drizzle", "label": "Drizzle (super-resolution)", "type": "bool", "group": "simple",
-     "help": "Use the drizzle algorithm. Best with 200+ dithered frames."},
+     "help": "Use the drizzle algorithm: a finer output grid, rebuilt from the tiny "
+             "shifts between subs. Best with 200+ dithered subs on each output pixel "
+             "— on a mosaic that's per panel, not the target's total, so a 3x3 "
+             "raster needs about nine times as many subs to get there."},
     {"key": "drizzle_reject", "glossary": "drizzle", "label": "Drizzle outlier rejection", "type": "bool",
      "group": "simple", "depends_on": "drizzle",
      "help": "Second drizzle pass that rejects satellites, plane trails and cosmic "

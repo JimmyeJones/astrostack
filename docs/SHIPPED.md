@@ -1,5 +1,58 @@
 # Shipped — the record
 
+## v0.462.1 — 2026-09-18 — the bar had a mirror guard for its *number* and none for its *unit*, and the sentence under the checkbox was in the wrong one
+
+*(Builder, branch `claude/sweet-babbage-m3wwgy`, the second task of the v0.462.0 run. Found by asking which
+surfaces quote the drizzle recommendation and in what unit each one counts it.)*
+
+**The rule is already written down, in the module the bar lives in.**
+`seestack/stack/drizzle_path.py`, above `DRIZZLE_MIN_SAMPLES_PER_PIXEL`:
+
+> *"It is a per-**pixel** count, not a target's frame total: on a mosaic the subs are spread across the
+> raster, so a 3x3 raster 225 subs deep in total has only ~25 on any pixel. **Every surface that quotes this
+> bar must feed it the depth, not the total.**"*
+
+v0.436.0 is that rule applied to the Stack form's cautions (`drizzleTooFewHint`, the print panel), and
+`frontend/src/samplesPerPixel.ts` exists to supply the denominator. What nobody had checked is the sentences
+that are not computed — the static copy a beginner reads with their hand on the control:
+
+| surface | said | counted in |
+|---|---|---|
+| `webapp/schemas.py` `drizzle` help (Stack form + Settings' stacking defaults) | "Best with 200+ dithered **frames**" | the target's total |
+| `seestack/data/glossary.md` → *Drizzle*, linked from that control since v0.461.0 | "enable it once you have 200+ aligned **frames**" | the target's total |
+| `seestack/stack/drizzle_path.py` module docstring — **the source both quote** | "lots of dithered **frames** (typically 200+)" | unstated; the unit appears twelve lines later, in the constant's comment |
+
+**Why it matters on this owner's library rather than in principle.** He is a heavy mosaic user — 26 of 104
+targets. A 3×3 raster 900 subs deep in total has about 100 subs on any pixel, so the frame total clears
+"200+" while every pixel is *below the engine's own warn bar*. The error is one-directional and toward harm:
+it says yes on exactly the canvas drizzle handles worst (slower, and at scale > 1 noisier and gappier than
+the ordinary weighted-mean path). And v0.461.0 had just wired the glossary entry to the checkbox, so the
+beginner who does not trust the tooltip and clicks the book got the same wrong unit in more words.
+
+**Two neighbours in the same class, fixed with it.** Both were found by reading every stacking help that
+names a sample threshold:
+
+- **"Auto outlier removal … for your number of subs."** It is not: `_resolve_auto_reject(options, n,
+  depth=)` takes `min(n, depth)`, and on a mosaic `depth` is `auto_reject_depth` — the *thinnest substantial
+  panel*. The help now says so, which also explains the thing a mosaic user would otherwise find inexplicable:
+  why a 2,000-sub target was given min/max.
+- **Min/max's "Needs 3+ frames."** The accumulator's test is per pixel (`count >= 3`, degrading to a plain
+  mean below it), so on a mosaic 12 subs deep in total with one on each pixel it dispatches and protects
+  nothing. The glossary entry has always said this correctly — *"below three subs on a pixel there is no
+  brightest and darkest it can spare"* — so this was the help disagreeing with the app's own dictionary.
+
+The deprecated desktop GUI's drizzle blurb (`seestack/gui/stack_dialog.py`) quoted the bar in frames too and
+is corrected in the same pass — a word, not an extension of a deprioritised surface.
+
+**The test is the durable half.** `tests/test_drizzle_bar_mirror.py` already guarded the bar's *number*
+across the Python/TypeScript mirror. It now also guards its **unit**: the sentence quoting "200+" must name
+the pixel, on the field help, on the glossary entry the control links to, and on the engine docstring both of
+them cite. It fails loudly rather than silently if the bar stops being quoted at all, because a guard that
+passes when it cannot find its subject enforces nothing. **All three fail before**, verified by reverting the
+three files to `HEAD` with the tests in place.
+
+Copy only: no behaviour, config, schema, on-disk, API-shape or default change.
+
 ## v0.462.0 — 2026-09-18 — a stack time estimate is a measurement of *code*, and it was still quoting the last build's
 
 *(Builder, branch `claude/sweet-babbage-m3wwgy`. Verified against the code from observer issue
