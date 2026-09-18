@@ -1,5 +1,71 @@
 # Shipped — the record
 
+## v0.465.2 — 2026-09-18 — two cards on one page prescribed different next sessions, and only one of them knew the other existed
+
+*(Builder, branch `claude/sweet-babbage-rypizn`. Photographed by `scripts/agent-dogfood.sh --mosaic
+--editor` on the bundled 2×2, in the block the probe prints precisely so this class gets read as one
+paragraph.)*
+
+**The contradiction, read off a running app.** On `Sample_M42_mosaic_2_2` the Target page says, in two
+cards an inch apart:
+
+> 💡 **To make your Sample: M42 mosaic (2×2) even better** — Add more time … **another pass or two over
+> the same mosaic** evens out the thinner part, and elsewhere pulls out fainter detail.
+>
+> 🧩 **It's bigger than this mosaic** — Orion Nebula is bigger than this mosaic — only about 75 % of it is
+> in this picture. **Adding more panels next session would capture the rest.**
+
+Two different next sessions, for the same night, with no word about which wins.
+
+**Why it survived the fix that exists for exactly this.** v0.443.0 added the `framing` rung to
+`nextBestMove` under the heading *"both are true; a beginner cannot act on both, and this card is the one
+whose docstring claims to name **the single** highest-leverage move — so it is the one that has to know
+about the other"*. It closes the contradiction **below** `FRAMING_MAX_COVERAGE` (0.67), where the coaching
+card *becomes* the widen advice and the two agree. Above the bar the coaching card makes the opposite
+decision — deliberately, and with an argument: a `partial` verdict fires just as readily at 95 % captured,
+where the missing sliver is an outer edge and depth is plainly the better lever. **Nothing carried that
+decision to the card an inch below**, which goes on prescribing panels as though it were the top move. So
+the fix's own reasoning had a second half nobody had written: the deference has to run in *both*
+directions, or the bar only moves the contradiction rather than closing it.
+
+**The fix: the order, in one clause, on the card that already exists.** `framingDepthFirstClause`
+(`components/target/nextBestMove.ts`, beside `framingIsFragment` and `readinessCanvasScope`, so all three
+consumers of the one gate stay in one file) returns
+
+> *"Most of it is already in this picture, though — until you're happy with the depth, more passes over the
+> panels you already have do more for it than a wider grid."*
+
+(and the single-field wording, *"more time on this framing does more for it than a wider canvas"*, because
+the widen advice there is "shoot it in mosaic mode" and a clause about panels nobody has yet would be
+nonsense). The measurement is untouched — the missing quarter is real and still named — and nothing is
+removed; the note gains the ordering it always assumed.
+
+**It asks the coaching card's *actual* verdict rather than re-deriving one**, which is the mirror of
+`IntegrationTrendBadge`'s own deference and reuses its wiring exactly: `Target.tsx` already computes
+`coachKind` for that badge, and now passes the same value to `FramingVerdictNote`. So the clause can only
+ever speak when the card it defers to is genuinely naming a more-light lever
+(`DEPTH_FIRST_COACH_KINDS` = `thin` / `integration` / `good`). On `locate` ("install the star database")
+or `soft` ("refocus") it stays silent, because "more time is the bigger win" beside either of those would
+be a *third* opinion — the very failure being fixed, in a new costume. On `framing` it stays silent too:
+that rung *is* the widen prescription.
+
+**And it requires a measured coverage above the bar, never merely "not a fragment".** A `partial` verdict
+whose `coverage` didn't come through says nothing about how much landed in, and *"most of it is already in
+this picture"* would then be a guess — the same rule `framingRung` applies to the friendly percentage it
+names.
+
+**Upgrade-safe (§9):** frontend-only; one optional prop with an omitted default. Every other surface that
+renders this note — the editor (`routes/Editor.tsx`) and History — passes no `coachKind` and reads
+byte-for-byte as it did, which is correct there: neither page has a coaching card to defer to.
+
+**Tests (+10, five of them fail-before — verified by neutering `framingDepthFirstClause` to `return null`
+and watching them go red):** `nextBestMove.test.ts` (+7 — the mosaic clause; the single-field lever, which
+must not mention panels; an older backend's missing `canvas`; silence on a fragment where the two cards
+already agree; the bar turned on one step above the coaching card's own; silence on `locate` / `soft` /
+`framing`; silence with no `coachKind` at all; and silence on a non-`partial` or unmeasured verdict) and
+`FramingVerdictNote.test.tsx` (+3 — the clause rendered beside an untouched 75 % measurement, nothing extra
+on a surface with no coaching card, and a fragment's verdict left alone).
+
 ## v0.465.1 — 2026-09-18 — the health note turned a depth into minutes with a median, and the panel map above it summed the real seconds
 
 *(Builder, branch `claude/sweet-babbage-dpaenx`. Found by the previous run's own lever, pointed one module
