@@ -5,7 +5,8 @@ import {
   joinExposures, mismatchedExposures,
   masterFitsFrames, masterOptionSuffix, masterRecommendation, masterSizeWarning,
   pickedMasterContentWarnings,
-  tempMismatch,
+  degC, tempMismatch, tempMismatchesTheSet, temperatureMismatchCount,
+  temperatureSpread,
 } from "./calibrationFit";
 
 const SUBS = { width_px: 1080, height_px: 1920 };
@@ -136,6 +137,54 @@ describe("tempMismatch", () => {
   });
 });
 
+
+describe("the subs' temperature tally", () => {
+  it("reads a spread off the tally, weighted by how many subs are at each", () => {
+    // Three subs at 2 °C and one at -20 °C: the median is a sub's temperature,
+    // not the midpoint of the two rows.
+    expect(temperatureSpread([[-20, 1], [2, 3]])).toEqual(
+      { lo: -20, median: 2, hi: 2, n: 4 });
+    expect(temperatureSpread([[2, 2], [8, 2]])).toEqual(
+      { lo: 2, median: 5, hi: 8, n: 4 });
+    // Order in, order out — the tally is served coldest first but must not rely
+    // on it.
+    expect(temperatureSpread([[8, 1], [2, 1]])?.lo).toBe(2);
+  });
+
+  it("has nothing to say when nothing recorded a temperature", () => {
+    expect(temperatureSpread(null)).toBeNull();
+    expect(temperatureSpread([])).toBeNull();
+    expect(temperatureSpread([[Number.NaN, 4]])).toBeNull();
+    expect(temperatureSpread([[2, 0]])).toBeNull();
+  });
+
+  it("counts how many subs a master's temperature misses, not how many rows", () => {
+    expect(temperatureMismatchCount(24, [[2, 3], [25, 3]]))
+      .toEqual({ off: 3, total: 6 });
+    expect(temperatureMismatchCount(24, [[25, 3]])).toEqual({ off: 0, total: 3 });
+    // A master with no temperature of its own can't be disproved.
+    expect(temperatureMismatchCount(null, [[2, 3]])).toEqual({ off: 0, total: 3 });
+  });
+
+  it("speaks only once the miss is a real share of the session", () => {
+    // One stray frame in fifty: true, and not worth a sentence — the engine's
+    // own floor, which is what the old single-temperature test fired on.
+    expect(tempMismatchesTheSet(24, [[2, 1], [24, 49]])).toBe(false);
+    expect(tempMismatchesTheSet(24, [[2, 6], [24, 44]])).toBe(true);
+    expect(tempMismatchesTheSet(24, [[24, 50]])).toBe(false);
+    // …and the server's floor wins over the mirrored one, like every other
+    // threshold here.
+    expect(tempMismatchesTheSet(24, [[2, 1], [24, 49]], { temp_min_share: 0.01 }))
+      .toBe(true);
+  });
+
+  it("says a temperature the way the header meant it", () => {
+    // float32 round-trips a 24.3 card as 24.299999237…
+    expect(degC(24.299999237060547)).toBe("24.3");
+    expect(degC(-20)).toBe("-20");
+    expect(degC(-0.04)).toBe("0");
+  });
+});
 
 // --- the bias slot: the one master whose size clash isn't fatal ------------
 //

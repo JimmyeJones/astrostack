@@ -1,5 +1,39 @@
 # Shipped — the record
 
+## v0.464.1 — 2026-09-18 — and the Stack form asked the median, so the two would have disagreed about one target
+
+*(Builder, branch `claude/sweet-babbage-cm0qc7`, the second half of v0.464.0 and not optional: the
+`calibration-suggestions` docstring states the contract in its own words — "the Stack form warns about the
+same two mismatches at *pick* time that `CalibrationMasters.calibration_warnings` reports on the finished
+run", and `tolerances` exists because writing a threshold twice let the app "stay quiet before the night was
+spent and complain about it afterwards".)*
+
+Fixing only the engine would have created exactly that split: the run judges the dark against every sub's
+temperature, the form against `params.sensor_temp_c`, their median. On the reproduction case — three subs at
+2 °C, three at −20 °C, a 2 °C dark — the form says nothing at all, because the median *is* 2 °C.
+
+**What is served.** `params.sensor_temps_c`, a `[[°C, how many subs], …]` tally, coldest first, rounded to
+the tenth of a degree a `CCD-TEMP` card is written at. A tally rather than a list because this owner has
+5,477 subs on one target and 35,894 on another: rounding turns a night of float32 jitter into one row, so a
+deep target answers in tens of rows instead of thousands, and the form's answer can differ from the engine's
+only inside 0.05 °C of the 5 °C bar. And `tolerances.temp_min_share`, beside the two thresholds already
+there, for the same reason they are there.
+
+**What the form does with it.** The same three sentences the engine has, off mirrored pure helpers
+(`temperatureSpread`, `temperatureMismatchCount`, `tempMismatchesTheSet`, `degC` in `calibrationFit.ts`) —
+the median of the *subs*, not of the distinct temperatures, so a tally row holding 400 frames weighs 400.
+With no tally at all — an older backend, or subs whose headers never carried a `CCD-TEMP` — the single
+median stands in exactly as it did before, pinned by a test in each direction.
+
+**Upgrade-safe:** two additive response keys and no removal; an older frontend ignores both, a newer
+frontend against an older backend falls through to today's wording. No schema, on-disk, default or
+API-shape change.
+
+**Tests +9** (3 endpoint incl. one on the tally helper's own edges, 5 `calibrationFit.test.ts`, 3
+`Stack.test.tsx`). The route test that names the new sentence was verified fail-before by reverting
+`Stack.tsx` alone and watching it go red; the other two are the "this did not change" half and pass both
+ways on purpose.
+
 ## v0.464.0 — 2026-09-18 — a target is not one *temperature* either, and the master-dark advisory assumed it was
 
 *(Builder, branch `claude/sweet-babbage-cm0qc7`. Found by taking the class the v0.456.0 entry said was worth
