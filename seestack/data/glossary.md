@@ -168,6 +168,25 @@ on **Auto outlier removal** and AstroStack picks between the two from how deep
 your subs actually are; the finished picture's health notes say which it used and
 what it could reach.
 
+## Quality weighting
+
+Letting the better subs count for more. Every sub is measured — star sharpness,
+how many stars were found, how bright the sky was — and a sharper, clearer frame
+is given more weight in the average than a soft or hazy one, instead of every
+frame counting the same. It is gentler than throwing frames away: a mediocre sub
+still contributes what it is worth. Min/max rejection ignores the weights, by
+design, because dropping the extreme *value* at a pixel is a different job.
+
+## Photometric normalisation
+
+Matching every sub's overall brightness before they are combined. Haze, the Moon
+and how low the target sat change how much light reaches the sensor, so subs from
+different nights arrive at different levels — and averaging those directly both
+weakens outlier rejection (a clear-night sub looks like an outlier next to a hazy
+one) and lets a bad night dim the finished picture. Normalising scales each sub
+to the set's own middle first. Mosaics do it automatically, because a panel shot
+through haze would otherwise stay a visibly darker tile.
+
 ## Coverage map / weight map
 
 A 2D map, the same size as the output, that records how many frames contributed
@@ -332,7 +351,10 @@ with twice the integration should measure noticeably lower.
 A panorama of the sky built from multiple panels, each itself a stack. The
 Seestar app supports mosaic capture mode. AstroStack auto-detects mosaic frames
 from their sky positions and builds the seamless joined output using the coverage
-map.
+map. Where two panels overlap they photograph the same sky, so their brightness
+there can be compared honestly — which is how a panel shot through haze is
+lifted to match its neighbours instead of staying a darker tile with a step
+along the join.
 
 ## Mean vs. median stacking
 

@@ -1128,9 +1128,10 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "where a pixel has at least 2×this+1 frames; costs a little more memory."},
     {"key": "background_flatten", "glossary": "background-flattening", "label": "Background flatten", "type": "bool", "group": "simple",
      "help": "Subtract a per-frame sky model to remove gradients."},
-    {"key": "quality_weighted", "label": "Quality weighting", "type": "bool", "group": "simple",
+    {"key": "quality_weighted", "glossary": "quality-weighting", "label": "Quality weighting", "type": "bool", "group": "simple",
      "help": "Weight sharper / clearer frames more heavily."},
-    {"key": "photometric_normalize", "label": "Photometric normalization", "type": "bool",
+    {"key": "photometric_normalize", "glossary": "photometric-normalisation",
+     "label": "Photometric normalization", "type": "bool",
      "group": "advanced",
      "help": "Gain-match every frame's brightness to the run's median before combining, "
              "so haze and airmass across a multi-night session don't weaken outlier "
@@ -1138,7 +1139,7 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "transparency; leaves un-measured frames untouched. Mosaics do this "
              "automatically — a panel shot through haze would otherwise stay dimmer "
              "than the one next to it."},
-    {"key": "panel_gain_match", "label": "Match mosaic panel brightness", "type": "bool",
+    {"key": "panel_gain_match", "glossary": "mosaic", "label": "Match mosaic panel brightness", "type": "bool",
      "group": "advanced",
      "help": "Mosaics only. Where two panels overlap they photograph the same sky, so "
              "their brightness there can be compared honestly — this uses that to lift "
@@ -1234,7 +1235,7 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "depends_on": "color_calibration",
      "help": "Balances the stack so the average star reads neutral, which removes the "
              "camera's colour cast. Fully offline — nothing leaves your box."},
-    {"key": "mosaic_canvas", "label": "Canvas mode", "type": "enum", "group": "advanced",
+    {"key": "mosaic_canvas", "glossary": "mosaic", "label": "Canvas mode", "type": "enum", "group": "advanced",
      "options": ["auto", "union", "reference"],
      "help": "Output framing when frames don't all cover the same field. Auto uses a "
              "union canvas only when the frames span more than one Seestar field (a "
@@ -1245,17 +1246,17 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "help": "How the exported TIFF is scaled. Linear keeps the raw stacked data (looks "
              "dark on screen but is what you edit — like DeepSkyStacker). Autostretch "
              "bakes in a gentle stretch so the TIFF is viewable straight away."},
-    {"key": "drizzle_pixfrac", "label": "Drizzle pixfrac", "type": "float", "group": "advanced",
+    {"key": "drizzle_pixfrac", "glossary": "drizzle", "label": "Drizzle pixfrac", "type": "float", "group": "advanced",
      "min": 0.1, "max": 1.0, "step": 0.05, "depends_on": "drizzle",
      "help": "How much each input pixel is shrunk before it's dropped onto the finer "
              "grid. Smaller = sharper but needs more frames to fill gaps; 0.8 is a safe "
              "middle. Only used when Drizzle is on."},
-    {"key": "drizzle_scale", "label": "Drizzle scale", "type": "float", "group": "advanced",
+    {"key": "drizzle_scale", "glossary": "drizzle", "label": "Drizzle scale", "type": "float", "group": "advanced",
      "min": 1.0, "max": 4.0, "step": 0.1, "depends_on": "drizzle",
      "help": "Output resolution multiplier. 2.0 = twice the reference resolution (full "
              "super-res), 1.0 = same size. Higher needs many well-dithered frames to pay "
              "off. Only used when Drizzle is on."},
-    {"key": "drizzle_kernel", "label": "Drizzle kernel", "type": "enum", "group": "advanced",
+    {"key": "drizzle_kernel", "glossary": "drizzle", "label": "Drizzle kernel", "type": "enum", "group": "advanced",
      "options": ["square", "gaussian", "turbo", "lanczos2", "lanczos3"], "depends_on": "drizzle",
      "help": "Shape used to spread each pixel onto the output grid. Square is the robust "
              "default; Gaussian is smoother; Lanczos is sharpest but can ring around "
