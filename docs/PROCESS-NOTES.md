@@ -18,6 +18,81 @@ is a queue.
 
 ---
 
+## 2026-09-18 — Builder: the eighth dry-backlog run, and the cheapest lever yet — read the comment beside the last fix
+
+*(Builder, branch `claude/sweet-babbage-cm0qc7`, the run that shipped v0.464.0/.1 and v0.465.0. Baseline
+`6352 passed, 2 skipped`, 10m55s with `-n 4` and the BLAS cap on a 4-core box.)*
+
+**Starting state, for the eighth run running.** Unchanged from the seven notes above: every open entry under
+"Bugs (fix these first)" is gated on the owner's library, routed to sign-off, or stood down with
+measurements; the Ideas list's surviving top-level bullets are the same; `list_issues` returns the same three
+observer issues (#878, #880, #903), each already traced in the backlog and each ending in owner sign-off or a
+measured decline. The previous runs found work by grepping the copy for promises, then for universal
+quantifiers, then by a census of an absence.
+
+**This run's lever was smaller than all of those: read the *comment* the previous fix left behind.** v0.456.0
+corrected `run_stack`'s master-dark advisory to judge a dark against every sub's exposure instead of the
+reference frame's, and its backlog entry closed with the class spelled out — *"a representative value is a
+claim that the set is uniform, and nothing in the data enforces it"* — plus a list of sibling surfaces. The
+comment that fix left in `stacker.py` reads, in one paragraph:
+
+> …the reference frame's **temperature** stands in for the session. Its **exposure** does not, and used not
+> to be allowed to: … which of them `pick_reference_frame` landed on then decided whether the advisory fired
+> at all.
+
+The paragraph argues, at length and correctly, that a reference frame cannot speak for a session — and then
+lets it speak for the session about the other number in the same sentence. **A fix's own comment is the
+densest possible statement of a class, written by someone who had just understood it; the instance next door
+is the one it is least likely to have checked.** Both named siblings in the backlog entry (`_auto_bind_for_target`,
+`calibration-suggestions`) had already been closed by later runs. The one nobody looked at was the clause in
+the same sentence.
+
+**Reproduced in four lines before anything was written**, which is what made it a bug rather than a hunch:
+six subs, three at 2 °C and three at −20 °C, one 2 °C dark, and the advisory answers `[]` or one warning
+depending on which frame is handed to it as the reference. Recorded in [`SHIPPED.md`](SHIPPED.md) under
+v0.464.0.
+
+**Two things about the fix that are not the bug, and are the reusable half.**
+
+- **The correction is not the same shape as the exposure one, and copying it would have been wrong.**
+  Exposure has a remedy — a bias lets the dark be rescaled per frame — so v0.456.0 could change the
+  *binding*. Temperature has none, so this one only ever reports, and the binding is deliberately untouched:
+  a dark that misses a minority still beats no dark. And exposure is a **setting**, so a second value is a
+  second population by definition; temperature is continuous and drifts, so on a target spanning many nights
+  a handful of subs sit outside the tolerance of *any* dark. That is why the fix speaks in a **share**
+  (`TEMP_MISMATCH_MIN_SHARE`) where the exposure one speaks in a list. **Same class, different remedy —
+  check which before reusing the last fix's shape.**
+- **A new threshold is only safe when it can be shown to suppress nothing that works today.** The share floor
+  is defensible not because 0.10 was measured but because of what it *can* remove: the pre-fix test asked one
+  frame, so the only warnings it silences are ones fired by a lone outlier that happened to be chosen as the
+  reference. Framing a new constant by the set of behaviours it can change, rather than by its value, is what
+  let it ship without the owner's data.
+
+**The second commit was not optional, and the endpoint's own docstring said so.** `calibration-suggestions`
+states its contract in prose — the form warns at pick time about the same mismatches the finished run
+reports, and `tolerances` exists because writing a threshold twice let the app "stay quiet before the night
+was spent and complain about it afterwards". Fixing only the engine would have created exactly that split, on
+exactly the reproduction case. **When a fix lands on one side of a stated two-sided contract, the other side
+is part of the same task, not a follow-up.**
+
+**The third commit came from asking the ordinary follow-up question.** Once the app judges a dark by the
+nights its subs were shot on, does anything ever *tell* the owner which night to shoot the dark on? Three
+places in the code gate on, blame and complain about sensor temperature; the one sentence that turns "shoot a
+matching dark" into an instruction named exposure and gain and stopped. On an **uncooled** sensor that is the
+one acquisition number he cannot set from a menu — he sets it by choosing when to go out. Worth keeping as a
+question rather than as a finding: **after fixing what the app measures, ask what it tells you to do about
+it.**
+
+**Dogfood `--calibration`: CLEAN**, and it did a second job — it put the new payload in front of a running
+app, where `/api/targets/…/calibration-suggestions` answered
+`"sensor_temps_c": [[-10.0, 6]] … "temp_min_share": 0.1` on a real calibrated install. Tallest phone page
+`/tonight` 3,540 px, `/glossary` 3,364 px, the Target page 3,287 px — in line with the standing baselines;
+nothing overflowing, no console errors. The Target page's prescriptive block was read as one paragraph per
+the standing instruction: the readiness card's *"1 min of ~2 h **for this single field**"* sits under the
+framing card's "shoot it as a mosaic", and the scope clause that makes those two hold together is
+`nextBestMove.readinessCanvasScope`, shipped for precisely this reading. Not a fresh instance of the class —
+recorded so the next run does not re-file it.
+
 ## 2026-09-18 — Builder: measuring a promise instead of grepping for one, and what the glossary's own coverage said
 
 *(Builder, branch `claude/sweet-babbage-tmis6f`, the run that shipped v0.463.0/.1/.2. Baseline
