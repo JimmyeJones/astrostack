@@ -1,5 +1,90 @@
 # Shipped — the record
 
+## v0.459.1 — 2026-09-18 — a picture's stated integration time was a median, and a median of two sub lengths is neither of them
+
+*(Builder, branch `claude/sweet-babbage-fwwin8`. Found while shipping v0.459.0 by asking where else in the
+same family a representative value stands in for a set, and measured before it was touched.)*
+
+**The bug.** `seestack.stack.stacker._integration_time_s` answered *"how much light is in this picture?"* with
+**median sub exposure x frames combined**. Its docstring justified the median as "the honest figure when a few
+candidate subs are dropped mid-stack" — which is what the `x n_used` half is for, not the median — and nothing
+in it had ever considered that the candidates might not all be the same length. A target is one folder, never
+one exposure, and a median of a set with two lengths in it is one member of that set picked by position rather
+than a summary of it.
+
+Measured on six subs, before any change:
+
+```
+6 x 10s (ordinary)           real    60.0s   EXPTOTAL    60.0s     +0.0%
+4 x 10s + 2 x 30s            real   100.0s   EXPTOTAL    60.0s    -40.0%
+3 x 10s + 3 x 30s            real   120.0s   EXPTOTAL   180.0s    +50.0%
+2 x 10s + 4 x 30s            real   140.0s   EXPTOTAL   180.0s    +28.6%
+100 x 10s + 100 x 30s        real  4000.0s   EXPTOTAL  6000.0s    +50.0%
+```
+
+Note it errs in **both** directions and the error does not shrink with depth — it is set by the shape of the
+split, so a 200-sub target is as wrong as a 6-sub one.
+
+**Where that number is read.** It is `stack_runs.total_exposure_s`, and from there: the `EXPTOTAL` card written
+into `master.fits` (which Siril, PixInsight and APP surface, and which `webapp.pipeline` reads back for the
+acquisition nameplate baked into every shared and printed picture), the hours on every History card, the
+"N h captured" clause in `postCaption`, and the denominator of the readiness goal. The **library's** own
+`total_exposure_s` is a genuine per-frame sum (`Library.refresh_target_stats`) and was never wrong, which is
+why the discrepancy had somewhere to hide: the Library wall and the campaign stats were right while the run
+that produced the picture was not.
+
+This is the fourth surface of the shortcut v0.456.0 named — *a representative value is a claim that the set is
+uniform, and nothing in the data enforces it* — and the first where it is arithmetic rather than wording. It
+is also in `seestack/stack/`, which AGENTS.md §1's current focus had closed "until a new bug is found there".
+
+**The fix.** A new `stacker._typical_sub_exposure_s` owns the choice:
+
+* **Median** when the subs are all one length. Robust, so one mistyped header cannot move the figure a whole
+  stack is described by — and this is every ordinary target, so the overwhelming majority of runs are
+  byte-for-byte what they always were.
+* **Mean** when they are genuinely several. It is the only value whose product with the frame count is the
+  light that was actually collected, which is the entire purpose of the figure.
+
+"All one length" is the engine's own `seestack.calibrate.apply.distinct_exposures`, so header rounding
+(`9.998` against `10.0`) stays one exposure while a real Seestar step (10 -> 20 -> 30 s) does not — the same
+question the dark advisory (v0.456.0), the Stack form (v0.456.1), the coverage roll-up (v0.457.0), the darks
+guide (v0.457.1), the master builder (v0.458.0) and the binder (v0.459.0) all already ask, answered in one
+place.
+
+`_integration_time_s` keeps scaling by `n_used` rather than summing outright, deliberately: with every
+candidate used, the mean times the count **is** the sum, exactly, so nothing is estimated; and when a sub
+drops mid-stack — or carries no recorded exposure at all — it remains the unbiased estimate of what the
+survivors were worth, which is the property the function already had.
+
+**The header can no longer contradict itself.** `_build_output_header_meta` stamped `EXPOSURE` as its own
+separate median, so with a mean-derived `EXPTOTAL` beside it a reader multiplying `EXPOSURE` by `NFRAMES`
+would have landed somewhere else entirely. Both cards now come from the one typical value, and on a mixed
+stack the comment reads *"mean per-sub exposure (s); subs were mixed"* instead of silently naming a length no
+sub was shot at. A single-exposure stack keeps the plain `"per-sub exposure (s)"` wording, pinned by a test.
+
+**Deliberately left alone:** `routers/stack.py`'s before/after card takes `sub_exposure_s` from
+`_pick_reference_sub(proj).exposure_s`, which looks like the same shortcut and is not — that panel *shows*
+that particular sub, so its own exposure is the right number for it.
+
+**Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change. Existing runs keep the
+`total_exposure_s` already in their rows (nothing is rewritten); a re-stack is what moves a target onto the
+corrected figure, exactly as with every other engine fix.
+
+**Tests (+13), in a new `tests/test_stack_integration_time.py`.** The figure itself: a mixed target reports
+the exact sum across five shapes (minority longer, minority shorter, an even split, three lengths, and at a
+real target's depth); a single-exposure target is unchanged; header rounding is one exposure, not two; one
+absurd header cannot move a uniform target's figure (the reason the uniform case keeps the median rather than
+simply always taking the mean); dropped subs are still scaled rather than summed; a sub with no recorded
+exposure is credited at the typical length rather than at nothing; and nothing is claimed when no sub records
+one. Then two end-to-end through a real `run_stack`: a mixed run's stored `total_exposure_s` and its master's
+`EXPTOTAL`/`NFRAMES`/`EXPOSURE` cards (including that the three agree with each other to the precision
+`EXPOSURE` is stamped at), and its companion pinning that a single-exposure run is stamped exactly as before,
+comment included.
+
+**Fail-before:** reverting `_typical_sub_exposure_s`' branch alone — the whole fix, with every signature and
+call site intact — turns **eight** of the thirteen red, including both end-to-end cases. The five that stay
+green are the ones pinning the behaviour that must not move.
+
 ## v0.459.0 — 2026-09-18 — the walk-away stack's master dark was picked for a length half the subs were not shot at
 
 *(Builder, branch `claude/sweet-babbage-fwwin8`. The open lead filed with v0.456.0/v0.456.1, built as the

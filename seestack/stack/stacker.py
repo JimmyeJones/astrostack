@@ -1491,20 +1491,56 @@ class StackCancelled(RuntimeError):
     """Raised internally when the user cancels mid-stack."""
 
 
-def _integration_time_s(frames: list, n_used: int) -> float | None:
-    """Effective integration time = median sub exposure × frames combined.
+def _typical_sub_exposure_s(exposures: list[float]) -> float:
+    """The one number that stands for ``exposures`` in a per-sub figure.
 
-    The honest figure when a few candidate subs are dropped mid-stack. Returns
-    ``None`` when no frame carries a usable exposure."""
+    The **median** when the subs are all one length, which is every ordinary
+    target: it is robust, so one mistyped header cannot move the length a whole
+    stack is described by.
+
+    The **mean** when they are genuinely several lengths. A target is one folder,
+    never one exposure — shoot it at 10 s on one night and 30 s on the next and it
+    is one target with two in it — and there the median is not a summary of the
+    set, it is one member of it chosen by position. Measured on a six-sub target:
+    4×10 s + 2×30 s really holds 100 s of light and the median reports 60 s
+    (−40 %), while 3×10 s + 3×30 s holds 120 s and the median reports 180 s
+    (+50 %). The mean is the only value whose product with the frame count is the
+    light that was actually collected, which is the whole point of the figure.
+
+    "All one length" is the engine's own :func:`~seestack.calibrate.apply.distinct_exposures`
+    grouping, so header rounding (``9.998`` against ``10.0``) stays one exposure
+    and a real Seestar step (10 → 20 → 30 s) does not — the same question the dark
+    advisory, the Stack form and the master binder all already ask, answered once.
+    ``exposures`` must be non-empty.
+    """
+    from seestack.calibrate.apply import distinct_exposures
+
+    if len(distinct_exposures(exposures)) > 1:
+        return sum(exposures) / len(exposures)
+    return sorted(exposures)[len(exposures) // 2]  # median
+
+
+def _integration_time_s(frames: list, n_used: int) -> float | None:
+    """Effective integration time = typical sub exposure × frames combined.
+
+    "Typical" is :func:`_typical_sub_exposure_s`: the median on a target shot at
+    one length (unchanged, and that is every ordinary target), the mean on one
+    shot at several — where the median describes no part of the set and the
+    reported integration can be out by ±50 % in either direction.
+
+    Scaling by ``n_used`` rather than summing outright is what keeps the figure
+    honest when a few candidate subs are dropped mid-stack: with every candidate
+    used the mean times the count *is* the sum, exactly, and when some are dropped
+    (or carry no recorded exposure at all) it is the unbiased estimate of what the
+    survivors were worth. Returns ``None`` when no frame carries a usable
+    exposure."""
     exposures = [
         float(f.exposure_s) for f in frames
         if getattr(f, "exposure_s", None) and f.exposure_s > 0
     ]
     if not exposures or not n_used:
         return None
-    exposures.sort()
-    per_sub = exposures[len(exposures) // 2]  # median
-    return round(per_sub * n_used, 2)
+    return round(_typical_sub_exposure_s(exposures) * n_used, 2)
 
 
 def _capture_window(frames: list) -> tuple[str | None, str | None]:
@@ -1933,9 +1969,20 @@ def _build_output_header_meta(
         if getattr(f, "exposure_s", None) and f.exposure_s > 0
     ]
     if exposures:
-        exposures.sort()
-        per_sub = exposures[len(exposures) // 2]  # median
-        meta["EXPOSURE"] = (round(per_sub, 3), "per-sub exposure (s)")
+        # The same "typical sub" the integration time is built from, so the two
+        # cards cannot disagree: a reader who multiplies EXPOSURE by NFRAMES must
+        # land on EXPTOTAL. On a target shot at more than one length that means
+        # the *mean* rather than a median that is one member of the set picked by
+        # position — and the comment says so, because a bare "per-sub exposure"
+        # naming a length no sub was shot at is what this is fixing.
+        from seestack.calibrate.apply import distinct_exposures
+
+        mixed = len(distinct_exposures(exposures)) > 1
+        per_sub = _typical_sub_exposure_s(exposures)
+        meta["EXPOSURE"] = (
+            round(per_sub, 3),
+            "mean per-sub exposure (s); subs were mixed" if mixed
+            else "per-sub exposure (s)")
         total = _integration_time_s(frames, n_used)
         if total is not None:
             meta["EXPTOTAL"] = (total, "integration time (s)")
