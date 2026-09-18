@@ -1226,31 +1226,49 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
         </Text>
       ) : null}
 
-      <Group justify="space-between" mt="sm" wrap="nowrap">
-        <Text fw={600}>{run.output_basename}</Text>
-        <Group gap={4} wrap="nowrap">
-          <CleanestBadge isCleanest={!!isCleanest} />
-          <FocusChip verdict={focus} />
-          <RejectionBadge options={run.options} />
-          <HazyNightBadge ratio={run.transparency_ratio} verdict={run.hazy_verdict} />
-          <PanelSeamsBadge verdict={run.seam_verdict} grain={run.grain_verdict} />
-          <CalibrationBadge calstat={run.calstat} />
-          {/* Same honesty as the Target page's hero: this card's thumbnail is the
-              baked preview, so a saved-but-never-exported edit isn't in it. The
-              one-click finish lives on the hero; here it's just a truthful label
-              next to the picture it applies to. */}
-          <UnexportedEditBadge show={run.unexported_edit} />
-          {/* The same badge the Gallery card of this very run shows, given the
-              same run's own `field_fulls` — this row is otherwise badge-for-badge
-              identical to that one, and a plain count here meant the two pages
-              answered "is this picture thin?" differently about one picture.
-              History is where "Set as cover" lives, so it is the worse of the two
-              places to be silent about it. */}
-          <FrameCountBadge
-            nFramesUsed={run.n_frames_used}
-            fieldFulls={run.field_fulls}
-          />
-        </Group>
+      {/* The run name gets the card's whole width, and the badges get their own
+          wrapping row underneath — which is, exactly, the Gallery card of this
+          same run (`<Text fw={600} truncate mt="sm" title=…>` then
+          `<Group gap={4} mt={4}>`), badge-for-badge identical by design, see
+          below.
+
+          They shared one `justify="space-between" wrap="nowrap"` row until
+          v0.465.4, and the arithmetic does not work: these cards sit in a
+          `SimpleGrid` up to three columns wide, so a card is ~390 px **however
+          big the screen is**, and a run that has earned six badges does not fit
+          beside its own name. Held to one line they did not overflow, they
+          *squeezed* — a `clippedLabels` dogfood probe measured "Sky even" in a
+          45 px box against a 47 px word, "dark+flat" 54 against 56 and
+          "21 frames" 61 against 64, on one calibrated mosaic run. A badge is a
+          whole short fact; there is no such thing as most of one. And letting
+          the *name* yield instead is no better: it is how you tell one of a
+          target's stacks from another, and the first attempt at this fix
+          ellipsised "master" to "mas…". So neither yields — the row does. */}
+      <Text fw={600} truncate mt="sm" title={run.output_basename}>
+        {run.output_basename}
+      </Text>
+      <Group gap={4} mt={4} data-testid="run-badges">
+        <CleanestBadge isCleanest={!!isCleanest} />
+        <FocusChip verdict={focus} />
+        <RejectionBadge options={run.options} />
+        <HazyNightBadge ratio={run.transparency_ratio} verdict={run.hazy_verdict} />
+        <PanelSeamsBadge verdict={run.seam_verdict} grain={run.grain_verdict} />
+        <CalibrationBadge calstat={run.calstat} />
+        {/* Same honesty as the Target page's hero: this card's thumbnail is the
+            baked preview, so a saved-but-never-exported edit isn't in it. The
+            one-click finish lives on the hero; here it's just a truthful label
+            next to the picture it applies to. */}
+        <UnexportedEditBadge show={run.unexported_edit} />
+        {/* The same badge the Gallery card of this very run shows, given the
+            same run's own `field_fulls` — this row is otherwise badge-for-badge
+            identical to that one, and a plain count here meant the two pages
+            answered "is this picture thin?" differently about one picture.
+            History is where "Set as cover" lives, so it is the worse of the two
+            places to be silent about it. */}
+        <FrameCountBadge
+          nFramesUsed={run.n_frames_used}
+          fieldFulls={run.field_fulls}
+        />
       </Group>
       <Text size="xs" c="dimmed">
         {/* Both dates, labelled — this is the one list where they answer

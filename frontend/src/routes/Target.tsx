@@ -1278,7 +1278,14 @@ export function TargetView() {
               target, measured from the run's own WCS. Self-hides when the target
               isn't a sized catalog object or the run has no solved WCS. */
           { key: "framing-verdict", priority: NOTICE_PRIORITY.advisory, node: latestRun?.has_fits ? (
-            <FramingVerdictNote safe={safe} runId={latestRun.id} />
+            <FramingVerdictNote
+              safe={safe}
+              runId={latestRun.id}
+              /* Which lever the coaching card above is naming, so a `partial`
+                 verdict it has already decided not to act on adds the order
+                 instead of prescribing a second next session. */
+              coachKind={coachKind}
+            />
           ) : null },
         ]}
       />

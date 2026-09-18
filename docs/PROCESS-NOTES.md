@@ -18,6 +18,68 @@ is a queue.
 
 ---
 
+## 2026-09-18 — Builder: the tenth dry-backlog run — three findings, all from *running* the app, and two of them from a flag combination nobody had tried
+
+*(Builder, branch `claude/sweet-babbage-rypizn`, the run that shipped v0.465.2/.3/.4. Baseline
+`6370 passed, 2 skipped`, 10m19s with `-n 4` and the BLAS cap on a 4-core box.)*
+
+**Starting state, unchanged for the tenth run.** Every open entry under "Bugs (fix these first)" is gated on
+the owner's library, routed to sign-off, or stood down with measurements; `list_issues` returns the same
+three observer issues (#878, #880, #903), each already traced. The Ideas list was read section by section
+and the candidates that looked open were checked in the code: the Stack-form "give the sentence a button"
+sweep is closed, the small-stack rejection entry is closed, the `astap_timeout_s` budget is a declined
+blind-threshold flip, the "one voice about marginal return" entry is measured and stood down. **So the
+lever had to be running the app, not reading the backlog** — which is what §2 says to do at least one run
+in three anyway.
+
+**Finding 1 came from the block the probe prints, which is now the reliable one.** `--mosaic --editor`,
+CLEAN by every mechanical check (no overflow, no console error, 21 editor ops re-rendering, undo/redo), and
+the finding was two of the Target page's prescriptive cards read as one paragraph: at 75 % captured the
+coaching card asks for *"another pass or two over the same mosaic"* and the framing note an inch below for
+*"more panels next session"*, with no word about which wins. **The generalisable half:** v0.443.0 fixed this
+class by teaching the coaching card to *become* the framing advice below `FRAMING_MAX_COVERAGE`. Above the
+bar it makes the opposite decision, deliberately — and **a one-directional deference moves a contradiction
+rather than closing it.** When a fix makes card A defer to card B under a condition, ask what card B says
+when the condition is false.
+
+**Findings 2 and 3 came from a flag combination, not from a new flag.** `--mosaic --calibration` had never
+been run (`--calibration` is one day old and was run once, alone). It produced two `clippedLabels` findings
+that twenty CLEAN passes had missed, and the reason is the same both times and worth stating plainly:
+**the probe can only see what happens to be on screen.**
+
+- The header's `ActiveJobsBadge` renders **nothing at all** unless a job is running, and no pass had ever
+  looked while one was. `--calibration` creates that state by construction (it re-processes the sample so
+  the newest picture is calibrated), and the badge was clipped **on every one of the 14 routes probed**.
+  This is the missing-observing-site / empty-`incoming/` / click-only-Compare / no-master-dark hole a fifth
+  time, in its cheapest form yet: **not a state the tooling could not reach, just one it had never happened
+  to be in.** Worth a habit rather than a flag — a pass that leaves a job in flight sees a different app.
+- The History run card only carries its full badge set on a run that has *earned* it (cleanest, focus,
+  rejection, haze, seams, **calibration**, unexported edit, depth). `--calibration` is what supplies the
+  sixth, and six is where the row stops fitting.
+
+**And the shape of finding 3 is worth keeping.** Three badges clipped by two to three pixels each is not
+one badge too long — it is **the row two pixels too short, taxing every occupant**. It showed at *desktop*
+and not at phone, which reads as impossible until you notice the cards sit in
+`SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}`: a card is ~390 px wide **however big the screen is**, and a
+wide screen just buys three of them. **A clip that appears only on the wider viewport means a grid, not a
+responsive bug.** Both fixes were already written elsewhere in the same codebase — the Scan button's
+`<Box visibleFrom="xs">` for the header, the Gallery card's wrapping badge row for History — so neither
+needed a new rule, only the sibling's shape.
+
+**Verification was done in a browser rather than argued**, since all three findings are pixel claims:
+v0.465.2's clause was photographed on the 2×2 (the framing note now carries *"Most of it is already in this
+picture, though — until you're happy with the depth…"*); v0.465.3 was re-measured with the built bundle and
+`/api/jobs` stubbed to one running job (**420 px: a 43 px box with 43 px of content**, against the 60/63
+reported; 1440 px: 100 of 100 with the word back); v0.465.4 by a repeat `--mosaic --calibration` pass.
+
+**One accounting note for the next run.** A dogfood screenshot is not evidence that a *self-hiding* element
+was fixed — the phone header shot from the verifying pass shows **no badge at all**, because no job was
+running when that page was shot. The stubbed-API measurement above is what settles it. When a fix is to
+something that hides itself, the absence of the symptom in the next pass proves nothing; reproduce the
+state.
+
+---
+
 ## 2026-09-18 — Builder: the ninth dry-backlog run — the *contradiction inside one file* is cheaper to find than a bug
 
 *(Builder, branch `claude/sweet-babbage-dpaenx`, the run that shipped v0.465.1. Baseline

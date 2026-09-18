@@ -7,6 +7,7 @@ import {
   DEEP_INTEGRATION_S,
   FRAMING_MAX_COVERAGE,
   readinessCanvasScope,
+  framingDepthFirstClause,
   type NextBestMoveKind,
 } from "./nextBestMove";
 import { integrationReadiness, type ReadinessLevel } from "../../readiness";
@@ -744,6 +745,78 @@ describe("nextBestMove", () => {
     it("declines a non-finite coverage rather than scoping from nothing", () => {
       expect(readinessCanvasScope({ ...partial(0.15, "frame"), coverage: NaN }))
         .toBeNull();
+    });
+  });
+
+  describe("framingDepthFirstClause", () => {
+    // The other side of the framing rung. Under the bar the coaching card *is*
+    // the widen advice and the two agree; over it the coaching card has decided
+    // the opposite and the framing note went on prescribing more panels, on the
+    // same screen, for the same night. Photographed on the bundled 2x2 at 75 %.
+    const partial = (coverage: number, canvas?: "frame" | "mosaic") => ({
+      level: "partial", coverage, coverage_pct: Math.round(coverage * 100),
+      canvas, object_name: "Orion Nebula",
+    });
+
+    it("puts depth first on a mosaic the coaching card is asking for more time on", () => {
+      const clause = framingDepthFirstClause(partial(0.75, "mosaic"), "integration");
+      expect(clause).toContain("Most of it is already in this picture");
+      expect(clause).toContain("panels you already have");
+      expect(clause).not.toContain("undefined");
+    });
+
+    it("names the single field's lever rather than the mosaic's", () => {
+      // The widen advice on a single field is "shoot it in mosaic mode", so the
+      // clause that tempers it must not talk about panels nobody has yet.
+      const clause = framingDepthFirstClause(partial(0.8, "frame"), "good");
+      expect(clause).toContain("more time on this framing");
+      expect(clause).not.toContain("panels");
+    });
+
+    it("reads an older backend's missing canvas as a single frame", () => {
+      expect(framingDepthFirstClause(partial(0.8), "integration"))
+        .toContain("more time on this framing");
+    });
+
+    it("stays silent on a fragment, where the two cards already agree", () => {
+      // Below the bar the coaching card carries the framing advice itself, so a
+      // clause here would argue against the card it is meant to defer to.
+      expect(framingDepthFirstClause(partial(0.2, "frame"), "framing")).toBeNull();
+      expect(framingDepthFirstClause(partial(0.2, "frame"), "integration"))
+        .toBeNull();
+      expect(framingDepthFirstClause(partial(FRAMING_MAX_COVERAGE, "frame"), "good"))
+        .toBeNull();
+    });
+
+    it("turns on exactly one step above the bar the coaching card turns on", () => {
+      expect(
+        framingDepthFirstClause(partial(FRAMING_MAX_COVERAGE + 0.01, "frame"), "good"),
+      ).not.toBeNull();
+    });
+
+    it("never argues with a coaching tip that is not about more light", () => {
+      // `locate` and `soft` name a setup fix; `framing` *is* the widen
+      // prescription. Deferring to any of them would be a third opinion.
+      for (const kind of ["locate", "soft", "framing"] as NextBestMoveKind[]) {
+        expect(framingDepthFirstClause(partial(0.75, "mosaic"), kind)).toBeNull();
+      }
+    });
+
+    it("is silent wherever there is no coaching card to defer to", () => {
+      // The editor and History render this note with no `coachKind` at all.
+      expect(framingDepthFirstClause(partial(0.75, "mosaic"), null)).toBeNull();
+      expect(framingDepthFirstClause(partial(0.75, "mosaic"), undefined)).toBeNull();
+    });
+
+    it("says nothing about a verdict that isn't a measured `partial`", () => {
+      for (const level of ["centred", "off_centre", "clipped"]) {
+        expect(framingDepthFirstClause({ ...partial(0.75, "frame"), level }, "good"))
+          .toBeNull();
+      }
+      expect(framingDepthFirstClause({ ...partial(0.75, "frame"), coverage: NaN }, "good"))
+        .toBeNull();
+      expect(framingDepthFirstClause({ level: "partial" }, "good")).toBeNull();
+      expect(framingDepthFirstClause(null, "good")).toBeNull();
     });
   });
 });

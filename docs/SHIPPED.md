@@ -1,5 +1,179 @@
 # Shipped — the record
 
+## v0.465.4 — 2026-09-18 — a History run card gave every badge two pixels rather than give the row a second line
+
+*(Builder, branch `claude/sweet-babbage-rypizn`, found by the pass that verified v0.465.3 — the same
+`clippedLabels` check, one page along, on a run that had finally earned enough badges to be interesting.)*
+
+**The measurement.** On `/targets/<mosaic>/history`, at **desktop** width, on one calibrated mosaic run:
+
+```
+[desktop] …/history: CLIPPED LABEL 45px box vs 47px word — "Sky even"
+[desktop] …/history: CLIPPED LABEL 54px box vs 56px word — "dark+flat"
+[desktop] …/history: CLIPPED LABEL 61px box vs 64px word — "21 frames"
+```
+
+Three badges, two to three pixels each. Not one badge too long — **the row two pixels too short, taxing
+every occupant**.
+
+**Why desktop and not phone, which is the part worth remembering.** These cards live in
+`<SimpleGrid cols={{ base: 1, sm: 2, md: 3 }}>`, so a card is about **390 px wide however big the screen
+is** — a 1440 px desktop simply buys three of them. "Desktop" is not a width here, and a row that fits on a
+phone and clips on a desktop is a row inside a grid, not a responsive-layout bug. The run this was measured
+on carried six badges (cleanest, focus, rejection, haze, seams, calibration, unexported edit, depth — the
+set a well-looked-after target accumulates), and the heading sat beside them under `justify="space-between"`.
+
+**The fix is the sibling card's own shape.** The Gallery card of the very same run is badge-for-badge
+identical by design — History's own comment says so — and has always given the run's name the card's whole
+width and put the badges on **their own wrapping row** underneath (`<Text fw={600} truncate mt="sm"
+title=…>` then `<Group gap={4} mt={4}>`, Mantine's default `wrap`). History's shared
+`justify="space-between" wrap="nowrap"` row was the outlier, and now it is that card's arrangement exactly.
+
+**The first attempt was wrong, and the screenshot is what said so.** Keeping the shared row and merely
+letting the badge group wrap does stop the clipping — and the verifying pass showed the heading rendered
+**"mas…"**, because a `space-between` row hands the badges their content width and the name the remainder.
+Trading three two-pixel clips for an ellipsised run name is not a fix: the name is how you tell one of a
+target's stacks from another (History's own docstring says so). With two rows neither has to yield.
+
+**Why wrapping rather than a tighter badge.** A badge here is a whole short fact — "dark+flat", "Sky even"
+— and there is no such thing as most of one. Shortening them would be removing information (§1: nothing may
+be removed); shrinking the gap would buy pixels once and lose them at the next badge. A second line costs
+~22 px on the cards that need it and nothing on the cards that don't.
+
+**Upgrade-safe (§9):** frontend-only, display-only, no config/DB/on-disk/API/default change.
+
+**Tests (+2, both fail-before — verified by restoring `wrap="nowrap"` and the bare heading):**
+`History.test.tsx` — a run carrying the full badge set gets a row that is not `nowrap` (asserted off
+Mantine's own `--group-wrap`, on a new `data-testid="run-badges"`) **and that does not contain the run's
+name**, which is the assertion that pins the failed first attempt; and a long `output_basename` keeps
+`truncate` with the whole name reachable as its `title`, so a reprocess's versioned output name still can't
+widen the card.
+
+**Verified in the browser** by a repeat `--mosaic --calibration` pass: both probes report "nothing
+overflowing, no console errors", and the desktop History screenshot shows the calibrated mosaic run's
+badges on two lines — `MIN-MAX SKY EVEN DARK+FLAT` / `21 FRAMES` — each one whole, under a heading that
+reads in full.
+
+## v0.465.3 — 2026-09-18 — the one badge that says the app is working for you was clipped on every phone screen, and no pass had ever had a job running while the browser looked
+
+*(Builder, branch `claude/sweet-babbage-rypizn`. Measured by `scripts/agent-dogfood.sh --mosaic
+--calibration` — a combination nobody had run — which happened to have a job in flight when the probe
+reached the second target.)*
+
+**The measurement.** `dogfood_probe.mjs`'s `clippedLabels` check flags a Mantine badge whose own overflow
+box is narrower than its content. On the 420 px pass it reported, on **every one of the 14 routes it
+probed**:
+
+```
+[phone] /: CLIPPED LABEL 60px box vs 63px word — "1 running" (scrolling cannot reveal it)
+```
+
+`ActiveJobsBadge` lives in `AppShell.Header`'s `wrap="nowrap"` row, between the "AstroStack" title and the
+Scan button, so on a phone it is squeezed by three pixels and the last letter goes. It is the only element
+on any screen that says *the app is busy on your behalf* — which, for a walk-away owner checking from a
+phone while a stack runs, is the single thing they opened it to see.
+
+**Why twenty clean passes missed it.** Every earlier pass printed "nothing overflowing, no console errors"
+for the identical header, because `ActiveJobsBadge` renders **nothing at all** when no job is running or
+queued — and no probe had ever looked while one was. This is the missing-observing-site (v0.436.1),
+empty-`incoming/` (v0.442.0), click-only-Compare (v0.440.2) and no-master-dark (v0.455.1) hole a fifth
+time, in its cheapest form yet: not a state the tooling could not *reach*, just one it had never happened
+to be in. (The `--calibration` pass creates one by construction — it re-processes the sample so the newest
+picture is a calibrated one — which is why this combination is the one that saw it.)
+
+**The fix is the header's own existing answer to exactly this**, not a new rule: the Scan button two
+elements along has read `<Box visibleFrom="xs">Scan incoming</Box>` since it was written, showing its icon
+alone on a phone. The badge now does the same — the **count** is always text, the word "running" comes
+back from `xs` up — and **nothing is removed**: the whole phrase (`"3 jobs running"`, singular at one)
+stays the badge's `title` at every width and is spelled out in a `VisuallyHidden` span beside the drawn
+text, which is `aria-hidden`. That last part is the detail worth keeping: `visibleFrom` hides with
+`display: none`, which hides from a **screen reader** too, so shortening the visible label without it would
+have traded a clipped word for a spoken badge that says only "1". The hidden span is absolutely positioned,
+so it costs the squeezed row nothing.
+
+**Measured after, in the same browser rather than argued.** Serving the built bundle with `/api/jobs`
+stubbed to one running job: at **420 px** the label is a **43 px box with 43 px of content — not clipped**
+(against the 60/63 that was reported), and at **1440 px** it is 100 px of 100 px with the word back. The
+hidden phrase adds nothing to either, which is the one thing worth checking about it. Asking for less width
+also cannot push the squeeze onto its neighbours.
+
+Deliberately **not** `flexShrink: 0` on the badge, which was the other obvious fix: the left group carries
+`minWidth: 0`, so refusing to shrink here just moves the clip onto the "AstroStack" title, which has
+`whiteSpace: "nowrap"` and no ellipsis. Trading a clipped badge for a clipped wordmark is not a fix.
+
+**Upgrade-safe (§9):** frontend-only, display-only, no config/DB/on-disk/API/default change.
+
+**Tests (+3, two fail-before — verified by restoring the old markup and watching them go red):**
+`App.test.tsx` — the whole phrase survives as the accessible name at every width; only the *word* sits
+behind the breakpoint and the number never does; and the badge still says nothing at all when no job is
+running or queued. (`ActiveJobsBadge` is now exported for this; it was previously module-private.)
+
+## v0.465.2 — 2026-09-18 — two cards on one page prescribed different next sessions, and only one of them knew the other existed
+
+*(Builder, branch `claude/sweet-babbage-rypizn`. Photographed by `scripts/agent-dogfood.sh --mosaic
+--editor` on the bundled 2×2, in the block the probe prints precisely so this class gets read as one
+paragraph.)*
+
+**The contradiction, read off a running app.** On `Sample_M42_mosaic_2_2` the Target page says, in two
+cards an inch apart:
+
+> 💡 **To make your Sample: M42 mosaic (2×2) even better** — Add more time … **another pass or two over
+> the same mosaic** evens out the thinner part, and elsewhere pulls out fainter detail.
+>
+> 🧩 **It's bigger than this mosaic** — Orion Nebula is bigger than this mosaic — only about 75 % of it is
+> in this picture. **Adding more panels next session would capture the rest.**
+
+Two different next sessions, for the same night, with no word about which wins.
+
+**Why it survived the fix that exists for exactly this.** v0.443.0 added the `framing` rung to
+`nextBestMove` under the heading *"both are true; a beginner cannot act on both, and this card is the one
+whose docstring claims to name **the single** highest-leverage move — so it is the one that has to know
+about the other"*. It closes the contradiction **below** `FRAMING_MAX_COVERAGE` (0.67), where the coaching
+card *becomes* the widen advice and the two agree. Above the bar the coaching card makes the opposite
+decision — deliberately, and with an argument: a `partial` verdict fires just as readily at 95 % captured,
+where the missing sliver is an outer edge and depth is plainly the better lever. **Nothing carried that
+decision to the card an inch below**, which goes on prescribing panels as though it were the top move. So
+the fix's own reasoning had a second half nobody had written: the deference has to run in *both*
+directions, or the bar only moves the contradiction rather than closing it.
+
+**The fix: the order, in one clause, on the card that already exists.** `framingDepthFirstClause`
+(`components/target/nextBestMove.ts`, beside `framingIsFragment` and `readinessCanvasScope`, so all three
+consumers of the one gate stay in one file) returns
+
+> *"Most of it is already in this picture, though — until you're happy with the depth, more passes over the
+> panels you already have do more for it than a wider grid."*
+
+(and the single-field wording, *"more time on this framing does more for it than a wider canvas"*, because
+the widen advice there is "shoot it in mosaic mode" and a clause about panels nobody has yet would be
+nonsense). The measurement is untouched — the missing quarter is real and still named — and nothing is
+removed; the note gains the ordering it always assumed.
+
+**It asks the coaching card's *actual* verdict rather than re-deriving one**, which is the mirror of
+`IntegrationTrendBadge`'s own deference and reuses its wiring exactly: `Target.tsx` already computes
+`coachKind` for that badge, and now passes the same value to `FramingVerdictNote`. So the clause can only
+ever speak when the card it defers to is genuinely naming a more-light lever
+(`DEPTH_FIRST_COACH_KINDS` = `thin` / `integration` / `good`). On `locate` ("install the star database")
+or `soft` ("refocus") it stays silent, because "more time is the bigger win" beside either of those would
+be a *third* opinion — the very failure being fixed, in a new costume. On `framing` it stays silent too:
+that rung *is* the widen prescription.
+
+**And it requires a measured coverage above the bar, never merely "not a fragment".** A `partial` verdict
+whose `coverage` didn't come through says nothing about how much landed in, and *"most of it is already in
+this picture"* would then be a guess — the same rule `framingRung` applies to the friendly percentage it
+names.
+
+**Upgrade-safe (§9):** frontend-only; one optional prop with an omitted default. Every other surface that
+renders this note — the editor (`routes/Editor.tsx`) and History — passes no `coachKind` and reads
+byte-for-byte as it did, which is correct there: neither page has a coaching card to defer to.
+
+**Tests (+10, five of them fail-before — verified by neutering `framingDepthFirstClause` to `return null`
+and watching them go red):** `nextBestMove.test.ts` (+7 — the mosaic clause; the single-field lever, which
+must not mention panels; an older backend's missing `canvas`; silence on a fragment where the two cards
+already agree; the bar turned on one step above the coaching card's own; silence on `locate` / `soft` /
+`framing`; silence with no `coachKind` at all; and silence on a non-`partial` or unmeasured verdict) and
+`FramingVerdictNote.test.tsx` (+3 — the clause rendered beside an untouched 75 % measurement, nothing extra
+on a surface with no coaching card, and a fragment's verdict left alone).
+
 ## v0.465.1 — 2026-09-18 — the health note turned a depth into minutes with a median, and the panel map above it summed the real seconds
 
 *(Builder, branch `claude/sweet-babbage-dpaenx`. Found by the previous run's own lever, pointed one module
