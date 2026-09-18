@@ -116,3 +116,26 @@ def test_every_editor_op_either_links_the_glossary_or_says_why_it_need_not(slugs
         o.id for o in ops if o.glossary and o.id in _OPS_THAT_EXPLAIN_THEMSELVES
     )
     assert not both, f"ops both linked and listed as needing no link: {both}"
+
+
+def test_the_frames_tables_column_links_are_real_entries(slugs):
+    """The frames table's headings are the densest run of jargon outside the
+    editor — ``FWHM``, ``Ecc.``, ``Sky``, ``Transp.`` — and each now carries the
+    glossary entry for what it measures (``FrameColumn.glossary``).
+
+    That slug is written by hand in a TypeScript file, so nothing about the
+    build can notice it going stale; this is the only thing that can. Read as
+    text rather than imported, which is the same bargain the sweep above makes.
+    """
+    from pathlib import Path
+    import re
+
+    src = (Path(__file__).resolve().parents[1]
+           / "frontend" / "src" / "components" / "target" / "frameColumns.ts")
+    found = re.findall(r'glossary:\s*\{\s*slug:\s*"([a-z0-9-]+)"', src.read_text(encoding="utf-8"))
+    assert len(found) >= 5, (
+        "the frames table's columns stopped linking the glossary — if that was "
+        f"deliberate, this guard is what should have said so (found {found})"
+    )
+    missing = sorted(set(found) - slugs)
+    assert not missing, f"frame columns link at glossary entries that don't exist: {missing}"
