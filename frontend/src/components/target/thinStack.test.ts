@@ -117,3 +117,15 @@ describe("where the reader is sent to see why subs were dropped", () => {
     expect(wall?.frames).toBe(3);
   });
 });
+
+describe("thinStackWarning's mosaic sentence", () => {
+  it("says a typical part, because the depth it quotes is a canvas mean", () => {
+    // `perPixel` divides the run's frames by the sky its canvas covers, so on a
+    // raster with one deep panel and three thin ones — the owner's own shooting
+    // style — there are parts on both sides of the number. Saying "each part
+    // has about 3" promises the thin corner is 3 deep when it is 1.
+    const w = thinStackWarning(30, 9);
+    expect(w?.message).toContain("so a typical part of this picture has only about 3 subs on it");
+    expect(w?.message).not.toContain("each part");
+  });
+});

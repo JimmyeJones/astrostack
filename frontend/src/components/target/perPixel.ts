@@ -70,6 +70,27 @@ export function perPixel(total: number, fieldFulls: number | null | undefined): 
   return total / canvasFieldFulls(fieldFulls);
 }
 
+/** How to name one part of a mosaic's canvas in a sentence about its depth.
+ *
+ * Deliberately **"a typical part"**, never "each part". Every per-pixel figure
+ * these surfaces quote is an average: `perPixel` is a mean over the canvas (see
+ * the note above on why the mean is the right conservative choice here), and the
+ * walk-away hold's `typical_panel_depth` is a frame-weighted median. A mosaic
+ * with one deep panel and eight thin ones — the owner's own shooting style, and
+ * the whole reason the hold takes a median rather than the thinnest panel — has
+ * pixels on both sides of that number. "Each part has N" is a claim about the
+ * whole canvas that the figure cannot support, and it is false in the direction
+ * that surprises: it promises more than the picture holds.
+ *
+ * The app already says "a typical part" wherever the *backend* supplies the
+ * number — the Jobs page's hold lines, the Dashboard's last-night card, the
+ * walk-away hold note, `AutoStackThinHoldOut`'s own docstring. This is that
+ * phrase for the frontend's own sentences, in one place, so one alert cannot
+ * again say "a typical part has 3" and "waiting until each part has 5" two
+ * clauses apart.
+ */
+export const A_TYPICAL_PART = "a typical part";
+
 /** "about 4 fields" / "about 2 fields" — how much sky the canvas spans, for a
  * sentence that has to explain why a total and a depth differ. Rounded to a
  * whole field: the precision is spurious (the canvas includes its uncovered

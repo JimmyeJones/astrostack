@@ -31,7 +31,12 @@
  * there is no honest clean-up to name.
  */
 
-import { fieldsOfSkyLabel, perPixel, spansMoreThanOneField } from "./perPixel";
+import {
+  A_TYPICAL_PART,
+  fieldsOfSkyLabel,
+  perPixel,
+  spansMoreThanOneField,
+} from "./perPixel";
 
 // The κ-σ / drizzle rejection-fraction band in which the "we cleaned the trails"
 // cue is honest — mirrors `stackhealth.py::_REJECTION_NOTE_{MIN,MAX}_FRACTION`
@@ -117,7 +122,8 @@ export function rejectionNote(
         // been told two things that can't both be true.
         ? `Your ${nFramesUsed} subs are spread across ` +
           `${fieldsOfSkyLabel(fieldFulls)} — with about ${depth} ` +
-          `sub${depth === 1 ? "" : "s"} on each part of this picture, AstroStack `
+          `sub${depth === 1 ? "" : "s"} on ${A_TYPICAL_PART} of this picture, `
+          + "AstroStack "
         : `Because only ${depth} sub${depth === 1 ? "" : "s"} stacked, AstroStack `;
     return (
       `${few}dropped the brightest and darkest value at each pixel, so a lone ` +
