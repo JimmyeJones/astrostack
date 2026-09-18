@@ -18,6 +18,54 @@ is a queue.
 
 ---
 
+## 2026-09-18 — DOGFOOD CLEAN (`--calibration --mosaic`, at v0.466.0), and the one thing it was run to check
+
+*(Builder, branch `claude/sweet-babbage-31bttf`, the pass that followed shipping v0.466.0.)*
+
+**Why this combination.** v0.466.0 is a calibration advisory, and the `--calibration`
+flag is the only pass that ever puts a master dark in front of the app at all
+(v0.455.1). `--mosaic` because AGENTS.md §1 judges every Auto/editor claim on a tiled
+canvas.
+
+**What it was run to check, and what it showed.** The two new response keys are live
+on the running app, off the endpoint rather than off a test double:
+
+```
+[suggestions] "gains": [80.0] … "tolerances": {…, "gain_frac": 0.01}
+[masters] dark · Dark 10s gain 80 −10°C · 480x320 · 6 frame(s)
+```
+
+The seeded darks are gain 80 and the sample's lights are gain 80, so **the form says
+nothing about gain** — which is the whole point: the advisory is silent on a library
+shot at one gain, which is what a Seestar gives. The health card's calibration note
+withdrew for the right reason (`masters applied`), and the stack is the calibrated
+branch (`auto_bind_calibration: on`).
+
+**Everything else was clean.** Trim Auto would apply to the 2×2: **7.9 %** (the D1 bar
+is ~15 %). Nothing overflowing and no console errors at either width, on either
+target. Tallest page `[phone] /tonight: 3705px`, then the mosaic Target page at
+3673 px — both in the band the last several passes have measured.
+
+**Read as one paragraph (the check that has produced most recent findings), the mosaic
+Target page holds together.** Its five cards say, in order: another pass or two over
+the same mosaic evens out the thinner part; goal ~7.3 h across about 4 fields; the
+panel map's *"a little behind at the top-right: about 30 s there against 1 min"*; the
+health card's *"23 % of the picture has 3 subs where most has 6 … only about 30 s
+behind, so it evens out on its own"*; and the framing verdict's *"bigger than this
+mosaic … Most of it is already in this picture, though — until you're happy with the
+depth, more passes over the panels you already have do more for it than a wider
+grid."* That last clause is **v0.465.2 working**: the framing note deferring to the
+coaching card's depth verdict instead of prescribing a second, different next session.
+The three depth-shaped cards all quote the same 30 s, which is what v0.465.1 bought.
+
+**One non-finding, recorded so it is not re-investigated.** The Dashboard says
+*"Plate-solving isn't set up yet … ASTAP wasn't found"* on an install that has just
+stacked two targets. That is the scratch environment, not a bug: the bundled samples
+carry synthetic WCS so they need no solver, and the owner's install has ASTAP in the
+image. Every pass ever run has shown this line.
+
+---
+
 ## 2026-09-18 — Builder: the tenth dry-backlog run — three findings, all from *running* the app, and two of them from a flag combination nobody had tried
 
 *(Builder, branch `claude/sweet-babbage-rypizn`, the run that shipped v0.465.2/.3/.4. Baseline
