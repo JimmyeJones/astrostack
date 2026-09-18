@@ -52,14 +52,20 @@ below is consistent with the "twenty clean sweeps, closed until a new bug is fou
   are correct: `_hot_pixels` is skipped entirely on a decimated proxy, and its `sigma` is a detection threshold,
   not a spatial radius; `background` `detect_sigma`/`object_sigma` are statistical. Clean.
 
-**Tooling note for the next run — `--big --editor` alone exceeds a 25-min `timeout` before it reaches the
-decimated-preview editor drive.** The pass drives the editor **sequentially** — field sample (1:1) first, then
-the full-size decimated run last — so with only `--big --editor` set the run spent its budget on the field
-drive + the full-size stack + both probes and was killed at the "probing the FULL-SIZE target" step, *before*
-the `-- driving the editor on the FULL-SIZE run (the only decimated preview)` block (shell lines 886–892) ran.
-The page probe on the full-size target still confirmed `[full-size check] available=True` with the five
-preview↔export advisories present and no console errors. To actually exercise the decimated-preview op drive,
-give it a longer timeout (≥40 min) or run it as its own pass. Parity itself was verified by code audit above.
+**The decimated-preview editor drive (`--big --editor`) also came back CLEAN.** It is the only run whose editor
+preview is not 1:1 (canvas 1693×1150, shrunk to 1/2, so `proxy_scale == 2`), and thus the only one that exercises
+the preview↔export surfaces at the live-app level rather than only the code audit above. All 21 ops re-rendered on
+the 2× preview, undo/redo applied, and the whole shrunk-preview vocabulary behaved: the scale caption ("Preview
+shown at 847 px — export renders at full resolution (2.0× larger)"), the standing sharpen-understates advisory
+(correct — the auto-seeded recipe the run opens on already carries a sharpen), the "Check it at full size" navigator
+following a click, the split comparison, and the 0-px-spare loupe window. No console errors, nothing overflowing.
+So rotation item (1) is clean by both the code trace and the running app.
+
+**One runtime note for the next run.** `--big --editor` drives the editor **sequentially** — the field sample
+(1:1) first, then the full-size decimated run — and the full pass (two stacks + three probes + two editor drives)
+runs close to 25 minutes; budget ≥30 min of wall-clock for it, and read the log to the `EXIT=` line rather than a
+mid-run tail (an early read here looked like a timeout at the "probing the FULL-SIZE target" step and was not —
+the full-size drive ran to `editor drive clean` right after).
 
 **Open GitHub issues (Scout owns the inbox) — all three accurately tracked, nothing to file or close this run:**
 - **#903** (reprocess-all replaced 44/77 pictures with flat linear stacks): the *silent* half is fixed
