@@ -159,7 +159,8 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     # when a human is watching.
     rec["confident"] = calibration.auto_bind_master_ids(
         settings.resolved_library_root, masters,
-        exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c,
+        exposure_s=exposure_s, light_exposures_s=exposures_s,
+        gain=gain, sensor_temp_c=sensor_temp_c,
         width_px=rec["params"]["width_px"], height_px=rec["params"]["height_px"],
         bayer_pattern=rec["params"]["bayer_pattern"],
     )
