@@ -454,6 +454,16 @@ export interface MergeSuggestionTarget {
 // A "these look like the same object — combine them?" suggestion: a cluster of
 // ≥2 targets whose plate-solved centres agree. `targets` are ordered
 // deepest-integration first, so `targets[0].safe` is the natural merge `into`.
+/** What `POST /api/targets/merge` did. `pictures_kept` is the finished stacks
+ *  carried out of the source folders the merge then deleted — optional because
+ *  a backend older than it simply omits the key, which must read as "unknown",
+ *  never as zero. */
+export interface MergeOutcome {
+  into: string;
+  frames_added: number;
+  pictures_kept?: number;
+}
+
 export interface MergeSuggestion {
   object_name: string | null;
   center_ra_deg: number;
@@ -2533,6 +2543,11 @@ export interface StackOptionField {
   // shows and accepts as 0–100 with a "%" suffix; the stored value is unchanged.
   // Absent/null on every other field, which renders the raw number as before.
   unit?: "percent" | null;
+  // The bundled glossary entry explaining the *concept* this control acts on
+  // ("sigma-clipping"), so the label can link at `/glossary#sigma-clipping`.
+  // `help` says what the control does; this says what the word means. Absent on
+  // most fields and on every backend older than it — then nothing is rendered.
+  glossary?: string | null;
 }
 
 export interface SystemInfo {
@@ -2582,6 +2597,9 @@ export interface EditOp {
   is_stretch: boolean;
   heavy?: boolean;
   help: string | null;
+  /** The glossary entry for what this op *is* ("stretching", "scnr") — see
+   *  `StackOptionField.glossary`. Absent on most ops and on an older backend. */
+  glossary?: string | null;
   params: StackOptionField[];
 }
 
@@ -2951,7 +2969,7 @@ export interface UnstretchedItem {
  *
  * The count and the field-fulls scale travel rather than the quotient, because
  * `thinStackWarning` names *both* on a mosaic ("your 30 subs are spread across
- * about 9 fields of sky, so each part …"), and that is the same function the
+ * about 9 fields of sky, so a typical part …"), and that is the same function the
  * Gallery card's badge already asks. */
 export interface ThinPictureItem {
   safe: string;
@@ -3350,7 +3368,8 @@ export const api = {
   deleteTarget: (safe: string, removeFiles: boolean) =>
     req(`/api/targets/${safe}?remove_files=${removeFiles}`, { method: "DELETE" }),
   mergeTargets: (into: string, sources: string[]) =>
-    req("/api/targets/merge", { method: "POST", body: JSON.stringify({ into, sources }) }),
+    req<MergeOutcome>("/api/targets/merge",
+      { method: "POST", body: JSON.stringify({ into, sources }) }),
   mergeSuggestions: () =>
     req<MergeSuggestion[]>("/api/targets/merge-suggestions"),
   cleanupSuggestions: () =>

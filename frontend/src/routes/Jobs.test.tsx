@@ -1320,7 +1320,7 @@ describe("processTargetSummary", () => {
       },
     });
     expect(cleaned).toMatch(/Your 21 subs are spread across/);
-    expect(cleaned).toMatch(/about 6 subs on each part of this picture/);
+    expect(cleaned).toMatch(/about 6 subs on a typical part of this picture/);
     expect(cleaned).not.toMatch(/only 21 subs stacked/);
   });
   it("names a κ-σ clean-up as a percentage on a healthy stack", () => {

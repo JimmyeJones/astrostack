@@ -43,7 +43,7 @@ export function MosaicThinHoldNote({ safe }: { safe: string }) {
           + `${panels}, so a typical part of the picture has only `
           + `${held.panel_depth} sub${held.panel_depth === 1 ? "" : "s"} on it. `
           + `Stacking now would make a picture that's mostly single-frame noise, `
-          + `so the hands-off auto-stack is waiting until each part has at least `
+          + `so the hands-off auto-stack is waiting until that’s at least `
           + `${held.min_frames}. Keep shooting this mosaic and it will stack `
           + `itself — or use "Stack" to make one now anyway.`}
       </Text>

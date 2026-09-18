@@ -50,6 +50,9 @@ class EditParam:
     option_labels: dict[str, str] | None = None
     help: str | None = None
     depends_on: str | None = None
+    #: Slug of the bundled glossary entry explaining the *concept* — see
+    #: :attr:`OpSpec.glossary`.
+    glossary: str | None = None
 
 
 @dataclass
@@ -299,6 +302,14 @@ class OpSpec:
     params: list[EditParam] = field(default_factory=list)
     proxy_safe: bool = True                   # if False: skipped in live preview unless forced
     help: str | None = None
+    #: Slug of the bundled glossary entry that explains what this op *is*
+    #: ("stretching", "scnr"), so the editor can link at ``/glossary#<slug>``.
+    #: ``help`` says what the control does to this picture; the glossary says
+    #: what the word means — the question a beginner meets first, and one the
+    #: app promises to answer at the word ("every entry has its own link — so a
+    #: screen that uses a word can point straight at the word",
+    #: ``seestack/data/glossary.md``). ``None`` renders exactly as before.
+    glossary: str | None = None
     is_stretch: bool = False                  # the single tone-mapping boundary op
     heavy: bool = False                       # expensive on the proxy (iterative/restoration);
                                               # the UI settles its preview debounce longer for these

@@ -1084,6 +1084,15 @@ class StackOptionField(BaseModel):
     # bounds are unchanged. ``None`` (the default, and every other field) means
     # the form shows the raw number, exactly as it always has.
     unit: Literal["percent"] | None = None
+    # The bundled glossary entry that explains the *concept* this control acts
+    # on — ``"sigma-clipping"`` for "Sigma clipping" — so the form can link at
+    # ``/glossary#sigma-clipping``. ``help`` says what the control does; this
+    # says what the word means, which is a different question and the one a
+    # beginner is more often stuck on. ``None`` (most fields, and every editor
+    # param that maps to no term) renders exactly as before.
+    # ``tests/test_glossary_links.py`` fails if a slug here is not in the
+    # bundled glossary, so a link can never be dead.
+    glossary: str | None = None
 
 
 # Curated descriptors. `default` is filled from the dataclass at import time so
@@ -1097,23 +1106,23 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "small stacks (where sigma clipping can't catch a lone satellite/plane "
              "trail), sigma clipping on large ones — so you don't have to choose. "
              "When on, it overrides the two options below."},
-    {"key": "sigma_clip", "label": "Sigma clipping", "type": "bool", "group": "simple",
+    {"key": "sigma_clip", "glossary": "sigma-clipping", "label": "Sigma clipping", "type": "bool", "group": "simple",
      "help": "Reject per-pixel outliers (satellites, cosmic rays, planes)."},
-    {"key": "sigma_kappa", "label": "Sigma κ", "type": "float", "group": "simple",
+    {"key": "sigma_kappa", "glossary": "sigma-clipping", "label": "Sigma κ", "type": "float", "group": "simple",
      "min": 1.0, "max": 5.0, "step": 0.1, "depends_on": "sigma_clip",
      "help": "Lower = more aggressive rejection."},
-    {"key": "min_max_reject", "label": "Min/max rejection", "type": "bool", "group": "simple",
+    {"key": "min_max_reject", "glossary": "min-max-rejection", "label": "Min/max rejection", "type": "bool", "group": "simple",
      "help": "Drop one per-pixel min and max before averaging. Removes a lone "
              "satellite/plane trail or hot/cold sample even in a small stack, "
              "where sigma clipping can't. Needs 3+ frames; takes precedence over "
              "sigma clipping and ignores quality weights."},
-    {"key": "min_max_reject_count", "label": "Extremes to drop (per side)", "type": "int",
+    {"key": "min_max_reject_count", "glossary": "min-max-rejection", "label": "Extremes to drop (per side)", "type": "int",
      "group": "advanced", "min": 1, "max": 5, "step": 1, "depends_on": "min_max_reject",
      "help": "How many of the lowest and highest values to drop at each pixel. 1 = "
              "the classic single min/max drop. Raise it to remove several trails "
              "crossing one pixel across a session (3 → up to 3 trails). Only applied "
              "where a pixel has at least 2×this+1 frames; costs a little more memory."},
-    {"key": "background_flatten", "label": "Background flatten", "type": "bool", "group": "simple",
+    {"key": "background_flatten", "glossary": "background-flattening", "label": "Background flatten", "type": "bool", "group": "simple",
      "help": "Subtract a per-frame sky model to remove gradients."},
     {"key": "quality_weighted", "label": "Quality weighting", "type": "bool", "group": "simple",
      "help": "Weight sharper / clearer frames more heavily."},
@@ -1133,16 +1142,16 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "it as a darker tile with a step along the join. Leave it on: it measures "
              "first and changes nothing at all unless the overlaps give it a clear "
              "answer. Single-field targets ignore this."},
-    {"key": "lucky_fraction", "label": "Lucky imaging (keep the sharpest frames)",
+    {"key": "lucky_fraction", "glossary": "fwhm", "label": "Lucky imaging (keep the sharpest frames)",
      "type": "float", "group": "simple", "min": 0.05, "max": 1.0, "step": 0.05,
      "unit": "percent",
      "help": "Keep only the sharpest frames by FWHM and drop the rest. Type how "
              "much to keep: 100 = keep all, 75 = keep the sharpest three-quarters, "
              "50 = the sharpest half. The finished picture is badged with the same "
              "number (e.g. \"Lucky 50%\")."},
-    {"key": "drizzle", "label": "Drizzle (super-resolution)", "type": "bool", "group": "simple",
+    {"key": "drizzle", "glossary": "drizzle", "label": "Drizzle (super-resolution)", "type": "bool", "group": "simple",
      "help": "Use the drizzle algorithm. Best with 200+ dithered frames."},
-    {"key": "drizzle_reject", "label": "Drizzle outlier rejection", "type": "bool",
+    {"key": "drizzle_reject", "glossary": "drizzle", "label": "Drizzle outlier rejection", "type": "bool",
      "group": "simple", "depends_on": "drizzle",
      "help": "Second drizzle pass that rejects satellites, plane trails and cosmic "
              "rays (single-pass drizzle keeps them). Uses Sigma κ; needs 4+ frames. "
@@ -1152,7 +1161,7 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "help": "Stack as single-channel luminance (no debayer). For mono cameras and "
              "L/R/G/B/narrowband subs. Combine channels later in Channel combine."},
     # --- advanced ---
-    {"key": "background_mode", "label": "Background mode", "type": "enum", "group": "advanced",
+    {"key": "background_mode", "glossary": "background-flattening", "label": "Background mode", "type": "enum", "group": "advanced",
      "options": ["per_channel", "luminance"],
      "option_labels": {"per_channel": "Per channel", "luminance": "Luminance"},
      "depends_on": "background_flatten",
@@ -1161,58 +1170,58 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "shared model and keeps colour on extended emission (nebulae like M42 / "
              "Lagoon / North America), where per-channel can leave cyan cores and red "
              "halos. Switch to Luminance for a big diffuse nebula."},
-    {"key": "background_box_size", "label": "Background box size", "type": "int",
+    {"key": "background_box_size", "glossary": "background-flattening", "label": "Background box size", "type": "int",
      "group": "advanced", "min": 32, "max": 512, "step": 16, "depends_on": "background_flatten",
      "help": "Grid size (px) of the sky model. Smaller follows finer gradients but risks "
              "eating real nebulosity; larger is gentler. 128 suits most Seestar frames."},
-    {"key": "suppress_hot_pixels", "label": "Hot-pixel suppression", "type": "bool",
+    {"key": "suppress_hot_pixels", "glossary": "hot-pixel", "label": "Hot-pixel suppression", "type": "bool",
      "group": "advanced",
      "help": "Replace stuck hot/cold pixels with a local median before stacking. "
              "Cheap (~10 ms/frame) and safe to leave on."},
-    {"key": "hot_pixel_sigma", "label": "Hot-pixel σ", "type": "float", "group": "advanced",
+    {"key": "hot_pixel_sigma", "glossary": "hot-pixel", "label": "Hot-pixel σ", "type": "float", "group": "advanced",
      "min": 2.0, "max": 10.0, "step": 0.5, "depends_on": "suppress_hot_pixels",
      "help": "How far above the local median a pixel must sit to count as hot. Lower = "
              "catches more (but can nibble faint stars); higher = only the worst."},
-    {"key": "subpixel_refine", "label": "Sub-pixel alignment refine", "type": "bool",
+    {"key": "subpixel_refine", "glossary": "alignment", "label": "Sub-pixel alignment refine", "type": "bool",
      "group": "advanced",
      "help": "Add a phase-correlation pass that nudges each frame by a fraction of a "
              "pixel after the plate-solve align, for slightly tighter stars. Costs a "
              "little more time per frame; off by default."},
-    {"key": "final_gradient_removal", "label": "Final gradient removal", "type": "bool",
+    {"key": "final_gradient_removal", "glossary": "background-flattening", "label": "Final gradient removal", "type": "bool",
      "group": "advanced", "help": "Post-stack gradient removal with object masking."},
-    {"key": "final_gradient_mode", "label": "Final gradient mode", "type": "enum",
+    {"key": "final_gradient_mode", "glossary": "background-flattening", "label": "Final gradient mode", "type": "enum",
      "group": "advanced", "options": ["per_channel", "luminance"],
      "option_labels": {"per_channel": "Per channel", "luminance": "Luminance"},
      "depends_on": "final_gradient_removal",
      "help": "Same choice as Background mode, applied to the one post-stack gradient "
              "pass. Use Luminance for extended nebulae to keep their colour; Per channel "
              "for star fields."},
-    {"key": "final_gradient_box_size", "label": "Final gradient box size", "type": "int",
+    {"key": "final_gradient_box_size", "glossary": "background-flattening", "label": "Final gradient box size", "type": "int",
      "group": "advanced", "min": 64, "max": 1024, "step": 32,
      "depends_on": "final_gradient_removal",
      "help": "Grid size (px) of the post-stack gradient model. Larger than the per-frame "
              "box because it works on the full stacked image; 256 suits most stacks."},
-    {"key": "scale_dark_to_light", "label": "Scale dark to sub exposure", "type": "bool",
+    {"key": "scale_dark_to_light", "glossary": "master-dark", "label": "Scale dark to sub exposure", "type": "bool",
      "group": "advanced",
      "help": "When your master dark was shot at a different exposure than these subs, "
              "scale its dark current to match: dark = bias + (dark − bias)×(sub ÷ dark "
              "exposure). Needs a master bias selected too (to hold the readout pedestal "
              "fixed); without one the dark is used unscaled."},
-    {"key": "repair_sensor_defects", "label": "Repair hot/dead pixels from the dark",
+    {"key": "repair_sensor_defects", "glossary": "master-dark", "label": "Repair hot/dead pixels from the dark",
      "type": "bool", "group": "advanced",
      "help": "Use your master dark to find the photosites that are broken — bright in "
              "every dark, or stuck dark — and replace just those from their same-colour "
              "neighbours, before the colours are reconstructed. Every other pixel, "
              "including every star, is left exactly as it was. Needs a master dark (or "
              "bias) selected; off by default."},
-    {"key": "color_calibration", "label": "Color calibration", "type": "bool", "group": "advanced",
+    {"key": "color_calibration", "glossary": "colour-calibration", "label": "Color calibration", "type": "bool", "group": "advanced",
      "help": "Balance the stack's colour so a neutral background reads grey, at stack "
              "time. The editor also offers colour calibration, so you can leave this off "
              "and do it there with a live preview."},
     # "gaia" is retired (v0.418.0) — see RETIRED_OPTION_VALUES below and MODE_GAIA in
     # seestack/post/color_cal.py. It needed a CDS network call and an astroquery the
     # image does not ship, so choosing it did nothing and said nothing.
-    {"key": "color_calibration_mode", "label": "Color cal. mode", "type": "enum",
+    {"key": "color_calibration_mode", "glossary": "colour-calibration", "label": "Color cal. mode", "type": "enum",
      "group": "advanced", "options": ["gray_star"],
      "option_labels": {"gray_star": "Gray-star (offline)"},
      "depends_on": "color_calibration",
@@ -1437,6 +1446,9 @@ class EditOpOut(BaseModel):
     is_stretch: bool
     heavy: bool = False
     help: str | None = None
+    #: The glossary entry for the concept this op performs — see
+    #: :attr:`StackOptionField.glossary`.
+    glossary: str | None = None
     params: list[StackOptionField]
 
 
@@ -1450,13 +1462,14 @@ def editor_ops_schema() -> list[EditOpOut]:
                 key=p.key, label=p.label, type=p.type, group=p.group,
                 default=p.default, min=p.min, max=p.max, step=p.step,
                 options=p.options, option_labels=p.option_labels,
-                help=p.help, depends_on=p.depends_on,
+                help=p.help, depends_on=p.depends_on, glossary=p.glossary,
             )
             for p in spec.params
         ]
         out.append(EditOpOut(
             id=spec.id, label=spec.label, group=spec.group, stage=spec.stage,
             proxy_safe=spec.proxy_safe, is_stretch=spec.is_stretch,
-            heavy=spec.heavy, help=spec.help, params=params,
+            heavy=spec.heavy, help=spec.help, glossary=spec.glossary,
+            params=params,
         ))
     return out
