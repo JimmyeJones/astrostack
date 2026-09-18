@@ -1,5 +1,89 @@
 # Shipped — the record
 
+## v0.462.0 — 2026-09-18 — a stack time estimate is a measurement of *code*, and it was still quoting the last build's
+
+*(Builder, branch `claude/sweet-babbage-m3wwgy`. Verified against the code from observer issue
+[#933](https://github.com/JimmyeJones/astrostack/issues/933); the magnitudes below are the observer's
+measurements on the owner's own library, the mechanism is this repo's.)*
+
+**What the estimate stands on.** `seestack/stacktime.py` answers the Stack form's third question — after
+"how big will the picture be?" and "will it fit in memory?" comes *"start it now or in the morning?"* — by
+**measuring** rather than modelling: the median seconds-per-sub of this target's own comparable finished
+runs (`stack_runs.duration_s`), times the planned sub count. Its docstring is explicit that "comparable" is
+deliberately strict, *"because a wrong number here costs more trust than no number at all"*, and it splits
+the basis on three axes: cost class, canvas area ratio, and a minimum basis frame count.
+
+It did not split on **which build measured it**, and nothing else in the path did either:
+`estimate_stack_seconds` took the five most recent qualifying runs whatever engine wrote them. The only
+upgrade the docstring anticipates is the *first* one — *"on the first run after an upgrade … the column is
+new, so nothing is timed yet, and the app says nothing rather than guessing"*. That covers the release that
+**introduced** `duration_s`. It does not cover the next upgrade, when the basis is full of timings from the
+previous engine.
+
+**Measured, on the owner's install, with a control.** Six restacks whose target, sub count combined, output
+canvas in pixels and `options_json` are identical to their predecessors, across one version boundary:
+
+    target                        n_subs   canvas       before    after    delta
+    C_20 - North America Nebula      320   2528x3238    1959.1   2118.2    +8.1%
+    C_28                            1110   2066x3212    6358.9   6986.2    +9.9%
+    Alphecca_mosaic-…                725   3712x7576    4906.1   5636.7   +14.9%
+    Alphecca_mosaic_sub              724   2475x5107    2213.5   2631.0   +18.9%
+    73_Leonis_mosaic-…               400   4473x8252    3823.3   4559.9   +19.3%
+    73_Leonis_mosaic_sub             400   3001x5507    2178.7   2971.5   +36.4%
+
+Median **+16.9 %**. The control — the same comparison *within* one engine, 11 consecutive repeats — is
+**+0.4 %**, range −4.6 % .. +8.1 %; five of the six cross-boundary deltas are above the control's maximum and
+the sixth ties it. Running the app's own `estimate_from_runs` over each target's history *as it stood
+immediately before* each of those runs, i.e. exactly the number the form would have shown, gives **six of six
+under-stated, one direction, 7.0 % to 24.9 %** — 6.0 h of estimate against 6.9 h of work, while a reprocess
+batch walked all 95 targets. (No cause is claimed: there is no bisect, and a host-level change over the eight
+days is not excluded. What is established is that the basis and the run are on opposite sides of a boundary
+the estimate cannot see.)
+
+**The app already knew the difference.** `webapp/pipeline.py::reprocess_status` calls a target *outdated* on
+exactly this comparison — `run.engine_version != APP_VERSION` — and raises the nudge that offers to restack
+it. So one surface used the version to tell the owner his pictures were made by an older build, and the
+surface pricing that very restack read the older build's rate as if it were this one's. Same fact, two
+screens, one of them silent about it.
+
+**The fix, and the shape it deliberately is not.** `estimate_stack_seconds` takes an `engine_version` and
+**prefers** the runs that build wrote: when the target has any, the rate is the median of those alone, even
+if that is one run against five older ones — a rate is a measurement of code, and one run of the code about
+to execute predicts it better than five runs of code that is not, which is the same argument the other three
+axes make. When there are none to prefer it does **not** go silent: the older runs still answer, exactly as
+they do today, and `StackTimeEstimate.same_engine` is `False` so the sentence can say where the number came
+from. Discarding them instead would take the form's only answer away on every target for one stack after
+every upgrade — precisely when the owner is restacking the library *because the app has just told him it is
+outdated* — to avoid an error the measurement puts at 7–25 %, where the three existing axes exclude jobs
+whose rates differ by multiples. The wording is `stackTimeLine`'s, one clause: *"About 1 h to run — from your
+last 2 stacks of this target, **which ran on a different version of AstroStack — the real time may differ**."*
+
+**Details that are load-bearing rather than tidy:**
+
+- **Unknown is not "mine".** `engine_version` is NULL on runs older than schema 9; such a row falls to the
+  flagged side, never silently passes as current.
+- **Asking without naming a build is still supported and pinned** (`engine_version=None` → one basis, no
+  preference, `same_engine` `True`) — so the pre-v0.462.0 behaviour is reachable and tested, and the
+  no-match case produces the identical basis, rate and number it did before.
+- **The preference is an extra axis, not an override.** A same-build run of a different cost class is still
+  not evidence and cannot rescue an estimate the other axes refused.
+- **`undefined` ≠ `false` in the frontend.** An older backend sends no `same_engine`, and that reads as
+  "nothing to say" rather than as a caveat, so a mixed-version install never grows a warning nobody computed.
+
+**Upgrade-safe (§9):** one additive response field with a `True` default, one additive dataclass field with a
+`None` default, no config, DB-schema, on-disk, endpoint or default change; the column it reads
+(`engine_version`, schema 9) long predates the column it joins it to (`duration_s`, schema 23).
+
+**Tests (+11):** seven in `tests/test_stack_time_estimate.py` (this build's runs outvote five older faster
+ones; an older-build-only basis is flagged but still answers with the same rate and number; a NULL version
+never passes as current; asking without a version is byte-for-byte the old answer; the basis cap applies to
+the preferred set and never pads with older runs; the version travels off the row through
+`estimate_from_runs`; and the axes still compose), one in `tests/webapp/test_stack_estimate.py` (the field on
+the wire, both ways, with only the version moving between the two calls), and three in
+`stackTimeEstimate.test.ts` (the clause, its absence, and `undefined` staying quiet). **Five fail before**,
+reverted *inside the logic* with the signature and call sites intact — a `TypeError` from a deleted keyword
+is not a fail-before.
+
 ## v0.461.0 — 2026-09-18 — the glossary promised that "a screen that uses a word can point straight at the word", and one screen did
 
 *(Builder, branch `claude/sweet-babbage-db6205`, the third task of the v0.460.0 run — and a **new beginner
