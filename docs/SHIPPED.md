@@ -1,5 +1,51 @@
 # Shipped — the record
 
+## v0.456.1 — 2026-09-18 — and the Stack form was still asking the median, so it and the run disagreed about one target
+
+*(Builder, branch `claude/sweet-babbage-n9bszz`, the sibling v0.456.0's own entry names. Not a follow-up
+tidy: the `calibration-suggestions` endpoint's stated contract is that the form warns about exactly the
+pairs the finished run complains about, and v0.456.0 made the run smarter than the form.)*
+
+**The bug.** `routers/calibration.py` reduced the target's subs to `_median([f.exposure_s …])` and
+`routes/Stack.tsx` rendered it as *"your subs are Ns"*. On a target shot at 10 s on one night and 30 s on
+the next that sentence is false however N is chosen — **on an even split the median is 20 s, a length no
+sub was shot at** — and worse, a 20 s master dark is then a *perfect* match for that median, so the form
+said nothing at all about a dark that is wrong on every single frame. The same median also decided
+`darkExpMismatch`, so the pick-time caution fired on the wrong question.
+
+**The fix.** The endpoint serves `params.exposures_s`, the target's **distinct** sub lengths, from the same
+`calibrate.apply.distinct_exposures` the engine groups with — so the form and the run cannot come to
+different opinions about how many exposures a target has. `calibrationFit.mismatchedExposures` is the
+`exposureMismatch` test asked of every length instead of one (and, like every other check in that file,
+one-sided: an unknown set, an unknown master exposure or an unusable value can only ever stay silent), and
+`joinExposures` mirrors the engine's `_join_exposures` so one target is described the same way before the
+night is spent and after.
+
+**What the form now says.** With a 10 s dark on a 10 s / 30 s target: *"This dark was shot at 10s but your
+subs were not all shot at the same length (10s and 30s) — it will over- or under-subtract on the 30s ones,
+leaving residual thermal signal there. Add a master bias to scale it to each sub, or stack each exposure on
+its own with a dark to match."* It names only the subs the dark is actually wrong for — a 10 s dark is
+right for two-thirds of them, and saying "a mismatched dark" flat would be as wrong as saying nothing. The
+exposure-scaling reassurance carries through the same way ("scaled to match each sub (10s and 30s)"), and
+so does the "Matched to this target's frames" line.
+
+**A one-exposure target is untouched**, including against an older backend that serves no set at all: the
+single-exposure wording is a separate branch, pinned by a test that asserts the mixed sentence never
+appears there.
+
+**Tests (+7).** Two `Stack.test.tsx` cases fail before under a scratch revert — the 20 s-dark case that drew
+no caution at all, and the one that pins *which* subs are named — and a third pins the unchanged
+single-exposure wording. Two endpoint tests fail before (the served set, and that header rounding is one
+exposure and not two), plus four `calibrationFit.test.ts` cases.
+
+**Upgrade-safe (§9):** one additive, optional response field; the median is still served unchanged, so an
+older client is unaffected, and a newer client against an older backend falls back to today's single
+number. No config, schema, on-disk, API-shape or default change, and no pixel changes.
+
+**Still open, filed as a lead:** `pipeline._auto_bind_for_target` takes the same median to *choose and
+bind* a dark unattended. The run now says when that lands wrong, which is the honest half; changing what it
+binds is a behaviour change on the walk-away path and wants its own call.
+
 ## v0.456.0 — 2026-09-18 — a target is not necessarily one exposure, and the dark advisory assumed it was
 
 *(Builder, branch `claude/sweet-babbage-n9bszz`. Found by asking which of the app's "representative value"

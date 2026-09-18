@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from webapp import calibration, deps, pipeline
 from seestack.calibrate import discover
+from seestack.calibrate.apply import distinct_exposures
 from seestack.calibrate.masters import VALID_KINDS, VALID_METHODS
 
 router = APIRouter(tags=["calibration"])
@@ -84,6 +85,17 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     form needs the subs' size to say so at pick time rather than letting the job
     die with a cryptic error. Additive keys; an older client just ignores them.
 
+    ``params.exposures_s`` carries the target's **distinct** sub lengths (grouped
+    by the engine's own ``EXPOSURE_MISMATCH_TOL``, so header rounding is one
+    length and a real Seestar step is two). The other ``params`` are medians,
+    which is a claim that there is only one of each — true for gain and
+    temperature in practice, and not true for exposure: a target shot at 10 s on
+    one night and 30 s on the next has two, and the median then names a length no
+    sub was shot at. The finished run judges the dark against all of them
+    (v0.456.0), so the form is served the set too, or the two would disagree
+    about one target — which is exactly what ``tolerances`` below exists to
+    prevent. Additive; an older client ignores it and keeps the single number.
+
     ``tolerances`` carries the **engine's own** exposure/temperature mismatch
     thresholds. The Stack form warns about the same two mismatches at *pick* time
     that ``CalibrationMasters.calibration_warnings`` reports on the finished run,
@@ -100,12 +112,22 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
         proj.close()
         lib.close()
     exposure_s = _median([f.exposure_s for f in frames if f.exposure_s])
+    # …and how many *different* sub lengths there are, because the median is a
+    # claim that there is only one. A target shot at 10 s on one night and 30 s
+    # on the next is one target with two exposures in it, and then "your subs are
+    # Ns" is false however N is chosen — on an even split it names a length no
+    # sub was shot at. The finished run judges the dark against all of them
+    # (v0.456.0); serving the set is what lets the form warn about exactly the
+    # pairs the run will complain about, which is this endpoint's whole contract.
+    # Additive: an older client ignores the key and keeps today's single number.
+    exposures_s = distinct_exposures([f.exposure_s for f in frames])
     gain = _median([f.gain for f in frames if f.gain is not None])
     sensor_temp_c = _median([f.sensor_temp_c for f in frames if f.sensor_temp_c is not None])
 
     masters = calibration.list_masters(settings.resolved_library_root)
     rec = calibration.recommend_masters(
         masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c)
+    rec["params"]["exposures_s"] = exposures_s
     rec["params"]["width_px"] = calibration.modal_dim([f.width_px for f in frames])
     rec["params"]["height_px"] = calibration.modal_dim([f.height_px for f in frames])
     # The subs' own colour-filter phase, so the form's "Use recommended" lands on
