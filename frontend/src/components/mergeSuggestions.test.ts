@@ -3,6 +3,7 @@ import type { MergeSuggestion } from "../api/client";
 import {
   describeMergeSuggestion,
   mergeInto,
+  mergeOutcomeMessage,
   mergeSources,
   mergeSuggestionSignature,
   mergeSuggestionTotalExposureS,
@@ -81,5 +82,36 @@ describe("describeMergeSuggestion", () => {
     );
     expect(text).toContain("Combine them.");
     expect(text).not.toContain("total)");
+  });
+});
+
+describe("mergeOutcomeMessage", () => {
+  it("names the pictures that came with the folders, so the promise is checkable", () => {
+    expect(mergeOutcomeMessage(2, "Andromeda Galaxy", 3)).toBe(
+      "Combined 2 folders of Andromeda Galaxy into one deep target. " +
+      "Your 3 existing pictures came with them — see History. " +
+      "Re-stack it to get the deeper picture.",
+    );
+  });
+
+  it("uses the singular for one picture", () => {
+    expect(mergeOutcomeMessage(2, "M 31", 1)).toContain(
+      "Your 1 existing picture came with it — see History.",
+    );
+  });
+
+  it("says nothing extra when no folder had a picture", () => {
+    expect(mergeOutcomeMessage(3, "M 31", 0)).toBe(
+      "Combined 3 folders of M 31 into one deep target. " +
+      "Re-stack it to get the deeper picture.",
+    );
+  });
+
+  it("degrades to today's sentence on a backend that omits the count", () => {
+    // Absent must read as "unknown", never as zero dressed up as a claim.
+    const today = "Combined 3 folders of M 31 into one deep target. " +
+      "Re-stack it to get the deeper picture.";
+    expect(mergeOutcomeMessage(3, "M 31", undefined)).toBe(today);
+    expect(mergeOutcomeMessage(3, "M 31", null)).toBe(today);
   });
 });

@@ -454,6 +454,16 @@ export interface MergeSuggestionTarget {
 // A "these look like the same object — combine them?" suggestion: a cluster of
 // ≥2 targets whose plate-solved centres agree. `targets` are ordered
 // deepest-integration first, so `targets[0].safe` is the natural merge `into`.
+/** What `POST /api/targets/merge` did. `pictures_kept` is the finished stacks
+ *  carried out of the source folders the merge then deleted — optional because
+ *  a backend older than it simply omits the key, which must read as "unknown",
+ *  never as zero. */
+export interface MergeOutcome {
+  into: string;
+  frames_added: number;
+  pictures_kept?: number;
+}
+
 export interface MergeSuggestion {
   object_name: string | null;
   center_ra_deg: number;
@@ -3350,7 +3360,8 @@ export const api = {
   deleteTarget: (safe: string, removeFiles: boolean) =>
     req(`/api/targets/${safe}?remove_files=${removeFiles}`, { method: "DELETE" }),
   mergeTargets: (into: string, sources: string[]) =>
-    req("/api/targets/merge", { method: "POST", body: JSON.stringify({ into, sources }) }),
+    req<MergeOutcome>("/api/targets/merge",
+      { method: "POST", body: JSON.stringify({ into, sources }) }),
   mergeSuggestions: () =>
     req<MergeSuggestion[]>("/api/targets/merge-suggestions"),
   cleanupSuggestions: () =>

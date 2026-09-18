@@ -825,6 +825,19 @@ class Project:
         assert self._conn is not None
         self._conn.execute("DELETE FROM project_meta WHERE key = ?", (key,))
 
+    def iter_meta(self) -> Iterator[tuple[str, str]]:
+        """Yield every ``(key, value)`` in ``project_meta``.
+
+        For the one caller that cannot name the keys it wants up front:
+        :func:`seestack.io.merge.carry_stack_runs` has to find the annotations
+        hung off *each* run id (``editor_recipe:7``, ``calibration_warnings:7``,
+        …) without importing the web layer that owns those prefixes. The table is
+        a handful of rows per project — this is not a scan worth avoiding.
+        """
+        assert self._conn is not None
+        for row in self._conn.execute("SELECT key, value FROM project_meta"):
+            yield row["key"], row["value"]
+
     def iter_meta_prefix(self, prefix: str) -> Iterator[tuple[str, str]]:
         """Yield ``(key, value)`` for every project-meta key starting with ``prefix``.
 
