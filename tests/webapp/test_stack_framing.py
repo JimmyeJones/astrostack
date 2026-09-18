@@ -483,3 +483,72 @@ def test_the_planner_says_nothing_when_only_a_re_render_survives(
              w=6000, h=4500, arcsec_per_px=3.0,
              timestamp="2026-09-13T10:00:00Z", derived_from=999999)
     assert _nudge(solved_library, safe) is None
+
+
+def test_a_canvas_that_holds_an_elongated_object_whole_says_so_end_to_end(
+    client, solved_library,
+):
+    """The shape bug, through the real endpoint and the real catalogue row.
+
+    M 42 is 85′ × 60′. A 100′ × 70′ canvas centred on it holds the whole nebula —
+    but modelled as a *square* of its major axis it "runs off" the short edge,
+    and the endpoint reported ``partial`` at about 80 %: an owner told to add
+    panels to a picture that already has everything, directly above the panel
+    count that says the grid they have covers it.
+    """
+    safe = _m42(client)
+    # 3″/px: 2000 × 1400 px = 100′ × 70′.
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                      w=2000, h=1400, arcsec_per_px=3.0, is_mosaic=True)
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "centred"
+    assert body["coverage"] == pytest.approx(1.0)
+    assert body["coverage_pct"] == 95          # never prints a bare "100%"
+    assert "more panels" not in body["text"]
+
+
+def test_an_object_the_canvas_really_does_cut_still_reports_the_shortfall(
+    client, solved_library,
+):
+    """The other direction, so the fix above can't be "always say it fitted":
+    half the short axis of M 42 is genuinely outside a 100′ × 30′ canvas."""
+    safe = _m42(client)
+    # 3″/px: 2000 × 600 px = 100′ × 30′ — the minor axis is 60′, so half of it
+    # is off the canvas whichever way the nebula is turned.
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                      w=2000, h=600, arcsec_per_px=3.0, is_mosaic=True)
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "partial"
+    assert body["coverage"] == pytest.approx(0.5, abs=0.02)
+    assert "more panels" in body["text"]
+
+
+def test_the_recentre_offer_is_made_for_an_elongated_object_end_to_end(
+    client, solved_library,
+):
+    """The wiring for the offer, not just for the sentence.
+
+    M 42 is 85′ × 60′. On this canvas the verdict says "all in this frame, but
+    sits well off to one side — re-centring it next session would give it more
+    room", and the offer beside it is the app doing exactly that to the picture
+    they already have. Sized around a *square* of the major axis the crop was
+    refused as "cramped", so the card made a promise and then withheld the one
+    button that keeps it.
+    """
+    safe = _m42(client)
+    # 1000 × 800 px at 14″/px, pointed 0.766° below the nebula: M 42 lands about
+    # half-way out towards the top edge, whole, with room for a crop that holds
+    # its real 85′ × 60′ box plus clear space.
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC - 0.766,
+                      w=1000, h=800, arcsec_per_px=14.0)
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "off_centre"
+    assert body["coverage"] == pytest.approx(1.0)
+    assert body["recentre"] is not None
+    assert body["recentre"]["kept"] > 0.4
