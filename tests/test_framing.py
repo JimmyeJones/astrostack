@@ -5,8 +5,10 @@ from __future__ import annotations
 import pytest
 
 from seestack.framing import (
+    MOSAIC_PANEL_OVERLAP,
     SEESTAR_FOV_LONG_ARCMIN,
     SEESTAR_FOV_SHORT_ARCMIN,
+    FrameField,
     framing_hint,
     framing_result_verdict,
     mosaic_plan,
@@ -288,6 +290,103 @@ def test_the_default_canvas_is_a_single_frame_so_old_callers_are_unchanged():
     # wording rather than inventing a third voice.
     v = verdict(500, 400, 180, canvas="something-else")
     assert v is not None and "your frame" in v.text
+
+
+# ---------------------------------------------------------------------------
+# The object's *shape* — the verdict, the panel count and the drawing have to
+# measure one object, because they land on one card.
+# ---------------------------------------------------------------------------
+
+
+def test_an_elongated_object_that_fits_whole_is_not_reported_as_40_percent_in():
+    # The bug this pins, measured on the owner's own telescope and a real
+    # catalogue row: M 31 (178' x 63') dead centre in the 2x1 mosaic that
+    # `mosaic_plan` itself prescribes for an S30 holds **all** of the galaxy —
+    # and the square-box model read that as "only about 40% of it is in this
+    # picture. Adding more panels next session would capture the rest.", printed
+    # directly above "About a 2x1 mosaic (2 panels) covers all of it." One card,
+    # two shapes, contradicting itself about a grid the owner had already shot.
+    field = FrameField(128.0, 72.0)          # S30, AGENTS.md sec.1 Owner facts
+    plan = mosaic_plan(178.0, 63.0, field=field)
+    assert plan is not None and (plan.cols, plan.rows) == (2, 1)
+    step = 1.0 - MOSAIC_PANEL_OVERLAP
+    scale = 5.0
+    w = int(field.long_arcmin * (1 + step * (plan.cols - 1)) * 60 / scale)
+    h = int(field.short_arcmin * (1 + step * (plan.rows - 1)) * 60 / scale)
+
+    v = framing_result_verdict(
+        x_px=(w - 1) / 2, y_px=(h - 1) / 2, width_px=w, height_px=h,
+        arcsec_per_px=scale, size_arcmin=178.0, size_minor_arcmin=63.0,
+        canvas="mosaic")
+    assert v is not None
+    assert v.level == "centred"
+    assert v.coverage == pytest.approx(1.0)
+    assert "more panels" not in v.text
+
+    # ...and the square fallback is exactly the old answer, so this is a change
+    # of *model*, not of arithmetic.
+    square = framing_result_verdict(
+        x_px=(w - 1) / 2, y_px=(h - 1) / 2, width_px=w, height_px=h,
+        arcsec_per_px=scale, size_arcmin=178.0, canvas="mosaic")
+    assert square is not None
+    assert square.level == "partial"
+    assert square.coverage == pytest.approx(0.404, abs=0.005)
+
+
+def test_a_minor_axis_never_makes_the_verdict_report_less_than_the_square_box():
+    # The minor axis can only ever *shrink* the object's box, so coverage can
+    # only ever go up. Pinned across the grid so a future change to the axis
+    # assignment can't quietly make a picture look worse than it is.
+    for x, y in ((500, 400), (900, 700), (500, 60), (60, 400)):
+        for major, minor in ((30, 10), (180, 60), (90, 89), (200, 5)):
+            square = verdict(x, y, major)
+            shaped = verdict(x, y, major, size_minor_arcmin=minor)
+            assert square is not None and shaped is not None
+            assert shaped.coverage >= square.coverage - 1e-9
+
+
+def test_the_object_is_laid_along_the_canvas_long_edge_whichever_way_it_runs():
+    # `mosaic_plan` and `field_fill` both assume the object is laid along the
+    # frame's long edge; a portrait canvas has to get the same assumption, or a
+    # rotated mosaic would measure the object the other way round.
+    landscape = framing_result_verdict(
+        x_px=499.5, y_px=399.5, width_px=1000, height_px=800,
+        arcsec_per_px=5.0, size_arcmin=80.0, size_minor_arcmin=40.0)
+    portrait = framing_result_verdict(
+        x_px=399.5, y_px=499.5, width_px=800, height_px=1000,
+        arcsec_per_px=5.0, size_arcmin=80.0, size_minor_arcmin=40.0)
+    assert landscape is not None and portrait is not None
+    assert landscape.level == portrait.level == "centred"
+    assert landscape.coverage == pytest.approx(portrait.coverage)
+
+
+def test_an_absent_or_junk_minor_axis_is_the_square_box_callers_always_got():
+    # Upgrade safety: every caller before this argument existed, and every
+    # catalogue row that records no minor axis, gets byte-identical sentences.
+    for x, y, size in ((500, 400, 30), (900, 700, 10), (500, 60, 30),
+                       (500, 400, 180)):
+        base = verdict(x, y, size)
+        assert base is not None
+        for minor in (None, 0, -5):
+            same = verdict(x, y, size, size_minor_arcmin=minor)
+            assert same is not None
+            assert (same.level, same.coverage, same.text) == (
+                base.level, base.coverage, base.text)
+    # A catalogue that recorded the two axes the wrong way round can't inflate
+    # the object either — the minor axis is clamped to the major one.
+    swapped = verdict(500, 400, 30, size_minor_arcmin=90)
+    assert swapped is not None
+    assert swapped.coverage == pytest.approx(verdict(500, 400, 30).coverage)
+
+
+def test_an_elongated_object_too_big_even_for_its_own_shape_still_says_mosaic():
+    # The fix must not turn the *real* "you need a mosaic" case into silence:
+    # a 180' x 120' object on this 83' x 67' canvas is still mostly outside it.
+    v = verdict(500, 400, 180, size_minor_arcmin=120)
+    assert v is not None
+    assert v.level == "partial"
+    assert v.coverage < 0.5
+    assert "mosaic mode" in v.text
 
 
 # ---------------------------------------------------------------------------
