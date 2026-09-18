@@ -21,7 +21,8 @@ import {
   biasSizeWarning, darkScalingBlockedNote, exposureMismatch, flatBayerWarning,
   flatDarkSizeWarning, flatPickPatch, joinExposures, masterOptionSuffix,
   masterRecommendation, masterSizeWarning, mismatchedExposures,
-  pickedMasterContentWarnings, tempMismatch,
+  pickedMasterContentWarnings, degC, tempMismatch, tempMismatchesTheSet,
+  temperatureMismatchCount, temperatureSpread, TEMP_MISMATCH_TOL_C,
 } from "../calibrationFit";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { useJobEvents } from "../hooks/useJobEvents";
@@ -563,9 +564,33 @@ export function StackView() {
   // CalibrationMasters.calibration_warnings temperature advisory, which until now
   // only reached the stack log). Independent of the exposure warning above: a
   // dark can match on exposure but still be temperature-mismatched.
+  //
+  // Asked of *every* sub's temperature, not of their median: the Seestar's
+  // sensor is uncooled, so it follows the ambient, and a target shot across a
+  // winter and a summer night holds a 20°C spread against a 5°C bar — where the
+  // median names a temperature a great many subs were not shot at. The finished
+  // run judges the dark against the whole set (v0.464.0), so the form has to as
+  // well, or the two disagree about one target. `temp_min_share` is the engine's
+  // own floor: temperature is continuous where an exposure is a setting, so a
+  // handful of stray subs sit outside the tolerance of any dark and a warning
+  // nobody can act on is worse than silence.
   const subTemp = sug?.params.sensor_temp_c ?? null;
-  const darkTempWarning =
-    tempMismatch(darkM?.sensor_temp_c, subTemp, tolerances)
+  const subTemps = sug?.params.sensor_temps_c ?? null;
+  const tempSpread = temperatureSpread(subTemps);
+  const tempTol = tolerances?.temp_c ?? TEMP_MISMATCH_TOL_C;
+  const darkTempOff = temperatureMismatchCount(
+    darkM?.sensor_temp_c, subTemps, tolerances);
+  const darkTempWarning = tempSpread
+    ? (tempMismatchesTheSet(darkM?.sensor_temp_c, subTemps, tolerances)
+        ? (darkTempOff.off === darkTempOff.total
+            ? (tempSpread.hi - tempSpread.lo < tempTol
+                ? `This dark was shot at ${degC(darkM!.sensor_temp_c!)}°C but your subs are at ${degC(tempSpread.median)}°C — dark current changes with temperature, so some may remain even at a matched exposure. A temperature-matched dark calibrates best.`
+                : `This dark was shot at ${degC(darkM!.sensor_temp_c!)}°C but your subs were not all shot at the same temperature (${degC(tempSpread.lo)}°C to ${degC(tempSpread.hi)}°C), and none of them is within ${tempTol}°C of it — dark current changes with temperature, so some will remain on every frame. A dark shot on a night like these calibrates best.`)
+            : `This dark was shot at ${degC(darkM!.sensor_temp_c!)}°C but your subs were not all shot at the same temperature (${degC(tempSpread.lo)}°C to ${degC(tempSpread.hi)}°C) — ${darkTempOff.off} of ${darkTempOff.total} are ${tempTol}°C or more away from it, so some dark current will remain on those. A second dark shot on a night like theirs calibrates them best.`)
+        : null)
+    // No tally at all (an older backend, or subs with no CCD-TEMP card): the
+    // single median stands in exactly as it did before.
+    : tempMismatch(darkM?.sensor_temp_c, subTemp, tolerances)
       ? `This dark was shot at ${darkM?.sensor_temp_c}°C but your subs are at ${subTemp}°C — dark current changes with temperature, so some may remain even at a matched exposure. A temperature-matched dark calibrates best.`
       : null;
   // Proactive nudge: the dark's exposure is mismatched and no bias is selected,

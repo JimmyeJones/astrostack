@@ -44,6 +44,21 @@ EXPOSURE_MISMATCH_TOL = 0.15
 # before the advisory warning fires. Dark current ~doubles per 6-7 °C, so a few
 # degrees is tolerable; this flags a clearly-mismatched dark library.
 TEMP_MISMATCH_TOL_C = 5.0
+# The share of a target's subs a master dark must *miss* on temperature before
+# the advisory says so.
+#
+# Exposure is a setting, so a second one is a second population by definition.
+# Temperature is not: an uncooled sensor drifts through a night and follows the
+# season across nights, so on a target spanning many nights a few subs sit beyond
+# the tolerance of *any* dark. What reaches the stacked picture is their share of
+# one frame's residual — below a tenth that is well inside what the tolerance
+# itself already calls tolerable, and saying it anyway is a warning the reader
+# cannot act on.
+#
+# It floors *reporting*, never correction, and it can only ever suppress a
+# warning the old reference-frame test fired by accident (that test asked one
+# frame, so a lone outlier chosen as reference spoke for the whole session).
+TEMP_MISMATCH_MIN_SHARE = 0.10
 
 # Historical private aliases — kept so nothing that referenced them breaks.
 _EXPOSURE_MISMATCH_TOL = EXPOSURE_MISMATCH_TOL
@@ -86,6 +101,66 @@ def distinct_exposures(values: Iterable[float | None]) -> list[float]:
         n = len(g)
         out.append(g[n // 2] if n % 2 else (g[n // 2 - 1] + g[n // 2]) / 2.0)
     return out
+
+
+def _finite_temps(values: Iterable[float | None]) -> list[float]:
+    """The usable sensor temperatures in a set of lights, coldest first.
+
+    Unlike an exposure a temperature may legitimately be zero or negative, so the
+    only values dropped are the missing and the non-finite ones: "this sub never
+    recorded a temperature" is not a temperature, and reading a blank FITS card as
+    0 °C would invent a mismatch out of nothing.
+    """
+    return sorted(
+        float(v) for v in values
+        if v is not None and math.isfinite(float(v))
+    )
+
+
+def temperature_spread(
+    values: Iterable[float | None],
+) -> tuple[float, float, float] | None:
+    """``(coldest, median, warmest)`` sensor temperature over a set of lights, or
+    ``None`` when none of them recorded one.
+
+    Public because the Stack form describes the same target *before* the night is
+    spent that the finished run describes afterwards, and the two must not
+    disagree about it — the same reason :data:`TEMP_MISMATCH_TOL_C` is public
+    (see :meth:`CalibrationMasters.calibration_warnings`).
+    """
+    temps = _finite_temps(values)
+    if not temps:
+        return None
+    n = len(temps)
+    med = temps[n // 2] if n % 2 else (temps[n // 2 - 1] + temps[n // 2]) / 2.0
+    return temps[0], med, temps[-1]
+
+
+def temperature_mismatch_count(
+    values: Iterable[float | None], dark_temp_c: float | None,
+    *, tol_c: float = TEMP_MISMATCH_TOL_C,
+) -> tuple[int, int]:
+    """``(how many of these lights this dark's temperature misses, how many of
+    them recorded a temperature at all)``.
+
+    The advisory's own test — ``|t_sub − t_dark| >= tol`` — asked of every sub
+    instead of one. Both halves are returned because the share is what decides
+    whether the gap is worth saying (:data:`TEMP_MISMATCH_MIN_SHARE`) and the
+    count is what makes the sentence actionable. ``(0, n)`` when the dark's own
+    temperature is unknown: an unrecorded master cannot be disproved, exactly as
+    everywhere else in this module.
+    """
+    temps = _finite_temps(values)
+    if dark_temp_c is None or not math.isfinite(float(dark_temp_c)):
+        return 0, len(temps)
+    dt = float(dark_temp_c)
+    return sum(1 for t in temps if abs(t - dt) >= float(tol_c)), len(temps)
+
+
+def _deg(value: float) -> str:
+    """A sensor temperature as the header meant it: one decimal, no trailing
+    zeros. ``float32`` round-trips a ``24.3`` card as ``24.299999237…``."""
+    return f"{round(float(value), 1) + 0.0:g}"
 
 
 def _join_exposures(values: Sequence[float]) -> str:
@@ -471,6 +546,7 @@ class CalibrationMasters:
         light_bayer_pattern: str | None = None,
         *,
         light_exposures_s: Iterable[float | None] | None = None,
+        light_temps_c: Iterable[float | None] | None = None,
     ) -> list[str]:
         """Advisory (non-fatal) warnings that the master dark doesn't match the
         lights it's calibrating.
@@ -511,6 +587,26 @@ class CalibrationMasters:
         against all of it, and the wording stops claiming "every frame" about a
         subset. Omit it (every direct caller, and every older one) and the
         reference frame stands in exactly as before.
+
+        ``light_temps_c`` is the same correction for the **temperature** half,
+        and it is the same false premise: a target is not one temperature either.
+        An uncooled sensor follows the ambient, so a target shot over a winter and
+        a summer night is one target with a 20 °C spread in it, and asking only
+        the reference frame meant the *same* subs with the *same* dark either
+        warned or said nothing depending on which frame ``pick_reference_frame``
+        happened to land on — and, when it did warn, named a temperature most of
+        the subs were not shot at.
+
+        Temperature differs from exposure in two ways that shape what is said.
+        There is no correction for it — a bias cannot rescale a dark to a warmer
+        night the way it can to a longer sub — so this only ever *reports*, and
+        the binding is deliberately unchanged (a dark that misses a minority is
+        still better than no dark at all). And it is continuous rather than a
+        setting, so "how many subs does this dark miss?" is a share, not a list:
+        the advisory speaks when that share reaches
+        :data:`TEMP_MISMATCH_MIN_SHARE` and says the range and the count, so a
+        reader can tell "shoot a second dark" from "ignore this". Omit the set
+        (every older caller) and the reference frame stands in exactly as before.
         """
         warnings: list[str] = []
         # Whichever pedestal actually reaches the lights (never both — see
@@ -640,7 +736,46 @@ class CalibrationMasters:
                         f"exposure-scaling (needs a master bias)."
                     )
         dt = self.dark_temp_c
-        if (dt is not None and light_temp_c is not None
+        # What the lights' temperatures actually are, when the caller knows.
+        # Nothing known (every older caller, and a library that never recorded a
+        # ``CCD-TEMP``) falls through to the single-value branch below, byte for
+        # byte.
+        spread = (
+            temperature_spread(light_temps_c) if light_temps_c is not None else None
+        )
+        if dt is not None and spread is not None:
+            lo, med, hi = spread
+            n_off, n_all = temperature_mismatch_count(light_temps_c, float(dt))
+            if n_all and n_off and n_off >= TEMP_MISMATCH_MIN_SHARE * n_all:
+                mixed = (hi - lo) >= TEMP_MISMATCH_TOL_C
+                if n_off == n_all and not mixed:
+                    # One night's worth of subs, all at much the same temperature
+                    # and all of them wrong — today's sentence, said about the
+                    # set rather than about whichever frame led it.
+                    warnings.append(
+                        f"Master dark was shot at {_deg(dt)}°C but your subs are at "
+                        f"{_deg(med)}°C — dark current changes with temperature, so "
+                        f"some may remain. A temperature-matched dark calibrates best."
+                    )
+                elif n_off == n_all:
+                    warnings.append(
+                        f"Master dark was shot at {_deg(dt)}°C but these subs were "
+                        f"not all shot at the same temperature ({_deg(lo)}°C to "
+                        f"{_deg(hi)}°C), and none of them is within "
+                        f"{TEMP_MISMATCH_TOL_C:g}°C of it — dark current changes "
+                        f"with temperature, so some will remain on every frame. A "
+                        f"dark shot on a night like these calibrates best."
+                    )
+                else:
+                    warnings.append(
+                        f"Master dark was shot at {_deg(dt)}°C but these subs were "
+                        f"not all shot at the same temperature ({_deg(lo)}°C to "
+                        f"{_deg(hi)}°C) — {n_off} of {n_all} are "
+                        f"{TEMP_MISMATCH_TOL_C:g}°C or more away from it, so some "
+                        f"dark current will remain on those. A second dark shot on "
+                        f"a night like theirs calibrates them best."
+                    )
+        elif (dt is not None and light_temp_c is not None
                 and abs(float(dt) - float(light_temp_c)) >= TEMP_MISMATCH_TOL_C):
             warnings.append(
                 f"Master dark was shot at {dt:g}°C but your subs are at "

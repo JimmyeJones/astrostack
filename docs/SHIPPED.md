@@ -1,5 +1,137 @@
 # Shipped — the record
 
+## v0.465.0 — 2026-09-18 — the nudge that says which dark to shoot never said which *night* to shoot it on
+
+*(Builder, branch `claude/sweet-babbage-cm0qc7`, the third commit of the v0.464.0 run and found by it: once
+the advisory judges a dark against every sub's temperature, the obvious next question is whether anything in
+the app ever told the owner to shoot it at the right one.)*
+
+**The gap.** The Calibration page's uncovered-targets nudge ends *"Shoot them at 10s at gain 80 — that's what
+those subs were shot at."* Three acquisition numbers decide whether a dark matches — exposure, gain and
+temperature — and the app says so itself in three places: `auto_bind_master_ids` gates on all three,
+`_acquisition_reason` gives *"its sensor was −3 °C, your subs were 12 °C"* as a reason a dark covers nothing,
+and `calibration_warnings` complains about it on the finished run. The sentence whose whole job is turning
+"shot the same way" into something actionable named two of the three.
+
+**Why the third one is not optional on this camera.** The Seestar's sensor is **uncooled**: its temperature
+is the ambient. So unlike exposure and gain, which are settings, temperature is chosen by *when the owner
+goes out* — and it is the only one of the three he cannot set from a menu. A nudge that leaves it out sends
+him out on any night and then complains about the result.
+
+**What it says now**, as one clause on the existing sentence rather than a new element (the standing "extremely
+busy" priority):
+
+* *"Shoot them on a night around −10 °C — this camera's sensor runs at the outside temperature, and a dark only
+  matches subs shot about as warm."*
+* and when the uncovered targets span more than the engine's own tolerance: *"They weren't all shot on the same
+  kind of night either (−20 °C to 2 °C at the sensor), so no one night's darks will match all of them"* —
+  because averaging a winter night and a summer one names a night nobody had, which is the identical untruth
+  the 10 s/30 s median was in the exposure column.
+* and **nothing at all** when no sub recorded a `CCD-TEMP`, or against an older backend: the rest of the nudge
+  is unchanged rather than guessing at a night.
+
+**How it gets there.** `_target_acquisition` already reads every accepted frame for the roll-up, so the tally
+rides along at no extra cost — the same `_temperature_tally` v0.464.1 serves the Stack form, through a new
+`COVERAGE_TARGET_KEYS` entry and `_clean_temperature_tally`, which *refuses* a malformed tally rather than
+repairing it (a wrong sentence about which night to shoot on is worse than the generic one). The frontend
+reads it with v0.464.1's own `temperatureSpread`/`degC`, and the wide/narrow bar is the engine's
+`TEMP_MISMATCH_TOL_C` — no new threshold anywhere in this commit.
+
+**Upgrade-safe:** one additive response key and one additive input key, both defaulting to empty; a caller
+that omits it gets today's answer, pinned by a test. No config, schema, on-disk, default or API-shape change.
+
+**Tests +6** (3 backend incl. the malformed-tally and end-to-end cases, 3 `calibrationCoverage.test.ts`). One
+existing exact-dict assertion gained the new key — updated, not loosened.
+
+## v0.464.1 — 2026-09-18 — and the Stack form asked the median, so the two would have disagreed about one target
+
+*(Builder, branch `claude/sweet-babbage-cm0qc7`, the second half of v0.464.0 and not optional: the
+`calibration-suggestions` docstring states the contract in its own words — "the Stack form warns about the
+same two mismatches at *pick* time that `CalibrationMasters.calibration_warnings` reports on the finished
+run", and `tolerances` exists because writing a threshold twice let the app "stay quiet before the night was
+spent and complain about it afterwards".)*
+
+Fixing only the engine would have created exactly that split: the run judges the dark against every sub's
+temperature, the form against `params.sensor_temp_c`, their median. On the reproduction case — three subs at
+2 °C, three at −20 °C, a 2 °C dark — the form says nothing at all, because the median *is* 2 °C.
+
+**What is served.** `params.sensor_temps_c`, a `[[°C, how many subs], …]` tally, coldest first, rounded to
+the tenth of a degree a `CCD-TEMP` card is written at. A tally rather than a list because this owner has
+5,477 subs on one target and 35,894 on another: rounding turns a night of float32 jitter into one row, so a
+deep target answers in tens of rows instead of thousands, and the form's answer can differ from the engine's
+only inside 0.05 °C of the 5 °C bar. And `tolerances.temp_min_share`, beside the two thresholds already
+there, for the same reason they are there.
+
+**What the form does with it.** The same three sentences the engine has, off mirrored pure helpers
+(`temperatureSpread`, `temperatureMismatchCount`, `tempMismatchesTheSet`, `degC` in `calibrationFit.ts`) —
+the median of the *subs*, not of the distinct temperatures, so a tally row holding 400 frames weighs 400.
+With no tally at all — an older backend, or subs whose headers never carried a `CCD-TEMP` — the single
+median stands in exactly as it did before, pinned by a test in each direction.
+
+**Upgrade-safe:** two additive response keys and no removal; an older frontend ignores both, a newer
+frontend against an older backend falls through to today's wording. No schema, on-disk, default or
+API-shape change.
+
+**Tests +9** (3 endpoint incl. one on the tally helper's own edges, 5 `calibrationFit.test.ts`, 3
+`Stack.test.tsx`). The route test that names the new sentence was verified fail-before by reverting
+`Stack.tsx` alone and watching it go red; the other two are the "this did not change" half and pass both
+ways on purpose.
+
+## v0.464.0 — 2026-09-18 — a target is not one *temperature* either, and the master-dark advisory assumed it was
+
+*(Builder, branch `claude/sweet-babbage-cm0qc7`. Found by taking the class the v0.456.0 entry said was worth
+remembering — "a representative value is a claim that the set is uniform, and nothing in the data enforces
+it" — and asking it of the sentence directly beside the one that fix corrected.)*
+
+**The comment in `stacker.py` said both halves out loud, 400 characters apart.** After v0.456.0 it read
+*"the reference frame's temperature stands in for the session. Its **exposure** does not, and used not to be
+allowed to: … which of them `pick_reference_frame` landed on then decided whether the advisory fired at
+all."* The paragraph explains exactly why a reference frame cannot speak for a session, and then lets it
+speak for the session about temperature.
+
+**Reproduced before it was fixed**, on a real `run_stack`: six subs of one target, three shot on a mild
+night at 2 °C and three at −20 °C, calibrated with a 2 °C dark. `pick_reference_frame` chooses on quality
+and pointing and has never heard of temperature, so —
+
+    reference frame at   2°C → 0 warnings
+    reference frame at -20°C → 1 warning: "…but your subs are at -20°C…"
+
+— the same subs and the same dark either warned or said nothing, and when it warned it named a temperature
+half the subs were not shot at. `TEMP_MISMATCH_TOL_C` is 5 °C and the Seestar's sensor is uncooled, so its
+temperature follows the ambient: a target shot across a winter and a summer night genuinely holds a 20 °C
+spread, and this owner shoots targets across many nights.
+
+**What it now does.** `calibration_warnings` takes `light_temps_c` — every sub's temperature, as
+`run_stack` already hands it every sub's exposure — and judges the dark against all of it through two new
+pure helpers, `temperature_spread` and `temperature_mismatch_count`. Three sentences, so the reader can tell
+what to do about it:
+
+* every sub off, all at much one temperature → **today's sentence, unchanged**, said about the set instead
+  of about whichever frame led it;
+* every sub off, spread over a range → the range, and that *none* of them is reached;
+* a real minority off → the range, and `N of M are 5 °C or more away from it`, which is the one that says
+  "shoot a second dark" rather than "replace the one you have".
+
+**Temperature is not exposure, and the differences shaped the fix.** There is no correction for it — a bias
+can rescale a dark to a longer sub, nothing rescales it to a warmer night — so this only ever *reports*, and
+the unattended binding is deliberately untouched: a dark that misses a minority still beats no dark, exactly
+the reasoning v0.456.0 recorded for the mixed-exposure case. And temperature is continuous rather than a
+setting, so "how many does it miss?" is a share, not a list. `TEMP_MISMATCH_MIN_SHARE` (0.10) is the bar,
+and it is a floor on *reporting* that can only ever suppress a warning the old test fired **by accident**:
+one stray frame out of fifty leaves a tenth of one frame's residual in the stacked mean, well inside what
+the tolerance itself calls tolerable — and the old reference-frame test fired on exactly that frame whenever
+it happened to be chosen.
+
+**Upgrade-safe:** one additive keyword-only argument with a `None` default. Every caller that omits it — and
+every caller outside this repo — gets the reference-frame reading byte for byte, pinned by a test. No config,
+schema, on-disk, API-shape or default change, and no pixel moves.
+
+**Tests +7** (`tests/test_calibrate.py` ×6, `tests/test_stack_pipeline.py` ×1). **Five of the seven fail
+before**, verified by reverting the fix at runtime (`temperature_spread` stubbed to `None`, which is exactly
+the pre-fix code path) and watching them go red — including the `run_stack` one, which reports **no warning
+at all** on the reverted tree because its reference frame is the matched one. The two that pass both ways
+are the two whose subject is the single-night case staying identical.
+
 ## v0.462.2 — 2026-09-18 — the `--calibration` pass's defect line read two keys the endpoint has never sent
 
 *(Builder, branch `claude/sweet-babbage-m3wwgy`, the third task of the v0.462.0 run. Found by running
