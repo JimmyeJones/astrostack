@@ -17,7 +17,13 @@ import type { StackEstimate } from "./api/client";
  *   target"), because a number with no provenance reads as a promise;
  * - it softens to *Roughly* when the run being sized is far bigger than the runs
  *   the rate was learned on — a rate measured on 40 subs projected onto 4,000 is
- *   an extrapolation, and saying so costs nothing.
+ *   an extrapolation, and saying so costs nothing;
+ * - and it names the *build* when the rate came from a different one. A
+ *   seconds-per-sub is a measurement of code, and across one real upgrade the
+ *   owner's own identical restacks came back 8–36 % slower, so the form
+ *   under-stated six of six by 7–25 % while sounding exactly as confident
+ *   (observer issue #933). The backend prefers this build's own timings and
+ *   sets `same_engine: false` when it had none to prefer.
  *
  * Returns `null` whenever there is nothing honest to say (no estimate, an older
  * backend that sends none, a nonsense duration), and the form then shows no line
@@ -37,12 +43,20 @@ export function stackTimeLine(
   plannedFrames: number,
 ): string | null {
   if (!estimate) return null;
-  const { seconds, basis_runs: runs, basis_frames: basisFrames } = estimate;
+  const {
+    seconds, basis_runs: runs, basis_frames: basisFrames, same_engine: sameEngine,
+  } = estimate;
   if (!Number.isFinite(seconds) || seconds <= 0 || runs <= 0) return null;
   const far = basisFrames > 0 && plannedFrames >= basisFrames * FAR_EXTRAPOLATION;
   const lead = far ? "Roughly" : "About";
   const basis = runs === 1
     ? "your last stack of this target"
     : `your last ${runs} stacks of this target`;
-  return `${lead} ${formatEtaSeconds(seconds)} to run — from ${basis}.`;
+  // Only `false` adds the clause: `undefined` is an older backend that never
+  // answered the question, and inventing a caveat from a missing field would
+  // put it on every install that hasn't upgraded yet.
+  const olderBuild = sameEngine === false
+    ? ", which ran on a different version of AstroStack — the real time may differ"
+    : "";
+  return `${lead} ${formatEtaSeconds(seconds)} to run — from ${basis}${olderBuild}.`;
 }

@@ -462,7 +462,8 @@ def test_estimate_builds_the_canvas_once_per_request(
 
 
 def _record_timed_run(data_root, safe: str, *, n_frames: int, duration_s: float,
-                      options: dict, canvas: tuple[int, int] = (320, 480)) -> None:
+                      options: dict, canvas: tuple[int, int] = (320, 480),
+                      engine_version: str | None = None) -> None:
     """Put one finished, timed run in a target's History — what the estimate
     below measures from. The real writer is ``run_stack``; this is the same row."""
     import json
@@ -481,6 +482,7 @@ def _record_timed_run(data_root, safe: str, *, n_frames: int, duration_s: float,
                 canvas_h=canvas[0], canvas_w=canvas[1],
                 coverage_min=1, coverage_max=n_frames,
                 options_json=json.dumps(options), duration_s=duration_s,
+                engine_version=engine_version,
             ))
         finally:
             proj.close()
@@ -517,6 +519,37 @@ def test_estimate_times_the_next_run_from_this_target_s_own_runs(
     assert data["time_estimate"]["basis_runs"] == 1
     assert data["time_estimate"]["basis_frames"] == 40
     assert data["time_estimate"]["seconds"] == round(2.0 * data["n_frames"])
+
+
+def test_the_time_estimate_says_when_its_rate_came_from_another_build(
+        client, solved_library):
+    """The endpoint tells the form *which build* measured the rate, so a
+    restack priced from the previous version's timings does not sound as
+    confident as one priced from this version's (observer issue #933).
+
+    The row is written with an ``engine_version`` this build is not, which is the
+    state every target on a just-upgraded install is in — and, on this owner's
+    library, the state all 95 of them were in while a reprocess batch walked
+    them."""
+    from webapp import __version__
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _record_timed_run(solved_library, safe, n_frames=40, duration_s=80.0,
+                      options={"min_max_reject": True, "sigma_clip": False},
+                      engine_version="0.401.1")
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"min_max_reject": "true"}).json()
+    assert data["time_estimate"] is not None
+    assert data["time_estimate"]["same_engine"] is False
+    # …and a run this build wrote is not flagged. Same target, same options, one
+    # newer row — so the only thing that moved is the version.
+    _record_timed_run(solved_library, safe, n_frames=40, duration_s=80.0,
+                      options={"min_max_reject": True, "sigma_clip": False},
+                      engine_version=__version__)
+    data = client.get(f"/api/targets/{safe}/stack-estimate",
+                      params={"min_max_reject": "true"}).json()
+    assert data["time_estimate"]["same_engine"] is True
+    assert data["time_estimate"]["basis_runs"] == 1
 
 
 def test_a_drizzle_run_is_not_timed_from_a_plain_stack_s_rate(
