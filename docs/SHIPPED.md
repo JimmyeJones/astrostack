@@ -1,5 +1,71 @@
 # Shipped — the record
 
+## v0.458.0 — 2026-09-18 — a folder of darks is not necessarily one exposure, and a master built from two lengths is a photograph of neither
+
+*(Builder, branch `claude/sweet-babbage-sn6qbd`, the third and last of the run. The same question as
+v0.457.0/.1 — where does the app reduce a set to one representative value? — asked of the **master build**
+rather than of a sentence. This is the one place in the family where the answer changes pixels, and where
+`seestack/calibrate/` is re-opened by a new bug found in it.)*
+
+**The bug, reproduced end-to-end before anything moved.** `seestack/calibrate/masters.py::build_master`
+stamps `exposure_s = float(np.median(exposures))` over whatever frames it combined, and combines all of them.
+A dark is a photograph of the sensor's own dark current, and dark current grows with exposure — so a folder
+holding 10 s and 30 s darks does not hold one master's worth of frames, it holds two. Measured on a
+synthetic set at the levels a real sensor gives (100 ADU at 10 s, 300 ADU at 30 s):
+
+| | master pixels | stamped exposure |
+|---|---|---|
+| before | **200 ADU** | **20 s** |
+| after | 100 ADU (from the 4 majority frames) | 10 s |
+
+200 ADU is a level neither length ever has, and 20 s is a length no frame in the folder was shot at. That
+master is then bound to lights and subtracted **unscaled** — over-subtracting from every short light and
+under-subtracting from every long one, in the one part of this app whose entire job is to remove a pedestal
+exactly.
+
+**Nothing prevents that folder.** `seestack/calibrate/discover.py::classify_frames` groups by *folder* and
+asks only what **kind** the frames are — the same folder-not-exposure grouping the target scanner uses, which
+is what v0.456.0 found on the lights side. A hand-aimed build takes what is in the folder by design. And the
+offer's own copy ("30 dark frames at 20 s") comes from the same median, off four sampled headers.
+
+**The fix is the rule that was already there, applied to the other axis.** `build_master` has had a
+majority-**shape** gate since a stray frame from another camera hijacked a build; a dark now gets the same
+majority-**exposure** gate, with the same tie-break and the same `skipped` reporting:
+
+- New `_majority_exposure_group` groups the loaded frames' exposures with the engine's own
+  `seestack.calibrate.apply.distinct_exposures` — so "two exposures" means the same thing here, in the dark
+  advisory, in the Stack form, on the Calibration page and in the darks guide — and returns the group with
+  the most frames. It returns `None` when there is fewer than one split to make, so **every ordinary folder
+  is byte-identical**.
+- Ties keep the **shortest** length, deterministically (groups come back shortest-first and the first
+  maximum wins), pinned by a test that builds the same set in both orders.
+- A frame that recorded **no** exposure is kept, mirroring this module's own "didn't say is not said the
+  wrong thing" rule for `require_declared_kind`: dropping a blank `EXPTIME` would turn a missing header into
+  a smaller master.
+- Header rounding (9.998 against 10.0) is one length; a real Seestar step (10 → 30 s) is two.
+- **Darks only, deliberately.** A flat is normalised before it divides, so its exposure is not part of what
+  it says — and a twilight flat set legitimately spans exposures as the sky fades; gating it would set aside
+  good frames for nothing. A bias is by definition the zero-length frame. Flat-darks arrive as `kind="dark"`
+  and want the rule as much as darks do. A test pins the flat case.
+
+**And the set-aside frames are good ones, so the Jobs line says what to do with them.** "3 wrong exposure"
+is a fact, not a next step: `buildMasterSummary` now ends with *"Those were shot at a different length — a
+dark only matches subs of its own exposure, so put them in their own folder and build a second master from
+it."* It fires only on that bucket, so a wrong-size or unreadable skip reads exactly as before.
+
+**On shipping this on by default.** §9's "new behaviour is opt-in" governs *features*; this stops the app
+producing an artefact that is wrong in every use of it, and a master built from two dark currents is not a
+thing anyone chose. No master already on disk is touched, re-read or rebuilt — only what a *future* build
+produces changes, and only for a folder that was already giving a meaningless answer.
+
+**Tests +8 (6 engine, 2 frontend).** Four fail on a scratch revert, including the load-bearing one that
+asserts the master's own pixels (200 → 100 ADU) rather than only its label. The three "untouched" guards —
+a one-exposure folder, header rounding, a mixed-exposure flat — are green in both directions on purpose:
+they exist to stop the gate growing teeth it should not have.
+
+**Upgrade-safe (§9):** no config, schema, on-disk layout, API-shape or response change; no new setting; no
+existing master altered. The only behaviour that moves is a build from a folder holding two dark lengths.
+
 ## v0.457.1 — 2026-09-18 — and the "How to add darks" guide was telling a beginner to go and shoot a night of them at a length none of their subs was shot at
 
 *(Builder, branch `claude/sweet-babbage-sn6qbd`, the sibling of v0.457.0 shipped the same run. The **sixth**
