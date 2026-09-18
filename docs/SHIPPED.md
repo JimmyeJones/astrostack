@@ -56,6 +56,185 @@ still reports the genuine half that is missing. **Four of the seven fail before*
 **Upgrade-safe (§9):** one optional keyword with a default that reproduces today's behaviour, one additive
 optional dataclass field, no config, DB-schema, on-disk, API-shape or default change. An older frontend
 reads the same response fields it always did.
+## v0.458.0 — 2026-09-18 — a folder of darks is not necessarily one exposure, and a master built from two lengths is a photograph of neither
+
+*(Builder, branch `claude/sweet-babbage-sn6qbd`, the third and last of the run. The same question as
+v0.457.0/.1 — where does the app reduce a set to one representative value? — asked of the **master build**
+rather than of a sentence. This is the one place in the family where the answer changes pixels, and where
+`seestack/calibrate/` is re-opened by a new bug found in it.)*
+
+**The bug, reproduced end-to-end before anything moved.** `seestack/calibrate/masters.py::build_master`
+stamps `exposure_s = float(np.median(exposures))` over whatever frames it combined, and combines all of them.
+A dark is a photograph of the sensor's own dark current, and dark current grows with exposure — so a folder
+holding 10 s and 30 s darks does not hold one master's worth of frames, it holds two. Measured on a
+synthetic set at the levels a real sensor gives (100 ADU at 10 s, 300 ADU at 30 s):
+
+| | master pixels | stamped exposure |
+|---|---|---|
+| before | **200 ADU** | **20 s** |
+| after | 100 ADU (from the 4 majority frames) | 10 s |
+
+200 ADU is a level neither length ever has, and 20 s is a length no frame in the folder was shot at. That
+master is then bound to lights and subtracted **unscaled** — over-subtracting from every short light and
+under-subtracting from every long one, in the one part of this app whose entire job is to remove a pedestal
+exactly.
+
+**Nothing prevents that folder.** `seestack/calibrate/discover.py::classify_frames` groups by *folder* and
+asks only what **kind** the frames are — the same folder-not-exposure grouping the target scanner uses, which
+is what v0.456.0 found on the lights side. A hand-aimed build takes what is in the folder by design. And the
+offer's own copy ("30 dark frames at 20 s") comes from the same median, off four sampled headers.
+
+**The fix is the rule that was already there, applied to the other axis.** `build_master` has had a
+majority-**shape** gate since a stray frame from another camera hijacked a build; a dark now gets the same
+majority-**exposure** gate, with the same tie-break and the same `skipped` reporting:
+
+- New `_majority_exposure_group` groups the loaded frames' exposures with the engine's own
+  `seestack.calibrate.apply.distinct_exposures` — so "two exposures" means the same thing here, in the dark
+  advisory, in the Stack form, on the Calibration page and in the darks guide — and returns the group with
+  the most frames. It returns `None` when there is fewer than one split to make, so **every ordinary folder
+  is byte-identical**.
+- Ties keep the **shortest** length, deterministically (groups come back shortest-first and the first
+  maximum wins), pinned by a test that builds the same set in both orders.
+- A frame that recorded **no** exposure is kept, mirroring this module's own "didn't say is not said the
+  wrong thing" rule for `require_declared_kind`: dropping a blank `EXPTIME` would turn a missing header into
+  a smaller master.
+- Header rounding (9.998 against 10.0) is one length; a real Seestar step (10 → 30 s) is two.
+- **Darks only, deliberately.** A flat is normalised before it divides, so its exposure is not part of what
+  it says — and a twilight flat set legitimately spans exposures as the sky fades; gating it would set aside
+  good frames for nothing. A bias is by definition the zero-length frame. Flat-darks arrive as `kind="dark"`
+  and want the rule as much as darks do. A test pins the flat case.
+
+**And the set-aside frames are good ones, so the Jobs line says what to do with them.** "3 wrong exposure"
+is a fact, not a next step: `buildMasterSummary` now ends with *"Those were shot at a different length — a
+dark only matches subs of its own exposure, so put them in their own folder and build a second master from
+it."* It fires only on that bucket, so a wrong-size or unreadable skip reads exactly as before.
+
+**On shipping this on by default.** §9's "new behaviour is opt-in" governs *features*; this stops the app
+producing an artefact that is wrong in every use of it, and a master built from two dark currents is not a
+thing anyone chose. No master already on disk is touched, re-read or rebuilt — only what a *future* build
+produces changes, and only for a folder that was already giving a meaningless answer.
+
+**Tests +8 (6 engine, 2 frontend).** Four fail on a scratch revert, including the load-bearing one that
+asserts the master's own pixels (200 → 100 ADU) rather than only its label. The three "untouched" guards —
+a one-exposure folder, header rounding, a mixed-exposure flat — are green in both directions on purpose:
+they exist to stop the gate growing teeth it should not have.
+
+**Upgrade-safe (§9):** no config, schema, on-disk layout, API-shape or response change; no new setting; no
+existing master altered. The only behaviour that moves is a build from a folder holding two dark lengths.
+
+## v0.457.1 — 2026-09-18 — and the "How to add darks" guide was telling a beginner to go and shoot a night of them at a length none of their subs was shot at
+
+*(Builder, branch `claude/sweet-babbage-sn6qbd`, the sibling of v0.457.0 shipped the same run. The **sixth**
+surface of the shortcut v0.456.0 named, and the one that actually costs the owner a night outdoors.)*
+
+**The bug, reproduced before anything moved.** `seestack/stackhealth.py::recommended_dark_spec` takes
+`statistics.median(exposures)` over a target's accepted subs, and `DarksGuide` renders it under the words
+*"Shoot about 20–30 dark frames at the same settings as your subs — 20 s at gain 80."* On a target shot at
+10 s on one night and 30 s on the next that median is **20 s** — a length none of those subs was shot at, in
+a sentence whose whole claim is that it *is* their setting. On a 4/2 split it says 10 s and never mentions
+the third of the frames a 10 s dark leaves its dark current and hot-pixel trails in.
+
+This is the app's most-pushed piece of advice: the health card tells the owner, on *every* uncalibrated
+stack, that master darks are "the single biggest cleanup for a noisy image", and this guide is the how-to it
+opens into. Getting the number wrong here spends a real night.
+
+**The fix.** `DarkSpec` gains `exposures_s`, the **distinct** sub lengths, grouped by the engine's own
+`seestack.calibrate.apply.distinct_exposures` — the same grouping the finished run's dark advisory
+(v0.456.0), the Stack form (v0.456.1) and the Calibration page's coverage roll-up (v0.457.0) use, so the
+four cannot disagree about how many exposures a target has. The median is kept and unchanged beside it; it
+is still what every existing reader gates on.
+
+`formatDarkSpec` names the set (*"10 s and 30 s at gain 80"*), and a new `darkSpecPerLengthNote` adds the
+sentence a mixed target needs: *"You shot this target at 2 different sub lengths, so it needs a set of darks
+at each — one dark only matches subs of its own exposure."* On the ordinary single-length target — every
+library until someone changes their sub length between nights — the rendered step is byte-identical, and so
+it is against an older backend that sends no set at all.
+
+**Gain is deliberately untouched.** It has the same shape (a median over a set nothing makes uniform), but
+it is not what varies: a Seestar owner changes *exposure* per target brightness as a matter of course, and
+the copy would have to name a cross product to handle both. Left as it is rather than half-done.
+
+**Tests +11 (5 engine, 2 endpoint, 4 frontend incl. 1 rendered).** The load-bearing fail-before is the
+rendered one, and it prints the bug: on a target with `exposures_s: [10, 30]` the old component rendered
+*"…at the same settings as your subs — 20 s at gain 80."* Every new test fails on a scratch revert.
+
+**Upgrade-safe (§9):** one additive dataclass field with a default, one additive defaulted response field,
+and a frontend that falls back to the median when it is absent. Old and new mix in either direction. No
+config, schema, on-disk, API-shape, default or pixel change.
+
+## v0.457.0 — 2026-09-18 — the Calibration page told you to shoot darks at a length no sub of yours was shot at
+
+*(Builder, branch `claude/sweet-babbage-sn6qbd`. The **fifth** surface of the shortcut v0.456.0 named — and
+the one that hands the owner a shopping list. Found by the method that run recorded: after a fix, re-read
+the contracts of everything that claims to agree with the thing you changed.)*
+
+**The bug, reproduced before anything moved.** `webapp/routers/calibration.py::_target_acquisition` reduces
+a target's accepted subs to `_median([f.exposure_s …])` and hands that one number to
+`calibration.master_coverage`, which is the whole of `/api/calibration/coverage` — the page whose stated job
+is *"do my masters actually cover my targets?"*. A target is one **folder**, never one exposure
+(`seestack/io/scanner.py` groups by folder and has never heard of exposure), so shooting a target at 10 s on
+one night and 30 s on the next is an ordinary thing for a Seestar owner to own. Measured on a real
+`master_coverage` call, on a 6-sub target split 3/3:
+
+- `uncovered_detail` reported `exposure_s: 20.0`, which the page renders as **"Shoot them at 20s at gain 80
+  — that's what those subs were shot at."** No sub was shot at 20 s. That is a night of dark frames spent on
+  a length that matches nothing the owner has.
+- On a 4/2 split it reported 10 s — true for two-thirds of the subs, and silent about the third that a 10 s
+  dark leaves with its dark current and hot-pixel trails in.
+- `missed_detail` said **"your subs are 20s, this dark is 30s"** about a dark that is the *right* dark for
+  half of those subs.
+- And a **20 s** master dark was reported as **covering** that target, because 20 s is a perfect match for
+  the median — while being outside the bind gate for every single frame in it.
+
+**What shipped, and what deliberately did not.** Nothing about *which* masters are bound changed:
+`covered`/`missed` are still the binder's own answer, reported unchanged, so the roll-up still promises
+exactly what the app will do on its own. What changed is that it stops being silent about the part it
+misses, and stops describing a target by a length it never shot.
+
+- `_target_acquisition` now also serves `exposures_s` — the **distinct** sub lengths, grouped by the
+  engine's own `seestack.calibrate.apply.distinct_exposures`, so the page and the finished run's advisory
+  cannot disagree about how many exposures a target has. The median is served unchanged beside it, and it is
+  still the only thing anything binds on.
+- New pure `calibration.dark_exposure_split(dark_exposure_s, exposures_s)` answers *which* of a target's
+  lengths a dark reaches, using `_AUTO_BIND_EXP_MISMATCH_FRAC` — the binder's own 25 % threshold — so the
+  page and the stack cannot come to different opinions. Both lists empty whenever either side is unknown, so
+  every caller degrades to the wording it had before rather than to a false alarm.
+- `master_coverage` gains `n_partial` / `partial_detail` per master: the targets it **is** bound to but only
+  partly reaches, each with the sentence that names which subs (*"M 42 was shot at 10s and 30s, and this
+  dark is 10s — it matches the 10s subs but not the 30s ones. Build a master bias and AstroStack can scale
+  this dark to all of them, or build a dark for each length."*).
+- `coverage_miss_reason` takes an optional `exposures_s` that changes **only the wording** — every verdict is
+  still decided by the median — so a mixed target is named by its own lengths and told which of them the
+  dark reaches.
+- `uncovered_detail` carries `exposures_s`, and `uncoveredDarkSpecHint` expands a target's own set into one
+  spec per length, which drops a mixed target into the honest branch that file already had for *two*
+  uncovered targets shot differently: *"Those subs weren't all shot the same way (10s at gain 80; 30s at
+  gain 80), so they need a dark each."*
+- The page's existing one coverage line gains a `— one only partly` clause and turns amber; the existing one
+  tooltip carries both claims (what it can't be applied to, and what it only partly reaches). **No new card,
+  no new element** — the standing "extremely busy" priority.
+
+**An exposure-scaled dark is deliberately silent.** When the binder pairs a mismatched dark with a confident
+master bias it sets `scale_dark_to_light`, and `apply_raw` is handed *each frame's own* exposure — so that
+binding is per-frame correct on a mixed target by construction. Reporting a shortfall there would be a false
+alarm on the one path that already handles this properly, and a test pins it.
+
+**Not built, on purpose:** the binder itself. `pipeline._auto_bind_for_target` picking a dark from the
+median is the open lead filed with v0.456.1; it *acts* rather than talks, on the on-by-default walk-away
+path, and it wants a measurement of how many of the owner's targets are genuinely mixed before anything
+about it moves. This entry changes no pixel.
+
+**Tests +17 (12 Python, 4 vitest units, 1 rendered).** The load-bearing Python fail-before uses **no new
+API**: `master_coverage` on an evenly split target, asserting the miss reason does not contain `20s` —
+before the fix it read *"your subs are 20s, this dark is 30s"*. Six frontend cases fail on a scratch revert,
+including the rendered page test and the `uncoveredDarkSpecHint` one that pins the median never appearing.
+The existing `_coverage_target` helper now carries a single-exposure `exposures_s`, which is the shape the
+endpoint really builds, and the one existing exact-dict assertion was widened for the additive key.
+
+**Upgrade-safe (§9):** additive optional response fields and one additive keyword-only parameter defaulting
+to the old behaviour; old and new mix in either direction (an older frontend ignores the fields, an older
+backend omitting them leaves every sentence exactly as it was). No config, schema, on-disk, API-shape,
+default or pixel change.
 
 ## v0.456.1 — 2026-09-18 — and the Stack form was still asking the median, so it and the run disagreed about one target
 

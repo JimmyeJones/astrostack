@@ -1,7 +1,9 @@
 import { MantineProvider } from "@mantine/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { DarksGuide, formatDarkSpec } from "./DarksGuide";
+import {
+  DarksGuide, darkSpecLengths, darkSpecPerLengthNote, formatDarkSpec,
+} from "./DarksGuide";
 
 describe("formatDarkSpec", () => {
   it("joins exposure and gain into a match-these-numbers phrase", () => {
@@ -59,5 +61,55 @@ describe("DarksGuide", () => {
     expect(
       screen.getByText(/same exposure and gain as your subs\./),
     ).toBeInTheDocument();
+  });
+});
+
+
+// A target is one *folder*, never one exposure. Shoot it at 10 s on a bright
+// night and 30 s on a faint one and the median is 20 s — which this guide would
+// then offer under the words "at the same settings as your subs".
+
+describe("a target shot at more than one sub length", () => {
+  it("names both lengths, never the median between them", () => {
+    expect(formatDarkSpec({ exposure_s: 20, gain: 80, exposures_s: [10, 30] }))
+      .toBe("10 s and 30 s at gain 80");
+  });
+  it("lists three the way a sentence does", () => {
+    expect(formatDarkSpec({ exposure_s: 20, gain: null, exposures_s: [10, 20, 30] }))
+      .toBe("10 s, 20 s and 30 s");
+  });
+  it("adds the sentence that says one dark can't cover both", () => {
+    const note = darkSpecPerLengthNote({
+      exposure_s: 20, gain: 80, exposures_s: [10, 30],
+    });
+    expect(note).toContain("2 different sub lengths");
+    expect(note).toContain("a set of darks at each");
+  });
+  it("shows both lengths in the rendered step, and not the median", async () => {
+    renderGuide({ exposure_s: 20, gain: 80, exposures_s: [10, 30] });
+    fireEvent.click(screen.getByRole("button", { name: /How to add darks/ }));
+    const step = await screen.findByText(/Shoot about 20–30 dark frames/);
+    expect(step.textContent).toContain("10 s and 30 s at gain 80");
+    expect(step.textContent).toContain("a set of darks at each");
+    expect(step.textContent).not.toContain("20 s at gain 80");
+  });
+});
+
+describe("the ordinary single-length target is untouched", () => {
+  it("keeps the exact sentence it had", () => {
+    expect(formatDarkSpec({ exposure_s: 10, gain: 80, exposures_s: [10] }))
+      .toBe("10 s at gain 80");
+    expect(darkSpecPerLengthNote({ exposure_s: 10, gain: 80, exposures_s: [10] }))
+      .toBe("");
+  });
+  it("falls back to the median against an older backend with no set", () => {
+    expect(formatDarkSpec({ exposure_s: 10, gain: 80 })).toBe("10 s at gain 80");
+    expect(darkSpecPerLengthNote({ exposure_s: 10, gain: 80 })).toBe("");
+  });
+  it("ignores an unusable length rather than printing it", () => {
+    expect(darkSpecLengths({ exposure_s: 10, gain: null, exposures_s: [0, -1] }))
+      .toEqual([10]);
+    expect(darkSpecLengths({ exposure_s: null, gain: null, exposures_s: [] }))
+      .toEqual([]);
   });
 });
