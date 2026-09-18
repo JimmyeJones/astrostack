@@ -15,6 +15,7 @@ import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, use
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, type AutoAnalysis, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
+import { GlossaryLink } from "../components/GlossaryLink";
 import { HintAnchor } from "../components/HintAnchor";
 import { ImageLightbox } from "../components/ImageLightbox";
 import { ObjectInfoCard } from "../components/ObjectInfoCard";
@@ -2708,8 +2709,20 @@ export function EditorView() {
                     ) : null}
                   </Group>
                 </Group>
-                {specs[selectedOp.id].help ? (
-                  <Text size="xs" c="dimmed" mb="xs">{specs[selectedOp.id].help}</Text>
+                {specs[selectedOp.id].help || specs[selectedOp.id].glossary ? (
+                  <Group gap={6} wrap="nowrap" align="flex-start" mb="xs">
+                    {specs[selectedOp.id].help ? (
+                      <Text size="xs" c="dimmed">{specs[selectedOp.id].help}</Text>
+                    ) : null}
+                    {/* "What is stretching?" — the paragraph the one-line help
+                        cannot hold, at the word it just used. Self-hiding: an op
+                        with no glossary entry, and an older backend, render the
+                        help line exactly as before. */}
+                    {specs[selectedOp.id].glossary ? (
+                      <GlossaryLink slug={specs[selectedOp.id].glossary as string}
+                        term={specs[selectedOp.id].label} />
+                    ) : null}
+                  </Group>
                 ) : null}
                 {/* Coverage leveling only equalises panels on a mosaic; on a
                     single-field stack (uniform coverage) it's a deliberate no-op,

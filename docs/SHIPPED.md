@@ -1,5 +1,73 @@
 # Shipped — the record
 
+## v0.461.0 — 2026-09-18 — the glossary promised that "a screen that uses a word can point straight at the word", and one screen did
+
+*(Builder, branch `claude/sweet-babbage-db6205`, the third task of the v0.460.0 run — and a **new beginner
+capability**, the thing AGENTS.md §1 says to ship on a regular cadence and which the last twenty versions,
+all fixes, had not. Found the same way as the other two: by reading the app's own published sentences as
+claims about behaviour.)*
+
+**The promise.** `seestack/data/glossary.md` opens with:
+
+> *"The app serves this page at **/glossary**, and every entry has its own link — so a screen that uses a
+> word can point straight at the word, and nobody has to leave the app to understand something on screen.
+> If a term you saw isn't here, it belongs here: this list is meant to cover everything the interface says
+> out loud."*
+
+Thirty-eight entries, every one with a stable anchor, a page that opens and scrolls to a `#slug` on first
+paint, and a search box. And in the whole frontend, **one** screen pointed at one of them:
+`FrameColumnGuide` → `/glossary#fwhm`. Everywhere else the glossary was a nav item you had to already know
+to go and look for — which is precisely no use to the person stuck on a word, who does not know the word.
+The `/glossary` page shipped as v0.423.0 and its own backlog entry has said since that *"what remains here
+is the per-screen jargon audit itself: each place that says a term without explaining it can now link
+`/glossary#slug`"*.
+
+**What shipped.** The two screens densest in jargon — the Stack form and the editor — now offer the
+explanation at the word. The slug is a descriptor field, so this is the app's own idiom (engine is the
+source of truth; the descriptor-driven form renders it generically) rather than copy edited into twenty
+components:
+
+- **`StackOptionField.glossary`** (additive, optional) on **20** stacking controls: sigma clipping and its
+  κ, min/max rejection and its count, background flatten / mode / box size and the three final-gradient
+  fields, drizzle and its rejection pass, hot-pixel suppression and its σ, sub-pixel refine, lucky imaging,
+  scale-dark-to-light and repair-sensor-defects, colour calibration and its mode. It reaches the Stack form,
+  the Settings page's stacking defaults and the editor's parameter panel at once, because all three render
+  through `StackOptionControl`.
+- **`OpSpec.glossary`** on **9** editor ops: stretch → *Stretching*, SCNR → *SCNR*, colour calibrate →
+  *Colour calibration*, both background passes → *Background flattening*, coverage leveling → *Coverage
+  map*, hot-pixel removal → *Hot pixel*, both denoisers → *Noise σ*.
+- **`GlossaryLink`** renders it: a 14 px book glyph linking at `/glossary#<slug>`, beside the existing
+  `HintIcon` in `HintLabel` and beside the op's help line in the editor.
+
+**Three design calls worth keeping.** *(a)* It is a **second glyph**, not a longer tooltip, because the two
+answer different questions — `help` says what this control does to *your picture* ("Reject per-pixel
+outliers (satellites, cosmic rays, planes)"), the glossary says what sigma clipping *is*, in a paragraph.
+A tooltip cannot hold the second, and it cannot hold a link either: Mantine's closes on `pointerleave`, so
+anything clickable inside one is unreachable with a mouse and gone before a finger arrives.
+*(b)* It is a **glyph, not an underlined label**, because `HintLabel` renders inside the control's own
+`<label>`, where a click is forwarded to the control it labels — the v0.374.11 trap one level along: asking
+what a word means would flip the setting. *(c)* It carries **no padding**, so no row is taller and no page
+grew — the standing "the pages are extremely busy" priority.
+
+**A hand-written slug is a slug that can be wrong**, and wrong silently: the page loads, the entry does not
+open, and the beginner who asked what a word means lands on a list of forty other words. `_slugify` derives
+the anchor from the heading text, so rewording a heading is enough to break one. `tests/test_glossary_links.py`
+therefore sweeps **every** slug — the 20 descriptors, the 9 ops, op params, **and** the links hard-coded into
+`.tsx` files (which covers the pre-existing `#fwhm` one, unchecked since it shipped) — against the bundled
+glossary. Proved armed by mistyping one and watching it go red.
+
+**Upgrade-safe (§9).** Two optional fields with `None` defaults on the engine spec and the API model, two
+optional fields on the client types; every control without a slug, and every control served by an older
+backend, renders exactly as it did. No config, schema, on-disk, default or existing-response-shape change —
+the key is always present and explicitly null rather than appearing and disappearing, so a client reading
+`field.glossary` gets null, never undefined.
+
+**Tests +11 (5 Python, 6 frontend).** Python: three slug sweeps (`tests/test_glossary_links.py`) and two
+endpoint tests (`tests/webapp/test_glossary_links_api.py`). Frontend: the anchor, the accessible name that
+deliberately does *not* repeat the control's label, `HintLabel` with and without a slug, and
+`StackOptionControl` threading it. **Fail-before verified by scratch reverts that keep every signature:** 2
+red in Python (slugs removed from the descriptors), 2 red in vitest (the link removed from `HintLabel`).
+
 ## v0.460.1 — 2026-09-18 — one alert said "a typical part has 1 sub" and, two clauses later, "waiting until each part has 3"
 
 *(Builder, branch `claude/sweet-babbage-db6205`, the second task of the v0.460.0 run. Same method: read the
