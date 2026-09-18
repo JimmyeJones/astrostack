@@ -403,7 +403,7 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
     "What am I looking at?" card. Matches by the target's name first, then by its
     plate-solved centre if one is known."""
     from seestack.objectinfo import identify_object, suggested_target_rename
-    from webapp.frame_field import install_frame_field
+    from webapp.frame_field import install_frame_field, target_frame_field
 
     lib = deps.open_library(request)
     try:
@@ -419,8 +419,21 @@ def identify_target(safe: str, request: Request) -> ObjectInfoOut | None:
         # about the owner's *own* telescope; without this they were answered for
         # an S50 on an S30's frames (see webapp/frame_field.py). None → the
         # module default, i.e. unchanged behaviour on a library with no solve yet.
+        #
+        # **This target's** frames first, and the library-wide probe only as the
+        # fallback: the question is about one target, and the library answer is
+        # whichever target the probe happened to reach first (newest activity),
+        # which is the same answer only while every frame in the library came
+        # through one telescope. Where that holds — every install this app is
+        # for — the two are identical and nothing changes; where it does not,
+        # this card was quoting a panel count for optics the picture underneath
+        # it was not shot with. One extra one-row query on a page that has
+        # already opened the library.
+        field = target_frame_field(lib, entry)
+        if field is None:
+            field = install_frame_field(request.app.state, lib)
         info = identify_object(entry.name, entry.ra_deg, entry.dec_deg,
-                               field=install_frame_field(request.app.state, lib))
+                               field=field)
     finally:
         lib.close()
     if info is None:
