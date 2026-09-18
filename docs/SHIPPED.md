@@ -1,5 +1,59 @@
 # Shipped — the record
 
+## v0.465.3 — 2026-09-18 — the one badge that says the app is working for you was clipped on every phone screen, and no pass had ever had a job running while the browser looked
+
+*(Builder, branch `claude/sweet-babbage-rypizn`. Measured by `scripts/agent-dogfood.sh --mosaic
+--calibration` — a combination nobody had run — which happened to have a job in flight when the probe
+reached the second target.)*
+
+**The measurement.** `dogfood_probe.mjs`'s `clippedLabels` check flags a Mantine badge whose own overflow
+box is narrower than its content. On the 420 px pass it reported, on **every one of the 14 routes it
+probed**:
+
+```
+[phone] /: CLIPPED LABEL 60px box vs 63px word — "1 running" (scrolling cannot reveal it)
+```
+
+`ActiveJobsBadge` lives in `AppShell.Header`'s `wrap="nowrap"` row, between the "AstroStack" title and the
+Scan button, so on a phone it is squeezed by three pixels and the last letter goes. It is the only element
+on any screen that says *the app is busy on your behalf* — which, for a walk-away owner checking from a
+phone while a stack runs, is the single thing they opened it to see.
+
+**Why twenty clean passes missed it.** Every earlier pass printed "nothing overflowing, no console errors"
+for the identical header, because `ActiveJobsBadge` renders **nothing at all** when no job is running or
+queued — and no probe had ever looked while one was. This is the missing-observing-site (v0.436.1),
+empty-`incoming/` (v0.442.0), click-only-Compare (v0.440.2) and no-master-dark (v0.455.1) hole a fifth
+time, in its cheapest form yet: not a state the tooling could not *reach*, just one it had never happened
+to be in. (The `--calibration` pass creates one by construction — it re-processes the sample so the newest
+picture is a calibrated one — which is why this combination is the one that saw it.)
+
+**The fix is the header's own existing answer to exactly this**, not a new rule: the Scan button two
+elements along has read `<Box visibleFrom="xs">Scan incoming</Box>` since it was written, showing its icon
+alone on a phone. The badge now does the same — the **count** is always text, the word "running" comes
+back from `xs` up — and **nothing is removed**: the whole phrase (`"3 jobs running"`, singular at one)
+stays the badge's `title` at every width and is spelled out in a `VisuallyHidden` span beside the drawn
+text, which is `aria-hidden`. That last part is the detail worth keeping: `visibleFrom` hides with
+`display: none`, which hides from a **screen reader** too, so shortening the visible label without it would
+have traded a clipped word for a spoken badge that says only "1". The hidden span is absolutely positioned,
+so it costs the squeezed row nothing.
+
+**Measured after, in the same browser rather than argued.** Serving the built bundle with `/api/jobs`
+stubbed to one running job: at **420 px** the label is a **43 px box with 43 px of content — not clipped**
+(against the 60/63 that was reported), and at **1440 px** it is 100 px of 100 px with the word back. The
+hidden phrase adds nothing to either, which is the one thing worth checking about it. Asking for less width
+also cannot push the squeeze onto its neighbours.
+
+Deliberately **not** `flexShrink: 0` on the badge, which was the other obvious fix: the left group carries
+`minWidth: 0`, so refusing to shrink here just moves the clip onto the "AstroStack" title, which has
+`whiteSpace: "nowrap"` and no ellipsis. Trading a clipped badge for a clipped wordmark is not a fix.
+
+**Upgrade-safe (§9):** frontend-only, display-only, no config/DB/on-disk/API/default change.
+
+**Tests (+3, two fail-before — verified by restoring the old markup and watching them go red):**
+`App.test.tsx` — the whole phrase survives as the accessible name at every width; only the *word* sits
+behind the breakpoint and the number never does; and the badge still says nothing at all when no job is
+running or queued. (`ActiveJobsBadge` is now exported for this; it was previously module-private.)
+
 ## v0.465.2 — 2026-09-18 — two cards on one page prescribed different next sessions, and only one of them knew the other existed
 
 *(Builder, branch `claude/sweet-babbage-rypizn`. Photographed by `scripts/agent-dogfood.sh --mosaic

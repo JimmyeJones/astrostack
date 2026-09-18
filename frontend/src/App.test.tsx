@@ -1,7 +1,8 @@
+import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GlobalJobNotifier } from "./App";
+import { ActiveJobsBadge, GlobalJobNotifier } from "./App";
 import * as client from "./api/client";
 import type { Job } from "./api/client";
 
@@ -28,6 +29,61 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   localStorage.clear();
+});
+
+function renderBadge(qc: QueryClient) {
+  return render(
+    <MantineProvider>
+      <QueryClientProvider client={qc}>
+        <ActiveJobsBadge />
+      </QueryClientProvider>
+    </MantineProvider>,
+  );
+}
+
+// The header row is `wrap="nowrap"`, so on a phone this badge is squeezed between
+// the title and the Scan button — measured clipped on all 14 probed routes by a
+// dogfood pass that happened to have a job running (60 px box, 63 px word).
+describe("ActiveJobsBadge", () => {
+  const qc = () => new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+
+  it("says the whole phrase to a reader who isn't looking at pixels", async () => {
+    // `visibleFrom` hides with `display: none`, which hides from a screen reader
+    // too — so the sentence is spelled out rather than left to the visible text.
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([mkJob({ state: "running" })]);
+    renderBadge(qc());
+    const spoken = await screen.findByText("1 job running");
+    expect(spoken).toBeInTheDocument();
+    // …and the part a phone actually draws is hidden from it, so it is not said
+    // twice.
+    const badge = spoken.closest('[class*="mantine-Badge-root"]');
+    expect(badge?.querySelector("[aria-hidden]")?.textContent).toContain("1");
+  });
+
+  it("puts only the word behind the phone breakpoint, never the number", async () => {
+    // A queued job counts as running work too, which is why the count can be
+    // plural while one of them hasn't started.
+    vi.spyOn(client.api, "listJobs").mockResolvedValue(
+      [mkJob({ id: "a", state: "running" }), mkJob({ id: "b", state: "queued" })]);
+    renderBadge(qc());
+    const spoken = await screen.findByText("2 jobs running");
+    const badge = spoken.closest('[class*="mantine-Badge-root"]');
+    const word = badge?.querySelector('[class*="visible-from-xs"]');
+    expect(word).not.toBeNull();
+    expect(word?.textContent).toBe(" running");
+    // The number sits outside it, so a phone still draws the count.
+    const drawn = badge?.querySelector("[aria-hidden]");
+    expect(drawn?.textContent?.replace(" running", "").trim()).toBe("2");
+  });
+
+  it("says nothing at all when no job is running or queued", async () => {
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([mkJob({ state: "done" })]);
+    const { container } = renderBadge(qc());
+    await waitFor(() => expect(client.api.listJobs).toHaveBeenCalled());
+    expect(container.querySelector('[class*="mantine-Badge-root"]')).toBeNull();
+  });
 });
 
 // Slice (b): the finish ping must fire from the always-mounted watcher, i.e. with
