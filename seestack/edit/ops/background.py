@@ -130,7 +130,7 @@ def _level_coverage(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarr
 _MODE = ["per_channel", "luminance"]
 
 register(OpSpec(
-    id="background.subtract", label="Background subtract", group="background",
+    id="background.subtract", label="Background subtract", group="background", glossary="background-flattening",
     stage="linear", apply=_subtract, proxy_safe=True, additive_field=True,
     help="Subtract a per-tile sky model to flatten gradients and vignetting.",
     params=[
@@ -145,7 +145,7 @@ register(OpSpec(
 ))
 
 register(OpSpec(
-    id="background.final_gradient", label="Gradient removal", group="background",
+    id="background.final_gradient", label="Gradient removal", group="background", glossary="background-flattening",
     stage="linear", apply=_final_gradient, proxy_safe=True, additive_field=True,
     help="Object-masked gradient removal — protects stars/nebulosity while flattening sky.",
     params=[
@@ -175,7 +175,7 @@ register(OpSpec(
 ))
 
 register(OpSpec(
-    id="background.level_coverage", label="Coverage leveling", group="background",
+    id="background.level_coverage", label="Coverage leveling", group="background", glossary="coverage-map",
     stage="linear", apply=_level_coverage, proxy_safe=True, additive_field=True,
     help="Equalize sky across mosaic panels with different frame coverage.",
     params=[

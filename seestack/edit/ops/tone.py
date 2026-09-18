@@ -373,7 +373,7 @@ def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndar
 
 
 register(OpSpec(
-    id="tone.color_calibrate", label="Color calibration", group="tone",
+    id="tone.color_calibrate", label="Color calibration", group="tone", glossary="colour-calibration",
     stage="linear", apply=_color_calibrate, proxy_safe=True,
     help="Photometric white balance from the colours of your own stars. Works offline.",
     # The MODE_* constants live in seestack.post.color_cal, which is imported
@@ -415,7 +415,7 @@ register(OpSpec(
 ))
 
 register(OpSpec(
-    id="tone.stretch", label="Stretch", group="tone", stage="any", is_stretch=True,
+    id="tone.stretch", label="Stretch", group="tone", stage="any", is_stretch=True, glossary="stretching",
     apply=_stretch, proxy_safe=True,
     help="Tone-map linear data to display. Asinh reveals faint detail naturally.",
     params=[
@@ -479,7 +479,7 @@ register(OpSpec(
 ))
 
 register(OpSpec(
-    id="tone.scnr", label="SCNR (green removal)", group="tone", stage="any",
+    id="tone.scnr", label="SCNR (green removal)", group="tone", stage="any", glossary="scnr",
     apply=_scnr, proxy_safe=True, help="Remove the green colour cast on OSC nebulae.",
     params=[
         EditParam("amount", "Amount", "float", default=0.8, min=0.0, max=1.0, step=0.05,

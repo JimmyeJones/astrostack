@@ -2543,6 +2543,11 @@ export interface StackOptionField {
   // shows and accepts as 0–100 with a "%" suffix; the stored value is unchanged.
   // Absent/null on every other field, which renders the raw number as before.
   unit?: "percent" | null;
+  // The bundled glossary entry explaining the *concept* this control acts on
+  // ("sigma-clipping"), so the label can link at `/glossary#sigma-clipping`.
+  // `help` says what the control does; this says what the word means. Absent on
+  // most fields and on every backend older than it — then nothing is rendered.
+  glossary?: string | null;
 }
 
 export interface SystemInfo {
@@ -2592,6 +2597,9 @@ export interface EditOp {
   is_stretch: boolean;
   heavy?: boolean;
   help: string | null;
+  /** The glossary entry for what this op *is* ("stretching", "scnr") — see
+   *  `StackOptionField.glossary`. Absent on most ops and on an older backend. */
+  glossary?: string | null;
   params: StackOptionField[];
 }
 

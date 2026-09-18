@@ -49,7 +49,7 @@ export function OpParamPanel({ spec, params, onChange, histogram, suggestions,
     if (p.type === "curve") {
       return (
         <div>
-          <HintLabel label={p.label} hint={p.help} />
+          <HintLabel label={p.label} hint={p.help} glossary={p.glossary} />
           <CurvesWidget
             points={(params[p.key] as [number, number][]) ?? [[0, 0], [1, 1]]}
             histogram={histogram}
