@@ -34,11 +34,11 @@ pytest.importorskip("PIL")
 
 from astropy.io import fits  # noqa: E402
 
+from seestack.calibrate.apply import typical_exposure_s  # noqa: E402
 from seestack.io.project import FrameRow, Project  # noqa: E402
 from seestack.stack.stacker import (  # noqa: E402
     StackOptions,
     _integration_time_s,
-    _typical_sub_exposure_s,
     run_stack,
 )
 from tests.synth import make_synth_wcs_text, write_seestar_fits  # noqa: E402
@@ -76,7 +76,19 @@ def test_a_single_exposure_target_is_unchanged():
     """Every ordinary target, and the whole installed base's hot path: the median
     still answers, so nothing about an existing library's numbers moves."""
     assert _integration_time_s(_frames([10.0] * 6), 6) == pytest.approx(60.0)
-    assert _typical_sub_exposure_s([10.0] * 6) == pytest.approx(10.0)
+    assert typical_exposure_s([10.0] * 6) == pytest.approx(10.0)
+
+
+def test_a_set_with_no_usable_exposure_answers_none_rather_than_raising():
+    """The shared form is asked by ``seestack.stackhealth`` too, where the input is
+    whatever the frame rows recorded — so "nothing recorded one" has to be an
+    answer rather than an exception. Missing, non-finite and non-positive values
+    are dropped the way ``distinct_exposures`` drops them, not grouped."""
+    assert typical_exposure_s([]) is None
+    assert typical_exposure_s([None, None]) is None
+    assert typical_exposure_s([0.0, -10.0, float("nan")]) is None
+    # …and a usable value beside unusable ones still answers.
+    assert typical_exposure_s([None, 10.0, 0.0]) == pytest.approx(10.0)
 
 
 def test_header_rounding_is_one_exposure_not_two():
@@ -84,7 +96,7 @@ def test_header_rounding_is_one_exposure_not_two():
     Grouping is the engine's own ``distinct_exposures``, so the median — the
     robust choice, which one mistyped header cannot move — still answers here."""
     exposures = [10.0, 9.998, 10.001, 10.0, 9.999, 10.0]
-    assert _typical_sub_exposure_s(exposures) == pytest.approx(
+    assert typical_exposure_s(exposures) == pytest.approx(
         sorted(exposures)[len(exposures) // 2])
 
 
@@ -93,7 +105,7 @@ def test_one_absurd_header_cannot_move_a_uniform_targets_figure():
     taking the mean: a single 3600 s typo in a night of 10 s subs would inflate
     the mean six-fold, and the median ignores it."""
     exposures = [10.0] * 5 + [3600.0]
-    assert _typical_sub_exposure_s([10.0] * 6) == pytest.approx(10.0)
+    assert typical_exposure_s([10.0] * 6) == pytest.approx(10.0)
     # It *is* mixed, so the honest total is still the sum — but the point is that
     # a uniform night keeps its robust answer, which the line above pins.
     assert _integration_time_s(_frames(exposures), 6) == pytest.approx(

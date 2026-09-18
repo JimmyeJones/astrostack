@@ -300,6 +300,115 @@ def test_the_grain_note_and_the_panel_map_never_give_opposite_instructions(
     assert note_says_go is map_says_go
 
 
+def _two_night_mosaic(thin_subs: int, deep_subs: int, short_s=10.0, long_s=30.0):
+    """A 2x2 mosaic shot over two nights at two sub lengths — the shape the pin
+    above deliberately does not have.
+
+    Three quarters of *every* panel's subs are ``short_s`` and the rest
+    ``long_s``, so the mix is the same everywhere and a panel's integration is
+    exactly its depth times the set's mean. Returns the map's
+    ``(ra, dec, exposure_s)`` triples and the flat list of exposures the run's
+    frames report, which is the same population read two ways.
+    """
+    def panel(n: int) -> list[float]:
+        return [short_s] * (n * 3 // 4) + [long_s] * (n - n * 3 // 4)
+
+    triples: list[tuple[float, float, float]] = []
+    exposures: list[float] = []
+    for r in range(2):
+        for c in range(2):
+            n = thin_subs if (r, c) == (1, 1) else deep_subs
+            dec = 30.0 + (1 - r) * 0.5
+            ra = 200.0 + (1 - c) * 0.5 / math.cos(math.radians(dec))
+            for e in panel(n):
+                triples.append((ra, dec, e))
+                exposures.append(e)
+    return triples, exposures
+
+
+def _grain_note(thin_subs: int, deep_subs: int, exposures: list[float]):
+    return next(
+        n for n in stack_health(
+            _run(grain_ratio=1.43, grain_thin_frames=thin_subs,
+                 grain_deep_frames=deep_subs, grain_thin_share=0.2257),
+            [FrameRow(id=i, source_path=f"/incoming/s{i}.fit", accept=True,
+                      fwhm_px=2.1, exposure_s=e)
+             for i, e in enumerate(exposures)])
+        if n.kind == "grain_uneven")
+
+
+def test_a_two_night_mosaic_is_not_told_its_thin_panel_evens_out_on_its_own():
+    """The bug, reproduced before it was fixed. A target is one folder, never one
+    exposure, and this note multiplies a per-sub length by a *count* — so it used
+    a plain median, which on a set of two lengths is one member of it chosen by
+    position rather than a summary.
+
+    Three quarters of every panel's subs at 10 s and the rest at 30 s makes the
+    median 10 s where the set's own mean is 15 s, and the shortfall the note
+    quotes lands on the wrong side of ``THIN_MIN_SHORTFALL_S``: 24 missing subs
+    read as 4 min ("it evens out on its own as you keep shooting") where the
+    light really missing is 6 min. The panel map directly above it, which sums
+    each panel's *actual* exposures, said to go and shoot that panel."""
+    from seestack.mosaicmap import THIN_MIN_SHORTFALL_S
+
+    triples, exposures = _two_night_mosaic(thin_subs=8, deep_subs=32)
+    note = _grain_note(8, 32, exposures)
+    # The honest shortfall — the mean times the missing count, which is exactly
+    # the light the thin panel is behind — clears the threshold the map uses.
+    assert (32 - 8) * (sum(exposures) / len(exposures)) > THIN_MIN_SHORTFALL_S
+    assert "another night on that panel" in note.message
+    assert "evens out on its own" not in note.message
+    # The measurement itself is untouched.
+    assert "23%" in note.message and "1.4×" in note.message
+
+
+def test_the_shortfall_the_note_names_is_the_gap_the_panel_map_measured():
+    """And the agreement is exact, not approximate: the map sums the thin panel's
+    own exposures against a typical panel's, and the note multiplies the missing
+    depth by the set's mean — which *is* that sum when the mix is the same on
+    every panel. Pinned as the same number rather than as the same verdict, so a
+    future basis change shows up here before it shows up as two sentences giving
+    opposite advice."""
+    from seestack.mosaicmap import mosaic_depth_map
+    from seestack.sharecard import format_duration
+
+    triples, exposures = _two_night_mosaic(thin_subs=8, deep_subs=32)
+    m = mosaic_depth_map(triples)
+    assert m is not None and m.thin is not None      # the map says: go and shoot
+    map_gap_s = m.median_exposure_s - m.thin.exposure_s
+
+    note_gap_s = (32 - 8) * (sum(exposures) / len(exposures))
+    assert note_gap_s == pytest.approx(map_gap_s)
+
+    # …and when the gap is small enough for the reassuring branch, the number the
+    # note prints is that same gap in the map's own words.
+    triples, exposures = _two_night_mosaic(thin_subs=8, deep_subs=20)
+    note = _grain_note(8, 20, exposures)
+    small_gap_s = (20 - 8) * (sum(exposures) / len(exposures))
+    assert f"about {format_duration(small_gap_s)} behind" in note.message
+
+
+@pytest.mark.parametrize("thin_subs,deep_subs,expect_a_night", [
+    (8, 20, False),       # 3 min behind at a 15 s mean
+    (8, 32, True),        # 6 min behind — the reproduction above
+])
+def test_the_two_surfaces_agree_on_a_mosaic_shot_at_two_sub_lengths(
+        thin_subs, deep_subs, expect_a_night):
+    """The pin above, re-run on the shape it excludes: "go and shoot that panel"
+    must still be said by both surfaces or by neither once the target holds more
+    than one sub length."""
+    from seestack.mosaicmap import mosaic_depth_map
+
+    triples, exposures = _two_night_mosaic(thin_subs, deep_subs)
+    m = mosaic_depth_map(triples)
+    assert m is not None
+    map_says_go = m.thin is not None
+    assert map_says_go is expect_a_night
+
+    note = _grain_note(thin_subs, deep_subs, exposures)
+    assert ("another night on that panel" in note.message) is map_says_go
+
+
 def test_the_panel_flatness_praise_stops_claiming_there_is_nothing_to_see():
     """The bug half. ``seam_residual`` 0.7 is "flat", and on an unevenly deep
     canvas the app used to answer someone looking straight at a grainier
