@@ -103,6 +103,46 @@ def distinct_exposures(values: Iterable[float | None]) -> list[float]:
     return out
 
 
+def typical_exposure_s(values: Iterable[float | None]) -> float | None:
+    """The one number that stands for ``values`` in a per-sub figure, or ``None``
+    when not one of them recorded a usable exposure.
+
+    The **median** when the subs are all one length, which is every ordinary
+    target: it is robust, so one mistyped header cannot move the length a whole
+    stack is described by.
+
+    The **mean** when they are genuinely several lengths. A target is one folder,
+    never one exposure — shoot it at 10 s on one night and 30 s on the next and it
+    is one target with two in it — and there the median is not a summary of the
+    set, it is one member of it chosen by position. Measured on a six-sub target:
+    4x10 s + 2x30 s really holds 100 s of light and the median reports 60 s
+    (-40 %), while 3x10 s + 3x30 s holds 120 s and the median reports 180 s
+    (+50 %). The mean is the only value whose product with the frame count is the
+    light that was actually collected, which is the whole point of the figure.
+
+    "All one length" is :func:`distinct_exposures`, so header rounding (``9.998``
+    against ``10.0``) stays one exposure and a real Seestar step (10 -> 20 ->
+    30 s) does not — the same question the dark advisory, the Stack form and the
+    master binder all already ask, answered once.
+
+    Public, and here rather than in the stacker, because two surfaces multiply it
+    by a *count*: the FITS integration time (``seestack.stack.stacker``'s
+    ``EXPOSURE``/``EXPTOTAL``) and the health panel's uneven-grain shortfall
+    (``seestack.stackhealth``), which reads the answer against the panel map's
+    own :data:`~seestack.mosaicmap.THIN_MIN_SHORTFALL_S`. Two definitions let the
+    map and the note give opposite instructions about one panel.
+    """
+    exposures = [
+        float(v) for v in values
+        if v is not None and math.isfinite(float(v)) and float(v) > 0
+    ]
+    if not exposures:
+        return None
+    if len(distinct_exposures(exposures)) > 1:
+        return sum(exposures) / len(exposures)
+    return sorted(exposures)[len(exposures) // 2]  # median
+
+
 def _finite_temps(values: Iterable[float | None]) -> list[float]:
     """The usable sensor temperatures in a set of lights, coldest first.
 
