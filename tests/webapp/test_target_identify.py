@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 
 def test_identify_known_target_by_name(client, solved_library):
     # The synthetic library has an "M_42" folder — it must resolve to the Orion
@@ -287,3 +289,64 @@ def test_identify_draws_nothing_for_an_object_with_no_vetted_size(
     info = client.get(f"/api/targets/{safe}/identify").json()
     assert info is not None
     assert info["field_fill"] is None and info["framing"] is None
+
+
+def _set_pixel_scale_for(data_root, safe: str, arcsec_per_px: float,
+                         w: int, h: int) -> None:
+    """The same as :func:`_set_pixel_scale`, for **one** target — so a library
+    can hold two targets shot through two different fields."""
+    from seestack.io.library import Library
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, pixscale_arcsec=arcsec_per_px,
+                                  width_px=w, height_px=h)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_each_target_card_answers_about_the_frames_that_target_was_shot_with(
+        client, solved_library):
+    """"How many mosaic panels?" is a question about *this* target's optics.
+
+    `library_frame_field` answers for the library as a whole, from whichever
+    target its probe reaches first — right for the Tonight planner, which badges
+    every catalogue row at once, and a guess on a card sitting under one
+    target's own picture. The two are the same answer only while every frame in
+    the library came through one telescope; where they differ, this card was
+    quoting a panel count for optics the picture underneath it was not shot
+    with, and nothing on screen said so.
+    """
+    _set_pixel_scale_for(solved_library, "M_42",
+                         71.8 * 60.0 / 320.0, 480, 320)   # 107.7' x 71.8'
+    _set_pixel_scale_for(solved_library, "NGC_7000",
+                         40.0 * 60.0 / 320.0, 480, 320)   # 60' x 40'
+
+    m42 = client.get("/api/targets/M_42/identify").json()
+    ngc = client.get("/api/targets/NGC_7000/identify").json()
+    assert m42["field_fill"]["field_long_arcmin"] == pytest.approx(107.7, abs=0.1)
+    assert ngc["field_fill"]["field_long_arcmin"] == pytest.approx(60.0, abs=0.1)
+    # …and the sentences follow the numbers: 85' clears M 42's ~72' short edge
+    # but fits its ~108' long one, while NGC 7000 (120') needs a real grid
+    # through a 60' x 40' field.
+    assert m42["framing"]["level"] == "tight"
+    assert m42["mosaic"] is None
+    assert ngc["mosaic"] is not None and ngc["mosaic"]["panels"] > 1
+
+
+def test_a_target_with_nothing_solved_still_gets_the_library_wide_answer(
+        client, solved_library):
+    """The fallback is the previous behaviour, not a second guess: a target the
+    owner has dropped in but not yet solved reads the field off the rest of the
+    library, exactly as every target did before."""
+    _set_pixel_scale_for(solved_library, "M_42",
+                         71.8 * 60.0 / 320.0, 480, 320)   # 107.7' x 71.8'
+    # NGC_7000 keeps the fixture's un-measured frames (no pixscale at all).
+
+    ngc = client.get("/api/targets/NGC_7000/identify").json()
+    assert ngc["field_fill"]["field_long_arcmin"] == pytest.approx(107.7, abs=0.1)

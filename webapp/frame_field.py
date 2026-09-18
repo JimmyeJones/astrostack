@@ -45,6 +45,46 @@ _MAX_TARGETS_PROBED = 8
 _RETRY_AFTER_S = 300.0
 
 
+def _field_from_target(lib: Library, entry: Any) -> FrameField | None:
+    """The single-frame field of one target's own solved frames, or ``None``.
+
+    Best-effort throughout — a project that won't open, has nothing solved, or
+    whose numbers are out of physical range answers ``None`` and the caller falls
+    back — because this feeds an advisory sentence and must never be the reason a
+    page 500s.
+    """
+    try:
+        proj = Project.open(lib.target_dir(entry))
+    except Exception:  # noqa: BLE001 — advisory path, never break a page
+        return None
+    try:
+        geom = proj.solved_frame_geometry()
+    except Exception:  # noqa: BLE001
+        geom = None
+    finally:
+        proj.close()
+    return None if geom is None else frame_field_from_solve(*geom)
+
+
+def target_frame_field(lib: Library, entry: Any) -> FrameField | None:
+    """The field of the telescope **this target's own frames** came from.
+
+    :func:`library_frame_field` answers for the library as a whole, from
+    whichever target it probes first, on the reasoning that every install this
+    app is for has one telescope. That is right for a question asked *about the
+    library* (the Tonight planner badges every catalogue row at once), and it is
+    a guess when the question is asked **about one target** — which is what the
+    "will it fit in one frame?" line and the mosaic panel count on that target's
+    own card are. Where the target itself can answer, it should: AGENTS.md §1's
+    rule is to derive the field from the frames rather than assume a model, and
+    the target's frames are the nearest frames there are.
+
+    ``None`` when this target has nothing solved yet; the caller then falls back
+    to the library-wide answer, which is exactly the previous behaviour.
+    """
+    return _field_from_target(lib, entry)
+
+
 def library_frame_field(lib: Library) -> FrameField | None:
     """The single-frame field of the telescope this library's frames came from.
 
@@ -60,19 +100,7 @@ def library_frame_field(lib: Library) -> FrameField | None:
     entries = lib.list_targets()
     entries.sort(key=lambda e: (e.last_activity_utc or ""), reverse=True)
     for entry in entries[:_MAX_TARGETS_PROBED]:
-        try:
-            proj = Project.open(lib.target_dir(entry))
-        except Exception:  # noqa: BLE001 — advisory path, never break a page
-            continue
-        try:
-            geom = proj.solved_frame_geometry()
-        except Exception:  # noqa: BLE001
-            geom = None
-        finally:
-            proj.close()
-        if geom is None:
-            continue
-        field = frame_field_from_solve(*geom)
+        field = _field_from_target(lib, entry)
         if field is not None:
             return field
     return None

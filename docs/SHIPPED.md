@@ -1,5 +1,48 @@
 # Shipped — the record
 
+## v0.458.3 — 2026-09-18 — the panel count on a target's own card was answered for whichever telescope the probe reached first
+
+*(Builder, branch `claude/sweet-babbage-3dy83s`, the third finding of the v0.458.1 run and the one that
+explains why that pass's numbers had moved. Measured on the bundled samples, not reasoned.)*
+
+**The bug.** `webapp.frame_field.library_frame_field` answers *"what field of view does this owner's telescope
+have?"* for the **library as a whole**, by walking targets newest-activity-first and taking the first solved
+frame geometry it finds. Its own docstring says why that is enough — *"the answer is the same for all of them
+on a one-telescope install (which is every install this app is for)"* — and for the Tonight planner, which
+badges every catalogue row at once, it is the only answer there could be. `GET /api/targets/{safe}/identify`
+used it too, and there the question is not about the library: *"will it fit in one frame?"* and *"how many
+mosaic panels?"* sit on **one target's** card, directly under that target's own picture. Where the library
+holds frames from more than one field, the card quoted a panel count for optics the picture underneath it was
+not shot with, and nothing on screen said so.
+
+**Measured, on the app's own bundled samples.** A dogfood pass with `--mosaic --big` loads two mosaic targets
+whose panels are 480x320 and 900x600 at the same 5"/px — 40' x 26.7' and 75' x 50'. The library-wide probe
+answers **75' x 50'** for both, so the 2x2 sample's card read *"About a 2x2 mosaic (4 panels) covers all of
+it"* — about a target that **is** a 2x2 — where its own frames give **3x3 (9 panels)**, which is exactly the
+number the 2026-09-14 record in `PROCESS-NOTES.md` quotes for that sample. The claim had moved when `--big`
+was added (v0.446.0) and nothing had changed about the sample.
+
+**The fix.** New `frame_field.target_frame_field(lib, entry)` — the same one-row `Project.solved_frame_geometry`
+query, asked of the target being identified — and `identify_target` prefers it, falling back to the library-wide
+probe when that target has nothing solved yet. AGENTS.md §1's rule is to *derive* the field from the frames
+rather than assume a model, and a target's own frames are the nearest frames there are. `library_frame_field`
+keeps its contract and now shares the helper, so the two can't drift.
+
+**On a one-telescope install — every install this app is for — the two answers are identical and nothing
+changes**, which is the reason this is a patch and not a behaviour flip. Where they differ (a scope changed
+mid-library, a second camera, or this app's own multi-sample dogfood install) each card now answers about its
+own picture. Cost: one extra SQLite open and one three-column query on a request that had already opened the
+library.
+
+**Tests (+2)**, `tests/webapp/test_target_identify.py`: two targets given genuinely different fields
+(107.7' x 71.8' and 60' x 40') each report their own `field_fill.field_long_arcmin` and their own framing
+verdict and panel count — **red under a scratch revert**, because before the fix both got whichever the probe
+reached first; and a target with nothing solved still reading the rest of the library's answer, which is the
+previous behaviour and passes either way on purpose.
+
+**Upgrade-safe (§9):** one new pure helper, one fallback chain in one endpoint. No config, DB-schema, on-disk,
+API-shape or default change, and no response field moved.
+
 ## v0.458.2 — 2026-09-18 — …and the crop the card offered to fix it with measured the square too
 
 *(Builder, branch `claude/sweet-babbage-3dy83s`, the same run and the other half of v0.458.1's own object
