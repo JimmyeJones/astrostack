@@ -18,6 +18,75 @@ is a queue.
 
 ---
 
+## 2026-09-18 — a representative value is a claim that the set is uniform, and nothing in the data enforces it
+
+*(Builder, branch `claude/sweet-babbage-n9bszz`, the run that shipped v0.456.0 and v0.456.1. A record, not
+a task.)*
+
+**Where the run started.** Baseline green (6,246 passed, 2 skipped), `main`'s CI green. Then the backlog,
+which is in the state the last three runs have described and is worth stating plainly one more time: every
+open entry in "Bugs (fix these first)" is gated on the owner's own data, routed to owner sign-off, or stood
+down **with the measurement written down**; "Features that serve real workflows" is two explicit declines
+and a "mostly already built"; the three open GitHub issues each map to one of those entries. The Ideas
+sections are thick with entries that were sized, measured and closed by the run that picked them. So, for
+the fourth run running, the work had to be found rather than picked — and the honest reading of that is
+that the *backlog* is healthy, not that the app is finished.
+
+**The question that worked.** The previous two runs asked *what magnitude has this tooling never held?* and
+*what does a stated complexity bound claim about its callers?* This run asked a third of the same family:
+
+> **Where does the app reduce a set to one representative value, and what is that reduction claiming?**
+
+A median, a mean, a modal size, "the reference frame's" — each is a summary that is also, silently, an
+assertion that the set is uniform enough for one number to stand in. The grep is cheap (`_med`, `_median`,
+`modal_`, `ref\.`), and the interesting question at each site is not "is the statistic right?" but **"what
+breaks if the set is genuinely mixed, and does anything in the data stop it being mixed?"**
+
+**Three hits on one fact, and the fact is one a beginner creates by accident.** A Seestar owner changes sub
+length between nights — 10 s for a bright target, 30 s for a faint one — and `seestack/io/scanner.py` groups
+a target by *folder*, never by exposure. So a target with two exposures in it is an ordinary thing to own,
+and three surfaces assumed it could not exist:
+
+1. `stacker.run_stack` → `calibration_warnings(ref.exposure_s, …)`, under a comment that said the reference
+   frame "stands in for the (uniform) session". **v0.456.0.**
+2. `routers/calibration.py` → `_median(...)`, rendered by `routes/Stack.tsx` as "your subs are Ns".
+   **v0.456.1.**
+3. `pipeline._auto_bind_for_target` → `_med(...)`, which *binds* a dark rather than describing one. **Filed
+   as a lead, deliberately not built** — it is the only one of the three that changes pixels, and on the
+   walk-away path.
+
+**The sharpest part is what the reduction did to the *warning*.** (1) is not "an advisory that was slightly
+off". `pick_reference_frame` chooses on quality and pointing and has never heard of exposure, so **which sub
+it happened to land on decided whether the app warned at all** — measured: a 10 s reference gave `[]`, a
+30 s reference gave the full sentence, same target, same masters, same subs. A safety net whose output
+depends on an unrelated tie-break is worse than no net, because its silence reads as an all-clear. And when
+it *did* fire it said "on every frame", which was false for two-thirds of them. The class generalises past
+this app: **a warning derived from a representative value inherits that value's assumption, and inherits it
+invisibly**, because the warning's own wording is where the assumption finally becomes a claim out loud.
+
+**A method note on ordering, which is what made (2) findable at all.** Fixing (1) *created* (2): the
+endpoint's docstring already promises that the Stack form warns about exactly the pairs the finished run
+complains about (it is why `tolerances` is served), and a smarter run means a form that is now behind. So
+after a fix, re-read the contracts of everything that claims to agree with the thing you changed — the
+second bug was not found by grepping, it was found by the first fix invalidating a promise someone had
+written down. Worth doing every time a shared rule moves.
+
+**On fail-before, and a trap inside it.** Ten of the fourteen new tests fail on a scratch revert, but they
+are not equally good and it is worth saying why. Six of them fail with `TypeError`/`ImportError`, because
+they call an API the reverted tree does not have — that is a *compilation* fail-before and it proves
+nothing about behaviour. The load-bearing one is the `run_stack` test, which uses **no new API at all**: a
+6-sub project (four at 10 s, two at 30 s), a real 10 s dark, and `calibration_warnings=[]` before against
+the named warning after. When a fix adds a parameter, at least one test has to be reachable *without* it,
+or the whole fail-before is a statement about the signature.
+
+**And a self-inflicted one, recorded because it will happen again.** AGENTS.md §7 says to be suspicious of
+a `tsc` run that names no files, so this run proved `tsc` was really compiling by planting a type error —
+and then cleaned up with `git checkout -- frontend/src/calibrationFit.ts`, which reverted the planted line
+**and the uncommitted real work in the same file**. The check was right and the cleanup was wrong.
+`git checkout --` is not an undo for "the last thing I typed"; it is an undo for "everything since the
+index". Plant the error in a scratch file, or `git stash` first — the same tool this run used correctly
+three times for the fail-before reverts.
+
 ## 2026-09-17 — the magnitude question again, one layer sideways: a stated complexity bound is a claim about a *caller*
 
 *(Builder, branch `claude/sweet-babbage-dmpc84`, the run that shipped v0.455.5, v0.455.6 and v0.455.7. A
