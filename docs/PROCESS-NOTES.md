@@ -18,6 +18,78 @@ is a queue.
 
 ---
 
+## 2026-09-18 — Builder method: when the app has written down what it will do, that sentence is a test
+
+*(Builder, branch `claude/sweet-babbage-fwwin8`, the run that shipped v0.459.0/.1/.2. Recorded because the way
+all three were found is reusable, and because one of them is a note about how a clean sweep can be clean and
+still sit next to a bug.)*
+
+**The lever.** The v0.456–0.458 family had spent two runs fixing *sentences* — the run advisory, the Stack
+form's caution, the coverage roll-up, the darks guide. The open lead that remained (`_auto_bind_for_target`'s
+median) was filed **gated** on a measurement no agent in this repo can take: how many of the owner's 104
+targets are genuinely mixed-exposure. That gate is real for judging *value*.
+
+What unblocked it was noticing that one of those shipped sentences is a **promise about behaviour**.
+v0.457.0's `master_coverage.partial_detail` says, to a beginner, in the product:
+
+> *"… Build a master bias and AstroStack can scale this dark to all of them, or build a dark for each length."*
+
+That is a falsifiable claim about the code, and it needs nobody's library to check. Building the bias and
+asking the real binder took four lines:
+
+```
+target sub lengths : [10.0, 30.0]  median: 10.0
+binder answers     : {'dark_master_id': 1}
+the bias IS built, and scale_dark_to_light is: None
+```
+
+The promise was false. So the question "is this worth doing?" — which the gate could not answer — was replaced
+by "is the app currently lying?", which it could. **Generalisation worth keeping: an idea gated on data you
+cannot get is sometimes decidable on a claim the app has already published.** Grep the copy, not just the code.
+
+**The second one came from asking where else a representative value stands in for a set**, with the family's
+own sentence as the search term rather than a symptom. `stacker._integration_time_s` — `median sub exposure ×
+frames` — is the same shortcut as arithmetic instead of wording, and it had a docstring justifying the median
+for a *different* reason ("the honest figure when a few candidate subs are dropped mid-stack", which is what
+the `× n_used` half does). Measured before touching it: −40 %, +50 %, +29 % on three ordinary splits, and the
+error is set by the **shape of the split rather than the depth**, so a 200-sub target is as wrong as a 6-sub
+one. Note where it hid: the *library's* `total_exposure_s` is a genuine per-frame sum and was always right, so
+the Library wall and the campaign stats agreed with each other while disagreeing with the picture's own header.
+**A figure that is computed twice, in two places, by two methods, is where a wrong one survives** — the right
+one keeps the surfaces looking sane.
+
+**The third is the one worth reading twice: what does my own fix make reachable?** v0.459.0 makes a mixed
+target's dark bind *scaled*. So every surface downstream of "was the dark scaled?" suddenly meets a case it had
+only theoretically had before — and one of them was wrong. The run's provenance stamp asked
+`dark_scaling_provenance` about the subs' **median**, so with a 10 s dark on 10 s/30 s subs the median *is* the
+dark's own length, the bundle answered "nothing was scaled", and the History line that exists so "the user can
+trust the off-by-default option did something" vanished from the run that had tripled its dark on a third of
+the frames. Shipping v0.459.0 alone would have made the app silently do something and then decline to say so.
+**Ask it every time: after this change, which code paths are now taken that were rare before?**
+
+**And a note about clean sweeps, offered without any disagreement intended.** The same-day Scout sweep
+immediately below this block read `calibrate/apply.py`'s scaling path adversarially and recorded it CLEAN —
+correctly. `_effective_dark` *is* per-frame; `align.py:148` and `stacker.py:4144` *do* pass each sub's own
+exposure. Every sentence of that record is true. Both bugs this run found in that neighbourhood were **one
+caller up** from the code that was read: who decides to turn scaling **on** (the binder, which never did), and
+who **reports** that it happened (the stamp, which asked a median). The lesson is not that the sweep missed
+something — it is that "this function is correct" and "this function is correctly reached and correctly
+described" are three claims, and a sweep scoped to a module can only settle the first. Worth adding the
+callers and the provenance to the reading list when a module comes back clean.
+
+**Two mechanical notes for the next run:**
+- **A `TypeError` is not a fail-before.** Deleting a new keyword argument makes a new test go red for a reason
+  that has nothing to do with the bug — the §8 "fixture that cannot exhibit its bug" trap in a fresh costume.
+  Every claim here was reverted *inside* the logic with the signature and call sites intact, and the revert
+  diff recorded in the entry. Three of eight new tests in v0.459.0 went red that way, eight of thirteen in
+  v0.459.1, five across three layers in v0.459.2.
+- **Do not `git stash` while the suite is running** — the AGENTS.md §7 "don't edit a source file mid-run"
+  warning covers this, and it is easy to trip while checking something unrelated (here: comparing `ruff`
+  output against the baseline). The stash/pop took about a second and still invalidated a ten-minute run,
+  which had to be repeated. Copy the file to the scratchpad and edit the copy, or wait.
+
+---
+
 ## 2026-09-18 — Scout QA sweep: calibrate + stack per-panel + solve/ffmpeg filesystem + editor preview↔export parity all CLEAN; no verified bug
 
 *(Scout, branch `claude/admiring-brahmagupta-hhky3o`. Baseline: `6291 passed, 2 skipped` headless on the settled
