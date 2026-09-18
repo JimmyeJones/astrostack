@@ -724,6 +724,113 @@ def test_calibration_no_exposure_warning_when_matched(tmp_path):
     assert cal.calibration_warnings(light_exposure_s=10.5) == []
 
 
+def test_distinct_exposures_groups_header_rounding_but_not_a_real_step():
+    """"Is this the same exposure?" is one question, answered once.
+
+    Header rounding must not read as a second exposure, a real Seestar step
+    (10 → 20 → 30 s) always must, and a ramp of near-neighbours must not chain
+    two genuinely different lengths into one group."""
+    from seestack.calibrate.apply import distinct_exposures
+
+    rounded = distinct_exposures([9.998, 10.0, 10.002, 9.999])
+    assert len(rounded) == 1 and rounded[0] == pytest.approx(10.0, abs=0.01)
+    assert distinct_exposures([10.0, 30.0, 10.0, 30.0, 20.0]) == [10.0, 20.0, 30.0]
+    # Grouped against each group's *first* member, so 10 and 13.2 stay apart
+    # even though every neighbouring pair is inside the tolerance.
+    assert len(distinct_exposures([10.0, 11.4, 13.0])) > 1
+    # "We don't know how long this sub was" is not an exposure.
+    assert distinct_exposures([None, 0.0, -1.0, float("nan"), float("inf"),
+                               10.0, 10.0]) == [10.0]
+    assert distinct_exposures([]) == []
+    assert distinct_exposures([None, None]) == []
+
+
+def test_a_mixed_exposure_target_is_judged_on_all_of_its_subs_not_the_reference(tmp_path):
+    """Fail-before: the advisory saw only the reference frame's exposure, so on a
+    target shot at 10 s one night and 30 s the next the *same* dark and the same
+    subs either warned or stayed silent depending on which frame was picked as
+    reference. Handed the whole set, it answers the same either way."""
+    dark = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=10.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    subs = [10.0] * 40 + [30.0] * 20
+
+    from_short = cal.calibration_warnings(10.0, light_exposures_s=subs)
+    from_long = cal.calibration_warnings(30.0, light_exposures_s=subs)
+    assert len(from_short) == 1
+    assert from_short == from_long          # the reference frame no longer decides
+    warn = from_short[0]
+    assert "10s and 30s" in warn            # both lengths named …
+    assert "under-subtracted on the 30s ones" in warn   # … and which is wrong
+    assert "every frame" not in warn        # … and nothing claimed about the rest
+    assert "exposure-scaling" in warn       # … and a fix the user can act on
+
+
+def test_a_uniform_set_of_subs_reads_exactly_as_the_reference_frame_alone(tmp_path):
+    """The ordinary case — one exposure — must be untouched, whether or not the
+    caller hands the set over."""
+    dark = np.zeros((4, 4), dtype=np.float32)
+    save_master(tmp_path / "d.fits", dark,
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=30.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    alone = cal.calibration_warnings(10.0)
+    assert cal.calibration_warnings(10.0, light_exposures_s=[10.0] * 12) == alone
+    # …including the rounding case, which is one exposure and not two.
+    assert cal.calibration_warnings(
+        10.0, light_exposures_s=[9.998, 10.0, 10.001]) == alone
+    # …and a matched dark stays silent both ways.
+    assert cal.calibration_warnings(30.0, light_exposures_s=[30.0] * 12) == []
+    # An unknown-exposure set can't invent a mismatch out of blank FITS cards.
+    assert cal.calibration_warnings(10.0, light_exposures_s=[None, None]) == alone
+
+
+def test_mixed_exposures_stay_silent_when_scaling_matches_the_dark_to_each_sub(tmp_path):
+    """``apply_raw`` is handed each frame's *own* exposure, so with scaling on
+    every sub gets a dark scaled to it — mixed or not. Nothing to warn about."""
+    save_master(tmp_path / "d.fits", np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=10.0))
+    save_master(tmp_path / "b.fits", np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("bias", 5, 4, 4, "mean", exposure_s=0.0))
+    cal = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d.fits"), bias_path=str(tmp_path / "b.fits"),
+        scale_dark_to_light=True)
+    assert cal.calibration_warnings(
+        10.0, light_exposures_s=[10.0] * 4 + [30.0] * 2) == []
+
+
+def test_the_mixed_exposure_warning_says_the_bias_shape_is_why_scaling_did_nothing(
+        tmp_path):
+    """The blocked-by-bias-shape case has to survive the mixed wording too —
+    telling someone who already turned scaling on to turn it on is advice they
+    cannot act on, whichever branch wrote the sentence."""
+    save_master(tmp_path / "d.fits", np.full((4, 4), 300.0, dtype=np.float32),
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=10.0))
+    save_master(tmp_path / "b.fits", np.full((2, 2), 100.0, dtype=np.float32),
+                MasterMeta("bias", 5, 2, 2, "mean", exposure_s=0.0))
+    cal = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d.fits"), bias_path=str(tmp_path / "b.fits"),
+        scale_dark_to_light=True)
+    (warn,) = cal.calibration_warnings(
+        10.0, light_exposures_s=[10.0] * 4 + [30.0] * 2)
+    assert "10s and 30s" in warn
+    assert "2×2" in warn and "4×4" in warn
+    assert "unscaled" in warn
+    assert "Turn on dark exposure-scaling" not in warn
+
+
+def test_a_dark_between_two_exposures_is_wrong_in_both_directions(tmp_path):
+    """A 20 s dark against 10 s and 30 s subs over-subtracts one and
+    under-subtracts the other, so the sentence may not pick a side."""
+    save_master(tmp_path / "d.fits", np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=20.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    (warn,) = cal.calibration_warnings(
+        20.0, light_exposures_s=[10.0] * 3 + [30.0] * 3)
+    assert "over- or under-subtracted" in warn
+    assert "10s and 30s" in warn
+
+
 def test_calibration_exposure_warning_suppressed_when_scaling_is_on(tmp_path):
     # With exposure-scaling on and a bias present, the exposure gap is corrected
     # by _effective_dark itself, so there's nothing to warn about.

@@ -1,5 +1,111 @@
 # Shipped — the record
 
+## v0.456.1 — 2026-09-18 — and the Stack form was still asking the median, so it and the run disagreed about one target
+
+*(Builder, branch `claude/sweet-babbage-n9bszz`, the sibling v0.456.0's own entry names. Not a follow-up
+tidy: the `calibration-suggestions` endpoint's stated contract is that the form warns about exactly the
+pairs the finished run complains about, and v0.456.0 made the run smarter than the form.)*
+
+**The bug.** `routers/calibration.py` reduced the target's subs to `_median([f.exposure_s …])` and
+`routes/Stack.tsx` rendered it as *"your subs are Ns"*. On a target shot at 10 s on one night and 30 s on
+the next that sentence is false however N is chosen — **on an even split the median is 20 s, a length no
+sub was shot at** — and worse, a 20 s master dark is then a *perfect* match for that median, so the form
+said nothing at all about a dark that is wrong on every single frame. The same median also decided
+`darkExpMismatch`, so the pick-time caution fired on the wrong question.
+
+**The fix.** The endpoint serves `params.exposures_s`, the target's **distinct** sub lengths, from the same
+`calibrate.apply.distinct_exposures` the engine groups with — so the form and the run cannot come to
+different opinions about how many exposures a target has. `calibrationFit.mismatchedExposures` is the
+`exposureMismatch` test asked of every length instead of one (and, like every other check in that file,
+one-sided: an unknown set, an unknown master exposure or an unusable value can only ever stay silent), and
+`joinExposures` mirrors the engine's `_join_exposures` so one target is described the same way before the
+night is spent and after.
+
+**What the form now says.** With a 10 s dark on a 10 s / 30 s target: *"This dark was shot at 10s but your
+subs were not all shot at the same length (10s and 30s) — it will over- or under-subtract on the 30s ones,
+leaving residual thermal signal there. Add a master bias to scale it to each sub, or stack each exposure on
+its own with a dark to match."* It names only the subs the dark is actually wrong for — a 10 s dark is
+right for two-thirds of them, and saying "a mismatched dark" flat would be as wrong as saying nothing. The
+exposure-scaling reassurance carries through the same way ("scaled to match each sub (10s and 30s)"), and
+so does the "Matched to this target's frames" line.
+
+**A one-exposure target is untouched**, including against an older backend that serves no set at all: the
+single-exposure wording is a separate branch, pinned by a test that asserts the mixed sentence never
+appears there.
+
+**Tests (+7).** Two `Stack.test.tsx` cases fail before under a scratch revert — the 20 s-dark case that drew
+no caution at all, and the one that pins *which* subs are named — and a third pins the unchanged
+single-exposure wording. Two endpoint tests fail before (the served set, and that header rounding is one
+exposure and not two), plus four `calibrationFit.test.ts` cases.
+
+**Upgrade-safe (§9):** one additive, optional response field; the median is still served unchanged, so an
+older client is unaffected, and a newer client against an older backend falls back to today's single
+number. No config, schema, on-disk, API-shape or default change, and no pixel changes.
+
+**Still open, filed as a lead:** `pipeline._auto_bind_for_target` takes the same median to *choose and
+bind* a dark unattended. The run now says when that lands wrong, which is the honest half; changing what it
+binds is a behaviour change on the walk-away path and wants its own call.
+
+## v0.456.0 — 2026-09-18 — a target is not necessarily one exposure, and the dark advisory assumed it was
+
+*(Builder, branch `claude/sweet-babbage-n9bszz`. Found by asking which of the app's "representative value"
+shortcuts is a claim the data does not enforce, and reproduced on a real `run_stack` before anything moved.)*
+
+**The bug.** `seestack/stack/stacker.py` asked `CalibrationMasters.calibration_warnings` about
+`ref.exposure_s` — the **reference frame's** exposure — under a comment saying it "stands in for the
+(uniform) session". Nothing makes a session uniform. Shoot a target at 10 s on one night and 30 s on the
+next and it is one target with two exposures in it; `pick_reference_frame` chooses on quality and pointing
+and has never heard of exposure, so **which sub it happened to land on decided whether the advisory fired
+at all**. Measured on the loaded masters directly: with a 10 s dark and subs at 10 s and 30 s, a 10 s
+reference gave `[]` and a 30 s reference gave the full warning — same target, same masters, same subs. And
+the warning it did give said the pedestal would be wrong *"on every frame"*, which is false for the subs the
+dark matches.
+
+**What it costs.** The 30 s subs get the 10 s dark subtracted **unscaled** either way (`_effective_dark` is
+handed each frame's own exposure, so the *scaling* path was already per-frame correct — only the telling was
+broken). That leaves residual dark current and hot-pixel trails on part of the stack, which is exactly the
+failure this advisory exists to name, and the app was silent about it on the one shape where a beginner is
+most likely to have caused it.
+
+**The fix.** `calibration_warnings` takes a keyword `light_exposures_s` — every light's exposure, not just
+the reference's — and `run_stack` hands over the frames it is actually stacking. New pure
+`calibrate.apply.distinct_exposures` answers "how many different lengths are in this set?" using
+`EXPOSURE_MISMATCH_TOL`, the module's own "is this the same exposure?" constant, so header rounding
+(`9.998` against `10.0`) groups as one and a real Seestar step (10 → 20 → 30 s) never does. Grouping is
+against each group's **first** member, not a running value, so a ramp of near-neighbours cannot chain two
+genuinely different lengths together; each group is named by its median, so one mistyped header cannot move
+it; and missing, non-finite or non-positive values are dropped rather than grouped, because "we don't know
+how long this sub was" is not an exposure and treating it as one would invent a mismatch out of a blank
+FITS card.
+
+**Nothing about a one-exposure target moved, and that is pinned rather than asserted.** The mixed branch is
+separate from the single-exposure one, which is untouched; a test asserts that passing a uniform set — and
+passing a rounding-spread set, and passing a set of `None`s — returns *exactly* what the reference frame
+alone returned. Mixed subs with exposure-scaling on stay silent, correctly: with a bias present each sub
+already gets a dark scaled to it.
+
+**Wording.** The mixed sentence names both lengths and which of them the dark is wrong for ("not all shot at
+the same length (10s and 30s) — its pedestal will be under-subtracted on the 30s ones"), picks a direction
+only when there is one to pick (a 20 s dark against 10 s and 30 s subs says "over- or under-subtracted"),
+and offers the fix as either exposure-scaling or stacking each exposure separately. The
+blocked-by-wrong-shaped-bias variant carries through, so someone who already turned scaling on is still not
+told to turn it on.
+
+**Tests (+7, all seven fail before).** The load-bearing one is at the `run_stack` level and uses no new API:
+a 6-sub project (four at 10 s, two at 30 s) with a 10 s dark came back `calibration_warnings=[]` before and
+carries the named warning after. Plus the reference-frame-independence property (the two answers are now
+`==`), the uniform-set byte-identity above, the scaling-on silence, the both-directions case, the
+blocked-bias variant, and `distinct_exposures`' grouping, non-chaining and junk-rejection.
+
+**Upgrade-safe (§9):** one keyword-only parameter with a default that reproduces the old behaviour; no
+config, schema, on-disk, API-shape or default change, and no pixel changes anywhere — the advisory is
+advisory.
+
+**The class, for the next run.** *A representative value is a claim that the set is uniform, and nothing in
+the data enforces it.* Two siblings take the same shortcut and are named in the backlog:
+`pipeline._auto_bind_for_target` and `routers/calibration.py`'s `calibration-suggestions` both reduce the
+target's subs to a **median** exposure.
+
 ## v0.455.7 — 2026-09-17 — the Target page and the Stack form asked the identical question under two cache keys
 
 *(Builder, branch `claude/sweet-babbage-dmpc84`, the third and last finding from this run's lens, and the

@@ -440,6 +440,97 @@ describe("StackView", () => {
       expect(screen.getByText(/shot at 120s but your subs are 30s/)).toBeInTheDocument());
   });
 
+  it("warns about a dark that matches the median of two exposures but not the subs", async () => {
+    // A target shot at 10 s on one night and 30 s on the next. Their median is
+    // 20 s, which is a length no sub was shot at — so the old sentence ("your
+    // subs are 20s") was false, and a 20 s dark, being a perfect match for that
+    // median, drew no warning at all while being wrong on every single frame.
+    // The finished run judges the dark against all of them (v0.456.0); this is
+    // the same question at pick time.
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 20s", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 20, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 20, gain: 80, sensor_temp_c: null,
+                exposures_s: [10, 30] },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null,
+      bias_master_id: null, scores: { "1": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Use recommended"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/not all shot at the same length \(10s and 30s\)/))
+        .toBeInTheDocument());
+    // It names which subs the dark is wrong for …
+    expect(screen.getByText(/on the 10s and 30s ones/)).toBeInTheDocument();
+    // … and never claims they are one length.
+    expect(screen.queryByText(/your subs are 20s/)).not.toBeInTheDocument();
+  });
+
+  it("names only the subs a matching dark is wrong for", async () => {
+    // A 10 s dark on a 10 s / 30 s target is right for two-thirds of the subs.
+    // Saying "a mismatched dark" flat would be as wrong as saying nothing.
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 10s", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 10, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 10, gain: 80, sensor_temp_c: null,
+                exposures_s: [10, 30] },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null,
+      bias_master_id: null, scores: { "1": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Use recommended"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/on the 30s ones/)).toBeInTheDocument());
+    expect(screen.queryByText(/on the 10s and 30s ones/)).not.toBeInTheDocument();
+  });
+
+  it("keeps today's single-exposure wording when the subs really are one length", async () => {
+    // The ordinary case must be untouched, including against an older backend
+    // that serves no set at all.
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 120s", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 120, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null,
+      bias_master_id: null, scores: { "1": 1 }, n_frames: 12,
+    });
+
+    renderStack();
+    await waitFor(() => expect(screen.getByText("Use recommended")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Use recommended"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/shot at 120s but your subs are 30s/)).toBeInTheDocument());
+    expect(screen.queryByText(/not all shot at the same length/)).not.toBeInTheDocument();
+  });
+
   it("offers a one-click dark exposure-scaling when a bias is also selected, then confirms", async () => {
     mockSchema([]);
     // A mismatched 120 s dark and a master bias both already selected.

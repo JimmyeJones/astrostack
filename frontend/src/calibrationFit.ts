@@ -278,6 +278,40 @@ export function exposureMismatch(
   return Math.abs(frameExposureS / masterExposureS - 1) > limit;
 }
 
+/** Which of a target's sub lengths this master's exposure does **not** match,
+ *  shortest first — the same test as `exposureMismatch`, asked of every length
+ *  instead of one.
+ *
+ *  A target is not necessarily one exposure: shoot it at 10 s on one night and
+ *  30 s on the next and it is one target with two in it, and then the median the
+ *  form used to warn against names a length no sub was shot at. The finished run
+ *  judges the dark against all of them (`calibration_warnings(light_exposures_s=)`),
+ *  so the form has to as well, or the two disagree about one target.
+ *
+ *  Empty when the master matches every length, when the set is unknown, or when
+ *  the master's own exposure is unknown — one-sided like every other check here,
+ *  so it can only ever add a warning the engine would also give. */
+export function mismatchedExposures(
+  masterExposureS: number | null | undefined,
+  frameExposuresS: readonly (number | null | undefined)[] | null | undefined,
+  tolerances?: MismatchTolerances | null,
+): number[] {
+  if (masterExposureS == null || !(masterExposureS > 0)) return [];
+  if (!frameExposuresS) return [];
+  return frameExposuresS.filter(
+    (e): e is number => exposureMismatch(masterExposureS, e, tolerances),
+  );
+}
+
+/** `[10, 30]` → `"10s and 30s"`; `[10, 20, 30]` → `"10s, 20s and 30s"`. Mirrors
+ *  the engine's `_join_exposures` so one target is described the same way before
+ *  the night is spent and after. */
+export function joinExposures(values: readonly number[]): string {
+  const parts = values.map((v) => `${v}s`);
+  if (parts.length <= 1) return parts.join("");
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
 /** True when a master's sensor temperature is far enough from the frames' to be
  *  worth warning about (`>=` the tolerance, mirroring the engine). */
 export function tempMismatch(

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bayerConflicts, biasCanScaleDark, biasSizeWarning, darkScalingBlockedNote,
   exposureMismatch, flatBayerWarning, flatDarkSizeWarning, flatPickPatch,
+  joinExposures, mismatchedExposures,
   masterFitsFrames, masterOptionSuffix, masterRecommendation, masterSizeWarning,
   pickedMasterContentWarnings,
   tempMismatch,
@@ -407,5 +408,49 @@ describe("pickedMasterContentWarnings", () => {
   it("copes with a master that has no name", () => {
     expect(pickedMasterContentWarnings([{ slot: "bias", master: warn("nope.") }]))
       .toEqual(["Master bias: nope."]);
+  });
+});
+
+
+describe("mismatchedExposures — a target is not necessarily one exposure", () => {
+  it("names the lengths the dark is wrong for, not the median of them", () => {
+    // 10 s and 30 s on one target: a 10 s dark is perfect on one half and 3x
+    // wrong on the other, and their median (20 s) describes neither.
+    expect(mismatchedExposures(10, [10, 30])).toEqual([30]);
+    expect(mismatchedExposures(30, [10, 30])).toEqual([10]);
+    // A dark between the two is wrong in both directions.
+    expect(mismatchedExposures(20, [10, 30])).toEqual([10, 30]);
+  });
+
+  it("says nothing when the dark matches every length", () => {
+    expect(mismatchedExposures(10, [10, 10, 10])).toEqual([]);
+    // Header rounding is not a mismatch (inside the engine's own tolerance).
+    expect(mismatchedExposures(10, [9.99, 10.01])).toEqual([]);
+  });
+
+  it("cannot invent a warning out of what it does not know", () => {
+    // One-sided, like every other check here: an unknown set, an unknown
+    // master exposure, or an unusable value can only ever stay silent.
+    expect(mismatchedExposures(10, null)).toEqual([]);
+    expect(mismatchedExposures(10, undefined)).toEqual([]);
+    expect(mismatchedExposures(null, [10, 30])).toEqual([]);
+    expect(mismatchedExposures(0, [10, 30])).toEqual([]);
+    expect(mismatchedExposures(10, [null, undefined, 0, -1])).toEqual([]);
+  });
+
+  it("uses the server's tolerance, like every other check here", () => {
+    // A 12 s sub against a 10 s dark is a mismatch at the default 0.15 …
+    expect(mismatchedExposures(10, [10, 12])).toEqual([12]);
+    // … and not at a looser one the server served.
+    expect(mismatchedExposures(10, [10, 12], { exposure_frac: 0.5 })).toEqual([]);
+  });
+});
+
+describe("joinExposures — one target described the same way as the engine does", () => {
+  it("reads as a sentence", () => {
+    expect(joinExposures([10])).toBe("10s");
+    expect(joinExposures([10, 30])).toBe("10s and 30s");
+    expect(joinExposures([10, 20, 30])).toBe("10s, 20s and 30s");
+    expect(joinExposures([])).toBe("");
   });
 });
