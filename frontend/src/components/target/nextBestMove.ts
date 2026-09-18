@@ -267,6 +267,58 @@ export function readinessCanvasScope(
   return v?.canvas === "mosaic" ? "this mosaic" : "this single field";
 }
 
+/** Coaching kinds that prescribe **more light on the canvas the picture already
+ * has** — the levers the framing note's "adding more panels next session would
+ * capture the rest" competes with for one night.
+ *
+ * `thin`, `integration` and `good` all end on "shoot this again"; `locate` and
+ * `soft` name a setup fix instead, and `framing` *is* the widen prescription, so
+ * none of those three is a lever the clause below could defer to without
+ * becoming a third opinion. */
+const DEPTH_FIRST_COACH_KINDS: ReadonlySet<NextBestMoveKind> =
+  new Set(["thin", "integration", "good"]);
+
+/** The clause that puts the framing note's widen-prescription in its place, or
+ * `null` to leave that note exactly as it is.
+ *
+ * This is the other side of `framingRung`. Below `FRAMING_MAX_COVERAGE` the
+ * coaching card *becomes* the framing advice and the two agree. **Above** it,
+ * the coaching card has deliberately decided the opposite — that depth beats
+ * width on this picture — and nothing carried that decision to the note an inch
+ * below, which goes on saying "Adding more panels next session would capture the
+ * rest". Photographed on the bundled 2x2 at 75 % captured: one card asking for
+ * another pass over the panels already shot, the other for more panels, on the
+ * same screen, for the same night, with no word about which wins.
+ *
+ * So the note keeps its sentence — the missing quarter is real and the reader
+ * should know about it — and gains the order. It is the mirror of
+ * `IntegrationTrendBadge`'s own deference, and like it, it asks the coaching
+ * card's *actual* verdict rather than re-deriving one: silent unless that card
+ * is currently naming a more-light lever (`DEPTH_FIRST_COACH_KINDS`), so it can
+ * never contradict a "refocus" or "install the star database" tip, and silent
+ * on every surface that has no coaching card at all (the editor, History) —
+ * which is what an omitted `coachKind` means.
+ *
+ * Requires a *measured* coverage above the bar, never merely "not a fragment":
+ * a `partial` verdict whose coverage didn't come through says nothing about how
+ * much is already in, and "most of it is already in this picture" would then be
+ * a guess.
+ */
+export function framingDepthFirstClause(
+  v: NextBestMoveFraming | null | undefined,
+  coachKind: NextBestMoveKind | null | undefined,
+): string | null {
+  if (!v || v.level !== "partial") return null;
+  const coverage = finite(v.coverage);
+  if (coverage == null || coverage <= FRAMING_MAX_COVERAGE) return null;
+  if (coachKind == null || !DEPTH_FIRST_COACH_KINDS.has(coachKind)) return null;
+  const lever = v.canvas === "mosaic"
+    ? "more passes over the panels you already have do more for it than a wider grid"
+    : "more time on this framing does more for it than a wider canvas";
+  return `Most of it is already in this picture, though — until you're happy ` +
+    `with the depth, ${lever}.`;
+}
+
 /** The `framing` rung, or `null` when this run's framing isn't the top lever.
  *
  * Silent unless the verdict names a fragment (`framingIsFragment`) *and* the

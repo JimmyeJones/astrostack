@@ -7,6 +7,7 @@ import {
   recentreCropRect, recentreKeptLabel, recentreRefusalLine,
 } from "../editor/recentreCrop";
 import { cropCoverageFraction } from "../editor/mosaicTrim";
+import { framingDepthFirstClause, type NextBestMoveKind } from "./nextBestMove";
 import { mosaicDepthText } from "../../mosaicEffort";
 
 const TONE: Record<StackFraming["level"], { color: string; icon: string }> = {
@@ -77,7 +78,19 @@ export function framingTitle(v: Pick<StackFraming, "level" | "canvas">): string 
  * not in the catalog, no vetted size, or a run with no usable WCS), so it's safe
  * to drop in unconditionally.
  */
-export function FramingVerdictNote({ safe, runId }: { safe: string; runId: number }) {
+export function FramingVerdictNote(
+  { safe, runId, coachKind }: {
+    safe: string;
+    runId: number;
+    /** The kind of tip `NextBestMoveBadge` is currently showing on the same
+     * screen (or null when it is hidden), so a `partial` verdict that the
+     * coaching card has already decided *not* to act on says so rather than
+     * prescribing a second, competing next session. Omitted on every surface
+     * with no coaching card (the editor, History), where the verdict reads
+     * exactly as it always has. */
+    coachKind?: NextBestMoveKind | null;
+  },
+) {
   const v = useStackFraming(safe, runId);
   // The picture they have *now* can often be improved too: when the target landed
   // off to one side and a crop can put it back in the middle without gutting the
@@ -129,6 +142,7 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
     : null;
   if (!v) return null;
   const tone = TONE[v.level] ?? TONE.centred;
+  const depthFirst = framingDepthFirstClause(v, coachKind);
   // A *disabled* crop op isn't shrinking anything, which `cropCoverageFraction`
   // already knows. An unreadable recipe falls back to making the offer — the old
   // behaviour — rather than silently withholding it.
@@ -149,7 +163,15 @@ export function FramingVerdictNote({ safe, runId }: { safe: string; runId: numbe
         </Group>
       }
     >
-      <Text size="sm">{`${v.object_name} ${v.text}`}</Text>
+      <Text size="sm">
+        {`${v.object_name} ${v.text}`}
+        {/* The order, not a second opinion: one clause in the same paragraph,
+            only where the coaching card above has measurably chosen depth over
+            width (see `framingDepthFirstClause`). */}
+        {depthFirst ? (
+          <Text span data-testid="framing-depth-first">{` ${depthFirst}`}</Text>
+        ) : null}
+      </Text>
       {/* "Shoot it in mosaic mode" / "Adding more panels" stops exactly where the
           beginner's next question starts: *how big a mosaic?* — which is the very
           gap `MosaicPlan` exists to close. The Target page hides the catalogue
