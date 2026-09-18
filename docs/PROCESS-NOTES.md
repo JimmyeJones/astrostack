@@ -18,6 +18,73 @@ is a queue.
 
 ---
 
+## 2026-09-18 — Builder: the ninth dry-backlog run — the *contradiction inside one file* is cheaper to find than a bug
+
+*(Builder, branch `claude/sweet-babbage-dpaenx`, the run that shipped v0.465.1. Baseline
+`6365 passed, 2 skipped`, 11m23s with `-n 4` and the BLAS cap on a 4-core box.)*
+
+**Starting state, unchanged for the ninth run.** Every open entry under "Bugs (fix these first)" is gated on
+the owner's library, routed to sign-off, or stood down with measurements; `list_issues` returns the same three
+observer issues (#878, #880, #903), each already traced. The one freshly filed entry — the gain lead, filed by
+a `docs:` commit **30 minutes** before this run started — was left alone on purpose: §11 says a Builder should
+treat an entry that new as claimed-in-spirit, and the whole calibration-advisory family had been worked by the
+previous run inside the last two hours.
+
+**The lever, one turn past the last run's.** The previous run's note says *"a fix's own comment is the densest
+possible statement of a class"*. Sharpened: **when one file's docstring asserts X about a population and
+another docstring in the same file asserts not-X, one of them is a bug, and the grep is two words long.**
+`grep -rn "stands in for\|representative\|fixed-length\|are all one"` over `seestack/`, `webapp/` and
+`frontend/src/` returns ~40 lines, and in `seestack/stackhealth.py` two of them are 25 lines apart:
+
+> `DarkSpec`: *"a median is a claim about uniformity that nothing in the data enforces … a Seestar owner
+> changes sub length between nights as a matter of course"*
+>
+> `_median_sub_exposure`: *"Seestar subs are fixed-length, so the median **is** the sub exposure."*
+
+The second one was multiplied by a count and read against a threshold, which is how it became v0.465.1.
+
+**What made it a bug rather than a nit: the surface next to it does the same arithmetic honestly.** The panel
+map sums each panel's *actual* exposures; the note converted a depth with a median. Both read one threshold
+(`mosaicmap.THIN_MIN_SHORTFALL_S`) precisely so they cannot give opposite instructions — the point of the
+v0.406.2 fix — so a divergence in the *quantity* re-opens the thing that fix closed. Reproduced in one script
+before a line was written: map **120 s against 480 s → go and shoot it**, note **"only about 4 min behind, so
+it evens out on its own"**.
+
+**The other half of the lesson is the fixture.** `test_the_grain_note_and_the_panel_map_never_give_opposite_instructions`
+existed, was green, and says in its own docstring *"for one mosaic, **at one sub exposure**"* — all four of
+its cases build frames at a single 10 s, i.e. it fixes the variable the bug lives in. That is AGENTS.md §8's
+"fixtures that cannot exhibit their bug" in the wild again. **When a pin names its own constant assumption in
+prose, that phrase is the next test case**, and here it was three lines of fixture.
+
+**One residual was chased and closed rather than filed, so nobody re-derives it.** If a mosaic's *panels* were
+shot at different sub lengths (not just the target across nights), a count-based depth and an
+integration-based one could in principle point opposite ways — a region with *more* subs holding *less* light.
+It is not reachable: `bg/coverage_leveling.measure_coverage_grain` only ever takes candidates **below** the
+modal coverage level, and it *measures* σ rather than assuming 1/√count, so a region above the mode is never a
+candidate and one that is not actually grainier never clears `grain_verdict`. A hand-fed
+`grain_thin_frames=10, grain_deep_frames=20` reproduces the inverted sentence, but the pipeline cannot produce
+that pair (with three panels at 10 subs and one at 20, the *mode* is 10). **Recorded here rather than filed as
+a lead: the guard is real, and a lead that is already defended costs the next run a slot.**
+
+**Two sibling sites were checked and are correct, so they are not work.**
+`Target.tsx` feeds `NextSessionCard` `total_exposure_s / n_frames_accepted` — a mean, already right;
+`calibrate/masters.py`'s median over a master's constituent darks is right, because darks for one master
+*are* one length; and `standouts.ts`'s "subs are a fixed length" only explains why two rankings usually
+coincide, with two cards rendered when they differ, so no arithmetic rests on it. `recommended_dark_spec`
+keeps its median **deliberately** — it names a length to dial into a camera.
+
+**Dogfood `--mosaic`: CLEAN**, and it did the second job the flag is for: it put the changed sentence in front
+of a running app on a single-exposure sample, where the fix is bit-identical by construction — the map and the
+note both said *"only about 30 s behind"*, which is the no-regression half demonstrated rather than argued.
+Tallest phone page `/tonight` 3,705 px, then the mosaic Target page 3,613 px, `/glossary` 3,364 px; nothing
+overflowing, no console errors. The prescriptive block was read as one paragraph per the standing
+instruction. One pair was weighed and **not** filed: at 75 % captured the coaching card says *"another pass or
+two over the same mosaic"* while the framing card says *"adding more panels next session would capture the
+rest"*. That band is the deliberate output of `FRAMING_MAX_COVERAGE = 0.67`, whose comment argues the case at
+length ("it fires just as readily at 95 % captured … depth is plainly the better lever") and names the
+coaching card as the one that decides. Re-opening it would be re-litigating a stand-down that carries a
+number.
+
 ## 2026-09-18 — Builder: the eighth dry-backlog run, and the cheapest lever yet — read the comment beside the last fix
 
 *(Builder, branch `claude/sweet-babbage-cm0qc7`, the run that shipped v0.464.0/.1 and v0.465.0. Baseline
