@@ -3220,6 +3220,13 @@ export interface CalibrationDefects {
 export interface CalibrationSuggestions {
   params: {
     exposure_s: number | null; gain: number | null; sensor_temp_c: number | null;
+    // The target's *distinct* sub lengths, shortest first, grouped by the
+    // engine's own tolerance. `exposure_s` above is their median, which is a
+    // claim that there is only one — false on a target shot at 10 s one night
+    // and 30 s the next, where it names a length no sub was shot at. The
+    // finished run judges a dark against all of them, so the form does too.
+    // Optional: an older backend omits it and the form keeps the single number.
+    exposures_s?: number[] | null;
     // The target's modal raw frame size, so the form can flag a master built
     // for a different camera/binning (which would fail the stack outright).
     // Optional: an older backend omits them.
