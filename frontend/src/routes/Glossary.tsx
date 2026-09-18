@@ -17,12 +17,16 @@ import { filterGlossary } from "../glossarySearch";
 // the one UI the owner actually runs said "FWHM", "drizzle", "sigma clipping"
 // and "panel depth" on screen with no page anywhere that defines them.
 //
-// **It is a list of headings, not 38 open entries** — and that is a measurement,
-// not a preference. The first build rendered every explanation eagerly and came
-// out at **8,194 px on a 420 px phone**, nearly three times the tallest page in
-// the app, on the one product whose standing owner complaint is *"I have to
-// scroll a fair bit to get to the actual info"*. Collapsed, the whole vocabulary
-// fits on about two screens and the word you want is one tap away — the same
+// **It is a list of headings, not a page of open entries** — and that is a
+// measurement, not a preference. The first build rendered every explanation
+// eagerly and came out at **8,194 px on a 420 px phone** (at 38 terms), nearly
+// three times the tallest page in the app, on the one product whose standing
+// owner complaint is *"I have to scroll a fair bit to get to the actual info"*.
+// The count is deliberately not quoted as the *current* one here: the glossary
+// grows whenever a screen gains a word it has to explain, and a comment holding
+// today's number is a comment that is wrong by the next entry. Collapsed, the
+// whole vocabulary fits on a couple of screens and the word you want is one tap
+// away — the same
 // trade `LifeList`'s TODO_PREVIEW and `FrameColumnGuide` already make, and
 // nothing is removed (AGENTS.md §1): every entry is still here, "Open them all"
 // still reads it end to end, and a `#fwhm` link opens its own entry.
