@@ -50,6 +50,25 @@ describe("MergeSuggestionsCard", () => {
     await waitFor(() => expect(merge).toHaveBeenCalledWith("m31_n2", ["m31_n1"]));
   });
 
+  it("says the pictures came too — the fine print promises nothing is deleted", async () => {
+    vi.spyOn(client.api, "mergeSuggestions").mockResolvedValue([suggestion()]);
+    vi.spyOn(client.api, "mergeTargets").mockResolvedValue(
+      { into: "m31_n2", frames_added: 100, pictures_kept: 2 } as never);
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByText(/keeps every sub/)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/every picture you.{1,3}ve already made of it/))
+      .toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Combine into one deep target"));
+    await waitFor(() =>
+      expect(screen.getByText(/Your 2 existing pictures came with them/))
+        .toBeInTheDocument(),
+    );
+  });
+
   it("self-hides when there are no suggestions", async () => {
     vi.spyOn(client.api, "mergeSuggestions").mockResolvedValue([]);
     const { container } = renderCard();

@@ -549,7 +549,7 @@ def _deconvolve(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 
 
 register(OpSpec(
-    id="detail.hot_pixels", label="Hot-pixel removal", group="detail", stage="linear",
+    id="detail.hot_pixels", label="Hot-pixel removal", group="detail", stage="linear", glossary="hot-pixel",
     apply=_hot_pixels, proxy_safe=True,
     help="Remove stray single bright or dark pixels (stuck sensor pixels) that "
          "calibration missed, without softening real stars.",
@@ -560,7 +560,7 @@ register(OpSpec(
 ))
 
 register(OpSpec(
-    id="detail.denoise", label="Noise reduction", group="detail", stage="linear",
+    id="detail.denoise", label="Noise reduction", group="detail", stage="linear", glossary="noise",
     apply=_denoise, proxy_safe=True, heavy=True,  # skimage restoration — slow on the proxy
     help="Smooth away background grain while keeping stars and detail. Tip: use the "
          "'From your image' button to set a strength from your own noise level.",
@@ -578,7 +578,7 @@ register(OpSpec(
 ))
 
 register(OpSpec(
-    id="detail.chroma_denoise", label="Colour-blotch smoothing", group="detail",
+    id="detail.chroma_denoise", label="Colour-blotch smoothing", group="detail", glossary="noise",
     stage="any", apply=_chroma_denoise, proxy_safe=True, heavy=True,  # wide filter
     help="Even out the patchy green/magenta colour drift across the sky that "
          "ordinary noise reduction leaves behind. It only touches colour, so "

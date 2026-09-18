@@ -25,7 +25,12 @@
  * stack) vs "thin" (2–4 — very few).
  */
 
-import { fieldsOfSkyLabel, perPixel, spansMoreThanOneField } from "./perPixel";
+import {
+  A_TYPICAL_PART,
+  fieldsOfSkyLabel,
+  perPixel,
+  spansMoreThanOneField,
+} from "./perPixel";
 
 // At/under this many subs *on one part of the picture* the result is genuinely
 // noisy and worth a heads-up. Chosen from the √N noise curve: below ~5 frames
@@ -94,7 +99,7 @@ export function thinStackWarning(
     // true; the spread is the fact that reconciles them.
     const spread =
       `Your ${nFramesUsed} subs are spread across ${fieldsOfSkyLabel(fieldFulls)}, ` +
-      `so each part of this picture has only about ${depth} ` +
+      `so ${A_TYPICAL_PART} of this picture has only about ${depth} ` +
       `${depth === 1 ? "sub" : "subs"} on it`;
     if (depth <= 1) {
       return {

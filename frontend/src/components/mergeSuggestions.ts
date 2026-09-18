@@ -49,3 +49,27 @@ export function mergeInto(s: MergeSuggestion): string {
 export function mergeSources(s: MergeSuggestion): string[] {
   return s.targets.slice(1).map((t) => t.safe);
 }
+
+// What to say once the merge has run.
+//
+// The nudge's fine print promises "nothing is deleted", and the merge does
+// delete the source *folders* — so the confirmation has to account for the one
+// thing in them a user could not get back: a finished picture. `POST /merge`
+// answers `pictures_kept`; an older backend omits it, which reads as "say
+// nothing extra" rather than as zero, so the sentence degrades to exactly the
+// one this app has always shown.
+export function mergeOutcomeMessage(
+  nFolders: number,
+  label: string,
+  picturesKept?: number | null,
+): string {
+  const kept =
+    picturesKept != null && Number.isFinite(picturesKept) && picturesKept > 0
+      ? ` Your ${picturesKept} existing picture${picturesKept === 1 ? "" : "s"} ` +
+        `came with ${picturesKept === 1 ? "it" : "them"} — see History.`
+      : "";
+  return (
+    `Combined ${nFolders} folders of ${label} into one deep target.` +
+    `${kept} Re-stack it to get the deeper picture.`
+  );
+}

@@ -114,7 +114,7 @@ class ThinPictureItem(BaseModel):
     #: sky its canvas covers. Both, rather than the quotient, because the wall
     #: asks ``thinStackWarning`` for its sentence and that function names *both*
     #: figures on a mosaic ("your 30 subs are spread across about 9 fields of
-    #: sky, so each part …"). Serving only the depth would make the wall write a
+    #: sky, so a typical part …"). Serving only the depth would make the wall write a
     #: second sentence about a picture the Gallery already has one for.
     n_frames_used: int = 0
     #: ``None`` on a single field and whenever the shape can't be measured — the

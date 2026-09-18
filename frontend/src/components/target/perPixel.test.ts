@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import {
+  A_TYPICAL_PART,
   canvasFieldFulls,
   fieldsOfSkyLabel,
   perPixel,
@@ -59,5 +60,16 @@ describe("fieldsOfSkyLabel", () => {
     // Only ever printed when the canvas really does span more than one field,
     // so a scale that rounds down to 1 still reads as at least 2.
     expect(fieldsOfSkyLabel(1.2)).toBe("about 2 fields of sky");
+  });
+});
+
+describe("A_TYPICAL_PART", () => {
+  it("is what every sentence built on this module's figures says", () => {
+    // Not a style preference: `perPixel` is a mean over the canvas and the
+    // walk-away hold's own number is a frame-weighted median, so on an uneven
+    // mosaic — the owner's shooting style — there are pixels on both sides of
+    // it. "each part has N" is a promise the figure cannot keep, and it is the
+    // half of the sentence that a beginner reads as a guarantee.
+    expect(A_TYPICAL_PART).toBe("a typical part");
   });
 });

@@ -2,6 +2,7 @@ import {
   Group, NumberInput, Select, Slider, Stack, Switch, Text, TextInput,
 } from "@mantine/core";
 import type { StackOptionField } from "../api/client";
+import { GlossaryLink } from "./GlossaryLink";
 import { HintIcon } from "./HintIcon";
 
 /**
@@ -19,11 +20,19 @@ import { HintIcon } from "./HintIcon";
  * could try — tapping the icon — used to activate the control instead: tapping
  * "what does this do?" on a checkbox flipped the setting.
  */
-export function HintLabel({ label, hint }: { label: string; hint?: string | null }) {
+export function HintLabel({ label, hint, glossary }: {
+  label: string;
+  hint?: string | null;
+  /** Slug of the glossary entry for the *concept* — see `GlossaryLink`. `help`
+   *  says what this control does; that says what the word means. Absent on most
+   *  fields and on every older backend, and then nothing is rendered. */
+  glossary?: string | null;
+}) {
   return (
     <Group gap={4} wrap="nowrap">
       <Text size="sm">{label}</Text>
       {hint ? <HintIcon hint={hint} /> : null}
+      {glossary ? <GlossaryLink slug={glossary} term={label} /> : null}
     </Group>
   );
 }
@@ -61,7 +70,9 @@ export function StackOptionControl({
   disabled?: boolean;
   preferSlider?: boolean;
 }) {
-  const label = <HintLabel label={field.label} hint={field.help} />;
+  const label = (
+    <HintLabel label={field.label} hint={field.help} glossary={field.glossary} />
+  );
   // A percent field is shown in percent *everywhere* — value, bounds and step —
   // so the slider, the readout and the typed number all speak one unit. `show`
   // and `store` are the identity for every other field, so nothing else moves.

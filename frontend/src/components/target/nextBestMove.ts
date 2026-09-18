@@ -26,7 +26,12 @@
  */
 
 import { THIN_STACK_MAX_FRAMES } from "./thinStack";
-import { fieldsOfSkyLabel, perPixel, spansMoreThanOneField } from "./perPixel";
+import {
+  A_TYPICAL_PART,
+  fieldsOfSkyLabel,
+  perPixel,
+  spansMoreThanOneField,
+} from "./perPixel";
 import { formatIntegration } from "../../format";
 import { settingsLink } from "../../settingsSections";
 import {
@@ -377,7 +382,7 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
       kind: "thin",
       phrase: mosaic
         ? `Your ${nUsed} subs are spread across ${fieldsOfSkyLabel(input.fieldFulls)}, ` +
-          `so each part of this picture has only about ${depth} ` +
+          `so ${A_TYPICAL_PART} of this picture has only about ${depth} ` +
           `${depth === 1 ? "sub" : "subs"} on it — too few to smooth out the ` +
           `noise. More passes over the same mosaic is the biggest win here; ` +
           `a stack only gets cleaner as it combines more frames.`
@@ -493,7 +498,8 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
       kind: "integration",
       phrase: mosaic
         ? `Add more time — your ${formatIntegration(integrationS)} is spread across ` +
-          `${fieldsOfSkyLabel(input.fieldFulls)}, so each part of this picture ` +
+          `${fieldsOfSkyLabel(input.fieldFulls)}, so ${A_TYPICAL_PART} of this ` +
+          `picture ` +
           `has ${soFar}. ` +
           (cluster || curatedEasy
             ? (alreadyClean && uneven

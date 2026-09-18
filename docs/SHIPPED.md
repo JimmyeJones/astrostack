@@ -1,5 +1,205 @@
 # Shipped — the record
 
+## v0.461.0 — 2026-09-18 — the glossary promised that "a screen that uses a word can point straight at the word", and one screen did
+
+*(Builder, branch `claude/sweet-babbage-db6205`, the third task of the v0.460.0 run — and a **new beginner
+capability**, the thing AGENTS.md §1 says to ship on a regular cadence and which the last twenty versions,
+all fixes, had not. Found the same way as the other two: by reading the app's own published sentences as
+claims about behaviour.)*
+
+**The promise.** `seestack/data/glossary.md` opens with:
+
+> *"The app serves this page at **/glossary**, and every entry has its own link — so a screen that uses a
+> word can point straight at the word, and nobody has to leave the app to understand something on screen.
+> If a term you saw isn't here, it belongs here: this list is meant to cover everything the interface says
+> out loud."*
+
+Thirty-eight entries, every one with a stable anchor, a page that opens and scrolls to a `#slug` on first
+paint, and a search box. And in the whole frontend, **one** screen pointed at one of them:
+`FrameColumnGuide` → `/glossary#fwhm`. Everywhere else the glossary was a nav item you had to already know
+to go and look for — which is precisely no use to the person stuck on a word, who does not know the word.
+The `/glossary` page shipped as v0.423.0 and its own backlog entry has said since that *"what remains here
+is the per-screen jargon audit itself: each place that says a term without explaining it can now link
+`/glossary#slug`"*.
+
+**What shipped.** The two screens densest in jargon — the Stack form and the editor — now offer the
+explanation at the word. The slug is a descriptor field, so this is the app's own idiom (engine is the
+source of truth; the descriptor-driven form renders it generically) rather than copy edited into twenty
+components:
+
+- **`StackOptionField.glossary`** (additive, optional) on **20** stacking controls: sigma clipping and its
+  κ, min/max rejection and its count, background flatten / mode / box size and the three final-gradient
+  fields, drizzle and its rejection pass, hot-pixel suppression and its σ, sub-pixel refine, lucky imaging,
+  scale-dark-to-light and repair-sensor-defects, colour calibration and its mode. It reaches the Stack form,
+  the Settings page's stacking defaults and the editor's parameter panel at once, because all three render
+  through `StackOptionControl`.
+- **`OpSpec.glossary`** on **9** editor ops: stretch → *Stretching*, SCNR → *SCNR*, colour calibrate →
+  *Colour calibration*, both background passes → *Background flattening*, coverage leveling → *Coverage
+  map*, hot-pixel removal → *Hot pixel*, both denoisers → *Noise σ*.
+- **`GlossaryLink`** renders it: a 14 px book glyph linking at `/glossary#<slug>`, beside the existing
+  `HintIcon` in `HintLabel` and beside the op's help line in the editor.
+
+**Three design calls worth keeping.** *(a)* It is a **second glyph**, not a longer tooltip, because the two
+answer different questions — `help` says what this control does to *your picture* ("Reject per-pixel
+outliers (satellites, cosmic rays, planes)"), the glossary says what sigma clipping *is*, in a paragraph.
+A tooltip cannot hold the second, and it cannot hold a link either: Mantine's closes on `pointerleave`, so
+anything clickable inside one is unreachable with a mouse and gone before a finger arrives.
+*(b)* It is a **glyph, not an underlined label**, because `HintLabel` renders inside the control's own
+`<label>`, where a click is forwarded to the control it labels — the v0.374.11 trap one level along: asking
+what a word means would flip the setting. *(c)* It carries **no padding**, so no row is taller and no page
+grew — the standing "the pages are extremely busy" priority.
+
+**A hand-written slug is a slug that can be wrong**, and wrong silently: the page loads, the entry does not
+open, and the beginner who asked what a word means lands on a list of forty other words. `_slugify` derives
+the anchor from the heading text, so rewording a heading is enough to break one. `tests/test_glossary_links.py`
+therefore sweeps **every** slug — the 20 descriptors, the 9 ops, op params, **and** the links hard-coded into
+`.tsx` files (which covers the pre-existing `#fwhm` one, unchecked since it shipped) — against the bundled
+glossary. Proved armed by mistyping one and watching it go red.
+
+**Upgrade-safe (§9).** Two optional fields with `None` defaults on the engine spec and the API model, two
+optional fields on the client types; every control without a slug, and every control served by an older
+backend, renders exactly as it did. No config, schema, on-disk, default or existing-response-shape change —
+the key is always present and explicitly null rather than appearing and disappearing, so a client reading
+`field.glossary` gets null, never undefined.
+
+**Tests +11 (5 Python, 6 frontend).** Python: three slug sweeps (`tests/test_glossary_links.py`) and two
+endpoint tests (`tests/webapp/test_glossary_links_api.py`). Frontend: the anchor, the accessible name that
+deliberately does *not* repeat the control's label, `HintLabel` with and without a slug, and
+`StackOptionControl` threading it. **Fail-before verified by scratch reverts that keep every signature:** 2
+red in Python (slugs removed from the descriptors), 2 red in vitest (the link removed from `HintLabel`).
+
+## v0.460.1 — 2026-09-18 — one alert said "a typical part has 1 sub" and, two clauses later, "waiting until each part has 3"
+
+*(Builder, branch `claude/sweet-babbage-db6205`, the second task of the v0.460.0 run. Same method: read the
+app's own sentences as claims about behaviour.)*
+
+**The bug.** `MosaicThinHoldNote` — the note a beginner meets on the Target page when the walk-away stack
+holds a mosaic back — says:
+
+> *"All 9 of your subs are located — but they're spread over 9 panels, so **a typical part** of the picture
+> has only 1 sub on it. Stacking now would make a picture that's mostly single-frame noise, so the hands-off
+> auto-stack is waiting until **each part** has at least 3."*
+
+Both halves are about the same quantity and only the first is true. The hold releases on
+`stacker.typical_panel_depth`, a **frame-weighted median**, and that is deliberate — its own docstring says
+taking the thinnest panel instead "would strand the whole target on account of one cell", and
+`tests/test_autostack_mosaic_depth.py::test_one_thin_corner_does_not_speak_for_the_whole_mosaic` pins
+`typical_panel_depth([40, 40, 40, 3]) == 40`. So a mosaic stacks itself while one corner is 3 subs deep, and
+the note had promised it would wait. The error is in the direction that surprises: it offers a stronger
+guarantee than the app gives, to the one user whose panels are routinely uneven (AGENTS.md §1 — heavy mosaic
+user, many nights).
+
+**Same substitution, four more sentences.** `thinStackWarning`, both of `nextBestMove`'s mosaic rungs and
+`rejectionNote` all say *"so each part of this picture has …"* over a figure `perPixel.ts` is explicit about:
+*"It is a mean… a mosaic with one deep panel and eight thin ones has pixels on both sides of it."*
+`nextBestMove`'s integration rung says it four lines under a comment reasoning carefully about exactly that
+unevenness. Meanwhile every surface where the **backend** supplies the number already says "a typical part" —
+the Jobs page's two hold lines, the Dashboard's last-night card, the hold note's own first clause,
+`AutoStackThinHoldOut`'s docstring, `webapp/overnight.py`. One quantity, two vocabularies, and the wrong one
+on the frontend's own half.
+
+**The fix** is the phrase in one place: `A_TYPICAL_PART` in `perPixel.ts`, the module that owns the quantity,
+with the reason it is that phrase — so the two halves of one sentence cannot drift apart again. The hold note
+keeps its own wording and simply refers back to the clause it already got right (*"waiting until that's at
+least 3"*), which is exactly what the median measures. Two comments that quoted the old sentence
+(`webapp/routers/unstretched.py`, `frontend/src/api/client.ts`) were updated with it.
+
+**No number moved, no threshold moved, no behaviour changed** — this is what the app already does, said
+accurately. A single-field target's sentences are untouched (the clause is mosaic-only on every surface).
+
+**Tests +3, all three red under a scratch revert of the copy alone** (`thinStack`, `rejectionNote`,
+`MosaicThinHoldNote`), plus the constant's own case; the two existing assertions that pinned the old wording
+were updated, not loosened. `tsc` / `vitest` / `vite build` clean.
+
+## v0.460.0 — 2026-09-18 — "Combine into one deep target" kept every sub and deleted every picture
+
+*(Builder, branch `claude/sweet-babbage-db6205`. Found by grepping the app's user-facing copy for a sentence
+that is a falsifiable claim about behaviour — the method recorded in `PROCESS-NOTES.md`, 2026-09-18 — and
+traced to the lines before anything was touched.)*
+
+**The bug.** The Library's same-object nudge ends its fine print with
+
+> *"Merges into “M 31 night 2” (your deepest folder) and keeps every sub — nothing is deleted."*
+
+The button under it posts `/api/targets/merge` → `Library.merge_targets`, which calls
+`seestack.io.merge.merge_projects` and then, for every source, `delete_target(safe, remove_files=True)` —
+`shutil.rmtree` of that target's **whole folder**. And `merge_projects` says in its own module docstring what
+it does not carry:
+
+```
+What does NOT get merged:
+  - Stage-2 caches (aligned data — invalidated when the destination's
+    reference frame changes anyway).
+  - Stack runs / project meta — those stay per-source.
+```
+
+"Stay per-source" and "the source is deleted next" are the same sentence read twice. So one click destroyed,
+permanently and with no confirmation: every source folder's `stack_runs` rows, its `output/` tree (the stacked
+FITS, the TIFF, the preview PNG, the coverage and frame-coverage maps, the progress reel, the share render)
+and its per-run `project_meta` — the **saved edit recipe** first among them. The raw subs survive (they live in
+`incoming/`, and their frame rows are copied), so "keeps every sub" was true; "nothing is deleted" was not.
+
+**Why it stopped being theoretical.** `auto_stack` ships **on** for fresh installs (v0.391.0) and the Seestar
+writes **one folder per night** — which is exactly the population `merge_suggestions` clusters and offers to
+combine, and nothing filters a suggestion on "has no stacks". So on a current install the folders this nudge
+points at normally *do* hold a picture the app made by itself. The same "what does my own change make
+reachable?" question the v0.459 run recorded, asked of a default flip three months old.
+
+**The fix: the pictures move out before the folder goes.** New
+`seestack.io.merge.carry_stack_runs(destination, source)` copies each source run's **three things** —
+its history row, its output file set and its per-run annotations:
+
+- **The file set** is resolved the way `webapp.routers.storage.delete_run_artifacts` resolves it: from the
+  stem of the recorded `fits_path`, not from `output_basename`. A re-stack archives the previous set to
+  `{base}_{stamp}.*` and repoints the row's three path columns (`Project.repoint_stack_runs`) while leaving
+  `output_basename` alone — so for every run but the newest, the column and the disk disagree, and a carry
+  that trusted the column would have copied the *newest* run's pixels onto the older run's row, twice. The
+  set moved is `RUN_ARTEFACT_SUFFIXES`, so the basename-resolved siblings (`_coverage.fits`, `_share.png`,
+  the reel) travel with it.
+- **The basename** is made free in the destination first (`_free_basename`). Two nights of the same Seestar
+  convention are both `master`, so a straight copy would have silently replaced the destination's own picture
+  with the source's — losing one while claiming to keep both. The source target's folder name is tried as the
+  suffix (`master_M_31_night_2`) before a bare counter, because a merged History reads better that way.
+- **The annotations** are found by *shape*, `^(.+:)(\d+)$` matching a run id this project actually has, and
+  re-keyed to the new id. The engine cannot import `webapp` (AGENTS.md §6), which owns the nine prefixes
+  `webapp.run_meta.per_run_meta_prefixes()` registers — so the rule is deliberately vocabulary-free, and a
+  prefix added later travels with no change here. `tests/webapp/test_merge_carries_pictures.py` asserts every
+  registered prefix matches that shape, so the two cannot drift.
+
+**And a picture that cannot be carried keeps its folder.** `CarryResult.lost` counts a run whose files exist
+but could not all be copied — a full disk, a permission error. `Library.merge_targets_result` then **does not
+delete that source target**, and takes the partial copies back out of the destination rather than leaving files
+no row names. Two library entries and nothing lost beats a tidy library and a missing picture; deleting the
+folder is the step that makes the loss permanent, so that is the step that is conditional. The frames merge
+either way — that half succeeded and is not undone.
+
+**Copies, not moves**, deliberately: a move would be faster and would not need room for both sets at once (a
+mosaic master is ~100 MB, its share render tens more), but `copy_stack_runs` is a *parameter* and only one
+caller happens to delete the source afterwards — gutting a source project this function does not own would be
+a worse bug than the one it fixes. The transient second copy is freed by that delete, seconds later, on the
+same filesystem.
+
+**What the app now says.** The fine print is *"…and keeps every sub — and every picture you've already made of
+it. Nothing is deleted."*, and the confirmation names the number: *"Combined 2 folders of Andromeda Galaxy into
+one deep target. Your 2 existing pictures came with them — see History. Re-stack it to get the deeper
+picture."* The count comes from an additive `pictures_kept` on the merge response; a backend that omits it
+reads as **unknown**, never as zero, so the sentence degrades to exactly the one this app has always shown.
+
+**Upgrade-safe (§9).** No config, schema, on-disk-layout or default change. `Library.merge_targets` keeps its
+signature and its `int` return (the new `merge_targets_result` is what counts pictures);
+`MergeResult`'s two new fields carry defaults; `merge_projects` still carries no runs unless asked, so this
+module's original "combine three nights of frame rows" job is byte-for-byte unchanged; the merge response only
+gains a key. New engine method `Project.iter_meta()`.
+
+**Tests (+9 Python, +5 frontend).** `tests/test_merge.py` +6 (the carry end to end with its recipe and its
+basename-resolved sibling; the default staying off; the two-`master` collision; a files-gone run not invented
+as an empty row; the archived-basename case; and a copy failure reported as lost with no orphans left behind),
+`tests/test_library.py` +2 (the picture readable after the folder is deleted; the folder kept when the copy
+fails), `tests/webapp/test_merge_carries_pictures.py` +2 (the endpoint's `pictures_kept` and the prefix-drift
+guard). **Fail-before verified by scratch reverts of the logic with every signature intact:** 3 red in
+`test_merge.py`, 1 red in the frontend card test. Frontend +5 (`mergeOutcomeMessage`'s four cases and the
+card's own). `tsc` / `vitest` (4,239) / `vite build` clean.
+
 ## v0.459.2 — 2026-09-18 — the run that scaled its dark on a mixed target either said nothing, or named one of its two sub lengths
 
 *(Builder, branch `claude/sweet-babbage-fwwin8`, the third task of the v0.459.0/.1 run. Found by asking what
