@@ -436,24 +436,36 @@ def framing_result_verdict(
     height_px: int,
     arcsec_per_px: float,
     size_arcmin: float | None,
+    size_minor_arcmin: float | None = None,
     canvas: str = CANVAS_FRAME,
 ) -> FramingResult | None:
     """Judge how well a finished stack framed its target.
 
     Takes the object's position **already projected into the result's pixel
     grid** (``x_px``/``y_px``), the canvas size, its plate scale and the object's
-    major-axis size — so this stays pure arithmetic with no WCS, no astropy and
-    no I/O, exactly like :mod:`seestack.scalebar`. The caller (the webapp) owns
-    the projection, which is the part that needs a WCS.
+    size — so this stays pure arithmetic with no WCS, no astropy and no I/O,
+    exactly like :mod:`seestack.scalebar`. The caller (the webapp) owns the
+    projection, which is the part that needs a WCS.
 
     Returns ``None`` when the answer would be a guess: no catalog size, a
     non-positive plate scale or canvas, or a non-finite position. We never
     invent a framing verdict — no card is better than a wrong one.
 
-    The object is modelled as a **square box of its major-axis size** centred on
-    its catalog position. That is deliberately generous for an elongated galaxy
-    seen edge-on (its minor axis is smaller), so the verdict errs toward "some of
-    it is outside" rather than quietly promising a beginner that all of it landed.
+    The object is modelled as a **box of its major × minor axes, laid along the
+    canvas's long edge** — the *same* convention :func:`mosaic_plan` counts
+    panels with and :func:`field_fill` draws with, and when the catalog records
+    no minor axis all three fall back to the same generous square of the major
+    axis. They have to agree, because they land on one card: the verdict says how
+    much of the object made it in and the plan says how big a mosaic captures all
+    of it, so measuring the object as two different shapes lets the card tell an
+    owner that a grid they have already shot would capture an object it says is
+    only 40 % in. (It did: M 31 — 178' × 63' — dead centre in a 2×1 mosaic of the
+    owner's own S30 field holds **all** of it, and the square box read that as
+    "only about 40% of it is in this picture. Adding more panels next session
+    would capture the rest", beside "About a 2×1 mosaic (2 panels) covers all of
+    it." The catalog stores no position angle, so "laid along the long edge" is
+    an assumption either way — and it is the one the panel count the owner is
+    being asked to *shoot* already makes.)
 
     ``canvas`` says whether the picture being judged is one frame of sky
     (:data:`CANVAS_FRAME`, the default and every caller's behaviour before this
@@ -472,14 +484,23 @@ def framing_result_verdict(
         return None
 
     hi_x, hi_y = float(width_px - 1), float(height_px - 1)
-    radius_px = (size_arcmin * 60.0 / arcsec_per_px) / 2.0
-    if radius_px <= 0:
+    major_px = (size_arcmin * 60.0 / arcsec_per_px) / 2.0
+    minor_px = major_px
+    if size_minor_arcmin is not None and size_minor_arcmin > 0:
+        minor_px = min(
+            (float(size_minor_arcmin) * 60.0 / arcsec_per_px) / 2.0, major_px)
+    if major_px <= 0 or minor_px <= 0:
         return None
+    # The object laid along the canvas's long edge — the arrangement anyone
+    # framing it would choose, and the one ``mosaic_plan`` already counts panels
+    # for. With no minor axis the two half-extents are equal and this is exactly
+    # the square box of every caller before the argument existed.
+    rx, ry = (major_px, minor_px) if hi_x >= hi_y else (minor_px, major_px)
 
     # Fraction of the object's box that lands inside the canvas.
-    span_x = max(0.0, min(x_px + radius_px, hi_x) - max(x_px - radius_px, 0.0))
-    span_y = max(0.0, min(y_px + radius_px, hi_y) - max(y_px - radius_px, 0.0))
-    coverage = (span_x * span_y) / ((2.0 * radius_px) ** 2)
+    span_x = max(0.0, min(x_px + rx, hi_x) - max(x_px - rx, 0.0))
+    span_y = max(0.0, min(y_px + ry, hi_y) - max(y_px - ry, 0.0))
+    coverage = (span_x * span_y) / (4.0 * rx * ry)
     coverage = min(1.0, max(0.0, coverage))
 
     # How far off-centre, as a fraction of the half-frame on its worst axis.
@@ -498,7 +519,7 @@ def framing_result_verdict(
         # badly (re-centre), while one bigger than the canvas can never fit in a
         # picture this size however well aimed (a mosaic, or a bigger one). Say
         # the right one.
-        fits_in_canvas = 2.0 * radius_px <= hi_x and 2.0 * radius_px <= hi_y
+        fits_in_canvas = 2.0 * rx <= hi_x and 2.0 * ry <= hi_y
         if fits_in_canvas:
             if mosaic:
                 return FramingResult(
@@ -617,6 +638,7 @@ def recentre_crop(
     height_px: int,
     arcsec_per_px: float,
     size_arcmin: float | None,
+    size_minor_arcmin: float | None = None,
     margin: float = _RECENTRE_MARGIN,
     tolerance: float = _RECENTRE_TOLERANCE,
     min_kept: float = _RECENTRE_MIN_KEPT,
@@ -631,6 +653,7 @@ def recentre_crop(
     return recentre_outcome(
         x_px=x_px, y_px=y_px, width_px=width_px, height_px=height_px,
         arcsec_per_px=arcsec_per_px, size_arcmin=size_arcmin,
+        size_minor_arcmin=size_minor_arcmin,
         margin=margin, tolerance=tolerance, min_kept=min_kept,
     ).crop
 
@@ -643,6 +666,7 @@ def recentre_outcome(
     height_px: int,
     arcsec_per_px: float,
     size_arcmin: float | None,
+    size_minor_arcmin: float | None = None,
     margin: float = _RECENTRE_MARGIN,
     tolerance: float = _RECENTRE_TOLERANCE,
     min_kept: float = _RECENTRE_MIN_KEPT,
@@ -665,6 +689,15 @@ def recentre_outcome(
     un-clip an object that ran off an edge, and that case falls out of the margin
     test rather than needing its own rule. Each of those carries its own
     ``reason`` (see :class:`RecentreOutcome`).
+
+    ``size_minor_arcmin`` is the object's second axis, and the box it makes is
+    the one :func:`framing_result_verdict` measures with and :func:`mosaic_plan`
+    counts panels with — laid along the canvas's long edge, square when the
+    catalog records no minor axis. The offer has to ask about the same object
+    the verdict above it just judged: sizing the clear space around a *square*
+    of the major axis is a stricter test than the verdict's own, so an elongated
+    galaxy the verdict calls "off to one side, re-centring would give it more
+    room" could be refused the very crop that would do exactly that.
     """
     if size_arcmin is None or size_arcmin <= 0:
         return RecentreOutcome(None, "unknown_size")
@@ -676,9 +709,16 @@ def recentre_outcome(
     hi_x, hi_y = float(width_px - 1), float(height_px - 1)
     if hi_x <= 0 or hi_y <= 0:
         return RecentreOutcome(None, "degenerate")
-    radius_px = (size_arcmin * 60.0 / arcsec_per_px) / 2.0
-    if radius_px <= 0:
+    major_px = (size_arcmin * 60.0 / arcsec_per_px) / 2.0
+    minor_px = major_px
+    if size_minor_arcmin is not None and size_minor_arcmin > 0:
+        minor_px = min(
+            (float(size_minor_arcmin) * 60.0 / arcsec_per_px) / 2.0, major_px)
+    if major_px <= 0 or minor_px <= 0:
         return RecentreOutcome(None, "degenerate")
+    # The object laid along the canvas's long edge — the verdict's own
+    # convention, so the two agree about the shape they are talking about.
+    rx, ry = (major_px, minor_px) if hi_x >= hi_y else (minor_px, major_px)
 
     # Same off-centre measure the verdict reports, so the two always agree about
     # whether this picture is off-centre at all.
@@ -703,9 +743,9 @@ def recentre_outcome(
     half_w = min(max_w, max_h * aspect)
     half_h = half_w / aspect
 
-    # Room for the object plus clear space around it, or no offer.
-    needed = radius_px * (1.0 + margin)
-    if half_w < needed or half_h < needed:
+    # Room for the object plus clear space around it, or no offer — per axis,
+    # because the object's own box has two of them.
+    if half_w < rx * (1.0 + margin) or half_h < ry * (1.0 + margin):
         return RecentreOutcome(None, "cramped")
 
     # Put the crop's centre on the object, pulled back only as far as the frame's

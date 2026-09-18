@@ -86,6 +86,12 @@ class ObjectInfo:
     dec_deg: float
     matched_by: str         # "name" or "coords" — how we identified it
     size_arcmin: float | None = None   # major-axis size, when the catalog has one
+    # Minor-axis size, when the catalog has one — so the *measured* framing
+    # verdict (``framing.framing_result_verdict``) can model the object as the
+    # same box ``mosaic`` and ``field_fill`` below already do. Without it an
+    # elongated galaxy is a square of its major axis to one of the three and not
+    # to the other two, and the card they share contradicts itself.
+    size_minor_arcmin: float | None = None
     framing: FramingHint | None = None  # "will it fit in one frame?" verdict
     # "How big a mosaic?" — the panel grid this object's span needs, for the ones
     # too big for a single frame. ``None`` when it fits (or has no vetted size),
@@ -371,6 +377,7 @@ def _to_info(obj: CatalogObject, matched_by: str,
         dec_deg=obj.dec_deg,
         matched_by=matched_by,
         size_arcmin=obj.size_arcmin,
+        size_minor_arcmin=obj.size_minor_arcmin,
         framing=framing_hint(obj.size_arcmin, field=field),
         mosaic=mosaic_plan(obj.size_arcmin, obj.size_minor_arcmin, field=field),
         # Same size, same minor-axis convention and same telescope as the two
