@@ -30,6 +30,7 @@ calibration job.
 from __future__ import annotations
 
 import logging
+import math
 import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -123,6 +124,45 @@ def _sigma_clip_mean(stack: np.ndarray, sigma: float, max_iters: int = 5) -> np.
     return np.where(np.isfinite(out), out, full_med).astype(np.float32, copy=False)
 
 
+def _exposure_in_group(value: float, group: Sequence[float]) -> bool:
+    """Is ``value`` one of the lengths in ``group``, within the module's own
+    "is this the same exposure?" tolerance? Header rounding (9.998 against 10.0)
+    is the same length; a real Seestar step (10 → 30 s) is not."""
+    from seestack.calibrate.apply import EXPOSURE_MISMATCH_TOL
+
+    return any(abs(value / g - 1.0) <= EXPOSURE_MISMATCH_TOL
+               for g in group if g > 0)
+
+
+def _majority_exposure_group(values: Sequence[float | None]) -> list[float] | None:
+    """The exposure length most of these dark frames were shot at, as the list of
+    raw values belonging to that group — or ``None`` when there is nothing to
+    gate on (no recorded exposure, or only one length, which is every ordinary
+    folder).
+
+    Grouped by :func:`seestack.calibrate.apply.distinct_exposures`, the same
+    grouping the dark advisory and the binder use, so "two exposures" means the
+    same thing everywhere. Ties keep the **shortest** length, because
+    ``distinct_exposures`` reports groups shortest-first and the first maximum
+    wins — deterministic, and exactly the shape-rule's own tie-break.
+    """
+    from seestack.calibrate.apply import distinct_exposures
+
+    vals = [float(v) for v in values
+            if v is not None and math.isfinite(float(v)) and float(v) > 0]
+    groups = distinct_exposures(vals)
+    if len(groups) < 2:
+        return None  # nothing to split — behaviour is byte-identical
+    members: list[list[float]] = [[] for _ in groups]
+    for v in vals:
+        for i, g in enumerate(groups):
+            if _exposure_in_group(v, [g]):
+                members[i].append(v)
+                break
+    best = max(range(len(groups)), key=lambda i: len(members[i]))
+    return members[best] or [groups[best]]
+
+
 def build_master(
     paths: Sequence[str | Path],
     *,
@@ -143,7 +183,10 @@ def build_master(
         Raw single-extension FITS files (all the same kind, shape and bayer
         pattern). When the set isn't uniform, the **majority** shape wins and
         files that don't match it are skipped — so one stray frame from another
-        camera or binning mode can't hijack the build.
+        camera or binning mode can't hijack the build. For a **dark**, the same
+        majority rule applies to the frames' *exposure* (see below): a dark's
+        entire content is its exposure, so a set holding two lengths does not
+        describe either one.
     kind
         'dark', 'flat' or 'bias' — recorded in the metadata.
     method
@@ -161,9 +204,10 @@ def build_master(
         long build stays responsive to the Jobs-page Cancel button.
     skipped
         Optional list to collect ``(filename, reason)`` for every frame that was
-        dropped during the build — ``"unreadable"`` (failed to load) or
+        dropped during the build — ``"unreadable"`` (failed to load),
         ``"wrong size"`` (not a 2-D frame, or a shape that doesn't match the
-        majority). Lets the caller tell the user *how many* of their frames were
+        majority) or ``"wrong exposure"`` (a dark whose length isn't the majority
+        one). Lets the caller tell the user *how many* of their frames were
         actually used vs. silently set aside, instead of a bare success. Frames
         dropped by ``max_frames`` sampling are **not** recorded here — that's an
         intentional memory bound, not a skip. Default ``None`` = don't collect.
@@ -270,6 +314,38 @@ def build_master(
         counts[tuple(raw.shape)] = counts.get(tuple(raw.shape), 0) + 1
     ref_shape = max(counts, key=lambda s: counts[s])  # first max wins on a tie
 
+    # ...and, for a dark, the majority **exposure**, by exactly the same rule and
+    # for exactly the same reason.
+    #
+    # A dark is a photograph of the sensor's own dark current, and dark current
+    # grows with exposure — so a folder holding 10 s and 30 s darks does not hold
+    # one master's worth of frames, it holds two. Combining them produced a master
+    # whose pixels are a median of two different dark currents (measured on a
+    # synthetic set: 100 ADU and 300 ADU in, **200 ADU** out — a level neither
+    # length ever has), stamped with the median exposure, **20 s** — a length no
+    # frame in it was shot at. It then over-subtracts from every short light and
+    # under-subtracts from every long one, in the one place in this app whose
+    # whole job is to remove a pedestal exactly.
+    #
+    # Nothing prevents that folder: `discover.classify_frames` groups by folder
+    # and asks only what *kind* the frames are, and a build the user aims by hand
+    # takes what is in the folder. This is the same majority rule the shape gate
+    # above already applies to a stray frame from another camera.
+    #
+    # Darks only, deliberately. A flat is normalised before it divides, so its
+    # exposure is not part of what it says; a bias is by definition the zero-length
+    # frame. Flat-darks arrive here as ``kind="dark"`` and want the rule as much as
+    # darks do (a flat-dark must match its flat's exposure).
+    #
+    # A frame that recorded **no** exposure is kept, mirroring this module's own
+    # "didn't say is not said the wrong thing" rule for ``require_declared_kind``:
+    # plenty of legitimate calibration FITS carry no ``EXPTIME``, and dropping them
+    # would turn a missing header into a smaller master.
+    ref_exposure_group: list[float] | None = None
+    if kind == "dark":
+        ref_exposure_group = _majority_exposure_group(
+            [info.exposure_s for _n, _r, info in loaded])
+
     arrays: list[np.ndarray] = []
     exposures: list[float] = []
     gains: list[float] = []
@@ -285,6 +361,13 @@ def build_master(
                         kind, name, raw.shape, ref_shape)
             if skipped is not None:
                 skipped.append((name, "wrong size"))
+            continue
+        if (ref_exposure_group is not None and info.exposure_s is not None
+                and not _exposure_in_group(info.exposure_s, ref_exposure_group)):
+            log.warning("master %s: skipping %s (exposure %.4gs, master is %.4gs)",
+                        kind, name, info.exposure_s, ref_exposure_group[0])
+            if skipped is not None:
+                skipped.append((name, "wrong exposure"))
             continue
         arrays.append(raw)
         declared = frame_kind_from_header(getattr(info, "raw_header", None) or {})

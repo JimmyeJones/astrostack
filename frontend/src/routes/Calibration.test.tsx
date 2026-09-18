@@ -96,6 +96,32 @@ describe("CalibrationView", () => {
       ).toBeInTheDocument());
   });
 
+  it("says when a covered target's subs aren't all the same length", async () => {
+    // The owner shot this target at 10 s one night and 30 s the next. The binder
+    // gates on the median, so the dark is bound and the page said "Covers all 1
+    // of your targets" — true about the binding, silent about the third of the
+    // frames the dark is wrong for.
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue({
+      n_targets: 1,
+      masters: [{
+        id: 1, name: "Dark 30s", kind: "dark", n_covered: 1,
+        covered: ["M 42"], missed: [], n_partial: 1,
+        partial_detail: [{
+          name: "M 42",
+          reason: "M 42 was shot at 10s and 30s, and this dark is 10s — it "
+            + "matches the 10s subs but not the 30s ones.",
+        }],
+      }],
+      uncovered: [],
+    });
+    renderView();
+
+    await waitFor(() => expect(
+      screen.getByText("Covers all 1 of your target — one only partly"),
+    ).toBeInTheDocument());
+  });
+
   it("stays quiet about coverage when every target is already covered", async () => {
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
     vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue({

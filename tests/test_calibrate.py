@@ -1545,3 +1545,119 @@ def test_require_declared_kind_all_wrong_says_why(tmp_path):
     with pytest.raises(ValueError, match="says it is something else"):
         build_master(paths, kind="dark", method="mean", skipped=[],
                      require_declared_kind=True)
+
+
+# --- A folder of darks is not necessarily one exposure ----------------------
+#
+# A dark is a photograph of the sensor's own dark current, and dark current grows
+# with exposure. `discover.classify_frames` groups by *folder* and asks only what
+# kind the frames are, so a folder holding 10 s and 30 s darks is an ordinary
+# thing to end up with — and combining them produced a master whose pixels are a
+# median of two different dark currents, stamped with a median exposure no frame
+# in it was shot at. It then over-subtracts from every short light and
+# under-subtracts from every long one.
+
+
+def _mixed_dark_set(tmp_path, *, n_short: int, n_long: int) -> list:
+    """Interleaved 10 s and 30 s darks, at the levels a real sensor would give
+    (dark current scales with exposure), named so they sort interleaved."""
+    paths = []
+    for i in range(n_short + n_long):
+        short = i < n_short
+        p = tmp_path / f"dark_{i:02d}.fits"
+        _write_raw(p, np.full((4, 4), 100.0 if short else 300.0, dtype=np.float32),
+                   exptime=10.0 if short else 30.0, gain=80.0, temp=-10.0)
+        paths.append(p)
+    return paths
+
+
+def test_a_dark_master_is_built_from_one_exposure_not_a_median_of_two(tmp_path):
+    """The whole bug in one assertion: 100 ADU and 300 ADU in used to give a
+    200 ADU master stamped 20 s — a level and a length neither set ever had."""
+    paths = _mixed_dark_set(tmp_path, n_short=4, n_long=2)
+    skipped: list[tuple[str, str]] = []
+
+    master, meta = build_master(paths, kind="dark", method="median",
+                                skipped=skipped)
+
+    np.testing.assert_allclose(master, 100.0)
+    assert meta.exposure_s == 10.0
+    assert meta.n_frames == 4
+    assert [r for _n, r in skipped] == ["wrong exposure"] * 2
+
+
+def test_a_dark_folder_of_one_exposure_is_untouched(tmp_path):
+    """Every ordinary folder — which is every folder until someone mixes two
+    nights' darks — builds byte-identically, with nothing set aside."""
+    paths = _mixed_dark_set(tmp_path, n_short=5, n_long=0)
+    skipped: list[tuple[str, str]] = []
+
+    master, meta = build_master(paths, kind="dark", method="median",
+                                skipped=skipped)
+
+    np.testing.assert_allclose(master, 100.0)
+    assert meta.exposure_s == 10.0 and meta.n_frames == 5
+    assert skipped == []
+
+
+def test_header_rounding_is_not_a_second_exposure(tmp_path):
+    """9.998 s against 10.0 s is one length, by the module's own tolerance — a
+    gate that split on exact equality would set aside half of a real folder."""
+    paths = []
+    for i, exp in enumerate([10.0, 9.998, 10.001, 9.999]):
+        p = tmp_path / f"dark_{i}.fits"
+        _write_raw(p, np.full((4, 4), 100.0, dtype=np.float32), exptime=exp)
+        paths.append(p)
+    skipped: list[tuple[str, str]] = []
+
+    _master, meta = build_master(paths, kind="dark", method="median",
+                                 skipped=skipped)
+
+    assert meta.n_frames == 4 and skipped == []
+
+
+def test_a_dark_that_recorded_no_exposure_is_still_used(tmp_path):
+    """"Didn't say" is not "said the wrong thing" — this module's own rule for
+    the declared-kind filter. Dropping a blank EXPTIME would turn a missing
+    header into a smaller master."""
+    paths = _mixed_dark_set(tmp_path, n_short=3, n_long=1)
+    blank = tmp_path / "dark_99.fits"
+    _write_raw(blank, np.full((4, 4), 100.0, dtype=np.float32), exptime=None)
+    paths.append(blank)
+    skipped: list[tuple[str, str]] = []
+
+    _master, meta = build_master(paths, kind="dark", method="median",
+                                 skipped=skipped)
+
+    assert meta.n_frames == 4, "the three 10 s darks plus the one that didn't say"
+    assert [r for _n, r in skipped] == ["wrong exposure"]
+
+
+def test_an_even_split_keeps_the_shorter_length_deterministically(tmp_path):
+    """With no majority there has to be an answer, and it has to be the same one
+    every time: shortest wins, the same tie-break shape the rule above uses."""
+    paths = _mixed_dark_set(tmp_path, n_short=3, n_long=3)
+
+    _master, meta = build_master(paths, kind="dark", method="median")
+    _master2, meta2 = build_master(list(reversed(paths)), kind="dark",
+                                   method="median")
+
+    assert meta.exposure_s == 10.0 and meta.n_frames == 3
+    assert meta2.exposure_s == 10.0 and meta2.n_frames == 3
+
+
+def test_a_flat_built_from_two_exposures_is_deliberately_untouched(tmp_path):
+    """A flat is normalised before it divides, so its exposure is not part of
+    what it says — and a flat set legitimately spans exposures as the twilight
+    sky fades. Gating it would set aside good frames for nothing."""
+    paths = []
+    for i, exp in enumerate([2.0, 2.0, 5.0, 5.0]):
+        p = tmp_path / f"flat_{i}.fits"
+        _write_raw(p, np.full((4, 4), 1000.0, dtype=np.float32), exptime=exp)
+        paths.append(p)
+    skipped: list[tuple[str, str]] = []
+
+    _master, meta = build_master(paths, kind="flat", method="median",
+                                 skipped=skipped)
+
+    assert meta.n_frames == 4 and skipped == []

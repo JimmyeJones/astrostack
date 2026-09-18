@@ -401,6 +401,25 @@ describe("buildMasterSummary", () => {
     );
   });
 
+  it("tells you what to do with darks set aside for their length", () => {
+    // "3 wrong exposure" is a fact, not a next step — and unlike a wrong-size or
+    // unreadable frame, those are good darks the owner still wants a master from.
+    const line = buildMasterSummary({
+      kind: "dark", n_frames: 12, n_skipped: 3,
+      skipped_buckets: { "wrong exposure": 3 },
+    });
+    expect(line).toContain("3 frames set aside (3 wrong exposure)");
+    expect(line).toContain("a dark only matches subs of its own exposure");
+    expect(line).toContain("build a second master");
+  });
+
+  it("does not offer that advice when nothing was set aside for its length", () => {
+    expect(buildMasterSummary({
+      kind: "flat", n_frames: 15, n_skipped: 5,
+      skipped_buckets: { "wrong size": 3, unreadable: 2 },
+    })).not.toContain("second master");
+  });
+
   it("still counts set-aside frames when the buckets are absent", () => {
     expect(buildMasterSummary({ kind: "dark", n_frames: 8, n_skipped: 1 }))
       .toBe("Built a master dark from 8 frames · 1 frame set aside.");

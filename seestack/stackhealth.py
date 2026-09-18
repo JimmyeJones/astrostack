@@ -663,10 +663,17 @@ class DarkSpec:
     """The exposure/gain a beginner should shoot their *dark* frames at so they
     match the lights — the numbers behind the "How to add darks" guide. Either
     field may be ``None`` when the frames didn't record it (older/odd FITS); the
-    guide then falls back to generic wording rather than a wrong number."""
+    guide then falls back to generic wording rather than a wrong number.
+
+    ``exposures_s`` is the **set** ``exposure_s`` is the median of, shortest
+    first. A target is one *folder*, never one exposure, so a median is a claim
+    about uniformity that nothing in the data enforces — and this guide's whole
+    sentence is "at the same settings as your subs", which a median between two
+    lengths is not. Empty when nothing recorded an exposure."""
 
     exposure_s: float | None
     gain: float | None
+    exposures_s: tuple[float, ...] = ()
 
 
 def recommended_dark_spec(frames: Iterable[FrameRow]) -> DarkSpec:
@@ -677,7 +684,18 @@ def recommended_dark_spec(frames: Iterable[FrameRow]) -> DarkSpec:
     gain) — the numbers a beginner should dial in. Pure/offline; returns a
     ``DarkSpec`` whose fields are ``None`` when no accepted frame recorded them,
     so the caller can degrade to generic wording instead of inventing a value.
+
+    The median is kept (every existing reader gates on it), and the **distinct**
+    lengths travel beside it, grouped by :func:`seestack.calibrate.apply.
+    distinct_exposures` — the same grouping the finished run's dark advisory and
+    the Calibration page's coverage roll-up use, so the three cannot disagree
+    about how many exposures a target has. It matters here because a Seestar
+    owner changes sub length between nights as a matter of course, and a target
+    shot at 10 s and 30 s has a median of **20 s**: a length none of their subs
+    was shot at, offered under the words "the same settings as your subs".
     """
+    from seestack.calibrate.apply import distinct_exposures
+
     accepted = [f for f in frames if f.accept]
     exps = [f.exposure_s for f in accepted
             if f.exposure_s is not None and f.exposure_s > 0]
@@ -685,6 +703,7 @@ def recommended_dark_spec(frames: Iterable[FrameRow]) -> DarkSpec:
     return DarkSpec(
         exposure_s=statistics.median(exps) if exps else None,
         gain=statistics.median(gains) if gains else None,
+        exposures_s=tuple(distinct_exposures(exps)),
     )
 
 

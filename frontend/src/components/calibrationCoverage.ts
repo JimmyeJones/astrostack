@@ -18,7 +18,7 @@ type MasterRow = CalibrationCoverage["masters"][number];
 /** The per-master coverage line, or null when there's nothing to say (a library
  *  with no targets yet — "covers 0 of your 0 targets" would just be noise). */
 export function masterCoverageLine(
-  row: Pick<MasterRow, "n_covered">,
+  row: Pick<MasterRow, "n_covered"> & Partial<Pick<MasterRow, "n_partial">>,
   nTargets: number,
 ): string | null {
   if (nTargets <= 0) return null;
@@ -27,9 +27,21 @@ export function masterCoverageLine(
     return `Doesn't match any of your ${nTargets} ${targets} yet`;
   }
   if (row.n_covered >= nTargets) {
-    return `Covers all ${nTargets} of your ${targets}`;
+    return `Covers all ${nTargets} of your ${targets}${partialClause(row)}`;
   }
-  return `Covers ${row.n_covered} of your ${nTargets} ${targets}`;
+  return `Covers ${row.n_covered} of your ${nTargets} ${targets}${partialClause(row)}`;
+}
+
+/** " — one only partly" / " — 2 only partly", or "" when there is nothing to say.
+ *
+ *  A target is one *folder*, never one exposure: shoot it at 10 s one night and
+ *  30 s the next and the binder reduces it to a median, so a 20 s dark can be
+ *  bound to a target not one of whose frames it matches. "Covers all 3 of your
+ *  targets" was true about the binding and misleading about the pictures. */
+function partialClause(row: Partial<Pick<MasterRow, "n_partial">>): string {
+  const n = row.n_partial ?? 0;
+  if (n <= 0) return "";
+  return n === 1 ? " — one only partly" : ` — ${n} only partly`;
 }
 
 /** The targets this master can't be applied to, as tooltip copy — or null when it
@@ -49,6 +61,23 @@ export function masterMissesTooltip(
   if (detail.length === 0) return `Can't be applied to: ${row.missed.join(", ")}`;
   const lines = detail.map((d) => `${d.name} — ${d.reason}`);
   return `Can't be applied to:\n${lines.join("\n")}`;
+}
+
+/** The targets this master is bound to but only *partly* reaches, as tooltip
+ *  copy — or null when there are none (so the page stays quiet on the ordinary
+ *  single-exposure library, which is every library until someone changes their
+ *  sub length between nights).
+ *
+ *  Kept separate from `masterMissesTooltip` because it is a different claim: a
+ *  missed target gets nothing from this master, a partly-covered one gets a dark
+ *  that is right for some of its subs and wrong for the rest. Both can be true of
+ *  one master at once, and the page joins them. */
+export function masterPartialTooltip(
+  row: Partial<Pick<MasterRow, "partial_detail">>,
+): string | null {
+  const detail = (row.partial_detail ?? []).filter((d) => d?.name && d?.reason);
+  if (detail.length === 0) return null;
+  return `Only part of:\n${detail.map((d) => d.reason).join("\n")}`;
 }
 
 /** The gentle nudge for targets no master reaches at all — the gap that actually
@@ -88,10 +117,20 @@ export function uncoveredDarkSpecHint(
 ): string {
   const specs = new Map<string, string>();
   for (const d of detail ?? []) {
-    if (!d || d.exposure_s == null || !(d.exposure_s > 0)) continue;
-    const exp = `${Number(d.exposure_s.toFixed(3))}s`;
-    const label = d.gain == null ? exp : `${exp} at gain ${Number(d.gain)}`;
-    specs.set(label, label);
+    if (!d) continue;
+    // A target's *own* sub lengths when the backend sends them, the median it
+    // used to send otherwise. This is the difference between "shoot them at 20s"
+    // — a length no sub on an evenly split 10 s / 30 s target was shot at — and
+    // an honest "these need a dark each".
+    const lengths = (d.exposures_s ?? []).filter((e) => e != null && e > 0);
+    const from = lengths.length > 0
+      ? lengths
+      : (d.exposure_s != null && d.exposure_s > 0 ? [d.exposure_s] : []);
+    for (const e of from) {
+      const exp = `${Number(e.toFixed(3))}s`;
+      const label = d.gain == null ? exp : `${exp} at gain ${Number(d.gain)}`;
+      specs.set(label, label);
+    }
   }
   const labels = [...specs.values()];
   if (labels.length === 0) return "";
