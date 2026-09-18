@@ -2684,20 +2684,23 @@ def run_stack(
             # user who never opens the server log still learns why their picture
             # came out crushed or grainy.
             #
-            # Neither the reference frame's exposure nor its temperature stands
-            # in for the session, and neither is allowed to any more: a target
-            # shot at 10 s on one night and 30 s on the next is one target with
-            # two exposures in it, and a target shot across a winter and a summer
-            # night is one target with a 20 °C spread in it. Which frame
-            # ``pick_reference_frame`` landed on then decided whether either
-            # advisory fired at all. So both whole sets go over — these are the
-            # frames actually being stacked — and the dark is judged against all
-            # of them. (Its CFA phase still stands in: a target really is one
-            # camera in one readout mode.)
+            # Neither the reference frame's exposure, nor its temperature, nor
+            # its gain stands in for the session, and none of them is allowed to
+            # any more: a target shot at 10 s on one night and 30 s on the next
+            # is one target with two exposures in it, a target shot across a
+            # winter and a summer night is one target with a 20 °C spread in it,
+            # and a target reshot at another gain is one target with two settings
+            # in it. Which frame ``pick_reference_frame`` landed on then decided
+            # whether the advisory fired at all. So all three whole sets go over
+            # — these are the frames actually being stacked — and the dark is
+            # judged against all of them. (Its CFA phase still stands in: a
+            # target really is one camera in one readout mode.)
             calib_warnings = list(calibration.calibration_warnings(
                 ref.exposure_s, ref.sensor_temp_c, ref.bayer_pattern,
                 light_exposures_s=[f.exposure_s for f in frames],
                 light_temps_c=[f.sensor_temp_c for f in frames],
+                light_gain=ref.gain,
+                light_gains=[f.gain for f in frames],
             ))
             for _warn in calib_warnings:
                 log.warning("Calibration: %s", _warn)

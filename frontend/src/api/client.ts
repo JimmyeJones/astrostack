@@ -3288,6 +3288,14 @@ export interface CalibrationSuggestions {
     // does too. Optional: an older backend omits it and the form keeps the
     // single number.
     sensor_temps_c?: [number, number][] | null;
+    // The target's *distinct* gains, lowest first. `gain` above is their median,
+    // and gain is the one acquisition number with no correction behind it — a
+    // dark carries the gain-dependent readout pedestal, so a gain-mismatched
+    // dark mis-subtracts at a perfectly matched exposure and temperature and
+    // nothing rescales it. A short list rather than a tally because gain is a
+    // discrete setting. Optional: an older backend omits it and the form keeps
+    // the single number.
+    gains?: number[] | null;
     // The target's modal raw frame size, so the form can flag a master built
     // for a different camera/binning (which would fail the stack outright).
     // Optional: an older backend omits them.
@@ -3304,14 +3312,15 @@ export interface CalibrationSuggestions {
   bias_master_id: number | null;
   scores: Record<string, number>;
   n_frames: number;
-  // The engine's own exposure/temperature mismatch thresholds, so the Stack
-  // form's pick-time warnings fire on exactly the pairs the finished run will
+  // The engine's own exposure/temperature/gain mismatch thresholds, so the
+  // Stack form's pick-time warnings fire on exactly the pairs the run will
   // complain about. Optional: an older backend omits it and the form falls back
   // to its mirrored constants (see `calibrationFit.ts`).
   tolerances?: {
     exposure_frac?: number | null;
     temp_c?: number | null;
     temp_min_share?: number | null;
+    gain_frac?: number | null;
   } | null;
   // What the *unattended* stack would bind for these same subs — the stricter
   // "best master we're confident about", as opposed to the fields above, which

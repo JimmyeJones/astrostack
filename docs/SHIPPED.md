@@ -1,5 +1,72 @@
 # Shipped — the record
 
+## v0.466.0 — 2026-09-18 — the third acquisition number, and the one nothing corrects for: a gain-mismatched master dark was applied in silence
+
+*(Builder, branch `claude/sweet-babbage-31bttf`. Closes the LEAD filed the same day with v0.464.0.)*
+
+**What was wrong, reproduced before it was fixed.** A master dark has to match three things about the
+lights it calibrates, and the app says so itself: `auto_bind_master_ids` gates on all three, its docstring
+spells out that *"a dark encodes the gain-dependent bias pedestal, so a wrong-gain dark mis-subtracts even
+at the right exposure"*, and `_acquisition_reason` blames a coverage miss on *"it was shot at gain 200,
+your subs at gain 80"*. `CalibrationMasters.calibration_warnings` covered exposure (v0.456.0), temperature
+(v0.464.0), CFA phase and flat-dark shape — **and could not cover gain, because the loader never read it**:
+
+```
+fields with 'gain': []          # [f for f in CalibrationMasters.__dataclass_fields__ if "gain" in f]
+dark_exposure_s: 10.0  dark_temp_c: 20.0
+warnings: []                    # gain-200 dark, gain-80 subs, exposure and temperature matched
+light 1000 -> 700.0             # …and the dark's full 300 ADU pedestal was subtracted anyway
+```
+
+And the unattended gate is looser than it reads. `_dark_match_confident` compares a *combined*
+`_match_distance` against `_AUTO_BIND_DARK_MAX_DIST` = 1.0, whose gain term is
+`|m_gain − gain| / max(|gain|, 1)` — so against gain-80 lights a gain-100 dark scores 0.250, a gain-120
+dark 0.500 and a gain-160 dark exactly 1.000. All three bind, unwarned, on the walk-away path.
+
+**Why this shipped although the lead filed it as real-data-gated.** The lead asked for a *gain tolerance*
+and was right that no honest one exists in this repo: what a 25 % gain gap costs an OSC stack in ADU needs
+darks shot at two gains on the owner's own camera. But a tolerance is what a **severity verdict** needs,
+and gain does not get one. An exposure gap has a correction — `scale_dark_to_light` rescales a mismatched
+length. A temperature gap is a continuous drift on an uncooled sensor, which is why it earns a 5 °C bar and
+a share floor. **A gain is a setting nothing anywhere corrects for.** So the sentence states both numbers
+instead of grading the gap, and the bar is `GAIN_MISMATCH_TOL = 0.01` — two orders of magnitude below the
+smallest step any camera offers, absorbing header/float round-trip noise and nothing else, in the same
+denominator (`max(|g_light|, 1)`) the binder already measures gain with. That is the rule the app already
+applies to gain in `_acquisition_reason`, which fires on `gain_d > 0`; no number was picked from recall.
+
+**What shipped, in two halves that must travel together.**
+
+- **The finished run (engine).** `CalibrationMasters.dark_gain` is loaded from the master's own `GAIN`
+  card (`MasterMeta.gain` was already read by `load_master`; nothing else changed on disk), and
+  `calibration_warnings` gained `light_gain` / `light_gains`. `run_stack` hands over **both** the reference
+  frame's gain and every stacked frame's, exactly as it already does for exposure and temperature — because
+  a target is not necessarily one gain either, and `pick_reference_frame` chooses on quality and pointing
+  and has never heard of one. New pure `apply.gain_mismatch` and `apply.distinct_gains` (grouped against
+  each group's first member, median-reported, gain 0 kept because it is a real setting unlike a 0 s
+  exposure) are the one place the question is answered.
+- **The Stack form (pick time).** Building only the run half would have re-created the split v0.464.1
+  exists to close, so `…/calibration-suggestions` now serves `params.gains` (a short list — gain is
+  discrete, so a library holds a handful of values however many subs it has) and `tolerances.gain_frac`,
+  and `calibrationFit.ts` mirrors `gainMismatch` / `mismatchedGains` / `joinGains` off the served numbers.
+  One yellow alert, with **no** action button — unlike the exposure caution there is no switch to offer.
+
+**Nothing is graded and nothing is silenced.** The advisory only ever *reports*: the binding, the pixels
+and every existing warning are untouched, and a dark that matches — or a master with no `GAIN` card, or
+subs that never recorded one — says nothing at all, which is what every upgrading install with a Seestar
+shot at one gain all year gets. `webapp/sample_data`'s lights and generated darks are all `GAIN = 80.0`, so
+the `--calibration` dogfood pass is unchanged too.
+
+**Upgrade-safe (§9):** one additive dataclass field with a `None` default, two additive keyword-only
+parameters, two additive response keys, no config, DB-schema, on-disk, API-shape or default change. An
+older frontend ignores `params.gains`/`tolerances.gain_frac`; an older backend omitting them leaves the
+form on today's single median, pinned both ways.
+
+**Tests (+9 Python engine/pipeline, +2 endpoint, +11 unit and +3 rendered frontend).** **Seven of the nine
+Python ones fail before**, verified by reverting `dark_gain = dark_meta.gain` in a scratch edit and
+watching them go red; the two that pass on the reverted tree are the ones that should (a master with no
+gain recorded, and `distinct_gains` itself — coverage of the fix, never of the bug). Nothing was loosened,
+skipped or rewritten.
+
 ## v0.465.4 — 2026-09-18 — a History run card gave every badge two pixels rather than give the row a second line
 
 *(Builder, branch `claude/sweet-babbage-rypizn`, found by the pass that verified v0.465.3 — the same
