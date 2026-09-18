@@ -1,5 +1,74 @@
 # Shipped — the record
 
+## v0.465.1 — 2026-09-18 — the health note turned a depth into minutes with a median, and the panel map above it summed the real seconds
+
+*(Builder, branch `claude/sweet-babbage-dpaenx`. Found by the previous run's own lever, pointed one module
+along: v0.459.1 fixed a per-sub exposure that was multiplied by a count, and wrote down why — the sibling
+that does the same multiplication was in a different file and was missed.)*
+
+**The bug, reproduced before anything was written.** `seestack/stackhealth.py`'s uneven-grain note knows a
+region of a mosaic holds *N* subs where the rest holds *M*, and since v0.406.2's sibling fix it answers
+"is that worth going out for?" by converting that depth shortfall into **seconds** and reading it against
+the panel map's own `mosaicmap.THIN_MIN_SHORTFALL_S` — one threshold on one quantity, so the two sentences
+printed one above the other on the Target page cannot give opposite instructions. It converted with
+`statistics.median` over the accepted subs' exposures, under a docstring that said *"Seestar subs are
+fixed-length, so the median **is** the sub exposure"*. Three functions above it in the same file,
+`DarkSpec`'s docstring says the opposite and says it with numbers: *"a median is a claim about uniformity
+that nothing in the data enforces … a Seestar owner changes sub length between nights as a matter of
+course"*.
+
+On a 2×2 mosaic shot over two nights — three quarters of every panel's subs at 10 s, the rest at 30 s, the
+thin panel 8 subs deep against 32 — the two surfaces disagreed across the threshold:
+
+| | |
+|---|---|
+| panel map (sums each panel's **actual** exposures) | thin panel **120 s** against **480 s** on a typical panel → 360 s behind → *go and shoot it* |
+| health note (24 missing subs × **median** 10 s) | *"it's only about **4 min** behind, so it evens out on its own as you keep shooting"* |
+
+The honest figure is 24 × the set's **mean** of 15 s = **360 s** — the map's number exactly, because a mean
+times a count *is* the sum. So the note was not merely imprecise: it was on the wrong side of the one
+threshold that decides whether the owner is told to go out, on the shape he actually shoots (a heavy mosaic
+user, targets spanning many nights).
+
+**Why the existing agreement pin could not see it.**
+`test_the_grain_note_and_the_panel_map_never_give_opposite_instructions` says in its own docstring *"for one
+mosaic, **at one sub exposure**"*, and every one of its four cases builds frames at a single 10 s. A fixture
+that fixes the variable the bug lives in is green for the same reason a Dockerfile-context break is green
+(AGENTS.md §8) — it is looking at something other than what the owner has.
+
+**The fix is one definition, not a second one.** v0.459.1 had already worked out the right answer for the
+FITS integration time and left it as `stacker._typical_sub_exposure_s` — the median when
+`distinct_exposures` says the subs are all one length (robust, so one mistyped header cannot move a whole
+stack's stated length), the mean once they genuinely differ. That is now public
+`seestack.calibrate.apply.typical_exposure_s`, sitting beside `distinct_exposures`, the grouping that decides
+which of its two answers applies, and both places that multiply a per-sub length by a **count** read it:
+`stacker`'s `EXPOSURE`/`EXPTOTAL` cards (unchanged behaviour) and `stackhealth._typical_sub_exposure`. It
+grew one thing on the way out of the stacker — it answers `None` for a set with nothing usable in it, because
+its second caller is handed whatever the frame rows recorded, and "nothing recorded one" has to be an answer
+rather than an exception (that branch already kept the note's old sentence, and still does: we cannot show
+the shortfall is small, so we do not claim it).
+
+**Deliberately not shared with `recommended_dark_spec`**, which keeps its median and carries the distinct
+lengths beside it. That guide names a length to **dial into a camera**, where a mean between 10 s and 30 s
+would be a setting nobody can shoot — the same class, a different remedy, which is the thing v0.464.0's own
+write-up says to check before reusing the last fix's shape.
+
+**Nothing moved for an ordinary target.** On one sub length the median still answers, bit for bit, so no
+existing library's numbers change; the measurement in the note (the share, the depths, the grain ratio) was
+never touched, only the closing clause's arithmetic.
+
+**Tests (+5 cases, from 4 new test functions):** four cases in `tests/test_coverage_grain.py` — the reproduction itself, the shortfall pinned as
+**the same number** the map measured rather than merely the same verdict (so a future basis change shows up
+here before it shows up as two sentences giving opposite advice), and the agreement pin re-run over the shape
+it excludes, parametrised both ways; one in `tests/test_stack_integration_time.py` covering the new `None`
+contract (four assertions). **Three fail before**, verified by reverting the fix to the old median in a scratch copy and
+watching them go red for the right reason; the fourth (a 3-minute gap, quiet on both surfaces) passes either
+way and is there as the other half of the pin. The suite goes 6,365 -> 6,370.
+
+**Upgrade-safe (§9):** engine-internal only. No config, schema, on-disk, API-shape or default change; no
+stored value is re-derived; a run stacked by any earlier version reads exactly as before unless its own subs
+carry more than one exposure, which is the case being fixed.
+
 ## v0.465.0 — 2026-09-18 — the nudge that says which dark to shoot never said which *night* to shoot it on
 
 *(Builder, branch `claude/sweet-babbage-cm0qc7`, the third commit of the v0.464.0 run and found by it: once

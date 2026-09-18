@@ -724,22 +724,38 @@ def _median_sub_fwhm(accepted: list[FrameRow]) -> float | None:
     return statistics.median(vals)
 
 
-def _median_sub_exposure(accepted: list[FrameRow]) -> float | None:
-    """Median recorded sub exposure, in seconds, across the accepted subs — or
-    ``None`` when not one of them recorded it.
+def _typical_sub_exposure(accepted: list[FrameRow]) -> float | None:
+    """The recorded sub exposure, in seconds, that stands for the accepted subs —
+    or ``None`` when not one of them recorded it.
 
     The number that turns a *depth* difference into a *time* difference. The
     grain note below knows a region holds 3 subs where the rest holds 6, and
     "is that worth going out for?" is a question about minutes, not about subs:
     the same 3-against-6 is half a minute behind on a first session and three
-    hours behind on a mosaic the owner has been building for a month. Mirrors
-    :func:`recommended_dark_spec`'s median over the same population — Seestar
-    subs are fixed-length, so the median *is* the sub exposure.
+    hours behind on a mosaic the owner has been building for a month.
+
+    It is the engine's :func:`~seestack.calibrate.apply.typical_exposure_s` and
+    **not** a plain median, because this is one of the two places a per-sub length
+    is multiplied by a *count*. A median is one member of the set chosen by
+    position, so on a target shot at 10 s one night and 30 s the next it names a
+    length some of the subs were not shot at — and the multiplication then puts
+    that error straight into a sentence read against
+    :data:`~seestack.mosaicmap.THIN_MIN_SHORTFALL_S`. Reproduced before it was
+    fixed, on a 2x2 mosaic with three quarters of every panel's subs at 10 s: the
+    panel map measured the thin panel 120 s against 480 s on a typical panel and
+    said to go and shoot it, while this note called the same panel "only about
+    4 min behind, so it evens out on its own as you keep shooting". The map sums
+    each panel's *actual* exposures, so the mean is the value that agrees with it
+    — exactly (mean x count is the sum), not merely approximately.
+
+    Deliberately **not** shared with :func:`recommended_dark_spec`, which keeps
+    its median and carries the distinct lengths beside it: that guide names a
+    length to dial into a camera, where a mean between 10 s and 30 s would be a
+    setting nobody can shoot.
     """
-    vals = [f.exposure_s for f in accepted
-            if f.exposure_s is not None and math.isfinite(f.exposure_s)
-            and f.exposure_s > 0]
-    return statistics.median(vals) if vals else None
+    from seestack.calibrate.apply import typical_exposure_s
+
+    return typical_exposure_s(f.exposure_s for f in accepted)
 
 
 def _solve_was_tried(frame: FrameRow) -> bool:
@@ -1168,10 +1184,20 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
         # v0.406.2's ``behind`` branch kept the map's fact and dropped its nag.
         # An unreadable sub exposure keeps today's sentence: we cannot show the
         # shortfall is small, so we do not claim it.
+        #
+        # One threshold applied to one *quantity* only holds if both sides read
+        # the quantity the same way, and for a while they did not: the map sums
+        # each panel's actual exposures while this converted a depth with a plain
+        # median, which on a target shot at two lengths is a length some of the
+        # subs were not shot at. So :func:`_typical_sub_exposure` is the engine's
+        # own answer (the mean once the lengths genuinely differ), whose product
+        # with a count *is* the light collected — see its docstring for the
+        # reproduction, where the two surfaces disagreed by 2 minutes across the
+        # threshold and printed opposite instructions about one panel.
         from seestack.mosaicmap import THIN_MIN_SHORTFALL_S
         from seestack.sharecard import format_duration
 
-        sub_s = _median_sub_exposure(accepted)
+        sub_s = _typical_sub_exposure(accepted)
         shortfall_s = (max(deep - thin, 0) * sub_s) if sub_s else None
         catches_up = (shortfall_s is not None
                       and 0.0 < shortfall_s < THIN_MIN_SHORTFALL_S)
