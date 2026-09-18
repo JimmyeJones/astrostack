@@ -18,6 +18,71 @@ is a queue.
 
 ---
 
+## 2026-09-18 — Builder method: the same lever, pointed at a *promise the app makes about itself*
+
+*(Builder, branch `claude/sweet-babbage-db6205`, the run that shipped v0.460.0/.1 and v0.461.0. Recorded
+because all three came out of the same two-minute grep, and because the third one is a **feature** found by a
+bug-hunting method — which is the part worth reusing.)*
+
+**Starting state.** The backlog is genuinely thin: I extracted every top-level bullet under "Ideas" and
+filtered out the ones whose body contains ✅ / CLOSED / DECLINED / "already", and what survives is almost
+entirely real-data-gated or explicitly stood down with measurements. The Bugs section's open entries are the
+same. So the run's work had to be *found*, not picked — and the previous run's note immediately above this one
+had already written down how: **grep the copy, not just the code.** A sentence the product publishes is a
+falsifiable claim, and checking it needs nobody's library.
+
+**What the grep was.** Two passes over user-facing strings, not over logic:
+
+```
+grep -rn "will be|will automatically|AstroStack will|it will|you'll get" frontend/src --include=*.tsx
+grep -rn "every part|no part of|everywhere|every pixel|every sub|nothing is deleted" frontend src webapp seestack
+```
+
+The second one — **universal quantifiers** — turned out to be the productive query, and it is the reusable
+half. A claim with "every", "each", "nothing" or "all" in it is the kind a program can violate, and it is
+the kind a reader takes as a guarantee. Three of the run's three findings were in that grep's output:
+
+1. *"keeps every sub — nothing is deleted"* on the merge nudge → **v0.460.0**. Two `grep`s later
+   (`merge_projects`' own docstring: *"Stack runs / project meta — those stay per-source"*, and
+   `merge_targets`' `delete_target(..., remove_files=True)`) that is a one-click permanent delete of every
+   source folder's pictures. **The bug was written down in the source, in English, in the module that causes
+   it** — "stay per-source" and "the source is deleted next" are the same sentence read twice, and the two
+   halves live 400 lines apart in two files.
+2. *"waiting until **each part** has at least 3"* two clauses after *"a typical part has only 1 sub on it"*
+   → **v0.460.1**. The engine's own test file already pinned the counter-example
+   (`typical_panel_depth([40, 40, 40, 3]) == 40`).
+3. The glossary's *"**every** entry has its own link — so a screen that uses a word can point straight at the
+   word"* → **v0.461.0**, and this is the one that surprised me: `grep -rn "/glossary#" frontend/src` returns
+   **one line**. A promise about a *capability that does not exist yet* reads exactly like a promise about
+   behaviour that is broken, and the fix is a feature rather than a patch.
+
+**Generalisations worth keeping.**
+
+- **Search the copy for quantifiers, not for topics.** "every/each/all/nothing/never" is a cheap, high-yield
+  filter over a codebase this size, because it selects for sentences that are *checkable* and for sentences a
+  reader is entitled to rely on. Every entry in this run came from one such grep.
+- **A promise can be unbuilt rather than broken.** AGENTS.md §4 keeps warning that the Ideas list carries
+  things already shipped; this is the mirror image — the app's own prose describes a capability nobody built,
+  and that is a *feature specification with a stated rationale, already approved by whoever wrote the
+  sentence*. It is also the cleanest answer to "the backlog is dry but the owner wants growth too": the
+  feature was not invented this run, it was found.
+- **The previous run's lesson, re-applied one level out.** That note says "ask what your own change makes
+  reachable". The merge bug is the same question asked of a change three months old: `auto_stack` shipping on
+  by default (v0.391.0) against a camera that writes one folder per night is what turned "merge deletes the
+  source's stacks" from a theoretical loss into the ordinary case, because the folders the nudge clusters now
+  normally *have* stacks. **A default flip does not only change behaviour; it re-weights every path
+  downstream of it.** Worth re-asking of the other flips in the log.
+- **When a fix is in a destructive path, make the destruction conditional rather than best-effort.**
+  `carry_stack_runs` could have copied what it could and let the delete proceed; instead a source whose
+  pictures did not all copy keeps its folder (`CarryResult.lost`). The delete is the step that makes loss
+  permanent, so that is the step that gets the guard — "two library entries and nothing lost" beats "a tidy
+  library and a missing picture", and it means the promise holds on a full disk too.
+
+**Mechanical note.** `git stash` twice to compare `ruff` before/after — safe only because no suite was
+running. The warning in AGENTS.md §7 and in the note above is about editing *during* a run; the same command
+is fine between them, and comparing the lint count before and after is the only way to honestly claim "added
+no new debt" against 70 pre-existing findings.
+
 ## 2026-09-18 — Builder method: when the app has written down what it will do, that sentence is a test
 
 *(Builder, branch `claude/sweet-babbage-fwwin8`, the run that shipped v0.459.0/.1/.2. Recorded because the way
