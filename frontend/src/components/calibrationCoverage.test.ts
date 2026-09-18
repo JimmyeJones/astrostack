@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  masterCoverageLine, masterMissesTooltip, uncoveredTargetsNote,
+  masterCoverageLine, masterMissesTooltip, masterPartialTooltip,
+  uncoveredDarkSpecHint, uncoveredTargetsNote,
 } from "./calibrationCoverage";
 
 describe("masterCoverageLine", () => {
@@ -125,5 +126,76 @@ describe("uncoveredTargetsNote", () => {
   });
   it("stays silent on a library with no targets", () => {
     expect(uncoveredTargetsNote({ uncovered: [], n_targets: 0 })).toBeNull();
+  });
+});
+
+
+// A target is one *folder*, never one exposure. Shoot it at 10 s one night and
+// 30 s the next and the binder reduces it to a median of 20 s — so a 20 s dark
+// binds to a target not one of whose frames it matches, and the page that exists
+// to answer "do my masters cover my targets?" said "covers" and stopped.
+
+describe("masterCoverageLine — partly covered targets", () => {
+  it("says how many targets it only partly reaches", () => {
+    expect(masterCoverageLine({ n_covered: 4, n_partial: 1 }, 6))
+      .toBe("Covers 4 of your 6 targets — one only partly");
+    expect(masterCoverageLine({ n_covered: 6, n_partial: 2 }, 6))
+      .toBe("Covers all 6 of your targets — 2 only partly");
+  });
+  it("is byte-identical on an ordinary library, and against an older backend", () => {
+    expect(masterCoverageLine({ n_covered: 4, n_partial: 0 }, 6))
+      .toBe("Covers 4 of your 6 targets");
+    expect(masterCoverageLine({ n_covered: 4 }, 6))
+      .toBe("Covers 4 of your 6 targets");
+  });
+  it("never contradicts 'matches nothing' — a master that covers none can't partly cover", () => {
+    expect(masterCoverageLine({ n_covered: 0, n_partial: 0 }, 6))
+      .toBe("Doesn't match any of your 6 targets yet");
+  });
+});
+
+describe("masterPartialTooltip", () => {
+  it("names the subs a bound dark misses", () => {
+    expect(masterPartialTooltip({
+      partial_detail: [
+        { name: "M 42", reason: "M 42 was shot at 10s and 30s, and this dark is 10s — it matches the 10s subs but not the 30s ones." },
+      ],
+    })).toBe("Only part of:\nM 42 was shot at 10s and 30s, and this dark is 10s — it matches the 10s subs but not the 30s ones.");
+  });
+  it("stays quiet on the ordinary single-exposure library", () => {
+    expect(masterPartialTooltip({ partial_detail: [] })).toBeNull();
+    expect(masterPartialTooltip({})).toBeNull();
+  });
+  it("ignores a malformed entry rather than printing an empty line", () => {
+    expect(masterPartialTooltip({
+      partial_detail: [{ name: "", reason: "" }],
+    })).toBeNull();
+  });
+});
+
+describe("uncoveredDarkSpecHint — the lengths to actually go and shoot", () => {
+  it("names both of a mixed target's lengths, never the median between them", () => {
+    const hint = uncoveredDarkSpecHint([
+      { name: "M 42", exposure_s: 20, gain: 80, exposures_s: [10, 30] },
+    ]);
+    expect(hint).not.toContain("20s");
+    expect(hint).toContain("10s at gain 80");
+    expect(hint).toContain("30s at gain 80");
+    expect(hint).toContain("need a dark each");
+  });
+  it("is unchanged on a single-exposure target", () => {
+    expect(uncoveredDarkSpecHint([
+      { name: "M 42", exposure_s: 10, gain: 80, exposures_s: [10] },
+    ])).toBe(" Shoot them at 10s at gain 80 — that's what those subs were shot at.");
+  });
+  it("falls back to the median against an older backend that sends no set", () => {
+    expect(uncoveredDarkSpecHint([
+      { name: "M 42", exposure_s: 10, gain: 80 },
+    ])).toBe(" Shoot them at 10s at gain 80 — that's what those subs were shot at.");
+  });
+  it("still says nothing when nothing was recorded", () => {
+    expect(uncoveredDarkSpecHint([
+      { name: "M 42", exposure_s: null, gain: null, exposures_s: [] },
+    ])).toBe("");
   });
 });

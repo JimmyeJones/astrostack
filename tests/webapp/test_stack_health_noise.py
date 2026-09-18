@@ -196,3 +196,79 @@ def test_a_mosaic_gets_no_verdict_on_either_surface(client, solved_library):
     assert measured["ratio"] is not None, "the number itself is still measured"
     assert measured["expected_verdict"] is None
     assert "noise_low" not in _kinds(client, safe, run_id)
+
+
+# --- "at the same settings as your subs" is a claim about a set -------------
+#
+# The "How to add darks" guide pre-fills the numbers off `recommended_dark_spec`,
+# which takes the *median* exposure of the accepted subs. A target is one folder,
+# never one exposure, so a Seestar owner who shoots 10 s on a bright night and
+# 30 s on a faint one gets told to go and shoot a night of darks at 20 s — a
+# length none of their frames was shot at, offered under the words "the same
+# settings as your subs".
+
+
+def _split_exposures(data_root, safe: str, short_s: float, long_s: float) -> int:
+    """Rewrite the target's accepted subs into two equal nights — half at
+    ``short_s``, half at ``long_s`` — so a fixture target can be the ordinary
+    two-nights-two-lengths shape a Seestar owner ends up with. Returns how many
+    frames were rewritten."""
+    import sqlite3
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        db = lib.target_dir(lib.find_target(safe)) / "project.sqlite"
+    finally:
+        lib.close()
+    con = sqlite3.connect(db)
+    try:
+        ids = [r[0] for r in con.execute(
+            "SELECT id FROM frames WHERE accept=1 ORDER BY id").fetchall()]
+        assert len(ids) >= 2, "two nights need two frames"
+        # The majority gets the short length, so the median is one of the two
+        # real lengths rather than something between them — which is the case
+        # this fixture can carry. (An even split, where the median is a length
+        # nobody shot, is pinned at engine level.)
+        half = (len(ids) + 1) // 2
+        for fid in ids[:half]:
+            con.execute("UPDATE frames SET exposure_s=? WHERE id=?", (short_s, fid))
+        for fid in ids[half:]:
+            con.execute("UPDATE frames SET exposure_s=? WHERE id=?", (long_s, fid))
+        con.commit()
+        return len(ids)
+    finally:
+        con.close()
+
+
+def test_the_darks_guide_names_every_length_the_target_was_shot_at(
+        client, solved_library):
+    """The set travels beside the median on the wire, so the guide can stop
+    describing a target by one length when it holds two. (The sharpest case —
+    an *even* split, where the median is a length nobody shot at all — is pinned
+    in ``tests/test_stackhealth.py``; this fixture has three accepted subs.)"""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_path(solved_library, safe, "master.fits")
+    _write_master(master, sigma=2.0)
+    run_id = _register(solved_library, safe, master)
+    _split_exposures(solved_library, safe, 10.0, 30.0)
+
+    spec = client.get(
+        f"/api/targets/{safe}/stack-health?run_id={run_id}").json()["dark_spec"]
+
+    assert spec["exposure_s"] == 10.0, "the median every existing reader gates on"
+    assert spec["exposures_s"] == [10.0, 30.0], (
+        "the 30 s subs are invisible behind the median, and need their own dark")
+
+
+def test_an_ordinary_single_length_target_reports_one_length_on_the_wire(
+        client, solved_library):
+    """Every library that has never changed sub length is untouched."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_path(solved_library, safe, "master.fits")
+    _write_master(master, sigma=2.0)
+    run_id = _register(solved_library, safe, master)
+
+    spec = client.get(
+        f"/api/targets/{safe}/stack-health?run_id={run_id}").json()["dark_spec"]
+
+    assert spec["exposures_s"] == [spec["exposure_s"]]

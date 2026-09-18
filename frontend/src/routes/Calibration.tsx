@@ -10,7 +10,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type CalibrationMaster } from "../api/client";
 import {
-  masterCoverageLine, masterMissesTooltip, uncoveredTargetsNote,
+  masterCoverageLine, masterMissesTooltip, masterPartialTooltip,
+  uncoveredTargetsNote,
 } from "../components/calibrationCoverage";
 import { IncomingCalibrationCard } from "../components/IncomingCalibrationCard";
 import { HintAnchor } from "../components/HintAnchor";
@@ -250,15 +251,22 @@ export function CalibrationView() {
                         const line = masterCoverageLine(row, nTargets);
                         if (!line) return null;
                         const misses = masterMissesTooltip(row, nTargets);
+                        // Two different claims about one master, joined into the
+                        // one tooltip this line already has: what it can't be
+                        // applied to at all, and what it only partly reaches.
+                        const partly = masterPartialTooltip(row);
+                        const tip = [misses, partly].filter(Boolean).join("\n\n");
                         const text = (
-                          <Text size="xs" c={row.n_covered === 0 ? "yellow.7" : "dimmed"}>
+                          <Text size="xs"
+                            c={row.n_covered === 0 ? "yellow.7"
+                              : (row.n_partial ?? 0) > 0 ? "yellow.7" : "dimmed"}>
                             {line}
                           </Text>
                         );
-                        return misses ? (
+                        return tip ? (
                           // `pre-line` so the per-target reasons stay one to a
                           // line instead of running together into a paragraph.
-                          <Tooltip label={misses} multiline w={300}
+                          <Tooltip label={tip} multiline w={300}
                             styles={{ tooltip: { whiteSpace: "pre-line" } }}>
                             {text}
                           </Tooltip>

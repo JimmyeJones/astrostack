@@ -1421,8 +1421,12 @@ def _coverage_master(root: Path, kind: str, *, name: str, exposure_s=10.0,
 
 def _coverage_target(name: str, *, exposure_s=10.0, gain=80.0, temp=-10.0,
                      width=480, height=320) -> dict:
+    # `exposures_s` is the set the median stands in for — a single-exposure
+    # target here, which is what the endpoint builds for an ordinary library.
+    # ``_mixed_target`` below is the two-nights-two-lengths shape.
     return {"name": name, "safe_name": name.replace(" ", "_"),
-            "exposure_s": exposure_s, "gain": gain, "sensor_temp_c": temp,
+            "exposure_s": exposure_s, "exposures_s": [exposure_s],
+            "gain": gain, "sensor_temp_c": temp,
             "width_px": width, "height_px": height}
 
 
@@ -1604,8 +1608,10 @@ def test_master_coverage_reports_what_an_uncovered_target_was_shot_at(tmp_path):
 
     assert cov["uncovered"] == ["M 42", "Long Sub"]
     assert cov["uncovered_detail"] == [
-        {"name": "M 42", "exposure_s": 10.0, "gain": 80.0},
-        {"name": "Long Sub", "exposure_s": 60.0, "gain": 200.0},
+        {"name": "M 42", "exposure_s": 10.0, "gain": 80.0,
+         "exposures_s": [10.0]},
+        {"name": "Long Sub", "exposure_s": 60.0, "gain": 200.0,
+         "exposures_s": [60.0]},
     ]
 
 
@@ -1910,3 +1916,194 @@ def test_header_kind_note_never_echoes_a_kind_the_engine_cannot_emit():
     assert note["severity"] == "warn"
     assert "xyz" not in note["message"]
     assert "2 say they are light frames (your subs)" in note["message"]
+
+
+# --- A target is one folder, never one exposure ------------------------------
+#
+# The roll-up reduces a target's subs to their median exposure, which is what the
+# binder gates on — but it is not what to go and shoot, and it is not the whole
+# story about what a bound dark reaches. Shoot a target at 10 s one night and 30 s
+# the next and the median is 20 s: a length no sub was shot at, offered as "shoot
+# your darks at 20s", with a 20 s dark then reported as covering the target.
+
+
+def _mixed_target(name: str, subs: list[float], *, gain=80.0, temp=-10.0) -> dict:
+    """A coverage target dict built the way the endpoint builds one: the median
+    for the binder, the distinct set beside it for the copy."""
+    from webapp.routers.calibration import _median
+    from seestack.calibrate.apply import distinct_exposures
+
+    return {"name": name, "safe_name": name.replace(" ", "_"),
+            "exposure_s": _median(subs), "exposures_s": distinct_exposures(subs),
+            "gain": gain, "sensor_temp_c": temp, "width_px": 480,
+            "height_px": 320}
+
+
+def test_an_uncovered_mixed_target_reports_the_lengths_it_was_actually_shot_at(
+        tmp_path):
+    """The number the page tells you to shoot darks at. On an even 10 s / 30 s
+    split the median is 20 s — a night of 20 s darks matches nothing the owner
+    owns — so the set has to travel beside it."""
+    root = tmp_path / "library"
+    cov = calibration.master_coverage(root, [], [
+        _mixed_target("Even", [10.0] * 3 + [30.0] * 3),
+    ])
+
+    (row,) = cov["uncovered_detail"]
+    assert row["exposure_s"] == 20.0  # the binder's own median, unchanged
+    assert row["exposures_s"] == [10.0, 30.0]
+
+
+def test_a_single_exposure_target_still_reports_exactly_one_length(tmp_path):
+    """The ordinary library is untouched: one exposure in, one exposure out, and
+    the median is one of them."""
+    root = tmp_path / "library"
+    cov = calibration.master_coverage(root, [], [
+        _mixed_target("Plain", [10.0] * 6),
+    ])
+
+    (row,) = cov["uncovered_detail"]
+    assert row["exposure_s"] == 10.0
+    assert row["exposures_s"] == [10.0]
+
+
+def test_a_dark_bound_to_a_mixed_target_says_which_subs_it_misses(tmp_path):
+    """The bound dark matches two-thirds of the target. "Covers" was true about
+    the binding and silent about the third it leaves uncalibrated."""
+    root = tmp_path / "library"
+    dark = _coverage_master(root, "dark", name="10s dark", exposure_s=10.0)
+    masters = calibration.list_masters(root)
+
+    cov = calibration.master_coverage(root, masters, [
+        _mixed_target("Uneven", [10.0] * 4 + [30.0] * 2),
+    ])
+
+    row = next(r for r in cov["masters"] if r["id"] == dark["id"])
+    assert row["covered"] == ["Uneven"]  # the binder's answer, unchanged
+    assert row["n_partial"] == 1
+    (part,) = row["partial_detail"]
+    assert part["name"] == "Uneven"
+    assert "10s and 30s" in part["reason"]
+    assert "matches the 10s subs but not the 30s ones" in part["reason"]
+
+
+def test_a_dark_matching_only_the_median_of_a_mixed_target_says_so(tmp_path):
+    """The sharpest case: a 20 s dark binds to an evenly split 10 s / 30 s target
+    because 20 s is the median — and it is wrong on every single frame."""
+    root = tmp_path / "library"
+    dark = _coverage_master(root, "dark", name="20s dark", exposure_s=20.0)
+    masters = calibration.list_masters(root)
+
+    cov = calibration.master_coverage(root, masters, [
+        _mixed_target("Even", [10.0] * 3 + [30.0] * 3),
+    ])
+
+    row = next(r for r in cov["masters"] if r["id"] == dark["id"])
+    assert row["covered"] == ["Even"]
+    assert row["n_partial"] == 1
+    assert "matches none of them" in row["partial_detail"][0]["reason"]
+
+
+def test_a_single_exposure_target_is_never_reported_as_partly_covered(tmp_path):
+    """The whole ordinary library stays quiet — this is a note about a mixed
+    target, not a second badge on every master."""
+    root = tmp_path / "library"
+    dark = _coverage_master(root, "dark", name="10s dark", exposure_s=10.0)
+    masters = calibration.list_masters(root)
+
+    cov = calibration.master_coverage(root, masters, [
+        _mixed_target("Plain", [10.0] * 6),
+    ])
+
+    row = next(r for r in cov["masters"] if r["id"] == dark["id"])
+    assert row["covered"] == ["Plain"]
+    assert row["n_partial"] == 0
+    assert row["partial_detail"] == []
+
+
+def test_an_exposure_scaled_dark_is_correct_on_a_mixed_target_and_says_nothing(
+        tmp_path):
+    """`apply_raw` is handed each frame's own exposure, so a dark bound *scaled*
+    is per-frame correct on a mixed target by construction. Reporting a shortfall
+    there would be a false alarm on the one binding that handles this properly."""
+    root = tmp_path / "library"
+    dark = _coverage_master(root, "dark", name="60s dark", exposure_s=60.0)
+    _coverage_master(root, "bias", name="bias", exposure_s=0.0)
+    masters = calibration.list_masters(root)
+
+    cov = calibration.master_coverage(root, masters, [
+        _mixed_target("Mixed", [10.0] * 3 + [30.0] * 3),
+    ])
+
+    row = next(r for r in cov["masters"] if r["id"] == dark["id"])
+    assert row["covered"] == ["Mixed"], "a bias must let the dark scale in"
+    assert row["n_partial"] == 0
+    assert row["partial_detail"] == []
+
+
+def test_the_miss_reason_names_the_set_not_a_median_no_sub_was_shot_at(tmp_path):
+    """A 30 s dark against a target shot at 10 s and 30 s: it is the *right* dark
+    for a third of those subs, and the old clause called them all 10s."""
+    reason = calibration.coverage_miss_reason(
+        {"kind": "dark", "exposure_s": 30.0, "gain": 80.0, "sensor_temp_c": -10.0,
+         "width_px": 480, "height_px": 320},
+        exposure_s=10.0, exposures_s=[10.0, 30.0], gain=80.0, sensor_temp_c=-10.0,
+        width_px=480, height_px=320,
+    )
+    assert reason is not None
+    assert "your subs are 10s and 30s" in reason
+    assert "only matches the 30s ones" in reason
+
+
+def test_the_miss_reason_is_unchanged_without_the_set(tmp_path):
+    """An older caller (or a target whose subs recorded no exposure) gets exactly
+    the sentence it always got — the set only ever changes the wording."""
+    master = {"kind": "dark", "exposure_s": 30.0, "gain": 80.0,
+              "sensor_temp_c": -10.0, "width_px": 480, "height_px": 320}
+    kw = dict(exposure_s=10.0, gain=80.0, sensor_temp_c=-10.0,
+              width_px=480, height_px=320)
+    plain = calibration.coverage_miss_reason(master, **kw)
+    assert plain == calibration.coverage_miss_reason(master, exposures_s=None, **kw)
+    assert plain == calibration.coverage_miss_reason(master, exposures_s=[10.0], **kw)
+    assert "your subs are 10s, this dark is 30s" in plain
+
+
+def test_dark_exposure_split_uses_the_binders_own_threshold():
+    """The page and the stack must not come to different opinions about which
+    subs a dark reaches, so the split is the bind gate itself."""
+    assert calibration.dark_exposure_split(10.0, [10.0, 30.0]) == ([10.0], [30.0])
+    assert calibration.dark_exposure_split(20.0, [10.0, 30.0]) == ([], [10.0, 30.0])
+    # 25 % is the gate: 12 s is inside it for a 10 s sub, 13 s is not.
+    assert calibration.dark_exposure_split(12.0, [10.0])[0] == [10.0]
+    assert calibration.dark_exposure_split(13.0, [10.0])[1] == [10.0]
+    # Unknowable either side degrades to "say nothing", never to a false alarm.
+    assert calibration.dark_exposure_split(None, [10.0]) == ([], [])
+    assert calibration.dark_exposure_split(10.0, None) == ([], [])
+    assert calibration.dark_exposure_split(10.0, ["x", 0, -1]) == ([], [])
+
+
+def test_calibration_coverage_endpoint_serves_the_distinct_exposures(
+        client, solved_library, tmp_path):
+    """End-to-end: the set reaches the page off the target's own frame rows."""
+    body = client.get("/api/calibration/coverage").json()
+    assert body["uncovered_detail"], "the fixture has no masters, so nothing covers"
+    assert all(d["exposures_s"] == [10.0] for d in body["uncovered_detail"])
+
+
+def test_the_roll_up_stops_describing_a_mixed_target_by_a_length_it_never_shot(
+        tmp_path):
+    """The behavioural fail-before, using no new API: on an evenly split
+    10 s / 30 s target the median is 20 s, and the tooltip told the owner "your
+    subs are 20s" — a sentence that is false about every frame they own."""
+    root = tmp_path / "library"
+    dark = _coverage_master(root, "dark", name="30s dark", exposure_s=30.0)
+    masters = calibration.list_masters(root)
+
+    cov = calibration.master_coverage(root, masters, [
+        _mixed_target("Even", [10.0] * 3 + [30.0] * 3),
+    ])
+
+    row = next(r for r in cov["masters"] if r["id"] == dark["id"])
+    (miss,) = row["missed_detail"]
+    assert "20s" not in miss["reason"], miss["reason"]
+    assert "your subs are 10s and 30s" in miss["reason"]

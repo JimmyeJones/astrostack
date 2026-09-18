@@ -1341,7 +1341,8 @@ def target_stack_health(
         notes=[HealthNoteOut(kind=n.kind, severity=n.severity,
                              message=n.message, action=n.action)
                for n in notes],
-        dark_spec=DarkSpecOut(exposure_s=spec.exposure_s, gain=spec.gain),
+        dark_spec=DarkSpecOut(exposure_s=spec.exposure_s, gain=spec.gain,
+                              exposures_s=list(spec.exposures_s)),
     )
 
 
