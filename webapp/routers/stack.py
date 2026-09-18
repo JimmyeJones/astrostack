@@ -3826,6 +3826,16 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
         for hk, k in (("DARKDEXP", "dark_exposure"), ("DARKLEXP", "light_exposure")):
             with contextlib.suppress(KeyError, TypeError, ValueError):
                 dark_scaling[k] = float(header[hk])
+        # A mixed-exposure target has no single length the dark was scaled *to* —
+        # the scaling is per frame — so those runs carry the set instead, already
+        # worded by the engine's own ``_join_exposures`` so the run Info and the
+        # advisory describe one target the same way. Additive: absent on every
+        # single-exposure run and on every run recorded before v0.459.2, where
+        # ``light_exposure`` alone is the complete answer.
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            text = str(header["DARKLEXS"]).strip()
+            if text:
+                dark_scaling["light_exposures"] = text
 
     # Sensor-defect-repair summary (present only when the off-by-default repair
     # actually fixed something), so the panel can show "Repaired 428 hot/dead

@@ -925,6 +925,78 @@ def test_dark_scaling_provenance_matches_what_effective_dark_actually_did(tmp_pa
     assert bad.dark_scaling_provenance(10.0) is None         # …so: no claim
 
 
+def test_dark_scaling_provenance_on_a_target_shot_at_two_lengths(tmp_path):
+    """The scaling is per *frame* — ``apply_raw`` is handed each sub's own
+    exposure — so on a target shot at 10 s one night and 30 s the next, one dark
+    is left alone on some subs and scaled on the rest.
+
+    Asked only about a representative value, as the run provenance used to ask,
+    that target answers "nothing was scaled" whenever the representative happens
+    to be the dark's own length. The run then said nothing at all about a dark it
+    had tripled on a third of the frames.
+    """
+    save_master(tmp_path / "d10.fits", np.full((4, 4), 100.0, dtype=np.float32),
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=10.0))
+    save_master(tmp_path / "b.fits", np.full((4, 4), 50.0, dtype=np.float32),
+                MasterMeta("bias", 5, 4, 4, "mean", exposure_s=0.0))
+    cal = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d10.fits"), bias_path=str(tmp_path / "b.fits"),
+        scale_dark_to_light=True)
+
+    # The pixels, first: the 10 s subs get the dark untouched, the 30 s ones a
+    # dark scaled by 3. That is the thing the provenance has to agree with.
+    assert float(cal._effective_dark(10.0)[0, 0]) == pytest.approx(100.0)
+    assert float(cal._effective_dark(30.0)[0, 0]) == pytest.approx(200.0)
+
+    # Asked about the median alone — 10 s, the dark's own length — it used to say
+    # nothing happened, and that is still the honest answer to *that* question.
+    assert cal.dark_scaling_provenance(10.0) is None
+    # Asked about the set, it names the dark and every length it was applied
+    # across, because there is no single one it was scaled "to".
+    assert cal.dark_scaling_exposures([10.0] * 4 + [30.0] * 2) == (10.0, [10.0, 30.0])
+    # A dark matching neither length still reports the whole set.
+    save_master(tmp_path / "d20.fits", np.full((4, 4), 150.0, dtype=np.float32),
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=20.0))
+    cal20 = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d20.fits"), bias_path=str(tmp_path / "b.fits"),
+        scale_dark_to_light=True)
+    assert cal20.dark_scaling_exposures([10.0, 30.0]) == (20.0, [10.0, 30.0])
+
+
+def test_dark_scaling_exposures_is_silent_on_the_cases_that_scale_nothing(tmp_path):
+    """Every "no claim" case the single-value form has, asked of a set — so the
+    two views cannot come to different opinions about one run."""
+    save_master(tmp_path / "d.fits", np.full((4, 4), 300.0, dtype=np.float32),
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=30.0))
+    save_master(tmp_path / "good.fits", np.full((4, 4), 100.0, dtype=np.float32),
+                MasterMeta("bias", 5, 4, 4, "mean", exposure_s=0.0))
+    save_master(tmp_path / "bad.fits", np.full((2, 2), 100.0, dtype=np.float32),
+                MasterMeta("bias", 5, 2, 2, "mean", exposure_s=0.0))
+    good = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d.fits"), bias_path=str(tmp_path / "good.fits"),
+        scale_dark_to_light=True)
+
+    assert good.dark_scaling_exposures([30.0] * 6) is None    # every sub matches
+    assert good.dark_scaling_exposures([]) is None            # nothing to scale to
+    assert good.dark_scaling_exposures(None) is None
+    assert good.dark_scaling_exposures([None, 0.0, -1.0]) is None  # nothing usable
+    # Header rounding is one exposure, not two, so a set that is really uniform
+    # against the dark stays silent.
+    assert good.dark_scaling_exposures([30.0, 29.998, 30.001]) is None
+
+    # A wrong-shaped bias can't hold the pedestal, so nothing is scaled and
+    # nothing may be claimed — the case the single-value form exists for.
+    bad = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d.fits"), bias_path=str(tmp_path / "bad.fits"),
+        scale_dark_to_light=True)
+    assert bad.dark_scaling_exposures([10.0, 30.0]) is None
+
+    # …and with the option off at all.
+    off = CalibrationMasters.load(
+        dark_path=str(tmp_path / "d.fits"), bias_path=str(tmp_path / "good.fits"))
+    assert off.dark_scaling_exposures([10.0, 30.0]) is None
+
+
 def test_calibration_warns_on_a_mismatched_dark_temperature(tmp_path):
     dark = np.zeros((4, 4), dtype=np.float32)
     save_master(tmp_path / "d.fits", dark,
