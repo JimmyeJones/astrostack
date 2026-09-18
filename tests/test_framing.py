@@ -394,6 +394,56 @@ def test_an_elongated_object_too_big_even_for_its_own_shape_still_says_mosaic():
 # ---------------------------------------------------------------------------
 
 
+def test_the_recentre_offer_measures_the_same_object_box_as_the_verdict():
+    # The verdict says "all in, but off to one side — re-centring it next session
+    # would give it more room", and the offer beside it is the app *doing* that
+    # to the picture they already have. Sizing the clear space around a square of
+    # the major axis is a stricter test than the verdict's own, so an elongated
+    # object got the sentence and then had the crop withheld: 30' x 10' sitting
+    # half-way out to the bottom edge of a 1000 x 800 canvas refused as
+    # "cramped", while the crop that does exactly what the sentence promises
+    # keeps 46 % of the frame.
+    v = verdict(500, 596, 30, size_minor_arcmin=10)
+    assert v is not None and v.level == "off_centre" and v.coverage == 1.0
+
+    square = recentre_outcome(x_px=500, y_px=596, size_arcmin=30, **FRAME)
+    assert square.crop is None and square.reason == "cramped"
+
+    shaped = recentre_outcome(x_px=500, y_px=596, size_arcmin=30,
+                              size_minor_arcmin=10, **FRAME)
+    assert shaped.reason is None
+    assert shaped.crop is not None
+    assert shaped.kept == pytest.approx(0.458, abs=0.01)
+
+
+def test_an_absent_minor_axis_leaves_every_recentre_offer_exactly_as_it_was():
+    # Upgrade safety, the same shape as the verdict's: an object the catalog
+    # records no minor axis for is the square box this has always used.
+    for x, y, size in ((900, 700, 10), (500, 596, 30), (800, 400, 20),
+                       (500, 400, 30), (950, 750, 40)):
+        base = recentre_outcome(x_px=x, y_px=y, size_arcmin=size, **FRAME)
+        for minor in (None, 0, -1):
+            same = recentre_outcome(x_px=x, y_px=y, size_arcmin=size,
+                                    size_minor_arcmin=minor, **FRAME)
+            assert (same.reason, same.kept) == (base.reason, base.kept)
+            assert (same.crop is None) == (base.crop is None)
+            if base.crop is not None:
+                assert same.crop == base.crop
+
+
+def test_a_minor_axis_never_makes_a_recentre_offer_keep_less_of_the_picture():
+    # It can only relax the margin test, never tighten it — so an offer that
+    # existed before still exists, and is never smaller.
+    for x, y, size, minor in ((900, 700, 10, 4), (500, 596, 30, 10),
+                              (800, 400, 20, 15), (950, 750, 40, 20)):
+        base = recentre_outcome(x_px=x, y_px=y, size_arcmin=size, **FRAME)
+        shaped = recentre_outcome(x_px=x, y_px=y, size_arcmin=size,
+                                  size_minor_arcmin=minor, **FRAME)
+        if base.crop is not None:
+            assert shaped.crop is not None
+            assert shaped.crop.kept >= base.crop.kept - 1e-9
+
+
 def recentre(x, y, size_arcmin, **over):
     return recentre_crop(
         x_px=x, y_px=y, size_arcmin=size_arcmin, **{**FRAME, **over},

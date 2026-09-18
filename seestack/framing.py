@@ -638,6 +638,7 @@ def recentre_crop(
     height_px: int,
     arcsec_per_px: float,
     size_arcmin: float | None,
+    size_minor_arcmin: float | None = None,
     margin: float = _RECENTRE_MARGIN,
     tolerance: float = _RECENTRE_TOLERANCE,
     min_kept: float = _RECENTRE_MIN_KEPT,
@@ -652,6 +653,7 @@ def recentre_crop(
     return recentre_outcome(
         x_px=x_px, y_px=y_px, width_px=width_px, height_px=height_px,
         arcsec_per_px=arcsec_per_px, size_arcmin=size_arcmin,
+        size_minor_arcmin=size_minor_arcmin,
         margin=margin, tolerance=tolerance, min_kept=min_kept,
     ).crop
 
@@ -664,6 +666,7 @@ def recentre_outcome(
     height_px: int,
     arcsec_per_px: float,
     size_arcmin: float | None,
+    size_minor_arcmin: float | None = None,
     margin: float = _RECENTRE_MARGIN,
     tolerance: float = _RECENTRE_TOLERANCE,
     min_kept: float = _RECENTRE_MIN_KEPT,
@@ -686,6 +689,15 @@ def recentre_outcome(
     un-clip an object that ran off an edge, and that case falls out of the margin
     test rather than needing its own rule. Each of those carries its own
     ``reason`` (see :class:`RecentreOutcome`).
+
+    ``size_minor_arcmin`` is the object's second axis, and the box it makes is
+    the one :func:`framing_result_verdict` measures with and :func:`mosaic_plan`
+    counts panels with — laid along the canvas's long edge, square when the
+    catalog records no minor axis. The offer has to ask about the same object
+    the verdict above it just judged: sizing the clear space around a *square*
+    of the major axis is a stricter test than the verdict's own, so an elongated
+    galaxy the verdict calls "off to one side, re-centring would give it more
+    room" could be refused the very crop that would do exactly that.
     """
     if size_arcmin is None or size_arcmin <= 0:
         return RecentreOutcome(None, "unknown_size")
@@ -697,9 +709,16 @@ def recentre_outcome(
     hi_x, hi_y = float(width_px - 1), float(height_px - 1)
     if hi_x <= 0 or hi_y <= 0:
         return RecentreOutcome(None, "degenerate")
-    radius_px = (size_arcmin * 60.0 / arcsec_per_px) / 2.0
-    if radius_px <= 0:
+    major_px = (size_arcmin * 60.0 / arcsec_per_px) / 2.0
+    minor_px = major_px
+    if size_minor_arcmin is not None and size_minor_arcmin > 0:
+        minor_px = min(
+            (float(size_minor_arcmin) * 60.0 / arcsec_per_px) / 2.0, major_px)
+    if major_px <= 0 or minor_px <= 0:
         return RecentreOutcome(None, "degenerate")
+    # The object laid along the canvas's long edge — the verdict's own
+    # convention, so the two agree about the shape they are talking about.
+    rx, ry = (major_px, minor_px) if hi_x >= hi_y else (minor_px, major_px)
 
     # Same off-centre measure the verdict reports, so the two always agree about
     # whether this picture is off-centre at all.
@@ -724,9 +743,9 @@ def recentre_outcome(
     half_w = min(max_w, max_h * aspect)
     half_h = half_w / aspect
 
-    # Room for the object plus clear space around it, or no offer.
-    needed = radius_px * (1.0 + margin)
-    if half_w < needed or half_h < needed:
+    # Room for the object plus clear space around it, or no offer — per axis,
+    # because the object's own box has two of them.
+    if half_w < rx * (1.0 + margin) or half_h < ry * (1.0 + margin):
         return RecentreOutcome(None, "cramped")
 
     # Put the crop's centre on the object, pulled back only as far as the frame's
