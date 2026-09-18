@@ -139,3 +139,52 @@ def test_the_frames_tables_column_links_are_real_entries(slugs):
     )
     missing = sorted(set(found) - slugs)
     assert not missing, f"frame columns link at glossary entries that don't exist: {missing}"
+
+
+#: The stacking controls that deliberately carry no glossary slug, and why —
+#: the Stack form's half of the rule ``_OPS_THAT_EXPLAIN_THEMSELVES`` states for
+#: the editor. Same reasoning: a link is worth a glyph only where there is a
+#: *concept* behind the label that a paragraph could explain.
+_STACK_OPTIONS_THAT_EXPLAIN_THEMSELVES = {
+    "output_name": "a filename",
+    # It is the one control that resolves *to* two others, and each of those
+    # links its own entry — so the reader who follows it would land on whichever
+    # of the two this run happened not to pick.
+    "auto_reject": "chooses between sigma clipping and min/max; both link their own",
+    # Mono/filtered imaging is the one area AGENTS.md §1 says not to invest in,
+    # so it deliberately has no glossary entry to point at.
+    "mono": "names the kind of subs, in the deprioritised mono/filtered area",
+    "tiff_mode": "a file format choice",
+    "quick_look_interval": "a frame count",
+    "save_progress": "a video of the stack appearing",
+    "record_rejection_map": "says what the run writes alongside the picture",
+    "max_workers": "a thread count",
+    "use_gpu": "hardware, not astronomy",
+}
+
+
+def test_every_stacking_control_either_links_the_glossary_or_says_why_it_need_not(slugs):
+    """The Stack form is the other screen this app puts jargon on by the dozen —
+    *photometric normalization*, *drizzle pixfrac*, *canvas mode* — and, like the
+    editor, it renders from descriptors, so the link is a slug beside the field
+    and the only thing that can notice a missing one is this.
+    """
+    from webapp.schemas import stack_option_fields
+
+    fields = stack_option_fields()
+    assert fields, "the stack form has no fields at all — this guard would be vacuous"
+    unexplained = sorted(
+        f.key for f in fields
+        if not f.glossary and f.key not in _STACK_OPTIONS_THAT_EXPLAIN_THEMSELVES
+    )
+    assert not unexplained, (
+        "stacking controls with no glossary link and no entry in "
+        "_STACK_OPTIONS_THAT_EXPLAIN_THEMSELVES: "
+        f"{unexplained} — either point each at the entry that explains its "
+        "concept, or record here why it needs none"
+    )
+    both = sorted(
+        f.key for f in fields
+        if f.glossary and f.key in _STACK_OPTIONS_THAT_EXPLAIN_THEMSELVES
+    )
+    assert not both, f"controls both linked and listed as needing no link: {both}"
