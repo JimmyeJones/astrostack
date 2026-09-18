@@ -18,6 +18,49 @@ is a queue.
 
 ---
 
+## 2026-09-18 — dogfood `--mosaic --big --editor`: the pass was CLEAN, and three bugs were in the block it prints for reading
+
+*(Builder, branch `claude/sweet-babbage-3dy83s`; shipped as v0.458.1, v0.458.2 and v0.458.3.)*
+
+**The pass itself was clean by every mechanical measure** — no console errors, nothing overflowing, all 21 ops
+re-rendering on all three samples, undo/redo fine, the loupe and its navigator, split and 0-px-spare window all
+behaving on the `--big` run, the trim Auto would apply at **7.9 %** (well under the 15 % bar), tallest phone page
+`/tonight` at 3,829 px. **All three findings came out of the "what the Target page SAYS" block**, read as one
+paragraph the way the script's own preamble asks — and none of them would have shown up as an error, a pixel or a
+page height.
+
+**The method that found them, which is the part worth carrying forward.** The block prints several cards that
+were computed independently. The question is not "is any one of these wrong?" — each was *internally* right —
+it is **"could a beginner hold all of these at once?"**. On the mosaic sample two lines of one card said:
+
+> It's bigger than this mosaic … **Adding more panels next session** would capture the rest.
+> **About a 2×2 mosaic (4 panels) covers all of it.**
+
+on a target that *is* a 2×2 mosaic with 4 panels. Neither sentence is wrong on its own premises. Together they
+are unactionable, and unpicking *why* two correct sentences disagreed is what produced three separate bugs:
+
+1. **The two were measuring different shapes** (v0.458.1). The verdict modelled every object as a square of its
+   major axis; the panel count and the to-scale drawing beside it use major × minor. Reproduced away from the
+   sample, on the owner's own S30 field: M 31 dead centre in the 2×1 grid `mosaic_plan` prescribes holds **all**
+   of the galaxy, and the card called it 40 % in.
+2. **The crop offered to fix it measured the square too** (v0.458.2) — so the card promised a re-centring and
+   then withheld the button that does it.
+3. **They were also answering about different telescopes** (v0.458.3), which is why the *sample's* numbers had
+   moved. `library_frame_field` answers for the library, newest-activity-first, and a `--mosaic --big` pass
+   holds two mosaic targets whose panels are 40′ × 26.7′ and 75′ × 50′ — so the probe answered **75′ for both**
+   and the 2×2 sample's card printed the *big* sample's panel count. Its own frames give 3×3 (9 panels), which
+   is exactly what the 2026-09-14 record below quotes for that sample: **the claim moved when `--big` shipped
+   (v0.446.0) with nothing about the sample changing.**
+
+**Two things to take from (3) rather than from the fix.** First, that is the shape of phantom regression a later
+run would have chased for an hour — a printed claim that changed because the *tooling* grew, not the app. Second,
+it is the general hazard of a scratch install that holds several samples: anything the app answers **library-wide**
+(this field probe today; any future "what does this owner's setup look like?" answer) is being asked of a library
+no real install has. When a flag adds a sample whose frames differ from the others', ask what else reads the
+library as one thing.
+
+---
+
 ## 2026-09-18 — don't fix the surface you tripped over: enumerate the family, then pick the one that changes pixels
 
 *(Builder, branch `claude/sweet-babbage-sn6qbd`, the run that shipped v0.457.0, v0.457.1 and v0.458.0. A
