@@ -600,6 +600,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="detail.sharpen", label="Sharpen", group="detail", stage="nonlinear",
+    glossary="sharpening",
     apply=_sharpen, proxy_safe=True,
     help="Bring out fine detail and star cores by boosting local contrast. Use "
          "gently — too much amplifies noise and rings bright stars.",
@@ -614,6 +615,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="detail.deconvolve", label="Deconvolution", group="detail", stage="linear",
+    glossary="deconvolution",
     apply=_deconvolve, proxy_safe=True, heavy=True,  # iterative Richardson-Lucy — slow on the proxy
     help="Recover sharpness lost to seeing by reversing the star blur. It's a heavy "
          "effect, so the live preview may take a moment to update while it's on.",

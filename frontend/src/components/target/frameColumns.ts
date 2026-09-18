@@ -22,6 +22,18 @@ export interface FrameColumn {
   label: string;
   /** Absent only for a column that genuinely explains itself. */
   hint?: string;
+  /**
+   * The glossary entry for the *concept* the column measures, and the word to
+   * call it by. `hint` is one sentence about what this number is; the glossary
+   * is where the same word gets a paragraph, and these headings are the app's
+   * densest run of jargon outside the editor.
+   *
+   * `term` is carried separately because the heading is an abbreviation — a
+   * link named "what is ecc.?" answers nothing. `tests/test_glossary_links.py`
+   * fails if a slug here is not in the bundled glossary, so a link can never be
+   * dead.
+   */
+  glossary?: { slug: string; term: string };
 }
 
 export const FRAME_COLUMNS: FrameColumn[] = [
@@ -36,27 +48,32 @@ export const FRAME_COLUMNS: FrameColumn[] = [
   },
   {
     key: "fwhm_px", label: "FWHM",
+    glossary: { slug: "fwhm", term: "FWHM" },
     hint: "Full-width-half-maximum: how many pixels wide the stars are. "
       + "Lower = sharper. Rises with poor seeing, focus drift or clouds.",
   },
   {
     key: "star_count", label: "Stars",
+    glossary: { slug: "star-count", term: "star count" },
     hint: "Number of stars detected in the frame. Drops on hazy or "
       + "cloud-affected subs. Higher is generally better.",
   },
   {
     key: "eccentricity_median", label: "Ecc.",
+    glossary: { slug: "eccentricity", term: "eccentricity" },
     hint: "Median star eccentricity (elongation): 0 = perfectly round, "
       + "closer to 1 = trailed. High values flag tracking error, wind or a "
       + "mount bump on that whole sub. Lower is better.",
   },
   {
     key: "sky_adu_median", label: "Sky",
+    glossary: { slug: "sky-background", term: "sky background" },
     hint: "Median sky-background level of the frame. Rises with moonlight, "
       + "light pollution or thin cloud. Lower is darker (better).",
   },
   {
     key: "transparency_score", label: "Transp.",
+    glossary: { slug: "transparency", term: "transparency" },
     hint: "Transparency: median brightness of the frame's brightest stars. "
       + "Higher = clearer sky; low values flag haze or thin cloud. Relative, "
       + "comparable across this target's frames.",
