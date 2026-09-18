@@ -236,6 +236,13 @@ def _target_acquisition(lib: Any, entry: Any) -> dict[str, Any] | None:
     return {
         "name": entry.name, "safe_name": entry.safe_name,
         "exposure_s": _median([f.exposure_s for f in frames if f.exposure_s]),
+        # The set the median stands in for. A target is one *folder*, never one
+        # exposure — shoot it at 10 s one night and 30 s the next and the median
+        # is 20 s, a length no sub was shot at. Grouped by the engine's own
+        # `distinct_exposures`, so the page and the finished run's advisory
+        # cannot disagree about how many exposures a target has. Reporting only:
+        # the binder still gates on the median above.
+        "exposures_s": distinct_exposures([f.exposure_s for f in frames]),
         "gain": _median([f.gain for f in frames if f.gain is not None]),
         "sensor_temp_c": _median(
             [f.sensor_temp_c for f in frames if f.sensor_temp_c is not None]),

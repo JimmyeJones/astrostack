@@ -1,5 +1,79 @@
 # Shipped — the record
 
+## v0.457.0 — 2026-09-18 — the Calibration page told you to shoot darks at a length no sub of yours was shot at
+
+*(Builder, branch `claude/sweet-babbage-sn6qbd`. The **fifth** surface of the shortcut v0.456.0 named — and
+the one that hands the owner a shopping list. Found by the method that run recorded: after a fix, re-read
+the contracts of everything that claims to agree with the thing you changed.)*
+
+**The bug, reproduced before anything moved.** `webapp/routers/calibration.py::_target_acquisition` reduces
+a target's accepted subs to `_median([f.exposure_s …])` and hands that one number to
+`calibration.master_coverage`, which is the whole of `/api/calibration/coverage` — the page whose stated job
+is *"do my masters actually cover my targets?"*. A target is one **folder**, never one exposure
+(`seestack/io/scanner.py` groups by folder and has never heard of exposure), so shooting a target at 10 s on
+one night and 30 s on the next is an ordinary thing for a Seestar owner to own. Measured on a real
+`master_coverage` call, on a 6-sub target split 3/3:
+
+- `uncovered_detail` reported `exposure_s: 20.0`, which the page renders as **"Shoot them at 20s at gain 80
+  — that's what those subs were shot at."** No sub was shot at 20 s. That is a night of dark frames spent on
+  a length that matches nothing the owner has.
+- On a 4/2 split it reported 10 s — true for two-thirds of the subs, and silent about the third that a 10 s
+  dark leaves with its dark current and hot-pixel trails in.
+- `missed_detail` said **"your subs are 20s, this dark is 30s"** about a dark that is the *right* dark for
+  half of those subs.
+- And a **20 s** master dark was reported as **covering** that target, because 20 s is a perfect match for
+  the median — while being outside the bind gate for every single frame in it.
+
+**What shipped, and what deliberately did not.** Nothing about *which* masters are bound changed:
+`covered`/`missed` are still the binder's own answer, reported unchanged, so the roll-up still promises
+exactly what the app will do on its own. What changed is that it stops being silent about the part it
+misses, and stops describing a target by a length it never shot.
+
+- `_target_acquisition` now also serves `exposures_s` — the **distinct** sub lengths, grouped by the
+  engine's own `seestack.calibrate.apply.distinct_exposures`, so the page and the finished run's advisory
+  cannot disagree about how many exposures a target has. The median is served unchanged beside it, and it is
+  still the only thing anything binds on.
+- New pure `calibration.dark_exposure_split(dark_exposure_s, exposures_s)` answers *which* of a target's
+  lengths a dark reaches, using `_AUTO_BIND_EXP_MISMATCH_FRAC` — the binder's own 25 % threshold — so the
+  page and the stack cannot come to different opinions. Both lists empty whenever either side is unknown, so
+  every caller degrades to the wording it had before rather than to a false alarm.
+- `master_coverage` gains `n_partial` / `partial_detail` per master: the targets it **is** bound to but only
+  partly reaches, each with the sentence that names which subs (*"M 42 was shot at 10s and 30s, and this
+  dark is 10s — it matches the 10s subs but not the 30s ones. Build a master bias and AstroStack can scale
+  this dark to all of them, or build a dark for each length."*).
+- `coverage_miss_reason` takes an optional `exposures_s` that changes **only the wording** — every verdict is
+  still decided by the median — so a mixed target is named by its own lengths and told which of them the
+  dark reaches.
+- `uncovered_detail` carries `exposures_s`, and `uncoveredDarkSpecHint` expands a target's own set into one
+  spec per length, which drops a mixed target into the honest branch that file already had for *two*
+  uncovered targets shot differently: *"Those subs weren't all shot the same way (10s at gain 80; 30s at
+  gain 80), so they need a dark each."*
+- The page's existing one coverage line gains a `— one only partly` clause and turns amber; the existing one
+  tooltip carries both claims (what it can't be applied to, and what it only partly reaches). **No new card,
+  no new element** — the standing "extremely busy" priority.
+
+**An exposure-scaled dark is deliberately silent.** When the binder pairs a mismatched dark with a confident
+master bias it sets `scale_dark_to_light`, and `apply_raw` is handed *each frame's own* exposure — so that
+binding is per-frame correct on a mixed target by construction. Reporting a shortfall there would be a false
+alarm on the one path that already handles this properly, and a test pins it.
+
+**Not built, on purpose:** the binder itself. `pipeline._auto_bind_for_target` picking a dark from the
+median is the open lead filed with v0.456.1; it *acts* rather than talks, on the on-by-default walk-away
+path, and it wants a measurement of how many of the owner's targets are genuinely mixed before anything
+about it moves. This entry changes no pixel.
+
+**Tests +17 (12 Python, 4 vitest units, 1 rendered).** The load-bearing Python fail-before uses **no new
+API**: `master_coverage` on an evenly split target, asserting the miss reason does not contain `20s` —
+before the fix it read *"your subs are 20s, this dark is 30s"*. Six frontend cases fail on a scratch revert,
+including the rendered page test and the `uncoveredDarkSpecHint` one that pins the median never appearing.
+The existing `_coverage_target` helper now carries a single-exposure `exposures_s`, which is the shape the
+endpoint really builds, and the one existing exact-dict assertion was widened for the additive key.
+
+**Upgrade-safe (§9):** additive optional response fields and one additive keyword-only parameter defaulting
+to the old behaviour; old and new mix in either direction (an older frontend ignores the fields, an older
+backend omitting them leaves every sentence exactly as it was). No config, schema, on-disk, API-shape,
+default or pixel change.
+
 ## v0.456.1 — 2026-09-18 — and the Stack form was still asking the median, so it and the run disagreed about one target
 
 *(Builder, branch `claude/sweet-babbage-n9bszz`, the sibling v0.456.0's own entry names. Not a follow-up
