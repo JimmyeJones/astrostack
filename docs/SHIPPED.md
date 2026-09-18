@@ -1,5 +1,62 @@
 # Shipped — the record
 
+## v0.458.1 — 2026-09-18 — the framing verdict measured a square where the panel count beside it measured a galaxy
+
+*(Builder, branch `claude/sweet-babbage-3dy83s`. Found by reading a `--mosaic` dogfood pass's Target-page
+block as one paragraph — the thing that block exists for — and then reproduced away from the sample, on the
+owner's own S30 field and a real catalogue row.)*
+
+**The bug.** `seestack.framing.framing_result_verdict` modelled every object as a **square box of its major
+axis**, while `mosaic_plan` and `field_fill` — the two sentences that land on the *same card* — model it as
+**major x minor**, falling back to the square only when the catalogue records no minor axis. So the card
+could measure one object as two different shapes and contradict itself.
+
+**Measured, not reasoned.** M 31 is 178' x 63'. `mosaic_plan` prescribes a **2x1** mosaic for the owner's
+S30 field (128' x 72'), and a 2x1 union canvas is 243' x 72' — which holds the **whole** galaxy with room
+on both axes. The verdict said:
+
+> M 31 **is bigger than this mosaic — only about 40% of it is in this picture. Adding more panels next
+> session would capture the rest.**
+> About a 2x1 mosaic (2 panels) covers all of it.
+
+Two lines of one card: add panels to a grid the same card says already covers it, about a picture that
+contains every pixel of the galaxy. The 40 % is `178 x 72 / 178²` — the square box running off the short
+edge of a canvas the galaxy fits inside comfortably.
+
+**The fix.** `framing_result_verdict` takes `size_minor_arcmin` and lays the object's box along the
+**canvas's long edge** — the identical convention `mosaic_plan` counts panels with and `field_fill` draws
+with ("the arrangement anyone framing it would choose"). `ObjectInfo` carries the minor axis through from
+the catalogue row, and `webapp.framing_advice.framing_payload` hands the verdict the same number the panel
+count on that card is derived from. The catalogue stores no position angle, so *some* assumption is
+unavoidable here — this makes it the one the grid the owner is being asked to go and **shoot** already
+makes, instead of a second, stricter one nothing else in the app uses.
+
+**Scope: 23 of the 157 bundled objects record a minor axis, 11 of them materially elongated** (minor < 0.7 x
+major) — which is exactly the population a mosaic user shoots. Every other object, and every caller that
+passes no minor axis, gets byte-identical sentences: `minor_px` defaults to `major_px`, which is the old
+expression term for term, and a test pins level, coverage and text equal across `None` / `0` / a negative.
+A catalogue row with its axes the wrong way round can't inflate the object either — the minor half-extent is
+clamped to the major one.
+
+**What it does not change.** `recentre_outcome` still sizes its offer on the major axis: it asks a different
+question ("is there room for the object *plus clear space* in a crop?"), and a rotation-agnostic radius there
+is conservative in the safe direction — it can only withhold an offer, never promise a crop that clips the
+object. Nothing else moved: no threshold, no wording, no response field, no default.
+
+**Tests (+7).** `tests/test_framing.py` (+5): the M 31 repro end to end through `mosaic_plan`'s own grid,
+with the square fallback asserted still to read 0.404 so the change is one of *model* and not of arithmetic;
+a monotonicity guard that a minor axis can only ever raise coverage, across four positions x four shapes;
+the long-edge assignment holding on a portrait canvas; the absent/zero/negative/swapped-axis equivalence;
+and the "an object the canvas really is too small for still says mosaic" direction, so the fix cannot
+degenerate into always saying it fitted. `tests/webapp/test_stack_framing.py` (+2), through the real
+endpoint and the real M 42 row (85' x 60'): a 100' x 70' canvas now reads `centred`, and a 100' x 30' one
+still reports the genuine half that is missing. **Four of the seven fail before**, verified by reverting
+`minor_px` to `major_px` in a scratch edit and re-running.
+
+**Upgrade-safe (§9):** one optional keyword with a default that reproduces today's behaviour, one additive
+optional dataclass field, no config, DB-schema, on-disk, API-shape or default change. An older frontend
+reads the same response fields it always did.
+
 ## v0.456.1 — 2026-09-18 — and the Stack form was still asking the median, so it and the run disagreed about one target
 
 *(Builder, branch `claude/sweet-babbage-n9bszz`, the sibling v0.456.0's own entry names. Not a follow-up

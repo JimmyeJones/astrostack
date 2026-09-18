@@ -116,6 +116,11 @@ def framing_payload(
     v = framing_result_verdict(
         x_px=x_px, y_px=y_px, width_px=width, height_px=height,
         arcsec_per_px=scale, size_arcmin=info.size_arcmin,
+        # The same minor axis the panel count on this very card is derived from
+        # (``ObjectInfo.mosaic``). ``None`` — an older catalog row, or an object
+        # the catalog records no minor axis for — is the square box this verdict
+        # has always used.
+        size_minor_arcmin=getattr(info, "size_minor_arcmin", None),
         canvas=CANVAS_MOSAIC if is_mosaic else CANVAS_FRAME,
     )
     if v is None:

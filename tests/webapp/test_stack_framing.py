@@ -483,3 +483,45 @@ def test_the_planner_says_nothing_when_only_a_re_render_survives(
              w=6000, h=4500, arcsec_per_px=3.0,
              timestamp="2026-09-13T10:00:00Z", derived_from=999999)
     assert _nudge(solved_library, safe) is None
+
+
+def test_a_canvas_that_holds_an_elongated_object_whole_says_so_end_to_end(
+    client, solved_library,
+):
+    """The shape bug, through the real endpoint and the real catalogue row.
+
+    M 42 is 85′ × 60′. A 100′ × 70′ canvas centred on it holds the whole nebula —
+    but modelled as a *square* of its major axis it "runs off" the short edge,
+    and the endpoint reported ``partial`` at about 80 %: an owner told to add
+    panels to a picture that already has everything, directly above the panel
+    count that says the grid they have covers it.
+    """
+    safe = _m42(client)
+    # 3″/px: 2000 × 1400 px = 100′ × 70′.
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                      w=2000, h=1400, arcsec_per_px=3.0, is_mosaic=True)
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "centred"
+    assert body["coverage"] == pytest.approx(1.0)
+    assert body["coverage_pct"] == 95          # never prints a bare "100%"
+    assert "more panels" not in body["text"]
+
+
+def test_an_object_the_canvas_really_does_cut_still_reports_the_shortfall(
+    client, solved_library,
+):
+    """The other direction, so the fix above can't be "always say it fitted":
+    half the short axis of M 42 is genuinely outside a 100′ × 30′ canvas."""
+    safe = _m42(client)
+    # 3″/px: 2000 × 600 px = 100′ × 30′ — the minor axis is 60′, so half of it
+    # is off the canvas whichever way the nebula is turned.
+    run_id = _add_run(solved_library, safe, ra=M42_RA, dec=M42_DEC,
+                      w=2000, h=600, arcsec_per_px=3.0, is_mosaic=True)
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/framing").json()
+    assert body["level"] == "partial"
+    assert body["coverage"] == pytest.approx(0.5, abs=0.02)
+    assert "more panels" in body["text"]
