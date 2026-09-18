@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from webapp import calibration, deps, pipeline
 from seestack.calibrate import discover
-from seestack.calibrate.apply import distinct_exposures
+from seestack.calibrate.apply import distinct_exposures, distinct_gains
 from seestack.calibrate.masters import VALID_KINDS, VALID_METHODS
 
 router = APIRouter(tags=["calibration"])
@@ -133,8 +133,16 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     question, at pick time, of thousands of subs without sending one row each.
     Additive; an older client ignores it and keeps the single number.
 
-    ``tolerances`` carries the **engine's own** exposure/temperature mismatch
-    thresholds. The Stack form warns about the same two mismatches at *pick* time
+    ``params.gains`` is the third, and the one with no correction behind it: a
+    dark carries the gain-dependent readout pedestal, so a gain-mismatched dark
+    mis-subtracts at a perfectly matched exposure and temperature and nothing
+    rescales it. A short list rather than a tally, because gain is a discrete
+    setting — a library holds a handful of values however many subs it has. The
+    finished run judges the dark against every sub's gain (v0.466.0). Additive;
+    an older client ignores it and keeps the single median.
+
+    ``tolerances`` carries the **engine's own** exposure/temperature/gain
+    mismatch thresholds. The Stack form warns about the same two mismatches at *pick* time
     that ``CalibrationMasters.calibration_warnings`` reports on the finished run,
     and until now each side chose its own threshold — so on a borderline pair the
     app could stay quiet before the night was spent and complain about it
@@ -168,12 +176,22 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     # engine's only inside 0.05 °C of the 5 °C bar. Additive: an older client
     # ignores the key and keeps today's single number.
     sensor_temps_c = _temperature_tally([f.sensor_temp_c for f in frames])
+    # …and the third acquisition number, for the third time: a target is not
+    # necessarily one *gain* either. `gain` above is their median, and unlike
+    # temperature there is no correction anywhere for a gain gap — a dark carries
+    # the gain-dependent readout pedestal, so it mis-subtracts at a perfectly
+    # matched exposure. The finished run judges the dark against every sub's gain
+    # (v0.466.0); serving the set is what lets the form ask the identical
+    # question at pick time. A short list rather than a tally: gain is a discrete
+    # setting, so a library holds a handful of values however many subs it has.
+    gains = distinct_gains([f.gain for f in frames])
 
     masters = calibration.list_masters(settings.resolved_library_root)
     rec = calibration.recommend_masters(
         masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c)
     rec["params"]["exposures_s"] = exposures_s
     rec["params"]["sensor_temps_c"] = sensor_temps_c
+    rec["params"]["gains"] = gains
     rec["params"]["width_px"] = calibration.modal_dim([f.width_px for f in frames])
     rec["params"]["height_px"] = calibration.modal_dim([f.height_px for f in frames])
     # The subs' own colour-filter phase, so the form's "Use recommended" lands on
@@ -188,6 +206,7 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     # (``|t_light / t_master − 1|``), exactly as ``calibration_warnings`` does.
     from seestack.calibrate.apply import (
         EXPOSURE_MISMATCH_TOL,
+        GAIN_MISMATCH_TOL,
         TEMP_MISMATCH_MIN_SHARE,
         TEMP_MISMATCH_TOL_C,
     )
@@ -203,6 +222,12 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
         # others — one source of truth, so the form and the finished run cannot
         # disagree about one target.
         "temp_min_share": float(TEMP_MISMATCH_MIN_SHARE),
+        # …and the gain bar. It is deliberately tiny and deliberately not a
+        # severity threshold: gain is a *setting* with no correction anywhere, so
+        # the engine reports any real difference and this only absorbs header
+        # round-trip noise. Served for the same reason as the others — one source
+        # of truth, so the form and the finished run cannot disagree.
+        "gain_frac": float(GAIN_MISMATCH_TOL),
     }
     # …and what the *unattended* stack would have picked for these same subs.
     # ``recommend_masters`` above answers "the best master of each kind you own";
