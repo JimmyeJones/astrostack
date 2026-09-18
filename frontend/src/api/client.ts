@@ -3272,6 +3272,15 @@ export interface CalibrationSuggestions {
     // finished run judges a dark against all of them, so the form does too.
     // Optional: an older backend omits it and the form keeps the single number.
     exposures_s?: number[] | null;
+    // The subs' temperatures tallied as `[°C, how many]`, coldest first, rounded
+    // to the tenth of a degree a `CCD-TEMP` card carries. `sensor_temp_c` above
+    // is their median, which is the same claim of uniformity `exposures_s` exists
+    // to disprove — and an *uncooled* sensor follows the ambient, so a target
+    // shot across two seasons holds a 20 °C spread against a 5 °C tolerance. The
+    // finished run judges a dark against every sub's temperature, so the form
+    // does too. Optional: an older backend omits it and the form keeps the
+    // single number.
+    sensor_temps_c?: [number, number][] | null;
     // The target's modal raw frame size, so the form can flag a master built
     // for a different camera/binning (which would fail the stack outright).
     // Optional: an older backend omits them.
@@ -3292,7 +3301,11 @@ export interface CalibrationSuggestions {
   // form's pick-time warnings fire on exactly the pairs the finished run will
   // complain about. Optional: an older backend omits it and the form falls back
   // to its mirrored constants (see `calibrationFit.ts`).
-  tolerances?: { exposure_frac?: number | null; temp_c?: number | null } | null;
+  tolerances?: {
+    exposure_frac?: number | null;
+    temp_c?: number | null;
+    temp_min_share?: number | null;
+  } | null;
   // What the *unattended* stack would bind for these same subs — the stricter
   // "best master we're confident about", as opposed to the fields above, which
   // are the best master of each kind you own. The two can disagree, so the form

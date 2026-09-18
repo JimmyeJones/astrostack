@@ -247,12 +247,23 @@ export function darkScalingBlockedNote(
 export const EXPOSURE_MISMATCH_TOL = 0.15;
 /** Fallback for the engine's `TEMP_MISMATCH_TOL_C` (degrees C). */
 export const TEMP_MISMATCH_TOL_C = 5;
+/** Fallback for the engine's `TEMP_MISMATCH_MIN_SHARE` — the share of a target's
+ *  subs a dark must miss on temperature before it is worth saying. Temperature is
+ *  continuous where an exposure is a setting, so on a target spanning many nights
+ *  a handful of subs sit outside the tolerance of any dark. */
+export const TEMP_MISMATCH_MIN_SHARE = 0.1;
 
 /** Optional `tolerances` block from the calibration-suggestions payload. */
 export interface MismatchTolerances {
   exposure_frac?: number | null;
   temp_c?: number | null;
+  temp_min_share?: number | null;
 }
+
+/** `[°C, how many subs]`, as `calibration-suggestions` serves
+ *  `params.sensor_temps_c` — the subs' temperatures tallied rather than listed,
+ *  so a target with thousands of them costs tens of rows. */
+export type TemperatureTally = readonly (readonly [number, number])[];
 
 /** A usable positive threshold from the server, or the built-in fallback. */
 function tol(served: number | null | undefined, fallback: number): number {
@@ -310,6 +321,78 @@ export function joinExposures(values: readonly number[]): string {
   const parts = values.map((v) => `${v}s`);
   if (parts.length <= 1) return parts.join("");
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/** `(coldest, median, warmest)` over a tally of the subs' temperatures, or null
+ *  when none of them recorded one. Mirrors the engine's `temperature_spread`.
+ *
+ *  Unlike an exposure a temperature may legitimately be zero or negative, so the
+ *  only rows dropped are the unusable ones — reading a blank `CCD-TEMP` card as
+ *  0 °C would invent a mismatch out of nothing. */
+export function temperatureSpread(
+  tally: TemperatureTally | null | undefined,
+): { lo: number; median: number; hi: number; n: number } | null {
+  if (!tally) return null;
+  const rows = tally
+    .filter((r) => Array.isArray(r) && Number.isFinite(r[0]) && (r[1] ?? 0) > 0)
+    .map((r) => [Number(r[0]), Math.round(Number(r[1]))] as const)
+    .sort((a, b) => a[0] - b[0]);
+  const n = rows.reduce((acc, r) => acc + r[1], 0);
+  if (n <= 0) return null;
+  // The median of the *subs*, not of the distinct temperatures: a tally row
+  // holding 400 frames weighs 400.
+  const at = (k: number): number => {
+    let acc = 0;
+    for (const [t, c] of rows) {
+      acc += c;
+      if (acc > k) return t;
+    }
+    return rows[rows.length - 1][0];
+  };
+  const median = n % 2 ? at((n - 1) / 2) : (at(n / 2 - 1) + at(n / 2)) / 2;
+  return { lo: rows[0][0], median, hi: rows[rows.length - 1][0], n };
+}
+
+/** How many of these subs a master's temperature misses, and how many recorded
+ *  one — the engine's `temperature_mismatch_count`, asked of the tally.
+ *
+ *  One-sided like every other check here: a master that never recorded its own
+ *  temperature misses nothing, because it cannot be disproved. */
+export function temperatureMismatchCount(
+  masterTempC: number | null | undefined,
+  tally: TemperatureTally | null | undefined,
+  tolerances?: MismatchTolerances | null,
+): { off: number; total: number } {
+  const rows = (tally ?? []).filter(
+    (r) => Array.isArray(r) && Number.isFinite(r[0]) && (r[1] ?? 0) > 0,
+  );
+  const total = rows.reduce((acc, r) => acc + Math.round(Number(r[1])), 0);
+  if (masterTempC == null || !Number.isFinite(masterTempC)) return { off: 0, total };
+  const limit = tol(tolerances?.temp_c, TEMP_MISMATCH_TOL_C);
+  const off = rows.reduce(
+    (acc, r) =>
+      Math.abs(Number(r[0]) - masterTempC) >= limit ? acc + Math.round(Number(r[1])) : acc,
+    0,
+  );
+  return { off, total };
+}
+
+/** True when a master's temperature misses enough of these subs to be worth
+ *  saying — the engine's own bar, share and all. */
+export function tempMismatchesTheSet(
+  masterTempC: number | null | undefined,
+  tally: TemperatureTally | null | undefined,
+  tolerances?: MismatchTolerances | null,
+): boolean {
+  const { off, total } = temperatureMismatchCount(masterTempC, tally, tolerances);
+  const share = tol(tolerances?.temp_min_share, TEMP_MISMATCH_MIN_SHARE);
+  return total > 0 && off > 0 && off >= share * total;
+}
+
+/** A sensor temperature as the header meant it — mirrors the engine's `_deg`, so
+ *  one target is described in the same degrees before and after the night. */
+export function degC(value: number): string {
+  return String(Math.round(value * 10) / 10 + 0);
 }
 
 /** True when a master's sensor temperature is far enough from the frames' to be

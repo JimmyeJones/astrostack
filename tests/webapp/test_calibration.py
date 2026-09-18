@@ -1231,6 +1231,84 @@ def test_calibration_suggestions_reports_one_exposure_as_one_exposure(
     assert params["exposures_s"][0] == pytest.approx(10.0, abs=0.01)
 
 
+def test_calibration_suggestions_tallies_the_subs_temperatures_not_just_a_median(
+        client, solved_library):
+    """The temperature half of the same contract.
+
+    Fail-before: the endpoint served only ``sensor_temp_c``, the median — and the
+    Seestar's sensor is uncooled, so a target shot across two seasons holds a
+    spread the median names no sub by. The finished run judges the dark against
+    every sub's temperature (v0.464.0), so the form is served the tally or the
+    two disagree about one target."""
+    from seestack.io.library import Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            ids = [f.id for f in proj.iter_frames()]
+            assert len(ids) >= 2, "fixture needs at least two frames to mix"
+            for i, fid in enumerate(ids):
+                proj.update_frame(fid, sensor_temp_c=-20.0 if i == 0 else 2.0)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get(f"/api/targets/{safe}/calibration-suggestions").json()
+    params = body["params"]
+    tally = {t: n for t, n in params["sensor_temps_c"]}
+    assert tally[-20.0] == 1
+    assert tally[2.0] == len(ids) - 1
+    # Coldest first, and the median is still served unchanged beside it.
+    assert params["sensor_temps_c"][0][0] == -20.0
+    assert params["sensor_temp_c"] == 2.0
+    # The engine's own share floor travels with the two thresholds, for the same
+    # reason they do: one source of truth for "is this worth saying?".
+    from seestack.calibrate.apply import TEMP_MISMATCH_MIN_SHARE
+
+    assert body["tolerances"]["temp_min_share"] == pytest.approx(
+        TEMP_MISMATCH_MIN_SHARE)
+
+
+def test_calibration_suggestions_rounds_the_temperature_tally_to_the_header(
+        client, solved_library):
+    """A ``CCD-TEMP`` card carries a tenth of a degree, so one night's worth of
+    float32 jitter is one row rather than one row per sub — a target with
+    thousands of subs must not answer with thousands of rows."""
+    from seestack.io.library import Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            ids = [f.id for f in proj.iter_frames()]
+            for i, fid in enumerate(ids):
+                proj.update_frame(fid, sensor_temp_c=2.0 + 0.0001 * i)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    params = client.get(
+        f"/api/targets/{safe}/calibration-suggestions").json()["params"]
+    assert params["sensor_temps_c"] == [[2.0, len(ids)]]
+
+
+def test_the_temperature_tally_never_reads_a_blank_header_as_zero_degrees():
+    """Unlike an exposure a temperature may legitimately be 0 or negative, so the
+    tally drops only what is unusable — counting a missing card as 0 °C would
+    invent a mismatch against every dark shot on a warm night."""
+    from webapp.routers.calibration import _temperature_tally
+
+    assert _temperature_tally([None, float("nan"), float("inf"), "x"]) == []
+    assert _temperature_tally([0.0, -3.0, 0.0]) == [[-3.0, 1], [0.0, 2]]
+    # -0.0 and 0.0 are one temperature, not two rows.
+    assert _temperature_tally([-0.0, 0.0]) == [[0.0, 2]]
+
+
 def test_calibration_suggestions_reports_the_targets_frame_size(client, solved_library):
     """The Stack form needs the subs' size to warn that a master built for another
     camera/binning can't be applied — the engine refuses it and fails the whole

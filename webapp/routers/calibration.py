@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,31 @@ def _median(values: list[float]) -> float | None:
     return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2.0
 
 
+def _temperature_tally(values: list[Any]) -> list[list[float]]:
+    """``[[°C, how many subs were shot at it], …]``, coldest first.
+
+    Rounded to a tenth of a degree, which is the precision a ``CCD-TEMP`` card
+    carries, so a target with thousands of subs answers in tens of rows. Unlike
+    an exposure a temperature may legitimately be zero or negative, so only the
+    missing and the non-finite are dropped — reading a blank card as 0 °C would
+    invent a mismatch out of nothing, exactly as the engine's ``_finite_temps``
+    refuses to.
+    """
+    counts: dict[float, int] = {}
+    for v in values:
+        if v is None:
+            continue
+        try:
+            t = float(v)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(t):
+            continue
+        key = round(t, 1) + 0.0
+        counts[key] = counts.get(key, 0) + 1
+    return [[t, counts[t]] for t in sorted(counts)]
+
+
 @router.get("/api/targets/{safe}/calibration-suggestions")
 def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     """Recommend the dark/flat masters that best match this target's frames.
@@ -95,6 +121,17 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     (v0.456.0), so the form is served the set too, or the two would disagree
     about one target — which is exactly what ``tolerances`` below exists to
     prevent. Additive; an older client ignores it and keeps the single number.
+
+    ``params.sensor_temps_c`` is the same correction for the temperature half,
+    as a compact ``[[°C, how many subs], …]`` tally rounded to the tenth of a
+    degree a ``CCD-TEMP`` card is written at. ``sensor_temp_c`` above is their
+    median, and the Seestar's sensor is **uncooled** — it follows the ambient, so
+    a target shot across a winter and a summer night holds a 20 °C spread against
+    a 5 °C tolerance, and a median names a temperature a great many of the subs
+    were not shot at. The finished run judges the dark against every sub's
+    temperature (v0.464.0); the tally is what lets the form ask the identical
+    question, at pick time, of thousands of subs without sending one row each.
+    Additive; an older client ignores it and keeps the single number.
 
     ``tolerances`` carries the **engine's own** exposure/temperature mismatch
     thresholds. The Stack form warns about the same two mismatches at *pick* time
@@ -123,11 +160,20 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     exposures_s = distinct_exposures([f.exposure_s for f in frames])
     gain = _median([f.gain for f in frames if f.gain is not None])
     sensor_temp_c = _median([f.sensor_temp_c for f in frames if f.sensor_temp_c is not None])
+    # …and how the subs' temperatures are actually spread, because the median is
+    # the same claim of uniformity the exposure one was, and an uncooled sensor
+    # disproves it over a season. Rounded to a tenth of a degree — the precision
+    # a ``CCD-TEMP`` card carries — so a target with thousands of subs sends tens
+    # of rows rather than thousands, and the form's answer can differ from the
+    # engine's only inside 0.05 °C of the 5 °C bar. Additive: an older client
+    # ignores the key and keeps today's single number.
+    sensor_temps_c = _temperature_tally([f.sensor_temp_c for f in frames])
 
     masters = calibration.list_masters(settings.resolved_library_root)
     rec = calibration.recommend_masters(
         masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c)
     rec["params"]["exposures_s"] = exposures_s
+    rec["params"]["sensor_temps_c"] = sensor_temps_c
     rec["params"]["width_px"] = calibration.modal_dim([f.width_px for f in frames])
     rec["params"]["height_px"] = calibration.modal_dim([f.height_px for f in frames])
     # The subs' own colour-filter phase, so the form's "Use recommended" lands on
@@ -140,11 +186,23 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     # One source of truth for "is this master a poor match?" — see the docstring.
     # ``exposure_frac`` is measured against the *master's* exposure
     # (``|t_light / t_master − 1|``), exactly as ``calibration_warnings`` does.
-    from seestack.calibrate.apply import EXPOSURE_MISMATCH_TOL, TEMP_MISMATCH_TOL_C
+    from seestack.calibrate.apply import (
+        EXPOSURE_MISMATCH_TOL,
+        TEMP_MISMATCH_MIN_SHARE,
+        TEMP_MISMATCH_TOL_C,
+    )
 
     rec["tolerances"] = {
         "exposure_frac": float(EXPOSURE_MISMATCH_TOL),
         "temp_c": float(TEMP_MISMATCH_TOL_C),
+        # …and the share of the subs a dark has to miss on temperature before it
+        # is worth saying. Unlike the two above this one exists because
+        # temperature is continuous: on a target spanning many nights a handful
+        # of subs sit outside the tolerance of any dark, and a warning a reader
+        # cannot act on is worse than silence. Served for the same reason as the
+        # others — one source of truth, so the form and the finished run cannot
+        # disagree about one target.
+        "temp_min_share": float(TEMP_MISMATCH_MIN_SHARE),
     }
     # …and what the *unattended* stack would have picked for these same subs.
     # ``recommend_masters`` above answers "the best master of each kind you own";
