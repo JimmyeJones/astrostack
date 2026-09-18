@@ -388,6 +388,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="tone.white_balance", label="White balance", group="tone", stage="linear",
+    glossary="white-balance",
     apply=_white_balance, proxy_safe=True,
     help="Manual per-channel gain (applied to linear data).",
     params=[
@@ -404,6 +405,9 @@ register(OpSpec(
 
 register(OpSpec(
     id="tone.neutralize_background", label="Neutralize background", group="tone",
+    # The colour-calibration entry names this control as the after-the-stretch
+    # half of the same job; there is one concept here, not two.
+    glossary="colour-calibration",
     stage="nonlinear", apply=_neutralize_background, proxy_safe=True,
     help="Remove a residual colour cast from the sky by balancing each channel's "
          "background to the darkest — a display-space fix, so add it after the stretch.",
@@ -440,6 +444,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="tone.curves", label="Curves", group="tone", stage="nonlinear", apply=_curves,
+    glossary="curves",
     proxy_safe=True, help="Freeform tone curve over all channels.",
     params=[
         EditParam("points", "Curve", "curve", default=[[0.0, 0.0], [1.0, 1.0]]),
@@ -453,6 +458,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="tone.levels", label="Levels", group="tone", stage="nonlinear", apply=_levels,
+    glossary="levels",
     proxy_safe=True,
     help="Set where black and white fall and adjust midtone brightness — the classic "
          "black-point / white-point / gamma controls.",
@@ -472,6 +478,7 @@ register(OpSpec(
 
 register(OpSpec(
     id="tone.saturation", label="Saturation", group="tone", stage="nonlinear",
+    glossary="saturation",
     apply=_saturation, proxy_safe=True, help="Boost or reduce colour, preserving luminance.",
     params=[EditParam("amount", "Amount", "float", default=1.0, min=0.0, max=3.0, step=0.05,
                       help="1.0 = unchanged, above 1 lifts colour, below 1 mutes it. "

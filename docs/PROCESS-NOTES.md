@@ -18,6 +18,65 @@ is a queue.
 
 ---
 
+## 2026-09-18 — Builder: measuring a promise instead of grepping for one, and what the glossary's own coverage said
+
+*(Builder, branch `claude/sweet-babbage-tmis6f`, the run that shipped v0.463.0/.1/.2. Baseline
+`6349 passed, 2 skipped`, 9m51s with `-n 4` and the BLAS cap on a 4-core box.)*
+
+**Starting state, for the seventh run running.** Same as the six notes above this one: every open entry under
+"Bugs (fix these first)" is gated on the owner's library, routed to sign-off, or stood down with numbers; the
+three open GitHub issues (#878, #880, #903) are each already traced in the backlog and each ends in
+owner-sign-off or a measured decline. So the work had to be found.
+
+**The lever, and why it is a different one from the two notes above.** Those runs *grepped the copy* — for
+promises, then for universal quantifiers — and each found a sentence the code contradicted. This run took the
+next step along: the glossary's own opening promise (*"this list is meant to cover everything the interface
+says out loud"*) is not checkable by reading, because its subject is an **absence**. It needs a census. Forty
+lines of throwaway Python against `load_glossary()`, `all_specs()` and `stack_option_fields()` answered it:
+
+- **13 of the editor's 21 controls** had no glossary entry to point at — *Deconvolution*, *Star reduction*,
+  *Levels*, *Curves*, *Saturation*, *White balance*, *Sharpen*, *Boost nebula*, *Neutralize background* — on
+  priority 1's own screen, and the screen densest in words nobody arrives knowing.
+- **16 of the Stack form's 36**, including the three drizzle knobs whose own checkbox already linked the
+  drizzle entry.
+- **25 of the 38 bundled terms** had no screen pointing at them at all.
+
+v0.461.0 built the mechanism a week earlier and wired the eight ops whose concept already had a heading. What
+the census showed is that *building the link* and *the promise being true* are two different things, and only
+one of them had happened. **Generalisation worth keeping: a claim about coverage is a claim about what is
+missing, and greps find what is present. Count both sides.**
+
+**The design rule the three commits share, and it is the durable half.** Each surface now carries an explicit
+list of the controls that deliberately have no link, with the reason —
+`_OPS_THAT_EXPLAIN_THEMSELVES` (crop, rotate, resize) and
+`_STACK_OPTIONS_THAT_EXPLAIN_THEMSELVES` (a filename, a thread count, `auto_reject`, `mono`). A test fails on
+anything that is neither linked nor listed. That converts "somebody should sweep this again in a month" into
+"the next person to register a control has to decide", which is the only version of this that does not rot.
+`auto_reject` is the entry worth remembering: it resolves *to* sigma clipping or min/max, each of which links
+its own entry, so a link from it would land the reader on whichever method the run happened **not** to pick —
+"no link" is the correct answer, and it needed writing down to stay one.
+
+**Two entries were added to an *existing* heading rather than getting their own.** *Neutralize background*
+links `colour-calibration`, which gains a sentence naming it as the after-the-stretch half of the same job;
+*Match mosaic panel brightness* links `mosaic`, which gains the overlap sentence. The alternative — one entry
+per control — would have produced near-duplicate paragraphs whose only difference was which screen sent you
+there. **One concept, one entry; extend the entry rather than fork it.**
+
+**Dogfood `--editor`: CLEAN, and it re-measured the page the change made longer.** All 21 ops added with the
+preview re-rendering each time, undo and redo applied, nothing overflowing, no console errors. Page heights on
+a phone: `/tonight` 3,540 px, **`/glossary` 3,364 px**, the Target page 3,287 px, the editor 3,143 px. The
+glossary is second-tallest *because of this run* — 38 terms to 47, about 70 px a collapsed heading — and it is
+recorded rather than sliced, deliberately: it is an accordion of headings with a search box above it, so the
+list **is** the content, which is not the shape the standing "extremely busy" complaint is about (a wall of
+banners between the reader and the information). If it ever needs a slice, group the headings; do not remove a
+term. `Glossary.tsx`'s own comment quoted "38" and is now written so it cannot rot again.
+
+**One honest limit on all three commits.** Nothing here changes a pixel of anybody's picture. It is prose and
+descriptor data, and the argument for spending a run on it is AGENTS.md §1 priority 1 ("make the controls
+obvious") and 3 — not image quality. A run that had a verified stacking bug available should have taken that
+instead.
+
+
 ## 2026-09-18 — Builder: the open issue inbox is a backlog when the backlog is dry, and a dogfood pass that comes back clean
 
 *(Builder, branch `claude/sweet-babbage-m3wwgy`, the run that shipped v0.462.0 and v0.462.1. Baseline

@@ -89,6 +89,42 @@ describe("FrameColumnGuide", () => {
       .toHaveStyle({ alignSelf: "flex-start" });
   });
 
+  it("gives each jargon heading its own way into the glossary", () => {
+    // The sentence beside a heading is one sentence. `Ecc.` and `Transp.` are
+    // words a beginner has never met, and until now the only link out of this
+    // disclosure landed on FWHM whatever they were stuck on.
+    renderGuide();
+    fireEvent.click(screen.getByText("What do these numbers mean? →"));
+    const linked = FRAME_COLUMNS.filter((c) => c.glossary);
+    expect(linked.length).toBeGreaterThanOrEqual(5);
+    for (const c of linked) {
+      const slug = c.glossary?.slug as string;
+      expect(screen.getByTestId(`glossary-link-${slug}`))
+        .toHaveAttribute("href", `/glossary#${slug}`);
+    }
+  });
+
+  it("names the concept rather than the abbreviation in the link", () => {
+    // `GlossaryLink` builds its accessible name from what it is handed, so a
+    // heading passed straight through would ask "what is ecc.?" — which is the
+    // question, not the answer. The column carries the word separately.
+    renderGuide();
+    fireEvent.click(screen.getByText("What do these numbers mean? →"));
+    expect(screen.getByLabelText("What is eccentricity?")).toBeInTheDocument();
+    expect(screen.getByLabelText("What is sky background?")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/what is ecc\./i)).not.toBeInTheDocument();
+  });
+
+  it("offers no link for a heading the glossary has no entry for", () => {
+    // The date column is explained in full by its own sentence, and inventing
+    // an entry so every row could have a glyph would be a link that teaches
+    // nothing. Absence is the deliberate state, so it is asserted.
+    renderGuide();
+    fireEvent.click(screen.getByText("What do these numbers mean? →"));
+    const when = FRAME_COLUMNS.find((c) => c.key === "timestamp_utc");
+    expect(when?.glossary).toBeUndefined();
+  });
+
   it("points out to the full glossary, at the term it was just explaining", () => {
     // The four hints here are a sentence each; the glossary is where the same
     // words get a paragraph. The link lands on the term's own anchor.

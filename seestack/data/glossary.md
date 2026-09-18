@@ -168,6 +168,25 @@ on **Auto outlier removal** and AstroStack picks between the two from how deep
 your subs actually are; the finished picture's health notes say which it used and
 what it could reach.
 
+## Quality weighting
+
+Letting the better subs count for more. Every sub is measured — star sharpness,
+how many stars were found, how bright the sky was — and a sharper, clearer frame
+is given more weight in the average than a soft or hazy one, instead of every
+frame counting the same. It is gentler than throwing frames away: a mediocre sub
+still contributes what it is worth. Min/max rejection ignores the weights, by
+design, because dropping the extreme *value* at a pixel is a different job.
+
+## Photometric normalisation
+
+Matching every sub's overall brightness before they are combined. Haze, the Moon
+and how low the target sat change how much light reaches the sensor, so subs from
+different nights arrive at different levels — and averaging those directly both
+weakens outlier rejection (a clear-night sub looks like an outlier next to a hazy
+one) and lets a bad night dim the finished picture. Normalising scales each sub
+to the set's own middle first. Mosaics do it automatically, because a panel shot
+through haze would otherwise stay a visibly darker tile.
+
 ## Coverage map / weight map
 
 A 2D map, the same size as the output, that records how many frames contributed
@@ -221,12 +240,48 @@ crop and so on — saved as a *recipe* rather than as changed pixels. The stacke
 master is never overwritten: every preview and every export re-applies the recipe
 to the original data, so any step can be changed or removed later, in any order.
 
+## Levels (black point / white point)
+
+Where black and white fall in the picture, and how bright everything in between
+is. Raising the **black point** darkens the sky and makes the picture look
+cleaner — pushed too far it throws away the faintest nebulosity. Lowering the
+**white point** brightens, but too far blows out the cores of bright stars. The
+**midtone** control lifts or lowers everything between the two without moving
+either end. Like every editor step it is part of the recipe, so nothing is
+decided permanently.
+
+## Curves
+
+The freehand version of Levels: instead of three numbers you drag a line that
+maps every input brightness to an output one. Lifting the middle of the line
+brightens the midtones; a gentle S-shape adds contrast. It is the most powerful
+tone control in the editor and the easiest to overdo — make small moves, and
+watch the sky rather than the object.
+
+## Saturation
+
+How strong the colours are. An astrophoto usually wants a lift, because
+averaging many subs mutes colour along with noise — but the sky background has
+colour noise in it too, so pushing saturation hard makes the *background*
+blotchy before it makes the object prettier. Raise it until the object looks
+right, then check an empty corner of the frame.
+
+## White balance
+
+The per-channel gains that decide whether the picture looks neutral or tinted.
+Setting them by hand is the manual version of Colour calibration below, which
+measures the same thing from the stars themselves — use the manual control when
+you want a deliberate look, and colour calibration when you want it correct.
+
 ## Colour calibration
 
 Setting the white balance from the actual colours of stars in the image rather
 than guessing from sky averages: AstroStack finds stars that ought to be neutral
 and balances the channels until they are. It runs entirely offline on your own
 data. This is one of the things that separates an amateur stack from a good one.
+The editor's **Neutralize background** step is the other half of the same job,
+done after the stretch: it balances each channel's *sky* to the darkest one, so
+a residual cast comes out of the background rather than out of the stars.
 
 ## SCNR (green cast removal)
 
@@ -235,6 +290,31 @@ stretched stack often ends up with a faint green cast in the sky. SCNR gently
 pulls green pixels back toward the average of red and blue where green is
 clearly winning — which removes the cast without draining the colour out of
 genuinely green things. It's part of the one-click Auto edit.
+
+## Sharpening
+
+Boosting local contrast so fine detail and star cores stand out. It invents
+nothing — it only makes differences that are already in the data more visible,
+which means it makes the *noise* more visible too, and rings bright stars with
+dark halos if pushed. Use a little, late in the edit, after the noise reduction.
+
+## Deconvolution
+
+Undoing some of the blur the atmosphere and the optics added, by modelling the
+shape a point of light was smeared into and reversing it. Gently, it makes stars
+tighter and detail crisper; hard, it produces dark rings around stars and
+worm-like texture in the background. It works on the linear image, before
+stretching, and it is the slowest step in the editor — the live preview takes a
+moment to catch up while it is on.
+
+## Star reduction / star mask
+
+Shrinking the stars so the nebula or galaxy behind them has room to breathe.
+AstroStack finds them with a *star mask* — a map of which pixels belong to a
+star — and shrinks only those, by eroding them; there is no AI model and no
+separate starless image. The editor's **Boost nebula** step uses the same mask
+the other way round, lifting everything that is *not* a star. Both are cosmetic,
+and both are undoable like any other step in the recipe.
 
 ## Master dark / flat / bias
 
@@ -271,7 +351,10 @@ with twice the integration should measure noticeably lower.
 A panorama of the sky built from multiple panels, each itself a stack. The
 Seestar app supports mosaic capture mode. AstroStack auto-detects mosaic frames
 from their sky positions and builds the seamless joined output using the coverage
-map.
+map. Where two panels overlap they photograph the same sky, so their brightness
+there can be compared honestly — which is how a panel shot through haze is
+lifted to match its neighbours instead of staying a darker tile with a step
+along the join.
 
 ## Mean vs. median stacking
 
