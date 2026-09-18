@@ -2179,6 +2179,40 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
+- **LEAD (Builder 2026-09-18, filed while shipping v0.464.0 — the third representative value, and the one the
+  engine cannot see at all) — a gain-mismatched master dark is applied silently, and the run's own
+  mismatch advisory is structurally unable to mention it.** *(Pillar: image quality + trust — PRIORITY 4;
+  size S to write, **M–L to be sure of** — it is real-data-gated, see below. Severity: low–medium.
+  Confidence: the code facts below were **run**, not read.)*
+  Three acquisition numbers decide whether a dark matches, and the app says so itself: `auto_bind_master_ids`
+  gates on all three, `_acquisition_reason` gives *"it was shot at gain 200, your subs at gain 80"* as a
+  reason a dark covers nothing, and `auto_bind_master_ids`' own docstring says *"a dark encodes the
+  gain-dependent bias pedestal, so a wrong-gain dark mis-subtracts even at the right exposure"*.
+  `CalibrationMasters.calibration_warnings` covers exposure (v0.456.0), temperature (v0.464.0), CFA phase and
+  flat-dark shape — **and has no gain branch, because `CalibrationMasters` never loads the dark's gain**:
+  `[f for f in CalibrationMasters.__dataclass_fields__ if "gain" in f]` is `[]`, against `dark_exposure_s`
+  and `dark_temp_c` which are there. The Stack form is silent about it too (`Stack.tsx` has `expMismatch`
+  and `tempMismatch`, no gain equivalent).
+  **And the unattended gate is looser than it reads.** `_dark_match_confident` compares a *combined*
+  `_match_distance` against `_AUTO_BIND_DARK_MAX_DIST` = 1.0, whose gain term is
+  `|m_gain − gain| / max(|gain|, 1)`. Measured against lights at gain 80: a gain-100 dark scores 0.250, a
+  gain-120 dark 0.500, a gain-160 dark exactly 1.000 — **all three bind**, unwarned, on the walk-away path;
+  only 2× and beyond declines. So a 25 % gain mismatch is auto-applied and nothing anywhere says a word.
+  **Why it is filed rather than built, and what would settle it.** The fix needs a gain tolerance, and there
+  is no honest one in this repo: the auto-bind bar is a *combined* distance, so it cannot be reused as a
+  per-dimension threshold (it is also nowhere near the exposure/temperature bars in strictness), and how much
+  a 25 % gain mismatch actually costs an OSC Seestar stack — the pedestal error in ADU against the sky level
+  of a 10 s sub — needs **real darks shot at two gains on the same camera**, which no agent here has. Do
+  **not** pick a number from recall; that is the blind-threshold move AGENTS.md §1 names. Two shapes worth
+  costing if the owner ever asks: (a) carry `dark_gain` onto `CalibrationMasters` and warn on a *relative*
+  gain gap, with the bar measured on his own darks; or (b) the strictly cheaper half — say it at **pick
+  time** only, on the Stack form, where the master registry's `gain` is already in the payload beside
+  `params.gain`, and leave the finished run alone. Note (b) alone re-creates the form↔run split v0.464.1
+  exists to close, so it is only the safe half if the entry is explicit that the run stays silent on purpose.
+  **Likelihood on this owner is the other unknown**: a Seestar shot at one gain all year never meets this.
+  Worth an observer question — *do any of his targets hold subs at more than one `GAIN`, and do any of his
+  masters' gains differ from the targets they cover?* — before anyone spends a slot on it.
+
 - **NEW IDEA (Builder 2026-09-04, the *behavioural* consequence of the v0.340.0 measurement — read the caution
   before touching this) — an unattended drizzle run could skip a rejection pass that provably clips nothing,
   and get 1.75× of its canvas memory back.** *(Pillar: autonomy + image quality — PRIORITY 2/4; size S to
