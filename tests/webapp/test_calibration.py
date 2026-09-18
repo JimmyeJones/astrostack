@@ -1309,6 +1309,70 @@ def test_the_temperature_tally_never_reads_a_blank_header_as_zero_degrees():
     assert _temperature_tally([-0.0, 0.0]) == [[0.0, 2]]
 
 
+def test_calibration_suggestions_serves_the_subs_distinct_gains_not_just_a_median(
+        client, solved_library):
+    """The gain half of the same contract, and the one with no correction behind
+    it: a dark carries the gain-dependent readout pedestal, so a gain-mismatched
+    dark mis-subtracts at a perfectly matched exposure and temperature and
+    nothing rescales it.
+
+    Fail-before: the endpoint served only ``gain``, the median — so a target
+    reshot at another gain answered with a setting a great many of its subs were
+    not shot at, and the form could only warn about that one. The finished run
+    judges the dark against every sub's gain (v0.466.0)."""
+    from seestack.io.library import Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            ids = [f.id for f in proj.iter_frames()]
+            assert len(ids) >= 2, "fixture needs at least two frames to mix"
+            for i, fid in enumerate(ids):
+                proj.update_frame(fid, gain=200.0 if i == 0 else 80.0)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    params = client.get(
+        f"/api/targets/{safe}/calibration-suggestions").json()["params"]
+    # Both settings, lowest first — a list rather than a tally, because gain is
+    # discrete and a library holds a handful of values however many subs it has.
+    assert params["gains"] == [80.0, 200.0]
+    # …and the median is still served unchanged beside it.
+    assert params["gain"] == 80.0
+
+
+def test_calibration_suggestions_gains_are_the_engines_own_grouping(
+        client, solved_library):
+    """One question, answered once: header round-trip noise is one gain and a
+    real step is two, decided by ``distinct_gains`` rather than by a second rule
+    written here."""
+    from seestack.calibrate.apply import distinct_gains
+    from seestack.io.library import Library
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            ids = [f.id for f in proj.iter_frames()]
+            for i, fid in enumerate(ids):
+                proj.update_frame(fid, gain=80.0 + 0.0001 * i)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    params = client.get(
+        f"/api/targets/{safe}/calibration-suggestions").json()["params"]
+    assert params["gains"] == distinct_gains([80.0 + 0.0001 * i
+                                              for i in range(len(ids))])
+    assert len(params["gains"]) == 1
+
+
 def test_calibration_suggestions_reports_the_targets_frame_size(client, solved_library):
     """The Stack form needs the subs' size to warn that a master built for another
     camera/binning can't be applied — the engine refuses it and fails the whole
@@ -1330,13 +1394,18 @@ def test_calibration_suggestions_serves_the_engines_own_mismatch_tolerances(
     night was spent and complained afterwards. The endpoint now serves the
     engine's constants — and this pins that they *are* the engine's, so changing
     ``calibration_warnings``' sensitivity can't silently leave the form behind."""
-    from seestack.calibrate.apply import EXPOSURE_MISMATCH_TOL, TEMP_MISMATCH_TOL_C
+    from seestack.calibrate.apply import (
+        EXPOSURE_MISMATCH_TOL,
+        GAIN_MISMATCH_TOL,
+        TEMP_MISMATCH_TOL_C,
+    )
 
     safe = client.get("/api/targets").json()[0]["safe_name"]
     tol = client.get(f"/api/targets/{safe}/calibration-suggestions").json()["tolerances"]
 
     assert tol["exposure_frac"] == EXPOSURE_MISMATCH_TOL
     assert tol["temp_c"] == TEMP_MISMATCH_TOL_C
+    assert tol["gain_frac"] == GAIN_MISMATCH_TOL
     # The pair the form used to let through is on the warning side of the served
     # threshold, measured the way the engine measures it (against the master).
     assert abs(25.0 / 30.0 - 1.0) > tol["exposure_frac"]

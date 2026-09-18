@@ -364,6 +364,85 @@ describe("StackView", () => {
     expect(screen.queryByText(/but your subs are 30s/)).not.toBeInTheDocument();
   });
 
+  it("warns when a chosen dark's gain differs from the subs' (nothing corrects that)", async () => {
+    mockSchema([]);
+    // Exposure and temperature both match; only the gain differs. The engine's
+    // own advisory reports it on the finished run (v0.466.0), so the form has to
+    // say it at pick time or the two disagree about one target — and there is no
+    // "turn on scaling" button here, because nothing rescales a wrong-gain dark.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 1 });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 30s gain 200", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 200, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
+      scores: { "1": 0.5 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/shot at gain 200 but your subs are gain 80/)).toBeInTheDocument());
+    // …and it must not read as a length problem.
+    expect(screen.queryByText(/but your subs are 30s/)).not.toBeInTheDocument();
+  });
+
+  it("judges the dark against every sub's gain, not against their median", async () => {
+    mockSchema([]);
+    // A target reshot at another gain is one target with two settings in it, and
+    // the median names one a great many subs were not shot at. The gain-80 dark
+    // is right for most of them and wrong for the rest, and the sentence has to
+    // say which — the same correction the exposure and temperature halves got.
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 1 });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 30s gain 80", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: 80, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null, gains: [80, 200] },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
+      scores: { "1": 0.5 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/not all shot at the same gain \(80 and 200\)/)).toBeInTheDocument());
+    expect(screen.getByText(/mis-subtract on the 200 ones/)).toBeInTheDocument();
+    // The median alone would have said nothing at all — the dark matches it.
+    expect(screen.queryByText(/on every frame/)).not.toBeInTheDocument();
+  });
+
+  it("says nothing about gain when the dark matches, or when nothing recorded one", async () => {
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ dark_master_id: 1 });
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([]);
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([
+      { id: 1, name: "Dark 30s", kind: "dark", filename: "d1.fits", n_frames: 20,
+        method: "median", exposure_s: 30, gain: null, sensor_temp_c: null,
+        bayer_pattern: "RGGB", width_px: 480, height_px: 320,
+        created_utc: "2026-01-01T00:00:00", exists: true },
+    ]);
+    vi.spyOn(client.api, "calibrationSuggestions").mockResolvedValue({
+      params: { exposure_s: 30, gain: 80, sensor_temp_c: null },
+      dark_master_id: 1, flat_master_id: null, flat_dark_master_id: null, bias_master_id: null,
+      scores: { "1": 0.5 }, n_frames: 12,
+    });
+
+    renderStack();
+
+    await waitFor(() => expect(client.api.calibrationSuggestions).toHaveBeenCalled());
+    expect(screen.queryByText(/gain-dependent readout pedestal/)).not.toBeInTheDocument();
+  });
+
   it("recommends the masters a walk-away stack would have used", async () => {
     // `recommend_masters` ranks a dark by *combined* distance, so an
     // exposure-perfect but gain-mismatched dark out-ranks the gain-matched one

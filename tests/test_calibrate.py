@@ -1839,3 +1839,132 @@ def test_a_flat_built_from_two_exposures_is_deliberately_untouched(tmp_path):
                                  skipped=skipped)
 
     assert meta.n_frames == 4 and skipped == []
+
+
+def test_calibration_warns_when_the_master_dark_was_shot_at_another_gain(tmp_path):
+    """Gain is the third acquisition number a dark has to match, and the only one
+    nothing anywhere corrects for.
+
+    Fail-before: ``CalibrationMasters`` never read the dark's gain at all —
+    ``[f for f in __dataclass_fields__ if "gain" in f]`` was ``[]`` — so this
+    advisory was structurally unable to mention it, while the unattended binder
+    happily applies a dark up to a *whole* relative gain unit away (a gain-160
+    dark on gain-80 subs scores exactly the auto-bind bar). Exposure and
+    temperature match here, so the gain is the only thing left to warn about."""
+    save_master(tmp_path / "d.fits", np.full((4, 4), 300.0, dtype=np.float32),
+                MasterMeta("dark", 20, 4, 4, "mean", exposure_s=10.0, gain=200.0,
+                           sensor_temp_c=-10.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    assert cal.dark_gain == 200.0
+    (warn,) = cal.calibration_warnings(10.0, -10.0, light_gain=80.0)
+    assert "gain 200" in warn and "gain 80" in warn
+    assert "every frame" in warn
+    # …and it must not read as a length problem: exposure-scaling cannot rescue a
+    # wrong gain, so the sentence may not send the user to that switch.
+    assert "Turn on dark exposure-scaling" not in warn
+
+
+def test_no_gain_warning_when_the_dark_matches_and_none_for_header_noise(tmp_path):
+    """The tolerance absorbs a header/float round-trip and nothing else — a real
+    step in the setting always speaks."""
+    save_master(tmp_path / "d.fits", np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 20, 4, 4, "mean", exposure_s=10.0, gain=80.0,
+                           sensor_temp_c=-10.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    assert cal.calibration_warnings(10.0, -10.0, light_gain=80.0) == []
+    assert cal.calibration_warnings(10.0, -10.0, light_gain=80.0001) == []
+    assert len(cal.calibration_warnings(10.0, -10.0, light_gain=81.0)) == 1
+
+
+def test_a_dark_that_never_recorded_its_gain_says_nothing_about_it(tmp_path):
+    """Every master built from frames whose headers carried no ``GAIN`` card, and
+    every third-party import without one. An unrecorded gain cannot be disproved,
+    exactly like an unrecorded exposure or temperature — so an install that
+    upgrades into this advisory gains no new warnings it cannot act on."""
+    save_master(tmp_path / "d.fits", np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 20, 4, 4, "mean", exposure_s=10.0,
+                           sensor_temp_c=-10.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    assert cal.dark_gain is None
+    assert cal.calibration_warnings(10.0, -10.0, light_gain=80.0) == []
+    assert cal.calibration_warnings(
+        10.0, -10.0, light_gains=[80.0] * 4 + [200.0] * 2) == []
+    # …and neither can a set of subs that never recorded theirs.
+    lit = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    assert lit.calibration_warnings(10.0, -10.0, light_gains=[None, None]) == []
+
+
+def test_distinct_gains_groups_header_noise_but_not_a_real_step():
+    """"Is this the same gain?" is one question, answered once — the gain
+    counterpart of ``distinct_exposures``."""
+    from seestack.calibrate.apply import distinct_gains
+
+    rounded = distinct_gains([80.0, 80.0002, 79.9998])
+    assert len(rounded) == 1 and rounded[0] == pytest.approx(80.0, abs=0.01)
+    assert distinct_gains([80.0, 200.0, 80.0, 200.0, 120.0]) == [80.0, 120.0, 200.0]
+    # Unlike an exposure, gain 0 is a real setting — it must survive.
+    assert distinct_gains([0.0, 0.0]) == [0.0]
+    # "This sub never recorded a gain" is not a gain, and neither is a negative.
+    assert distinct_gains([None, float("nan"), float("inf"), -5.0, 80.0]) == [80.0]
+    assert distinct_gains([]) == []
+
+
+def test_a_mixed_gain_target_is_judged_on_all_of_its_subs_not_the_reference(tmp_path):
+    """A target is not necessarily one gain either — the same false premise the
+    exposure (v0.456.0) and temperature (v0.464.0) halves were corrected for.
+
+    Fail-before: there was no gain branch at all, so this said nothing whichever
+    frame led. With one, it must still not be the *reference frame's* gain that
+    decides: the answer has to be the same from either end."""
+    save_master(tmp_path / "d.fits", np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 20, 4, 4, "mean", exposure_s=10.0, gain=80.0,
+                           sensor_temp_c=-10.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    subs = [80.0] * 40 + [200.0] * 20
+
+    from_low = cal.calibration_warnings(10.0, -10.0, light_gain=80.0,
+                                        light_gains=subs)
+    from_high = cal.calibration_warnings(10.0, -10.0, light_gain=200.0,
+                                         light_gains=subs)
+    assert len(from_low) == 1
+    assert from_low == from_high            # the reference frame no longer decides
+    warn = from_low[0]
+    assert "80 and 200" in warn             # both settings named …
+    assert "the 200 ones" in warn           # … and which of them is wrong
+    assert "every frame" not in warn        # … and nothing claimed about the rest
+
+
+def test_a_uniform_gain_set_reads_exactly_as_the_reference_frame_alone(tmp_path):
+    """The ordinary case — one gain — must be untouched, whether or not the caller
+    hands the set over, and a matched dark stays silent both ways."""
+    save_master(tmp_path / "d.fits", np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 20, 4, 4, "mean", exposure_s=10.0, gain=200.0,
+                           sensor_temp_c=-10.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    alone = cal.calibration_warnings(10.0, -10.0, light_gain=80.0)
+    assert len(alone) == 1
+    assert cal.calibration_warnings(
+        10.0, -10.0, light_gain=80.0, light_gains=[80.0] * 12) == alone
+    # …including the rounding case, which is one gain and not two.
+    assert cal.calibration_warnings(
+        10.0, -10.0, light_gain=80.0, light_gains=[79.999, 80.0, 80.001]) == alone
+    # …and a set alone, with no reference value, answers the same thing.
+    assert cal.calibration_warnings(
+        10.0, -10.0, light_gains=[80.0] * 12) == alone
+    # An unknown-gain set can't invent a mismatch out of blank FITS cards.
+    assert cal.calibration_warnings(
+        10.0, -10.0, light_gain=80.0, light_gains=[None, None]) == alone
+
+
+def test_the_gain_warning_is_independent_of_the_exposure_and_temperature_ones(tmp_path):
+    """Three acquisition numbers, three separate answers: a dark can be wrong on
+    all of them at once, and the reader needs each said."""
+    save_master(tmp_path / "d.fits", np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 20, 4, 4, "mean", exposure_s=30.0, gain=200.0,
+                           sensor_temp_c=20.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    warns = cal.calibration_warnings(10.0, -10.0, light_gain=80.0)
+    assert len(warns) == 3
+    assert any("30s" in w and "10s" in w for w in warns)
+    assert any("20°C" in w for w in warns)
+    assert any("gain 200" in w for w in warns)

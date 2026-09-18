@@ -252,12 +252,21 @@ export const TEMP_MISMATCH_TOL_C = 5;
  *  continuous where an exposure is a setting, so on a target spanning many nights
  *  a handful of subs sit outside the tolerance of any dark. */
 export const TEMP_MISMATCH_MIN_SHARE = 0.1;
+/** Fallback for the engine's `GAIN_MISMATCH_TOL` (fraction of the subs' own
+ *  gain). Deliberately tiny, and deliberately *not* a severity threshold: an
+ *  exposure gap has `scale_dark_to_light` to correct it and a temperature gap
+ *  earns a tolerance wide enough to cover a night, but a gain is a setting
+ *  nothing anywhere corrects for — a dark carries the gain-dependent readout
+ *  pedestal, so it mis-subtracts at a perfectly matched exposure. This absorbs
+ *  header/float round-trip noise and nothing else. */
+export const GAIN_MISMATCH_TOL = 0.01;
 
 /** Optional `tolerances` block from the calibration-suggestions payload. */
 export interface MismatchTolerances {
   exposure_frac?: number | null;
   temp_c?: number | null;
   temp_min_share?: number | null;
+  gain_frac?: number | null;
 }
 
 /** `[°C, how many subs]`, as `calibration-suggestions` serves
@@ -319,6 +328,52 @@ export function mismatchedExposures(
  *  the night is spent and after. */
 export function joinExposures(values: readonly number[]): string {
   const parts = values.map((v) => `${v}s`);
+  if (parts.length <= 1) return parts.join("");
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/** True when a master's gain differs from the frames' by more than header noise
+ *  — the engine's own test, `|g_master − g_frames| / max(|g_frames|, 1) > tol`.
+ *
+ *  One-sided like every other check here: a side that never recorded a gain
+ *  cannot be disproved, so an unknown value never warns. The denominator is the
+ *  frames' gain floored at 1, matching the engine and the master binder, so gain
+ *  0 (a real setting, unlike a 0 s exposure) is compared absolutely. */
+export function gainMismatch(
+  masterGain: number | null | undefined,
+  frameGain: number | null | undefined,
+  tolerances?: MismatchTolerances | null,
+): boolean {
+  if (masterGain == null || frameGain == null) return false;
+  if (!Number.isFinite(masterGain) || !Number.isFinite(frameGain)) return false;
+  const limit = tol(tolerances?.gain_frac, GAIN_MISMATCH_TOL);
+  return Math.abs(masterGain - frameGain) > limit * Math.max(Math.abs(frameGain), 1);
+}
+
+/** Which of a target's gains this master does **not** match, lowest first — the
+ *  same test as `gainMismatch`, asked of every setting instead of one.
+ *
+ *  A target is not necessarily one gain: reshoot it at another and the median the
+ *  form would warn against names a setting no sub was shot at. The finished run
+ *  judges the dark against all of them (`calibration_warnings(light_gains=)`), so
+ *  the form has to as well, or the two disagree about one target. */
+export function mismatchedGains(
+  masterGain: number | null | undefined,
+  frameGains: readonly (number | null | undefined)[] | null | undefined,
+  tolerances?: MismatchTolerances | null,
+): number[] {
+  if (masterGain == null || !Number.isFinite(masterGain)) return [];
+  if (!frameGains) return [];
+  return frameGains.filter(
+    (g): g is number => gainMismatch(masterGain, g, tolerances),
+  );
+}
+
+/** `[80, 200]` → `"80 and 200"`. Mirrors the engine's `_join_gains`, so one
+ *  target is described the same way before the night is spent and after; a gain
+ *  setting carries no unit to print. */
+export function joinGains(values: readonly number[]): string {
+  const parts = values.map((v) => `${v}`);
   if (parts.length <= 1) return parts.join("");
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }

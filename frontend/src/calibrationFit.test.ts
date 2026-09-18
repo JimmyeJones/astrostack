@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   bayerConflicts, biasCanScaleDark, biasSizeWarning, darkScalingBlockedNote,
   exposureMismatch, flatBayerWarning, flatDarkSizeWarning, flatPickPatch,
-  joinExposures, mismatchedExposures,
+  gainMismatch, joinExposures, joinGains, mismatchedExposures, mismatchedGains,
   masterFitsFrames, masterOptionSuffix, masterRecommendation, masterSizeWarning,
   pickedMasterContentWarnings,
   degC, tempMismatch, tempMismatchesTheSet, temperatureMismatchCount,
@@ -501,5 +501,60 @@ describe("joinExposures — one target described the same way as the engine does
     expect(joinExposures([10, 30])).toBe("10s and 30s");
     expect(joinExposures([10, 20, 30])).toBe("10s, 20s and 30s");
     expect(joinExposures([])).toBe("");
+  });
+});
+
+
+describe("gainMismatch — the acquisition number with no correction behind it", () => {
+  it("speaks for any real difference in the setting, and not for header noise", () => {
+    // Gain is a setting, not a drift: the tolerance absorbs a float round-trip
+    // and nothing else, because nothing anywhere rescales a wrong-gain dark.
+    expect(gainMismatch(200, 80)).toBe(true);
+    expect(gainMismatch(80, 80)).toBe(false);
+    expect(gainMismatch(80.0001, 80)).toBe(false);
+    expect(gainMismatch(81, 80)).toBe(true);
+  });
+
+  it("cannot invent a warning out of what it does not know", () => {
+    expect(gainMismatch(null, 80)).toBe(false);
+    expect(gainMismatch(200, null)).toBe(false);
+    expect(gainMismatch(undefined, undefined)).toBe(false);
+    expect(gainMismatch(NaN, 80)).toBe(false);
+    expect(gainMismatch(200, NaN)).toBe(false);
+  });
+
+  it("compares gain 0 absolutely instead of dividing by nothing", () => {
+    // Unlike a 0 s exposure, gain 0 is a legitimate setting — the denominator is
+    // floored at 1, matching the engine and the master binder.
+    expect(gainMismatch(0, 0)).toBe(false);
+    expect(gainMismatch(5, 0)).toBe(true);
+  });
+
+  it("uses the server's tolerance, like every other check here", () => {
+    expect(gainMismatch(100, 80)).toBe(true);
+    expect(gainMismatch(100, 80, { gain_frac: 0.5 })).toBe(false);
+  });
+});
+
+describe("mismatchedGains — a target is not necessarily one gain either", () => {
+  it("names the settings this dark misses, and only those", () => {
+    expect(mismatchedGains(80, [80, 200])).toEqual([200]);
+    expect(mismatchedGains(80, [80, 80])).toEqual([]);
+    expect(mismatchedGains(200, [80, 100])).toEqual([80, 100]);
+  });
+
+  it("cannot invent a warning out of what it does not know", () => {
+    expect(mismatchedGains(80, null)).toEqual([]);
+    expect(mismatchedGains(null, [80, 200])).toEqual([]);
+    expect(mismatchedGains(80, [null, undefined])).toEqual([]);
+  });
+});
+
+describe("joinGains — one target described the same way as the engine does", () => {
+  it("reads as a sentence, with no unit to print", () => {
+    expect(joinGains([80])).toBe("80");
+    expect(joinGains([80, 200])).toBe("80 and 200");
+    expect(joinGains([80, 100, 200])).toBe("80, 100 and 200");
+    expect(joinGains([])).toBe("");
   });
 });

@@ -2179,39 +2179,21 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Image quality — for the OSC Seestar workflow (PRIORITY 4)
 
-- **LEAD (Builder 2026-09-18, filed while shipping v0.464.0 — the third representative value, and the one the
+- ~~**LEAD (Builder 2026-09-18, filed while shipping v0.464.0 — the third representative value, and the one the
   engine cannot see at all) — a gain-mismatched master dark is applied silently, and the run's own
-  mismatch advisory is structurally unable to mention it.** *(Pillar: image quality + trust — PRIORITY 4;
-  size S to write, **M–L to be sure of** — it is real-data-gated, see below. Severity: low–medium.
-  Confidence: the code facts below were **run**, not read.)*
-  Three acquisition numbers decide whether a dark matches, and the app says so itself: `auto_bind_master_ids`
-  gates on all three, `_acquisition_reason` gives *"it was shot at gain 200, your subs at gain 80"* as a
-  reason a dark covers nothing, and `auto_bind_master_ids`' own docstring says *"a dark encodes the
-  gain-dependent bias pedestal, so a wrong-gain dark mis-subtracts even at the right exposure"*.
-  `CalibrationMasters.calibration_warnings` covers exposure (v0.456.0), temperature (v0.464.0), CFA phase and
-  flat-dark shape — **and has no gain branch, because `CalibrationMasters` never loads the dark's gain**:
-  `[f for f in CalibrationMasters.__dataclass_fields__ if "gain" in f]` is `[]`, against `dark_exposure_s`
-  and `dark_temp_c` which are there. The Stack form is silent about it too (`Stack.tsx` has `expMismatch`
-  and `tempMismatch`, no gain equivalent).
-  **And the unattended gate is looser than it reads.** `_dark_match_confident` compares a *combined*
-  `_match_distance` against `_AUTO_BIND_DARK_MAX_DIST` = 1.0, whose gain term is
-  `|m_gain − gain| / max(|gain|, 1)`. Measured against lights at gain 80: a gain-100 dark scores 0.250, a
-  gain-120 dark 0.500, a gain-160 dark exactly 1.000 — **all three bind**, unwarned, on the walk-away path;
-  only 2× and beyond declines. So a 25 % gain mismatch is auto-applied and nothing anywhere says a word.
-  **Why it is filed rather than built, and what would settle it.** The fix needs a gain tolerance, and there
-  is no honest one in this repo: the auto-bind bar is a *combined* distance, so it cannot be reused as a
-  per-dimension threshold (it is also nowhere near the exposure/temperature bars in strictness), and how much
-  a 25 % gain mismatch actually costs an OSC Seestar stack — the pedestal error in ADU against the sky level
-  of a 10 s sub — needs **real darks shot at two gains on the same camera**, which no agent here has. Do
-  **not** pick a number from recall; that is the blind-threshold move AGENTS.md §1 names. Two shapes worth
-  costing if the owner ever asks: (a) carry `dark_gain` onto `CalibrationMasters` and warn on a *relative*
-  gain gap, with the bar measured on his own darks; or (b) the strictly cheaper half — say it at **pick
-  time** only, on the Stack form, where the master registry's `gain` is already in the payload beside
-  `params.gain`, and leave the finished run alone. Note (b) alone re-creates the form↔run split v0.464.1
-  exists to close, so it is only the safe half if the entry is explicit that the run stays silent on purpose.
-  **Likelihood on this owner is the other unknown**: a Seestar shot at one gain all year never meets this.
-  Worth an observer question — *do any of his targets hold subs at more than one `GAIN`, and do any of his
-  masters' gains differ from the targets they cover?* — before anyone spends a slot on it.
+  mismatch advisory is structurally unable to mention it.**~~ — **✅ SHIPPED v0.466.0** (Builder 2026-09-18, the
+  same day). Entry cut to [`SHIPPED.md`](SHIPPED.md), one-liner under "Shipped". **The gate it was filed behind
+  turned out to be the wrong question, and that is the part worth keeping:** the lead asked for a *gain
+  tolerance* and rightly said no honest one exists in this repo — but a tolerance is what a *severity* verdict
+  needs, and gain does not get one. An exposure has a correction (`scale_dark_to_light`) and a temperature is a
+  continuous drift that earns a bar wide enough to cover a night; a gain is a **setting nothing anywhere
+  corrects for**, and the app already treats it with zero tolerance in `_acquisition_reason`
+  (*"it was shot at gain 200, your subs at gain 80"*, fired on `gain_d > 0`). So the advisory states both
+  numbers instead of grading the gap, and `GAIN_MISMATCH_TOL` absorbs header round-trip noise and nothing else.
+  Its shape (a) was built — `dark_gain` carried onto `CalibrationMasters` — and its (b) was built *with* it
+  rather than instead of it, because the entry is right that (b) alone re-creates the form↔run split v0.464.1
+  exists to close. The observer question it ends on is answered for free either way: the advisory is silent on a
+  library shot at one gain, which is what a Seestar gives.
 
 - **NEW IDEA (Builder 2026-09-04, the *behavioural* consequence of the v0.340.0 measurement — read the caution
   before touching this) — an unattended drizzle run could skip a rejection pass that provably clips nothing,
@@ -3611,6 +3593,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.466.0** — 🟠 IMAGE QUALITY + TRUST (PRIORITY 4), Builder-reproduced this run, closing the gain LEAD filed the same day: **a gain-mismatched master dark was applied in silence, and the run's own advisory was structurally unable to mention it** — `[f for f in CalibrationMasters.__dataclass_fields__ if "gain" in f]` was `[]`, so with exposure and temperature matched a gain-200 dark subtracted its full 300 ADU pedestal from gain-80 subs and `calibration_warnings` returned `[]`; meanwhile `_dark_match_confident` auto-binds anything up to a whole relative gain unit away (gain-100 scores 0.250, gain-120 0.500, gain-160 exactly the 1.0 bar). **The gate the lead filed it behind was the wrong question**: a tolerance is what a *severity verdict* needs, and gain does not get one — an exposure gap has `scale_dark_to_light` and a temperature gap is a continuous drift, while a gain is a setting nothing anywhere corrects for, which is why `_acquisition_reason` already reports it on `gain_d > 0`. So the sentence states both numbers rather than grading the gap and `GAIN_MISMATCH_TOL` absorbs header round-trip noise and nothing else. `apply.dark_gain` + `gain_mismatch` + `distinct_gains`; `run_stack` hands over **every** frame's gain, not the reference frame's (a target is not necessarily one gain either); and the Stack form says it at pick time off served `params.gains` + `tolerances.gain_frac`, because the run half alone re-creates the form↔run split v0.464.1 exists to close. Reports only — binding, pixels and every existing warning untouched, and silent on a library shot at one gain. Tests +25, **seven fail before**. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.465.4** — 🟡 BUG (friendliness — PRIORITY 3), measured by the pass that verified v0.465.3: **a History run card that had earned six badges gave each of them two or three pixels rather than give the row a second line** — "Sky even" 45 px box vs 47 px word, "dark+flat" 54 vs 56, "21 frames" 61 vs 64. Not one badge too long: the row two pixels too short, taxing every occupant. **Desktop, not phone, and that is the tell** — the cards sit in `SimpleGrid cols={{base:1,sm:2,md:3}}`, so a card is ~390 px however big the screen is and a wide screen just buys three of them. Fixed with the sibling card's own shape: the Gallery card of the same run is badge-for-badge identical by design and has always let its badge row wrap, so History's `wrap="nowrap"` was the outlier; the heading gets the card's whole width, exactly as Gallery's does. A badge is a whole short fact — there is no such thing as most of one — and the run name is how you tell one stack from another, so **neither** yields: the row does. (Keeping the shared row and only letting the badges wrap was tried first and the verifying screenshot showed the heading as "mas…"; a test now pins the name out of that row.) Tests +2, **both fail before**. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.465.3** — 🟡 BUG (friendliness / mobile — PRIORITY 3), measured this run by a `--mosaic --calibration` dogfood pass: **the header's "N running" badge — the only element on any screen that says the app is working for you — was clipped on a phone on all 14 probed routes** (60 px box vs a 63 px word; the probe's own note is that scrolling cannot reveal it). Twenty clean passes missed it because `ActiveJobsBadge` renders nothing when no job is running and no probe had ever looked while one was — the missing-site / empty-`incoming/` / click-only-Compare hole a fifth time, in its cheapest form. Fixed with the header's own idiom (`<Box visibleFrom="xs">`, as the Scan button beside it already does): the count is always text, the word comes back from `xs` up, and the full phrase stays the badge's `title` and a `VisuallyHidden` span at every width — `visibleFrom` hides with `display: none`, which hides from a screen reader too, so the spoken badge would otherwise have become the bare number. `flexShrink: 0` was rejected — it moves the clip onto the wordmark. Tests +3, **two fail before**. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.465.2** — 🟠 BUG (friendliness + trust — PRIORITY 3), Builder-found on a `--mosaic --editor` dogfood pass this run: **the Target page prescribed two different next sessions for the same night — the coaching card asking for "another pass or two over the same mosaic", the framing note an inch below for "more panels next session" — and only one of them knew the other existed.** v0.443.0's `framing` rung closes this *below* `FRAMING_MAX_COVERAGE` (0.67), where the coaching card becomes the widen advice; above it that card deliberately decides the opposite (a `partial` verdict fires just as readily at 95 % captured, where depth is plainly the better lever) and nothing carried the decision down. Photographed at 75 % captured. Fixed as the deference running both ways: a new `framingDepthFirstClause` (beside `framingIsFragment`/`readinessCanvasScope`, one gate in one file) adds *"Most of it is already in this picture, though — until you're happy with the depth, more passes over the panels you already have do more for it than a wider grid"*, gated on the coaching card's **actual** verdict (`coachKind`, the wiring `IntegrationTrendBadge` already uses) so it can never become a third opinion beside "refocus" or "install the star database", and on a *measured* coverage above the bar. Nothing removed, no new element, no new number. The editor and History pass no `coachKind` and are byte-identical. Tests +10, **five fail before**. Full entry in [`SHIPPED.md`](SHIPPED.md).
