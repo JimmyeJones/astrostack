@@ -70,3 +70,49 @@ def test_the_frontends_hard_coded_glossary_links_are_real_entries(slugs):
     assert found, "no component links into the glossary at all"
     missing = {s: where for s, where in found.items() if s not in slugs}
     assert not missing, f"components link at glossary entries that don't exist: {missing}"
+
+
+#: The editor ops that deliberately carry no glossary slug, and why. Each of
+#: these is a control whose *concept* is its own label — there is no astronomy
+#: behind "rotate" that a paragraph could usefully add — so a link would be a
+#: second glyph on the row buying nothing (the standing "the pages are extremely
+#: busy" priority, AGENTS.md §1).
+#:
+#: It is an explicit list rather than a silent absence so the decision has to be
+#: *taken* for the next op somebody registers: the test below fails on an op that
+#: is neither linked nor named here, which is how the glossary's own promise —
+#: *"this list is meant to cover everything the interface says out loud"* — stays
+#: true of the editor as ops are added.
+_OPS_THAT_EXPLAIN_THEMSELVES = {
+    "geometry.crop": "a rectangle you drag; nothing to define",
+    "geometry.rotate": "an angle",
+    "geometry.resize": "a scale factor",
+}
+
+
+def test_every_editor_op_either_links_the_glossary_or_says_why_it_need_not(slugs):
+    """The editor is the screen a beginner is most lost on (AGENTS.md §1,
+    priority 1), and it is the one densest in words nobody arrives knowing —
+    *deconvolution*, *star reduction*, *levels*, *SCNR*. v0.461.0 built the link;
+    this asserts it actually reaches every control that needs one.
+    """
+    from webapp.schemas import editor_ops_schema
+
+    ops = editor_ops_schema()
+    assert ops, "the editor has no ops at all — this guard would be vacuous"
+    unexplained = sorted(
+        o.id for o in ops
+        if not o.glossary and o.id not in _OPS_THAT_EXPLAIN_THEMSELVES
+    )
+    assert not unexplained, (
+        "editor ops with no glossary link and no entry in "
+        "_OPS_THAT_EXPLAIN_THEMSELVES: "
+        f"{unexplained} — either point each at the entry that explains its "
+        "concept, or record here why it needs none"
+    )
+    # And the other direction: an op that gained a link must leave the list, or
+    # the list rots into a claim about controls that no longer hold.
+    both = sorted(
+        o.id for o in ops if o.glossary and o.id in _OPS_THAT_EXPLAIN_THEMSELVES
+    )
+    assert not both, f"ops both linked and listed as needing no link: {both}"

@@ -125,6 +125,7 @@ def _boost_nebula(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray
 
 register(OpSpec(
     id="stars.reduce", label="Star reduction", group="stars_geometry", stage="nonlinear",
+    glossary="star-reduction",
     apply=_reduce, proxy_safe=True,
     help="Shrink stars morphologically without touching nebulosity. No AI model.",
     params=[
@@ -141,6 +142,9 @@ register(OpSpec(
 
 register(OpSpec(
     id="stars.boost_nebula", label="Boost nebula", group="stars_geometry", stage="nonlinear",
+    # The same star mask, inverted — so the entry that explains the mask is the
+    # one that explains this control too.
+    glossary="star-reduction",
     apply=_boost_nebula, proxy_safe=True,
     help="Lift and saturate the background (non-star) regions so faint nebulosity "
          "pops, leaving stars untouched.",
