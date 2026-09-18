@@ -1011,6 +1011,112 @@ def test_calibration_warns_on_a_mismatched_dark_temperature(tmp_path):
     assert cal.calibration_warnings(light_exposure_s=10.0, light_temp_c=-8.0) == []
 
 
+def _dark_at(tmp_path, temp_c, *, name="dt.fits"):
+    """A 10 s master dark shot at ``temp_c``."""
+    save_master(tmp_path / name, np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 5, 4, 4, "mean", exposure_s=10.0,
+                           sensor_temp_c=temp_c))
+    return CalibrationMasters.load(dark_path=str(tmp_path / name))
+
+
+def test_the_temperature_spread_and_mismatch_count_are_one_definition():
+    """The two pure helpers the advisory and the Stack form both read."""
+    from seestack.calibrate.apply import (
+        temperature_mismatch_count,
+        temperature_spread,
+    )
+
+    assert temperature_spread([25.0, 2.0, 25.0, 2.0]) == (2.0, 13.5, 25.0)
+    assert temperature_spread([7.0, 5.0, 9.0]) == (5.0, 7.0, 9.0)
+    # A temperature may legitimately be 0 or negative — only the unknown and the
+    # non-finite are dropped, unlike an exposure.
+    assert temperature_spread([0.0, -12.0]) == (-12.0, -6.0, 0.0)
+    assert temperature_spread([None, float("nan"), float("inf")]) is None
+    assert temperature_spread([]) is None
+
+    assert temperature_mismatch_count([25.0] * 3 + [2.0] * 3, 24.0) == (3, 6)
+    assert temperature_mismatch_count([25.0, 24.0], 24.0) == (0, 2)
+    # Exactly at the bar counts as a miss, matching the advisory's own >= test.
+    assert temperature_mismatch_count([19.0], 24.0) == (1, 1)
+    # A master that never recorded its own temperature can't be disproved.
+    assert temperature_mismatch_count([25.0, 2.0], None) == (0, 2)
+    assert temperature_mismatch_count([None, None], 24.0) == (0, 0)
+
+
+def test_a_multi_night_target_is_judged_on_all_of_its_subs_not_the_reference(tmp_path):
+    """Fail-before: the temperature advisory saw only the reference frame's
+    temperature, so on a target shot on a warm night and a cold one the *same*
+    dark and the *same* subs either warned or stayed silent depending on which
+    frame ``pick_reference_frame`` picked. Handed the whole set it answers the
+    same either way — and stops claiming a temperature most subs weren't shot at."""
+    cal = _dark_at(tmp_path, 24.0)
+    subs = [25.0] * 3 + [2.0] * 3
+
+    from_warm = cal.calibration_warnings(10.0, 25.0, light_temps_c=subs)
+    from_cold = cal.calibration_warnings(10.0, 2.0, light_temps_c=subs)
+    assert len(from_warm) == 1
+    assert from_warm == from_cold          # the reference frame no longer decides
+    warn = from_warm[0]
+    assert "2°C to 25°C" in warn           # the range named …
+    assert "3 of 6" in warn                # … how many the dark misses …
+    assert "your subs are at" not in warn  # … and no single temperature claimed
+    # The old, reference-frame-only reading disagreed with itself on this target.
+    assert cal.calibration_warnings(10.0, 25.0) == []
+    assert len(cal.calibration_warnings(10.0, 2.0)) == 1
+
+
+def test_a_single_night_target_reads_exactly_as_the_reference_frame_alone(tmp_path):
+    """The ordinary case — one night, one temperature — must be untouched,
+    whether or not the caller hands the set over."""
+    cal = _dark_at(tmp_path, -10.0)
+    alone = cal.calibration_warnings(10.0, 5.0)
+    assert len(alone) == 1
+    assert cal.calibration_warnings(10.0, 5.0, light_temps_c=[5.0] * 12) == alone
+    # …a dark that matches stays silent both ways …
+    assert cal.calibration_warnings(10.0, -8.0, light_temps_c=[-8.0] * 12) == []
+    assert cal.calibration_warnings(10.0, -8.0) == []
+    # …and a set of blank CCD-TEMP cards can't invent or suppress anything.
+    assert cal.calibration_warnings(10.0, 5.0, light_temps_c=[None, None]) == alone
+
+
+def test_a_lone_cold_sub_does_not_speak_for_the_whole_session(tmp_path):
+    """The share floor. One stray frame out of fifty leaves a tenth of a tenth of
+    one frame's residual in the stack — below what the tolerance itself calls
+    tolerable — and the old test fired on exactly that frame whenever it happened
+    to be the reference."""
+    from seestack.calibrate.apply import TEMP_MISMATCH_MIN_SHARE
+
+    cal = _dark_at(tmp_path, 24.0)
+    assert cal.calibration_warnings(
+        10.0, 2.0, light_temps_c=[24.0] * 49 + [2.0]) == []
+    # …but a real minority is a real population, and is named as one.
+    n = int(round(TEMP_MISMATCH_MIN_SHARE * 50)) + 1
+    warns = cal.calibration_warnings(
+        10.0, 24.0, light_temps_c=[24.0] * (50 - n) + [2.0] * n)
+    assert len(warns) == 1 and f"{n} of 50" in warns[0]
+
+
+def test_a_whole_session_away_from_the_dark_is_said_as_one_thing(tmp_path):
+    """Every sub mismatched, but spread over a range: the sentence says the range
+    and that none of them is reached, rather than naming a middle nobody shot at."""
+    cal = _dark_at(tmp_path, 24.0)
+    warns = cal.calibration_warnings(10.0, 2.0, light_temps_c=[0.0, 5.0, 10.0])
+    assert len(warns) == 1
+    assert "0°C to 10°C" in warns[0]
+    assert "none of them is within 5°C" in warns[0]
+    assert "every frame" in warns[0]
+
+
+def test_the_temperature_advisory_survives_a_float32_header_round_trip(tmp_path):
+    """A ``24.3`` FITS card comes back as ``24.299999237…``; the sentence says
+    what the header meant."""
+    cal = _dark_at(tmp_path, 24.3)
+    warns = cal.calibration_warnings(
+        10.0, 2.0, light_temps_c=[float(np.float32(2.7))] * 4)
+    assert len(warns) == 1
+    assert "24.3°C" in warns[0] and "2.7°C" in warns[0]
+
+
 def test_calibration_warnings_empty_without_a_dark_or_unknown_headers(tmp_path):
     # No dark → nothing to warn about (a bias-only calibration is exposure-
     # independent).

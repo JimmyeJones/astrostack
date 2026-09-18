@@ -1,5 +1,60 @@
 # Shipped — the record
 
+## v0.464.0 — 2026-09-18 — a target is not one *temperature* either, and the master-dark advisory assumed it was
+
+*(Builder, branch `claude/sweet-babbage-cm0qc7`. Found by taking the class the v0.456.0 entry said was worth
+remembering — "a representative value is a claim that the set is uniform, and nothing in the data enforces
+it" — and asking it of the sentence directly beside the one that fix corrected.)*
+
+**The comment in `stacker.py` said both halves out loud, 400 characters apart.** After v0.456.0 it read
+*"the reference frame's temperature stands in for the session. Its **exposure** does not, and used not to be
+allowed to: … which of them `pick_reference_frame` landed on then decided whether the advisory fired at
+all."* The paragraph explains exactly why a reference frame cannot speak for a session, and then lets it
+speak for the session about temperature.
+
+**Reproduced before it was fixed**, on a real `run_stack`: six subs of one target, three shot on a mild
+night at 2 °C and three at −20 °C, calibrated with a 2 °C dark. `pick_reference_frame` chooses on quality
+and pointing and has never heard of temperature, so —
+
+    reference frame at   2°C → 0 warnings
+    reference frame at -20°C → 1 warning: "…but your subs are at -20°C…"
+
+— the same subs and the same dark either warned or said nothing, and when it warned it named a temperature
+half the subs were not shot at. `TEMP_MISMATCH_TOL_C` is 5 °C and the Seestar's sensor is uncooled, so its
+temperature follows the ambient: a target shot across a winter and a summer night genuinely holds a 20 °C
+spread, and this owner shoots targets across many nights.
+
+**What it now does.** `calibration_warnings` takes `light_temps_c` — every sub's temperature, as
+`run_stack` already hands it every sub's exposure — and judges the dark against all of it through two new
+pure helpers, `temperature_spread` and `temperature_mismatch_count`. Three sentences, so the reader can tell
+what to do about it:
+
+* every sub off, all at much one temperature → **today's sentence, unchanged**, said about the set instead
+  of about whichever frame led it;
+* every sub off, spread over a range → the range, and that *none* of them is reached;
+* a real minority off → the range, and `N of M are 5 °C or more away from it`, which is the one that says
+  "shoot a second dark" rather than "replace the one you have".
+
+**Temperature is not exposure, and the differences shaped the fix.** There is no correction for it — a bias
+can rescale a dark to a longer sub, nothing rescales it to a warmer night — so this only ever *reports*, and
+the unattended binding is deliberately untouched: a dark that misses a minority still beats no dark, exactly
+the reasoning v0.456.0 recorded for the mixed-exposure case. And temperature is continuous rather than a
+setting, so "how many does it miss?" is a share, not a list. `TEMP_MISMATCH_MIN_SHARE` (0.10) is the bar,
+and it is a floor on *reporting* that can only ever suppress a warning the old test fired **by accident**:
+one stray frame out of fifty leaves a tenth of one frame's residual in the stacked mean, well inside what
+the tolerance itself calls tolerable — and the old reference-frame test fired on exactly that frame whenever
+it happened to be chosen.
+
+**Upgrade-safe:** one additive keyword-only argument with a `None` default. Every caller that omits it — and
+every caller outside this repo — gets the reference-frame reading byte for byte, pinned by a test. No config,
+schema, on-disk, API-shape or default change, and no pixel moves.
+
+**Tests +7** (`tests/test_calibrate.py` ×6, `tests/test_stack_pipeline.py` ×1). **Five of the seven fail
+before**, verified by reverting the fix at runtime (`temperature_spread` stubbed to `None`, which is exactly
+the pre-fix code path) and watching them go red — including the `run_stack` one, which reports **no warning
+at all** on the reverted tree because its reference frame is the matched one. The two that pass both ways
+are the two whose subject is the single-night case staying identical.
+
 ## v0.462.2 — 2026-09-18 — the `--calibration` pass's defect line read two keys the endpoint has never sent
 
 *(Builder, branch `claude/sweet-babbage-m3wwgy`, the third task of the v0.462.0 run. Found by running
