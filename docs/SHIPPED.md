@@ -1,5 +1,99 @@
 # Shipped — the record
 
+## v0.459.0 — 2026-09-18 — the walk-away stack's master dark was picked for a length half the subs were not shot at
+
+*(Builder, branch `claude/sweet-babbage-fwwin8`. The open lead filed with v0.456.0/v0.456.1, built as the
+shape that entry recommended, with the fallback it asked for left exactly as it was.)*
+
+**The bug.** `webapp.pipeline._confident_master_binding` reduces a target's accepted subs to one representative
+exposure — `_med([f.exposure_s for f in frames])` — and hands that to `calibration.auto_bind_master_paths`.
+A target is one folder, never one exposure: shoot it at 10 s on one night and 30 s on the next and its median
+is 10 s, so a 10 s master dark clears the binder's 25 % gate and is bound **bare**. `apply_raw` then subtracts
+its whole pedestal from the 30 s subs too — a dark measured over a third of their integration time, taken off
+at full strength, leaving residual dark current on every one of them.
+
+This was the third surface of the shortcut v0.456.0 named ("a representative value is a claim that the set is
+uniform"), and the only one that changes pixels: v0.456.0 fixed the finished run's advisory and v0.456.1 the
+Stack form's pick-time caution, so by v0.458 the app *described* the mismatch honestly on every screen and
+still *made* it.
+
+**What made it decidable without the owner's library.** The lead was filed gated on a measurement nobody in
+this repo can take — how many of the owner's 104 targets are genuinely mixed. That gate turned out to be about
+*value*, not safety, and the thing that settled it is that **the app already promises this outcome in
+writing**. v0.457.0's `master_coverage` shipped a `partial_detail` note whose own words are:
+
+> *"… it matches the 10s subs but not the 30s ones. Build a master bias and AstroStack can scale this dark to
+> all of them, or build a dark for each length."*
+
+Reproduced against the real binder on a scratch library — a 10 s dark, a gain-matched master bias, and a target
+whose subs are 10 s and 30 s:
+
+```
+target sub lengths : [10.0, 30.0]  median: 10.0
+binder answers     : {'dark_master_id': 1}
+dark reaches       : [10.0]  misses: [30.0]
+the bias IS built, and scale_dark_to_light is: None
+```
+
+The bias the page asked for was built and nothing happened, because the dark had already passed the *median*
+test and returned before the scaling branch it would have reached on an ordinary mismatch. That is a broken
+promise on a shipped surface, independent of how many targets are mixed.
+
+**The fix.** `auto_bind_master_ids` and `auto_bind_master_paths` take an additive `light_exposures_s` — the
+target's **distinct** sub lengths, grouped by the engine's own `seestack.calibrate.apply.distinct_exposures`,
+exactly as v0.456.0/v0.457.0 already serve them elsewhere. Inside `_try_bind_dark`, a dark that matches the
+representative exposure is now also asked, per length, whether it reaches all of them — through
+`calibration.dark_exposure_split`, the binder's own 25 % gate and the same function the Calibration page's note
+above is written from, so the page and the stack cannot come to different opinions about one target. When it
+reaches some but not all, the **same** dark is bound *scaled* instead (`dark_master_id` + `bias_master_id` +
+`scale_dark_to_light`), which `apply_raw` applies per frame: ratio exactly 1 — i.e. the plain dark, unchanged —
+on the subs the dark already matched, and 3 on the 30 s ones. The exposure-mismatch branch was extracted to
+`_try_scale_dark` so the two paths reach the scaling decision through one piece of code.
+
+**The two properties that make it safe on the walk-away path:**
+
+* It can only ever **add** `scale_dark_to_light` + the bias to a binding it already makes. It never chooses a
+  different dark (candidate ordering is untouched, so the majority of the subs keep the dark actually shot for
+  them) and it never withholds one it would bind today.
+* With no confident master bias to scale by, a mixed target keeps **today's** unscaled binding. That is the
+  lead's own instruction, and it is right: stripping calibration from a target that is 95 % one length because
+  5 % of it is another is worse overall, and the run's own `calibration_warnings` names the shortfall either
+  way (v0.456.0).
+
+**Wired at all three callers**, so no surface is left asking the old question: `pipeline._confident_master_binding`
+(the walk-away/`Reprocess everything` path), `routers/calibration.py`'s `calibration-suggestions` `confident`
+block, and `calibration.master_coverage`'s per-target probe. The roll-up is the nice consequence — it already
+skips a dark bound *scaled* ("correct on a mixed target by construction and has nothing to report"), so the
+"covers this target, but only partly" note now retires itself for exactly the targets the fix repairs.
+
+**No frontend change was needed, and that is a fact about the existing contract rather than luck.**
+`calibrationFit.masterRecommendation` already reads `scale_dark_to_light` off `confident` and couples the bias
+to it, and `routes/Stack.tsx` already renders `darkScaledNote` — *"Dark exposure-scaling is on — this 10s dark
+will be scaled to match each sub (10s and 30s)."* — for precisely this state. So "Use recommended" now lands on
+the picks a walk-away stack would make, which is that endpoint's stated contract.
+
+**Upgrade-safe (§9):** one additive keyword argument with a `None` default on two functions; omit it and the
+representative exposure stands in exactly as before. No config, schema, on-disk, API-shape or default change,
+and `auto_bind_calibration` itself is still **off** by default, so an install that never turned it on is
+untouched.
+
+**Tests (+8).** `tests/webapp/test_calibration.py` (+5): the mixed target is scaled and the *same* dark still
+wins; a uniform target is byte-for-byte identical with and without the set, including a near-miss inside the
+grouping tolerance; a mixed target with no bias keeps today's unscaled dark; a mixed target with a
+*gain-mismatched* bias does too; and the page's own advice, taken — build the bias `partial_detail` asks for and
+the shortfall goes away, with the bias itself now reported as covering that target rather than passed over.
+`tests/webapp/test_reprocess_all.py` (+2): the same claim end-to-end through `submit_reprocess_all` on a library
+whose targets were made genuinely mixed, plus its companion pinning that a uniform target still binds the bare
+dark with the bias left out even when one is sitting in the library. `tests/webapp/test_calibration.py`'s
+coverage case (+1) is counted above.
+
+**Fail-before, done the way AGENTS.md §8 demands.** Deleting the keyword makes the new tests fail with a
+`TypeError`, which is a test looking at something other than the bug. So the revert was done *inside* the
+logic — `_, unmatched = dark_exposure_split(...)` replaced by `unmatched = []`, the pre-fix behaviour with the
+new signature intact — and three tests go red on the behaviour itself (`KeyError: 'bias_path'`,
+`assert None` on `StackOptions.bias_path`, and `assert 1 == 0` on the coverage note). The three guard tests pass
+both ways, which is their job: they pin the halves that must not move.
+
 ## v0.458.3 — 2026-09-18 — the panel count on a target's own card was answered for whichever telescope the probe reached first
 
 *(Builder, branch `claude/sweet-babbage-3dy83s`, the third finding of the v0.458.1 run and the one that

@@ -2107,3 +2107,126 @@ def test_the_roll_up_stops_describing_a_mixed_target_by_a_length_it_never_shot(
     (miss,) = row["missed_detail"]
     assert "20s" not in miss["reason"], miss["reason"]
     assert "your subs are 10s and 30s" in miss["reason"]
+
+
+def test_auto_bind_scales_a_dark_that_only_reaches_some_of_a_mixed_target(tmp_path):
+    """A target is one folder, never one exposure. Shoot it at 10 s one night and
+    30 s the next and its *median* is 10 s — so a 10 s dark clears the bind gate
+    and, until now, was bound **unscaled** onto the 30 s subs too, which get its
+    pedestal subtracted at a third of the integration time it was measured over.
+
+    Handed the whole set, the binder scales that same dark instead. It is
+    per-frame correct by construction (``apply_raw`` is passed each frame's own
+    exposure, so the ratio is exactly 1 — the plain dark — on the 10 s subs), and
+    it is the promise the Calibration page already makes for exactly this case:
+    *"Build a master bias and AstroStack can scale this dark to all of them."*
+    """
+    root = tmp_path / "lib"
+    dark = _register(root, "dark", exposure_s=10.0, gain=80.0)
+    bias = _register(root, "bias", exposure_s=0.0, gain=80.0)
+    masters = calibration.list_masters(root)
+    # Four 10 s subs and two 30 s ones: median 10 s, two distinct lengths.
+    exposures = [10.0, 30.0]
+
+    # Fails before: the median alone binds the dark bare.
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=10.0, gain=80.0, light_exposures_s=exposures)
+    assert Path(bound["dark_path"]).name == dark["filename"]
+    assert Path(bound["bias_path"]).name == bias["filename"]
+    assert bound["scale_dark_to_light"] is True
+
+    # The *same* dark is chosen — the set changes how it is applied, never which
+    # master wins, so the majority of the subs keep the dark actually shot for them.
+    ids = calibration.auto_bind_master_ids(
+        root, masters, exposure_s=10.0, gain=80.0, light_exposures_s=exposures)
+    assert ids["dark_master_id"] == dark["id"]
+
+
+def test_auto_bind_leaves_a_uniform_target_byte_for_byte_alone(tmp_path):
+    """Passing the set changes nothing when the subs really are all one length —
+    which is every ordinary target, and the whole installed base's hot path."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=10.0, gain=80.0)
+    _register(root, "bias", exposure_s=0.0, gain=80.0)
+    masters = calibration.list_masters(root)
+
+    without = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=10.0, gain=80.0)
+    with_set = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=10.0, gain=80.0, light_exposures_s=[10.0])
+    assert with_set == without
+    assert "scale_dark_to_light" not in with_set
+    # A near-miss inside the grouping tolerance is one length, not two.
+    assert calibration.auto_bind_master_paths(
+        root, masters, exposure_s=10.0, gain=80.0,
+        light_exposures_s=[10.0, 10.02]) == without
+
+
+def test_auto_bind_keeps_the_mixed_targets_dark_when_no_bias_can_scale_it(tmp_path):
+    """No master bias, so nothing can scale the dark — keep today's unscaled
+    binding rather than withhold it. A target that is mostly 10 s is better
+    calibrated on its 10 s subs than not calibrated at all, and the run's own
+    advisory (``calibration_warnings``) names the subs the dark misses either way.
+    """
+    root = tmp_path / "lib"
+    dark = _register(root, "dark", exposure_s=10.0, gain=80.0)
+    masters = calibration.list_masters(root)
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=10.0, gain=80.0,
+        light_exposures_s=[10.0, 30.0])
+    assert Path(bound["dark_path"]).name == dark["filename"]
+    assert "scale_dark_to_light" not in bound
+    assert "bias_path" not in bound
+
+
+def test_auto_bind_mixed_target_needs_a_confident_bias_to_scale(tmp_path):
+    """A bias whose *gain* doesn't match the subs can't carry the scaling (it
+    would hold the wrong pedestal fixed), so the mixed target falls back to
+    today's unscaled dark rather than to a bias nothing trusts."""
+    root = tmp_path / "lib"
+    dark = _register(root, "dark", exposure_s=10.0, gain=80.0)
+    _register(root, "bias", exposure_s=0.0, gain=400.0)  # wrong gain
+    masters = calibration.list_masters(root)
+
+    bound = calibration.auto_bind_master_paths(
+        root, masters, exposure_s=10.0, gain=80.0,
+        light_exposures_s=[10.0, 30.0])
+    assert Path(bound["dark_path"]).name == dark["filename"]
+    assert "scale_dark_to_light" not in bound
+    assert "bias_path" not in bound
+
+
+def test_building_the_bias_the_page_asks_for_actually_scales_the_dark(tmp_path):
+    """The page's own advice, taken. ``partial_detail`` tells a beginner *"Build a
+    master bias and AstroStack can scale this dark to all of them"* — and until the
+    binder was handed the target's whole set of sub lengths it then didn't, because
+    a 10 s dark clears the bind gate against a 10 s *median* and never reaches the
+    scaling branch at all.
+
+    Build the bias and the shortfall goes away for the reason the sentence
+    promised: the same dark, bound scaled, which ``apply_raw`` applies per frame.
+    """
+    root = tmp_path / "library"
+    dark = _coverage_master(root, "dark", name="10s dark", exposure_s=10.0)
+    target = _mixed_target("Uneven", [10.0] * 4 + [30.0] * 2)
+
+    # Before the bias exists: bound, but only to the 10 s subs, and the page says so.
+    before = calibration.master_coverage(
+        root, calibration.list_masters(root), [target])
+    row = next(r for r in before["masters"] if r["id"] == dark["id"])
+    assert row["n_partial"] == 1
+    assert "build a master bias" in row["partial_detail"][0]["reason"].lower()
+
+    bias = _coverage_master(root, "bias", name="bias", exposure_s=0.0)
+    after = calibration.master_coverage(
+        root, calibration.list_masters(root), [target])
+
+    dark_row = next(r for r in after["masters"] if r["id"] == dark["id"])
+    assert dark_row["covered"] == ["Uneven"]
+    assert dark_row["n_partial"] == 0, "the bias the page asked for must fix it"
+    assert dark_row["partial_detail"] == []
+    # And the bias is genuinely applied to that target rather than passed over as
+    # "a master dark was used instead" — it is what carries the scaling.
+    bias_row = next(r for r in after["masters"] if r["id"] == bias["id"])
+    assert bias_row["covered"] == ["Uneven"]
