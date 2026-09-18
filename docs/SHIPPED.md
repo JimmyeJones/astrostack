@@ -1,5 +1,80 @@
 # Shipped — the record
 
+## v0.459.2 — 2026-09-18 — the run that scaled its dark on a mixed target either said nothing, or named one of its two sub lengths
+
+*(Builder, branch `claude/sweet-babbage-fwwin8`, the third task of the v0.459.0/.1 run. Found by asking what
+v0.459.0 makes reachable, and reproduced before anything was touched.)*
+
+**The bug.** Dark exposure-scaling is applied **per frame** — `apply_raw` is handed each sub's own exposure, so
+`_effective_dark` scales one master dark differently for a 10 s sub and a 30 s one. The run's provenance stamp
+(`_build_output_header_meta`) asked `CalibrationMasters.dark_scaling_provenance` about **one** exposure, and
+handed it `exposures[len(exposures) // 2]` — the subs' median. Reproduced on the real code, with the ratios
+`apply_raw` actually applied printed beside what the run claimed:
+
+```
+uniform 10s subs, 30s dark   scale ratios really applied [0.333]
+                             what the run says: DARKSCAL=exposure 30.0s->10.0s
+
+mixed 10s/30s, 10s dark      scale ratios really applied [1.0, 3.0]
+                             what the run says: (no card — 'nothing was scaled')
+
+mixed 10s/30s, 30s dark      scale ratios really applied [0.333, 1.0]
+                             what the run says: DARKSCAL=exposure 30.0s->10.0s
+```
+
+Both mixed cases are wrong, in opposite ways:
+
+* With a **10 s dark**, the median *is* the dark's own length, so the "matched exposures leave the dark
+  unscaled — nothing to advertise" branch fired and the `DARKSCAL`/`DARKDEXP`/`DARKLEXP` cards were omitted
+  **entirely**. History's "Dark scaled to sub exposure" line never appeared, on the run that had tripled its
+  dark on a third of its frames. The whole point of that line, per its own comment, is that "the user can trust
+  the off-by-default `scale_dark_to_light` option did something".
+* With a **30 s dark**, the median lands on 10 s and the run stamped *"30s → 10s"* — true of the four 10 s subs
+  and false of the two the dark was left unscaled on.
+
+**Why it was fixed in this run rather than filed.** It is pre-existing — a user could always tick
+`scale_dark_to_light` on a mixed target from the Stack form — but v0.459.0 makes it the *ordinary* case, because
+that change binds a mixed target's dark **scaled** on the walk-away path. Shipping v0.459.0 without this would
+have made the app silently do something and then decline to say so, which is the same gap between two of the
+app's own claims that AGENTS.md's dogfood note is about.
+
+**The fix.** New `CalibrationMasters.dark_scaling_exposures(light_exposures_s)` returns
+`(dark_exposure_s, every distinct sub length)` when the dark really is scaled for at least one of them. It
+groups with the engine's own `distinct_exposures`, so header rounding cannot read as a second exposure and a
+missing, non-finite or non-positive value is dropped rather than scaled by. `dark_scaling_provenance` is now a
+thin one-exposure view of it, so there is still exactly **one** definition of "did scaling happen?" — the
+property its docstring was written to protect — and its existing contract is unchanged, pinned by the tests it
+already had. (It gains one incidental improvement: an infinite `light_exposure_s` used to pass the "materially
+different" test and be returned; `distinct_exposures` drops it.)
+
+The stamp asks the set form. A **single-length** target keeps `DARKLEXP` and its "30s → 10s" line byte for byte
+— that is every target the installed base has. A **mixed** one gets a new `DARKLEXS` card holding the set,
+already worded by the engine's `_join_exposures` ("10s and 30s") so the run Info and the exposure advisory
+describe one target the same way. There is deliberately no number-to-number arrow there, because the arrow is
+the claim about one length that was wrong.
+
+`GET …/stack-runs/{id}/info` carries it as an additive `dark_scaling.light_exposures` string, and
+`History.darkScalingSummaryText` renders *"Dark matched to each sub · 10s dark across 10s and 30s subs"*.
+
+**Upgrade-safe (§9), and additive in both directions.** An older backend sends no `light_exposures` and the line
+reads exactly as it always has; a newer backend sends none on a single-exposure run, which is what every
+existing run is. No config, schema, on-disk, API-shape or default change.
+
+**Tests (+11).** `tests/test_calibrate.py` (+2 cases covering 4 claims): the pixels first — a 10 s dark leaves
+the 10 s subs alone and doubles the pedestal on the 30 s ones — then that the median-only question still
+honestly answers `None` while the set names the dark and every length; a dark matching neither length; and every
+"no claim" case the single-value form has, asked of a set (all-matching, empty, `None`, nothing usable, header
+rounding, a wrong-shaped bias, the option off). `tests/test_output_header_meta.py` (+4): the mixed target is
+stamped at all, never names one of its lengths, a single-exposure run stamps exactly what it always did
+(including under header rounding), and a "mixed" target whose every length matches the dark still claims
+nothing. `tests/webapp/test_stack_render.py` (+2): the endpoint carries the set and omits it for a
+single-exposure run. `History.test.tsx` (+3): the set is named, it wins if a run somehow carries both, and the
+arrow survives for every run recorded before the set existed.
+
+**Fail-before, one per layer.** Restoring the median question in the stamp turns 2 red; removing the `DARKLEXS`
+parse turns 1 red; removing the set branch in `darkScalingSummaryText` turns 2 red. In each case the
+neighbouring tests stay green, which is their job — they pin what must not move.
+
 ## v0.459.1 — 2026-09-18 — a picture's stated integration time was a median, and a median of two sub lengths is neither of them
 
 *(Builder, branch `claude/sweet-babbage-fwwin8`. Found while shipping v0.459.0 by asking where else in the
