@@ -1754,3 +1754,106 @@ def test_reprocess_status_endpoint_serves_the_finished_picture_counts(
     assert body["finished_pictures_stale_only"] == 1
     # The fields an older frontend reads are untouched.
     assert body["outdated"] == 1 and body["total_targets"] == 2
+
+
+def test_reprocess_all_scales_a_dark_that_only_reaches_part_of_a_mixed_target(
+        solved_library, monkeypatch):
+    """The unattended path's own instance of "a representative value is a claim
+    that the set is uniform": a target shot at 10 s on one night and 30 s on the
+    next has a *median* of 10 s, so the 10 s dark cleared the bind gate and was
+    applied bare — its pedestal subtracted at full strength from subs integrated
+    three times as long.
+
+    With the whole set in hand the binder scales the same dark instead, which
+    ``apply_raw`` then applies per frame (ratio 1 on the 10 s subs, 3 on the 30 s
+    ones). Fails before: ``scale_dark_to_light`` is False and no bias is bound.
+    """
+    import numpy as np
+
+    from seestack.calibrate.masters import MasterMeta
+    from tests.webapp.conftest import FRAME_H, FRAME_W
+    from webapp import calibration
+
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    root = solved_library / "library"
+    dark = _register_matching_dark(root)  # 10 s, gain 80 — matches the median
+    bias = calibration.register_master(
+        root, name="Bias",
+        array=np.full((FRAME_H, FRAME_W), 0.5, dtype=np.float32),
+        meta=MasterMeta("bias", 5, FRAME_W, FRAME_H, "median",
+                        exposure_s=0.0, gain=80.0))
+    lib = Library.open_or_create(root)
+    try:
+        # Make each target genuinely mixed: most subs at 10 s, a minority at 30 s.
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                frames = list(proj.iter_frames())
+                for i, f in enumerate(frames):
+                    proj.update_frame(
+                        f.id, exposure_s=30.0 if i == 0 else 10.0, gain=80.0)
+            finally:
+                proj.close()
+        _seed_prior_runs_without_calibration(lib)
+        settings = Settings(data_root=str(solved_library), auto_ingest=False,
+                            auto_qc=False, auto_solve=False, auto_stack=False,
+                            auto_bind_calibration=True)
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all, settings, job)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 2
+    assert len(captured) == 2
+    for o in captured:
+        # Same dark as before — the set changes how it is applied, not which
+        # master wins, so the 10 s subs keep the dark actually shot for them.
+        assert o.dark_path and Path(o.dark_path).name == dark["filename"]
+        assert o.bias_path and Path(o.bias_path).name == bias["filename"]
+        assert o.scale_dark_to_light is True
+
+
+def test_reprocess_all_binds_a_uniform_target_unscaled_exactly_as_before(
+        solved_library, monkeypatch):
+    """The companion to the test above, and the one that guards the installed
+    base: when the subs really are all one length the bare dark is still what gets
+    bound, bias and all left out, even with a master bias sitting in the library."""
+    import numpy as np
+
+    from seestack.calibrate.masters import MasterMeta
+    from tests.webapp.conftest import FRAME_H, FRAME_W
+    from webapp import calibration
+
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    root = solved_library / "library"
+    dark = _register_matching_dark(root)
+    calibration.register_master(
+        root, name="Bias",
+        array=np.full((FRAME_H, FRAME_W), 0.5, dtype=np.float32),
+        meta=MasterMeta("bias", 5, FRAME_W, FRAME_H, "median",
+                        exposure_s=0.0, gain=80.0))
+    lib = Library.open_or_create(root)
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                for f in proj.iter_frames():
+                    proj.update_frame(f.id, exposure_s=10.0, gain=80.0)
+            finally:
+                proj.close()
+        _seed_prior_runs_without_calibration(lib)
+        settings = Settings(data_root=str(solved_library), auto_ingest=False,
+                            auto_qc=False, auto_solve=False, auto_stack=False,
+                            auto_bind_calibration=True)
+        job = Job(kind="reprocess_all")
+        _run_body(pipeline.submit_reprocess_all, settings, job)
+    finally:
+        lib.close()
+
+    assert len(captured) == 2
+    for o in captured:
+        assert o.dark_path and Path(o.dark_path).name == dark["filename"]
+        assert not o.bias_path
+        assert o.scale_dark_to_light is False

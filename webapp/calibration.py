@@ -776,6 +776,7 @@ def auto_bind_master_paths(
     width_px: int | None = None,
     height_px: int | None = None,
     bayer_pattern: str | None = None,
+    light_exposures_s: Any = None,
 ) -> dict[str, Any]:
     """Calibration master *paths* safe to auto-apply in an *unattended* stack.
 
@@ -792,7 +793,7 @@ def auto_bind_master_paths(
     bound = auto_bind_master_ids(
         library_root, masters, exposure_s=exposure_s, gain=gain,
         sensor_temp_c=sensor_temp_c, width_px=width_px, height_px=height_px,
-        bayer_pattern=bayer_pattern)
+        bayer_pattern=bayer_pattern, light_exposures_s=light_exposures_s)
     out: dict[str, Any] = {}
     for id_key, path_key in _BOUND_ID_TO_PATH_KEY.items():
         mid = bound.get(id_key)
@@ -816,6 +817,7 @@ def auto_bind_master_ids(
     width_px: int | None = None,
     height_px: int | None = None,
     bayer_pattern: str | None = None,
+    light_exposures_s: Any = None,
 ) -> dict[str, Any]:
     """Calibration master *ids* safe to auto-apply in an *unattended* stack.
 
@@ -840,6 +842,25 @@ def auto_bind_master_ids(
       gain/temperature, or a
       mismatched exposure with no scalable bias, is left off, so the stack stays
       uncalibrated exactly as today rather than risking an over-/under-subtraction;
+
+      ``light_exposures_s`` is **every** sub's exposure, where ``exposure_s`` is
+      only the target's representative (median) one. A target is one folder, never
+      one exposure — shoot it at 10 s on one night and 30 s on the next and it is
+      one target with two lengths in it — and a dark picked against the median is
+      then bound *unscaled* onto subs it does not match. Hand over the whole set
+      and the dark is judged against all of it: when it reaches some lengths but
+      not others, the same dark is bound **scaled** instead (``dark`` + ``bias`` +
+      ``scale_dark_to_light``), which is per-frame correct on a mixed target by
+      construction because :meth:`CalibrationMasters.apply_raw` is handed each
+      frame's own exposure. This is also the promise the Calibration page already
+      makes for exactly this case — *"Build a master bias and AstroStack can scale
+      this dark to all of them"* (see :func:`master_coverage`'s ``partial_detail``).
+      It never changes *which* dark is chosen and never withholds one it would
+      bind today: with no confident bias to scale by, a mixed target keeps today's
+      unscaled binding, because stripping calibration from a target that is mostly
+      one length is worse than the mismatch on the minority (the run's own advisory
+      names it either way). Omit the set (every older caller) and the representative
+      exposure stands in exactly as before;
     * the recommended **flat** and its **flat-dark** (flats are exposure
       independent, and the flat-dark is already distance-gated inside
       :func:`_recommend_flat_dark`);
@@ -924,12 +945,28 @@ def auto_bind_master_ids(
     # unbindable dark from masking a bindable one. Ordering by distance means the
     # closest bindable dark wins (an exposure-perfect dark is preferred over one
     # that needs scaling, since its exposure term is 0).
+    def _try_scale_dark(mid: Any) -> dict[str, Any] | None:
+        """Dark ``mid`` bound for exposure-scaling — ``dark_master_id`` +
+        ``bias_master_id`` + ``scale_dark_to_light`` — or ``None`` when no
+        confident, resolvable master bias is available to scale it by."""
+        bias_id = rec.get("bias_master_id")
+        bm = by_id.get(int(bias_id)) if bias_id is not None else None
+        if bm is None or not _bias_match_confident(
+                bm, gain=gain, sensor_temp_c=sensor_temp_c):
+            return None
+        dp = _bindable(mid)
+        bp = _bindable(bias_id)
+        if dp is None or bp is None:
+            return None
+        return {"dark_master_id": dp, "bias_master_id": bp,
+                "scale_dark_to_light": True}
+
     def _try_bind_dark(cand: dict[str, Any]) -> dict[str, Any] | None:
         """The confident dark-binding keys for master ``cand``
         (``dark_master_id`` alone, or ``dark_master_id`` + ``bias_master_id`` +
-        ``scale_dark_to_light`` when only the exposure is off and a confident bias
-        can scale it), or ``None`` when it can't be confidently bound to these
-        subs."""
+        ``scale_dark_to_light`` when the exposure is off — for the target as a
+        whole, or for only *some* of its subs — and a confident bias can scale
+        it), or ``None`` when it can't be confidently bound to these subs."""
         if not exposure_s or not _dark_match_confident(
                 cand, gain=gain, sensor_temp_c=sensor_temp_c):
             return None
@@ -938,20 +975,32 @@ def auto_bind_master_ids(
             return None  # a dark's thermal signal is exposure-specific — can't gate
         mid = cand.get("id")
         if abs(float(dexp) - exposure_s) / exposure_s <= _AUTO_BIND_EXP_MISMATCH_FRAC:
+            # The dark matches the target's representative exposure. It still has
+            # to match the subs *themselves*, which are not necessarily all one
+            # length — and the same threshold, asked per exposure, is what says
+            # so (``dark_exposure_split``, which the Calibration page's own
+            # "covers this target, but only partly" note is written from).
+            _, unmatched = dark_exposure_split(dexp, light_exposures_s)
+            if not unmatched:
+                d = _bindable(mid)
+                return {"dark_master_id": d} if d is not None else None
+            # Mixed subs: this dark is right for some of them and wrong for the
+            # rest. Scaling is right for *all* of them — ``apply_raw`` is handed
+            # each frame's own exposure, so the ratio is per frame, and it is
+            # exactly 1 (i.e. the plain dark, unchanged) on the subs the dark
+            # already matched. Prefer it when a bias can carry it.
+            scaled = _try_scale_dark(mid)
+            if scaled is not None:
+                return scaled
+            # No bias to scale by. Keep today's unscaled binding rather than
+            # withhold the dark: a target that is mostly one length is better
+            # calibrated on that length than not at all, and the run's own
+            # advisory (``calibration_warnings``) names the subs it misses.
             d = _bindable(mid)
             return {"dark_master_id": d} if d is not None else None
         # Exposure mismatch, gain/temp confident: recover via exposure-scaling if a
         # confident master bias (with matching dimensions) is available.
-        bias_id = rec.get("bias_master_id")
-        bm = by_id.get(int(bias_id)) if bias_id is not None else None
-        if bm is not None and _bias_match_confident(
-                bm, gain=gain, sensor_temp_c=sensor_temp_c):
-            dp = _bindable(mid)
-            bp = _bindable(bias_id)
-            if dp is not None and bp is not None:
-                return {"dark_master_id": dp, "bias_master_id": bp,
-                        "scale_dark_to_light": True}
-        return None
+        return _try_scale_dark(mid)
 
     dark_bound = False
     dark_candidates = sorted(
@@ -1641,7 +1690,9 @@ def master_coverage(
             # in the registry to recover the id it started as.
             bound = auto_bind_master_ids(
                 library_root, masters,
-                exposure_s=t.get("exposure_s"), gain=t.get("gain"),
+                exposure_s=t.get("exposure_s"),
+                light_exposures_s=t.get("exposures_s"),
+                gain=t.get("gain"),
                 sensor_temp_c=t.get("sensor_temp_c"),
                 width_px=t.get("width_px"), height_px=t.get("height_px"),
                 bayer_pattern=t.get("bayer_pattern"),
