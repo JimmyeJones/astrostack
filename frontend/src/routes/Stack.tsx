@@ -20,7 +20,8 @@ import { StackOptionControl as FieldControl } from "../components/StackOptionCon
 import {
   biasSizeWarning, darkScalingBlockedNote, exposureMismatch, flatBayerWarning,
   flatDarkSizeWarning, flatPickPatch, joinExposures, masterOptionSuffix,
-  masterRecommendation, masterSizeWarning, mismatchedExposures,
+  gainMismatch, joinGains, masterRecommendation, masterSizeWarning,
+  mismatchedExposures, mismatchedGains,
   pickedMasterContentWarnings, degC, tempMismatch, tempMismatchesTheSet,
   temperatureMismatchCount, temperatureSpread, TEMP_MISMATCH_TOL_C,
 } from "../calibrationFit";
@@ -592,6 +593,29 @@ export function StackView() {
     // single median stands in exactly as it did before.
     : tempMismatch(darkM?.sensor_temp_c, subTemp, tolerances)
       ? `This dark was shot at ${darkM?.sensor_temp_c}°C but your subs are at ${subTemp}°C — dark current changes with temperature, so some may remain even at a matched exposure. A temperature-matched dark calibrates best.`
+      : null;
+  // And the third acquisition number, which until v0.466.0 nothing anywhere
+  // mentioned: a dark carries the gain-dependent readout pedestal, so a
+  // gain-mismatched dark mis-subtracts at a perfectly matched exposure *and*
+  // temperature — and unlike an exposure gap there is no scaling switch to
+  // rescue it, which is why this one has no "turn on…" button. Independent of
+  // both warnings above, and conditional on something genuinely rare (a Seestar
+  // shot at one gain all year never sees it), which is what earns it a line on
+  // a form the owner already calls busy.
+  //
+  // Asked of every sub's gain, not of their median, for the same reason as the
+  // other two: the finished run judges the dark against the whole set
+  // (v0.466.0), so the form has to, or the two disagree about one target.
+  const subGain = sug?.params.gain ?? null;
+  const subGains = sug?.params.gains ?? null;
+  const mixedSubGains = (subGains?.length ?? 0) > 1;
+  const darkBadGains = mismatchedGains(darkM?.gain, subGains, tolerances);
+  const darkGainWarning = mixedSubGains && subGains
+    ? (darkBadGains.length > 0
+        ? `This dark was shot at gain ${darkM?.gain} but your subs were not all shot at the same gain (${joinGains(subGains)}) — a dark carries the gain-dependent readout pedestal, so it will mis-subtract on the ${joinGains(darkBadGains)} ones even at a matched exposure, and nothing rescales it. Stack each gain on its own with a dark shot at that gain.`
+        : null)
+    : gainMismatch(darkM?.gain, subGain, tolerances)
+      ? `This dark was shot at gain ${darkM?.gain} but your subs are gain ${subGain} — a dark carries the gain-dependent readout pedestal, so it will mis-subtract on every frame even at a matched exposure, and nothing rescales it. Use a dark shot at gain ${subGain}.`
       : null;
   // Proactive nudge: the dark's exposure is mismatched and no bias is selected,
   // but the library *holds* a master bias — so scaling is one click away rather
@@ -1229,6 +1253,11 @@ export function StackView() {
                 {darkTempWarning ? (
                   <Alert color="yellow" variant="light" py={6} px="sm">
                     <Text size="xs">{darkTempWarning}</Text>
+                  </Alert>
+                ) : null}
+                {darkGainWarning ? (
+                  <Alert color="yellow" variant="light" py={6} px="sm">
+                    <Text size="xs">{darkGainWarning}</Text>
                   </Alert>
                 ) : null}
                 {values.flat_master_id && darkOpts.length > 0 ? (

@@ -1784,3 +1784,61 @@ def test_kappa_sigma_keep_mask_matches_plain_clip_when_fully_covered():
     keep = _kappa_sigma_keep_mask(aligned, mean_win, std_win, kappa=3.0)
     plain = np.isfinite(aligned) & (np.abs(aligned - mean_win) <= 3.0 * std_win)
     assert np.array_equal(keep, plain)
+
+
+def test_stack_carries_a_gain_mismatch_warning_out_on_the_result(tmp_path):
+    """A dark shot at another *gain* mis-subtracts its pedestal at a perfectly
+    matched exposure and temperature, and nothing rescales it.
+
+    Fail-before: ``CalibrationMasters`` never loaded the master's gain, so the
+    advisory had no gain branch to run — this stack came back looking healthy
+    (CALSTAT stamped, no warning) with a gain-200 dark subtracted whole from
+    gain-80 subs."""
+    proj = _build_project(tmp_path, n=4)
+    try:
+        for f in proj.iter_frames():
+            proj.update_frame(f.id, exposure_s=10.0, sensor_temp_c=-10.0, gain=80.0)
+        dark = np.zeros((320, 480), dtype=np.float32)
+        dark_path = tmp_path / "dark_gain200.fits"
+        save_master(dark_path, dark,
+                    MasterMeta("dark", 5, 480, 320, "mean", exposure_s=10.0,
+                               gain=200.0, sensor_temp_c=-10.0))
+        res = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                           dark_path=str(dark_path),
+                                           output_name="gain_out"))
+        assert len(res.calibration_warnings) == 1
+        warn = res.calibration_warnings[0]
+        assert "gain 200" in warn and "gain 80" in warn
+    finally:
+        proj.close()
+
+
+def test_a_target_shot_at_two_gains_is_warned_about_whichever_sub_is_the_reference(
+        tmp_path):
+    """A target is not necessarily one *gain* either, and the advisory may not
+    assume it is — the third instance of the representative-value class, after
+    exposure (v0.456.0) and temperature (v0.465.0/v0.464.0).
+
+    ``pick_reference_frame`` chooses on quality and pointing and has never heard
+    of gain, so the answer must not depend on which frame it lands on."""
+    proj = _build_project(tmp_path, n=6)
+    try:
+        for i, f in enumerate(proj.iter_frames()):
+            # One target, two settings: four subs at gain 80, two at gain 200.
+            proj.update_frame(f.id, exposure_s=10.0, sensor_temp_c=-10.0,
+                              gain=200.0 if i >= 4 else 80.0)
+        dark = np.zeros((320, 480), dtype=np.float32)
+        dark_path = tmp_path / "dark_gain80.fits"
+        save_master(dark_path, dark,
+                    MasterMeta("dark", 5, 480, 320, "mean", exposure_s=10.0,
+                               gain=80.0, sensor_temp_c=-10.0))
+        res = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                           dark_path=str(dark_path),
+                                           output_name="mixed_gain_out"))
+        assert len(res.calibration_warnings) == 1
+        warn = res.calibration_warnings[0]
+        assert "80 and 200" in warn          # both settings named …
+        assert "the 200 ones" in warn        # … and which of them the dark misses
+        assert "every frame" not in warn     # … and nothing claimed about the rest
+    finally:
+        proj.close()

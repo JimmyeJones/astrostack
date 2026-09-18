@@ -59,6 +59,28 @@ TEMP_MISMATCH_TOL_C = 5.0
 # warning the old reference-frame test fired by accident (that test asked one
 # frame, so a lone outlier chosen as reference spoke for the whole session).
 TEMP_MISMATCH_MIN_SHARE = 0.10
+# How far a master dark's **gain** may differ from the lights' before the
+# advisory mismatch warning fires, as a fraction of the lights' own gain
+# (``|g_dark − g_light| / max(|g_light|, 1)`` — the denominator
+# ``webapp.calibration._match_distance`` already measures gain with, so the
+# advisory and the master binder speak of one distance).
+#
+# Gain is neither of the two above, and the difference is what sets this number.
+# An exposure is a setting with a *correction* — ``scale_dark_to_light`` rescales
+# a mismatched length. A temperature is continuous and drifts, so it earns a
+# tolerance wide enough to cover a night. **Gain is a setting nothing corrects
+# for**: a dark carries the gain-dependent readout pedestal and dark current, so
+# a dark shot at another gain mis-subtracts at a perfectly matched exposure *and*
+# temperature, with no lever anywhere to rescue it.
+#
+# So this is deliberately **not** a severity threshold. What a 25 % gain gap
+# costs an OSC stack in ADU needs darks shot at two gains on the owner's own
+# camera, which is not in this repo, and picking a number from recall is the
+# blind-threshold move AGENTS.md §1 names. It absorbs header/float round-trip
+# noise and nothing else, which is why it sits two orders of magnitude below the
+# smallest step a camera offers: every *real* difference in the setting is
+# reported, and the sentence states both numbers rather than grading them.
+GAIN_MISMATCH_TOL = 0.01
 
 # Historical private aliases — kept so nothing that referenced them breaks.
 _EXPOSURE_MISMATCH_TOL = EXPOSURE_MISMATCH_TOL
@@ -143,6 +165,65 @@ def typical_exposure_s(values: Iterable[float | None]) -> float | None:
     return sorted(exposures)[len(exposures) // 2]  # median
 
 
+def gain_mismatch(
+    master_gain: float | None, light_gain: float | None,
+    *, tol: float = GAIN_MISMATCH_TOL,
+) -> bool:
+    """True when a master's gain differs from the lights' by more than header
+    noise — the single question the gain advisory and the Stack form both ask.
+
+    One-sided like every other check in this module: a side that never recorded a
+    gain cannot be disproved, so an unknown value never warns. The denominator is
+    the *lights'* gain floored at 1, matching ``webapp.calibration._match_distance``,
+    so gain 0 (a legitimate setting, unlike a 0 s exposure) is compared absolutely
+    instead of dividing by nothing.
+    """
+    if master_gain is None or light_gain is None:
+        return False
+    mg, lg = float(master_gain), float(light_gain)
+    if not (math.isfinite(mg) and math.isfinite(lg)):
+        return False
+    return abs(mg - lg) > float(tol) * max(abs(lg), 1.0)
+
+
+def distinct_gains(values: Iterable[float | None]) -> list[float]:
+    """The distinct gain settings in a set of lights, lowest first.
+
+    The same shape as :func:`distinct_exposures`, for the same reason: a target
+    is one folder, never necessarily one *setting*. Two subs count as the same
+    gain when they agree to within :data:`GAIN_MISMATCH_TOL`, so a header
+    round-trip cannot read as a second gain while any real step does, and each
+    group is reported by its median so one mistyped card cannot move the value
+    the group is named by.
+
+    Unlike an exposure, a gain of 0 is a legitimate setting, so only the missing,
+    the non-finite and the negative are dropped — reading a blank ``GAIN`` card
+    as 0 would invent a mismatch out of nothing.
+
+    Grouping is against each group's **first** member rather than a running
+    value, so a ramp of near-neighbours cannot chain two genuinely different
+    settings into one group.
+    """
+    vals = sorted(
+        float(v) for v in values
+        if v is not None and math.isfinite(float(v)) and float(v) >= 0
+    )
+    if not vals:
+        return []
+    groups: list[list[float]] = [[vals[0]]]
+    for v in vals[1:]:
+        first = groups[-1][0]
+        if abs(v - first) <= GAIN_MISMATCH_TOL * max(abs(first), 1.0):
+            groups[-1].append(v)
+        else:
+            groups.append([v])
+    out: list[float] = []
+    for g in groups:
+        n = len(g)
+        out.append(g[n // 2] if n % 2 else (g[n // 2 - 1] + g[n // 2]) / 2.0)
+    return out
+
+
 def _finite_temps(values: Iterable[float | None]) -> list[float]:
     """The usable sensor temperatures in a set of lights, coldest first.
 
@@ -206,6 +287,15 @@ def _deg(value: float) -> str:
 def _join_exposures(values: Sequence[float]) -> str:
     """``[10, 30]`` → ``"10s and 30s"``; ``[10, 20, 30]`` → ``"10s, 20s and 30s"``."""
     parts = [f"{v:g}s" for v in values]
+    if len(parts) <= 1:
+        return "".join(parts)
+    return f"{', '.join(parts[:-1])} and {parts[-1]}"
+
+
+def _join_gains(values: Sequence[float]) -> str:
+    """``[80, 200]`` → ``"80 and 200"``. The gain counterpart of
+    :func:`_join_exposures`; a gain setting carries no unit to print."""
+    parts = [f"{v:g}" for v in values]
     if len(parts) <= 1:
         return "".join(parts)
     return f"{', '.join(parts[:-1])} and {parts[-1]}"
@@ -282,6 +372,14 @@ class CalibrationMasters:
     # (:meth:`calibration_warnings`) — dark current varies with temperature, so a
     # dark shot far from the lights' temperature leaves a residual.
     dark_temp_c: float | None = None
+    # Gain the master dark was shot at, None when the header didn't carry it
+    # (a master built from frames with no ``GAIN`` card, or a third-party
+    # import). Used only for the advisory mismatch check
+    # (:meth:`calibration_warnings`) — a dark encodes the gain-dependent readout
+    # pedestal and dark current, so a dark shot at another gain mis-subtracts
+    # even at a matched exposure and temperature, and unlike an exposure gap
+    # there is no ``scale_dark_to_light`` to correct it.
+    dark_gain: float | None = None
     # The ``BAYERPAT`` each master declares (normalised, ``None`` when the header
     # didn't carry one — every master built before this field was read, and any
     # third-party import without the card). Masters are applied to the **raw
@@ -365,6 +463,7 @@ class CalibrationMasters:
         dark_nodata_mask = None
         dark_exposure_s = None
         dark_temp_c = None
+        dark_gain = None
         dark_bayer = None
         flat_norm = None
         flat_bayer = None
@@ -384,6 +483,7 @@ class CalibrationMasters:
             dark = _sanitize_pedestal(dark)
             dark_exposure_s = dark_meta.exposure_s
             dark_temp_c = dark_meta.sensor_temp_c
+            dark_gain = dark_meta.gain
             dark_bayer = _norm_bayer(dark_meta.bayer_pattern)
         if bias_path:
             bias, bias_meta = load_master(bias_path)
@@ -472,7 +572,7 @@ class CalibrationMasters:
                    bias_nodata_mask=bias_nodata_mask,
                    dark_path=dark_path, flat_path=flat_path, bias_path=bias_path,
                    dark_exposure_s=dark_exposure_s, bias_exposure_s=bias_exposure_s,
-                   dark_temp_c=dark_temp_c,
+                   dark_temp_c=dark_temp_c, dark_gain=dark_gain,
                    dark_bayer_pattern=dark_bayer, flat_bayer_pattern=flat_bayer,
                    bias_bayer_pattern=bias_bayer,
                    flat_dark_shape_mismatch=flat_dark_shape_mismatch,
@@ -587,6 +687,8 @@ class CalibrationMasters:
         *,
         light_exposures_s: Iterable[float | None] | None = None,
         light_temps_c: Iterable[float | None] | None = None,
+        light_gain: float | None = None,
+        light_gains: Iterable[float | None] | None = None,
     ) -> list[str]:
         """Advisory (non-fatal) warnings that the master dark doesn't match the
         lights it's calibrating.
@@ -647,6 +749,25 @@ class CalibrationMasters:
         :data:`TEMP_MISMATCH_MIN_SHARE` and says the range and the count, so a
         reader can tell "shoot a second dark" from "ignore this". Omit the set
         (every older caller) and the reference frame stands in exactly as before.
+
+        ``light_gain`` / ``light_gains`` are the third acquisition number, and
+        the one this advisory was structurally unable to mention: the loader did
+        not read the dark's ``GAIN`` at all, so a gain-mismatched dark was
+        applied in silence — while the unattended binder accepts one up to a
+        whole relative gain unit away, i.e. a gain-160 dark on gain-80 subs. Gain
+        differs from the two above in the way that matters here: an exposure gap
+        has ``scale_dark_to_light`` to correct it and a temperature gap earns a
+        tolerance wide enough to cover a night, but a gain is a *setting* nothing
+        anywhere corrects for — the dark carries the gain-dependent readout
+        pedestal, so it mis-subtracts at a perfectly matched exposure and
+        temperature. So the bar is :data:`GAIN_MISMATCH_TOL`, which absorbs
+        header noise and nothing else, and the sentence states both numbers
+        rather than grading the gap. ``light_gains`` is the whole set for the
+        same reason as the other two — a target is not necessarily one gain
+        either — and a single distinct gain in it stands in when no
+        ``light_gain`` is given. Omit both and nothing about gain is said, which
+        is exactly what every older caller, and every master with no ``GAIN``
+        card, gets.
         """
         warnings: list[str] = []
         # Whichever pedestal actually reaches the lights (never both — see
@@ -821,6 +942,41 @@ class CalibrationMasters:
                 f"Master dark was shot at {dt:g}°C but your subs are at "
                 f"{light_temp_c:g}°C — dark current changes with temperature, so "
                 f"some may remain. A temperature-matched dark calibrates best."
+            )
+        # Gain — the third acquisition number, and the only one with no lever
+        # anywhere to correct it. Independent of both blocks above: a dark can
+        # match on exposure and temperature and still carry a pedestal of the
+        # wrong size, which is exactly the case that used to pass in silence.
+        dg = self.dark_gain
+        gains = distinct_gains(light_gains) if light_gains is not None else []
+        mismatched_gains = [g for g in gains if gain_mismatch(dg, g)]
+        # One distinct gain in the set (the ordinary case, and every caller that
+        # omits it) falls through to the single-gain branch below, which prefers
+        # the caller's own value and uses the set's only member otherwise.
+        single_gain = (
+            light_gain if light_gain is not None
+            else (gains[0] if len(gains) == 1 else None)
+        )
+        if len(gains) > 1 and mismatched_gains:
+            # These subs are not all one setting, so "your subs at gain N" would
+            # be false however N were chosen, and so would "on every frame" —
+            # the dark is right for some of them.
+            warnings.append(
+                f"Master dark was shot at gain {float(dg):g} but these subs were "
+                f"not all shot at the same gain ({_join_gains(gains)}) — a dark "
+                f"carries the gain-dependent readout pedestal, so it "
+                f"mis-subtracts on the {_join_gains(mismatched_gains)} ones even "
+                f"at a matched exposure, and nothing rescales it. Stack each gain "
+                f"on its own with a dark shot at that gain."
+            )
+        elif gain_mismatch(dg, single_gain):
+            warnings.append(
+                f"Master dark was shot at gain {float(dg):g} but your subs at "
+                f"gain {float(single_gain):g} — a dark carries the "
+                f"gain-dependent readout pedestal, so it mis-subtracts on every "
+                f"frame even at a matched exposure, and nothing rescales it the "
+                f"way dark exposure-scaling rescales a mismatched length. Use a "
+                f"dark shot at gain {float(single_gain):g}."
             )
         return warnings
 
