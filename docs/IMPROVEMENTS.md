@@ -76,11 +76,31 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **`claude/sweet-babbage-db6205` (Builder 2026-09-18)** — the "combine these folders" merge deletes every
+  source target's stacked pictures, under a sentence saying nothing is deleted. Entry at the top of "Bugs".
 
 ---
 
 ## Bugs (fix these first)
+
+- **🟠 BUG (trust / data loss, Builder 2026-09-18, reproduced in the code and pinned by a fail-before
+  test) — "Combine into one deep target" permanently deletes every source folder's stacked pictures, saved
+  edits and run history, under its own sentence *"keeps every sub — nothing is deleted"*.** *(Pillar: trust
+  — PRIORITY 1-adjacent; size M. Severity: medium-high — no **raw** sub is lost (they live in `incoming/`
+  and the frame rows are copied), but a finished picture the owner made, and any edit recipe he saved onto
+  it, are gone for good and cannot be re-derived without re-stacking. Confidence: **traced to the lines**.)*
+  **Mechanism.** `Library.merge_targets` (`seestack/io/library.py`) calls `merge_projects`, which by its own
+  docstring merges frame rows and Stage-1 caches and explicitly does **not** merge *"Stack runs / project
+  meta — those stay per-source"*. It then calls `delete_target(se.safe_name, remove_files=True)`, whose
+  `shutil.rmtree(targets_dir / safe_name)` takes the source's whole folder with it: `project.sqlite` (its
+  `stack_runs` rows, its `editor_recipe:<id>` / `editor_auto_*` / `calibration_*` meta) **and** its
+  `output/` tree (the stacked FITS, TIFF, preview PNG, coverage maps and share renders). The Library nudge
+  that fires it says, in the product, *"Merges into “X” (your deepest folder) and keeps every sub — nothing
+  is deleted."* (`frontend/src/components/MergeSuggestionsCard.tsx`). One click, no confirmation.
+  **Why this got worse rather than staying theoretical:** `auto_stack` ships **on** for fresh installs
+  (v0.391.0) and the Seestar writes **one folder per night** — which is precisely the population
+  `merge_suggestions` clusters and offers to combine. Nothing filters a suggestion on "has no stacks", so on
+  a current install the source folders normally *do* carry a picture the app made by itself.
 
 - ~~**🟠 BUG (autonomy / library hygiene, Builder 2026-09-17, reproduced before it was fixed) — a folder of
   darks under `incoming/` becomes a light target, in the one place the app itself told the owner to put
