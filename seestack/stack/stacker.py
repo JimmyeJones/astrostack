@@ -2041,24 +2041,38 @@ def _build_output_header_meta(
     # exposures so the run Info / History can show "Dark scaled to sub exposure ·
     # 30s → 10s" and the user can trust the off-by-default feature did something.
     # The scale is applied per-frame, so this stamps the run-level option + the
-    # (median) exposures, not a per-pixel value. Omitted (like PHOTNORM) whenever
-    # nothing was actually scaled — matched exposures leave the dark unscaled.
+    # exposures, not a per-pixel value. Omitted (like PHOTNORM) whenever nothing
+    # was actually scaled — matched exposures leave the dark unscaled.
     # The "did it actually scale?" test is asked of the bundle itself
-    # (``dark_scaling_provenance``) rather than re-derived here: this stamp used
+    # (``dark_scaling_exposures``) rather than re-derived here: this stamp used
     # to check only that *a* bias was loaded, but a bias whose shape doesn't
     # match the dark can't hold the pedestal fixed, so the engine subtracts the
     # dark unscaled — and the run then claimed "Dark scaled to sub exposure ·
     # 30s → 10s" about a dark it hadn't touched.
+    # It is asked about the **whole set** of sub lengths rather than their
+    # median, because the scaling is per frame: on a target shot at 10 s one
+    # night and 30 s the next, a median that lands on the dark's own length made
+    # the bundle answer "nothing was scaled" and dropped the card entirely — on
+    # the very runs where a third of the subs really were tripled — while a
+    # median that landed on the *other* length stamped "30s → 10s" as though
+    # every sub were 10 s. So a single-length target keeps DARKLEXP exactly as
+    # before, and a mixed one gets DARKLEXS naming the set it was applied across,
+    # since there is no one exposure it was scaled "to".
     if calibration is not None and getattr(calibration, "scale_dark_to_light", False):
-        light_exp = exposures[len(exposures) // 2] if exposures else None
-        provenance = getattr(calibration, "dark_scaling_provenance", None)
-        scaled = provenance(light_exp) if callable(provenance) else None
+        probe = getattr(calibration, "dark_scaling_exposures", None)
+        scaled = probe(exposures) if callable(probe) else None
         if scaled is not None:
-            dark_exp, light_exp = scaled
+            dark_exp, light_exps = scaled
             meta["DARKSCAL"] = ("exposure", "dark exposure-scaling mode")
             meta["DARKDEXP"] = (round(float(dark_exp), 3), "master dark exposure (s)")
-            meta["DARKLEXP"] = (round(float(light_exp), 3),
-                                "sub exposure dark scaled to (s)")
+            if len(light_exps) == 1:
+                meta["DARKLEXP"] = (round(float(light_exps[0]), 3),
+                                    "sub exposure dark scaled to (s)")
+            else:
+                from seestack.calibrate.apply import _join_exposures
+
+                meta["DARKLEXS"] = (_join_exposures(light_exps),
+                                    "sub exposures the dark was scaled across")
     # Quality-weighting provenance: lets the run Info panel report how many subs
     # weighting actually demoted and over what range, so the user can trust the
     # (off-by-default) weighting did something and gauge how aggressive it was.

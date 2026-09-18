@@ -985,6 +985,65 @@ def test_stack_info_dark_scaling_absent_for_unscaled_stack(client, solved_librar
     assert body["dark_scaling"] is None
 
 
+def test_stack_info_carries_the_set_a_mixed_targets_dark_was_scaled_across(
+        client, solved_library):
+    """On a target shot at more than one length the scaling is per frame, so
+    there is no single exposure the dark was scaled *to* and the run stamps
+    DARKLEXS (the already-worded set) instead of DARKLEXP. The endpoint has to
+    carry it, or the panel falls back to the bare line and the numbers a reader
+    wanted are gone."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["DARKSCAL"] = "exposure"
+                hdul[0].header["DARKDEXP"] = 10.0
+                hdul[0].header["DARKLEXS"] = "10s and 30s"
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    d = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["dark_scaling"]
+    assert d["mode"] == "exposure"
+    assert d["dark_exposure"] == 10.0
+    assert d["light_exposures"] == "10s and 30s"
+    # …and no single-length claim beside it.
+    assert "light_exposure" not in d
+
+
+def test_stack_info_omits_the_set_for_every_single_exposure_run(
+        client, solved_library):
+    """Additive in both directions: a run with only DARKLEXP (every existing one)
+    carries no `light_exposures`, so an older backend and a newer frontend mix
+    without the panel inventing a set."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["DARKSCAL"] = "exposure"
+                hdul[0].header["DARKDEXP"] = 30.0
+                hdul[0].header["DARKLEXP"] = 10.0
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    d = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["dark_scaling"]
+    assert d["light_exposure"] == 10.0
+    assert "light_exposures" not in d
+
+
 def test_stack_info_surfaces_the_sensor_defect_repair_count(client, solved_library):
     """A run that repaired hot/dead photosites stamps DEFECTPX; the info endpoint
     serves it so the panel can say the off-by-default repair did something."""

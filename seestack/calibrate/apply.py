@@ -649,32 +649,66 @@ class CalibrationMasters:
             )
         return warnings
 
-    def dark_scaling_provenance(
-        self, light_exposure_s: float | None,
-    ) -> tuple[float, float] | None:
-        """``(dark_exposure_s, light_exposure_s)`` when the dark really is scaled.
+    def dark_scaling_exposures(
+        self, light_exposures_s: Iterable[float | None] | None,
+    ) -> tuple[float, list[float]] | None:
+        """``(dark_exposure_s, the distinct sub lengths)`` when the dark really is
+        scaled for at least one of them — otherwise ``None``.
 
         The single answer to "did exposure-scaling actually happen?", so a run's
         provenance can't claim something :meth:`_effective_dark` didn't do. It
         returns non-``None`` under **exactly** the condition that method scales:
         the option is on, a shape-matching master bias holds the readout pedestal
-        fixed, and both exposures are known, positive and materially different.
+        fixed, and the exposures are known, positive and materially different.
 
         A *wrong-shaped* bias is the case this exists for. It doesn't enable
         scaling (see :attr:`_dark_scaling_applies`) — the dark is subtracted
         unscaled — but "a bias is loaded" reads as enough from the outside, and a
         stamp written on that looser test tells the user the dark was matched to
         their subs when it wasn't.
+
+        It takes the **set** because the scaling is per frame: ``apply_raw`` is
+        handed each sub's own exposure, so on a target shot at 10 s one night and
+        30 s the next a 10 s dark is left alone on some subs and tripled on the
+        rest. Asked only about a representative value — which is what the run
+        provenance used to hand it — that target answers *"nothing was scaled"*
+        whenever the representative happens to be the dark's own length, and the
+        History line disappears from the one run that most needed it. The second
+        element is therefore every distinct length the dark was applied across,
+        not the single one it was "scaled to", because on a mixed target there is
+        no such single value.
+
+        Lengths are grouped by :func:`distinct_exposures`, so header rounding
+        cannot read as a second exposure, and a value that is missing, non-finite
+        or non-positive is dropped rather than scaled by.
         """
         if not self._dark_scaling_applies:
             return None
-        de, le = self.dark_exposure_s, light_exposure_s
-        if not de or not le or de <= 0 or le <= 0:
+        de = self.dark_exposure_s
+        if not de or de <= 0:
             return None
-        if abs(float(le) / float(de) - 1.0) <= 1e-3:
-            # Matched exposures leave the dark unscaled — nothing to advertise.
+        exposures = distinct_exposures(light_exposures_s or [])
+        # Matched exposures leave the dark unscaled, so a set in which *every*
+        # length matches has nothing to advertise — exactly the old single-value
+        # test, asked of each member.
+        if not any(abs(e / float(de) - 1.0) > 1e-3 for e in exposures):
             return None
-        return float(de), float(le)
+        return float(de), exposures
+
+    def dark_scaling_provenance(
+        self, light_exposure_s: float | None,
+    ) -> tuple[float, float] | None:
+        """``(dark_exposure_s, light_exposure_s)`` when the dark really is scaled.
+
+        The one-exposure view of :meth:`dark_scaling_exposures`, kept for callers
+        that genuinely have a single length to ask about. Implemented in terms of
+        it so there is still only one definition of "did scaling happen?".
+        """
+        got = self.dark_scaling_exposures([light_exposure_s])
+        if got is None:
+            return None
+        de, exposures = got
+        return de, exposures[0]
 
     def _effective_dark(self, light_exposure_s: float | None) -> np.ndarray | None:
         """The dark to subtract, exposure-scaled to the light when opted in.
