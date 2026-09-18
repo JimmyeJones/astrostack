@@ -18,6 +18,71 @@ is a queue.
 
 ---
 
+## 2026-09-18 — Scout QA sweep: calibrate + stack per-panel + solve/ffmpeg filesystem + editor preview↔export parity all CLEAN; no verified bug
+
+*(Scout, branch `claude/admiring-brahmagupta-hhky3o`. Baseline: `6291 passed, 2 skipped` headless on the settled
+tree. Dogfood `--mosaic --editor` CLEAN. No code shipped — a clean sweep with the backlog left as found, per
+AGENTS.md §2.)*
+
+**Why this is recorded here and not in "Bugs".** Nothing was found. The value of the note is telling the *next*
+Scout what was read adversarially and came back clean, so the rotation doesn't re-sweep it (AGENTS.md §1's
+recurring failure mode — "all four runs after it was written swept the very area it marks closed"). Everything
+below is consistent with the "twenty clean sweeps, closed until a new bug is found" state.
+
+**What was swept, and the specific edge each was read for:**
+- **`calibrate/masters.py` + `calibrate/apply.py`** (the v0.456–0.458 exposure family's neighbourhood). The
+  exposure-scaling path (`_effective_dark`, `bias + (dark−bias)·ratio`) is applied **per frame** — `align.py:148`
+  and `stacker.py:4144` both pass `light_exposure_s=info.exposure_s`, so a mixed-exposure target scales each sub
+  to its own length, not the reference's. The no-data dark/bias masks correctly restore "no correction" on the
+  scaled path. The advisory now receives the full set (`stacker.py:2653` `light_exposures_s=[…]`). Clean.
+- **Stack per-panel floor** (`stacker.typical_panel_depth`, rotation item 2 — "a threshold taken from a peak
+  number that is really per-panel"). It is a **frame-weighted median** of `panel_frame_counts`, robust by
+  construction to a stray one-frame mis-solved "panel", and the walk-away floor (`pipeline._auto_stack_panel_depth`)
+  consumes it correctly. The thinnest panel is used only where it belongs (`auto_reject_depth`). Traced the
+  accumulation `seen*2 >= total` on [9,9,9]/[9,1]/[3,3,3,3] — correct. Clean.
+- **Filesystem side effects (rotation item 3), against the §10 incoming guardrail.** ASTAP: `shutil.copy2` into a
+  `TemporaryDirectory`, `-wcs` (never `-update`), sidecars read before the scratch dir is dropped — `incoming/`
+  is only ever read (`astap.py:303–312`). ffmpeg decode: `-i <path>` in, `-f rawvideo … -` out **to stdout**,
+  `-nostdin`, fixed argv, no output file written anywhere (`video/ffmpeg.py:369–379`). Neither writes into
+  `incoming/`. Clean.
+- **Editor preview↔export parity (rotation item 1, the A2 bug class).** Every pixel-unit op scales by the proxy
+  factor: `background._scaled_box`, `detail` sharpen/deconv/chroma radii via `ctx.scaled_px`, `tone` detect/aperture
+  radii, `stars._reduce` erosion footprint via `scaled_px`, and `stars` star-mask sizes via `star_mask`'s own
+  internal `size_px / max(1, proxy_scale)` (`starmask.py:56–57`). The two params that *don't* call `scaled_px`
+  are correct: `_hot_pixels` is skipped entirely on a decimated proxy, and its `sigma` is a detection threshold,
+  not a spatial radius; `background` `detect_sigma`/`object_sigma` are statistical. Clean.
+
+**Tooling note for the next run — `--big --editor` alone exceeds a 25-min `timeout` before it reaches the
+decimated-preview editor drive.** The pass drives the editor **sequentially** — field sample (1:1) first, then
+the full-size decimated run last — so with only `--big --editor` set the run spent its budget on the field
+drive + the full-size stack + both probes and was killed at the "probing the FULL-SIZE target" step, *before*
+the `-- driving the editor on the FULL-SIZE run (the only decimated preview)` block (shell lines 886–892) ran.
+The page probe on the full-size target still confirmed `[full-size check] available=True` with the five
+preview↔export advisories present and no console errors. To actually exercise the decimated-preview op drive,
+give it a longer timeout (≥40 min) or run it as its own pass. Parity itself was verified by code audit above.
+
+**Open GitHub issues (Scout owns the inbox) — all three accurately tracked, nothing to file or close this run:**
+- **#903** (reprocess-all replaced 44/77 pictures with flat linear stacks): the *silent* half is fixed
+  (v0.447.2 dialog + v0.448.0 wall chip + v0.449.0 finished-picture definition); the remaining leftover is filed
+  small and honestly optional. Still legitimately open.
+- **#878** (76 % of frames double-registered; 11 duplicate mosaic targets): recurrence is **already closed** in
+  code (the mosaic device-output folder is skipped by the single-field sibling rule; the "wrong stack" concern
+  doesn't hold — mosaic mode is decided geometrically, not from the name). The only remainder is a merge
+  migration for the 11 existing pairs, routed to **owner sign-off** (§9 forbids moving live folders).
+- **#880** (traceback stored as `reject_reason`; QC-error frames stay accepted): Builder-verified as **not
+  user-facing** (every surface maps `qc_error*` to plain language; the observer only sees the repr because it
+  reads `project.sqlite` directly) and the accept-on-error carve-out is **documented deliberate design**. The
+  classification gap it shares with #878 is closed for recurrence.
+
+**Feature pipeline:** densely stocked and the app is exhaustively feature-complete for its niche — every beginner
+feature brainstormed this run was already shipped: pre-shoot "will it fit / recommended mosaic size" (v0.401.0
+`field_fill` + `mosaic_plan`), growth timelapse (the deepening reel + Story tab), "compare with my last one"
+(v0.360.0), session recap + `/api/recap.jpg` poster, moon interference (`moon_interference`, `/moon/{safe}`),
+wallpaper/social export. No new idea filed — adding a redundant one would be the busywork AGENTS.md §2/§4 warns
+against, not the stocking the Scout owes.
+
+---
+
 ## 2026-09-18 — dogfood `--mosaic --big --editor`: the pass was CLEAN, and three bugs were in the block it prints for reading
 
 *(Builder, branch `claude/sweet-babbage-3dy83s`; shipped as v0.458.1, v0.458.2 and v0.458.3.)*
