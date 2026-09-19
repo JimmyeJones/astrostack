@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS stack_runs (
     grain_thin_frames INTEGER,
     grain_deep_frames INTEGER,
     grain_thin_share REAL,
+    grain_region TEXT,
     seam_scale INTEGER,
     transparency_scale INTEGER
 );
@@ -777,6 +778,16 @@ class Project:
         try:
             self._conn.execute(
                 "ALTER TABLE stack_runs ADD COLUMN seam_scale INTEGER")
+        except sqlite3.OperationalError:
+            pass  # already present
+        # …and ``grain_region``, the word that says whether a grainy region is
+        # an under-shot panel or the dithered outline. Same un-gated, un-bumped
+        # shape as ``seam_scale`` above and for the same reasons; every existing
+        # run stays NULL, which every reader takes as "unmeasured" and answers
+        # with the advice that cannot be harmful.
+        try:
+            self._conn.execute(
+                "ALTER TABLE stack_runs ADD COLUMN grain_region TEXT")
         except sqlite3.OperationalError:
             pass  # already present
         # …and the same for ``transparency_ratio``, whose estimator moved in
@@ -1629,9 +1640,9 @@ class Project:
             "  capture_hours_json, coverage_thin_frac, uncovered_frac,"
             "  coverage_shares_version, coverage_median_depth, duration_s,"
             "  grain_ratio, grain_thin_frames, grain_deep_frames, grain_thin_share,"
-            "  seam_scale, transparency_scale"
+            "  grain_region, seam_scale, transparency_scale"
             ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            "         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 run.timestamp_utc, run.output_basename, run.fits_path,
                 run.tiff_path, run.preview_path, run.n_frames_used,
@@ -1660,6 +1671,7 @@ class Project:
                  else int(run.grain_deep_frames)),
                 (None if run.grain_thin_share is None
                  else float(run.grain_thin_share)),
+                (None if run.grain_region is None else str(run.grain_region)),
                 (None if run.seam_scale is None else int(run.seam_scale)),
                 (None if run.transparency_scale is None
                  else int(run.transparency_scale)),
@@ -1761,6 +1773,10 @@ class Project:
                 grain_thin_share=(
                     row["grain_thin_share"]
                     if "grain_thin_share" in row.keys() else None
+                ),
+                grain_region=(
+                    row["grain_region"]
+                    if "grain_region" in row.keys() else None
                 ),
                 preview_north_up_deg=(
                     row["preview_north_up_deg"]
@@ -1944,6 +1960,7 @@ class Project:
     def set_stack_coverage_grain(
         self, run_id: int, ratio: float | None, thin_frames: int | None,
         deep_frames: int | None, thin_share: float | None,
+        region: str | None = None,
     ) -> bool:
         """Record how much grainier a run's thinly-covered region is than the
         depth most of its canvas was shot at — normally stamped by the stack
@@ -1952,17 +1969,21 @@ class Project:
         (:func:`seestack.coverage_backfill.backfill_coverage_grain`, which
         re-measures it from the master and coverage map the run wrote).
 
-        The four values are one measurement and are written together, so a row
-        can never hold a ratio with no depths to explain it. Returns True if a
-        row was updated, False if no run with ``run_id`` exists."""
+        The values are one measurement and are written together, so a row can
+        never hold a ratio with no depths to explain it. ``region`` defaults to
+        None so a caller written before it existed still clears the column rather
+        than leaving a stale word beside a fresh ratio. Returns True if a row was
+        updated, False if no run with ``run_id`` exists."""
         assert self._conn is not None
         cur = self._conn.execute(
             "UPDATE stack_runs SET grain_ratio = ?, grain_thin_frames = ?,"
-            "  grain_deep_frames = ?, grain_thin_share = ? WHERE id = ?",
+            "  grain_deep_frames = ?, grain_thin_share = ?, grain_region = ?"
+            " WHERE id = ?",
             (None if ratio is None else float(ratio),
              None if thin_frames is None else int(thin_frames),
              None if deep_frames is None else int(deep_frames),
              None if thin_share is None else float(thin_share),
+             None if region is None else str(region),
              run_id))
         return cur.rowcount > 0
 
@@ -2211,6 +2232,15 @@ class StackRunRow:
     grain_thin_frames: int | None = None
     grain_deep_frames: int | None = None
     grain_thin_share: float | None = None
+    # ...and **what** the thin region is, which decides what to do about it:
+    # ``"panel"`` (a part of the picture shot with fewer subs — more subs even it
+    # out) or ``"edge"`` (the ragged outline the dithering leaves, whose width is
+    # set by the pointing spread rather than the sub count, so more subs never
+    # even it out and only a tighter crop removes it). Measured, not inferred —
+    # see :func:`seestack.bg.coverage_leveling._grain_region`. None on every run
+    # recorded before it existed, and every reader then falls back to the advice
+    # that is never harmful ("more subs"), which is what those rows already say.
+    grain_region: str | None = None
     # Which generation of the seam estimator wrote ``seam_residual`` — see
     # :data:`seestack.bg.coverage_leveling.SEAM_ESTIMATOR_GENERATION`. The figure
     # itself carries no scale, and v0.313.1 changed what it means, so a reader

@@ -96,6 +96,45 @@ describe("grainProjection", () => {
     expect(p?.sentence).toContain("only more light evens that part out");
   });
 
+  // …and where the depth is a *ramp* rather than a plateau, "only more light
+  // evens that part out" is the wrong half of the answer: part of that thin
+  // region is the picture's ragged outer edge, whose width is the spread of the
+  // pointings and which the next ten nights leave exactly as it is.
+  it("stops prescribing more light for a thin part that is a ragged edge", () => {
+    const p = grainProjection([
+      {
+        total_exposure_s: 3 * HOUR, noise_sigma: 0.016,
+        grain_verdict: "uneven", grain_region: "spread",
+      },
+    ]);
+    expect(p?.level).toBe("clean");
+    // Every fact the scoped sentence carries is still there…
+    expect(p?.sentence).toContain("across most of it");
+    expect(p?.sentence).toContain("thinner than the rest");
+    expect(p?.sentence).toContain("3.0 h");
+    expect(p?.sentence).toContain("0.016");
+    expect(p?.sentence).toContain("29 % more");
+    // …and the prescription is the one that can actually do something.
+    expect(p?.sentence).toContain("ragged outer edge");
+    expect(p?.sentence).toContain("cropping it away");
+    expect(p?.sentence).not.toContain("only more light evens that part out");
+  });
+
+  it("keeps the panel wording for a plateau, and for a backend that says nothing", () => {
+    const panel = grainProjection([
+      {
+        total_exposure_s: 3 * HOUR, noise_sigma: 0.016,
+        grain_verdict: "uneven", grain_region: "panel",
+      },
+    ])?.sentence;
+    // An older backend sends no region at all and must read as the panel case.
+    expect(grainProjection([
+      { total_exposure_s: 3 * HOUR, noise_sigma: 0.016, grain_verdict: "uneven" },
+    ])?.sentence).toBe(panel);
+    expect(panel).toContain("only more light evens that part out");
+    expect(panel).not.toContain("ragged outer edge");
+  });
+
   it("keeps the plain clean wording byte-for-byte whenever nothing says uneven", () => {
     const plain = grainProjection([run(3 * HOUR, 0.016)])?.sentence;
     // An evenly covered mosaic and a single field both send null…

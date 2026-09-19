@@ -197,6 +197,14 @@ export interface NextBestMoveInput {
    * `good` rung and — since v0.438.1, to scope the same claim the same way — by
    * the `integration` rung; see the comments there. */
   grainVerdict?: string | null;
+  /** The backend's own `grain_region`: `"panel"` (one coverage plateau — more
+   * passes even it out) or `"spread"` (the depth ramps, so part of the thin
+   * region is the ragged outer edge, whose width comes from the pointing
+   * spread rather than the sub count and which more passes never narrow). Only
+   * the `good` rung reads it, and only to avoid prescribing a night that cannot
+   * change what the owner is looking at. Omit / null / an older backend → the
+   * panel case, i.e. today's phrase. */
+  grainRegion?: string | null;
   /** The *measured* grain of the picture the readiness card on this same page is
    * describing — `cardGrainProjection(runs)`'s own `level`, so the two cards
    * cannot come to different opinions about one picture. Only the `integration`
@@ -605,6 +613,23 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
   // The prescription matches both endings that note can print ("another night
   // on that panel", and "it evens out on its own as you keep shooting"): more
   // passes over the same mosaic is what serves either.
+  //
+  // …with one exception the health note itself now makes: where the depth is a
+  // **ramp** rather than a plateau, part of the thin region is the picture's
+  // ragged outer edge, whose width is the spread of the pointings — the same
+  // shape after another ten passes — so "more passes over the same mosaic" is
+  // then a prescription that may do nothing. `grain_region` is the backend's
+  // word for which was found; absent, it reads as the panel case.
+  if (input.grainVerdict === "uneven" && input.grainRegion === "spread") {
+    return {
+      kind: "good",
+      phrase:
+        `Across most of it this is a solid result — plenty of subs went in. ` +
+        `Part of it is thinner than the rest, though — where that's the ragged ` +
+        `outer edge, cropping it away is quicker than shooting it out, and ` +
+        `more time is what adds depth to the rest.`,
+    };
+  }
   if (input.grainVerdict === "uneven") {
     return {
       kind: "good",

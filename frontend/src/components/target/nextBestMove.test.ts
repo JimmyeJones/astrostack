@@ -155,6 +155,30 @@ describe("nextBestMove", () => {
       expect(tip?.phrase).not.toContain("This is a solid result");
     });
 
+    it("stops prescribing more passes when the thin part is a ragged edge", () => {
+      // The health note withdrew "another night on that panel" on a ramping
+      // canvas for the same reason: more passes do not narrow an outline whose
+      // width is the spread of the pointings.
+      const tip = nextBestMove({
+        ...evenMosaic, grainVerdict: "uneven", grainRegion: "spread",
+      });
+      expect(tip?.kind).toBe("good");
+      expect(tip?.phrase).toContain("Across most of it");
+      expect(tip?.phrase).toContain("ragged outer edge");
+      expect(tip?.phrase).toContain("cropping it away");
+      expect(tip?.phrase).not.toContain("more passes over the same mosaic");
+    });
+
+    it("keeps the panel phrase for a plateau and for a backend that says nothing", () => {
+      const panel = nextBestMove({
+        ...evenMosaic, grainVerdict: "uneven", grainRegion: "panel",
+      });
+      expect(nextBestMove({ ...evenMosaic, grainVerdict: "uneven" }))
+        .toEqual(panel);
+      expect(panel?.phrase).toContain("more passes over the same mosaic");
+      expect(panel?.phrase).not.toContain("ragged outer edge");
+    });
+
     it("leaves every other verdict exactly as it was", () => {
       // Null, absent, a single field's None, and an older backend that sends
       // nothing all keep today's wording byte for byte — as does a *measured*

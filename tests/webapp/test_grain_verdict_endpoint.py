@@ -57,6 +57,32 @@ def test_the_run_listing_carries_both_mosaic_verdicts(client, solved_library):
     assert runs[old]["grain_verdict"] is None
 
 
+def test_the_run_listing_also_says_which_kind_of_thin_part_it_found(
+        client, solved_library):
+    """The word the Target page's two prescribing surfaces read. A plateau is a
+    panel and takes a panel's advice; a ramp says so, and the sentence then
+    leaves the crop on the table instead of sending someone out for a night that
+    cannot narrow an outline. A run measured before the word existed reads as the
+    panel case — the wording it has always carried."""
+    spread = _register_run(solved_library, safe := client.get(
+        "/api/targets").json()[0]["safe_name"], is_mosaic=True,
+        seam_residual=0.7, grain_ratio=1.59, grain_thin_frames=26,
+        grain_deep_frames=224, grain_thin_share=0.25, grain_region="spread")
+    panel = _register_run(solved_library, safe, is_mosaic=True,
+                          seam_residual=0.7, grain_ratio=1.43,
+                          grain_thin_frames=3, grain_deep_frames=6,
+                          grain_thin_share=0.2257, grain_region="panel")
+    old = _register_run(solved_library, safe, is_mosaic=True, seam_residual=0.7,
+                        grain_ratio=1.43, grain_thin_frames=3,
+                        grain_deep_frames=6, grain_thin_share=0.2257)
+
+    runs = {r["id"]: r
+            for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
+    assert runs[spread]["grain_region"] == "spread"
+    assert runs[panel]["grain_region"] == "panel"
+    assert runs[old]["grain_region"] == "panel"
+
+
 def test_a_single_field_run_carries_neither(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     run_id = _register_run(solved_library, safe)

@@ -410,15 +410,36 @@ def _level_sky_mask(
 ) -> tuple[np.ndarray, bool] | None:
     """One coverage level's sky pixels + whether a rescue found them.
 
-    ``None`` when the level has no usable sky at all. Applies the same two
-    guards both passes need: a level the canvas-wide object threshold has
+    ``None`` when the level has no usable sky at all. See
+    :func:`_region_sky_mask` for the two guards it applies; this is that
+    function with "the region" spelled as a single coverage level, which is what
+    both levelling passes want.
+    """
+    return _region_sky_mask(ctx, (ctx.cov_int == level) & ctx.valid_pix,
+                            object_sigma, dilate_object_mask_px)
+
+
+def _region_sky_mask(
+    ctx: _LevelContext,
+    region_mask: np.ndarray,
+    object_sigma: float,
+    dilate_object_mask_px: int,
+) -> tuple[np.ndarray, bool] | None:
+    """Any region's sky pixels + whether a rescue found them.
+
+    ``None`` when the region has no usable sky at all. Applies the same two
+    guards both passes need: a region the canvas-wide object threshold has
     *starved* is re-thresholded against its own statistics (see
-    :func:`_local_sky_mask`), and a level whose retained sample is far more
+    :func:`_local_sky_mask`), and a region whose retained sample is far more
     spread out than the canvas's own sky is refused outright — it is filled by
     real structure, and reading an object's level as a sky offset would subtract
     real flux.
+
+    Taking a *mask* rather than a level is what lets
+    :func:`measure_coverage_grain` ask the same question of a **band** of depths
+    when no single depth is substantial enough to ask it of — see that function
+    for why a dithered canvas has no such depth.
     """
-    region_mask = (ctx.cov_int == level) & ctx.valid_pix
     region_sky_mask = region_mask & ~ctx.object_mask
     rescued_level = int(region_sky_mask.sum()) < ctx.effective_min
     if rescued_level:
@@ -595,6 +616,45 @@ _GRAIN_MIN_SHARE = 0.10
 # stranding it): nothing is lost by staying silent here.
 _GRAIN_MIN_SKY_PIXELS = 500
 
+# A candidate level has to be measurably *shallower* than the modal one before
+# comparing the two says anything. Grain falls as 1/√depth, so two levels one sub
+# apart differ by 0.02 % and their measured ratio is whatever their sky samples
+# happened to do — which is exactly what the observer caught on a 3,117-sub
+# single field whose union area trips the mosaic heuristic: levels 3,116 and
+# 3,117 each held a tenth of the canvas, the measurement fired, and it reported
+# 1.008× over 15 % of the picture while the depth *bands* on the same canvas read
+# 2.27× over 27 %. A tenth shallower predicts ~1.05× and is the shallowest step
+# worth a sentence; below it the answer is "nothing here", which now means the
+# band rule is asked instead of the measurement stopping.
+_GRAIN_MAX_THIN_FRAC = 0.9
+
+# The band rule's two regions, as fractions of the picture's own median depth:
+# "thin" is under half of it and "deep" is within ±15 % of it. Deliberately the
+# shape the 2026-09-19 observer report measured 26 of the owner's mosaics with,
+# rather than a new one of our own — its σ ratios (1.39–1.86 against a 1/√depth
+# prediction of 1.90–2.31) are the evidence this rule exists on, and a different
+# banding would not be that evidence.
+_GRAIN_BAND_THIN_FRAC = 0.5
+_GRAIN_BAND_DEEP_TOL = 0.15
+
+#: What a run's thin region turned out to be, which is the fact its advice turns
+#: on. ``"panel"`` — the thin part is **one coverage level**, a plateau holding a
+#: tenth of the canvas or more, which is what a frame's footprint makes: a panel
+#: shot with fewer subs, and another night on it is exactly the fix. ``"spread"``
+#: — there is no such plateau and the depth simply *ramps*, which is what dither
+#: and night-to-night re-pointing leave: part of it is the picture's ragged outer
+#: edge, which no amount of further shooting narrows because its width is the
+#: spread of the pointings rather than the sub count.
+#:
+#: Deliberately a statement about **what was found**, not a geometric guess about
+#: where it sits. A plateau at a tenth of the canvas is a panel by construction —
+#: nothing else in this pipeline makes one — while a ramp genuinely may be either
+#: an outline or unevenly deep panels, and the sentence for it says so instead of
+#: prescribing a night that may not help. Distance-from-the-outline was tried and
+#: dropped: it cannot tell a corner panel from the corner it sits in.
+GRAIN_REGION_PANEL = "panel"
+GRAIN_REGION_SPREAD = "spread"
+
 
 @dataclass(frozen=True)
 class CoverageGrain:
@@ -633,6 +693,13 @@ class CoverageGrain:
     deep_frames: int     # subs on a pixel of the region most of the picture is at
     thin_share: float    # that grainy region's share of the covered canvas
     ratio: float         # thin σ / deep σ, median over the three channels
+    # **What** the thin region is, because it decides what to do about it:
+    # ``"panel"`` — a part of the picture shot with fewer subs, which more subs
+    # even out — or ``"edge"`` — the ragged outline the dithering leaves, whose
+    # width is set by the pointing spread and not by the sub count, so more subs
+    # never even it out and a crop is the quicker answer. See
+    # :data:`GRAIN_REGION_PANEL` / :data:`GRAIN_REGION_SPREAD`.
+    region: str = GRAIN_REGION_PANEL
 
 
 def measure_coverage_grain(
@@ -648,11 +715,35 @@ def measure_coverage_grain(
     """Measure the *grain* step a finished canvas carries between a thinly
     covered region and the depth most of it was shot at.
 
-    Compares each substantial coverage level **below the modal one** against the
-    modal level itself, and reports the grainiest of them. Comparing against the
-    mode rather than against the deepest level is what keeps an *evenly* shot
-    mosaic silent: its overlap strips sit above the mode, never below it, so
-    there is no candidate and the answer is ``None``.
+    Asks the question twice, because a coverage map has two shapes and only one
+    of them has levels.
+
+    **By level, first.** Each substantial coverage level meaningfully below the
+    modal one is compared against the modal level itself and the grainiest wins.
+    Comparing against the mode rather than against the deepest level is what
+    keeps an *evenly* shot mosaic silent: its overlap strips sit above the mode,
+    never below it, so there is no candidate at all.
+
+    **By depth band, when that finds nothing** — which on a real mosaic is
+    always. A level is a *plateau*, and plateaus are what a mosaic has when every
+    sub of a panel lands on the same pixels; dither it, re-point it night after
+    night, and the per-pixel frame count becomes a near-continuous ramp instead.
+    Measured on the owner's own library (2026-09-19): 26 of 26 mosaics spread
+    their depth over **79 to 1,392 distinct integer levels**, the modal level
+    held 2–17 % of the canvas and **not one level in the library cleared
+    :data:`_GRAIN_MIN_SHARE`** — so this function returned ``None`` on every
+    mosaic it exists for, and the surfaces reading it went quiet in exactly the
+    state they were written for. The same canvases measure 1.39–1.86× grainier
+    over a median 29 % of themselves once the thin and deep regions are taken as
+    *bands* of depth (:data:`_GRAIN_BAND_THIN_FRAC`, :data:`_GRAIN_BAND_DEEP_TOL`).
+
+    **What stops the band rule prescribing the wrong thing is ``region``, not
+    silence.** Any dithered stack has a shallow ramp around its outline — 23–26 %
+    of the canvas on the same library's single fields — and that ramp really is
+    grainier; what would be wrong is the *advice*, because more subs do not
+    narrow a ramp whose width is the spread of the pointings. So the answer says
+    which rule found it: a plateau is a panel and takes a panel's advice, a ramp
+    says so and leaves the crop on the table. See :data:`GRAIN_REGION_PANEL`.
 
     Returns ``None`` whenever there is nothing to say — a single-coverage-level
     stack, an evenly covered mosaic, a canvas whose levels can't be measured, or
@@ -674,14 +765,15 @@ def measure_coverage_grain(
     # The depth most of the picture was actually shot at — not the mean, which a
     # ragged fringe drags down, and not the peak, which is one mosaic corner.
     deep_level = max(counts, key=lambda level: (counts[level], level))
+    # ...and meaningfully shallower than it, not merely a different integer —
+    # see :data:`_GRAIN_MAX_THIN_FRAC`.
     candidates = [level for level in counts
-                  if level < deep_level
+                  if level <= _GRAIN_MAX_THIN_FRAC * deep_level
                   and counts[level] >= _GRAIN_MIN_SHARE * total]
-    if not candidates:
-        return None
 
-    def _sigmas(level: int) -> list[float] | None:
-        found = _level_sky_mask(ctx, level, object_sigma, dilate_object_mask_px)
+    def _sigmas_of(region_mask: np.ndarray) -> list[float] | None:
+        found = _region_sky_mask(ctx, region_mask, object_sigma,
+                                 dilate_object_mask_px)
         if found is None:
             return None
         region_sky_mask, _rescued = found
@@ -692,34 +784,95 @@ def measure_coverage_grain(
             return None
         return [float(s) for s in out]
 
-    deep_sigmas = _sigmas(deep_level)
-    if deep_sigmas is None:
-        return None
-
-    best: CoverageGrain | None = None
-    for level in sorted(candidates):
-        thin_sigmas = _sigmas(level)
-        if thin_sigmas is None:
-            continue
+    def _ratio(thin_sigmas: list[float],
+               deep_sigmas: list[float]) -> float | None:
         # Per channel, then the median of the three: one channel can carry a
         # colour cast or a bright star the mask missed, and a median of three is
         # the cheapest way to stop it deciding the answer on its own.
-        ratio = float(np.median([t / d for t, d in zip(thin_sigmas, deep_sigmas,
-                                                       strict=True)]))
-        if not np.isfinite(ratio) or ratio <= 0:
-            continue
-        if best is None or ratio > best.ratio:
-            best = CoverageGrain(
-                thin_frames=int(level), deep_frames=int(deep_level),
-                thin_share=float(counts[level]) / float(total), ratio=ratio)
+        r = float(np.median([t / d for t, d in zip(thin_sigmas, deep_sigmas,
+                                                   strict=True)]))
+        return r if np.isfinite(r) and r > 0 else None
+
+    best: CoverageGrain | None = None
+    if candidates:
+        deep_sigmas = _sigmas_of((ctx.cov_int == deep_level) & ctx.valid_pix)
+        if deep_sigmas is not None:
+            for level in sorted(candidates):
+                thin_mask = (ctx.cov_int == level) & ctx.valid_pix
+                thin_sigmas = _sigmas_of(thin_mask)
+                if thin_sigmas is None:
+                    continue
+                ratio = _ratio(thin_sigmas, deep_sigmas)
+                if ratio is None:
+                    continue
+                if best is None or ratio > best.ratio:
+                    best = CoverageGrain(
+                        thin_frames=int(level), deep_frames=int(deep_level),
+                        thin_share=float(counts[level]) / float(total),
+                        ratio=ratio,
+                        region=GRAIN_REGION_PANEL)
+    if best is None:
+        best = _grain_from_bands(ctx, img, _sigmas_of, _ratio,
+                                 object_sigma, dilate_object_mask_px)
     if best is None:
         return None
     log.info(
         "Coverage grain: %.0f%% of the picture is %d subs deep against a modal "
-        "%d, and measures %.2fx grainier",
+        "%d, and measures %.2fx grainier (%s)",
         best.thin_share * 100.0, best.thin_frames, best.deep_frames, best.ratio,
+        best.region,
     )
     return best
+
+
+def _grain_from_bands(
+    ctx: _LevelContext,
+    img: np.ndarray,
+    sigmas_of,
+    ratio_of,
+    object_sigma: float,
+    dilate_object_mask_px: int,
+) -> CoverageGrain | None:
+    """The depth-band half of :func:`measure_coverage_grain` — see its docstring
+    for why a dithered canvas needs one.
+
+    Thin is under :data:`_GRAIN_BAND_THIN_FRAC` of the picture's own median
+    depth and deep is within :data:`_GRAIN_BAND_DEEP_TOL` of it, which is the
+    banding the 2026-09-19 observer report measured 26 of the owner's mosaics
+    with. Every figure is over the whole covered canvas, so "about a third of
+    this picture" means the picture. Shares the caller's σ and ratio helpers, so
+    the two rules can only ever differ in *which pixels* they compare, never in
+    how.
+    """
+    total = int(ctx.valid_pix.sum())
+    if total <= 0:
+        return None
+    median_depth = float(np.median(ctx.cov_int[ctx.valid_pix]))
+    if not np.isfinite(median_depth) or median_depth <= 0:
+        return None
+    thin = ctx.valid_pix & (ctx.cov_int < _GRAIN_BAND_THIN_FRAC * median_depth)
+    n_thin = int(thin.sum())
+    if n_thin < _GRAIN_MIN_SHARE * total:
+        return None
+    deep = ctx.valid_pix \
+        & (ctx.cov_int >= (1.0 - _GRAIN_BAND_DEEP_TOL) * median_depth) \
+        & (ctx.cov_int <= (1.0 + _GRAIN_BAND_DEEP_TOL) * median_depth)
+    if not deep.any():
+        return None
+    thin_sigmas = sigmas_of(thin)
+    deep_sigmas = sigmas_of(deep)
+    if thin_sigmas is None or deep_sigmas is None:
+        return None
+    ratio = ratio_of(thin_sigmas, deep_sigmas)
+    if ratio is None:
+        return None
+    return CoverageGrain(
+        thin_frames=int(np.median(ctx.cov_int[thin])),
+        deep_frames=int(np.median(ctx.cov_int[deep])),
+        thin_share=float(n_thin) / float(total),
+        ratio=ratio,
+        region=GRAIN_REGION_SPREAD,
+    )
 
 
 def level_by_coverage(

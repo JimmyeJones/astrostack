@@ -1514,6 +1514,12 @@ export interface StackRun {
   // reads both and says which of the two it is looking at. Absent on an older
   // backend, which reads as "not measured" — today's wording.
   grain_verdict?: string | null;
+  // ...and what was found: "panel" (one coverage plateau — a panel shot with
+  // fewer subs, which more light on it evens out) or "spread" (no plateau, the
+  // depth ramps — so part of the thin region is the ragged outer edge, which
+  // further shooting does not narrow). Absent on an older backend, which reads
+  // as "panel" — the wording those runs have always carried.
+  grain_region?: string | null;
   calstat?: string | null;
   options?: Record<string, unknown>;
   engine_version?: string | null;

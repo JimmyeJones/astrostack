@@ -1,5 +1,61 @@
 # Process notes & QA sweep records
 
+## 2026-09-19 — Builder: the open-issue inbox held a measured bug the backlog had never heard of, and the fixture was most of the work (v0.470.0)
+
+*(Builder, branch `claude/sweet-babbage-ceonap`. Baseline `6449 passed, 2 skipped` in 11m16s with
+`-n 4 --dist worksteal` + the BLAS cap. `ruff` on the touched files is unchanged; `seestack/io/project.py`
+gains 2 findings, both of them the file's own existing idioms — its 22nd `try/except OperationalError: pass`
+migration block and its 30th `in row.keys()`, which `sqlite3.Row` actually requires — i.e. AGENTS.md §5's
+"match surrounding style" beating ruff's preference, not new debt.)*
+
+**Where the work came from, and it is worth naming because the backlog said otherwise.** The "Bugs (fix these
+first)" section reads as drained: every open entry is gated on data an agent cannot supply, or is a recorded
+stand-down. The Ideas sections are picked over in the same way. What was *not* drained was the **GitHub issue
+inbox**: observer issue #952 had been filed at 07:19 that morning, against the deployed build and verified
+byte-identical on `origin/main`, with 26 mosaics' worth of measurements and three separable findings. It had
+not reached `docs/IMPROVEMENTS.md` yet. **When the backlog looks dry, read the open issues before concluding
+it is** — this is the second run to find its whole task there (the first was 2026-09-15).
+
+**The method that mattered: build the fixture the bug needs, then assert the fixture's own shape.** Every
+existing fixture in `tests/test_coverage_grain.py` is a `np.full` plateau, which is exactly why the bug
+survived — the rule under test is "does one integer coverage level hold a tenth of the canvas?", and a
+plateau always answers yes. Reproducing it needed a coverage map built the way a real one is built: one
+rectangle per sub, jittered by a dither, re-pointed night to night. That took four rounds of parameter search
+against the issue's own table (79–1,392 distinct levels, modal share 2–17.5 %, **zero** levels over the bar),
+and the fixtures now **assert those properties before asserting anything about the measurement**, so a future
+change that makes them plateau fails loudly instead of passing for the wrong reason.
+
+**The design that had to be abandoned, recorded so it is not re-attempted from scratch.** The first two
+shapes both failed on the same rock — *a synthetic canvas cannot stand in for the owner's geometry*:
+
+1. **Gate the new rule on what the app's own border trim leaves.** Principled, and directly supported by the
+   issue's control #1 (single fields 0.9 % thin after the trim, mosaics 10–30 %). But no synthetic mosaic I
+   could build reproduced the second number: mine came out at 1.4–7 %, because a regular grid's ramp is
+   exactly what an axis-aligned rectangle *can* exclude, and the owner's mosaics are raggeder than that.
+   Shipping a gate whose firing branch no test can reach is the "fixture that cannot exhibit its bug" trap
+   wearing the other face, so the gate went.
+2. **Classify the thin region geometrically** — distance inside the covered footprint, normalised by the
+   largest inscribed radius, which is the measure the issue's own control #2 used. It reads the owner's data
+   correctly (0.09–0.11 against 0.24–0.45) and it reads **this repo's fixtures wrong**: `_uneven_canvas` is a
+   stripe against the frame edge and a panel by construction, and the classifier called it an edge. It cannot
+   tell a corner panel from the corner it sits in.
+
+What shipped instead is a statement about **what was found** rather than where it sits: a coverage plateau
+holding a tenth of the canvas is a panel by construction (nothing else in this pipeline makes one), a ramp is
+genuinely either, and the sentence for a ramp *says* it is either instead of prescribing the night that may
+do nothing. Coarser than the classifier, and true — which is the trade the fixtures forced and the right one.
+Both dropped shapes are on the lead in `IMPROVEMENTS.md`, with what would have to be measured to revive them.
+
+**The half worth remembering for next time: a measurement that was silent cannot simply be switched on.** The
+grain note's ending is *"another night on that panel is what evens it out"*, and the issue's control #2 is a
+proof that on these canvases it is a false prescription, not merely an unhelpful one. So the run's second
+commit-sized piece was the *sentence*, on three surfaces, and a new persisted word to steer it. A fix that
+makes a quiet surface speak owes the same attention to what it will say as to whether it speaks.
+
+**Fail-before, six times, by reverting rather than by reasoning:** the band rule, the adjacent-level guard,
+the health-note split and the border-trim promise (Python), and the two frontend branches. Each revert was
+made in the working tree, the suite run, and the file restored from a copy taken first.
+
 ## 2026-09-19 — Builder: shipped v0.469.0/.1 (the binder LEAD's shapes (b) and (a)); `--mosaic --calibration` dogfood CLEAN at v0.469.1
 
 *(Builder, branch `claude/sweet-babbage-eky2mu`, PR #951. Baseline `6431 passed, 2 skipped`

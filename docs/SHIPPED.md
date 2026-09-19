@@ -1,5 +1,117 @@
 # Shipped — the record
 
+## v0.470.0 — 2026-09-19 — the grain measurement had no plateau to stand on, so it said nothing about any real mosaic
+
+*(Builder, branch `claude/sweet-babbage-ceonap`, from observer issue
+[#952](https://github.com/JimmyeJones/astrostack/issues/952), filed the same day against the deployed 0.455.7
+and verified byte-identical on `origin/main`.)*
+
+**What was wrong.** `measure_coverage_grain` picked its thin region by asking which **single integer coverage
+level** held at least `_GRAIN_MIN_SHARE` (10 %) of the canvas. That is a question about a *plateau*, and a
+plateau is what a mosaic has only when every sub of a panel lands on the same pixels. Dither it, re-point it
+night after night, and the per-pixel frame count becomes a near-continuous ramp. Measured by the observer with
+the app's own strided read, object mask and `_robust_stats` over the newest genuine run of every mosaic target
+in the owner's library:
+
+| | min | median | max |
+|---|---|---|---|
+| distinct integer coverage levels on the canvas | 79 | 380 | 1392 |
+| modal level's share of the covered canvas | 2.0 % | 5.3 % | 17.5 % |
+| largest single level **below** the mode | 0.0 % | 1.8 % | 7.4 % |
+| levels clearing the 10 % bar | **0** | **0** | **0** |
+
+`grain_ratio` was non-NULL on **2 of 680** runs, and both of those were single fields. On **26 of 26**
+mosaics the function returned `None` before measuring anything — so `grain_verdict` was `None` everywhere it
+was written for, and five surfaces went quiet: the "How's my stack?" grain note, `PanelSeamsBadge` on
+History / Gallery / Compare, `nextBestMove`'s good rung, `integrationTrend`'s plateau branch and
+`grainProjection`. Worse than quiet on two of them: with `seam_verdict` `flat` and no grain verdict, the chip
+says **"Panels even — the sky matches across the joins, so you shouldn't see seams between them"**, which is
+the exact sentence v0.406.0 shipped to stop. IC 5146_sub run 11 carries it over a canvas **43.8 %** of which
+measures **1.86×** grainier; M 57_sub run 11 over **39.4 %** at **1.73×**.
+
+Taken as *bands* of depth instead — thin under half the canvas's median, deep within ±15 % of it — the same 26
+canvases measure **1.39–1.86×** (median 1.59) over a median **28.8 %** of themselves, every one of them above
+the app's own `_GRAIN_UNEVEN_RATIO` of 1.25, and every one *conservative* against the 1/√depth prediction of
+1.90–2.31 exactly as `CoverageGrain`'s docstring says the clipped σ must be.
+
+**What shipped — the measurement.** `measure_coverage_grain` now asks the question twice. The per-level rule
+is unchanged and still answers first, so every canvas that has a plateau — the bundled sample, every fixture
+in this repo, every run already measured — is byte-for-byte what it was. When it finds nothing, a **band**
+rule takes the thin and deep regions as `_GRAIN_BAND_THIN_FRAC` / `_GRAIN_BAND_DEEP_TOL` of the picture's own
+median depth: deliberately the banding the observer measured with, rather than a new one of our own, because
+those σ ratios are the evidence this rule exists on and a different banding would not be that evidence. The
+two rules share one σ helper and one ratio helper, so they can differ in *which* pixels they compare and never
+in how. Everything reported is over the whole covered canvas, so "about a third of this picture" means the
+picture.
+
+**And a guard on the rule that did fire.** Of the two runs in 680 carrying a ratio, one compares **3,116 subs
+against 3,117** — both levels cleared the 10 % bar, one sub apart — and reported 1.0078 over 15 % of the
+canvas where the bands on that same canvas read 2.27 over 27 %. Grain falls as 1/√depth, so one sub apart is
+0.02 %: the measurement fired and answered about its sky samples, not about depth. A candidate level must now
+be at least `_GRAIN_MAX_THIN_FRAC` shallower (a tenth, predicting ~1.05×), and where that leaves nothing the
+band rule is asked instead of the measurement stopping.
+
+**What shipped — the sentence, because switching the measurement on would otherwise have shipped a wrong
+one.** The note's ending is *"another night on that panel is what evens it out"*, and that is a panel's
+advice. The observer's own control rules out its premise here: a distance transform of each covered footprint
+puts the thin region's median depth-inside at 0.09–0.11 of the largest inscribed radius against 0.24–0.45 for
+the deep region, with **0 %** of thin pixels beyond half that radius — the thin part is the ragged perimeter,
+not an under-shot interior panel, and its width is the spread of the pointings rather than the sub count. It
+is the same shape after another ten nights. So the measurement now carries `region`, persisted as
+`grain_region`: **`"panel"`** when a coverage plateau was found (a frame's footprint is the only thing in this
+pipeline that makes one) or **`"spread"`** when the depth simply ramps. A plateau keeps today's sentence
+exactly; a ramp gets one that names the grain, says grain only comes down with more light, and offers the crop
+— *"Where the thin part is the picture's ragged outer edge, cropping it away is the quicker answer"* — without
+prescribing a night that may do nothing.
+
+**Deliberately a statement about what was found, not a geometric guess about where it sits.** A
+distance-from-the-outline classifier was built and dropped: on this repo's fixtures it cannot tell a corner
+panel from the corner it sits in, and it read the app's own `_uneven_canvas` — a stripe against the frame
+edge, a panel by construction — as an edge. A plateau at a tenth of the canvas *is* a panel; a ramp is
+genuinely either, and the sentence for it says so rather than guessing.
+
+**The third finding, gated on the same measurement.** The ragged-border note offers *"Trim border gives a
+clean, even rectangle"*, and a ramp has no edge for a rectangle to stop at: applying the app's own
+`largest_covered_rect` to HIP 4205_mosaic_sub keeps 37 % of the canvas and **19.5 % of what it keeps** is
+still below half the median depth, still **1.58×** grainier; across the 22 mosaics measured the post-trim thin
+share is 10.1–30.5 %. The trim behaves exactly as designed — its documented bias is to leave fringe in rather
+than crop a panel away — so what changes is the promise, and only on a run that carries a measured spread: it
+becomes the weaker claim its sibling note two blocks down already makes (*"crops to the well-covered part"*)
+and picks up the ratio. The grain note then **stands down** rather than quoting a second, different percentage
+about the same thin part two notes apart, which is the standing clutter complaint (AGENTS.md §1). Every run
+without that measurement keeps the sentence byte for byte.
+
+**The two prescribing surfaces on the Target page read the same word.** `grainProjection`'s clean-but-uneven
+branch and `nextBestMove`'s good rung both said "only more light evens that part out" / "more passes over the
+same mosaic"; on a `spread` they now offer the crop instead. An older backend sends no `grain_region` at all
+and both read it as the panel case — the wording those rows have always carried.
+
+**Upgrade-safe (§9).** `grain_region` is one nullable TEXT column added **without** a `SCHEMA_VERSION` bump,
+the shape `seam_scale`, `transparency_scale` and the four `grain_*` columns already use, so a build that has
+never heard of it can still open a DB this one wrote and the upgrade stays rollable. Every existing run stays
+NULL, which `grain_region_of` answers as `"panel"` — the advice those rows already carry. Additive `GRAINREG`
+FITS card, additive optional API field, no on-disk layout change, no default flipped, no threshold moved on a
+canvas that already had an answer. The owner's 26 mosaics pick the measurement up through the existing
+`coverage_backfill` heal on the read that grades them; runs that already carry a ratio are not re-measured.
+
+**Tests (+12 Python, +4 vitest).** The mosaic fixtures build their coverage map the way a real one is built —
+one rectangle per sub, jittered by a dither, re-pointed night to night — and each asserts its own *shape*
+first (over 100 distinct levels, **zero** clearing the bar), because a fixture that stops ramping stops
+exhibiting the bug and would go green for the wrong reason. Covered: a ramping mosaic measured where it was
+silent, its figures inside the observer's measured ranges; a plateau still saying `panel` and a ramp saying
+`spread`; a tight-dither single field and an evenly shot dithered mosaic both still silent; a starved pointing
+on a ramping canvas still measured; the two-levels-one-sub-apart case; the ramp's sentence withdrawing
+"another night on that panel" and the plateau's keeping it; the trim offer's promise withdrawn and kept; the
+column round-tripping and an older DB reading NULL as `panel`; the run listing serving the word. **Fail-before
+verified by four separate scratch reverts** — the band rule, the adjacent-level guard, the note split and the
+trim promise — plus two more on the frontend branches.
+
+**One thing the run did NOT do, filed rather than guessed.** Whether the *deep* band is the right reference on
+a canvas whose median sits in the panel-overlap strips is unmeasured here — the observer's figures are the
+only evidence, and they are the band rule's own. And the `panel`/`spread` word is coarse by design: a ramping
+canvas that is *also* carrying an under-shot panel reads as `spread` and gets the softer sentence. Both are on
+the lead in [`IMPROVEMENTS.md`](IMPROVEMENTS.md).
+
 ## v0.466.2 — 2026-09-19 — the sentence v0.466.1 had just written was itself a whole-canvas claim on a mosaic
 
 *(Builder, branch `claude/sweet-babbage-foh7rz`, the same run, caught by re-reading the new copy against the

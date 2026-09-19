@@ -19,6 +19,7 @@ from seestack.io.project import readable_frame_path
 from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, preview_crop_json
 from seestack.stackhealth import (
+    grain_region_of,
     grain_verdict,
     stored_hazy_verdict_for,
     stored_seam_verdict_for,
@@ -1020,6 +1021,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             seam_residual=r.seam_residual,
             seam_verdict=stored_seam_verdict_for(r),
             grain_verdict=grain_verdict(r.grain_ratio),
+            grain_region=grain_region_of(r),
             calstat=r.calstat,
             options=_parse_options(r.options_json),
             engine_version=r.engine_version,

@@ -159,6 +159,183 @@ def test_an_all_nan_canvas_declines_rather_than_raising():
 
 
 # --------------------------------------------------------------------------
+# a canvas that ramps instead of stepping (issue #952)
+# --------------------------------------------------------------------------
+# Every fixture above is a flat-plateau coverage map — `np.full` blocks at 3 / 6
+# / 12 / 40 subs — and that is the shape the `_GRAIN_MIN_SHARE`-per-*integer
+# level* rule was written against. A mosaic dithered across many nights does not
+# have that shape: the per-pixel frame count is a near-continuous ramp, and on
+# the owner's own library (2026-09-19) it spread over 79-1,392 distinct integer
+# levels with **not one level clearing the bar on any of 26 mosaics**. So the
+# measurement returned None on every mosaic it exists for, and the five surfaces
+# that read it went quiet — including the chip that then said "Panels even" over
+# a canvas 1.86x grainier across 44 % of itself.
+#
+# These fixtures build the coverage map the way the real one is built: one
+# rectangle per sub, jittered by a dither, re-pointed night to night. Nothing is
+# asserted about them that is not first asserted about their *shape* — a fixture
+# that stops ramping stops exhibiting the bug, and would go green for the wrong
+# reason.
+
+def _dithered_coverage(panels=3, n_per_visit=12, panel_h=170, panel_w=240,
+                       step=0.80, nights=20, night_drift=0.20, dither=0.03,
+                       starve=None, starve_frac=0.15, seed=3):
+    """Per-pixel frame counts for a dithered, re-pointed mosaic.
+
+    ``panels`` x ``panels`` pointings stepping ``step`` of a frame, each visited
+    on ``nights`` nights; every night carries its own pointing offset
+    (``night_drift`` of a frame) and every sub its own dither. ``starve`` names a
+    panel that gets ``starve_frac`` of the visits — an under-shot panel, as
+    opposed to the ragged outline the drift leaves on every edge.
+    """
+    rng = np.random.default_rng(seed)
+    dy = int(round(panel_h * step))
+    dx = int(round(panel_w * step))
+    pad_y = int(round(panel_h * (night_drift + dither))) + 2
+    pad_x = int(round(panel_w * (night_drift + dither))) + 2
+    h = panel_h + dy * (panels - 1) + 2 * pad_y
+    w = panel_w + dx * (panels - 1) + 2 * pad_x
+    cov = np.zeros((h, w), dtype=np.int32)
+    for _night in range(nights):
+        oy = int(round(rng.normal(0.0, panel_h * night_drift / 2)))
+        ox = int(round(rng.normal(0.0, panel_w * night_drift / 2)))
+        for py in range(panels):
+            for px in range(panels):
+                scale = starve_frac if (py, px) == starve else 1.0
+                n = max(1, int(round(n_per_visit * scale
+                                     * rng.uniform(0.85, 1.0))))
+                for _ in range(n):
+                    jy = int(round(rng.normal(0.0, panel_h * dither)))
+                    jx = int(round(rng.normal(0.0, panel_w * dither)))
+                    y0 = max(0, min(h - panel_h, pad_y + py * dy + oy + jy))
+                    x0 = max(0, min(w - panel_w, pad_x + px * dx + ox + jx))
+                    cov[y0:y0 + panel_h, x0:x0 + panel_w] += 1
+    return cov
+
+
+def _sky_for(cov, base_sigma=6.0, stars=300, seed=5):
+    """Sky whose grain really does fall as 1/√depth, pixel by pixel, with NaN
+    where nothing landed — so a measured ratio is a fact about the fixture and
+    not about how it was drawn."""
+    rng = np.random.default_rng(seed)
+    h, w = cov.shape
+    depth = np.maximum(cov, 1).astype(np.float32)
+    scale = base_sigma / np.sqrt(depth)
+    rgb = np.empty((h, w, 3), dtype=np.float32)
+    for c in range(3):
+        rgb[..., c] = rng.normal(0.0, 1.0, size=(h, w)).astype(np.float32) * scale
+    rgb[cov == 0] = np.nan
+    for _ in range(stars):                        # something real to mask
+        y = int(rng.integers(6, h - 6))
+        x = int(rng.integers(6, w - 6))
+        if cov[y, x] > 0:
+            rgb[y - 1:y + 2, x - 1:x + 2, :] += 400.0
+    return rgb
+
+
+def _as_map(cov):
+    """The float coverage map a stack writes. Zero-filled, not NaN-filled, which
+    is what the accumulators actually emit — the NaN in these fixtures is in the
+    *image*, where it means "no coverage", exactly as the pipeline has it."""
+    return cov.astype(np.float32)
+
+
+def _levels_over_the_bar(cov) -> int:
+    covered = cov > 0
+    total = int(covered.sum())
+    _, counts = np.unique(cov[covered], return_counts=True)
+    return int((counts >= _GRAIN_MIN_SHARE * total).sum())
+
+
+def test_a_dithered_mosaic_is_measured_instead_of_staying_silent():
+    """The bug, and the fix, on the shape the owner's 26 mosaics have."""
+    cov = _dithered_coverage()
+    # The premise first: this canvas has no plateau for the per-level rule to
+    # find. If a future change makes it plateau, this test stops being about the
+    # bug and says so here rather than passing quietly.
+    assert len(np.unique(cov[cov > 0])) > 100
+    assert _levels_over_the_bar(cov) == 0
+
+    grain = measure_coverage_grain(_sky_for(cov), _as_map(cov))
+    assert grain is not None                       # None before this fix
+    assert grain_verdict(grain.ratio) == "uneven"
+    assert grain.thin_frames < grain.deep_frames
+    # Measured over a substantial part of the picture, and conservative against
+    # the 1/√depth prediction the way `CoverageGrain`'s docstring says it must
+    # be. Both land inside the ranges the observer measured on the real library
+    # (17.8-43.8 % of the canvas, 1.39-1.86x against a prediction of 1.90-2.31).
+    assert 0.15 <= grain.thin_share <= 0.5
+    assert 1.25 <= grain.ratio <= math.sqrt(grain.deep_frames / grain.thin_frames)
+
+
+def test_a_ramping_canvas_says_a_spread_and_a_plateau_says_a_panel():
+    """The word that decides the advice, and what it is a claim about.
+
+    A coverage *level* holding a tenth of the canvas is a panel by construction —
+    nothing but a frame's footprint makes one — so the plateau fixtures keep the
+    panel wording they have always had. A ramp is not a claim either way, and
+    says so: part of it is the outline the pointings leave, which no amount of
+    further shooting narrows.
+    """
+    plateau_rgb, plateau_cov = _uneven_canvas()
+    plateau = measure_coverage_grain(plateau_rgb, plateau_cov)
+    assert plateau is not None and plateau.region == "panel"
+
+    cov = _dithered_coverage()
+    ramp = measure_coverage_grain(_sky_for(cov), _as_map(cov))
+    assert ramp is not None and ramp.region == "spread"
+
+
+def test_a_dithered_single_field_with_a_tight_dither_says_nothing():
+    """A dither of a few pixels leaves a ramp a couple of percent wide, which is
+    what `test_a_thin_region_too_small_to_matter_says_nothing` is about at the
+    plateau end: below :data:`_GRAIN_MIN_SHARE` there is nothing to say, however
+    many distinct levels the canvas happens to hold."""
+    cov = _dithered_coverage(panels=1, panel_h=300, panel_w=420, nights=20,
+                             night_drift=0.02, dither=0.015, n_per_visit=16,
+                             seed=3)
+    assert len(np.unique(cov[cov > 0])) > 100      # it really does ramp
+    assert measure_coverage_grain(_sky_for(cov), _as_map(cov)) is None
+
+
+def test_an_evenly_shot_dithered_mosaic_still_says_nothing():
+    """`test_an_evenly_shot_mosaic_says_nothing` again, on the ramping shape:
+    the new rule must keep the old one's silence, not merely add to it."""
+    cov = _dithered_coverage(panels=2, panel_h=200, panel_w=280, step=0.70,
+                             nights=14, night_drift=0.06, n_per_visit=20,
+                             seed=4)
+    assert _levels_over_the_bar(cov) == 0
+    assert measure_coverage_grain(_sky_for(cov), _as_map(cov)) is None
+
+
+def test_a_starved_panel_on_a_dithered_canvas_is_still_measured():
+    """The band rule is not only about outlines: a pointing that got a sixth of
+    the visits is thin too, and on a ramping canvas it is the only rule that can
+    see it."""
+    cov = _dithered_coverage(panels=2, panel_h=200, panel_w=280, step=0.70,
+                             nights=14, night_drift=0.06, n_per_visit=20,
+                             starve=(0, 0), starve_frac=0.15, seed=4)
+    assert _levels_over_the_bar(cov) == 0
+    grain = measure_coverage_grain(_sky_for(cov), _as_map(cov))
+    assert grain is not None and grain_verdict(grain.ratio) == "uneven"
+
+
+def test_two_levels_one_sub_apart_are_not_a_depth_step():
+    """The one place the per-level rule *did* fire in the owner's 680 runs, and
+    it answered about the wrong pair: levels 3,116 and 3,117 each held a tenth of
+    the canvas, so it reported 1.008x over 15 % of the picture while the depth
+    bands on the same canvas read 2.27x over 27 %. Grain falls as 1/√depth — one
+    sub apart is 0.02 % — so comparing two adjacent levels measures their sky
+    samples, not their depth."""
+    rng = np.random.default_rng(3)
+    h, w = 400, 800
+    cov = np.full((h, w), 3117, dtype=np.int32)
+    cov[:, :300] = 3116
+    rgb = rng.normal(0.0, 3.0, size=(h, w, 3)).astype(np.float32)
+    assert measure_coverage_grain(rgb, cov.astype(np.float32)) is None
+
+
+# --------------------------------------------------------------------------
 # the verdict
 # --------------------------------------------------------------------------
 
@@ -190,6 +367,72 @@ def test_the_health_panel_explains_the_grainier_panel():
     assert note.action is None
     # …and it says so, in both endings.
     assert "grain only comes down with more light" in note.message
+
+
+def test_a_ramping_canvas_is_not_sent_out_for_another_night_on_that_panel():
+    """The second half of the 2026-09-19 observer report, and the reason the
+    measurement could not simply be switched on: the note's own wording — "that
+    corner has 3 subs where the rest has 6, another night on that panel evens it
+    out" — is a panel's advice, and on a ramping canvas part of the thin region
+    is the outline the pointings leave, whose width is the pointing spread. It is
+    the same shape after another ten nights."""
+    notes = stack_health(
+        _run(grain_ratio=1.59, grain_thin_frames=26, grain_deep_frames=224,
+             grain_thin_share=0.25, grain_region="spread",
+             coverage_thin_frac=0.0),
+        _frames())
+    note = next(n for n in notes if n.kind == "grain_uneven")
+    assert "25%" in note.message and "1.6×" in note.message
+    assert "26 subs" in note.message and "224" in note.message
+    assert "another night on that panel" not in note.message
+    assert "ragged outer edge" in note.message
+    assert "grain only comes down with more light" in note.message
+    assert note.action is None
+
+
+def test_a_plateau_keeps_the_panel_sentence_it_has_always_had():
+    """The same run with a *level* behind it, not a ramp — and with no word at
+    all, which is every run recorded before the column existed. Both keep the
+    sentence byte for byte."""
+    for region in ("panel", None):
+        notes = stack_health(
+            _run(grain_ratio=1.43, grain_thin_frames=3, grain_deep_frames=6,
+                 grain_thin_share=0.2257, grain_region=region), _frames())
+        note = next(n for n in notes if n.kind == "grain_uneven")
+        assert "Part of this mosaic is thinner than the rest" in note.message
+        assert "ragged outer edge" not in note.message
+
+
+def test_the_border_trim_stops_promising_a_clean_rectangle_it_cannot_cut():
+    """The third finding of the same report, measured on the owner's own library:
+    `largest_covered_rect` keeps 37 % of one of his mosaics and 19.5 % of what it
+    keeps is *still* below half the median depth, at 1.58x the grain of the rest.
+    A ramp has no edge for a rectangle to stop at. So a run that carries a
+    measured depth spread trades the promise for what the trim really does — and
+    the grain note stands down rather than quoting a second percentage about the
+    same thin part two notes apart."""
+    run = _run(coverage_thin_frac=0.55, coverage_max=12, grain_ratio=1.58,
+               grain_thin_frames=26, grain_deep_frames=224,
+               grain_thin_share=0.25, grain_region="spread")
+    notes = stack_health(run, _frames())
+    coverage = next(n for n in notes if n.kind == "coverage")
+    assert "clean, even rectangle" not in coverage.message
+    assert "crops to the well-covered part" in coverage.message
+    assert "1.6×" in coverage.message
+    assert coverage.action == "trim_border"          # the button is untouched
+    assert not [n for n in notes if n.kind == "grain_uneven"]
+
+
+def test_a_thin_panel_keeps_the_border_trims_own_promise():
+    """The same offer on every run that carries no depth-spread measurement — a
+    single field, an evenly covered mosaic, a thin *panel*, or anything recorded
+    before the word existed. Byte for byte what it was."""
+    run = _run(coverage_thin_frac=0.55, coverage_max=12, grain_ratio=1.43,
+               grain_thin_frames=3, grain_deep_frames=6, grain_thin_share=0.2257)
+    coverage = next(n for n in stack_health(run, _frames())
+                    if n.kind == "coverage")
+    assert coverage.message.endswith(
+        "Trim border gives a clean, even rectangle.")
 
 
 def test_a_panel_only_minutes_behind_is_not_sent_out_for_another_night():
@@ -629,6 +872,50 @@ def test_a_stack_stamps_the_grain_step_on_the_header_and_the_run(
     assert run.grain_deep_frames == int(header["GRAINDEP"])
     assert run.grain_thin_share == pytest.approx(float(header["GRAINSHR"]))
     assert grain_verdict(run.grain_ratio) == "uneven"
+    # ...and *what* was found travels with the four figures, on both, so nothing
+    # downstream has to guess which advice the numbers license.
+    assert run.grain_region == header["GRAINREG"] == "panel"
+
+
+def test_the_region_word_round_trips_and_an_older_db_simply_has_none(tmp_path):
+    """The column is additive and un-versioned, like the four figures beside it:
+    a DB written before it existed opens, gains it, and reads NULL — which
+    :func:`grain_region_of` answers as the panel wording those rows have always
+    carried."""
+    import sqlite3
+
+    from seestack.io.project import Project
+    from seestack.stackhealth import grain_region_of
+
+    proj = Project.create(tmp_path / "t", name="region")
+    try:
+        run_id = proj.add_stack_run(_run(id=None, grain_region="spread"))
+        back = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert back.grain_region == "spread"
+        assert grain_region_of(back) == "spread"
+        # The update path writes it beside the ratio it belongs to.
+        assert proj.set_stack_coverage_grain(run_id, 1.6, 26, 224, 0.25, "panel")
+        assert next(r for r in proj.iter_stack_runs()
+                    if r.id == run_id).grain_region == "panel"
+        db = proj.db_path
+    finally:
+        proj.close()
+
+    # An older build's DB: drop the column and re-open.
+    with sqlite3.connect(db) as conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(stack_runs)")
+                if r[1] != "grain_region"]
+        conn.execute("CREATE TABLE old AS SELECT "
+                     + ", ".join(cols) + " FROM stack_runs")
+        conn.execute("DROP TABLE stack_runs")
+        conn.execute("ALTER TABLE old RENAME TO stack_runs")
+    proj = Project.open(tmp_path / "t")
+    try:
+        rows = list(proj.iter_stack_runs())
+        assert rows and rows[0].grain_region is None
+        assert grain_region_of(rows[0]) == "panel"
+    finally:
+        proj.close()
 
 
 def test_a_single_field_run_is_healed_for_free_without_opening_a_file(tmp_path):

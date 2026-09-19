@@ -22,7 +22,11 @@ import statistics
 from dataclasses import dataclass
 from typing import Iterable
 
-from seestack.bg.coverage_leveling import SEAM_ESTIMATOR_GENERATION
+from seestack.bg.coverage_leveling import (
+    GRAIN_REGION_PANEL,
+    GRAIN_REGION_SPREAD,
+    SEAM_ESTIMATOR_GENERATION,
+)
 from seestack.io.project import FrameRow, StackRunRow
 from seestack.session_recap import bucket_reject_reason
 
@@ -572,6 +576,114 @@ def uneven_grain_verdict(run: StackRunRow) -> str | None:
     return grain_verdict(run.grain_ratio)
 
 
+
+def grain_region_of(run: StackRunRow) -> str:
+    """Which of the two a run's grainy region is, defaulting to ``"panel"``.
+
+    ``"panel"`` is the answer every run recorded before the column existed gets,
+    and it keeps the sentence those rows have always carried. Only a measurement
+    can produce ``"spread"``, whose sentence withdraws the "another night on that
+    panel" prescription — and withdrawing advice is not something a surface
+    should do from an absent column.
+
+    Public and shared for the same reason :func:`grain_verdict` is: the "How's my
+    stack?" note and the Target page's projection are two surfaces prescribing
+    from one measurement, and the way they come to disagree is each having its
+    own opinion about it.
+    """
+    region = getattr(run, "grain_region", None)
+    return (GRAIN_REGION_SPREAD if region == GRAIN_REGION_SPREAD
+            else GRAIN_REGION_PANEL)
+
+
+def _coverage_note_spoke(run: StackRunRow) -> bool:
+    """Did the ragged-border offer fire for this run?
+
+    Its own condition, read from one place so the grain note can tell whether
+    the thing it is about to say has already been said — with a button attached —
+    twenty ranks above it. Two percentages about one edge, two notes apart, is
+    the clutter the owner's standing complaint is about.
+    """
+    thin_share = run.coverage_thin_frac
+    return (thin_share is not None and run.coverage_max >= _COVERAGE_MIN_PEAK
+            and thin_share >= _COVERAGE_THIN_SHARE)
+
+
+def _grain_panel_note(scored, run: StackRunRow, accepted, thin: int,
+                      deep: int) -> None:
+    """The grain note for a thin **panel** — the sentence, unchanged, that this
+    note has carried since it shipped.
+
+    Lifted into its own function when the *edge* case gained a sentence of its
+    own, so the two prescriptions sit side by side and neither can be edited
+    into the other by accident. Everything below is the original reasoning.
+    """
+    # …and *whether it is worth going out for* is a second question, which
+    # this note used to answer without asking. A depth on its own cannot
+    # answer it: 3 subs against 6 reads 1.4× grainier whether the shortfall
+    # is half a minute or three hours. The panel map on the same page has
+    # asked it since v0.406.2 — and on the bundled mosaic sample the two
+    # printed opposite instructions about the same panel, the map's
+    # "it's only a few minutes' difference at this stage, so it evens out on
+    # its own as you keep shooting" directly above this note's "another
+    # night on that panel is what evens it out". *(The map's half of that
+    # quote is history: the same fixed phrase then turned out to describe a
+    # 30-second gap as "a few minutes", and ``_verdict_text`` now names the
+    # shortfall in the clause below's exact words. The two sentences on that
+    # page agree on the prescription because of this block, and on the size
+    # of the gap because of that one.)*
+    #
+    # So convert the shortfall to *time* and read it against the map's own
+    # :data:`~seestack.mosaicmap.THIN_MIN_SHORTFALL_S` rather than inventing
+    # a second threshold here — that constant's whole reason for existing
+    # ("this stops a brand-new mosaic from being nagged about noise in its
+    # first half hour") is this note's case too. The measurement is
+    # untouched either way; only the closing clause moves, exactly as
+    # v0.406.2's ``behind`` branch kept the map's fact and dropped its nag.
+    # An unreadable sub exposure keeps today's sentence: we cannot show the
+    # shortfall is small, so we do not claim it.
+    #
+    # One threshold applied to one *quantity* only holds if both sides read
+    # the quantity the same way, and for a while they did not: the map sums
+    # each panel's actual exposures while this converted a depth with a plain
+    # median, which on a target shot at two lengths is a length some of the
+    # subs were not shot at. So :func:`_typical_sub_exposure` is the engine's
+    # own answer (the mean once the lengths genuinely differ), whose product
+    # with a count *is* the light collected — see its docstring for the
+    # reproduction, where the two surfaces disagreed by 2 minutes across the
+    # threshold and printed opposite instructions about one panel.
+    from seestack.mosaicmap import THIN_MIN_SHORTFALL_S
+    from seestack.sharecard import format_duration
+
+    sub_s = _typical_sub_exposure(accepted)
+    shortfall_s = (max(deep - thin, 0) * sub_s) if sub_s else None
+    catches_up = (shortfall_s is not None
+                  and 0.0 < shortfall_s < THIN_MIN_SHORTFALL_S)
+    measured = (
+        "Part of this mosaic is thinner than the rest — about "
+        f"{float(run.grain_thin_share or 0.0):.0%} of the picture has "
+        f"{thin} sub{'' if thin == 1 else 's'} on it where most of it "
+        f"has {deep}, so that part looks about "
+        f"{float(run.grain_ratio or 0.0):.1f}× grainier.")
+    ending = (
+        " Processing can't fix that — grain only comes down with more "
+        f"light — but it's only about {format_duration(shortfall_s)} "
+        "behind, so it evens out on its own as you keep shooting."
+        if catches_up else
+        " That isn't something processing can fix — grain only comes down "
+        "with more light — so another night on that panel is what evens "
+        "it out.")
+    scored.append((42, HealthNote(
+        kind="grain_uneven",
+        severity="info",
+        message=measured + ending,
+        # No in-app fix exists, and offering one would be the untruth this
+        # note is here to remove. The panel map on the Target page already
+        # says *which* panel is behind.
+        action=None,
+    )))
+
+
 def background_reads_clean(noise_sigma: float | None) -> bool:
     """Has this run's **own** background been measured, and measured clean?
 
@@ -949,6 +1061,14 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # ``grainProjection.ts`` says "across most of it" on exactly this verdict.
     # Read from the shared ``uneven_grain_verdict`` the note below already uses,
     # rather than a second opinion about the same four figures.
+    # Is this run's grainy region the dithered outline rather than an under-shot
+    # panel? Two notes below need the answer — the border-trim offer, whose
+    # promise it withdraws, and the grain note, which stands down when the offer
+    # has already said it — so it is read once, here, from the shared pair the
+    # rest of the app reads it from.
+    grain_spread = (uneven_grain_verdict(run) == "uneven"
+                    and grain_region_of(run) == GRAIN_REGION_SPREAD)
+
     calibrated = bool(run.calstat and run.calstat.strip())
     if not calibrated:
         if background_reads_clean(run.noise_sigma):
@@ -983,16 +1103,39 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # whole canvas the note stays quiet. A run stamped under the older
     # peak-referenced rule is re-derived by ``coverage_backfill`` on the read that
     # grades it, and drops to None (silent) when its map is gone.
+    # **"a clean, even rectangle" is a promise, and on a canvas whose depth is a
+    # ramp it is not one the trim can keep** *(2026-09-19, from the observer
+    # report that made the grain step measurable on a dithered canvas at all)*.
+    # The trim behaves exactly as designed — its documented bias is to leave
+    # fringe in rather than crop a panel away — but a ramp has no edge for a
+    # rectangle to stop at, and on the owner's own library 10–30 % of what the
+    # trim keeps is still thin, at 1.39–2.22× the grain of the rest. So a run
+    # that carries a *measured* depth spread trades the promise for the weaker
+    # claim its sibling note two blocks down already makes ("crops to the
+    # well-covered part"), and picks up the ratio — at which point the grain note
+    # below has nothing left to add and stands down rather than quoting a second,
+    # different percentage about the same thin part two notes apart. Every run
+    # without that measurement (a single field, an evenly covered mosaic, a thin
+    # *panel* rather than a ramp, anything recorded before the word existed)
+    # keeps today's sentence byte for byte.
     thin_share = run.coverage_thin_frac
-    if (thin_share is not None and run.coverage_max >= _COVERAGE_MIN_PEAK
-            and thin_share >= _COVERAGE_THIN_SHARE):
+    if _coverage_note_spoke(run):
+        if grain_spread:
+            message = (
+                f"About {thin_share * 100:.0f}% of this picture is a thin edge — "
+                "far fewer frames landed there than on the rest, and it measures "
+                f"about {float(run.grain_ratio or 0.0):.1f}× grainier. Trim "
+                "border crops to the well-covered part; what stays only evens "
+                "out with more light on it.")
+        else:
+            message = (f"About {thin_share * 100:.0f}% of this picture is a thin "
+                       "edge — far fewer frames landed there than on the rest, so "
+                       "it's noisier and uneven. Trim border gives a clean, even "
+                       "rectangle.")
         scored.append((20, HealthNote(
             kind="coverage",
             severity="info",
-            message=(f"About {thin_share * 100:.0f}% of this picture is a thin "
-                     "edge — far fewer frames landed there than on the rest, so "
-                     "it's noisier and uneven. Trim border gives a clean, even "
-                     "rectangle."),
+            message=message,
             action="trim_border",
         )))
 
@@ -1277,70 +1420,38 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     if grain == "uneven":
         thin = int(run.grain_thin_frames or 0)
         deep = int(run.grain_deep_frames or 0)
-        # …and *whether it is worth going out for* is a second question, which
-        # this note used to answer without asking. A depth on its own cannot
-        # answer it: 3 subs against 6 reads 1.4× grainier whether the shortfall
-        # is half a minute or three hours. The panel map on the same page has
-        # asked it since v0.406.2 — and on the bundled mosaic sample the two
-        # printed opposite instructions about the same panel, the map's
-        # "it's only a few minutes' difference at this stage, so it evens out on
-        # its own as you keep shooting" directly above this note's "another
-        # night on that panel is what evens it out". *(The map's half of that
-        # quote is history: the same fixed phrase then turned out to describe a
-        # 30-second gap as "a few minutes", and ``_verdict_text`` now names the
-        # shortfall in the clause below's exact words. The two sentences on that
-        # page agree on the prescription because of this block, and on the size
-        # of the gap because of that one.)*
-        #
-        # So convert the shortfall to *time* and read it against the map's own
-        # :data:`~seestack.mosaicmap.THIN_MIN_SHORTFALL_S` rather than inventing
-        # a second threshold here — that constant's whole reason for existing
-        # ("this stops a brand-new mosaic from being nagged about noise in its
-        # first half hour") is this note's case too. The measurement is
-        # untouched either way; only the closing clause moves, exactly as
-        # v0.406.2's ``behind`` branch kept the map's fact and dropped its nag.
-        # An unreadable sub exposure keeps today's sentence: we cannot show the
-        # shortfall is small, so we do not claim it.
-        #
-        # One threshold applied to one *quantity* only holds if both sides read
-        # the quantity the same way, and for a while they did not: the map sums
-        # each panel's actual exposures while this converted a depth with a plain
-        # median, which on a target shot at two lengths is a length some of the
-        # subs were not shot at. So :func:`_typical_sub_exposure` is the engine's
-        # own answer (the mean once the lengths genuinely differ), whose product
-        # with a count *is* the light collected — see its docstring for the
-        # reproduction, where the two surfaces disagreed by 2 minutes across the
-        # threshold and printed opposite instructions about one panel.
-        from seestack.mosaicmap import THIN_MIN_SHORTFALL_S
-        from seestack.sharecard import format_duration
-
-        sub_s = _typical_sub_exposure(accepted)
-        shortfall_s = (max(deep - thin, 0) * sub_s) if sub_s else None
-        catches_up = (shortfall_s is not None
-                      and 0.0 < shortfall_s < THIN_MIN_SHORTFALL_S)
-        measured = (
-            "Part of this mosaic is thinner than the rest — about "
-            f"{float(run.grain_thin_share or 0.0):.0%} of the picture has "
-            f"{thin} sub{'' if thin == 1 else 's'} on it where most of it "
-            f"has {deep}, so that part looks about "
-            f"{float(run.grain_ratio or 0.0):.1f}× grainier.")
-        ending = (
-            " Processing can't fix that — grain only comes down with more "
-            f"light — but it's only about {format_duration(shortfall_s)} "
-            "behind, so it evens out on its own as you keep shooting."
-            if catches_up else
-            " That isn't something processing can fix — grain only comes down "
-            "with more light — so another night on that panel is what evens "
-            "it out.")
-        scored.append((42, HealthNote(
-            kind="grain_uneven",
-            severity="info",
-            message=measured + ending,
-            # No in-app fix exists, and offering one would be the untruth this
-            # note is here to remove. The panel map on the Target page already
-            # says *which* panel is behind.
-            action=None,
-        )))
+        # …and *which of the two things* the thin part is comes first, because
+        # it decides whether any of that reasoning applies at all. A dithered
+        # outline is not a panel that is behind: its width is set by the pointing
+        # spread, so it is the same shape after another ten nights as after the
+        # first, and "another night on that panel" is a false prescription there
+        # rather than a merely unhelpful one. Every run recorded before the word
+        # was measured reads as ``"panel"`` and keeps the sentence it had.
+        if grain_spread and _coverage_note_spoke(run):
+            pass  # already said, with the trim button attached — see above
+        elif grain_spread:
+            scored.append((42, HealthNote(
+                kind="grain_uneven",
+                severity="info",
+                message=(
+                    "About "
+                    f"{float(run.grain_thin_share or 0.0):.0%} of this picture "
+                    f"is thinner than the rest — around {thin} subs on it "
+                    f"against {deep} across most of it — so it measures about "
+                    f"{float(run.grain_ratio or 0.0):.1f}× grainier. That "
+                    "isn't something processing can fix: grain only comes down "
+                    "with more light. Where the thin part is the picture's "
+                    "ragged outer edge, cropping it away is the quicker "
+                    "answer."),
+                # Deliberately no "another night on that panel": the depth here
+                # is a ramp rather than a plateau, so some of the thin part is
+                # the outline the pointings leave, which further shooting does
+                # not narrow. Naming both answers and letting the picture decide
+                # beats prescribing the one that may do nothing.
+                action=None,
+            )))
+        else:
+            _grain_panel_note(scored, run, accepted, thin, deep)
 
     seam = run.seam_residual
     # Read on the scale the figure was written on, not on today's: a run stacked

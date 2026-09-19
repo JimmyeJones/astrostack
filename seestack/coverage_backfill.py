@@ -489,7 +489,7 @@ def backfill_coverage_grain(project: Project, run: StackRunRow) -> bool:
         try:
             project.set_stack_coverage_grain(
                 run.id, ratio, int(result.thin_frames), int(result.deep_frames),
-                thin_share)
+                thin_share, str(result.region))
         except sqlite3.Error:
             log.debug("could not record coverage grain for run %s", run.id,
                       exc_info=True)
@@ -497,4 +497,5 @@ def backfill_coverage_grain(project: Project, run: StackRunRow) -> bool:
     run.grain_thin_frames = int(result.thin_frames)
     run.grain_deep_frames = int(result.deep_frames)
     run.grain_thin_share = thin_share
+    run.grain_region = str(result.region)
     return True

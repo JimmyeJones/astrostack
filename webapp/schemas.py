@@ -900,6 +900,15 @@ class StackRunOut(BaseModel):
     # older frontend ignores it and a run with no measurement reads as None,
     # which is exactly today's wording.
     grain_verdict: str | None = None
+    # ...and **what was found**, because the two take different advice: "panel"
+    # (one coverage plateau — a panel shot with fewer subs, which more light on
+    # it evens out) or "spread" (no plateau, the depth ramps — so part of the
+    # thin region is the picture's ragged outer edge, whose width comes from the
+    # pointing spread rather than the sub count and which further shooting does
+    # not narrow). Always present beside an "uneven" verdict; "panel" is what a
+    # run measured before the word existed reads as, which is the wording those
+    # runs have always carried.
+    grain_region: str | None = None
     # Which calibration masters were applied to the lights ("dark+flat",
     # "bias+flat", "flat", …), or None when the stack was uncalibrated / for
     # pre-schema-7 runs; lets a card show a "dark+flat" chip at a glance.

@@ -3704,6 +3704,8 @@ def run_stack(
                                    "subs per pixel most of the canvas is at")
         header_meta["GRAINSHR"] = (round(float(coverage_grain.thin_share), 4),
                                    "that thin region's share of the canvas")
+        header_meta["GRAINREG"] = (str(coverage_grain.region),
+                                   "thin region: panel (more subs) or edge (crop)")
     paths = write_stack_outputs(
         project_dir=project.project_dir,
         rgb=result_image,
@@ -3881,6 +3883,10 @@ def run_stack(
                                if coverage_grain is not None else None),
             grain_thin_share=(round(float(coverage_grain.thin_share), 4)
                               if coverage_grain is not None else None),
+            # ...and what that thin region *is*, because an under-shot panel and
+            # a dithered outline take opposite advice.
+            grain_region=(str(coverage_grain.region)
+                          if coverage_grain is not None else None),
             # How long this run took, so the *next* one can be estimated from it
             # rather than from a model of the stacker (see
             # :mod:`seestack.stacktime`). Measured around the whole run —
