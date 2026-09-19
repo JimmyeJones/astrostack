@@ -54,6 +54,29 @@ payload came back `"gain": 80.0` beside `"gains": [80.0]`. Single-gain is the wh
 base, and the new `dominant_gain` is the same number the median was there — which is the
 property the change is worth having only if it holds.
 
+**The third task (v0.469.2) came from the cheapest lever in this file, and it is worth naming
+because it keeps working: after fixing one reader of a value, grep for the *others*, then read
+the docstring of the line you are about to change.** `grep -n 'f.gain\|\.gain for f'` over
+`webapp/` and `seestack/` returned five sites; three were already right, and the two that were
+not are v0.469.2. One of them — `stackhealth.recommended_dark_spec` — is the instructive one:
+its own docstring spends a paragraph arguing that a median across two sub lengths names a
+length nobody shot, "offered under the words *the same settings as your subs*", and the very
+next line took `statistics.median` of the **gain**. v0.457.0 had fixed the exposure half and
+left the gain sitting under the paragraph that condemns it. **A docstring that argues a
+principle is a test of the lines beneath it**, and nothing in a suite checks that. This is the
+same shape as v0.468.1 ("the comment saying why a bias was exempt argued *for* the gate") and
+v0.465.1's "read the comment the *last* fix left behind" — three finds now from one habit.
+
+**And one generalisation this run did NOT chase, filed here rather than in the backlog because
+it is a method, not an item:** the family is "a representative value is a claim that the set is
+uniform". The app has now corrected it for exposure (v0.456.0/v0.457.0), temperature (v0.464.0)
+and gain (v0.466.0/v0.469.x), each time in several surfaces at once and each time a run later
+than the first. The next agent in this area should ask, of any new `_median`/`_med` over a
+per-frame column, **which of the three kinds of number it is** — a quantity with a correction
+(exposure: `scale_dark_to_light`), a continuous drift (temperature: a tolerance wide enough to
+cover a night), or a discrete setting with no correction anywhere (gain: name the mode and the
+set, never the middle). The answer picks the fix, and it is not the same fix.
+
 
 ## 2026-09-19 — Scout: QA swept the *newest* code (v0.455–0.468 calibration) + a CLEAN `--mosaic` dogfood at v0.468.1; observer #878 confirmed dormant on live data
 
