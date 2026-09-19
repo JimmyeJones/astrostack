@@ -52,6 +52,25 @@ proof that on these canvases it is a false prescription, not merely an unhelpful
 commit-sized piece was the *sentence*, on three surfaces, and a new persisted word to steer it. A fix that
 makes a quiet surface speak owes the same attention to what it will say as to whether it speaks.
 
+**Dogfood `--mosaic` after the change — CLEAN, and run to check one specific thing.** The bundled 2×2 is a
+*plateau* canvas (3/6/12/21 subs, `np.full` blocks by construction), so the per-level rule still answers first
+on it and every sentence it produces must be byte-identical. It is: `[health/grain_uneven]` reads *"about 23 %
+of the picture has 3 subs on it where most of it has 6, so that part looks about 1.4× grainier… it's only
+about 30 s behind, so it evens out on its own as you keep shooting"*, word for word what the 2026-09-19
+pre-change pass recorded, and the readiness card still carries *"only more light evens that part out"*. Mosaic
+trim 7.9 % (bar ~15 %). Nothing overflowing and no console errors at 1440 px or 420 px on either sample. Page
+heights, phone: `/tonight` 3694 px, mosaic Target 3673 px, `/glossary` 3364 px, `/` 3115 px — **identical to
+the digit** to the pass recorded earlier the same day, which is the point: this change must be invisible on
+every canvas that already had an answer, and on the only canvas the tooling can produce, it is.
+
+**What that CLEAN does not cover, stated so the next run does not over-read it.** The dogfood samples cannot
+produce a ramping canvas at all — both are built from `np.full` coverage blocks — so the *new* branch and its
+new sentence were never in front of a browser. They are covered by the suite's own generated fixtures and by
+the observer's measurements on the real library, and the first real check of the shipped wording will be the
+next observer report. A `shape="ramped"` sample would close that hole and is the obvious next piece of
+tooling; it is not filed as work because nothing yet says the wording is wrong, only that this pass could not
+look at it.
+
 **Fail-before, six times, by reverting rather than by reasoning:** the band rule, the adjacent-level guard,
 the health-note split and the border-trim promise (Python), and the two frontend branches. Each revert was
 made in the working tree, the suite run, and the file restored from a copy taken first.
