@@ -60,3 +60,59 @@ def test_best_frame_ignores_a_rejected_sharper_sub(client, solved_library, data_
     # The sharper frame 0 was set aside, so the best *accepted* look is frame 1.
     assert body["frame_id"] == ids[1]
     assert body["n_accepted"] == 2  # only accepted frames counted
+
+
+def test_the_card_streams_the_target_instead_of_listing_it(
+        client, solved_library, monkeypatch):
+    """The card reads four small fields off one sub and a count, and it was
+    building a `FrameRow` for every accepted sub of the target to get them.
+
+    Fail-before: `list(proj.iter_frames(accepted_only=True))` — 35,894 rows on
+    the owner's deepest target, each carrying its own plate solution, measured
+    at **1,181 ms / 135.3 MB peak** against **858 ms / ~0 MB** for the same
+    pick and the same count (AGENTS.md §10 — this box has an OOM history).
+
+    Asserted structurally rather than by bytes: what the endpoint hands
+    `best_frame` is what decides whether anything is retained, and `best_frame`
+    holds only the winner (pinned in `tests/test_qc_grading.py`).
+    """
+    from seestack.qc.grading import best_frame as real_best_frame
+
+    seen: list[str] = []
+
+    def watching(frames):
+        seen.append(type(frames).__name__)
+        assert not isinstance(frames, (list, tuple)), (
+            f"the endpoint materialised the target as a {type(frames).__name__}")
+        return real_best_frame(frames)
+
+    # The endpoint imports it inside the handler, so the module attribute is
+    # what it will resolve on the call.
+    monkeypatch.setattr("seestack.qc.grading.best_frame", watching)
+    body = client.get("/api/targets/M_42/best-frame").json()
+    assert seen, "best_frame was not called"
+    assert body["n_accepted"] == 3
+
+
+def test_the_accepted_count_is_the_one_the_frames_table_would_give(
+        client, solved_library, data_root):
+    """It comes from `COUNT(*)` now rather than `len()` of the rows the pick
+    walked, and the two are only the same number while they share a filter —
+    so it is pinned against the rows themselves, with a rejected sub present so
+    "all frames" and "accepted frames" are different answers."""
+    _set_qc(data_root, "M_42", {
+        0: {"accept": False, "reject_reason": "user"},
+        1: {"fwhm_px": 2.6, "star_count": 400},
+    })
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            accepted = len(list(proj.iter_frames(accepted_only=True)))
+            everything = len(list(proj.iter_frames()))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert accepted != everything, "the fixture must have a rejected sub"
+    assert client.get("/api/targets/M_42/best-frame").json()["n_accepted"] == accepted

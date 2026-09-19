@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from seestack.io.project import FrameRow, StackRunRow
+from seestack.io.project import FrameHealth, FrameRow, StackRunRow
 from seestack.stackhealth import (
     CLEAN_BACKGROUND_SIGMA,
     background_reads_clean,
@@ -1555,3 +1555,100 @@ def test_the_dark_guides_gain_set_is_silent_when_nothing_recorded_one():
     spec = recommended_dark_spec([_exp_frame(gain=None) for _ in range(3)])
     assert spec.gain is None and spec.gains == ()
     assert recommended_dark_spec([]).gains == ()
+
+
+# ---------------------------------------------------------------------------
+# The record these functions grade a sub through.
+#
+# They read seven small fields and one bit ("did ASTAP locate it?"), and until
+# v0.471.4 the webapp handed them whole `FrameRow`s to do it — `SELECT *`, plate
+# solution and all, once per sub, on a page the owner opens constantly. It now
+# hands them `FrameHealth` records instead (`Project.iter_health_frames`).
+#
+# What these pin is that the *choice of record* cannot move an answer. Asserted
+# against the real functions over the same frames both ways, rather than against
+# a list of the fields they read, because that list is exactly what would go
+# stale when a note starts reading an eighth one.
+# ---------------------------------------------------------------------------
+
+
+def _as_health(frames: list[FrameRow]) -> list[FrameHealth]:
+    """The same subs, as the narrow record — the mapping
+    `Project.iter_health_frames` makes, made here without a database."""
+    return [FrameHealth(
+        id=f.id, accept=f.accept, reject_reason=f.reject_reason,
+        fwhm_px=f.fwhm_px, eccentricity_median=f.eccentricity_median,
+        exposure_s=f.exposure_s, gain=f.gain, solved=f.solved,
+    ) for f in frames]
+
+
+def _mixed_frames() -> list[FrameRow]:
+    """Subs that turned out every way a note can speak about: set aside, tried
+    and failed to locate, not yet reached, located — at two exposures and two
+    gains, so the medians have something to choose between."""
+    out: list[FrameRow] = []
+    for i in range(60):
+        out.append(FrameRow(
+            source_path=f"s{i}.fit",
+            id=i + 1,
+            accept=i % 9 != 0,
+            reject_reason=("solve_failed:no match" if i % 5 == 0
+                           else ("auto:grade:fwhm_px" if i % 9 == 0 else None)),
+            wcs_json=None if i % 5 == 0 or i % 7 == 0 else "{\"c\": 1}",
+            fwhm_px=(2.4 + (i % 11) * 0.1) if i % 4 else None,
+            eccentricity_median=0.3 + (i % 6) * 0.06,
+            exposure_s=10.0 if i % 3 else 30.0,
+            gain=80.0 if i % 4 else 200.0,
+        ))
+    return out
+
+
+def test_the_notes_are_the_same_whichever_record_a_sub_arrives_as():
+    """Every note, in order, with its severity, sentence and action."""
+    frames = _mixed_frames()
+    run = _run(calstat="none", n_frames_used=40)
+
+    def spelled(fs):
+        return [(n.kind, n.severity, n.message, n.action)
+                for n in stack_health(run, fs, noise_ratio=3.1,
+                                      noise_crop_depth=40)]
+
+    assert spelled(frames) == spelled(_as_health(frames))
+    # …and it is not vacuously equal because both are empty.
+    assert len(spelled(frames)) >= 2
+
+
+def test_the_darks_guide_is_the_same_whichever_record_a_sub_arrives_as():
+    """The second function the card hands the same list to."""
+    frames = _mixed_frames()
+    assert recommended_dark_spec(frames) == recommended_dark_spec(
+        _as_health(frames))
+    # The guide really is saying something about this target, not nothing.
+    assert recommended_dark_spec(frames).exposures_s
+
+
+def test_the_located_count_reads_the_bit_and_not_the_header():
+    """`solved` is the one field that is a column on one record and a `bool` on
+    the other, and the unsolved note is the only place it is read — so this is
+    where a divergence would show up as a wrong *number* in a sentence."""
+    # 20 accepted subs, 12 of them tried and failed, which clears the note's
+    # ≥8-tried and ≥30 %-failed bars.
+    frames = [FrameRow(source_path=f"s{i}.fit", id=i + 1, accept=True,
+                       wcs_json=None if i < 12 else "{}",
+                       reject_reason="solve_failed:no stars" if i < 12 else None)
+              for i in range(20)]
+    for fs in (frames, _as_health(frames)):
+        [note] = [n for n in stack_health(_run(), fs) if n.kind == "unsolved"]
+        assert "Only 8 of 20 subs could be located" in note.message
+
+
+def test_a_blank_plate_solution_is_unlocated_on_both_records():
+    """An empty string is "not located", the same as no column at all — the one
+    value where a `wcs_json IS NOT NULL` reading would part from `bool()`."""
+    frames = [FrameRow(source_path=f"s{i}.fit", id=i + 1, accept=True,
+                       wcs_json="" if i < 12 else "{}",
+                       reject_reason="solve_failed:no stars" if i < 12 else None)
+              for i in range(20)]
+    for fs in (frames, _as_health(frames)):
+        [note] = [n for n in stack_health(_run(), fs) if n.kind == "unsolved"]
+        assert "Only 8 of 20" in note.message
