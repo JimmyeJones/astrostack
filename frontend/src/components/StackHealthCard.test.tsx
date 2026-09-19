@@ -149,7 +149,7 @@ describe("StackHealthCard", () => {
     renderCard();
     (await screen.findByText("How to add darks →")).click();
     await waitFor(() =>
-      expect(screen.getByText(/background already measures clean/))
+      expect(screen.getByText(/mostly means hot pixels rather than less grain/))
         .toBeInTheDocument());
     expect(screen.queryByText(/single biggest cleanup/)).toBeNull();
   });

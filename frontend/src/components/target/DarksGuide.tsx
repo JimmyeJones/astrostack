@@ -115,10 +115,18 @@ export function DarksGuide(
         <Stack gap={6} pl={4}>
           <Text size="xs" c="dimmed">
             {backgroundClean
+              // Deliberately says what darks *do* here rather than restating
+              // that the background is clean. The note above already said that,
+              // and on a mosaic it says it with a scope ("across most of it") —
+              // sigma is one figure for the whole canvas, so a second
+              // unqualified copy of the claim down here would be the very
+              // over-claim v0.466.2 removed from the note. "Mostly hot pixels
+              // rather than less grain" is true of every part of any canvas
+              // once the sky is not dark-current-dominated: darks never reduce
+              // shot noise, which is what the thin part of a mosaic has.
               ? "Darks record your camera's own warmth and noise so we can "
-                + "subtract it. This picture's background already measures "
-                + "clean, so here they mostly tidy up hot pixels rather than "
-                + "bring the grain down."
+                + "subtract it — on this picture that mostly means hot pixels "
+                + "rather than less grain."
               : "Darks record your camera's own warmth and noise so we can "
                 + "subtract it — this is the single biggest cleanup for a "
                 + "noisy image."}

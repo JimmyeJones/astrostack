@@ -10,6 +10,7 @@ from seestack.stackhealth import (
     seam_scale_is_current,
     stack_health,
     stored_seam_verdict,
+    uneven_grain_verdict,
 )
 
 
@@ -1447,3 +1448,56 @@ def test_a_calibrated_run_says_nothing_about_darks_however_clean_it_is():
     notes = stack_health(_run(calstat="dark+flat", noise_sigma=0.001),
                          [_frame() for _ in range(10)])
     assert "calibration" not in _kinds(notes)
+
+
+def test_the_clean_sentence_states_the_scope_it_was_measured_over():
+    """On a mosaic, σ is one figure for the whole canvas and is dominated by the
+    part that got the most subs — so "the background here already measures
+    clean" would be the same over-claim in a new place on a canvas this very
+    card calls 1.4× grainier over a quarter of itself.
+
+    The bundled 2×2's own figures (3 subs against 6 over 23 % of the canvas),
+    which is the shape the owner's multi-night mosaics have. Fails before the
+    scope clause: the sentence read "The background here already measures
+    clean" beside a note saying part of it is grainier.
+    """
+    notes = stack_health(
+        _run(calstat=None, noise_sigma=0.001, is_mosaic=True,
+             grain_ratio=1.43, grain_thin_frames=3, grain_deep_frames=6,
+             grain_thin_share=0.2257),
+        [_frame() for _ in range(10)])
+    cal = next(n for n in notes if n.kind == "calibration")
+    assert "Across most of it the background already measures clean" in cal.message
+    assert "The background here" not in cal.message
+    # It is the same page saying both, so the pair has to hold together.
+    grain = next(n for n in notes if n.kind == "grain_uneven")
+    assert "grain only comes down with more light" in grain.message
+
+
+def test_an_evenly_deep_picture_keeps_the_unqualified_clean_sentence():
+    """A single field, and a mosaic whose panels match, have nothing to scope —
+    the scope clause must not leak onto them."""
+    for extra in ({}, dict(is_mosaic=True, grain_ratio=1.0,
+                           grain_thin_frames=6, grain_deep_frames=6,
+                           grain_thin_share=0.2)):
+        notes = stack_health(_run(calstat=None, noise_sigma=0.001, **extra),
+                             [_frame() for _ in range(10)])
+        cal = next(n for n in notes if n.kind == "calibration")
+        assert "The background here already measures clean" in cal.message
+        assert "Across most of it" not in cal.message
+
+
+def test_uneven_grain_verdict_is_the_one_reader_of_those_four_figures():
+    """Both sentences that depend on it read the same function — a note that
+    cannot explain its ratio must not claim one, in either place."""
+    full = dict(grain_ratio=1.43, grain_thin_frames=3, grain_deep_frames=6,
+                grain_thin_share=0.2257)
+    assert uneven_grain_verdict(_run(**full)) == "uneven"
+    # Any missing figure withdraws the verdict, and with it the scope clause.
+    for missing in ("grain_thin_frames", "grain_deep_frames", "grain_thin_share"):
+        partial = dict(full, **{missing: None})
+        assert uneven_grain_verdict(_run(**partial)) is None
+        notes = stack_health(_run(calstat=None, noise_sigma=0.001, **partial),
+                             [_frame() for _ in range(10)])
+        cal = next(n for n in notes if n.kind == "calibration")
+        assert "Across most of it" not in cal.message, missing

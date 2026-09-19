@@ -1,5 +1,50 @@
 # Shipped — the record
 
+## v0.466.2 — 2026-09-19 — the sentence v0.466.1 had just written was itself a whole-canvas claim on a mosaic
+
+*(Builder, branch `claude/sweet-babbage-foh7rz`, the same run, caught by re-reading the new copy against the
+card it now sits beside.)*
+
+**What was still wrong after v0.466.1.** That fix stopped the calibration note claiming a speckle the
+readiness card had measured away. Its replacement sentence — *"The background here already measures clean"*
+— is a claim about **the whole picture**, and on a mosaic `noise_sigma` is not: it is one robust estimate
+over the finished canvas (`stacker._compute_noise_sigma`), so on panels of uneven depth it is dominated by
+the part that got the most subs. On the bundled 2×2 — 3 subs against 6 over 23 % of the canvas, the shape the
+owner's multi-night mosaics actually have — the *same card* carries, a line below, *"about 23 % of the
+picture has 3 subs on it where most of it has 6, so that part looks about 1.4× grainier"*.
+
+So the fix for one over-claim had planted the identical over-claim one card along. `grainProjection.ts`
+already solved this exact problem for its own clean verdict, in its own words — *"across most of it the
+background already looks clean"* — and the reasoning transfers unchanged.
+
+**What shipped.** The clean sentence takes the scope it was measured over: *"Across most of it the
+background already measures clean…"* on a run whose depth is measurably uneven, and today's unqualified
+sentence everywhere else (a single field, an evenly-covered mosaic, and any run missing one of the four
+figures an uneven claim needs).
+
+**One reader of those four figures, not two.** The guard that says a note may never quote a ratio it has no
+depths to explain was inline in the uneven-grain note. It is now the public
+`uneven_grain_verdict(run)`, and both sentences read it — because two readers of one measurement is how the
+bug v0.466.1 fixed got in, and repeating that inside the fix would be a poor joke. The uneven-grain note's
+own behaviour is unchanged (same guard, same verdict, same wording).
+
+**Upgrade-safe (§9).** One new public engine function over figures the row already carried; no config,
+schema, on-disk, API-shape or default change, no threshold moved, no pixel touched. A calibrated run still
+never reaches the branch.
+
+**The same over-claim was in the guide underneath, and it is gone rather than scoped.** `DarksGuide`'s
+clean lead said *"This picture's background already measures clean"* — the note above it had just said that
+*with* a scope on a mosaic, so an unqualified second copy re-introduced what the note had dropped. It now
+says what darks **do** here instead of restating a verdict: *"…on this picture that mostly means hot pixels
+rather than less grain."* True of every part of any canvas once the sky is not dark-current-dominated,
+because darks never reduce shot noise — which is exactly what a mosaic's thin panel has. So the guide needs
+no scope flag of its own, and there is one fewer place for the two to drift.
+
+**Tests (+3 Python functions, 3 frontend assertions re-pointed).** The 2×2's own figures taking the scope clause **and** the uneven-grain note
+beside it still saying what it says; the single-field and evenly-covered-mosaic cases keeping the
+unqualified sentence; and each of the three missing figures withdrawing the verdict *and* the clause.
+**Fail-before verified by scratch revert** — pinning `scope` to the unqualified string reddens the first.
+
 ## v0.466.1 — 2026-09-19 — one card guessed at the background another had just measured: the uncalibrated note stops promising to cut a speckle that is not there
 
 *(Builder, branch `claude/sweet-babbage-foh7rz`. Found by a `--mosaic --editor --incoming-lag` dogfood pass

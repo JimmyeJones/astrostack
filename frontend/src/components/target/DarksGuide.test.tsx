@@ -126,10 +126,14 @@ describe("DarksGuide — the lead sentence agrees with the note above it", () =>
     renderGuide({ exposure_s: 10, gain: 80 }, true);
     fireEvent.click(screen.getByText("How to add darks →"));
     expect(screen.queryByText(/single biggest cleanup/)).not.toBeInTheDocument();
+    // It says what darks *do* here rather than restating the note's verdict:
+    // sigma is a whole-canvas figure, and the note above scopes it on a mosaic
+    // ("across most of it"), so an unqualified copy down here would reintroduce
+    // exactly the over-claim this pair of fixes removed.
     expect(
-      screen.getByText(/background already measures clean/),
+      screen.getByText(/mostly means hot pixels rather than less grain/),
     ).toBeInTheDocument();
-    expect(screen.getByText(/tidy up hot pixels/)).toBeInTheDocument();
+    expect(screen.queryByText(/background already measures clean/)).toBeNull();
     // The how-to itself is untouched — this changes one sentence, not the offer.
     expect(screen.getByText(/Cap the scope/)).toBeInTheDocument();
     expect(
@@ -144,7 +148,7 @@ describe("DarksGuide — the lead sentence agrees with the note above it", () =>
       fireEvent.click(screen.getByText("How to add darks →"));
       expect(screen.getByText(/single biggest cleanup/)).toBeInTheDocument();
       expect(
-        screen.queryByText(/background already measures clean/),
+        screen.queryByText(/mostly means hot pixels/),
       ).not.toBeInTheDocument();
       unmount();
     }
