@@ -1,5 +1,60 @@
 # Process notes & QA sweep records
 
+## 2026-09-19 — Builder: shipped v0.469.0/.1 (the binder LEAD's shapes (b) and (a)); `--mosaic --calibration` dogfood CLEAN at v0.469.1
+
+*(Builder, branch `claude/sweet-babbage-eky2mu`, PR #951. Baseline `6431 passed, 2 skipped`
+in 11m13s with `-n 4 --dist worksteal` + the BLAS cap; after the two commits and the sync with
+`origin/main`, `6443 passed, 2 skipped` in 10m42s. `ruff` count unchanged at the pre-existing
+22.)*
+
+**Method worth carrying forward — the lead had already done the hard half, and the run's job
+was to work out which of its three shapes were safe.** The entry filed with v0.468.0 listed
+(a) a tie-break, (b) hand the binder the real gain, (c) charge a blended master extra distance,
+and said (c) could not be settled from this repo. Sizing them against the code agreed, and
+sharpened the reason: `_match_distance` is read by **three** kinds of caller — a *ranking*
+(`recommend_masters`, the binder's candidate sorts, `_recommend_flat_dark`,
+`existing_master_like`), three *confidence gates*, and `master_coverage`'s "which targets does
+this cover?". Anything that moves a **distance** therefore moves a gate, and moving a gate can
+*strip* calibration off a target that has it today. Anything that only moves an **order** can
+not. That one distinction is what made (a) shippable as a tuple key without a single measured
+threshold, and it is the shape to reach for the next time this file says "don't blind-flip a
+threshold on the on-by-default hot path".
+
+**The half deliberately not built, so it is not re-picked as an omission.** The lead asks for
+`light_gains` *and* `light_temps_c`. Gain got it; temperature did not, because the two are not
+the same kind of number. A gain is a discrete **setting**, so the midpoint of two of them is a
+value the camera was never at — a temperature is continuous and the Seestar's sensor is
+uncooled, so a value between two nights' readings is one the sensor really passed through.
+There is no mode of a continuous quantity to reach for, and `apply.py`'s own constant comment
+already argues it (*"a temperature… earns a tolerance wide enough to cover a night"*). Recorded
+on the lead too.
+
+**Fail-before, both times, by reverting rather than by reasoning.** Two of the three gain tests
+fail with the call site put back to `_med`; the tie-break's parametrized case fails in the
+registration order that used to lose, with `_match_rank`'s span stubbed to `0.0`. The tie-break
+test is parametrized over **both** registration orders on purpose: "whichever the registry
+listed first" is exactly what it replaces, so a single-order test would have been green for the
+wrong reason half the time.
+
+**Dogfood — CLEAN at v0.469.1, `--mosaic --calibration`.** Nothing overflowing and no console
+errors at 1440 px or 420 px on either sample; mosaic trim **7.9 %** (the bar is ~15 %);
+`[run 1] masters actually applied: {'dark_master_id': 1, 'flat_master_id': 2}`, i.e. the
+calibrated branch really was on screen. Read as one paragraph, the mosaic Target page holds
+together: the readiness card prices the 4-panel canvas it has, the framing card says the object
+wants a 3×3 **and** defers with v0.465.2's depth-first clause (75 % captured is above
+`FRAMING_MAX_COVERAGE`, so v0.444.2's rescope correctly does not fire), and the two folded
+cards agree with each other about the thin panel (23 % at 3 subs, ~30 s behind). Page heights,
+phone: `/tonight` 3694 px, `/glossary` 3364 px, mosaic Target 3673 px, `/` 3115 px — no slice
+indicated (AGENTS.md §1: measure first, and the measurement says no). The Dashboard's one
+speaking note is *"Plate-solving isn't set up yet — ASTAP wasn't found"*, which is the
+container, not the app.
+
+**One thing the calibration probe confirms about this run's own change:** the suggestions
+payload came back `"gain": 80.0` beside `"gains": [80.0]`. Single-gain is the whole installed
+base, and the new `dominant_gain` is the same number the median was there — which is the
+property the change is worth having only if it holds.
+
+
 ## 2026-09-19 — Scout: QA swept the *newest* code (v0.455–0.468 calibration) + a CLEAN `--mosaic` dogfood at v0.468.1; observer #878 confirmed dormant on live data
 
 *(Scout, branch `claude/admiring-brahmagupta-3hltrq`. Baseline `6431 passed, 2 skipped`,
