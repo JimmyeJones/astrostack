@@ -105,3 +105,31 @@ def test_a_target_with_no_stack_yet_says_nothing(client, built_library):
 
 def test_restack_gain_unknown_target_404(client):
     assert client.get("/api/targets/does_not_exist/restack-gain").status_code == 404
+
+
+def test_the_offer_counts_one_column_not_whole_frames(client, built_library,
+                                                      monkeypatch):
+    """The offer needs two counts — how many subs are accepted, and how many of
+    them carry a readable capture time — and it was building a `FrameRow` per
+    sub to take them, plate solution and all.
+
+    Fail-before: 35,894 rows built and discarded per visit on the owner's
+    deepest target, measured at 1,132 ms against 370 ms for identical counts.
+    The answer is unchanged either way, so only a test like this can see it.
+    """
+    import seestack.io.project as project_module
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_run(built_library, safe, ts="2026-08-30T14:32:05Z")
+
+    built = 0
+    real = project_module._row_to_frame
+
+    def counting(row):
+        nonlocal built
+        built += 1
+        return real(row)
+
+    monkeypatch.setattr(project_module, "_row_to_frame", counting)
+    assert client.get(f"/api/targets/{safe}/restack-gain").status_code == 200
+    assert built == 0, f"built {built} FrameRow objects to take two counts"

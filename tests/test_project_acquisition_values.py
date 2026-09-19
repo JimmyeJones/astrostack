@@ -1,4 +1,4 @@
-"""`Project.acquisition_values` — what the camera was set to, without the rows.
+"""`Project.iter_frame_columns` / `acquisition_values` — fields, not whole rows.
 
 The two surfaces that match a calibration master to a target — the Stack form's
 ``calibration-suggestions`` and the Calibration page's coverage roll-up — each
@@ -160,3 +160,73 @@ def test_a_non_finite_temperature_round_trips_the_way_reading_a_row_does(tmp_pat
         assert temp == row.sensor_temp_c is None
     finally:
         proj.close()
+
+
+# ---------------------------------------------------------------------------
+# `iter_frame_columns`, the primitive underneath — and the answer for any other
+# caller that wants a handful of small fields off a deep target.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("accepted_only", [True, False])
+def test_columns_are_the_values_reading_the_rows_would_have_given(
+        mixed_project, accepted_only):
+    """Equivalence, in the order `iter_frames` yields — which is the property
+    every caller silently depends on and none of them would notice losing."""
+    want = [(f.timestamp_utc, f.sky_adu_median, f.exposure_s, f.gain)
+            for f in mixed_project.iter_frames(accepted_only=accepted_only)]
+    got = list(mixed_project.iter_frame_columns(
+        "timestamp_utc", "sky_adu_median", "exposure_s", "gain",
+        accepted_only=accepted_only))
+    assert got == want
+
+
+def test_a_column_read_builds_no_frame_objects(mixed_project, monkeypatch):
+    """The claim the two Target-page callers are for. Fail-before: both built a
+    `FrameRow` per sub — 35,894 on the owner's deepest target — to read four
+    small fields off it (`/sky-brightness`) and one (`/restack-gain`)."""
+    import seestack.io.project as project_module
+
+    built = 0
+    real = project_module._row_to_frame
+
+    def counting(row):
+        nonlocal built
+        built += 1
+        return real(row)
+
+    monkeypatch.setattr(project_module, "_row_to_frame", counting)
+    rows = list(mixed_project.iter_frame_columns("timestamp_utc"))
+    assert rows and built == 0, f"built {built} FrameRow objects to read one column"
+
+
+def test_a_column_that_is_not_a_column_is_refused_not_interpolated(
+        mixed_project):
+    """Code-supplied today, but the check is free and turns a typo into a
+    `ValueError` here instead of an `OperationalError` from inside a request —
+    the rule `iter_frames_page` already follows."""
+    for bad in ("fwhm", "FWHM_PX", "rowid", "id; DROP TABLE frames",
+                "(SELECT 1)", ""):
+        with pytest.raises(ValueError):
+            list(mixed_project.iter_frame_columns(bad))
+    # …including when it is hiding behind a good one.
+    with pytest.raises(ValueError):
+        list(mixed_project.iter_frame_columns("id", "nope"))
+    # The table is still there, which a raised exception alone wouldn't prove.
+    assert mixed_project.count() > 0
+
+
+def test_asking_for_no_columns_is_refused_rather_than_selecting_nothing(
+        mixed_project):
+    """`SELECT  FROM frames` is a syntax error, and an empty `*columns` is far
+    more likely to be an unpacking mistake than a request for empty tuples."""
+    with pytest.raises(ValueError):
+        list(mixed_project.iter_frame_columns())
+
+
+def test_rows_are_plain_tuples_not_this_connections_row_factory(mixed_project):
+    """A `sqlite3.Row`'s `repr` is its memory address, and these are values a
+    caller compares, logs and puts in a test — the same reason
+    `frames_fingerprint` drops the row factory."""
+    [row] = list(mixed_project.iter_frame_columns("exposure_s"))[:1]
+    assert type(row) is tuple

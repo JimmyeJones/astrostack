@@ -319,10 +319,18 @@ def sky_brightness_read(safe: str, request: Request) -> dict:
     settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
+        # Four columns, not whole rows. This is a Target-page fetch, and a
+        # `FrameRow` carries the sub's plate solution — a FITS header text of
+        # ~25 eighty-character cards that nothing here reads. Measured on a
+        # synthetic project the size of the owner's deepest target (35,894
+        # subs): 1,074 ms against 322 ms, for identical samples. Every frame,
+        # not just the accepted ones — a sub dropped for a satellite trail still
+        # measured the sky it was shot under.
         samples = [
-            SkySample(timestamp_utc=f.timestamp_utc, sky_adu_median=f.sky_adu_median,
-                      exposure_s=f.exposure_s, gain=f.gain)
-            for f in proj.iter_frames()
+            SkySample(timestamp_utc=ts, sky_adu_median=sky,
+                      exposure_s=exposure_s, gain=gain)
+            for ts, sky, exposure_s, gain in proj.iter_frame_columns(
+                "timestamp_utc", "sky_adu_median", "exposure_s", "gain")
         ]
     finally:
         proj.close()

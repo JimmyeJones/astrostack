@@ -503,6 +503,34 @@ def test_sky_brightness_404s_for_an_unknown_target(client, built_library):
     assert client.get("/api/targets/nope/frames/sky-brightness").status_code == 404
 
 
+def test_sky_brightness_reads_four_columns_not_whole_frames(
+        client, built_library, monkeypatch):
+    """This is a Target-page fetch, and the card needs four small fields — but
+    it was building a `FrameRow` per sub to get them, and a `FrameRow` carries
+    the sub's plate solution (`wcs_json` is a FITS header text of ~25
+    eighty-character cards).
+
+    Fail-before: on the owner's deepest target that is 35,894 rows built and
+    thrown away on every visit — measured at 1,074 ms against 322 ms for
+    identical samples. Nothing in the response can see the difference, which is
+    exactly why it needs a test of its own.
+    """
+    import seestack.io.project as project_module
+
+    built = 0
+    real = project_module._row_to_frame
+
+    def counting(row):
+        nonlocal built
+        built += 1
+        return real(row)
+
+    monkeypatch.setattr(project_module, "_row_to_frame", counting)
+    r = client.get("/api/targets/M_42/frames/sky-brightness")
+    assert r.status_code == 200
+    assert built == 0, f"built {built} FrameRow objects to read four columns"
+
+
 def test_reject_summary_surfaces_accepted_unsolved_frames(client, built_library):
     """The owner's gibberish case: subs are accepted but not plate-solved yet, so
     they never reach the stack. The breakdown must surface them as "not located
