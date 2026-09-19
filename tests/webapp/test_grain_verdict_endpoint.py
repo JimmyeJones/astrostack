@@ -57,6 +57,35 @@ def test_the_run_listing_carries_both_mosaic_verdicts(client, solved_library):
     assert runs[old]["grain_verdict"] is None
 
 
+def test_the_run_listing_says_whether_the_thin_part_is_the_ragged_edge(
+        client, solved_library):
+    """The flag the Target page's three prescribing cards need, decided
+    server-side by the *same* `has_ragged_border` the "How's my stack?" notes
+    choose between "crop it" and "go and shoot that panel" with. Served rather
+    than re-derived: a second reader of one rule is how two surfaces come to
+    prescribe opposite things about one region."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rim = _register_run(solved_library, safe, is_mosaic=True, seam_residual=0.7,
+                        grain_ratio=1.59, grain_thin_frames=12,
+                        grain_deep_frames=40, grain_thin_share=0.23,
+                        coverage_thin_frac=0.30)
+    panel = _register_run(solved_library, safe, is_mosaic=True,
+                          seam_residual=0.7, grain_ratio=1.43,
+                          grain_thin_frames=3, grain_deep_frames=6,
+                          grain_thin_share=0.2257, coverage_thin_frac=0.0)
+    old = _register_run(solved_library, safe, is_mosaic=True, seam_residual=0.7,
+                        grain_ratio=1.43, grain_thin_frames=3,
+                        grain_deep_frames=6, grain_thin_share=0.2257)
+
+    runs = {r["id"]: r
+            for r in client.get(f"/api/targets/{safe}/stack-runs").json()}
+    assert runs[rim]["ragged_border"] is True
+    assert runs[panel]["ragged_border"] is False
+    # A run recorded before the share was measured keeps the panel wording
+    # rather than guessing — the same contract `has_ragged_border` states.
+    assert runs[old]["ragged_border"] is False
+
+
 def test_a_single_field_run_carries_neither(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     run_id = _register_run(solved_library, safe)

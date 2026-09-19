@@ -900,6 +900,15 @@ class StackRunOut(BaseModel):
     # older frontend ignores it and a run with no measurement reads as None,
     # which is exactly today's wording.
     grain_verdict: str | None = None
+    # ...and whether that grainier part is the canvas's ragged *perimeter* — the
+    # thing "Trim border" crops away — rather than a panel that is simply behind.
+    # `seestack.stackhealth.has_ragged_border`, the same predicate the "How's my
+    # stack?" notes decide between "crop it" and "go and shoot that panel" with,
+    # served rather than re-derived: the prescribing cards on the Target page
+    # give the same advice, and a second reader of one rule is how two surfaces
+    # come to prescribe opposite things about one region. Absent on an older
+    # backend, which reads as False — the wording those runs have always carried.
+    ragged_border: bool = False
     # Which calibration masters were applied to the lights ("dark+flat",
     # "bias+flat", "flat", …), or None when the stack was uncalibrated / for
     # pre-schema-7 runs; lets a card show a "dark+flat" chip at a glance.

@@ -132,6 +132,13 @@ interface RunLike {
    * backend, all of which read as "nothing measured" and keep the plain
    * wording. See the clean branch for why this is read at all. */
   grain_verdict?: string | null;
+  /** True when that thinner part is the canvas's ragged *perimeter* rather than
+   * a panel that is simply behind — the backend's own
+   * `seestack.stackhealth.has_ragged_border`, already decided for the "How's my
+   * stack?" notes. A rim does not fill in as you keep shooting, because the
+   * dither keeps moving it, so the clause that offers more light has to know.
+   * Absent on an older backend, which reads as false — today's wording. */
+  ragged_border?: boolean;
 }
 
 function measured(v: number | null | undefined): v is number {
@@ -164,7 +171,8 @@ export function grainProjection(
   runs: RunLike[] | null | undefined,
 ): GrainProjection | null {
   if (!runs) return null;
-  let best: { t: number; sigma: number; uneven: boolean } | null = null;
+  let best:
+    { t: number; sigma: number; uneven: boolean; rim: boolean } | null = null;
   for (const r of runs) {
     // An editor-export / combine run (`reusable === false`) is excluded; a run
     // from a backend too old to report the flag is treated as genuine, which is
@@ -180,6 +188,7 @@ export function grainProjection(
         t,
         sigma: r.noise_sigma as number,
         uneven: r.grain_verdict === "uneven",
+        rim: r.ragged_border === true,
       };
     }
   }
@@ -248,13 +257,28 @@ export function grainProjection(
     // threshold moves and the *level* is still "clean": the number is honest
     // for most of the canvas, and demoting it would be a second opinion where
     // what was missing is one sentence's scope.
-    sentence =
-      `Measured on your own picture: across most of it the background already ` +
-      `looks clean at ${now} (grain ${grain}). Part of this one is thinner ` +
-      `than the rest, though, and only more light evens that part out. ` +
-      `Elsewhere, more time mostly buys fainter detail rather than a visibly ` +
-      `cleaner picture — doubling your ${now} would take the grain down about ` +
-      `29 % more.`;
+    //
+    // …and "only more light evens that part out" is a **panel's** answer. Where
+    // the thin part is the canvas's ragged *perimeter*, it does not fill in as
+    // you keep shooting — the dither keeps moving it — and the card is then
+    // sending someone out for a night that cannot change what they are looking
+    // at. That is the same correction v0.470.1 made to the "How's my stack?"
+    // note, read off the same `has_ragged_border`, so the two cards cannot
+    // prescribe opposite things about one region. An older backend sends no
+    // flag and keeps today's sentence.
+    sentence = best.rim
+      ? `Measured on your own picture: across most of it the background ` +
+        `already looks clean at ${now} (grain ${grain}). Its ragged edge is ` +
+        `thinner and grainier, though, and it won't fill in as you keep ` +
+        `shooting — Trim border crops it away. Elsewhere, more time mostly ` +
+        `buys fainter detail rather than a visibly cleaner picture — doubling ` +
+        `your ${now} would take the grain down about 29 % more.`
+      : `Measured on your own picture: across most of it the background ` +
+        `already looks clean at ${now} (grain ${grain}). Part of this one is ` +
+        `thinner than the rest, though, and only more light evens that part ` +
+        `out. Elsewhere, more time mostly buys fainter detail rather than a ` +
+        `visibly cleaner picture — doubling your ${now} would take the grain ` +
+        `down about 29 % more.`;
   } else if (level === "clean") {
     // Deliberately not "you're done": see "Reconciling with the goal verdict".
     sentence =

@@ -155,6 +155,27 @@ describe("nextBestMove", () => {
       expect(tip?.phrase).not.toContain("This is a solid result");
     });
 
+    it("offers the trim, not more passes, when the thin part is the ragged edge", () => {
+      const tip = nextBestMove({
+        ...evenMosaic, grainVerdict: "uneven", raggedBorder: true,
+      });
+      expect(tip?.kind).toBe("good");
+      expect(tip?.phrase).toContain("Across most of it");
+      expect(tip?.phrase).toContain("ragged edge");
+      expect(tip?.phrase).toContain("Trim border");
+      expect(tip?.phrase).not.toContain("more passes over the same mosaic");
+    });
+
+    it("keeps the panel phrase for a thin panel and for a backend that says nothing", () => {
+      const panel = nextBestMove({
+        ...evenMosaic, grainVerdict: "uneven", raggedBorder: false,
+      });
+      expect(nextBestMove({ ...evenMosaic, grainVerdict: "uneven" }))
+        .toEqual(panel);
+      expect(panel?.phrase).toContain("more passes over the same mosaic");
+      expect(panel?.phrase).not.toContain("ragged edge");
+    });
+
     it("leaves every other verdict exactly as it was", () => {
       // Null, absent, a single field's None, and an older backend that sends
       // nothing all keep today's wording byte for byte — as does a *measured*

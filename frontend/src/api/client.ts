@@ -1514,6 +1514,12 @@ export interface StackRun {
   // reads both and says which of the two it is looking at. Absent on an older
   // backend, which reads as "not measured" — today's wording.
   grain_verdict?: string | null;
+  // ...and whether that grainier part is the canvas's ragged perimeter — the
+  // thing "Trim border" crops away — rather than a panel that is simply behind.
+  // Decided server-side by `seestack.stackhealth.has_ragged_border`, the same
+  // predicate the "How's my stack?" notes choose between "crop it" and "go and
+  // shoot that panel" with. Absent on an older backend, which reads as false.
+  ragged_border?: boolean;
   calstat?: string | null;
   options?: Record<string, unknown>;
   engine_version?: string | null;

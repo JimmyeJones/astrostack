@@ -262,6 +262,9 @@ class _LevelContext:
     # *considering* a level at all (the export-equivalent count) is applied when
     # ``big_levels`` is built — see :func:`_level_context`.
     effective_min: int
+    # Floor on the sky sample a *grain* σ may be taken from, already scaled for
+    # the read's stride — see :data:`_GRAIN_MIN_SKY_PIXELS`.
+    grain_sky_min: int
 
 
 def _level_context(
@@ -298,6 +301,13 @@ def _level_context(
     # which is exactly what the export does for a level it can't measure either.
     # At step ≤ 4 the two floors coincide, so the ordinary path is unchanged.
     effective_min = max(_MIN_STRIDED_PIXELS, include_min)
+    # The same arithmetic for the grain measurement's own sky floor, and for the
+    # same reason: it is a claim about how many **full-resolution** pixels a σ
+    # rests on, and one strided pixel stands in for ``step²`` of them. Left
+    # unscaled it is not one floor but a different one per canvas size, which is
+    # exactly backwards — see :data:`_GRAIN_MIN_SKY_PIXELS`.
+    grain_sky_min = max(_MIN_STRIDED_PIXELS,
+                        int(round(_GRAIN_MIN_SKY_PIXELS / (step * step))))
 
     # Bin by the true per-pixel frame count when the caller provides it (quality
     # weighting fuzzes the weighted-sum ``coverage``); otherwise fall back to the
@@ -404,6 +414,7 @@ def _level_context(
         object_mask=object_mask,
         max_level_sigma=_RESCUE_MAX_SIGMA_RATIO * sky_sigma,
         effective_min=effective_min,
+        grain_sky_min=grain_sky_min,
     )
 
 
@@ -623,11 +634,45 @@ def measure_seam_residual(
 # would fire on every mosaic ever shot while naming nothing anyone can act on.
 _GRAIN_MIN_SHARE = 0.10
 
-# ...and its sky sample needs at least this many pixels for a σ to be a
-# measurement rather than a mood. Deliberately far above ``_MIN_STRIDED_PIXELS``
-# (which is a floor on *levelling* a region, where a rough answer still beats
-# stranding it): nothing is lost by staying silent here.
+# ...and its sky sample needs at least this many **full-resolution** pixels for
+# a σ to be a measurement rather than a mood. Deliberately far above
+# ``_MIN_STRIDED_PIXELS`` (which is a floor on *levelling* a region, where a
+# rough answer still beats stranding it): nothing is lost by staying silent here.
+#
+# **Full-resolution, and so scaled by the read's stride** (``grain_sky_min`` in
+# :func:`_level_context`, by exactly the arithmetic ``include_min`` already uses
+# two lines above it). Unscaled it is not one floor but a different one per
+# canvas size, and it lands hardest on the canvases this measurement exists for:
+# `backfill_coverage_grain` is the only path by which an already-stacked mosaic
+# reaches it, and that path reads strided — step 3 on a 3494x2470 canvas — so a
+# sample of 1/9 the pixels was being asked to clear the whole-canvas bar. A thin
+# band's *sky* sample is a small fraction of its pixels to begin with (the object
+# mask thresholds the canvas globally and dilates, and a band that is grainier by
+# construction loses more of itself to it), so the two multiply: measured on this
+# repo's own dithered fixture, 948 sky pixels at full resolution and 171 at
+# stride 2, i.e. answered and then silent about one canvas.
 _GRAIN_MIN_SKY_PIXELS = 500
+
+# A candidate level has to be measurably *shallower* than the modal one before
+# comparing the two says anything about depth. Grain falls as 1/√depth, so two
+# levels one sub apart are predicted to differ by 0.02 % and whatever the
+# comparison reports is their sky samples, not their depths — which is exactly
+# what the 2026-09-19 observer report caught on the one run in 680 where this
+# measurement fired: levels **3,116 and 3,117** each held a tenth of a 3,117-sub
+# single field whose union area trips the mosaic heuristic, and it answered
+# **1.0078 over 15 %** of the picture where the depth bands on that same canvas
+# read **2.27 over 27 %**. It fired, and it answered about the wrong pair.
+#
+# The bound is read off :data:`_GRAIN_BAND_THIN_OF_BULK`'s own reasoning rather
+# picked: that constant takes half the bulk depth because 1/√0.5 = 1.41× is the
+# shallowest a band can be while still being predicted to clear
+# ``_GRAIN_UNEVEN_RATIO``. A tenth shallower predicts 1/√0.9 = **1.054×** — an
+# order below that bar, so no level this excludes could have produced a verdict
+# on the physics alone, and any that somehow did would have done so on its sky
+# sample. Excluding it is not a threshold on the answer; it is a statement that
+# the question was not about depth. Such a canvas falls through to the band
+# comparison, which is what has something to say about it.
+_GRAIN_MAX_THIN_FRAC = 0.9
 
 # A *dithered* canvas has no plateaus to compare, and the level rule above then
 # finds nothing at all. Measured across the owner's own library (observer report
@@ -712,7 +757,7 @@ def _grain_sigmas(
     if found is None:
         return None
     region_sky_mask, _rescued = found
-    if int(region_sky_mask.sum()) < _GRAIN_MIN_SKY_PIXELS:
+    if int(region_sky_mask.sum()) < ctx.grain_sky_min:
         return None
     out = [_robust_stats(img[..., c][region_sky_mask])[1] for c in range(3)]
     if any(not np.isfinite(s) or s <= 0 for s in out):
@@ -842,15 +887,19 @@ def measure_coverage_grain(
     # The depth most of the picture was actually shot at — not the mean, which a
     # ragged fringe drags down, and not the peak, which is one mosaic corner.
     deep_level = max(counts, key=lambda level: (counts[level], level))
+    # ...and a candidate has to be measurably *shallower* than it, not merely a
+    # different integer — see :data:`_GRAIN_MAX_THIN_FRAC`.
     candidates = [level for level in counts
-                  if level < deep_level
+                  if level <= _GRAIN_MAX_THIN_FRAC * deep_level
                   and counts[level] >= _GRAIN_MIN_SHARE * total]
     if not candidates:
         # No plateau to compare: a mosaic dithered across several nights has a
         # coverage map that *ramps* rather than steps, so no single depth is a
         # tenth of the canvas and there is nothing here to pick. Ask the same
         # question of two bands of depth instead — the only half of this function
-        # such a canvas ever reaches.
+        # such a canvas ever reaches. A canvas whose only candidates were a sub
+        # or two apart arrives here too, and for the same reason: nothing the
+        # level comparison could say about it would be about depth.
         return _grain_from_depth_bands(ctx, img, object_sigma,
                                        dilate_object_mask_px)
 
