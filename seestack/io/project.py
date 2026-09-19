@@ -26,7 +26,7 @@ import logging
 import os
 import sqlite3
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator
@@ -222,6 +222,16 @@ class FrameRow:
     # UTC). NULL on every frame that was never reconsidered and on every row
     # written before schema 22. See :meth:`Project.restored_frame_stamps`.
     restored_utc: str | None = None
+
+
+#: Every column of the ``frames`` table, taken from :class:`FrameRow` itself.
+#:
+#: ``iter_frames`` reads ``SELECT *`` and :func:`_row_to_frame` maps each column
+#: onto the identically-named field, so the dataclass *is* the column list and
+#: deriving the set from it cannot drift the way a hand-written copy would.
+#: :meth:`Project.iter_frames_page` checks a caller-supplied sort column against
+#: this before it goes anywhere near the SQL.
+_FRAME_COLUMNS: frozenset[str] = frozenset(f.name for f in fields(FrameRow))
 
 
 def readable_frame_path(frame: "FrameRow") -> str | None:
@@ -1136,6 +1146,68 @@ class Project:
             sql += " WHERE accept = 1"
         sql += " ORDER BY id"
         for row in self._conn.execute(sql):
+            yield _row_to_frame(row)
+
+    def iter_frames_page(
+        self,
+        *,
+        accepted_only: bool = False,
+        sort: str = "id",
+        descending: bool = False,
+        offset: int = 0,
+        limit: int = 500,
+    ) -> Iterator[FrameRow]:
+        """One sorted *window* of this target's frames, sorted and paged by
+        SQLite rather than in Python.
+
+        Exactly the rows :meth:`iter_frames` would yield, ordered the way the
+        frames table asks for them, sliced to ``[offset, offset + limit)`` — but
+        only ``limit`` :class:`FrameRow` objects are ever built. The caller that
+        needs this is the frames endpoint on a **deep** target: the owner's
+        largest holds 35,894 subs and the table fetches it 2,000 at a time, so
+        reading the whole list meant materialising every row eighteen times over.
+        Measured on a synthetic 35,894-sub project: **9.09 s / 163.6 MB peak**
+        for the full paged read against **2.42 s / 83.5 MB** here, with an
+        identical id sequence on every sortable column, both directions and six
+        windows. Memory, not speed, is the point — this box has an OOM history.
+
+        **Nulls last, in both directions**, which is the ordering the frames
+        table has needed since a descending "blurriest first" sort pinned a block
+        of unmeasured subs to the top: an unmeasured frame is not a bad one, and
+        a reader who asked for the worst wants the worst *measured* ones. Ties
+        break on ``id`` ascending — Python's sort is stable and
+        :meth:`iter_frames` yields in id order, so that is what the sort it
+        replaces did.
+
+        ``sort`` is checked against :class:`FrameRow`'s own field names before it
+        reaches the SQL, because it arrives from a query string: the column list
+        and the dataclass are one set by construction (``SELECT *`` +
+        :func:`_row_to_frame`), so this needs no second list to keep in step, and
+        anything else raises :class:`ValueError` rather than being interpolated.
+        """
+        assert self._conn is not None
+        if sort not in _FRAME_COLUMNS:
+            raise ValueError(f"not a frame column: {sort!r}")
+        offset = max(0, int(offset))
+        limit = max(0, int(limit))
+        where = " WHERE accept = 1" if accepted_only else ""
+        direction = "DESC" if descending else "ASC"
+        # `<col> IS NULL` is 0 for a measured row and 1 for an unmeasured one, so
+        # ascending on it is "measured first" whichever way the value itself is
+        # ordered — that term is load-bearing and a test fails without it.
+        #
+        # The trailing `id ASC` is the stability the Python sort had for free.
+        # It is insurance rather than a fix: this SQLite's sorter happens to keep
+        # the scan order for equal keys and the scan happens to be in rowid
+        # order, so deleting the term changes nothing today (checked, and
+        # recorded in the test). It is there because that is an accident — a
+        # spilled sort, a later SQLite, or an index on one of these columns could
+        # each end it — and without a fixed order within a tie group two requests
+        # for adjacent windows can repeat one row and never return another.
+        sql = (f"SELECT * FROM frames{where}"
+               f" ORDER BY ({sort} IS NULL) ASC, {sort} {direction}, id ASC"
+               f" LIMIT ? OFFSET ?")
+        for row in self._conn.execute(sql, (limit, offset)):
             yield _row_to_frame(row)
 
     def frames_fingerprint(self) -> str:
