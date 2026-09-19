@@ -661,11 +661,18 @@ class DarkSpecOut(BaseModel):
     the guide saying "at the same settings as your subs — 20 s" about a target
     shot at 10 s and 30 s. Additive and defaulted, so an older client ignores it
     and an older backend omitting it reads as "one length", which is what every
-    library that has never changed sub length actually has."""
+    library that has never changed sub length actually has.
+
+    ``gains`` is the same set for the gain, and ``gain`` itself is now the
+    setting the **most** subs were shot at rather than their median — a gain is a
+    discrete setting, so the midpoint of two of them is a number no camera can be
+    dialled to, which is worse than a length no sub was shot at. Same additive,
+    both-directions-safe shape as ``exposures_s``."""
 
     exposure_s: float | None = None
     gain: float | None = None
     exposures_s: list[float] = []
+    gains: list[float] = []
 
 
 class StackHealthOut(BaseModel):

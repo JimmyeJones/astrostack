@@ -4013,6 +4013,7 @@ def _uncalibrated_advice(request: Request, safe: str) -> str | None:
     Calibration page the owner has no reason to visit. The folder walk is the
     shared, cached one, and only runs when there is no master-derived advice.
     """
+    from seestack.calibrate.apply import dominant_gain
     from webapp import calibration
 
     try:
@@ -4024,7 +4025,13 @@ def _uncalibrated_advice(request: Request, safe: str) -> str | None:
             proj.close()
             lib.close()
         exposure_s = _median([f.exposure_s for f in frames if f.exposure_s])
-        gain = _median([f.gain for f in frames if f.gain is not None])
+        # The gain the most subs were shot at, not their median — the same
+        # matcher (`_match_distance` and its confidence gates) the binder and the
+        # Stack form ask, so the "why isn't this calibrated?" advice and the
+        # stack that would be calibrated cannot judge one target's masters
+        # against two different gains. A gain is a discrete setting: a target
+        # shot at 80 and 200 has a median of 140, which no master can match.
+        gain = dominant_gain([f.gain for f in frames])
         sensor_temp_c = _median(
             [f.sensor_temp_c for f in frames if f.sensor_temp_c is not None])
         width_px = calibration.modal_dim([f.width_px for f in frames])

@@ -803,6 +803,11 @@ export interface DarkSpec {
   // of 20 s — a length none of its subs was shot at. Optional: an older backend
   // omits it and the guide keeps its single-length wording.
   exposures_s?: number[] | null;
+  // …and the same set for the gain. `gain` above is the setting the *most* subs
+  // were shot at; a target shot at gain 80 and gain 200 used to report their
+  // median, 140, which is not a setting any camera can be dialled to. Optional:
+  // an older backend omits it and the guide keeps its single-gain wording.
+  gains?: number[] | null;
 }
 
 export interface StackHealth {
