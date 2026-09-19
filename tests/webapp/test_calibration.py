@@ -2521,3 +2521,96 @@ def test_the_build_job_says_at_once_that_its_darks_straddled_two_nights(tmp_path
     assert result["sensor_temp_min_c"] == -10.0
     assert result["sensor_temp_max_c"] == 15.0
     assert "mixes frames shot between -10°C and 15°C" in result["temp_note"]["message"]
+
+
+# ---- a target is not necessarily one *gain*, and the binder took its median ---
+
+
+def _fake_proj_with_gains(gains, exposure_s=30.0, width=4, height=4,
+                          bayer_pattern="RGGB"):
+    """A stand-in Project whose accepted subs were shot at *gains* — the mixed
+    case ``_fake_proj_with_frames`` above cannot express."""
+    from types import SimpleNamespace
+
+    frames = [SimpleNamespace(exposure_s=exposure_s, gain=g, sensor_temp_c=None,
+                              width_px=width, height_px=height,
+                              bayer_pattern=bayer_pattern)
+              for g in gains]
+
+    class _Proj:
+        def iter_frames(self, accepted_only=False):  # noqa: ARG002
+            return list(frames)
+
+    return _Proj()
+
+
+def test_the_unattended_binder_judges_a_two_gain_target_by_the_gain_it_mostly_is(
+        tmp_path):
+    """Fail-before: ``_confident_master_binding`` handed the binder the subs'
+    *median* gain, so an evenly split target of gain-80 and gain-200 subs was
+    judged against **140** — a setting no frame was shot at and no camera was
+    ever set to.
+
+    The consequence is not cosmetic. The gain-80 dark actually shot for half the
+    stack scores |80−140|/140 = 0.43 against that phantom, while a gain-140 dark
+    shot for *none* of it scores 0 — so the wrong master outranks the right one
+    and wins, on the walk-away path where nobody is there to read the run's
+    advisory about it.
+    """
+    from types import SimpleNamespace
+
+    from webapp.pipeline import _confident_master_binding
+
+    root = tmp_path / "lib"
+    real = _register(root, "dark", exposure_s=30.0, gain=80.0)
+    phantom = _register(root, "dark", exposure_s=30.0, gain=140.0)
+    settings = SimpleNamespace(resolved_library_root=root)
+
+    bound = _confident_master_binding(
+        settings, _fake_proj_with_gains([80.0] * 3 + [200.0] * 3))
+    assert Path(bound["dark_path"]).name == real["filename"]
+    assert Path(bound["dark_path"]).name != phantom["filename"]
+
+
+def test_the_unattended_binder_reads_a_single_gain_target_exactly_as_before(
+        tmp_path):
+    """The whole installed base: every sub at one gain, where the mode, the
+    median and the only value are the same number — so nothing moves."""
+    from types import SimpleNamespace
+
+    from webapp.pipeline import _confident_master_binding
+
+    root = tmp_path / "lib"
+    dark = _register(root, "dark", exposure_s=30.0, gain=80.0)
+    _register(root, "dark", exposure_s=30.0, gain=400.0)  # a wrong-gain decoy
+    settings = SimpleNamespace(resolved_library_root=root)
+
+    bound = _confident_master_binding(
+        settings, _fake_proj_with_gains([80.0] * 6))
+    assert Path(bound["dark_path"]).name == dark["filename"]
+    # …and a near-miss inside the engine's own grouping tolerance is still one
+    # setting, not two, so header round-trip noise can't move the answer.
+    jittered = _confident_master_binding(
+        settings, _fake_proj_with_gains([80.0, 80.0002, 79.9998, 80.0]))
+    assert jittered == bound
+
+
+def test_the_binder_prefers_the_gain_the_majority_of_a_targets_subs_carry(
+        tmp_path):
+    """Three settings, where the median lands on the *smallest* population — one
+    sub in seven — while three of the seven were shot at 80. Nothing about the
+    median makes it the majority once there are more than two settings."""
+    from types import SimpleNamespace
+
+    from webapp.pipeline import _confident_master_binding
+
+    root = tmp_path / "lib"
+    majority = _register(root, "dark", exposure_s=30.0, gain=80.0)
+    lone = _register(root, "dark", exposure_s=30.0, gain=140.0)
+    settings = SimpleNamespace(resolved_library_root=root)
+
+    bound = _confident_master_binding(
+        settings, _fake_proj_with_gains([80.0] * 3 + [140.0] + [200.0] * 3))
+    assert Path(bound["dark_path"]).name == majority["filename"]
+    assert Path(bound["dark_path"]).name != lone["filename"]
+

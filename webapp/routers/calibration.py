@@ -11,7 +11,11 @@ from fastapi import APIRouter, HTTPException, Request
 
 from webapp import calibration, deps, pipeline
 from seestack.calibrate import discover
-from seestack.calibrate.apply import distinct_exposures, distinct_gains
+from seestack.calibrate.apply import (
+    distinct_exposures,
+    distinct_gains,
+    dominant_gain,
+)
 from seestack.calibrate.masters import VALID_KINDS, VALID_METHODS
 
 router = APIRouter(tags=["calibration"])
@@ -99,8 +103,10 @@ def _temperature_tally(values: list[Any]) -> list[list[float]]:
 def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     """Recommend the dark/flat masters that best match this target's frames.
 
-    Reads the median exposure/gain/sensor-temperature of the target's accepted
-    frames and ranks the library's masters against them, so a beginner doesn't
+    Reads the median exposure/sensor-temperature and the *dominant* gain of the
+    target's accepted frames and ranks the library's masters against them — see
+    ``params.gains`` below for why the gain is the odd one out — so a beginner
+    doesn't
     have to know which dark/flat goes with which lights. Purely advisory — the
     Stack form still lets the user pick anything (or nothing).
 
@@ -113,8 +119,8 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
 
     ``params.exposures_s`` carries the target's **distinct** sub lengths (grouped
     by the engine's own ``EXPOSURE_MISMATCH_TOL``, so header rounding is one
-    length and a real Seestar step is two). The other ``params`` are medians,
-    which is a claim that there is only one of each — true for gain and
+    length and a real Seestar step is two). ``exposure_s`` and ``sensor_temp_c``
+    are medians, which is a claim that there is only one of each — true for
     temperature in practice, and not true for exposure: a target shot at 10 s on
     one night and 30 s on the next has two, and the median then names a length no
     sub was shot at. The finished run judges the dark against all of them
@@ -139,7 +145,15 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     rescales it. A short list rather than a tally, because gain is a discrete
     setting — a library holds a handful of values however many subs it has. The
     finished run judges the dark against every sub's gain (v0.466.0). Additive;
-    an older client ignores it and keeps the single median.
+    an older client ignores it and keeps the single number.
+
+    …and that single number, ``params.gain``, is the gain the **most subs were
+    shot at** rather than their median, because a discrete setting has no
+    meaningful midpoint: 80 and 200 average to 140, a value no frame carries and
+    no camera was ever set to. It is the one representative that is also a
+    *gate* — ``recommend_masters`` and the confident binding below both rank and
+    refuse masters by it — so a phantom here picks the wrong dark rather than
+    merely describing the target badly. Unchanged on every single-gain target.
 
     ``tolerances`` carries the **engine's own** exposure/temperature/gain
     mismatch thresholds. The Stack form warns about the same two mismatches at *pick* time
@@ -166,7 +180,15 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     # pairs the run will complain about, which is this endpoint's whole contract.
     # Additive: an older client ignores the key and keeps today's single number.
     exposures_s = distinct_exposures([f.exposure_s for f in frames])
-    gain = _median([f.gain for f in frames if f.gain is not None])
+    # The gain the most subs were actually *shot* at, not their median. Gain is a
+    # discrete setting, so a median across two of them names a value no frame
+    # carries (80 and 200 average to 140) and — unlike the exposure and
+    # temperature halves, where the set below is what corrects the claim — this
+    # number is also what the masters are ranked and gated against just below, so
+    # a phantom here picks the wrong dark rather than merely describing the
+    # target badly. One setting all year, which is every ordinary target, gives
+    # exactly the median it always did.
+    gain = dominant_gain([f.gain for f in frames])
     sensor_temp_c = _median([f.sensor_temp_c for f in frames if f.sensor_temp_c is not None])
     # …and how the subs' temperatures are actually spread, because the median is
     # the same claim of uniformity the exposure one was, and an uncooled sensor
@@ -327,7 +349,11 @@ def _target_acquisition(lib: Any, entry: Any) -> dict[str, Any] | None:
         # cannot disagree about how many exposures a target has. Reporting only:
         # the binder still gates on the median above.
         "exposures_s": distinct_exposures([f.exposure_s for f in frames]),
-        "gain": _median([f.gain for f in frames if f.gain is not None]),
+        # The gain the most subs were shot at, matching what the unattended
+        # binder and the Stack form's endpoint now judge a master against — this
+        # roll-up says which targets a master covers, so a different answer here
+        # would have the coverage page and the stack disagree about one target.
+        "gain": dominant_gain([f.gain for f in frames]),
         "sensor_temp_c": _median(
             [f.sensor_temp_c for f in frames if f.sensor_temp_c is not None]),
         # …and the set that median stands in for, for the same reason. The

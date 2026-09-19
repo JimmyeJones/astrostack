@@ -204,6 +204,17 @@ def distinct_gains(values: Iterable[float | None]) -> list[float]:
     value, so a ramp of near-neighbours cannot chain two genuinely different
     settings into one group.
     """
+    return [_gain_group_value(g) for g in _gain_groups(values)]
+
+
+def _gain_groups(values: Iterable[float | None]) -> list[list[float]]:
+    """The usable gains in *values*, grouped into settings, lowest group first.
+
+    The grouping behind both :func:`distinct_gains` and :func:`dominant_gain`,
+    shared so "is this a second setting, or one setting written twice?" cannot be
+    answered one way when the app *counts* a target's gains and another way when
+    it picks the one value they stand for.
+    """
     vals = sorted(
         float(v) for v in values
         if v is not None and math.isfinite(float(v)) and float(v) >= 0
@@ -217,11 +228,54 @@ def distinct_gains(values: Iterable[float | None]) -> list[float]:
             groups[-1].append(v)
         else:
             groups.append([v])
-    out: list[float] = []
-    for g in groups:
-        n = len(g)
-        out.append(g[n // 2] if n % 2 else (g[n // 2 - 1] + g[n // 2]) / 2.0)
-    return out
+    return groups
+
+
+def _gain_group_value(group: list[float]) -> float:
+    """The value an (already sorted) gain group is reported by — its median, so
+    one mistyped ``GAIN`` card cannot move the setting a whole target is named
+    after."""
+    n = len(group)
+    return group[n // 2] if n % 2 else (group[n // 2 - 1] + group[n // 2]) / 2.0
+
+
+def dominant_gain(values: Iterable[float | None]) -> float | None:
+    """The gain setting most of a target's lights were actually shot at, or
+    ``None`` when not one of them recorded a usable gain.
+
+    The one number a *master* should be judged against when a target holds more
+    than one gain — and deliberately **not** their median. Gain is a discrete
+    setting the camera was physically at, so on an evenly split target the median
+    is a value no frame was shot at: 80 and 200 average to 140, and a master
+    judged against 140 is judged against a phantom. Both failure directions
+    follow from it — the gain-80 dark that matches half the stack is scored 0.43
+    away and can be refused, while a gain-140 dark that matches *none* of it
+    scores 0 and is bound. With three or more settings the median need not even
+    be the majority: three subs at 80, one at 140 and three at 200 puts the
+    median on the one sub in seven. The mode is a setting the camera really was
+    at, and it is the one the most subs were shot at, so the master that wins is
+    the master that is right for the largest part of the stack.
+
+    On an ordinary target — every sub at one gain, which is the whole installed
+    base — the mode, the median and the only value are the same number, so
+    nothing about today's binding moves.
+
+    A tie (two settings, exactly equal populations) is broken on the **lower**
+    gain. Deterministically, because re-reading the same frames in another order
+    must not rebind a target's calibration; and toward the safer error, because a
+    dark shot at a lower gain carries a smaller pedestal — it *under*-subtracts
+    on the higher-gain subs, where the opposite choice over-subtracts and clips
+    shadows to hard zeros nothing downstream can recover.
+
+    "The same setting" is :func:`distinct_gains`' own grouping, so a header
+    round-trip cannot read as a second gain here while it reads as one there.
+    """
+    groups = _gain_groups(values)
+    if not groups:
+        return None
+    # ``max`` returns the *first* maximal element and the groups are ordered
+    # lowest-first, so an exact tie resolves to the lower setting (see above).
+    return _gain_group_value(max(groups, key=len))
 
 
 def _finite_temps(values: Iterable[float | None]) -> list[float]:
