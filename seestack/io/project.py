@@ -354,7 +354,20 @@ def readable_frame_path(frame: "FrameRow") -> str | None:
     when the cache exists the result is identical (cache tried first); only a
     *missing* cache now falls through to the source instead of failing.
     """
-    for path in (frame.cached_path, frame.source_path):
+    return first_existing_frame_path(frame.cached_path, frame.source_path)
+
+
+def first_existing_frame_path(cached_path: str | None,
+                              source_path: str | None) -> str | None:
+    """:func:`readable_frame_path`'s rule, stated over the two paths themselves.
+
+    The same answer, for a caller that read the two columns rather than the
+    whole row — which is what a caller with a deep target should do, since a
+    ``FrameRow`` carries the sub's plate-solve header and this question does not
+    look at it. Kept as the one definition so "which file is this frame?" cannot
+    come to mean two things.
+    """
+    for path in (cached_path, source_path):
         if path and Path(path).exists():
             return str(path)
     return None
@@ -1626,6 +1639,36 @@ class Project:
         assert self._conn is not None
         return self._conn.execute(
             "SELECT COUNT(*) FROM frames WHERE wcs_json IS NOT NULL AND wcs_json != ''"
+        ).fetchone()[0]
+
+    def count_accepted_solved(self) -> int:
+        """Count the subs a stack would actually combine — accepted **and**
+        plate-solved.
+
+        The number the walk-away scan decides on: :func:`run_stack` combines
+        accepted, solved frames, so this is "how much picture is there to make
+        right now?" and the trigger compares it against what the last stack
+        covered. It is asked of **every target on every poll**, which is why it
+        is a ``COUNT`` — reading the rows to count them built a ``FrameRow`` per
+        sub, and a solved sub's row is mostly the plate-solve header this
+        question only asks the existence of. Measured on a synthetic project the
+        size of the owner's deepest target (35,894 subs): **935 ms → 54 ms**,
+        for the identical number.
+
+        Empty-string ``wcs_json`` is excluded as well as NULL, so this matches
+        the engine's own ``if f.wcs_json`` truthiness test exactly — the same
+        care :meth:`count_solved` takes, and for the same reason: a blank
+        sidecar is not a plate solve, and the count that decides whether to
+        stack must not disagree with the stacker about which subs exist.
+
+        Distinct from :meth:`count_solved` (which ignores the accept flag, for
+        the deep-image rescue) and from :meth:`count_accepted_unsolved` (which
+        is about the subs a solve would *act on*, and tests NULL only).
+        """
+        assert self._conn is not None
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM frames"
+            " WHERE accept = 1 AND wcs_json IS NOT NULL AND wcs_json != ''"
         ).fetchone()[0]
 
     def count_accepted_unsolved(self) -> int:

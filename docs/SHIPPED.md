@@ -1,5 +1,58 @@
 # Shipped — the record
 
+## v0.471.7 — 2026-09-19 — "a healthy, up-to-date target pays nothing but a couple of DB reads" — it paid a frame object per sub, five times over, every five minutes
+
+*(Builder, branch `claude/wizardly-cannon-fgcbme`, the same run as v0.471.6. The sentence in the heading is
+`pipeline._auto_stack_degraded_recheck`'s own docstring, and it is the whole finding: the repo's habit of
+reading a comment as a claim about the lines beneath it, applied to the one loop nobody watches.)*
+
+**Where the cost was.** The walk-away scan decides, for **every target on every poll**, whether to stack it.
+Five reads make that decision, and every one of them built a `FrameRow` per accepted sub — `SELECT *` on a
+table whose biggest column is the sub's plate-solve header, to answer questions that never look at it:
+
+| read | asked | what it wanted |
+|---|---|---|
+| `_solved_accepted_count` | once per target, then again in each recheck behind it | a **count** |
+| `_auto_stack_calibration_recheck` | per target with no new subs | that count |
+| `_auto_stack_degraded_recheck` | per target with no new subs and no master | that count |
+| `_detect_mixed_pointings` | per target about to stack | two coordinates |
+| `_auto_stack_panel_depth` | per target about to stack | two coordinates |
+| `_auto_stack_readability_hold` | per target about to stack | two paths, two coordinates, one bit |
+
+So a target with nothing new — which is most targets, most polls — paid the whole table **three times**, and
+one about to stack paid it three more. On the owner's library that is 54,681 accepted subs' worth of row
+building per sweep, in the single job worker, on a box with a recorded OOM history (AGENTS.md §10).
+
+**Measured** on a synthetic project the size of his deepest target (35,894 subs, ~2 kB of `wcs_json` each),
+best of 3 on this box: the count **935 ms → 54 ms**, the pointing read **993 ms → 254 ms**, identical
+answers.
+
+**What it is now.** New `Project.count_accepted_solved()` — `COUNT(*) WHERE accept = 1 AND wcs_json IS NOT
+NULL AND wcs_json != ''`. The empty-string arm is deliberate and is the only subtle part: the engine's test
+is `if f.wcs_json`, so a blank sidecar is *not* a plate solve, and the count that decides whether to stack
+must not disagree with the stacker about which subs exist. (`count_accepted_unsolved` spells its own test
+`IS NULL` and therefore reads a blank as located; that is recorded in `count_solved`'s docstring and left
+alone, since it can only make an *offer* more conservative.) The three pointing reads take
+`iter_frame_columns`.
+
+`readable_frame_path`'s rule gained a second spelling for the column-shaped caller —
+`project.first_existing_frame_path(cached_path, source_path)` — and the row-shaped form is now a one-line
+wrapper over it, so "which file is this frame?" keeps exactly one definition. A test compares the two over
+every shape at once, including a blank path and a dangling cache, because what would go wrong is a
+*divergence* and only comparing them can show it.
+
+**Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change; no new column and no
+migration; nothing in the stacker or the engine's hot path.
+
+**Tests (+4, three of them failing before — verified by scratch reverts).**
+`test_count_accepted_solved_is_exactly_what_the_stacker_would_combine` pins the intersection against a
+fixture carrying a rejected-but-solved sub, a blank sidecar and a NULL one, *and* against the read it
+replaced; `test_count_accepted_solved_builds_no_frame_objects` and
+`test_the_scan_loops_stack_decision_builds_no_frame_objects` count
+`seestack.io.project._row_to_frame` calls — the second drives all six reads above in one arming, because the
+docstring this change is against is a claim about the decision as a whole rather than about any one step,
+and it goes red on a whole-row read reintroduced anywhere along it.
+
 ## v0.471.6 — 2026-09-19 — the *walk-away* path asked the same six calibration questions, and was still reading whole frames to answer them
 
 *(Builder, branch `claude/wizardly-cannon-fgcbme`. The unattended sibling of v0.471.2, found by asking that

@@ -17,6 +17,7 @@ from __future__ import annotations
 from seestack.io.project import (
     FrameRow,
     count_unreadable_frames,
+    first_existing_frame_path,
     readable_frame_path,
 )
 from seestack.qc.runner import build_qc_arglist
@@ -66,6 +67,33 @@ def test_helper_falls_back_to_source_when_cache_is_gone(tmp_path):
 def test_helper_returns_none_when_neither_exists(tmp_path):
     f = _frame(1, cached_path=str(tmp_path / "a.fit"), source_path=str(tmp_path / "b.fit"))
     assert readable_frame_path(f) is None
+
+
+def test_the_two_column_form_is_the_same_rule_and_not_a_second_one(tmp_path):
+    """The scan loop reads a sub's two paths as *columns* — a `FrameRow` would
+    carry its plate-solve header along to answer "which file is this?" — so the
+    rule has a second spelling, and the two must never drift into two answers
+    about one frame.
+
+    Pinned over every shape above and the frame-shaped case together, rather
+    than by re-testing the branches: what would go wrong is a *divergence*, and
+    only comparing them can show that.
+    """
+    cache, src, gone = (tmp_path / "c.fit", tmp_path / "s.fit",
+                        tmp_path / "gone.fit")
+    cache.write_bytes(b"c")
+    src.write_bytes(b"s")
+    for cached_path, source_path in (
+            (str(cache), str(src)),          # both there — cache wins
+            (str(gone), str(src)),           # dangling cache — falls through
+            (str(gone), str(tmp_path / "x")),  # neither
+            (None, str(src)),                # no cache column at all
+            (None, None),                    # nothing recorded
+            ("", str(src)),                  # a blank is not a path
+    ):
+        f = _frame(1, cached_path=cached_path, source_path=source_path)
+        assert first_existing_frame_path(cached_path, source_path) == \
+            readable_frame_path(f), (cached_path, source_path)
 
 
 def test_helper_handles_missing_cache_column(tmp_path):
