@@ -1,5 +1,63 @@
 # Shipped — the record
 
+## v0.471.5 — 2026-09-19 — the "First look" card built a frame object per accepted sub to read four fields off one of them
+
+*(Builder, branch `claude/wizardly-cannon-nc6rhy`, the same run as v0.471.4. Closes shape **(b)** of the
+measured Target-page LEAD — and closes it in a shape the lead had ruled out, because v0.471.4's measurement
+had just moved the ground under it.)*
+
+**What the lead expected, and why it was wrong.** Its words: *"`best_frame` returns the frame, and its caller
+reads four fields off the returned one — so a narrow projection means either returning a tuple (and changing
+every caller) or keeping the id and re-reading that one row, which is one extra query against 132 MB."* Both
+horns of that assume the lever is **what is read**. v0.471.4 measured, on the sibling endpoint, that it is
+not: these reads **stream**, so at most one row is alive at a time and the cost is what the caller **keeps**.
+
+And `best_frame` is a `min()` — it keeps exactly one frame. So there was nothing to project. The 135 MB was
+two lists, both incidental:
+
+1. the endpoint's own `list(proj.iter_frames(accepted_only=True))`, kept only so `len()` could give
+   `n_accepted`; and
+2. the function's internal `eligible = [...]` filter list, which on a streamed input holds every candidate
+   row alive to the end.
+
+**What shipped.**
+
+- `seestack/qc/grading.best_frame` takes an `Iterable[FrameRow]` and streams a running minimum instead of
+  filtering into a list. The comparison is strict `<`, which is what keeps the **first** frame at a winning
+  key — exactly what `min()` did, and the only thing separating two rows that tie on all three terms.
+- `webapp/routers/targets.target_best_frame` hands over `proj.iter_frames(accepted_only=True)` itself, inside
+  the project's own `try`, and takes `n_accepted` from `Project.count(accepted_only=True)` — a `COUNT(*)`
+  instead of a `len()` of rows built to be discarded.
+
+Measured on a synthetic project the size of the owner's deepest target (35,894 subs, ~2 kB of `wcs_json`
+each, best of 3):
+
+| | before | after |
+|---|---|---|
+| time | 1,181 ms | **858 ms** |
+| peak allocation | **135.3 MB** | **~0 MB** |
+
+Same pick, same count. `best_frame` still returns a `FrameRow`, so **no caller changed** and no record type
+was needed — the narrower signature (`list` → `Iterable`) is a widening, and a list still works exactly as
+before.
+
+**What this says about shape (a), the one still open.** `count_unreadable_frames` already streams and peaks
+at ~0, and the 1,594 ms the lead measured is against a fixture where **no file exists** — two `stat()`s per
+frame that a healthy install does not pay (the endpoint's own comment records 44 ms per 5,000 present files).
+So a projection there buys the row building only, on the one entry in the table with nothing to retain. Noted
+in the backlog as probably not worth a slot.
+
+**Upgrade-safe (§9).** Pure optimisation: no endpoint, response shape, config, DB schema, on-disk path or
+default changed; nothing removed.
+
+**Tests (+5).** `tests/test_qc_grading.py` (+3): the streamed read holds only the winner — bounded against the
+same rows in a list rather than an absolute figure, and **failing before** (scratch revert, run); a one-shot
+iterator is consumed exactly once and left exhausted; and the first frame at a winning key wins, asserted both
+ways round. `tests/webapp/test_target_best_frame.py` (+2): the endpoint hands `best_frame` something that is
+not a `list` or `tuple` — structural, because what the endpoint passes is the whole question — **failing
+before**; and `n_accepted` pinned against the accepted rows themselves, on a fixture carrying a rejected sub
+so "all frames" and "accepted frames" are different answers.
+
 ## v0.471.4 — 2026-09-19 — the "How's my stack?" card read 35,894 whole frame rows to ask seven small questions and one bit
 
 *(Builder, branch `claude/wizardly-cannon-nc6rhy`. Closes shape **(c)** — the biggest one — of the measured

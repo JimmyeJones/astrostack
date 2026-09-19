@@ -1,5 +1,56 @@
 # Process notes & QA sweep records
 
+## 2026-09-19 — Builder: two CLEAN dogfood sweeps, and the measurement that reshaped a lead (v0.471.4 / v0.471.5)
+
+*(Builder, branch `claude/wizardly-cannon-nc6rhy`. Baseline `6511 passed, 2 skipped` in 11m38s with
+`-n 4 --dist worksteal` + the BLAS cap; `6527` after v0.471.4 and `6532` after v0.471.5.)*
+
+**The lever on the "whole deep target per request" family is what the caller KEEPS, not what the SELECT
+names — measured, and it contradicts how the lead was written.** Both entries closed this run assume, in
+their own words, that reading a 2 kB plate-solution column to ask one small question is what costs. It is
+not. These reads **stream**: at most one row is alive at a time, so a projection that avoids the column buys
+about 5 % and moves the peak not at all (measured on 20,000 subs: **269 ms against 256 ms**, same peak, for
+answering "is there a WCS?" in Python versus in SQL). The 144 MB and the 135 MB are both the caller's own
+`list(...)` — 35,894 rows each holding their own header, all at once.
+
+Two consequences, both acted on the same run:
+
+* A `_FRAME_EXPRESSIONS` facility on `iter_frame_columns` — a derived-column mechanism, with a
+  collision assertion and its own tests — was **built and then removed before it shipped**, because the
+  measurement did not support it. Deleting it also made the fix's central claim *stronger*: both spellings of
+  `FrameRow.solved` / `FrameHealth.solved` are now literally `bool()` of the same value, rather than a SQL
+  string that has to be argued equivalent to one.
+* Shape **(b)** of the lead, which it had sized as needing either a tuple return (changing every caller) or an
+  extra query, turned out to need **neither**: `best_frame` is a `min()`, so it keeps one frame, and the whole
+  135 MB was two incidental lists. It shipped as a streaming minimum with an unchanged return type.
+
+**The general form, for whoever picks shape (a):** before projecting columns off a deep read, check whether
+the caller materialises the set at all. If it streams, the projection is a few per cent; if it lists, the list
+is the whole number. (a)'s `count_unreadable_frames` streams, and the 1,594 ms recorded for it is a fixture
+where no file exists — two `stat()`s per frame a healthy install never pays.
+
+**Two CLEAN sweeps, recorded here rather than in a priority section.**
+
+* `scripts/agent-dogfood.sh --mosaic --calibration` — nothing overflowing, no console errors, on both the
+  single field and the 2×2. Read as one paragraph per the §7 instruction, the Target page's four cards agree:
+  the coaching card, the readiness card and the framing verdict all point at *more passes over the panels you
+  already have*, and the panel map's "about 30 s behind" is the same number the health card's grain note
+  quotes. The mosaic page is 3,673 px on a phone, second to `/tonight` at 3,694 px.
+  One thing that reads oddly and is **not** a finding: the Dashboard's only note is "Plate-solving isn't set
+  up yet … set it up before you drop in frames", on a scratch install that has just stacked two targets. The
+  samples arrive pre-solved and the scratch box genuinely has no ASTAP, so the note is true and the
+  before-you-drop phrasing is simply written for the install it is normally seen on. The owner has ASTAP; not
+  worth a slot.
+* `scripts/agent-dogfood.sh --big --editor --no-probe` — the editor driven on the field sample **and** on the
+  full-size mosaic, i.e. the one run whose preview is decimated (canvas 1693×1150, shrunk 1/2). All 21 ops
+  re-rendered the preview, undo/redo applied, no console error, no failed request; the loupe opened, followed
+  a navigator click ("the middle of your picture" → "the top-left of your picture") and its split comparison
+  read correctly. The two advisories that fire on **every** op there — the preview-scale caption and the
+  sharpening understatement — are Auto's own seeded `detail.sharpen` being described, and the second is
+  preventative by design (it exists to stop a user cranking a radius they cannot see), so firing before the
+  user has touched the slider is the point rather than a defect. Noted because it looks like a repetition
+  finding and is not.
+
 ## 2026-09-19 — Builder: a dry backlog, one CLEAN sweep, and the class that was still paying out (v0.471.2 / v0.471.3)
 
 *(Builder, branch `claude/wizardly-cannon-dnc0vt`. Baseline `6495 passed, 2 skipped` in 10m21s with

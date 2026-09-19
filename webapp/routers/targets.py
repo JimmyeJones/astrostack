@@ -1404,19 +1404,26 @@ def target_best_frame(safe: str, request: Request) -> BestFrameOut:
 
     lib, proj = deps.open_target_project(request, safe)
     try:
-        frames = list(proj.iter_frames(accepted_only=True))
+        # Streamed, not listed: `best_frame` holds nothing but the running
+        # winner, and the count is a `COUNT(*)` rather than a `len()` of rows
+        # built to be thrown away. A `FrameRow` is `SELECT *` and the biggest
+        # column on a solved sub is its plate solution, which this card never
+        # reads — measured on the owner's deepest target (35,894 subs),
+        # 1,191 ms / 136.3 MB peak → 852 ms / ~0 MB, same pick and same count
+        # (AGENTS.md §10 — this box has an OOM history).
+        n_accepted = proj.count(accepted_only=True)
+        best = best_frame(proj.iter_frames(accepted_only=True))
     finally:
         proj.close()
         lib.close()
-    best = best_frame(frames)
     if best is None:
-        return BestFrameOut(n_accepted=len(frames))
+        return BestFrameOut(n_accepted=n_accepted)
     return BestFrameOut(
         frame_id=best.id,
         captured_utc=best.timestamp_utc,
         fwhm_px=best.fwhm_px,
         star_count=best.star_count,
-        n_accepted=len(frames),
+        n_accepted=n_accepted,
     )
 
 
