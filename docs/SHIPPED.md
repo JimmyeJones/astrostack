@@ -1,5 +1,75 @@
 # Shipped — the record
 
+## v0.466.1 — 2026-09-19 — one card guessed at the background another had just measured: the uncalibrated note stops promising to cut a speckle that is not there
+
+*(Builder, branch `claude/sweet-babbage-foh7rz`. Found by a `--mosaic --editor --incoming-lag` dogfood pass
+that was otherwise CLEAN — a flag combination never run before — by reading the block it prints as one
+paragraph, which is the check the probe's own preamble asks for.)*
+
+**What was wrong.** On the Target page, two cards speak about the same picture's background. One of them
+**measures** it. The other did not look.
+
+```
+[readiness-card, inline]   Measured on your own picture: across most of it the background
+                           already looks clean at 4 min (grain 0.001).
+[stack-health-card]        No darks or flats were applied to this stack. Adding master darks
+                           would cut the background speckle and hot pixels.
+```
+
+`stack_health`'s calibration note fired on one thing — `calstat` being empty — and its sentence then made a
+claim about *this* picture's grain (*"would cut the background speckle"*), on a `StackRunRow` that was
+carrying the very number needed to check it (`run.noise_sigma`) the whole time. Reproduced on both samples
+in one pass: the single field (grain 0.001) and the 2×2 mosaic (grain 0.001), with the identical pair of
+sentences on each.
+
+**And it is not a sample artefact.** The clean bar's own provenance is the owner's real deep stacks — 271–787
+frames of one target — measuring σ **0.015–0.020**, i.e. inside the bar. So on every target he has no master
+dark for, this is his everyday state, and the health card's second-ranked note has been contradicting the
+readiness card above it on each one.
+
+**The fix keeps the offer and drops the unearned claim.** Darks are worth having on any uncalibrated stack
+and this note is how a beginner ever hears of them, so the note keeps its rank, its `action="calibration"`,
+its "Set up master darks & flats →" link and its how-to guide. What changes is only the magnitude clause,
+and only where the app has *measured*:
+
+* **Measured clean** → *"No darks or flats were applied to this stack. The background here already measures
+  clean, so darks would mostly tidy up hot pixels and your camera's own warmth rather than bring the grain
+  down."* `estimate_noise_sigma` is robust — a handful of isolated hot pixels barely move it — so the part
+  σ cannot see is exactly what honestly survives a clean reading.
+* **Above the bar, or never measured at all** (a run predating the `noise_sigma` column, a canvas the
+  estimator declined, a non-finite or non-positive σ) → **today's sentence, byte for byte**. `False` is the
+  cautious answer and it covers both, so nothing anywhere says "already clean" about a picture nobody
+  measured.
+
+**One bar, not a second opinion — which is the whole point.** `seestack.stackhealth.CLEAN_BACKGROUND_SIGMA`
+is not invented here: it is the literal
+`frontend/src/components/target/grainProjection.ts::CLEAN_SIGMA` already prints *"the background already
+looks clean"* from. Two cards holding private opinions about one σ is how this happened, so the two literals
+are pinned to each other by a test on each side and neither can move alone. The decision itself is one
+public predicate, `background_reads_clean(noise_sigma)`, beside its sibling `grain_verdict` for the same
+stated reason.
+
+**And the guide underneath the note no longer re-asserts what the note withdrew.** `DarksGuide` opens with
+*"this is the single biggest cleanup for a noisy image"* — a fine thing to say about a noisy image, and the
+wrong thing to say two clicks under a note that has just said this one measures clean. `StackHealthOut`
+gains an additive nullable `background_clean`, the note's own fact served once, threaded to the guide rather
+than re-derived. An older backend sends nothing and the guide keeps its general wording.
+
+**Upgrade-safe (§9).** One additive nullable response field, one additive optional component prop, one new
+public engine constant and one new pure function. No config, schema, on-disk, default or existing-response
+shape change; no threshold moved; no pixel of any picture touched; the calibrated path never reaches the new
+branch at all (pinned by a test).
+
+**Tests (+8 Python functions, +3 frontend cases).** Python: the clean sentence and that it keeps the note's rank and action;
+the grainy case asserted as the **exact** old string; the four unmeasured shapes (`None`, NaN, 0, negative);
+the shared-bar pin; and that a calibrated run acquires no note from any of it. Endpoint: `background_clean`
+served `True`/`False`/`False` across the three, each asserted *together with* the sentence beside it, so the
+flag and the copy cannot drift. Frontend: the guide's two branches (clean, and the three not-clean shapes
+including an older backend's `undefined`), the card threading the flag, and the cross-language bar pin.
+**Fail-before verified by scratch revert on both sides** — `background_reads_clean` forced to `False` reddens
+`test_a_measured_clean_background_stops_the_note_claiming_speckle`; the guide's conditional forced to `false`
+reddens its vitest case.
+
 ## v0.466.0 — 2026-09-18 — the third acquisition number, and the one nothing corrects for: a gain-mismatched master dark was applied in silence
 
 *(Builder, branch `claude/sweet-babbage-31bttf`. Closes the LEAD filed the same day with v0.464.0.)*

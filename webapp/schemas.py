@@ -677,6 +677,14 @@ class StackHealthOut(BaseModel):
     # The exposure/gain to shoot darks at, for the "How to add darks" guide shown
     # beside an uncalibrated note. Additive/nullable — older clients ignore it.
     dark_spec: DarkSpecOut | None = None
+    # Whether this run's own background σ was measured and measured clean
+    # (``seestack.stackhealth.background_reads_clean``). It is the fact the
+    # uncalibrated note's wording already turns on, served so the how-to guide
+    # rendered underneath that note says the same thing about the same picture
+    # instead of re-asserting "the single biggest cleanup for a noisy image" over
+    # a note that has just withdrawn the claim. Additive/nullable — an older
+    # backend sends nothing and the guide keeps its general wording.
+    background_clean: bool | None = None
 
 
 class FrameOut(BaseModel):

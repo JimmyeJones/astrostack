@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from seestack.io.project import FrameRow, StackRunRow
 from seestack.stackhealth import (
+    CLEAN_BACKGROUND_SIGMA,
+    background_reads_clean,
     recommended_dark_spec,
     seam_scale_is_current,
     stack_health,
@@ -1370,3 +1372,78 @@ def test_a_run_recorded_before_the_median_existed_keeps_the_old_test_exactly():
         [_frame() for _ in range(12)],
     )
     assert "rejection_blind" not in _kinds(notes)
+
+
+# --- The uncalibrated note stops claiming a speckle the app has measured away --
+#
+# Found by reading a dogfood pass's own printed block as one paragraph
+# (2026-09-19, `--mosaic --editor --incoming-lag`, otherwise CLEAN): the
+# readiness card an inch above the health card had *measured* the same
+# background — "across most of it the background already looks clean at 4 min
+# (grain 0.001)" — while this note told the same reader, about the same picture,
+# that darks "would cut the background speckle". One card guessing at what
+# another had measured.
+
+
+def test_a_measured_clean_background_stops_the_note_claiming_speckle():
+    """The offer stays; the unearned magnitude claim goes.
+
+    Fails before the fix: the old note said "would cut the background speckle"
+    on every uncalibrated run whatever its σ.
+    """
+    notes = stack_health(_run(calstat=None, noise_sigma=0.001),
+                         [_frame() for _ in range(10)])
+    note = next(n for n in notes if n.kind == "calibration")
+    # Still the same note, still ranked and wired the same way — only the
+    # sentence about *this* picture's grain changed.
+    assert note.action == "calibration"
+    assert notes[0].kind == "calibration"
+    assert "darks" in note.message.lower()
+    assert "background speckle" not in note.message
+    assert "already measures clean" in note.message
+    # What darks still buy on a picture whose sky is already clean: the part a
+    # robust σ cannot see.
+    assert "hot pixels" in note.message
+
+
+def test_a_grainy_background_keeps_todays_sentence_byte_for_byte():
+    """Above the bar nothing moves — this fix may only ever make the app say
+    *less* than it measured, never more."""
+    notes = stack_health(_run(calstat=None, noise_sigma=0.08),
+                         [_frame() for _ in range(10)])
+    note = next(n for n in notes if n.kind == "calibration")
+    assert note.message == (
+        "No darks or flats were applied to this stack. Adding master darks "
+        "would cut the background speckle and hot pixels.")
+
+
+def test_an_unmeasured_run_is_not_called_clean():
+    """A run recorded before the σ column existed, or one the estimator
+    declined, carries no measurement — so it keeps the general wording rather
+    than being told its background is clean on no evidence."""
+    for sigma in (None, float("nan"), 0.0, -1.0):
+        notes = stack_health(_run(calstat=None, noise_sigma=sigma),
+                             [_frame() for _ in range(10)])
+        note = next(n for n in notes if n.kind == "calibration")
+        assert "already measures clean" not in note.message, sigma
+        assert "background speckle" in note.message, sigma
+
+
+def test_background_reads_clean_is_the_one_bar_and_it_is_the_frontends():
+    """`CLEAN_BACKGROUND_SIGMA` is not a bar invented here — it is the number
+    `frontend/src/components/target/grainProjection.ts::CLEAN_SIGMA` already
+    prints "the background already looks clean" from, and the two cards
+    disagreeing about one picture is what it exists to stop. Pinned on both
+    sides (see `grainProjection.test.ts`) so neither can drift alone."""
+    assert CLEAN_BACKGROUND_SIGMA == 0.02
+    assert background_reads_clean(CLEAN_BACKGROUND_SIGMA) is True
+    assert background_reads_clean(0.0201) is False
+    assert background_reads_clean("not a number") is False
+
+
+def test_a_calibrated_run_says_nothing_about_darks_however_clean_it_is():
+    """The σ branch is reached only through the uncalibrated gate — a stack that
+    *did* get its masters must not acquire a new note from this."""
+    notes = stack_health(_run(calstat="dark+flat", noise_sigma=0.001),
+                         [_frame() for _ in range(10)])
+    assert "calibration" not in _kinds(notes)
