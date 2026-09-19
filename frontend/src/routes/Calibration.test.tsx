@@ -169,6 +169,39 @@ describe("CalibrationView", () => {
     expect(screen.queryByText(/say they are/)).not.toBeInTheDocument();
   });
 
+  it("says when a master dark was built across two nights", async () => {
+    // The Temp column shows one number because the master stamps one, and that
+    // number is a median — so a blend of a cold night and a warm one reads as a
+    // clean, well-matched dark.
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({
+      sensor_temp_c: 2.5, sensor_temp_min_c: -10, sensor_temp_max_c: 15,
+      temp_note: {
+        severity: "warn",
+        message: "This master dark mixes frames shot between -10°C and 15°C — "
+          + "25°C apart, and a sensor's dark current roughly doubles every "
+          + "6-7°C.",
+      },
+    })]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
+    renderView();
+
+    await waitFor(() =>
+      expect(screen.getByText(/mixes frames shot between -10°C and 15°C/))
+        .toBeInTheDocument());
+  });
+
+  it("says nothing about the range on an ordinary one-night dark", async () => {
+    // Every flat and bias, every one-night folder, and every master built
+    // before the range was recorded.
+    vi.spyOn(client.api, "listCalibrationMasters")
+      .mockResolvedValue([mk({ temp_note: null })]);
+    vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
+    renderView();
+
+    await waitFor(() => expect(screen.getByText("Dark 30s")).toBeInTheDocument());
+    expect(screen.queryByText(/mixes frames shot between/)).not.toBeInTheDocument();
+  });
+
   it("says how many photosites this dark shows as broken", async () => {
     vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
     vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);

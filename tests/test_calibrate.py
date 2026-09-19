@@ -2132,3 +2132,298 @@ def test_the_gain_warning_is_independent_of_the_exposure_and_temperature_ones(tm
     assert any("30s" in w and "10s" in w for w in warns)
     assert any("20°C" in w for w in warns)
     assert any("gain 200" in w for w in warns)
+
+
+# --- a master dark's OWN temperature range ---------------------------------
+#
+# The third acquisition number, on the *build* side. `build_master` already
+# refuses to blend two exposures and two gains, because each is a setting and a
+# second value is a second population. A temperature is neither: an uncooled
+# sensor follows the night and the season, so a dark folder legitimately drifts
+# and dropping the minority would only leave the master noisier. What it must
+# not do is stay *silent* — the master stamps one median temperature, and a
+# median that lands on the lights makes the mismatch advisory report a perfect
+# match for a dark that is a blend of two dark currents.
+
+
+def _blended_dark(tmp_path, cold, warm, *, n_cold=3, n_warm=3, level_cold=100.0,
+                  level_warm=1400.0, method="median", name="blend"):
+    """A master dark built from ``n_cold`` frames at ``cold``°C and ``n_warm`` at
+    ``warm``°C — same exposure, same gain, only the temperature (and the dark
+    current it drives) differing."""
+    paths = []
+    for i in range(n_cold):
+        p = tmp_path / f"{name}_c{i}.fits"
+        _write_raw(p, np.full((4, 4), level_cold, dtype=np.float32),
+                   exptime=10.0, gain=80.0, temp=cold)
+        paths.append(str(p))
+    for i in range(n_warm):
+        p = tmp_path / f"{name}_w{i}.fits"
+        _write_raw(p, np.full((4, 4), level_warm, dtype=np.float32),
+                   exptime=10.0, gain=80.0, temp=warm)
+        paths.append(str(p))
+    return build_master(paths, kind=method and "dark", method=method)
+
+
+def test_a_master_dark_records_the_range_its_stamped_temperature_is_a_median_of(tmp_path):
+    """Fail-before: ``MasterMeta`` carried only the median, so the two nights a
+    master was built from were unrecoverable from the master itself."""
+    master, meta = _blended_dark(tmp_path, -10.0, 15.0)
+    # The measurement this entry is about: a level neither night ever had…
+    assert float(np.median(master)) == pytest.approx(750.0)
+    # …stamped with a temperature no frame was shot at.
+    assert meta.sensor_temp_c == pytest.approx(2.5)
+    assert meta.sensor_temp_min_c == pytest.approx(-10.0)
+    assert meta.sensor_temp_max_c == pytest.approx(15.0)
+    # An ordinary one-night folder records a range too — it is simply narrow,
+    # which is what keeps every sentence below silent.
+    _, tight = _blended_dark(tmp_path, -10.0, -9.0, name="tight")
+    assert tight.sensor_temp_min_c == pytest.approx(-10.0)
+    assert tight.sensor_temp_max_c == pytest.approx(-9.0)
+
+
+def test_the_temperature_range_survives_a_round_trip_through_the_fits_header(tmp_path):
+    """It is part of what the master *is*, not how it was built, so — unlike
+    ``n_supplied`` and ``header_kinds`` — it has to come back off disk."""
+    _, meta = _blended_dark(tmp_path, 2.0, 24.0)
+    save_master(tmp_path / "m.fits", np.zeros((4, 4), dtype=np.float32), meta)
+    _arr, back = load_master(tmp_path / "m.fits")
+    assert back.sensor_temp_min_c == pytest.approx(2.0)
+    assert back.sensor_temp_max_c == pytest.approx(24.0)
+    # A master written before the cards existed reads as "didn't say", never as
+    # "uniform" — the whole file is upgrade-safe on that distinction.
+    save_master(tmp_path / "old.fits", np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 5, 4, 4, "mean", sensor_temp_c=-10.0))
+    _arr, old = load_master(tmp_path / "old.fits")
+    assert old.sensor_temp_min_c is None and old.sensor_temp_max_c is None
+
+
+def test_the_blend_rule_is_the_modules_own_mismatch_tolerance_not_a_new_number():
+    from seestack.calibrate.apply import (
+        TEMP_MISMATCH_TOL_C,
+        dark_temperature_blend,
+        dark_temperature_blend_warning,
+    )
+
+    assert dark_temperature_blend(-10.0, 15.0) == pytest.approx(25.0)
+    # Exactly at the bar counts, matching every other >= test in the module.
+    assert dark_temperature_blend(0.0, TEMP_MISMATCH_TOL_C) == pytest.approx(
+        TEMP_MISMATCH_TOL_C)
+    assert dark_temperature_blend(0.0, TEMP_MISMATCH_TOL_C - 0.1) is None
+    # One-sided: a master that never recorded its range can't be disproved.
+    assert dark_temperature_blend(None, 15.0) is None
+    assert dark_temperature_blend(-10.0, None) is None
+    assert dark_temperature_blend(float("nan"), 15.0) is None
+    assert dark_temperature_blend_warning(-10.0, -9.0) is None
+    said = dark_temperature_blend_warning(-10.0, 15.0)
+    assert "-10°C" in said and "15°C" in said and "25°C apart" in said
+
+
+def test_a_dark_that_blends_two_nights_says_so_even_when_it_matches_the_subs(tmp_path):
+    """The case the whole entry is about, and the one the existing temperature
+    check is structurally unable to reach: the master's median lands *on* the
+    lights, so `calibration_warnings` reported a perfect match — for a dark
+    whose own frames are 25°C apart. Fail-before: this list was empty."""
+    _master, meta = _blended_dark(tmp_path, -10.0, 15.0)
+    save_master(tmp_path / "blend.fits", np.zeros((4, 4), dtype=np.float32), meta)
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "blend.fits"))
+    assert cal.dark_temp_c == pytest.approx(2.5)
+    warns = cal.calibration_warnings(
+        light_exposure_s=10.0, light_temps_c=[2.5] * 20, light_gains=[80.0] * 20)
+    assert len(warns) == 1
+    assert "mixes frames shot between -10°C and 15°C" in warns[0]
+    # It is a fact about the dark, so it is said with no lights handed over at
+    # all — the walk-away path's own call shape.
+    assert cal.calibration_warnings(light_exposure_s=10.0) == warns
+
+
+def test_a_dark_shot_on_one_night_stays_silent_about_its_range(tmp_path):
+    """The ordinary case must be byte-identical, both ways round: a narrow range
+    says nothing, and an older master with no range recorded says nothing."""
+    _master, meta = _blended_dark(tmp_path, -10.0, -8.0, name="onenight")
+    save_master(tmp_path / "one.fits", np.zeros((4, 4), dtype=np.float32), meta)
+    one = CalibrationMasters.load(dark_path=str(tmp_path / "one.fits"))
+    assert one.calibration_warnings(
+        light_exposure_s=10.0, light_temps_c=[-9.0] * 12) == []
+    save_master(tmp_path / "old.fits", np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 6, 4, 4, "median", exposure_s=10.0,
+                           sensor_temp_c=2.5))
+    old = CalibrationMasters.load(dark_path=str(tmp_path / "old.fits"))
+    assert old.dark_temp_min_c is None
+    assert old.calibration_warnings(
+        light_exposure_s=10.0, light_temps_c=[2.5] * 12) == []
+
+
+def test_the_blend_sentence_is_independent_of_the_three_mismatch_ones(tmp_path):
+    """A blended dark can also be wrong against the subs on all three numbers;
+    each answer is separate, and the blend one comes *before* the temperature
+    comparison because it is the premise that comparison rests on."""
+    save_master(tmp_path / "d.fits", np.zeros((4, 4), dtype=np.float32),
+                MasterMeta("dark", 20, 4, 4, "mean", exposure_s=30.0, gain=200.0,
+                           sensor_temp_c=20.0, sensor_temp_min_c=2.0,
+                           sensor_temp_max_c=38.0))
+    cal = CalibrationMasters.load(dark_path=str(tmp_path / "d.fits"))
+    warns = cal.calibration_warnings(10.0, -10.0, light_gain=80.0)
+    assert len(warns) == 4
+    blend = next(i for i, w in enumerate(warns)
+                 if "mixes frames shot between 2°C and 38°C" in w)
+    mismatch = next(i for i, w in enumerate(warns)
+                    if "was shot at 20°C" in w)
+    assert blend < mismatch
+    assert any("30s" in w and "10s" in w for w in warns)
+    assert any("gain 200" in w for w in warns)
+
+
+def test_no_frame_is_dropped_for_its_temperature_the_way_one_is_for_exposure(tmp_path):
+    """The deliberate difference from the exposure and gain rules. A temperature
+    is continuous and an uncooled sensor drifts, so gating on it would throw away
+    good frames and leave the master noisier; the answer is to say so instead.
+    Every frame goes in, and the pixels are exactly what they were."""
+    skipped = []
+    paths = []
+    for i, temp in enumerate((-10.0, -10.0, -10.0, 15.0, 15.0, 15.0)):
+        p = tmp_path / f"t{i}.fits"
+        _write_raw(p, np.full((4, 4), 200.0, dtype=np.float32),
+                   exptime=10.0, gain=80.0, temp=temp)
+        paths.append(str(p))
+    master, meta = build_master(paths, kind="dark", method="median",
+                                skipped=skipped)
+    assert skipped == []
+    assert meta.n_frames == 6
+    assert np.allclose(master, 200.0)
+
+
+# --- a BIAS folder's exposure ----------------------------------------------
+#
+# "A bias is by definition the zero-length frame" was the reason the exposure
+# gate skipped a bias build — and it is really the argument *for* the gate: it
+# says what a bias is, not what is in the folder.
+
+
+def _bias_folder(tmp_path, *, n_bias=3, n_dark=3, bias_exp=0.0, method="median",
+                 name="b", bias_level=500.0, dark_level=1500.0):
+    """A bias folder with ``n_dark`` seconds-long dark frames mixed into it."""
+    paths = []
+    for i in range(n_bias):
+        p = tmp_path / f"{name}_b{i}.fits"
+        _write_raw(p, np.full((4, 4), bias_level, dtype=np.float32),
+                   exptime=bias_exp, gain=80.0, temp=-10.0)
+        paths.append(str(p))
+    for i in range(n_dark):
+        p = tmp_path / f"{name}_d{i}.fits"
+        _write_raw(p, np.full((4, 4), dark_level, dtype=np.float32),
+                   exptime=10.0, gain=80.0, temp=-10.0)
+        paths.append(str(p))
+    skipped = []
+    master, meta = build_master(paths, kind="bias", method=method,
+                                skipped=skipped)
+    return master, meta, skipped
+
+
+@pytest.mark.parametrize("n_bias,n_dark,bias_exp,method", [
+    (3, 3, 0.0, "median"),      # an even split: the 0 s group wins on the
+    (3, 3, 0.0, "mean"),        # shortest-first tie-break, as everywhere else
+    (3, 3, 0.0, "sigma_mean"),
+    (4, 2, 0.0, "mean"),        # the silent one before the fix: the majority's
+    (4, 2, 0.0, "median"),      # own 0 s label on a pedestal 67 % too big
+    (3, 3, 0.001, "median"),    # a camera whose minimum isn't literally zero
+    (4, 2, 0.001, "mean"),
+])
+def test_a_bias_is_not_built_out_of_the_darks_sitting_beside_it(
+        tmp_path, n_bias, n_dark, bias_exp, method):
+    """Fail-before: every one of these combined all six frames. The even split
+    gave a 1000 ADU master stamped **5 s** — a bias claiming to be a five-second
+    exposure — and the 4-to-2 folder gave 833 ADU stamped 0 s, which is worse
+    because it is silent: the majority's own label on the wrong pedestal."""
+    master, meta, skipped = _bias_folder(
+        tmp_path, n_bias=n_bias, n_dark=n_dark, bias_exp=bias_exp,
+        method=method, name=f"{n_bias}{n_dark}{method}")
+    assert float(np.median(master)) == pytest.approx(500.0)
+    assert meta.exposure_s == pytest.approx(bias_exp)
+    assert meta.n_frames == n_bias
+    assert [reason for _n, reason in skipped] == ["wrong exposure"] * n_dark
+
+
+def test_an_ordinary_bias_folder_is_untouched(tmp_path):
+    """Byte-identical wherever the folder holds one length — which is every
+    bias folder anyone has ever built, including the zero-length one the old
+    grouping could not even see."""
+    for exp in (0.0, 0.001, 0.02):
+        master, meta, skipped = _bias_folder(
+            tmp_path, n_bias=5, n_dark=0, bias_exp=exp, name=f"one{exp}")
+        assert skipped == []
+        assert meta.n_frames == 5
+        assert meta.exposure_s == pytest.approx(exp)
+        assert np.allclose(master, 500.0)
+    # …and a folder whose frames record no exposure at all still builds from
+    # all of them: "didn't say" is not "said the wrong thing".
+    paths = []
+    for i in range(4):
+        p = tmp_path / f"noexp{i}.fits"
+        _write_raw(p, np.full((4, 4), 500.0, dtype=np.float32), gain=80.0)
+        paths.append(str(p))
+    skipped = []
+    _m, meta = build_master(paths, kind="bias", skipped=skipped)
+    assert skipped == [] and meta.n_frames == 4
+
+
+def test_a_lone_zero_stamped_frame_cannot_hijack_a_bias_build(tmp_path):
+    """The reason the rule is a *majority* and not "the shortest wins": one
+    mistyped or truncated header must be the frame that is set aside, not the
+    one that defines the master and skips every real frame after it — the same
+    failure the majority-shape rule already exists to prevent."""
+    paths = []
+    for i in range(5):
+        p = tmp_path / f"real{i}.fits"
+        _write_raw(p, np.full((4, 4), 500.0, dtype=np.float32),
+                   exptime=0.001, gain=80.0)
+        paths.append(str(p))
+    stray = tmp_path / "stray.fits"
+    _write_raw(stray, np.full((4, 4), 9000.0, dtype=np.float32),
+               exptime=0.0, gain=80.0)
+    paths.append(str(stray))
+    skipped = []
+    master, meta = build_master(paths, kind="bias", skipped=skipped)
+    assert meta.n_frames == 5
+    assert meta.exposure_s == pytest.approx(0.001)
+    assert skipped == [("stray.fits", "wrong exposure")]
+    assert np.allclose(master, 500.0)
+
+
+def test_zero_is_a_length_only_where_a_bias_asks_for_it(tmp_path):
+    """The dark path must not move. ``distinct_exposures`` drops a non-positive
+    value on purpose — for a light or a dark a 0 s card is a blank, not a
+    length — so the zero group is opt-in, and a dark build behaves exactly as
+    it did."""
+    from seestack.calibrate.masters import (
+        _exposure_in_group,
+        _majority_exposure_group,
+    )
+
+    assert _exposure_in_group(0.0, [0.0], allow_zero=True) is True
+    assert _exposure_in_group(0.0, [0.0]) is False          # dark path, unchanged
+    assert _exposure_in_group(0.0, [10.0], allow_zero=True) is False
+    assert _exposure_in_group(10.0, [0.0], allow_zero=True) is False
+    assert _exposure_in_group(9.998, [10.0], allow_zero=True) is True
+
+    mixed = [0.0, 0.0, 0.0, 10.0, 10.0]
+    assert _majority_exposure_group(mixed, allow_zero=True) == [0.0, 0.0, 0.0]
+    # Without it the zeros vanish, the set reads as one length, and nothing is
+    # gated — which is exactly what the bug was.
+    assert _majority_exposure_group(mixed) is None
+
+    # A dark folder holding a stray 0 s frame keeps today's answer: the zeros
+    # are dropped, the remaining lengths decide, and nothing new is skipped.
+    paths = []
+    for i in range(4):
+        p = tmp_path / f"d{i}.fits"
+        _write_raw(p, np.full((4, 4), 100.0, dtype=np.float32), exptime=10.0,
+                   gain=80.0)
+        paths.append(str(p))
+    zero = tmp_path / "zero.fits"
+    _write_raw(zero, np.full((4, 4), 5.0, dtype=np.float32), exptime=0.0,
+               gain=80.0)
+    paths.append(str(zero))
+    skipped = []
+    _m, meta = build_master(paths, kind="dark", skipped=skipped)
+    assert skipped == [] and meta.n_frames == 5
