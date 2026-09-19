@@ -451,14 +451,17 @@ def test_recommend_masters_skips_missing_and_handles_empty():
 
 
 def _register(root, kind, exposure_s=None, gain=None, sensor_temp_c=None,
-              width=4, height=4, bayer_pattern=None):
+              width=4, height=4, bayer_pattern=None,
+              sensor_temp_min_c=None, sensor_temp_max_c=None):
     from seestack.calibrate.masters import MasterMeta
     return calibration.register_master(
         root, name=f"{kind} {exposure_s}",
         array=np.full((height, width), 1.0, dtype=np.float32),
         meta=MasterMeta(kind, 5, width, height, "median", exposure_s=exposure_s,
                         gain=gain, sensor_temp_c=sensor_temp_c,
-                        bayer_pattern=bayer_pattern))
+                        bayer_pattern=bayer_pattern,
+                        sensor_temp_min_c=sensor_temp_min_c,
+                        sensor_temp_max_c=sensor_temp_max_c))
 
 
 def test_auto_bind_binds_confident_dark_and_flat(tmp_path):
@@ -2614,3 +2617,106 @@ def test_the_binder_prefers_the_gain_the_majority_of_a_targets_subs_carry(
     assert Path(bound["dark_path"]).name == majority["filename"]
     assert Path(bound["dark_path"]).name != lone["filename"]
 
+
+# ---- a tie between two masters is not a coin toss --------------------------
+
+
+def test_temp_range_span_measures_only_what_a_master_actually_recorded():
+    """One-sided, like every other reading in the module: anything it cannot
+    measure is 0 °C — "didn't say" is not "was built across nothing"."""
+    from webapp.calibration import _temp_range_span
+
+    assert _temp_range_span({"sensor_temp_min_c": -15.0,
+                             "sensor_temp_max_c": 5.0}) == 20.0
+    assert _temp_range_span({}) == 0.0                       # before v0.468.0
+    assert _temp_range_span({"sensor_temp_min_c": -15.0}) == 0.0   # half a range
+    assert _temp_range_span({"sensor_temp_min_c": -5.0,
+                             "sensor_temp_max_c": -5.0}) == 0.0    # one night
+    # The registry's JSON is not validated on read, so junk must be refused
+    # rather than described — and a bool is an int in Python.
+    assert _temp_range_span({"sensor_temp_min_c": 5.0,
+                             "sensor_temp_max_c": -15.0}) == 0.0
+    assert _temp_range_span({"sensor_temp_min_c": "cold",
+                             "sensor_temp_max_c": 5.0}) == 0.0
+    assert _temp_range_span({"sensor_temp_min_c": float("nan"),
+                             "sensor_temp_max_c": 5.0}) == 0.0
+    assert _temp_range_span({"sensor_temp_min_c": True,
+                             "sensor_temp_max_c": 5.0}) == 0.0
+
+
+@pytest.mark.parametrize("blended_first", [True, False])
+def test_a_dark_that_only_averages_to_the_right_temperature_loses_a_tie(
+        tmp_path, blended_first):
+    """Two darks the acquisition numbers cannot separate: same exposure, same
+    gain, both stamped −5 °C. One really was shot at −5 °C; the other was built
+    across a −15 °C night and a +5 °C one and only *averages* to it, which is
+    the master v0.468.0's advisory exists to warn about.
+
+    Until now the binder scored them identically and took whichever the registry
+    happened to list first, so the owner's walk-away stack got the blended one
+    half the time — with the warning going to a page nobody was reading. Asserted
+    in both registration orders, because "whichever came first" is exactly what
+    this is replacing.
+    """
+    root = tmp_path / "lib"
+    order = ["blended", "measured"] if blended_first else ["measured", "blended"]
+    ids = {}
+    for which in order:
+        ids[which] = _register(
+            root, "dark", exposure_s=30.0, gain=80.0, sensor_temp_c=-5.0,
+            sensor_temp_min_c=-15.0 if which == "blended" else -5.2,
+            sensor_temp_max_c=5.0 if which == "blended" else -4.8)
+
+    bound = calibration.auto_bind_master_ids(
+        root, calibration.list_masters(root), exposure_s=30.0, gain=80.0,
+        sensor_temp_c=-5.0)
+    assert bound["dark_master_id"] == ids["measured"]["id"]
+    # …and the interactive form's recommendation agrees, so "Use recommended"
+    # and a walk-away stack cannot land on two different darks.
+    rec = calibration.recommend_masters(
+        calibration.list_masters(root), exposure_s=30.0, gain=80.0,
+        sensor_temp_c=-5.0)
+    assert rec["dark_master_id"] == ids["measured"]["id"]
+    # The badge score is about the match, not about the range: two masters this
+    # close are equally good matches and must not be shown two numbers.
+    assert rec["scores"][ids["measured"]["id"]] == rec["scores"][ids["blended"]["id"]]
+
+
+def test_the_narrow_range_tie_break_never_beats_a_closer_master(tmp_path):
+    """A tie-break, not a distance. A master that genuinely matches the subs
+    better still wins however wide the range it was built across — which is what
+    keeps this from being able to *strip* calibration off a target that has it
+    today: it can never move a master further away, only order two that are
+    already level."""
+    root = tmp_path / "lib"
+    narrow_but_far = _register(root, "dark", exposure_s=30.0, gain=80.0,
+                               sensor_temp_c=-25.0,
+                               sensor_temp_min_c=-25.1, sensor_temp_max_c=-24.9)
+    blended_but_near = _register(root, "dark", exposure_s=30.0, gain=80.0,
+                                 sensor_temp_c=-5.0,
+                                 sensor_temp_min_c=-15.0, sensor_temp_max_c=5.0)
+    bound = calibration.auto_bind_master_ids(
+        root, calibration.list_masters(root), exposure_s=30.0, gain=80.0,
+        sensor_temp_c=-5.0)
+    assert bound["dark_master_id"] == blended_but_near["id"]
+    assert bound["dark_master_id"] != narrow_but_far["id"]
+
+
+def test_a_master_built_before_the_range_was_recorded_is_ordered_as_it_always_was(
+        tmp_path):
+    """Every master on the installed base predates v0.468.0 and records no range
+    at all, so the tie-break has to be invisible there: the binding is byte-for-
+    byte what it was, and the two functions still agree with each other."""
+    root = tmp_path / "lib"
+    _register(root, "dark", exposure_s=30.0, gain=80.0, sensor_temp_c=-5.0)
+    newest = _register(root, "dark", exposure_s=30.0, gain=80.0, sensor_temp_c=-5.0)
+    masters = calibration.list_masters(root)
+    assert all(m.get("sensor_temp_min_c") is None for m in masters)
+
+    bound = calibration.auto_bind_master_ids(
+        root, masters, exposure_s=30.0, gain=80.0, sensor_temp_c=-5.0)
+    rec = calibration.recommend_masters(
+        masters, exposure_s=30.0, gain=80.0, sensor_temp_c=-5.0)
+    # Today's answer, spelled out rather than assumed: with nothing to break the
+    # tie, the registry's own order stands and ``list_masters`` is newest first.
+    assert bound["dark_master_id"] == rec["dark_master_id"] == newest["id"]
