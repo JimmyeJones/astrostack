@@ -201,6 +201,55 @@ def test_count_solved_is_every_located_sub_accepted_or_not(proj):
     assert proj.count_solved() == 2
 
 
+def test_count_accepted_solved_is_exactly_what_the_stacker_would_combine(proj):
+    """The number the walk-away scan decides on, asked of every target on every
+    poll. `run_stack` combines accepted **and** solved frames, so this must be
+    that intersection and nothing near it — and it must agree, sub for sub, with
+    the engine's own `if f.wcs_json` truthiness rather than with a bare
+    `IS NOT NULL` (`count_accepted_unsolved` spells that one `IS NULL` and so
+    reads a blank sidecar as located; the trigger must not).
+    """
+    proj.add_frames([FrameRow(source_path=f"c{i}.fit") for i in range(6)])
+    proj.update_frame(1, wcs_json="{}")
+    proj.update_frame(2, wcs_json="{}")
+    # Solved, but the user set it aside — the stacker will not combine it.
+    proj.update_frame(3, accept=False, reject_reason="user", wcs_json="{}")
+    # Accepted, never solved.
+    #   (frame 4 left untouched)
+    # A blank sidecar is not a plate solve.
+    proj.update_frame(5, wcs_json="")
+    # Neither is a NULL one.
+    proj.update_frame(6, wcs_json=None)
+
+    assert proj.count_accepted_solved() == 2
+    # …and it is the same set the read it replaced produced, frame for frame.
+    assert proj.count_accepted_solved() == sum(
+        1 for f in proj.iter_frames(accepted_only=True) if f.wcs_json)
+
+
+def test_count_accepted_solved_builds_no_frame_objects(proj, monkeypatch):
+    """The point of it being a `COUNT`. Fail-before: the scan loop summed a
+    generator over `iter_frames`, so every poll built a `FrameRow` per accepted
+    sub of every target — 35,894 of them on the owner's deepest — each carrying
+    the plate-solve header this question only asks the *existence* of.
+    Measured on a synthetic project that size: **935 ms → 54 ms**.
+    """
+    import seestack.io.project as project_module
+
+    proj.add_frames([FrameRow(source_path=f"d{i}.fit", wcs_json="{}")
+                     for i in range(4)])
+    built = [0]
+    real = project_module._row_to_frame
+
+    def counting(row):
+        built[0] += 1
+        return real(row)
+
+    monkeypatch.setattr(project_module, "_row_to_frame", counting)
+    assert proj.count_accepted_solved() == 4
+    assert built[0] == 0, f"built {built[0]} FrameRow objects to take a count"
+
+
 def test_count_accepted_unsolved_tried_is_the_subset_the_solver_has_beaten(proj):
     """"Try harder" presupposes a first try, so the offer counts only the subs
     ASTAP actually ran on and failed to place — not ones it has never seen."""
