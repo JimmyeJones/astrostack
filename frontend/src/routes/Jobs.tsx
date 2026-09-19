@@ -785,9 +785,20 @@ export function buildMasterSummary(r: Record<string, unknown>): string {
     // again for a reason this line never mentioned.
     const differing = byLength && byGain ? "a different length and gain"
       : byLength ? "a different length" : "a different gain";
+    // A bias needs its own "because": it is the one master whose exposure rule
+    // is not "match your subs" but "be zero". Saying "a bias only matches subs
+    // of its own exposure" would be false — a bias is exposure-independent
+    // where it is *applied*; what it cannot survive is a seconds-long frame in
+    // the folder it is built from, which is dark current, not a read pedestal.
+    const lengthBecause = kind === "bias"
+      ? "a bias is the readout on its own, so a frame shot for seconds is dark "
+        + "current rather than a bias"
+      : `a ${kind} only matches subs of its own exposure`;
     const because = byLength && byGain
-      ? `a ${kind} only matches subs of its own exposure and gain`
-      : byLength ? `a ${kind} only matches subs of its own exposure`
+      ? (kind === "bias" ? `${lengthBecause}, and it carries the gain-dependent `
+          + "readout pedestal too"
+        : `a ${kind} only matches subs of its own exposure and gain`)
+      : byLength ? lengthBecause
         : `a ${kind} carries the gain-dependent readout pedestal, and nothing `
           + `rescales it`;
     if (byLength || byGain) {

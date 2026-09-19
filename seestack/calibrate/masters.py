@@ -141,18 +141,35 @@ def _sigma_clip_mean(stack: np.ndarray, sigma: float, max_iters: int = 5) -> np.
     return np.where(np.isfinite(out), out, full_med).astype(np.float32, copy=False)
 
 
-def _exposure_in_group(value: float, group: Sequence[float]) -> bool:
+def _exposure_in_group(
+    value: float, group: Sequence[float], *, allow_zero: bool = False,
+) -> bool:
     """Is ``value`` one of the lengths in ``group``, within the module's own
     "is this the same exposure?" tolerance? Header rounding (9.998 against 10.0)
-    is the same length; a real Seestar step (10 → 30 s) is not."""
+    is the same length; a real Seestar step (10 → 30 s) is not.
+
+    ``allow_zero`` adds **0 as a length of its own**, matching only another 0.
+    It is off by default, and on only for a bias, because a bias is *defined* as
+    the zero-length readout: a camera that writes ``EXPTIME = 0`` is stating the
+    frame's whole identity, where for a light or a dark the same card means
+    nothing usable and is dropped (see
+    :func:`seestack.calibrate.apply.distinct_exposures`). A relative tolerance
+    cannot express it — ``0`` is 100 % away from every positive length and
+    ``0/0`` is not a ratio — so it is an exact match rather than a new
+    threshold.
+    """
     from seestack.calibrate.apply import EXPOSURE_MISMATCH_TOL
 
+    if allow_zero and value == 0.0:
+        return any(g == 0.0 for g in group)
     return any(abs(value / g - 1.0) <= EXPOSURE_MISMATCH_TOL
                for g in group if g > 0)
 
 
-def _majority_exposure_group(values: Sequence[float | None]) -> list[float] | None:
-    """The exposure length most of these dark frames were shot at, as the list of
+def _majority_exposure_group(
+    values: Sequence[float | None], *, allow_zero: bool = False,
+) -> list[float] | None:
+    """The exposure length most of these frames were shot at, as the list of
     raw values belonging to that group — or ``None`` when there is nothing to
     gate on (no recorded exposure, or only one length, which is every ordinary
     folder).
@@ -162,18 +179,32 @@ def _majority_exposure_group(values: Sequence[float | None]) -> list[float] | No
     same thing everywhere. Ties keep the **shortest** length, because
     ``distinct_exposures`` reports groups shortest-first and the first maximum
     wins — deterministic, and exactly the shape-rule's own tie-break.
+
+    ``allow_zero`` carries a **0 s** group alongside them, for a bias. It has to
+    be added here rather than inside ``distinct_exposures``, which drops a
+    non-positive value on purpose: for a light or a dark "0 s" is a blank card,
+    not a length. For a bias it is the length — and dropping it is what made the
+    commonest contaminated-bias folder invisible, because a set of 0 s frames
+    plus a stray 10 s dark grouped as *one* length (10 s) and gated on nothing.
+    The 0 s group is still only a candidate for the majority, so a lone
+    zero-stamped frame among real ones is the minority and is the frame that
+    gets set aside — never the other way round, which is the whole point of
+    taking a majority rather than the shortest.
     """
     from seestack.calibrate.apply import distinct_exposures
 
     vals = [float(v) for v in values
-            if v is not None and math.isfinite(float(v)) and float(v) > 0]
+            if v is not None and math.isfinite(float(v))
+            and (float(v) > 0 or (allow_zero and float(v) == 0.0))]
     groups = distinct_exposures(vals)
+    if allow_zero and any(v == 0.0 for v in vals):
+        groups = [0.0] + groups   # shortest-first, so the tie-break is unchanged
     if len(groups) < 2:
         return None  # nothing to split — behaviour is byte-identical
     members: list[list[float]] = [[] for _ in groups]
     for v in vals:
         for i, g in enumerate(groups):
-            if _exposure_in_group(v, [g]):
+            if _exposure_in_group(v, [g], allow_zero=allow_zero):
                 members[i].append(v)
                 break
     best = max(range(len(groups)), key=lambda i: len(members[i]))
@@ -241,12 +272,12 @@ def build_master(
         Raw single-extension FITS files (all the same kind, shape and bayer
         pattern). When the set isn't uniform, the **majority** shape wins and
         files that don't match it are skipped — so one stray frame from another
-        camera or binning mode can't hijack the build. For a **dark**, the same
-        majority rule applies to the frames' *exposure* (see below): a dark's
-        entire content is its exposure, so a set holding two lengths does not
-        describe either one. For a **dark or a bias**, it applies to their
-        *gain* as well, which sets the size of the pedestal they exist to
-        measure.
+        camera or binning mode can't hijack the build. For a **dark or a bias**,
+        the same majority rule applies to the frames' *exposure* (see below):
+        a dark's entire content is its exposure and a bias is *defined* as the
+        zero-length readout, so in either case a set holding two lengths does
+        not describe either one. It applies to their *gain* as well, which sets
+        the size of the pedestal they exist to measure.
     kind
         'dark', 'flat' or 'bias' — recorded in the metadata.
     method
@@ -266,9 +297,9 @@ def build_master(
         Optional list to collect ``(filename, reason)`` for every frame that was
         dropped during the build — ``"unreadable"`` (failed to load),
         ``"wrong size"`` (not a 2-D frame, or a shape that doesn't match the
-        majority), ``"wrong exposure"`` (a dark whose length isn't the majority
-        one) or ``"wrong gain"`` (a dark or bias whose gain isn't the majority
-        one). Lets the caller tell the user *how many* of their frames were
+        majority), ``"wrong exposure"`` (a dark or bias whose length isn't the
+        majority one) or ``"wrong gain"`` (a dark or bias whose gain isn't the
+        majority one). Lets the caller tell the user *how many* of their frames were
         actually used vs. silently set aside, instead of a bare success. Frames
         dropped by ``max_frames`` sampling are **not** recorded here — that's an
         intentional memory bound, not a skip. Default ``None`` = don't collect.
@@ -393,19 +424,41 @@ def build_master(
     # takes what is in the folder. This is the same majority rule the shape gate
     # above already applies to a stray frame from another camera.
     #
-    # Darks only, deliberately. A flat is normalised before it divides, so its
-    # exposure is not part of what it says; a bias is by definition the zero-length
-    # frame. Flat-darks arrive here as ``kind="dark"`` and want the rule as much as
-    # darks do (a flat-dark must match its flat's exposure).
+    # Flats are exempt, deliberately: a flat is normalised before it divides, so
+    # its exposure is not part of what it says. Flat-darks arrive here as
+    # ``kind="dark"`` and want the rule as much as darks do (a flat-dark must
+    # match its flat's exposure).
+    #
+    # **A bias wants it too, and used to be exempt for a reason that was really
+    # the bug.** "A bias is by definition the zero-length frame" is a statement
+    # about what a bias *is*, not about what is in the folder — so it argued for
+    # the gate rather than against it. Measured on a synthetic folder of 0 s
+    # readouts (500 ADU) with a few 10 s darks mixed in, the identical folder
+    # built as a ``dark`` set the 10 s frames aside as "wrong exposure", while
+    # built as a ``bias`` it combined all six: an even split gave a **1000 ADU**
+    # master stamped **5 s** — a bias frame that claims to be a five-second
+    # exposure — and the 4-to-2 folder gave **833 ADU** stamped **0 s**, which is
+    # the silent one, a pedestal 67 % too big wearing a bias's own label. That
+    # matters more than the same mistake in a dark, because the bias is what
+    # carries dark exposure-scaling: ``_effective_dark`` computes
+    # ``bias + (dark − bias)·t_light/t_dark``, so an inflated bias is wrong at
+    # every pixel of every scaled frame, and it is also
+    # :func:`~seestack.calibrate.defects.build_defect_map`'s fallback source.
+    #
+    # The bias call passes ``allow_zero``, because the commonest shape of that
+    # folder is 0 s frames plus a stray dark and ``distinct_exposures`` drops a
+    # non-positive value — so without it the set groups as one length and the
+    # gate never fires. See :func:`_majority_exposure_group`.
     #
     # A frame that recorded **no** exposure is kept, mirroring this module's own
     # "didn't say is not said the wrong thing" rule for ``require_declared_kind``:
     # plenty of legitimate calibration FITS carry no ``EXPTIME``, and dropping them
     # would turn a missing header into a smaller master.
     ref_exposure_group: list[float] | None = None
-    if kind == "dark":
+    if kind in ("dark", "bias"):
         ref_exposure_group = _majority_exposure_group(
-            [info.exposure_s for _n, _r, info in loaded])
+            [info.exposure_s for _n, _r, info in loaded],
+            allow_zero=(kind == "bias"))
 
     # ...and, for a dark or a bias, the majority **gain**, by the same rule
     # again — the same bug as the exposure one, one setting sideways.
@@ -460,7 +513,8 @@ def build_master(
                 skipped.append((name, "wrong size"))
             continue
         if (ref_exposure_group is not None and info.exposure_s is not None
-                and not _exposure_in_group(info.exposure_s, ref_exposure_group)):
+                and not _exposure_in_group(info.exposure_s, ref_exposure_group,
+                                           allow_zero=(kind == "bias"))):
             log.warning("master %s: skipping %s (exposure %.4gs, master is %.4gs)",
                         kind, name, info.exposure_s, ref_exposure_group[0])
             if skipped is not None:
