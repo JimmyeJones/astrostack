@@ -46,6 +46,15 @@ measures: it counts DOM nodes and first paint, and the *server* cost of the requ
 front of anything. **Generalisation worth carrying: for any endpoint the frontend pages through, the cost to
 read is per-request × pages, and a 6-sub fixture multiplies that by 1.**
 
+**A third sweep, run *after* the merge to check what it shipped: `--deep`, also CLEAN.** v0.471.1 changes the
+endpoint the frames table reads, so the table was driven at 1,200 subs in a real browser: **301 rows rendered
+of 1,200**, 7,485 DOM nodes, first paint **1,708 ms**, the foot reading *"Showing the first 300 of 1,200
+subs"*, and scrolling to it growing the window to 601 rows / 14,475 nodes — the `IntersectionObserver` path
+jsdom cannot cover. No console errors, no failed requests. So the SQL-paged endpoint serves the windowed table
+exactly as the Python-sorted one did, end to end. **One flag note for whoever runs this next: `--deep --no-probe`
+does not run `dogfood_deep.mjs`** — the deep measurement is part of the probe step, so `--no-probe` silently
+skips the only thing the flag exists for, and the pass prints eight lines and exits 0.
+
 **And one piece of test honesty, because the temptation was real.** The new `ORDER BY` carries an `id ASC`
 tie-break. Deleting it in a scratch copy leaves all 31 tests passing — this SQLite's sorter happens to keep
 the scan order for equal keys, and the scan happens to be in rowid order. The term stays (that is an
