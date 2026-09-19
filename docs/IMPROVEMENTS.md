@@ -171,6 +171,38 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   tolerance wide enough to cover a night"*). Re-open it only with a shape that is not "the mode of a
   continuous quantity".
 
+- **LEAD (Builder 2026-09-19, filed while shipping v0.470.0 — the one thing in that fix that is a *proxy*
+  rather than a measurement, and I knew it when I shipped it) — the app decides "ragged rim or under-shot
+  panel?" from a share it did not measure for that question, and on a mosaic that is both, the rim wins.**
+  *(Pillar: friendliness / trust — PRIORITY 3; size **S to write, M to be sure of**; severity low;
+  confidence: **the proxy and its failure direction are traced in code**, how often the ambiguous shape
+  occurs on the owner's library is **not** measured — which is why this is a lead.)*
+  **What shipped and why.** v0.470.0's grain note has to choose between two opposite prescriptions about one
+  thin region: *"another night on that panel"* and *"Trim border crops the worst of it away"*. It chooses
+  with `stackhealth.has_ragged_border`, i.e. `coverage_thin_frac >= _COVERAGE_THIN_SHARE` — deliberately the
+  ragged-border note's **own** condition, so the two notes on one card cannot disagree, which was the whole
+  point. That was the right call for the fix: it needed no new column, no migration and no new threshold.
+  **What it is not.** `coverage_thin_frac` answers *"how much of this canvas is under a quarter of one
+  panel's depth?"* — a question about **amount**, not about **place**. The thing being inferred is
+  geometric: is the thin region the canvas's perimeter, or an interior panel nobody has finished? The
+  observer's own discriminator for that is a **distance transform of the covered footprint normalised by its
+  maximum inscribed radius** (0 % of thin pixels beyond half that radius on all 22 of the owner's mosaics,
+  the same as on the single-field controls), which is cheap (`scipy.ndimage.distance_transform_edt`, already
+  a dependency) and definitive where the share is circumstantial.
+  **The failure direction, stated so nobody has to re-derive it:** a mosaic that has *both* a ragged union
+  rim **and** a genuinely under-shot interior panel takes the rim branch, so the owner is told to trim when
+  the more useful answer was to go and shoot that panel — and the grain note is the one surface that would
+  have said so (the panel map says *where*, but it is a different card). The reverse cannot happen: without
+  a rim the note keeps the sentence it has always had.
+  **Why it was not built.** It needs the interior fraction carried onto the run to be read at note time, and
+  `stack_runs` has no column for it — so it is an additive migration plus a `coverage_backfill` pass, which
+  is the right shape for a *measured* answer and far too much for an inference the card already makes
+  coherently. **Check first, before building any of it:** how often does the owner's library actually hold a
+  mosaic that is both? If the answer is "rarely", the proxy is good enough and this should be **closed with
+  the number** rather than built. If it is built, put the fraction behind the same lazy backfill the grain
+  columns already use, default it to "unknown" (never to 0.0, which would read as "all rim"), and keep
+  `has_ragged_border` as the fallback for every run recorded before it existed.
+
 - **🟠 OPEN REMAINDER of observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903) — a restack
   still *changes* each target's displayed picture; v0.447.2 only stopped it being silent.** *(Pillar: trust —
   PRIORITY 1-adjacent; size **L**, and not a drive-by. Filed by the Scout 2026-09-16 with three fix options;
