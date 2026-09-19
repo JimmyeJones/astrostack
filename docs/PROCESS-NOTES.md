@@ -49,6 +49,24 @@ useless: `distinct_exposures` drops a non-positive value on purpose, so the
 commonest contaminated-bias folder groups as *one* length and gates on nothing.
 Zero had to be carried as a length of its own, opt-in, for the bias call only.
 
+**A CI note that cost this run two and a half hours, so the next one doesn't
+pay it again: the Actions API's job status lags by tens of minutes, and a job
+that reads `in_progress` is very often already finished.** Both PR jobs sat at
+`in_progress` in every poll for ~2 h, in steps that take seconds (`npm ci`,
+`vite build`) — which reads exactly like a wedged runner, and is the one case
+AGENTS.md §8 allows a re-run for. It was not one. The tell was there and I
+missed it: `Image contract` reported `in_progress` for a solid hour and, when
+it finally flipped, its own `completed_at` said **05:21:07** — it had finished
+in 1 m 24 s, an hour before the API admitted it. The same job's steps then
+advanced one at a time across my polls, each already minutes in the past.
+
+So: **read `completed_at`, never the wall clock against `started_at`**, and
+before concluding "stuck", poll `get_workflow_job` (fresher than the check-runs
+list) twice and check whether the *step boundary* moved. I cancelled and spent
+the one permitted re-run on a run that was probably healthy, then merged on the
+local gate with a PR comment explaining why — which was the right call *given*
+what I could see, and would have been unnecessary given what was actually true.
+
 **Lever 3 — dogfood `--calibration --editor`: CLEAN.** A combination never run
 (`--calibration` had been run alone, with `--mosaic`, and with
 `--incoming-lag --mosaic`, but never with the editor drive, so a *calibrated*
