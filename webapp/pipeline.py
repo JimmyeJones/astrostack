@@ -756,6 +756,17 @@ def submit_build_master(
             "header_kinds": dict(meta.header_kinds or {}),
             "header_note": calibration.header_kind_note(
                 entry["kind"], meta.header_kinds, entry["n_frames"]),
+            # The coldest and warmest frame that went in, and the sentence for a
+            # master dark whose own frames straddle two nights — said here, at
+            # the moment it is built, as well as on the Calibration page. A
+            # master's single stamped temperature is a median, so without these
+            # a blend of a cold night and a warm one looks like a clean build.
+            # Both None (and the note absent) when no frame recorded a
+            # temperature, and on every kind but a dark.
+            "sensor_temp_min_c": meta.sensor_temp_min_c,
+            "sensor_temp_max_c": meta.sensor_temp_max_c,
+            "temp_note": calibration.master_temp_note(
+                entry["kind"], meta.sensor_temp_min_c, meta.sensor_temp_max_c),
         }
 
     return jm.submit("build_master", body)

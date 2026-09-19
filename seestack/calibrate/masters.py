@@ -60,6 +60,23 @@ class MasterMeta:
     exposure_s: float | None = None
     gain: float | None = None
     sensor_temp_c: float | None = None
+    # The coldest and warmest frame that actually went into the combine, in °C —
+    # the two numbers ``sensor_temp_c``'s median sits between. A single stamped
+    # temperature is a *claim that the set was uniform*, and nothing about a
+    # folder of darks enforces it: a Seestar's sensor is uncooled, so it follows
+    # the night and the season, and one folder can hold a cold night and a warm
+    # one. Dark current roughly doubles every 6-7 °C, so such a master is a blend
+    # of two dark currents and its stamped value is a middle no frame was shot
+    # at — which the mismatch advisory then finds a perfect match for.
+    #
+    # Unlike :attr:`n_supplied` and :attr:`header_kinds` these **are** written
+    # into the master's FITS header, because they are part of what the master *is*
+    # rather than how it was built: a master reloaded off disk has to still be
+    # able to say that its stamped temperature is a middle. ``None`` when no
+    # source frame recorded a temperature, and on every master built before this
+    # field existed — both of which read as "didn't say", never as "uniform".
+    sensor_temp_min_c: float | None = None
+    sensor_temp_max_c: float | None = None
     bayer_pattern: str | None = None
     # How many frames the caller actually supplied, before the ``max_frames``
     # memory bound sampled the set down. ``None`` when unknown — it is a
@@ -521,6 +538,10 @@ def build_master(
         exposure_s=float(np.median(exposures)) if exposures else None,
         gain=float(np.median(gains)) if gains else None,
         sensor_temp_c=float(np.median(temps)) if temps else None,
+        # Off the same list the median comes from, so the stamped value and the
+        # range it sits in can never describe different frames.
+        sensor_temp_min_c=float(min(temps)) if temps else None,
+        sensor_temp_max_c=float(max(temps)) if temps else None,
         bayer_pattern=_mode(patterns),
         n_supplied=n_supplied,
         header_kinds=header_kinds,
@@ -541,6 +562,8 @@ _META_CARDS = {
     "exposure_s": "EXPTIME",
     "gain": "GAIN",
     "sensor_temp_c": "CCD-TEMP",
+    "sensor_temp_min_c": "SSTMPMIN",
+    "sensor_temp_max_c": "SSTMPMAX",
     "bayer_pattern": "BAYERPAT",
 }
 
@@ -562,6 +585,12 @@ def save_master(path: str | Path, master: np.ndarray, meta: MasterMeta) -> None:
         h["GAIN"] = meta.gain
     if meta.sensor_temp_c is not None:
         h["CCD-TEMP"] = meta.sensor_temp_c
+    # Additive cards: a reader that doesn't know them ignores them, and a master
+    # written before they existed simply has neither.
+    if meta.sensor_temp_min_c is not None:
+        h["SSTMPMIN"] = (meta.sensor_temp_min_c, "Coldest source frame (C)")
+    if meta.sensor_temp_max_c is not None:
+        h["SSTMPMAX"] = (meta.sensor_temp_max_c, "Warmest source frame (C)")
     if meta.bayer_pattern:
         h["BAYERPAT"] = meta.bayer_pattern
     # Atomic write so a crash mid-save can't leave a truncated master.
@@ -596,6 +625,8 @@ def load_master(path: str | Path) -> tuple[np.ndarray, MasterMeta]:
         exposure_s=_f("EXPTIME"),
         gain=_f("GAIN"),
         sensor_temp_c=_f("CCD-TEMP"),
+        sensor_temp_min_c=_f("SSTMPMIN"),
+        sensor_temp_max_c=_f("SSTMPMAX"),
         bayer_pattern=str(h["BAYERPAT"]).strip() if "BAYERPAT" in h else None,
     )
     return data, meta

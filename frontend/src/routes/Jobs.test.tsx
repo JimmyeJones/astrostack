@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
   bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobHeaderNote,
+  jobTempNote,
   jobKindLabel,
   calibrationMismatchNote, heldForFilesLine, heldForSubsLine, missingSubsNote,
   readErrorsNote,
@@ -1061,6 +1062,30 @@ describe("JobsView build_master result actions", () => {
     expect(link).toHaveAttribute("href", "/calibration");
   });
 
+  it("says so at once when the darks straddled two nights", async () => {
+    // Nothing was set aside, so the summary line reports a clean build — the
+    // one case the frame counts structurally cannot reach.
+    vi.spyOn(client.api, "listJobs").mockResolvedValue([
+      mkJob({
+        id: "bm-3", kind: "build_master", state: "done",
+        result: {
+          id: 3, name: "Two nights", kind: "dark", n_frames: 6, n_skipped: 0,
+          sensor_temp_min_c: -10, sensor_temp_max_c: 15,
+          temp_note: {
+            severity: "warn",
+            message: "This master dark mixes frames shot between -10°C and "
+              + "15°C — 25°C apart.",
+          },
+        },
+      }),
+    ]);
+    renderJobsRouted();
+    expect(await screen.findByText(/Built a master dark from 6 frames\./))
+      .toBeInTheDocument();
+    expect(await screen.findByText(/mixes frames shot between -10°C and 15°C/))
+      .toBeInTheDocument();
+  });
+
   it("says so at once when the frames say they are the wrong kind", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({
@@ -1102,6 +1127,33 @@ describe("jobHeaderNote", () => {
   it("never invents a warning out of an unexpected severity", () => {
     expect(jobHeaderNote({ header_note: { severity: "boom", message: "x" } }))
       .toEqual({ severity: "ok", message: "x" });
+  });
+});
+
+describe("jobTempNote", () => {
+  it("passes the server's blended-dark sentence through", () => {
+    expect(jobTempNote({
+      temp_note: { severity: "warn", message: "This master dark mixes frames…" },
+    })).toEqual({ severity: "warn", message: "This master dark mixes frames…" });
+  });
+
+  it("is null when there is nothing to say — the common case", () => {
+    // A one-night dark folder, every flat and bias, a camera that writes no
+    // CCD-TEMP, and every build made before the range was recorded.
+    expect(jobTempNote({})).toBeNull();
+    expect(jobTempNote({ temp_note: null })).toBeNull();
+    expect(jobTempNote({ temp_note: { severity: "warn" } })).toBeNull();
+    expect(jobTempNote({ temp_note: { severity: "warn", message: "" } })).toBeNull();
+    expect(jobTempNote({ temp_note: "warn" })).toBeNull();
+  });
+
+  it("reads its own key, never the other note's", () => {
+    // The two notes answer different questions about one build and both can
+    // fire at once; neither may stand in for the other.
+    expect(jobTempNote({ header_note: { severity: "warn", message: "x" } }))
+      .toBeNull();
+    expect(jobHeaderNote({ temp_note: { severity: "warn", message: "x" } }))
+      .toBeNull();
   });
 });
 

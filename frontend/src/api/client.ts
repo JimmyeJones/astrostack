@@ -3049,6 +3049,17 @@ export interface CalibrationMaster {
   // one is silent, not suspect.
   header_kinds?: Record<string, number> | null;
   header_note?: { severity: "ok" | "warn"; message: string } | null;
+  // The coldest and warmest source frame, and the server's sentence for a
+  // master dark whose own frames straddle two nights. `sensor_temp_c` alone is
+  // a *median*, so a dark built from a cold night and a warm one is stamped
+  // with a temperature no frame was shot at — and a median that happens to land
+  // on your subs makes the mismatch check report a perfect match. All three are
+  // absent on masters built before the range was recorded, and `temp_note` is
+  // null whenever there is nothing to say (an ordinary one-night folder, a
+  // camera that writes no `CCD-TEMP`, and every flat and bias).
+  sensor_temp_min_c?: number | null;
+  sensor_temp_max_c?: number | null;
+  temp_note?: { severity: "ok" | "warn"; message: string } | null;
 }
 
 // A Seestar Moon/Sun video capture sitting in the incoming folder (a `*_video/`

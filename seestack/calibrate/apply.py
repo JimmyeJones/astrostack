@@ -278,6 +278,68 @@ def temperature_mismatch_count(
     return sum(1 for t in temps if abs(t - dt) >= float(tol_c)), len(temps)
 
 
+def dark_temperature_blend(
+    min_c: float | None, max_c: float | None,
+    *, tol_c: float = TEMP_MISMATCH_TOL_C,
+) -> float | None:
+    """How far apart the coldest and warmest frame inside a master dark were, in
+    °C — but only when that is wide enough to mean the master describes more than
+    one night. ``None`` otherwise, which is every ordinary dark folder.
+
+    The bar is :data:`TEMP_MISMATCH_TOL_C`, the module's own "far enough that
+    dark current has moved" number: a master whose *own* frames straddle it is
+    not a picture of any single one of them, by exactly the standard this module
+    already judges a dark against the lights by. Deliberately not a new
+    threshold — a second one would let the app call a gap material in one
+    sentence and tolerable in the next.
+
+    One-sided like everything else here: a master that didn't record its range
+    (every master built before the two cards existed, and any third-party
+    import) cannot be disproved and answers ``None``.
+    """
+    if min_c is None or max_c is None:
+        return None
+    lo, hi = float(min_c), float(max_c)
+    if not (math.isfinite(lo) and math.isfinite(hi)):
+        return None
+    spread = hi - lo
+    return spread if spread >= float(tol_c) else None
+
+
+def dark_temperature_blend_warning(
+    min_c: float | None, max_c: float | None,
+    *, tol_c: float = TEMP_MISMATCH_TOL_C,
+) -> str | None:
+    """The plain-language sentence for a master dark built across a wide
+    temperature range, or ``None`` when there is nothing to say.
+
+    Shared by :meth:`CalibrationMasters.calibration_warnings` (where it is said
+    about the dark a run is applying) and ``webapp.calibration.master_temp_note``
+    (where it is said about a master on the Calibration page and on the build
+    job that has just made one), so the two surfaces cannot come to different
+    opinions about one master.
+
+    Unlike the exposure and gain rules in :func:`seestack.calibrate.masters.build_master`,
+    the answer here is to **say so**, never to drop frames. An exposure and a gain
+    are settings, so a second value is a second population by definition; a
+    temperature is continuous and an uncooled sensor drifts through a night, so
+    gating on it would throw away good frames from a legitimate dark library and
+    leave the master noisier than it needs to be. Nothing about a pixel changes.
+    """
+    spread = dark_temperature_blend(min_c, max_c, tol_c=tol_c)
+    if spread is None:
+        return None
+    return (
+        f"This master dark mixes frames shot between {_deg(min_c)}°C and "
+        f"{_deg(max_c)}°C — {_deg(spread)}°C apart, and a sensor's dark current "
+        f"roughly doubles every 6-7°C. So it is a picture of no single one of "
+        f"those nights: it takes too much off subs shot at the cold end and too "
+        f"little off subs shot at the warm end, whatever temperature it says it "
+        f"is. Build a separate master from each night's darks, or shoot your "
+        f"darks in one session at the temperature you image at."
+    )
+
+
 def _deg(value: float) -> str:
     """A sensor temperature as the header meant it: one decimal, no trailing
     zeros. ``float32`` round-trips a ``24.3`` card as ``24.299999237…``."""
@@ -372,6 +434,15 @@ class CalibrationMasters:
     # (:meth:`calibration_warnings`) — dark current varies with temperature, so a
     # dark shot far from the lights' temperature leaves a residual.
     dark_temp_c: float | None = None
+    # The coldest and warmest frame that went into that master dark, when it
+    # recorded them. ``dark_temp_c`` alone is a *median*, so it is silent about
+    # a master built from a cold night and a warm one — and silent in the worst
+    # possible way, because a median that lands on the lights makes the
+    # temperature check below report a perfect match. See
+    # :func:`dark_temperature_blend_warning`. ``None`` on every master built
+    # before the range was recorded, which reads as "didn't say".
+    dark_temp_min_c: float | None = None
+    dark_temp_max_c: float | None = None
     # Gain the master dark was shot at, None when the header didn't carry it
     # (a master built from frames with no ``GAIN`` card, or a third-party
     # import). Used only for the advisory mismatch check
@@ -463,6 +534,8 @@ class CalibrationMasters:
         dark_nodata_mask = None
         dark_exposure_s = None
         dark_temp_c = None
+        dark_temp_min_c = None
+        dark_temp_max_c = None
         dark_gain = None
         dark_bayer = None
         flat_norm = None
@@ -483,6 +556,8 @@ class CalibrationMasters:
             dark = _sanitize_pedestal(dark)
             dark_exposure_s = dark_meta.exposure_s
             dark_temp_c = dark_meta.sensor_temp_c
+            dark_temp_min_c = dark_meta.sensor_temp_min_c
+            dark_temp_max_c = dark_meta.sensor_temp_max_c
             dark_gain = dark_meta.gain
             dark_bayer = _norm_bayer(dark_meta.bayer_pattern)
         if bias_path:
@@ -572,7 +647,9 @@ class CalibrationMasters:
                    bias_nodata_mask=bias_nodata_mask,
                    dark_path=dark_path, flat_path=flat_path, bias_path=bias_path,
                    dark_exposure_s=dark_exposure_s, bias_exposure_s=bias_exposure_s,
-                   dark_temp_c=dark_temp_c, dark_gain=dark_gain,
+                   dark_temp_c=dark_temp_c,
+                   dark_temp_min_c=dark_temp_min_c,
+                   dark_temp_max_c=dark_temp_max_c, dark_gain=dark_gain,
                    dark_bayer_pattern=dark_bayer, flat_bayer_pattern=flat_bayer,
                    bias_bayer_pattern=bias_bayer,
                    flat_dark_shape_mismatch=flat_dark_shape_mismatch,
@@ -750,6 +827,14 @@ class CalibrationMasters:
         reader can tell "shoot a second dark" from "ignore this". Omit the set
         (every older caller) and the reference frame stands in exactly as before.
 
+        A master dark carries a **range** as well as a stamped temperature
+        (``dark_temp_min_c`` / ``dark_temp_max_c``), and a range wide enough to
+        mean the master blends two nights is said out loud before any comparison
+        with the lights — see :func:`dark_temperature_blend_warning`. That one
+        needs no ``light_*`` argument at all: it is a fact about the dark, and
+        the case it exists for is precisely the one the comparison below calls a
+        perfect match.
+
         ``light_gain`` / ``light_gains`` are the third acquisition number, and
         the one this advisory was structurally unable to mention: the loader did
         not read the dark's ``GAIN`` at all, so a gain-mismatched dark was
@@ -896,6 +981,17 @@ class CalibrationMasters:
                         f"Use a dark matched to your exposure, or turn on dark "
                         f"exposure-scaling (needs a master bias)."
                     )
+        # Before comparing the dark against the lights at all: is the dark a
+        # picture of one night? A master's stamped temperature is a median, and
+        # a folder of darks is not guaranteed to hold one night's worth — so
+        # this is said about the master itself, independent of the lights, and
+        # first, because it is the premise every sentence below rests on. It is
+        # the loudest exactly where the comparison below is quietest: a median
+        # that lands on the lights reports a perfect match.
+        blend = dark_temperature_blend_warning(
+            self.dark_temp_min_c, self.dark_temp_max_c)
+        if self.dark is not None and blend is not None:
+            warnings.append(blend)
         dt = self.dark_temp_c
         # What the lights' temperatures actually are, when the caller knows.
         # Nothing known (every older caller, and a library that never recorded a

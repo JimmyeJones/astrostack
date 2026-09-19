@@ -809,7 +809,31 @@ export function buildMasterSummary(r: Record<string, unknown>): string {
 export function jobHeaderNote(
   r: Record<string, unknown>,
 ): { severity: string; message: string } | null {
-  const note = r.header_note;
+  return serverNote(r, "header_note");
+}
+
+/** The server's sentence about a master dark built across a wide sensor
+ * temperature range — a folder holding a cold night and a warm one, which the
+ * build otherwise reports as a clean success because a master stamps one
+ * *median* temperature. Null when there is nothing to say, which is every
+ * ordinary dark folder, every flat and bias, and every build made before the
+ * range was recorded. Worded server-side
+ * (`apply.dark_temperature_blend_warning`, via `calibration.master_temp_note`)
+ * so this panel, the Calibration page and a run's own advisory all say the same
+ * thing about one master. Pure. */
+export function jobTempNote(
+  r: Record<string, unknown>,
+): { severity: string; message: string } | null {
+  return serverNote(r, "temp_note");
+}
+
+/** One `{severity, message}` note off an untyped job result, or null when the
+ * server didn't send one. Shared so the two notes above can't drift in how
+ * defensively they read the same shape. */
+function serverNote(
+  r: Record<string, unknown>, key: string,
+): { severity: string; message: string } | null {
+  const note = r[key];
   if (!note || typeof note !== "object") return null;
   const { severity, message } = note as Record<string, unknown>;
   if (typeof message !== "string" || !message) return null;
@@ -1374,6 +1398,7 @@ function JobResultActions({ job }: { job: Job }) {
   if (job.kind === "build_master") {
     const skipped = Number(r.n_skipped ?? 0) || 0;
     const headerNote = jobHeaderNote(r);
+    const tempNote = jobTempNote(r);
     return (
       <Stack gap={4} mt="xs">
         <Text size="sm" c={skipped > 0 ? "orange" : undefined}>
@@ -1384,6 +1409,14 @@ function JobResultActions({ job }: { job: Job }) {
         {headerNote ? (
           <Text size="sm" c={headerNote.severity === "warn" ? "yellow.7" : "dimmed"}>
             {headerNote.message}
+          </Text>
+        ) : null}
+        {/* "…and they were shot across 25 °C", which the summary above cannot
+            say: no frame was set aside, so by every count it reports this was a
+            clean build. */}
+        {tempNote ? (
+          <Text size="sm" c={tempNote.severity === "warn" ? "yellow.7" : "dimmed"}>
+            {tempNote.message}
           </Text>
         ) : null}
         <Group>
