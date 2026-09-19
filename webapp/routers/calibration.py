@@ -17,6 +17,7 @@ from seestack.calibrate.apply import (
     dominant_gain,
 )
 from seestack.calibrate.masters import VALID_KINDS, VALID_METHODS
+from seestack.io.project import AcquisitionValues
 
 router = APIRouter(tags=["calibration"])
 
@@ -99,6 +100,64 @@ def _temperature_tally(values: list[Any]) -> list[list[float]]:
     return [[t, counts[t]] for t in sorted(counts)]
 
 
+def _acquisition_signature(acq: AcquisitionValues) -> dict[str, Any]:
+    """The eight numbers that describe **what the camera was set to** on a
+    target's accepted subs, off a :class:`~seestack.io.project.AcquisitionValues`.
+
+    One function because there are two surfaces here and they ask the same
+    question from opposite ends: the Stack form's ``calibration-suggestions``
+    asks *"which master fits these subs?"* and the Calibration page's coverage
+    roll-up asks *"which targets does this master fit?"*. The app's own contract
+    is that the two cannot describe one target differently — that is why
+    ``gain`` became :func:`dominant_gain` in both at once (v0.469.0) and why
+    ``exposures_s`` and ``sensor_temps_c`` were added to both at once — and until
+    now it was kept by hand-mirroring the block, comment for comment, in two
+    places. Sharing it makes the agreement structural instead of vigilant.
+
+    The keys are exactly :data:`webapp.calibration.COVERAGE_TARGET_KEYS` minus
+    the target's own name, so the roll-up's dict is this plus the two it
+    identifies a target by; ``calibration-suggestions`` adds the ones only a
+    *form* needs (``gains``, ``n_frames``) on top. Pure — it reads no file and
+    opens no database.
+    """
+    return {
+        "exposure_s": _median([e for e in acq.exposures_s if e]),
+        # …and how many *different* sub lengths there are, because the median is
+        # a claim that there is only one. A target shot at 10 s on one night and
+        # 30 s on the next is one target with two exposures in it, and then
+        # "your subs are N s" is false however N is chosen — on an even split it
+        # names a length no sub was shot at. The finished run judges the dark
+        # against all of them (v0.456.0), so both surfaces are served the set.
+        "exposures_s": distinct_exposures(acq.exposures_s),
+        # The gain the most subs were actually *shot* at, not their median. Gain
+        # is a discrete setting, so a median across two of them names a value no
+        # frame carries (80 and 200 average to 140) — and this number is also
+        # what masters are *ranked and gated* against, so a phantom here picks
+        # the wrong dark rather than merely describing the target badly
+        # (v0.469.0). One setting all year gives exactly the median it always
+        # did.
+        "gain": dominant_gain(acq.gains),
+        "sensor_temp_c": _median(
+            [t for t in acq.sensor_temps_c if t is not None]),
+        # …and the same correction for the temperature half, as a compact
+        # ``[[°C, how many subs], …]`` tally. The Seestar's sensor is uncooled,
+        # so this is really *which nights these were shot on* — the one part of
+        # "shoot a matching dark" the owner controls by choosing when to go out,
+        # and the one the finished run's advisory judges the dark on (v0.464.0).
+        "sensor_temps_c": _temperature_tally(acq.sensor_temps_c),
+        # A master built for a different camera or binning is not merely a poor
+        # match — ``CalibrationMasters.validate`` refuses it and the whole stack
+        # fails — so the subs' modal size is what lets both surfaces say so
+        # before a night is spent rather than after.
+        "width_px": calibration.modal_dim(acq.widths_px),
+        "height_px": calibration.modal_dim(acq.heights_px),
+        # …and the subs' own colour-filter phase, so a recommendation lands on a
+        # flat the engine will actually accept (a flat one phase out divides red
+        # photosites by a green correction).
+        "bayer_pattern": calibration.modal_bayer(acq.bayer_patterns),
+    }
+
+
 @router.get("/api/targets/{safe}/calibration-suggestions")
 def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     """Recommend the dark/flat masters that best match this target's frames.
@@ -166,63 +225,45 @@ def calibration_suggestions(safe: str, request: Request) -> dict[str, Any]:
     settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
-        frames = list(proj.iter_frames(accepted_only=True))
+        # Six columns, not whole rows: this endpoint is on the Stack form, which
+        # a beginner opens for every stack, and a `FrameRow` carries the frame's
+        # plate solution — a FITS header text nothing here reads. Measured on a
+        # synthetic project the size of the owner's deepest target (35,894 subs):
+        # 1,132 ms / 146.4 MB peak against 244 ms / 8.4 MB, identical values.
+        acq = proj.acquisition_values()
     finally:
         proj.close()
         lib.close()
-    exposure_s = _median([f.exposure_s for f in frames if f.exposure_s])
-    # …and how many *different* sub lengths there are, because the median is a
-    # claim that there is only one. A target shot at 10 s on one night and 30 s
-    # on the next is one target with two exposures in it, and then "your subs are
-    # Ns" is false however N is chosen — on an even split it names a length no
-    # sub was shot at. The finished run judges the dark against all of them
-    # (v0.456.0); serving the set is what lets the form warn about exactly the
-    # pairs the run will complain about, which is this endpoint's whole contract.
-    # Additive: an older client ignores the key and keeps today's single number.
-    exposures_s = distinct_exposures([f.exposure_s for f in frames])
-    # The gain the most subs were actually *shot* at, not their median. Gain is a
-    # discrete setting, so a median across two of them names a value no frame
-    # carries (80 and 200 average to 140) and — unlike the exposure and
-    # temperature halves, where the set below is what corrects the claim — this
-    # number is also what the masters are ranked and gated against just below, so
-    # a phantom here picks the wrong dark rather than merely describing the
-    # target badly. One setting all year, which is every ordinary target, gives
-    # exactly the median it always did.
-    gain = dominant_gain([f.gain for f in frames])
-    sensor_temp_c = _median([f.sensor_temp_c for f in frames if f.sensor_temp_c is not None])
-    # …and how the subs' temperatures are actually spread, because the median is
-    # the same claim of uniformity the exposure one was, and an uncooled sensor
-    # disproves it over a season. Rounded to a tenth of a degree — the precision
-    # a ``CCD-TEMP`` card carries — so a target with thousands of subs sends tens
-    # of rows rather than thousands, and the form's answer can differ from the
-    # engine's only inside 0.05 °C of the 5 °C bar. Additive: an older client
-    # ignores the key and keeps today's single number.
-    sensor_temps_c = _temperature_tally([f.sensor_temp_c for f in frames])
-    # …and the third acquisition number, for the third time: a target is not
-    # necessarily one *gain* either. `gain` above is their median, and unlike
-    # temperature there is no correction anywhere for a gain gap — a dark carries
-    # the gain-dependent readout pedestal, so it mis-subtracts at a perfectly
-    # matched exposure. The finished run judges the dark against every sub's gain
-    # (v0.466.0); serving the set is what lets the form ask the identical
-    # question at pick time. A short list rather than a tally: gain is a discrete
-    # setting, so a library holds a handful of values however many subs it has.
-    gains = distinct_gains([f.gain for f in frames])
+    # The eight fields the coverage roll-up computes too, from one function, so
+    # the form and the page cannot describe one target differently.
+    signature = _acquisition_signature(acq)
+    exposure_s = signature["exposure_s"]
+    exposures_s = signature["exposures_s"]
+    gain = signature["gain"]
+    sensor_temp_c = signature["sensor_temp_c"]
+    # …and the third acquisition number as a *set*, which only the form needs: a
+    # target is not necessarily one gain either, and unlike temperature there is
+    # no correction anywhere for a gap — a dark carries the gain-dependent
+    # readout pedestal, so it mis-subtracts at a perfectly matched exposure. The
+    # finished run judges the dark against every sub's gain (v0.466.0); serving
+    # the set is what lets the form ask the identical question at pick time. A
+    # short list rather than a tally: gain is a discrete setting, so a library
+    # holds a handful of values however many subs it has.
+    gains = distinct_gains(acq.gains)
 
     masters = calibration.list_masters(settings.resolved_library_root)
     rec = calibration.recommend_masters(
         masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c)
     rec["params"]["exposures_s"] = exposures_s
-    rec["params"]["sensor_temps_c"] = sensor_temps_c
+    rec["params"]["sensor_temps_c"] = signature["sensor_temps_c"]
     rec["params"]["gains"] = gains
-    rec["params"]["width_px"] = calibration.modal_dim([f.width_px for f in frames])
-    rec["params"]["height_px"] = calibration.modal_dim([f.height_px for f in frames])
-    # The subs' own colour-filter phase, so the form's "Use recommended" lands on
-    # a flat the engine will actually accept (a flat one phase out divides red
-    # photosites by a green correction — ``CalibrationMasters.validate`` refuses
-    # it). Additive: an older client ignores the key.
-    rec["params"]["bayer_pattern"] = calibration.modal_bayer(
-        [f.bayer_pattern for f in frames])
-    rec["n_frames"] = len(frames)
+    # The modal size and colour-filter phase come off the same shared signature,
+    # so the form's "Use recommended" and the coverage page's "covers this
+    # target" are refusing the same wrong-camera and wrong-phase masters.
+    rec["params"]["width_px"] = signature["width_px"]
+    rec["params"]["height_px"] = signature["height_px"]
+    rec["params"]["bayer_pattern"] = signature["bayer_pattern"]
+    rec["n_frames"] = acq.n_frames
     # One source of truth for "is this master a poor match?" — see the docstring.
     # ``exposure_frac`` is measured against the *master's* exposure
     # (``|t_light / t_master − 1|``), exactly as ``calibration_warnings`` does.
@@ -334,39 +375,20 @@ def _target_acquisition(lib: Any, entry: Any) -> dict[str, Any] | None:
     try:
         proj = lib.open_target(entry.safe_name)
         try:
-            frames = list(proj.iter_frames(accepted_only=True))
+            # Six columns rather than whole rows — and this one is paid *per
+            # target*, over the whole library, so it is the read that most wants
+            # to stop carrying every sub's plate solution (AGENTS.md §10).
+            acq = proj.acquisition_values()
         finally:
             proj.close()
     except Exception:  # noqa: BLE001 — one unreadable target must not sink the page
         return None
-    return {
-        "name": entry.name, "safe_name": entry.safe_name,
-        "exposure_s": _median([f.exposure_s for f in frames if f.exposure_s]),
-        # The set the median stands in for. A target is one *folder*, never one
-        # exposure — shoot it at 10 s one night and 30 s the next and the median
-        # is 20 s, a length no sub was shot at. Grouped by the engine's own
-        # `distinct_exposures`, so the page and the finished run's advisory
-        # cannot disagree about how many exposures a target has. Reporting only:
-        # the binder still gates on the median above.
-        "exposures_s": distinct_exposures([f.exposure_s for f in frames]),
-        # The gain the most subs were shot at, matching what the unattended
-        # binder and the Stack form's endpoint now judge a master against — this
-        # roll-up says which targets a master covers, so a different answer here
-        # would have the coverage page and the stack disagree about one target.
-        "gain": dominant_gain([f.gain for f in frames]),
-        "sensor_temp_c": _median(
-            [f.sensor_temp_c for f in frames if f.sensor_temp_c is not None]),
-        # …and the set that median stands in for, for the same reason. The
-        # Seestar's sensor is uncooled, so the number here is really *which
-        # nights these were shot on* — which is the one part of "shoot a
-        # matching dark" the owner controls by choosing when to go out, and the
-        # one the finished run's advisory judges the dark on (v0.464.0).
-        "sensor_temps_c": _temperature_tally([f.sensor_temp_c for f in frames]),
-        "width_px": calibration.modal_dim([f.width_px for f in frames]),
-        "height_px": calibration.modal_dim([f.height_px for f in frames]),
-        "bayer_pattern": calibration.modal_bayer(
-            [f.bayer_pattern for f in frames]),
-    }
+    # The same eight fields the Stack form's `calibration-suggestions` serves,
+    # from the same function: this roll-up says which targets a master covers, so
+    # a different answer here would have the coverage page and the stack
+    # disagree about one target.
+    return {"name": entry.name, "safe_name": entry.safe_name,
+            **_acquisition_signature(acq)}
 
 
 @router.get("/api/calibration/incoming")

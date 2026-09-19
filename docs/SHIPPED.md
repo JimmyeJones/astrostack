@@ -1,5 +1,71 @@
 # Shipped — the record
 
+## v0.471.2 — 2026-09-19 — the Stack form and the Calibration page each read every sub of a target to ask six questions about the camera
+
+*(Builder, branch `claude/wizardly-cannon-dnc0vt`. Found by asking v0.471.1's question one endpoint sideways —
+"what else reads a whole deep target per request?" — and then measured. Performance and memory, plus a drift
+guard that came free with the fix; AGENTS.md §10's "never break the memory bounds" exists because this box has
+an OOM history.)*
+
+**What it cost.** Two surfaces match a calibration master to a target, and between them they ask six questions:
+how long were the subs, at what gain, how warm, what size, what Bayer phase, how many. Both answered by reading
+**every accepted frame of the target as a `FrameRow`**:
+
+* `GET /api/targets/<t>/calibration-suggestions` (`routers/calibration.py`), which the **Stack form** queries on
+  every visit — the form a beginner opens for every stack;
+* `_target_acquisition`, behind `GET /api/calibration/coverage`, which pays it **per target, across the whole
+  library** (104 targets, 54,681 frames on the owner's).
+
+A `FrameRow` is `SELECT *`, and the biggest column on a solved sub is its plate solution: `wcs_json` is a FITS
+header *text*, ~25 eighty-character cards. So the answer was dominated by the one field neither surface reads.
+
+Measured on a synthetic project the size of the owner's deepest target (35,894 subs, ~2 kB of `wcs_json` each;
+this box, best of 3):
+
+| | time | peak allocation |
+|---|---|---|
+| whole-row read | 1,132 ms | 146.4 MB |
+| the six columns | **244 ms** | **8.4 MB** |
+
+4.6× faster, **17.4× less memory**, identical values. At 20,000 subs it is 555 ms / 63.6 MB → 98 ms / 4.7 MB.
+
+**The fix.** New `Project.acquisition_values()` (`seestack/io/project.py`) reads only
+`_ACQUISITION_COLUMNS` — `exposure_s`, `gain`, `sensor_temp_c`, `width_px`, `height_px`, `bayer_pattern` —
+and returns a frozen `AcquisitionValues` of six parallel lists. Column-major on purpose: every consumer wants
+*one* column at a time (the median exposure, the dominant gain, the modal size), so a row object would be built
+only to be taken apart again. `ORDER BY id` is kept and is load-bearing rather than decorative — `modal_dim`
+and `modal_bayer` break a tie on whichever candidate they met first, so on a target evenly split between two
+frame sizes a different order could move the answer for no reason a reader could see. It defaults to
+`accepted_only=True`, unlike `iter_frames`, because a rejected sub is not going into the stack a master would
+be applied to and both callers have always filtered that way.
+
+**And the agreement stopped being vigilance.** The eight fields were hand-mirrored in the two call sites,
+comment for comment — which is why `gain` had to become `dominant_gain` in *both* at once (v0.469.0), and why
+`exposures_s` (v0.457.0) and `sensor_temps_c` (v0.464.x) were each added to both at once. The app's own contract
+is that the form and the coverage page cannot describe one target differently; that contract was being kept by
+remembering. It is now one `_acquisition_signature(acq)`, whose key set is exactly
+`calibration.COVERAGE_TARGET_KEYS` minus the two a target is *named* by. `calibration-suggestions` adds the two
+only a form needs (`gains`, `n_frames`) on top; the roll-up's dict is the signature plus `name`/`safe_name`.
+
+**Pure optimisation.** Identical responses — verified over 40 randomised awkward targets (missing, zero,
+negative and near-duplicate exposures and gains, a NaN temperature, blank and mono Bayer cards, an even split
+between two frame sizes, rejected subs) with **zero** mismatches against the old block. `iter_frames` is
+untouched. No endpoint, config, schema, on-disk, API-shape or default change.
+
+**Tests (+8).** `tests/test_project_acquisition_values.py` (7): equivalence with `iter_frames` column by
+column, in both `accepted_only` modes; the accepted-only default; the lists being parallel and in id order;
+an empty target; and the NaN round-trip — SQLite has no NaN, so a non-finite `CCD-TEMP` comes back `None`
+whichever way it is read, which is worth pinning because `_temperature_tally` and the engine's `_finite_temps`
+both take care never to read a blank card as 0 °C. Plus `test_it_builds_no_frame_objects_at_all`, the memory
+claim in test form: **verified fail-before by re-implementing `acquisition_values` over `iter_frames` in a
+scratch copy** — it goes red with "built 109 FrameRow objects to read six columns" while all six equivalence
+tests stay green, which is the point (only that one test can see the difference). And
+`tests/webapp/test_calibration.py` (+1): the drift guard, asserting the form's `params`, the roll-up's dict and
+the shared helper agree field for field on a target deliberately made awkward first — two exposures, two gains,
+a spread of temperatures — because on a uniform target every plausible way of computing these agrees and the
+guard would pass for the wrong reason. Its key set is taken from the helper's own output, so a field added
+later is compared by construction rather than by remembering to.
+
 ## v0.471.1 — 2026-09-19 — opening the frames table on the owner's deepest target read all 35,894 subs eighteen times
 
 *(Builder, branch `claude/sweet-babbage-bluf7z`. Found by reading `routers/frames.py` at the owner's scale,
