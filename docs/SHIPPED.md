@@ -1,5 +1,56 @@
 # Shipped — the record
 
+## v0.471.6 — 2026-09-19 — the *walk-away* path asked the same six calibration questions, and was still reading whole frames to answer them
+
+*(Builder, branch `claude/wizardly-cannon-fgcbme`. The unattended sibling of v0.471.2, found by asking that
+fix's question sideways: `/calibration-suggestions` was moved off whole rows because the Stack form asks
+"which master fits these subs?" — **three other places ask the identical question**, and two of them are the
+ones nobody is watching.)*
+
+**The class, and why this half matters more than the half already fixed.** A `FrameRow` is `SELECT *`, and
+the biggest column on a solved sub is its plate solution (`wcs_json`, a FITS header *text* of ~25
+eighty-character cards). Six small columns — how long, what gain, how warm, what size, what Bayer phase, how
+many — decide which master dark, flat and bias a target gets, and `Project.acquisition_values` has existed
+since v0.471.2 to read exactly those. The Stack form was moved onto it; the **walk-away** path was not. That
+is the worse side of the split:
+
+* `pipeline._confident_master_binding` runs **in the job worker**, immediately before a stack allocates its
+  canvases, on a box with a recorded OOM history (AGENTS.md §10) — and again **per target per scan** from
+  `_auto_stack_calibration_recheck`, which is the path an idle library walks every five minutes.
+* `pipeline._apply_saved_calibration_masters` reads the subs' size and colour-filter phase the same way, in
+  two *separate* lazy reads, so a walk-away run that had to check both built the whole table **twice**.
+* `routers/stack._uncalibrated_advice` hangs off the run-info read a beginner opens beside the picture.
+
+**Measured**, on a synthetic project the size of the owner's deepest target (35,894 subs carrying ~2 kB of
+`wcs_json` each), best of 3 on this box: **1,525 ms / 128.3 MB peak → 513 ms / 11.7 MB**, with the arguments
+handed to `auto_bind_master_paths` identical field for field.
+
+**What changed is only *what is read*.** Every representative value keeps its own arithmetic exactly as it
+was — the median exposure, `distinct_exposures`, `dominant_gain`, the median temperature, `modal_dim`,
+`modal_bayer` — so no master can be picked differently than it was yesterday. `acquisition_values` yields the
+same values in the same `id` order `iter_frames` did, which is the property the modal tie-breaks rest on.
+The two lazy reads in `_apply_saved_calibration_masters` take `iter_frame_columns` directly rather than the
+six-column record, because they want two columns and one, and they are reached only on a conflict.
+
+**Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change; no endpoint added or
+removed; nothing in the engine touched.
+
+**Tests (+3, all three fail before — verified by scratch reverts, not by reasoning).** Each counts
+`seestack.io.project._row_to_frame` calls, the trap `tests/test_project_acquisition_values.py` uses on the
+primitive, pointed at the callers instead:
+`test_the_unattended_binder_builds_no_frame_objects`,
+`test_the_uncalibrated_advice_builds_no_frame_objects` (which also records that `list_masters` was reached,
+because `_uncalibrated_advice` swallows every exception by contract and a guard that only counted rows could
+pass by never getting there), and
+`test_the_saved_pick_checks_are_read_as_columns_not_as_frames` (which forces *both* lazy reads — a
+wrong-sized dark and a wrong-phase flat — and asserts the two skip sentences, so the zero means something).
+
+**And two test fakes became real targets.** `tests/webapp/test_calibration.py`'s `_fake_proj_with_frames` /
+`_fake_proj_with_gains` were hand-rolled objects exposing only `iter_frames`, which is precisely the shape
+that keeps passing while the code under test moves to a read the real class offers and the fake does not.
+They are now one `_proj_with_frames(tmp_path, …)` building an actual `Project` whose subs carry a
+plate-solve header — the thing the whole change is about.
+
 ## v0.471.5 — 2026-09-19 — the "First look" card built a frame object per accepted sub to read four fields off one of them
 
 *(Builder, branch `claude/wizardly-cannon-nc6rhy`, the same run as v0.471.4. Closes shape **(b)** of the
