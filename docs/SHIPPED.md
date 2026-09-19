@@ -1,5 +1,96 @@
 # Shipped — the record
 
+## v0.470.0 + v0.470.1 — 2026-09-19 — the mosaic grain measurement was silent on every mosaic the owner has, and the trim it points at was promising an evenness it cannot deliver
+
+*(Builder, branch `claude/sweet-babbage-luv0qq`, from observer issue
+[#952](https://github.com/JimmyeJones/astrostack/issues/952), verified by reproduction before it was fixed
+and then re-reproduced in-repo on a fixture.)*
+
+**v0.470.0 — the measurement.** `measure_coverage_grain` compares each substantial coverage *level* below the
+modal one against the mode, where "substantial" is `_GRAIN_MIN_SHARE` (10 % of the canvas) applied to a
+single **integer** frame count. That is the right rule for a tiled mosaic and finds nothing at all on a
+dithered one: every sub of a panel lands at its own offset, so the per-pixel count ramps through hundreds of
+one-apart depths instead of sitting on plateaus. Measured across the owner's library — 22 mosaic targets,
+read off their masters and `_framecov.fits` siblings — the canvases carry **79–1392 distinct levels** each,
+the modal level holds 2.0–17.5 % and the largest single level **below** it holds 0.0–7.4 %. Not one produced
+a candidate. `stack_runs.grain_ratio` was non-NULL on **2 of 680** runs, both single fields, and the one
+place it did fire compared **3,116 subs against 3,117**.
+
+So `grain_verdict` was `None` on every mosaic and the five surfaces reading it were inert — and one was
+over-claiming with it: `PanelSeamsBadge` shows *"Panels even · the sky matches across the joins, so you
+shouldn't see seams between them"* when `seam_verdict` is `flat` **and** there is no grain verdict, the exact
+sentence v0.406.0 shipped to stop. Three of the owner's runs are in that state on canvases measuring up to
+**1.86× grainier across 44 %** of themselves.
+
+Reproduced here on a dithered 2×2 fixture (`_dithered_canvas`: 128 distinct levels, largest level below the
+mode 8.2 %, uneven panel depths): `measure_coverage_grain` returns `None`, where the band comparison reads
+**1.73× over 22.7 % of the canvas, 12 subs against 40** — conservative against the 1/√depth prediction of
+1.83, exactly as `CoverageGrain`'s docstring requires of the clipped σ.
+
+**The fix is one-sided by construction.** The level comparison is untouched and still answers first; only
+when it finds *no* candidate does the new `_grain_from_depth_bands` ask the same question of two **bands** of
+depth. Both bounds are read off `_GRAIN_UNEVEN_RATIO` rather than picked: a pixel at half the bulk depth is
+1/√0.5 = 1.41× grainier — the shallowest it can be while still being *predicted* to clear the bar the ratio
+is graded on — and a reference band held to ±15 % of the bulk varies by only 1.08× inside itself. The bulk is
+the **median** over the covered canvas: not the mode, which on a ramp is an accident of where the dither
+piled up (on one fixture here it lands on the *shallowest* panel), and not the mean, which a ragged fringe
+drags down. The median also bounds the answer usefully — at most half the canvas can sit below it, so the
+thin band can never outgrow the depth it is compared against. Both bands carry the same 10 % substantiality
+bar a single level has to clear.
+
+Two shared seams rather than a second copy: `_level_sky_mask` is now a wrapper over a mask-taking
+`_region_sky_mask`, and `_grain_sigmas` is the one definition of "this region's sky σ" both halves measure
+with. **`_region_sky_mask` gains `sigma_allowance` (default 1.0, so every levelling caller is byte-for-byte
+as it was), and that parameter is the part worth carrying forward:** its structure guard asks *"is this
+region filled with something other than sky?"* against the **canvas's** retained spread, which is the right
+question for a levelling pass — where every region is meant to be equally grainy — and the wrong one for a
+region known to be shot shallower. Grain falls as 1/√depth, so such a region legitimately carries a wider
+sky, and the guard was refusing exactly the bands worth reporting; the first implementation of this fallback
+came out silent on the very fixture written to exercise it, and that was why. The band path allows it
+√(deep/thin) and no more, in **both** places the yardstick is applied — the refusal and `_local_sky_mask`'s
+own, which is the rescue the starved band actually lands in.
+
+**And the sentence the newly-firing note writes had to be true of that canvas.** On a dithered mosaic the
+thin part is the union canvas's ragged **perimeter**, not an under-shot panel: by the observer's distance
+transform, **0 %** of the thin pixels on any of the owner's 22 mosaics sits beyond half the footprint's
+inscribed radius. "Another night on that panel" names a panel that is not there, while the card two notes
+above is already offering *"Trim border"*. New shared `stackhealth.has_ragged_border` is that note's own
+condition, now read by both, so the two cannot prescribe opposite things about one region; the grain note
+gains a third ending and hands over `action="trim_border"`, keeping its measurement wording untouched.
+Checked *before* the catches-up branch deliberately — a rim does not fill in as you keep shooting, because
+the dither keeps moving it.
+
+**v0.470.1 — what that button actually delivers.** The ragged-border note has promised *"Trim border gives a
+clean, even rectangle"*, and v0.470.0's new ending briefly promised the same thing in other words. Measured
+in-repo rather than argued: inside the rectangle `largest_covered_rect` keeps on the dithered fixture,
+`coverage_thin_fraction` reads **0.0** — the trim keeps its own promise exactly — while
+`measure_coverage_grain` still reads **1.71× over 13 %** of what is left. The two yardsticks are different
+by construction: "thin" for the trim is under a quarter of **one panel's** depth
+(`COVERAGE_THIN_RATIO`, deliberately the level the trim keeps down to, so the note and its action agree),
+while the grain bar is half the depth **most of the canvas** is at, which is where 1/√depth says the
+difference starts to show — and everything between the two survives the crop. The observer measured the same
+thing on the real library: 10.1–30.5 % of the kept canvas at 1.39–2.22× across his 22 mosaics, against 0.9 %
+on the single-field controls, which is the control that shows the trim works where it can.
+
+So both sentences now stop where the app can keep them. On a run the app has **itself measured** as unevenly
+deep (`uneven_grain_verdict`, the same reader the grain note uses, so one card cannot make two promises about
+one button) the border note says *"Trim border crops the worst of it away, though the depth still varies
+across what's left, so it won't come out perfectly even"*, and the grain note's rim ending says *"Trim border
+crops the worst of it away"* rather than *"evens it out"*. A single field, an even mosaic, and every run
+recorded before the grain was measured keep today's sentence **byte for byte** — pinned as an equality, both
+ways.
+
+**Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change, and **no new column** — the
+rim branch reads `coverage_thin_frac`, already on every run. A run whose grain the app already measures is
+answered by the identical code path with the identical numbers.
+
+**Tests +9** in `tests/test_coverage_grain.py`; **four fail before**, each verified by reverting the
+production change in a scratch copy. `_dithered_canvas` and `_no_level_is_substantial` assert the
+precondition rather than assuming it, so the new measurement tests cannot pass on the level comparison and
+vouch for nothing; a monkeypatched `_grain_from_depth_bands` pins that a plateau canvas never reaches the
+fallback at all; and the trim test asserts the crop *did* crop something before reading what it left, so a
+fixture that drifted to "nothing to trim" cannot pass for evidence. Nothing loosened or rewritten.
+
 ## v0.466.2 — 2026-09-19 — the sentence v0.466.1 had just written was itself a whole-canvas claim on a mosaic
 
 *(Builder, branch `claude/sweet-babbage-foh7rz`, the same run, caught by re-reading the new copy against the
