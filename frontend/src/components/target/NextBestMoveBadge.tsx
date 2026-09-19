@@ -34,6 +34,7 @@ export function NextBestMoveBadge(
     objectType,
     difficulty,
     grainVerdict,
+    raggedBorder,
     grainLevel,
     framing,
   }: {
@@ -63,6 +64,10 @@ export function NextBestMoveBadge(
      * scopes its praise the way the "How's my stack?" panel below it scopes its
      * measurement. Optional — null/absent reads exactly as before. */
     grainVerdict?: string | null;
+    /** The run's own `ragged_border`, so the well-done note never offers another
+     * pass for a rim no amount of shooting narrows. Optional — false/absent
+     * reads exactly as before. */
+    raggedBorder?: boolean;
     /** The measured grain level of the picture the readiness card beside this
      * one is describing (`cardGrainProjection(runs)?.level`), so the "add more
      * time" rung stops promising a cleaner background over a card that has just
@@ -88,11 +93,12 @@ export function NextBestMoveBadge(
         objectType,
         difficulty,
         grainVerdict,
+        raggedBorder,
         grainLevel,
         framing,
       }),
     [nFramesUsed, integrationS, nUnsolved, runs, fieldFulls, objectType,
-     difficulty, grainVerdict, grainLevel, framing],
+     difficulty, grainVerdict, raggedBorder, grainLevel, framing],
   );
   if (!tip) return null;
 

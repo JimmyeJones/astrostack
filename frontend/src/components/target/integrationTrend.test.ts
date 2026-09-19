@@ -176,6 +176,44 @@ describe("integrationTrend", () => {
         expect(t?.percentCutIfDoubled).toBe(even?.percentCutIfDoubled);
       });
 
+      it("offers the trim, not another pass, when the thin part is the ragged edge", () => {
+        // "Another pass over it" is a panel's answer. A rim does not come down
+        // with more light at all — the dither keeps moving it — so on such a run
+        // this card would be naming the one lever that cannot work.
+        const rim = (t_s: number, sigma: number, ff: number) => ({
+          ...uneven(t_s, sigma, ff), ragged_border: true,
+        });
+        const t = integrationTrend([
+          rim(2 * HOUR, 0.030, 4), rim(8 * HOUR, 0.030, 4),
+        ]);
+        expect(t?.level).toBe("plateaued");
+        expect(t?.unevenDepth).toBe(true);
+        expect(t?.sentence).toContain("Across the deepest part of this picture");
+        expect(t?.sentence).toContain("After that, a darker sky or a brighter target");
+        expect(t?.sentence).toContain("ragged edge");
+        expect(t?.sentence).toContain("Trim border");
+        expect(t?.sentence).not.toContain("another pass over it");
+        // The measurement is untouched by the flag.
+        const panel = integrationTrend([
+          uneven(2 * HOUR, 0.030, 4), uneven(8 * HOUR, 0.030, 4),
+        ]);
+        expect(t?.hoursNow).toBeCloseTo(panel?.hoursNow as number, 10);
+        expect(t?.exponent).toBeCloseTo(panel?.exponent as number, 10);
+      });
+
+      it("keeps the panel sentence for a thin panel and for a backend that says nothing", () => {
+        const absent = integrationTrend([
+          uneven(2 * HOUR, 0.030, 4), uneven(8 * HOUR, 0.030, 4),
+        ]);
+        const named = integrationTrend([
+          { ...uneven(2 * HOUR, 0.030, 4), ragged_border: false },
+          { ...uneven(8 * HOUR, 0.030, 4), ragged_border: false },
+        ]);
+        expect(named?.sentence).toBe(absent?.sentence);
+        expect(absent?.sentence).toContain("another pass over it");
+        expect(absent?.sentence).not.toContain("ragged edge");
+      });
+
       it("reads the verdict off the deepest run, not off any run", () => {
         // The sentence is about the deepest picture, so an *older*, shallower run
         // that happened to be uneven must not scope a verdict about a canvas that

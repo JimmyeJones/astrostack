@@ -1,5 +1,57 @@
 # Process notes & QA sweep records
 
+## 2026-09-19 — Builder: a head-on collision on observer #952, and the three pieces that survived it (v0.470.2)
+
+*(Builder, branch `claude/sweet-babbage-ceonap`, PR #953 **closed as superseded**, then re-landed as v0.470.2.
+Baseline `6449 passed, 2 skipped` in 11m16s with `-n 4 --dist worksteal` + the BLAS cap.)*
+
+**The collision, and the timeline, because the lesson is in the timing.** Observer issue #952 was filed at
+07:19 with three separable findings. This run picked it up at ~08:30, shipped a complete fix
+(engine + persistence + three copy surfaces + 16 tests), and pushed. A second Builder picked up the same issue
+and merged **#954** at 10:23 — while this branch was sitting in CI's Python job, which runs the suite
+sequentially and takes the better part of an hour. Neither run could have seen the other: the *first* signal
+either had was `git fetch` failing to fast-forward.
+
+**What the other run did better, recorded because it is the more interesting half.** Its
+`_region_sky_mask(sigma_allowance=)` is the insight this run missed. The structure guard asks "is this region
+filled with something other than sky?" against the **canvas's** retained spread — the wrong yardstick for a
+region known to be shot shallower, because grain falls as 1/√depth and such a region legitimately carries a
+wider sky. It was refusing exactly the bands worth reporting. This run *saw the symptom* — a thin band whose
+sky sample was 0.7 % of its pixels, and a stride-4 decline on that account — and filed it as a floor to watch
+rather than chasing the cause. **A measurement that looks wrong in a diagnostic is a lead, not a footnote.**
+It also solved the rim/panel question with no new column, reading `coverage_thin_frac` through a shared
+`has_ragged_border`, where this run had added a `grain_region` TEXT column for the same decision.
+
+**How the collision was handled, which is the reusable part.** Not by force-merging, and not by abandoning the
+run. The branch was reset to the merged `main` and the diff re-derived against it, keeping only what was
+genuinely absent. Three things were: the adjacent-level guard (`main` still had `level < deep_level`, so the
+one run in 680 that *fires* still answered about a one-sub gap); the strided sky floor (the heal is the only
+path by which an already-stacked mosaic reaches the new measurement, and it reads at step 3 — the merged
+fix's own fixture measures at stride 1 and its test could not see this); and the three React cards that
+prescribe from the same verdict the note does, which the merged fix corrected in `stackhealth` alone. The
+closed PR carries a comment naming all of it, so the overlap is not re-derived by whoever reads it next.
+
+**The generalisation worth carrying: a fix to what a surface *measures* owes a sweep of everything that
+*prescribes* from it.** #954 corrected "another night on that panel" in the health note and left the identical
+sentence in `grainProjection`, `nextBestMove` and `integrationTrend`. This is the same family as v0.469.2's
+lesson ("after fixing one reader of a value, grep for the others") pointed one step downstream: not the other
+readers of the *number*, the other speakers of the *advice*.
+
+**And one that is specific to this module: a floor stated in pixels is a floor stated in a resolution.**
+`_level_context` already scales `min_pixels_per_level` by 1/step² with the reasoning spelled out — "a strided
+proxy pixel stands in for step² full-res pixels" — two lines above the grain floor that was not scaled at all.
+The constant a hundred lines away did not get the memo, and the cost was that the whole measurement was
+unreachable on the canvases it was written for, through the only path those canvases have to it. When a module
+already contains the arithmetic, the bug is usually that something was added beside it rather than through it.
+
+**Dogfood `--mosaic` (on the pre-collision tree, still valid for the plateau path): CLEAN.** The bundled 2×2
+is a plateau canvas by construction, so the per-level rule answers it and every sentence is byte-identical —
+confirmed word for word, `[health/grain_uneven]` included. Mosaic trim 7.9 % (bar ~15 %), nothing overflowing,
+no console errors, page heights identical to the digit to the pass recorded earlier the same day. **What it
+cannot check:** both samples build their coverage from `np.full` blocks, so the band path and its sentence
+have never been in front of a browser. A `shape="ramped"` sample would close that; nothing yet says the
+wording is wrong, only that no pass could look at it.
+
 ## 2026-09-19 — Builder: shipped v0.469.0/.1 (the binder LEAD's shapes (b) and (a)); `--mosaic --calibration` dogfood CLEAN at v0.469.1
 
 *(Builder, branch `claude/sweet-babbage-eky2mu`, PR #951. Baseline `6431 passed, 2 skipped`
