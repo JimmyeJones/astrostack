@@ -693,12 +693,13 @@ class CoverageGrain:
     deep_frames: int     # subs on a pixel of the region most of the picture is at
     thin_share: float    # that grainy region's share of the covered canvas
     ratio: float         # thin σ / deep σ, median over the three channels
-    # **What** the thin region is, because it decides what to do about it:
-    # ``"panel"`` — a part of the picture shot with fewer subs, which more subs
-    # even out — or ``"edge"`` — the ragged outline the dithering leaves, whose
-    # width is set by the pointing spread and not by the sub count, so more subs
-    # never even it out and a crop is the quicker answer. See
-    # :data:`GRAIN_REGION_PANEL` / :data:`GRAIN_REGION_SPREAD`.
+    # **What was found**, because it decides what to say about it:
+    # :data:`GRAIN_REGION_PANEL` (one coverage plateau — a panel shot with fewer
+    # subs, which another night on it evens out) or :data:`GRAIN_REGION_SPREAD`
+    # (no plateau, the depth ramps — so part of the thin region is the picture's
+    # ragged outer edge, whose width is the spread of the pointings and not the
+    # sub count, and a crop is the quicker answer there). Read those two for the
+    # whole argument, including the classifier that was tried and dropped.
     region: str = GRAIN_REGION_PANEL
 
 

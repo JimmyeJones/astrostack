@@ -2232,14 +2232,15 @@ class StackRunRow:
     grain_thin_frames: int | None = None
     grain_deep_frames: int | None = None
     grain_thin_share: float | None = None
-    # ...and **what** the thin region is, which decides what to do about it:
-    # ``"panel"`` (a part of the picture shot with fewer subs — more subs even it
-    # out) or ``"edge"`` (the ragged outline the dithering leaves, whose width is
-    # set by the pointing spread rather than the sub count, so more subs never
-    # even it out and only a tighter crop removes it). Measured, not inferred —
-    # see :func:`seestack.bg.coverage_leveling._grain_region`. None on every run
-    # recorded before it existed, and every reader then falls back to the advice
-    # that is never harmful ("more subs"), which is what those rows already say.
+    # ...and **what was found**, which decides what the note says about it:
+    # ``"panel"`` (one coverage plateau — a panel shot with fewer subs, and
+    # another night on it is exactly the fix) or ``"spread"`` (no plateau, the
+    # depth ramps — so part of the thin region is the picture's ragged outer
+    # edge, whose width is the spread of the pointings rather than the sub count,
+    # and further shooting never narrows it). See
+    # :data:`seestack.bg.coverage_leveling.GRAIN_REGION_PANEL`. None on every run
+    # recorded before it existed, and every reader then falls back to the panel
+    # wording, which is what those rows already carry.
     grain_region: str | None = None
     # Which generation of the seam estimator wrote ``seam_residual`` — see
     # :data:`seestack.bg.coverage_leveling.SEAM_ESTIMATOR_GENERATION`. The figure

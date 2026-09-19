@@ -64,9 +64,10 @@ export function NextBestMoveBadge(
      * scopes its praise the way the "How's my stack?" panel below it scopes its
      * measurement. Optional — null/absent reads exactly as before. */
     grainVerdict?: string | null;
-    /** The run's own `grain_region` ("panel" or "edge"), so the well-done note
-     * never prescribes another night for a ragged edge no amount of shooting
-     * evens out. Optional — null/absent reads as "panel", exactly as before. */
+    /** The run's own `grain_region` ("panel" or "spread"), so the well-done
+     * note never prescribes another pass for a ragged edge that no amount of
+     * shooting narrows. Optional — null/absent reads as "panel", exactly as
+     * before. */
     grainRegion?: string | null;
     /** The measured grain level of the picture the readiness card beside this
      * one is describing (`cardGrainProjection(runs)?.level`), so the "add more
