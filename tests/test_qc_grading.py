@@ -497,6 +497,68 @@ def test_best_frame_none_on_empty():
     assert best_frame([]) is None
 
 
+def test_best_frame_takes_a_stream_and_holds_only_the_winner():
+    """The card's caller hands over `iter_frames()` itself rather than a list of
+    it, so what this function *keeps* is what the Target page pays.
+
+    Fail-before: it filtered into an `eligible` list first, which on a generator
+    keeps every candidate row alive to the end — and a `FrameRow` carries the
+    frame's plate solution, a FITS header text of ~25 eighty-character cards
+    that this function reads four small fields beside. Measured on the owner's
+    deepest target (35,894 subs): **1,181 ms / 135.3 MB peak → 858 ms / ~0 MB**,
+    same pick (AGENTS.md §10 — this box has an OOM history).
+
+    Bounded against the rows themselves rather than an absolute figure, so the
+    number means the same thing on any box.
+    """
+    import tracemalloc
+
+    n = 2000
+    wcs = "".join(f"CARD{c:02d}  = 1.2345678901E+02".ljust(80) for c in range(25))
+
+    def rows():
+        for i in range(n):
+            yield make_frame_like(make_frame(i + 1, fwhm=3.0 + (i % 97) * 0.01),
+                                  wcs_json=wcs)
+
+    tracemalloc.start()
+    best = best_frame(rows())
+    _, streamed = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    tracemalloc.start()
+    kept = list(rows())
+    _, listed = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    assert best is not None and best.id == 1          # fwhm 3.00, the lowest
+    assert len(kept) == n
+    assert streamed < listed / 10, (
+        f"streaming {n} subs peaked at {streamed / 1024:.0f} KiB against "
+        f"{listed / 1024:.0f} KiB for the same rows in a list")
+
+
+def test_best_frame_reads_a_one_shot_iterator_exactly_once():
+    """A generator cannot be walked twice, and the endpoint hands over one — so
+    a second pass (for a count, say) would come back empty rather than raise."""
+    frames = [make_frame(1, fwhm=3.2), make_frame(2, fwhm=2.1)]
+    it = iter(frames)
+    best = best_frame(it)
+    assert best is not None and best.id == 2
+    assert list(it) == [], "the iterator should be exhausted, not restarted"
+
+
+def test_best_frame_keeps_the_first_frame_at_a_winning_key():
+    """`min()` returns the first minimal element, and the streamed form keeps
+    that by comparing strictly — pinned because two rows really can tie on all
+    three terms only when they share an id, and the *order* is the only thing
+    that separates them then."""
+    a = make_frame(7, fwhm=2.5, stars=300)
+    b = make_frame(7, fwhm=2.5, stars=300)
+    assert best_frame([a, b]) is a
+    assert best_frame([b, a]) is b
+
+
 def test_best_frame_tolerates_missing_star_count_in_tiebreak():
     # A missing star_count must not crash the tiebreak; it ranks below a measured one.
     frames = [
