@@ -775,12 +775,25 @@ export function buildMasterSummary(r: Record<string, unknown>): string {
     // "3 wrong exposure" is a fact, not a next step. A dark's whole content is
     // its exposure, so a folder holding two lengths holds two masters' worth of
     // frames — and the frames that were set aside are good ones the owner still
-    // wants a master from. Say what to do with them.
-    if ((Number(buckets["wrong exposure"]) || 0) > 0) {
+    // wants a master from. Say what to do with them. The same is true one
+    // setting sideways: a dark or a bias is a photograph of a pedestal whose
+    // size the *gain* sets, so a folder holding two gains is two folders too.
+    const byLength = (Number(buckets["wrong exposure"]) || 0) > 0;
+    const byGain = (Number(buckets["wrong gain"]) || 0) > 0;
+    // Both at once is a folder someone has emptied two nights into; name both
+    // rather than picking one, so the second re-run doesn't set frames aside
+    // again for a reason this line never mentioned.
+    const differing = byLength && byGain ? "a different length and gain"
+      : byLength ? "a different length" : "a different gain";
+    const because = byLength && byGain
+      ? `a ${kind} only matches subs of its own exposure and gain`
+      : byLength ? `a ${kind} only matches subs of its own exposure`
+        : `a ${kind} carries the gain-dependent readout pedestal, and nothing `
+          + `rescales it`;
+    if (byLength || byGain) {
       return (
-        `${line}. Those were shot at a different length — a dark only matches `
-        + `subs of its own exposure, so put them in their own folder and build a `
-        + `second master from it.`
+        `${line}. Those were shot at ${differing} — ${because}, so put them in `
+        + `their own folder and build a second master from it.`
       );
     }
   }

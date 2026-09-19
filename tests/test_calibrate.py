@@ -1841,6 +1841,170 @@ def test_a_flat_built_from_two_exposures_is_deliberately_untouched(tmp_path):
     assert meta.n_frames == 4 and skipped == []
 
 
+# --- ...nor necessarily one gain ------------------------------------------
+#
+# The same bug one setting sideways. A dark and a bias are photographs of a
+# pedestal the sensor adds, and the *gain* sets how big that pedestal is — so a
+# folder holding gain-80 and gain-160 darks holds two masters' worth of frames,
+# exactly as a folder holding two exposures does. Unlike an exposure there is no
+# lever anywhere that corrects a gain gap afterwards.
+
+
+def _mixed_gain_set(tmp_path, *, n_low: int, n_high: int, kind: str = "dark") -> list:
+    """Interleaved gain-80 and gain-160 frames at one exposure and one
+    temperature, at the levels a real sensor would give (the pedestal scales
+    with gain), named so they sort interleaved."""
+    paths = []
+    for i in range(n_low + n_high):
+        low = i < n_low
+        p = tmp_path / f"{kind}_{i:02d}.fits"
+        _write_raw(p, np.full((4, 4), 100.0 if low else 300.0, dtype=np.float32),
+                   exptime=10.0, gain=80.0 if low else 160.0, temp=-10.0)
+        paths.append(p)
+    return paths
+
+
+@pytest.mark.parametrize("method", ["median", "mean", "sigma_mean"])
+def test_a_dark_master_is_built_from_one_gain_not_a_median_of_two(tmp_path, method):
+    """The whole bug in one assertion, on every combine method the form offers:
+    an evenly-split folder used to give a **200 ADU** master stamped **gain
+    120** — a level and a setting no frame in it was ever shot at."""
+    paths = _mixed_gain_set(tmp_path, n_low=3, n_high=3)
+    skipped: list[tuple[str, str]] = []
+
+    master, meta = build_master(paths, kind="dark", method=method, skipped=skipped)
+
+    np.testing.assert_allclose(master, 100.0)
+    assert meta.gain == 80.0
+    assert meta.n_frames == 3
+    assert [r for _n, r in skipped] == ["wrong gain"] * 3
+
+
+def test_the_silent_case_a_minority_gain_the_advisory_could_never_mention(tmp_path):
+    """The worse half, because nothing downstream could see it. With a minority
+    at the other gain the stamped gain stays 80 while ``mean`` lifts the master's
+    own level to 166.7 — so ``calibration_warnings``, which compares the
+    *stamped* gain against the lights, sees a perfect match and says nothing
+    about a pedestal two thirds too big."""
+    paths = _mixed_gain_set(tmp_path, n_low=4, n_high=2)
+    skipped: list[tuple[str, str]] = []
+
+    master, meta = build_master(paths, kind="dark", method="mean", skipped=skipped)
+
+    np.testing.assert_allclose(master, 100.0)
+    assert meta.gain == 80.0 and meta.n_frames == 4
+    assert [r for _n, r in skipped] == ["wrong gain"] * 2
+
+
+def test_a_bias_folder_of_two_gains_is_gated_the_same_way(tmp_path):
+    """A bias *is* the gain-dependent readout pedestal, so it wants the rule at
+    least as much as a dark does."""
+    paths = _mixed_gain_set(tmp_path, n_low=4, n_high=2, kind="bias")
+    skipped: list[tuple[str, str]] = []
+
+    master, meta = build_master(paths, kind="bias", method="median",
+                                skipped=skipped)
+
+    np.testing.assert_allclose(master, 100.0)
+    assert meta.gain == 80.0 and meta.n_frames == 4
+    assert [r for _n, r in skipped] == ["wrong gain"] * 2
+
+
+def test_a_dark_folder_of_one_gain_is_untouched(tmp_path):
+    """Every ordinary folder — which is every folder until someone mixes two
+    nights' settings — builds byte-identically, with nothing set aside."""
+    paths = _mixed_gain_set(tmp_path, n_low=5, n_high=0)
+    skipped: list[tuple[str, str]] = []
+
+    master, meta = build_master(paths, kind="dark", method="median",
+                                skipped=skipped)
+
+    np.testing.assert_allclose(master, 100.0)
+    assert meta.gain == 80.0 and meta.n_frames == 5
+    assert skipped == []
+
+
+def test_header_rounding_is_not_a_second_gain(tmp_path):
+    """A header round-trip is one setting, by the module's own tolerance — a
+    gate that split on exact equality would set aside half of a real folder."""
+    paths = []
+    for i, gain in enumerate([80.0, 79.9999, 80.0001, 80.0]):
+        p = tmp_path / f"dark_{i}.fits"
+        _write_raw(p, np.full((4, 4), 100.0, dtype=np.float32),
+                   exptime=10.0, gain=gain)
+        paths.append(p)
+    skipped: list[tuple[str, str]] = []
+
+    _master, meta = build_master(paths, kind="dark", method="median",
+                                 skipped=skipped)
+
+    assert meta.n_frames == 4 and skipped == []
+
+
+def test_a_dark_that_recorded_no_gain_is_still_used(tmp_path):
+    """"Didn't say" is not "said the wrong thing" — this module's own rule for
+    the declared-kind filter and for the exposure gate. Dropping a blank GAIN
+    would turn a missing header into a smaller master."""
+    paths = _mixed_gain_set(tmp_path, n_low=3, n_high=1)
+    blank = tmp_path / "dark_99.fits"
+    _write_raw(blank, np.full((4, 4), 100.0, dtype=np.float32), exptime=10.0,
+               gain=None)
+    paths.append(blank)
+    skipped: list[tuple[str, str]] = []
+
+    _master, meta = build_master(paths, kind="dark", method="median",
+                                 skipped=skipped)
+
+    assert meta.n_frames == 4, "the three gain-80 darks plus the one that didn't say"
+    assert [r for _n, r in skipped] == ["wrong gain"]
+
+
+def test_an_even_gain_split_keeps_the_lower_setting_deterministically(tmp_path):
+    """With no majority there has to be an answer, and it has to be the same one
+    every time: lowest wins, the tie-break shape the shape and exposure rules
+    already use."""
+    paths = _mixed_gain_set(tmp_path, n_low=3, n_high=3)
+
+    _master, meta = build_master(paths, kind="dark", method="median")
+    _master2, meta2 = build_master(list(reversed(paths)), kind="dark",
+                                   method="median")
+
+    assert meta.gain == 80.0 and meta.n_frames == 3
+    assert meta2.gain == 80.0 and meta2.n_frames == 3
+
+
+def test_a_gain_of_zero_is_a_setting_not_a_missing_header(tmp_path):
+    """Unlike a 0 s exposure, gain 0 is something a camera can legitimately be
+    set to — so it groups like any other value rather than being dropped."""
+    paths = []
+    for i in range(5):
+        p = tmp_path / f"dark_{i}.fits"
+        _write_raw(p, np.full((4, 4), 100.0 if i < 3 else 300.0, dtype=np.float32),
+                   exptime=10.0, gain=0.0 if i < 3 else 100.0)
+        paths.append(p)
+    skipped: list[tuple[str, str]] = []
+
+    master, meta = build_master(paths, kind="dark", method="median",
+                                skipped=skipped)
+
+    np.testing.assert_allclose(master, 100.0)
+    assert meta.gain == 0.0 and meta.n_frames == 3
+    assert [r for _n, r in skipped] == ["wrong gain"] * 2
+
+
+def test_a_flat_built_from_two_gains_is_deliberately_untouched(tmp_path):
+    """A flat is normalised to its own median before it divides, so a constant
+    gain factor divides straight back out and is not part of what the flat
+    says. Gating it would set aside good frames for nothing."""
+    paths = _mixed_gain_set(tmp_path, n_low=2, n_high=2, kind="flat")
+    skipped: list[tuple[str, str]] = []
+
+    _master, meta = build_master(paths, kind="flat", method="median",
+                                 skipped=skipped)
+
+    assert meta.n_frames == 4 and skipped == []
+
+
 def test_calibration_warns_when_the_master_dark_was_shot_at_another_gain(tmp_path):
     """Gain is the third acquisition number a dark has to match, and the only one
     nothing anywhere corrects for.

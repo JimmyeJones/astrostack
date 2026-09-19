@@ -413,6 +413,30 @@ describe("buildMasterSummary", () => {
     expect(line).toContain("build a second master");
   });
 
+  it("tells you what to do with frames set aside for their gain", () => {
+    // Same shape one setting sideways: a dark carries the gain-dependent
+    // readout pedestal, and unlike a length nothing anywhere rescales it.
+    const line = buildMasterSummary({
+      kind: "dark", n_frames: 12, n_skipped: 2,
+      skipped_buckets: { "wrong gain": 2 },
+    });
+    expect(line).toContain("2 frames set aside (2 wrong gain)");
+    expect(line).toContain("shot at a different gain");
+    expect(line).toContain("gain-dependent readout pedestal");
+    expect(line).toContain("build a second master");
+  });
+
+  it("names both reasons when a folder holds two lengths and two gains", () => {
+    // Naming one would send the owner to re-run a build that sets frames aside
+    // again for a reason this line never mentioned.
+    const line = buildMasterSummary({
+      kind: "bias", n_frames: 10, n_skipped: 4,
+      skipped_buckets: { "wrong exposure": 1, "wrong gain": 3 },
+    });
+    expect(line).toContain("shot at a different length and gain");
+    expect(line).toContain("its own exposure and gain");
+  });
+
   it("does not offer that advice when nothing was set aside for its length", () => {
     expect(buildMasterSummary({
       kind: "flat", n_frames: 15, n_skipped: 5,
