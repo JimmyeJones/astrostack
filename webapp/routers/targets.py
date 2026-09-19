@@ -1351,7 +1351,13 @@ def target_stack_health(
         # having to be stacked again. Free on a single-field run, and a no-op on
         # every run stacked since the columns existed.
         backfill_coverage_grain(proj, run)
-        frames = list(proj.iter_frames())
+        # The three consumers below read seven small fields off a sub and one
+        # bit ("did ASTAP locate it?"), so they are handed `FrameHealth` records
+        # rather than whole rows: a `FrameRow` is `SELECT *`, and on a solved sub
+        # the plate solution is almost all of it. Measured on the owner's deepest
+        # target (35,894 subs): 1,180 ms / 144.0 MB peak → 541 ms / 9.8 MB, for
+        # field-for-field identical records. See `Project.iter_health_frames`.
+        frames = list(proj.iter_health_frames())
         # The √N yardstick note reads the measurement the "One frame vs your
         # stack" reveal already stamped — it never measures one. A run nobody has
         # revealed yet simply gets no note, and starts getting one the moment the

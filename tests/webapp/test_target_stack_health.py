@@ -503,3 +503,37 @@ def test_stack_health_never_calls_an_unmeasured_run_clean(
     assert body["background_clean"] is False
     note = next(n for n in body["notes"] if n["kind"] == "calibration")
     assert "background speckle" in note["message"]
+
+
+def test_the_card_reads_fields_not_whole_frames(client, solved_library,
+                                                data_root, monkeypatch):
+    """The card hands *every* sub of the target to three functions — the health
+    notes, the darks guide and the reference-sub pick behind the noise
+    yardstick — which between them read seven small fields and one bit ("did
+    ASTAP locate it?"). It was building a `FrameRow` per sub to do it, and a
+    `FrameRow` is `SELECT *`: on a solved sub the plate solution is a FITS
+    header text of ~25 eighty-character cards, i.e. almost all of the read.
+
+    Fail-before: 35,894 rows built per visit on the owner's deepest target,
+    measured at 1,180 ms / **144.0 MB peak** against 541 ms / 9.8 MB for
+    field-for-field identical records (AGENTS.md §10 — this box has an OOM
+    history). The answer is unchanged either way, so only a test like this can
+    see it.
+    """
+    import seestack.io.project as project_module
+
+    _add_run(data_root, "M_42")
+
+    built = 0
+    real = project_module._row_to_frame
+
+    def counting(row):
+        nonlocal built
+        built += 1
+        return real(row)
+
+    monkeypatch.setattr(project_module, "_row_to_frame", counting)
+    r = client.get("/api/targets/M_42/stack-health")
+    assert r.status_code == 200
+    assert r.json()["notes"], "the card must still have graded the run"
+    assert built == 0, f"built {built} FrameRow objects to grade one stack"

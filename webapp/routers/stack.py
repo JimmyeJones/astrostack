@@ -2935,7 +2935,11 @@ def reference_sub_from_frames(frames: list[Any]) -> Any | None:
     """The same choice as :func:`_pick_reference_sub`, made over a frame list the
     caller already has in hand — so a page that has just read every frame doesn't
     re-query for one of them. Pure; ``frames`` may be the whole set or just the
-    accepted ones (accepted are preferred either way)."""
+    accepted ones (accepted are preferred either way).
+
+    It reads three fields — ``accept``, ``fwhm_px`` and ``id`` — so a caller may
+    hand it :class:`~seestack.io.project.FrameHealth` records as readily as whole
+    rows, which is what the stack-health card does."""
     accepted = [f for f in frames if f.accept]
     pool = accepted or list(frames)
     if not pool:
