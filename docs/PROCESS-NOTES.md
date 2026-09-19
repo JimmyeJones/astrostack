@@ -1,5 +1,49 @@
 # Process notes & QA sweep records
 
+## 2026-09-19 — Builder: a dry backlog, one CLEAN sweep, and the class that was still paying out (v0.471.2 / v0.471.3)
+
+*(Builder, branch `claude/wizardly-cannon-dnc0vt`. Baseline `6495 passed, 2 skipped` in 10m21s with
+`-n 4 --dist worksteal` + the BLAS cap; `6503` and then `6511` after the two commits.)*
+
+**The backlog is genuinely dry of ready work, and the triage is worth recording so the next run does not
+repeat it.** "Bugs (fix these first)" holds no buildable entry: everything open there is a lead gated on a
+measurement of the owner's own library, a piece already routed to owner sign-off, or a Builder verification
+saying the named slice is already in the code. Every `READY` marker in the file is on a shipped item. Two
+specific checks, so nobody spends a slot on them:
+
+* **The Scout #17 "calibration match confidence on the Stack form" entry is shipped and annotated as such
+  further down its own body** — `rec["confident"]` has been served by `calibration-suggestions` since
+  v0.321.0 and `frontend/src/calibrationFit.ts` prefers it over the best-available recommendation. Grepping
+  the *bullet* line alone reads it as open; it is not.
+* **The `has_ragged_border` lead's own gate is already answered inside the lead.** It asks how often the
+  owner's library holds a mosaic that is *both* ragged-rimmed and carrying an under-shot interior panel, and
+  says to close it with the number if the answer is "rarely". The observer's measurement, quoted two
+  paragraphs up in the same entry, is **0 % of thin pixels beyond half the inscribed radius on all 22 of his
+  mosaics** — i.e. never. Left open rather than closed by this run because closing another agent's lead on a
+  reading of its own text is the Scout's call, but the reading is here to save the derivation.
+
+**Where the run's work came from instead: asking v0.471.1's question sideways.** That fix was "the frames
+endpoint reads a whole deep target per request". The question generalises — *what else does?* — and the
+answer was four more endpoints, two of which were fixed this run (v0.471.2, v0.471.3) and three of which are
+now a measured lead in `IMPROVEMENTS.md`. The lever, stated so it can be reused: **a `FrameRow` is
+`SELECT *`, and the biggest column on a solved sub is its plate solution** (`wcs_json` is a FITS header
+*text* of ~25 eighty-character cards), so any endpoint reading a handful of small fields off a deep target is
+paying for that column. `grep -rn "iter_frames(" webapp/` is the whole search.
+
+**One CLEAN sweep — `scripts/agent-dogfood.sh --mosaic --editor`.** Recorded because a clean sweep is a
+result. Editor drive clean on the mosaic run: all 21 ops re-render, undo and redo apply, nothing overflows,
+no console errors. Auto's trim on the 2×2 is **7.9 %**, well under the ~15 % that would make it D1-shaped.
+The server-side mosaic paragraph holds together read as one: the panel map and the grain note give the *same*
+number in the same words ("about 30 s behind… it evens out on its own as you keep shooting"), and
+`seams_flat` explicitly hands off to depth rather than claiming the picture is even. Page heights: `/tonight`
+3,694 px phone (tallest), the mosaic Target page 3,673 px, the editor 3,419 px, `/glossary` 3,364 px, `/`
+3,132 px — the same standings as the last recorded pass, within noise, so **no IA slice is indicated**
+(AGENTS.md §1: measure first, and the measurement says not to).
+
+**Not re-run this pass:** `--big`, `--deep`, `--calibration`, `--incoming-lag` and `--empty`. `--big` and
+`--deep` were both run clean on 2026-09-19 by the previous Builder against v0.471.0/.1, and this run's
+changes touch neither the preview's scale nor the frames table's rows.
+
 ## 2026-09-19 — Builder: two CLEAN dogfood sweeps, a dry bug list, and the lever that found the one thing worth shipping (v0.471.0 / v0.471.1)
 
 *(Builder, branch `claude/sweet-babbage-bluf7z`. Baseline `6461 passed, 2 skipped` in 10m11s with

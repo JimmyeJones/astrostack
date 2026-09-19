@@ -2720,3 +2720,60 @@ def test_a_master_built_before_the_range_was_recorded_is_ordered_as_it_always_wa
     # Today's answer, spelled out rather than assumed: with nothing to break the
     # tie, the registry's own order stands and ``list_masters`` is newest first.
     assert bound["dark_master_id"] == rec["dark_master_id"] == newest["id"]
+
+
+def test_the_form_and_the_coverage_page_describe_one_target_identically(
+        client, solved_library):
+    """The drift guard the shared signature exists to be.
+
+    ``calibration-suggestions`` asks *"which master fits these subs?"* and the
+    coverage roll-up asks *"which targets does this master fit?"* — the same
+    question from opposite ends, and the app's own contract is that the two
+    cannot answer it differently about one target. Until now the eight fields
+    were hand-mirrored in two blocks, comment for comment, which is why ``gain``
+    had to be changed to ``dominant_gain`` in both at once (v0.469.0) and
+    ``exposures_s``/``sensor_temps_c`` added to both at once. Now there is one
+    function, and this pins that there stays one.
+
+    The target is made deliberately awkward first — two exposures, two gains and
+    a spread of temperatures — because on a uniform target every plausible way
+    of computing these agrees and the guard would pass for the wrong reason.
+    """
+    from seestack.io.library import Library
+    from webapp.routers.calibration import _acquisition_signature, _target_acquisition
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            ids = [f.id for f in proj.iter_frames()]
+            assert len(ids) >= 3, "fixture needs enough subs to mix settings"
+            for i, fid in enumerate(ids):
+                proj.update_frame(
+                    fid,
+                    exposure_s=30.0 if i == 0 else 10.0,
+                    gain=200.0 if i == 0 else 80.0,
+                    sensor_temp_c=-10.0 + i * 0.4,
+                )
+            # The key set is the helper's own, so a field added to it in future
+            # is compared here by construction rather than by remembering to.
+            shared = _acquisition_signature(proj.acquisition_values())
+        finally:
+            proj.close()
+        entry = next(e for e in lib.list_targets() if e.safe_name == safe)
+        rollup = _target_acquisition(lib, entry)
+    finally:
+        lib.close()
+
+    params = client.get(
+        f"/api/targets/{safe}/calibration-suggestions").json()["params"]
+
+    for key, value in shared.items():
+        assert rollup[key] == value, f"roll-up disagrees about {key}"
+        assert params[key] == value, f"the Stack form disagrees about {key}"
+    # …and the fixture really is the awkward case, so the agreement above is not
+    # two functions agreeing that everything is uniform.
+    assert len(shared["exposures_s"]) == 2
+    assert shared["gain"] == 80.0, "the dominant gain, not the median 140"
+    assert len(shared["sensor_temps_c"]) > 1

@@ -234,6 +234,47 @@ class FrameRow:
 _FRAME_COLUMNS: frozenset[str] = frozenset(f.name for f in fields(FrameRow))
 
 
+#: The columns that say **what the camera was set to** on a sub — and nothing
+#: about where it pointed, when it landed or how it measured.
+#:
+#: Read as a set of their own by :meth:`Project.acquisition_values`, because the
+#: two surfaces that judge a master dark against a target ask only these six
+#: questions and a ``SELECT *`` makes them pay for the rest: a solved frame's
+#: ``wcs_json`` is a FITS header text of ~25 eighty-character cards, so on a deep
+#: target the header the question never looks at is almost all of what is read.
+_ACQUISITION_COLUMNS: tuple[str, ...] = (
+    "exposure_s", "gain", "sensor_temp_c",
+    "width_px", "height_px", "bayer_pattern",
+)
+
+
+@dataclass(frozen=True)
+class AcquisitionValues:
+    """Every accepted sub's acquisition settings, one list per column.
+
+    Column-major rather than a list of rows on purpose: every consumer wants
+    *one* column at a time — the median exposure, the dominant gain, the modal
+    frame size — so a row object would be built only to be taken apart again.
+
+    The lists are parallel and in ``id`` order, which is the order
+    :meth:`Project.iter_frames` yields, so anything order-sensitive (a modal
+    value's tie-break) answers exactly as it did when these were read off
+    ``FrameRow`` objects.
+    """
+
+    exposures_s: list[float | None]
+    gains: list[float | None]
+    sensor_temps_c: list[float | None]
+    widths_px: list[int | None]
+    heights_px: list[int | None]
+    bayer_patterns: list[str | None]
+
+    @property
+    def n_frames(self) -> int:
+        """How many subs are described — the length every list shares."""
+        return len(self.exposures_s)
+
+
 def readable_frame_path(frame: "FrameRow") -> str | None:
     """Return the first of a frame's on-disk paths that actually exists.
 
@@ -1209,6 +1250,86 @@ class Project:
                f" LIMIT ? OFFSET ?")
         for row in self._conn.execute(sql, (limit, offset)):
             yield _row_to_frame(row)
+
+    def acquisition_values(self, *, accepted_only: bool = True
+                           ) -> AcquisitionValues:
+        """This target's subs' **acquisition settings**, and nothing else.
+
+        The same values :meth:`iter_frames` would hand back, in the same order,
+        for the six columns in :data:`_ACQUISITION_COLUMNS` — but read as those
+        six columns instead of as whole rows. The callers are the two surfaces
+        that match a calibration master to a target (the Stack form's
+        recommendation and the Calibration page's coverage roll-up), and between
+        them they ask only "how long, what gain, how warm, what size, what
+        Bayer phase, how many".
+
+        Reading rows for that is expensive in the one way this box cannot afford
+        (AGENTS.md §10 — the OOM history): a ``FrameRow`` carries the frame's
+        plate solution, which is a FITS header text of ~25 eighty-character
+        cards, so the answer is dominated by the field nothing here looks at.
+        Measured on a synthetic project the size of the owner's deepest target
+        (35,894 subs, ~2 kB of ``wcs_json`` each): **1,132 ms / 146.4 MB peak**
+        the old way against **244 ms / 8.4 MB** this way, with identical values.
+        The coverage roll-up pays it **per target**, across the whole library.
+
+        ``accepted_only`` defaults to ``True`` — unlike :meth:`iter_frames`,
+        because a rejected sub is not going into the stack a master would be
+        applied to, and both callers have always filtered that way.
+        """
+        rows = list(self.iter_frame_columns(
+            *_ACQUISITION_COLUMNS, accepted_only=accepted_only))
+        return AcquisitionValues(
+            exposures_s=[r[0] for r in rows],
+            gains=[r[1] for r in rows],
+            sensor_temps_c=[r[2] for r in rows],
+            widths_px=[r[3] for r in rows],
+            heights_px=[r[4] for r in rows],
+            bayer_patterns=[r[5] for r in rows],
+        )
+
+    def iter_frame_columns(self, *columns: str,
+                           accepted_only: bool = False) -> Iterator[tuple]:
+        """Just *columns* of this target's frames, as plain tuples in ``id``
+        order — the same rows :meth:`iter_frames` yields, without building one.
+
+        The primitive behind :meth:`acquisition_values`, and the answer for any
+        caller that wants a handful of small fields off a **deep** target. A
+        ``FrameRow`` is ``SELECT *``, and the biggest column on a solved sub is
+        its plate solution — ``wcs_json`` is a FITS header *text* of ~25
+        eighty-character cards — so building one to read a timestamp costs far
+        more than the timestamp. Measured on a synthetic project the size of the
+        owner's deepest target (35,894 subs): the Target page's sky-brightness
+        read is **1,074 ms → 322 ms** and its restack-gain read **1,132 ms →
+        370 ms**, for identical answers.
+
+        ``ORDER BY id`` is :meth:`iter_frames`' own order and is kept
+        deliberately: a caller taking a modal value breaks a tie on whichever
+        candidate it met first, so a different order could move its answer for
+        no reason a reader could see. ``accepted_only`` mirrors
+        :meth:`iter_frames` and defaults to ``False``.
+
+        Column names are checked against :data:`_FRAME_COLUMNS` before they
+        reach the SQL. They are code-supplied today rather than user-supplied,
+        but the check is free, it is the rule :meth:`iter_frames_page` already
+        follows, and a typo becomes a :class:`ValueError` here instead of an
+        ``OperationalError`` from inside a request.
+        """
+        assert self._conn is not None
+        if not columns:
+            raise ValueError("iter_frame_columns needs at least one column")
+        for name in columns:
+            if name not in _FRAME_COLUMNS:
+                raise ValueError(f"not a frame column: {name!r}")
+        where = " WHERE accept = 1" if accepted_only else ""
+        cols = ", ".join(columns)
+        # Plain tuples rather than this connection's ``sqlite3.Row``: a Row's
+        # ``repr`` is its memory address, and these are values a caller compares,
+        # logs and puts in a test — the same reason ``frames_fingerprint`` drops
+        # the row factory. The copy is part of what the numbers above were
+        # measured through, so it is already paid for in them.
+        for row in self._conn.execute(
+                f"SELECT {cols} FROM frames{where} ORDER BY id"):
+            yield tuple(row)
 
     def frames_fingerprint(self) -> str:
         """A short hash of the **entire** ``frames`` table — every column of
