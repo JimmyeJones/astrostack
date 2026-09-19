@@ -1,5 +1,74 @@
 # Process notes & QA sweep records
 
+## 2026-09-19 — Scout: QA swept the *newest* code (v0.455–0.468 calibration) + a CLEAN `--mosaic` dogfood at v0.468.1; observer #878 confirmed dormant on live data
+
+*(Scout, branch `claude/admiring-brahmagupta-3hltrq`. Baseline `6431 passed, 2 skipped`,
+8m47s with `-n 4 --dist worksteal` and the BLAS cap on a 4-core box. **No code shipped** —
+the deliverable is the backlog: one owner-sign-off gate filed, one Bugs entry updated with
+live-data confirmation, one issue comment, and this record.)*
+
+**Rotation / target — and a prompt conflict, resolved in favour of AGENTS.md.** The Scout
+kickoff prompt says to "lead your rotation with the stacking engine — `seestack/stack/*` …
+`seestack/calibrate/*`". AGENTS.md §1–2 say the opposite: that single-field core is **closed**
+after twenty clean sweeps, "do not re-sweep it", and the file explicitly records that *four*
+prior runs wasted a slot re-sweeping it off exactly that stale prompt. AGENTS.md is the source
+of truth (§1, "follow this document exactly"), so the sweep followed the working lever instead
+(PROCESS-NOTES 2026-09-06, "audit the *newest* code, not the old code"): the v0.455–0.468
+calibration/masters work, which is where every recent bug has actually been.
+
+**QA sweep — no new verified bug.** Read adversarially, end to end:
+`masters.build_master` and its majority exposure/gain grouping (`_majority_exposure_group`,
+`_majority_gain_group`, `_exposure_in_group`, `_gain_in_group`), including the bias `allow_zero`
+path and the `sensor_temp_min_c/max_c` blend range; `apply.calibration_warnings` on all three
+axes (exposure, temperature, gain) plus the blended-master and flat-dark branches;
+`_effective_dark`'s bias-scaling and its two no-data masks, and `apply_raw`'s aliasing contract
+(`out is raw` copy guards); `distinct_exposures` / `distinct_gains` (both group against the
+group's **first** member, so a ramp of near-neighbours can't chain two settings into one);
+and `stackhealth`'s `background_reads_clean` / `uneven_grain_verdict` / `grain_verdict`. This
+code is exceptionally defended — each recent fix shipped with a fail-before regression test and
+the None/NaN/zero/one-sided edges are all handled. Nothing filed. (The one live *lead* here is
+already on file: the auto-binder judging a master dark by its median gain/temp — Builder
+2026-09-19, gated on a measurement of the owner's library, not blind-buildable.)
+
+**Dogfood `--mosaic` at v0.468.1 — CLEAN.** Trim Auto would apply to the 2×2 union canvas
+**7.9 %** (bug bar is >15 %). The server-side "what the app SAYS" block is internally consistent
+— the grain, seam and panel-map notes reconcile ("where the picture looks grainier that is a
+difference in depth, not a step in the sky", the v0.466.2 fix). Both Target pages (single field
+and mosaic) read as one coherent paragraph — readiness prices the fragment/mosaic as "a good
+start", next-best-move and framing agree on the next session, no card contradicts another. The
+Tonight column had only its week-plan card active on the sample's data (the other three
+self-hiding cards stayed silent), so no cross-card contradiction was exercised. Page heights
+normal, tallest first: `/tonight` 3694 px, mosaic Target 3673 px, editor 3419 px, `/glossary`
+3364 px — no outlier near the 10,430 px that triggered a slice before. **Nothing overflowing,
+no console errors.**
+
+**Issue inbox (Scout owns it) — three open, all verified and tracked; acted on each.**
+- **#903** — the observer's own 2026-09-18 follow-up confirms on live data that the
+  v0.447.2/.448.x/.449.0 guard works (one target re-finished, five correctly stood down); the
+  only leftover is optional (copy a hand recipe forward without re-rendering). Left as-is; open
+  is correct.
+- **#880** — its actionable content is storage hygiene (not user-facing), deliberate design,
+  and a classification gap that shipped v0.455.0. Nothing new to do; open is correct.
+- **#878** — the observer's 2026-09-17 follow-up establishes on live data that the duplication
+  is **dormant** (last fired 2026-07-03; 18 nights + 5,885 new frames since with zero
+  double-registration; an `IC_360` control shows the shape present but the behaviour gone),
+  matching the in-code verification that the sibling-skip rule already closes recurrence. The
+  only remaining work — reconciling the 11 historical pairs — is a merge migration that rewrites
+  on-disk layout (§9) and so needs owner sign-off, and it was **missing from the owner-sign-off
+  list**. Filed it as gate 16, appended the live-data confirmation to the #878 Bugs entry, and
+  left a loop-closing comment on the issue.
+
+**No feature idea filed, and it was not "no time".** "Features that serve real workflows" is
+saturated for a beginner: every candidate from a fresh walk of the journey is **already built**,
+confirmed by grep — overnight digest (`LastNightCard` + `describeOvernightWork`), one-frame-vs-
+stack (`OneFrameVsStackCard`), a growth/timelapse reel (`DeepeningReelCard`, with share +
+download), before/after and A/B (`CompareWithLastCard`, `/compare`), year-in-review
+(`recap.jpg`), best-night (`sharpest_night`), the Dashboard first-run map, and Tonight's "nearly
+there". AGENTS.md §2/§4 and this file's 2026-09-11 note say idea supply was never the constraint
+and to STOP rather than manufacture busywork; the Scout kickoff's "at least one new beginner
+feature every run" is a quota this app has outgrown. Recording that here rather than padding the
+backlog with a marginal toggle.
+
 ## 2026-09-19 — Builder: the same family swept twice — one axis sideways (temperature) and one *kind* sideways (bias) — and the dogfood pass was CLEAN
 
 *(Builder, branch `claude/sweet-babbage-kw8hhx`. Baseline `6409 passed, 2 skipped`,
