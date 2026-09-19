@@ -170,6 +170,11 @@ describe("grainProjection", () => {
   });
 
   it("puts the clean/grainy bars exactly on the documented thresholds", () => {
+    // The Python side pins the same literal from the other end —
+    // `seestack.stackhealth.CLEAN_BACKGROUND_SIGMA`, which the "How's my stack?"
+    // calibration note reads so it stops claiming darks would cut a speckle
+    // this card has just measured away. Two cards on one page must answer one
+    // σ the same way, so neither literal may move without the other.
     expect(CLEAN_SIGMA).toBe(0.02);
     expect(grainProjection([run(HOUR, CLEAN_SIGMA)])?.level).toBe("clean");
     expect(grainProjection([run(HOUR, CLEAN_SIGMA + 0.001)])?.level).toBe("some");

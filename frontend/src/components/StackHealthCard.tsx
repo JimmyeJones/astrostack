@@ -130,7 +130,10 @@ export function StackHealthCard(
                   {/* Turn the "add darks" advice into an actionable how-to, with
                       the target's own exposure/gain pre-filled. */}
                   {n.kind === "calibration" ? (
-                    <DarksGuide spec={data.dark_spec} />
+                    <DarksGuide
+                      spec={data.dark_spec}
+                      backgroundClean={data.background_clean}
+                    />
                   ) : null}
                 </Stack>
               </Group>

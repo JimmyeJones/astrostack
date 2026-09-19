@@ -462,3 +462,44 @@ def test_an_ordinary_older_run_is_told_nothing_about_black_bands(
     assert "uncovered" not in [n["kind"] for n in body["notes"]]
     assert _stored_uncovered_frac(data_root, "M_42", rid) == pytest.approx(
         0.0396, abs=0.002)
+
+
+# --- `background_clean`: one measurement, served once ------------------------
+#
+# The calibration note's wording turns on the run's own measured σ, and the "How
+# to add darks" guide rendered directly beneath that note used to re-assert the
+# magnitude the note had just withdrawn ("the single biggest cleanup for a noisy
+# image"). Serving the decision rather than letting the browser re-derive it is
+# what stops the two holding different opinions about one picture.
+
+
+def test_stack_health_serves_the_measured_background_verdict(
+        client, solved_library, data_root):
+    _add_run(data_root, "M_42", calstat=None, noise_sigma=0.001)
+    body = client.get("/api/targets/M_42/stack-health").json()
+    assert body["background_clean"] is True
+    note = next(n for n in body["notes"] if n["kind"] == "calibration")
+    # The endpoint's flag and the sentence it serves beside it are one decision.
+    assert "already measures clean" in note["message"]
+    assert "background speckle" not in note["message"]
+
+
+def test_stack_health_calls_a_grainy_background_what_it_is(
+        client, solved_library, data_root):
+    _add_run(data_root, "M_42", calstat=None, noise_sigma=0.08)
+    body = client.get("/api/targets/M_42/stack-health").json()
+    assert body["background_clean"] is False
+    note = next(n for n in body["notes"] if n["kind"] == "calibration")
+    assert "background speckle" in note["message"]
+
+
+def test_stack_health_never_calls_an_unmeasured_run_clean(
+        client, solved_library, data_root):
+    """A run recorded before the σ column existed carries no measurement, so the
+    flag is False and the note keeps its general wording — the app never says
+    "already clean" about a picture nobody measured."""
+    _add_run(data_root, "M_42", calstat=None, noise_sigma=None)
+    body = client.get("/api/targets/M_42/stack-health").json()
+    assert body["background_clean"] is False
+    note = next(n for n in body["notes"] if n["kind"] == "calibration")
+    assert "background speckle" in note["message"]

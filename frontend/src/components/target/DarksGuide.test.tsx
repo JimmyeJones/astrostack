@@ -24,10 +24,13 @@ describe("formatDarkSpec", () => {
   });
 });
 
-function renderGuide(spec: Parameters<typeof DarksGuide>[0]["spec"]) {
+function renderGuide(
+  spec: Parameters<typeof DarksGuide>[0]["spec"],
+  backgroundClean?: boolean | null,
+) {
   return render(
     <MantineProvider>
-      <DarksGuide spec={spec} />
+      <DarksGuide spec={spec} backgroundClean={backgroundClean} />
     </MantineProvider>,
   );
 }
@@ -111,5 +114,39 @@ describe("the ordinary single-length target is untouched", () => {
       .toEqual([10]);
     expect(darkSpecLengths({ exposure_s: null, gain: null, exposures_s: [] }))
       .toEqual([]);
+  });
+});
+
+// The guide sits directly under the "How's my stack?" calibration note, and that
+// note now reads the run's measured background σ before it says anything about
+// grain (`seestack.stackhealth.background_reads_clean`). The lead sentence here
+// used to re-assert the magnitude the note had just withdrawn.
+describe("DarksGuide — the lead sentence agrees with the note above it", () => {
+  it("drops the noisy-image claim once the background measures clean", () => {
+    renderGuide({ exposure_s: 10, gain: 80 }, true);
+    fireEvent.click(screen.getByText("How to add darks →"));
+    expect(screen.queryByText(/single biggest cleanup/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/background already measures clean/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/tidy up hot pixels/)).toBeInTheDocument();
+    // The how-to itself is untouched — this changes one sentence, not the offer.
+    expect(screen.getByText(/Cap the scope/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/same settings as your subs — 10 s at gain 80/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps today's wording when the background is grainy, unmeasured, or the "
+    + "backend is older", () => {
+    for (const flag of [false, null, undefined] as const) {
+      const { unmount } = renderGuide({ exposure_s: 10, gain: 80 }, flag);
+      fireEvent.click(screen.getByText("How to add darks →"));
+      expect(screen.getByText(/single biggest cleanup/)).toBeInTheDocument();
+      expect(
+        screen.queryByText(/background already measures clean/),
+      ).not.toBeInTheDocument();
+      unmount();
+    }
   });
 });
