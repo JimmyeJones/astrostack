@@ -1,5 +1,83 @@
 # Process notes & QA sweep records
 
+## 2026-09-19 — Builder: the family sweep found one bug by *reading*, and the dogfood pass found the other by *running* — and the second was in the tooling's own log line
+
+*(Builder, branch `claude/sweet-babbage-3pa8rc`. Baseline `6392 passed, 2 skipped`,
+12m08s with `-n 4` and the BLAS cap on a 4-core box. Shipped v0.467.0 and
+v0.467.1.)*
+
+**The backlog was dry again — "Bugs (fix these first)" holds nothing that is not
+gated, declined with measurements, or already built.** So the run was two
+levers, one each.
+
+**Lever 1: enumerate the family of the last fix, one axis sideways.** v0.458.0
+gave `masters.build_master` a majority-**exposure** gate, because a folder
+holding two sub lengths does not describe either one. A dark has *three*
+acquisition numbers, and v0.466.0 had just spent a whole version on the third
+one — gain — on the *apply* side. The question that took two minutes to ask was:
+does the **build** side gate gain the way it gates exposure? It did not. A
+scratch script at one exposure and one temperature, only the gain differing:
+
+```
+3x g80 + 3x g160, median/mean/sigma_mean -> 200.0 ADU, stamped gain 120
+4x g80 + 2x g160, mean                   -> 166.7 ADU, stamped gain  80
+```
+
+The second line is the one worth carrying forward. **A minority is worse than an
+even split, because it is silent**: the stamped gain stays at a value the
+advisory then finds a perfect match for, so the one surface built to catch a
+gain mismatch is structurally blind to a master that *contains* one. A
+representative value does not only misdescribe the set — it can make the set's
+own error invisible to the check downstream.
+
+**Lever 2: a flag combination nobody had run — and read the tooling's own
+output, not just its verdict.** `--calibration --incoming-lag --mosaic` came
+back "nothing overflowing, no console errors", and the finding was eleven lines
+above that, in the seeding log:
+
+```
+   wrote 6 dark frame(s) into Darks 10s/
+   [offer] NOTHING FOUND — the seeded frames are invisible to the app
+```
+
+The reflex is "the harness is broken". It was not: `find_calibration_folders` on
+that exact path answered `Darks 10s dark 6 10.0 80.0`. What the combination
+exposed is that **`--incoming-lag` polls `/api/incoming-lag`, which warms the
+120 s `incoming/` walk cache, and the darks are written after that** — so the
+app held "there is no calibration data here" through the rest of the pass. That
+is the owner's own sequence, not a fixture's: on his box the Dashboard's
+incoming-lag note is *usually* the thing that looked first. Shipped as v0.467.1.
+
+**Two things worth keeping.**
+
+* **A flag the tooling added to reach a surface is itself a claim, and a
+  combination can falsify it.** `--calibration` exists (v0.455.1) because no
+  pass had ever held a master. This pass held none either, and said so in
+  print — the line v0.455.1 wrote for exactly this reason is what made the bug
+  findable. The verification after the fix is the same line answering
+  differently: `[offer] Darks 10s -> dark master, 6 frame(s)` … `[run 2] masters
+  actually applied: {'dark_master_id': 1, 'flat_master_id': 2}`.
+* **One thing was checked and *not* shipped, recorded so it is not re-derived.**
+  The same stale cache feeds `incominglag._calibration_folders`, whose docstring
+  says naming a calibration folder would "complain forever about the folder the
+  app itself asked for" — so a false nag looked like a second symptom worth a
+  test. It is not reachable: `LAG_MIN_AGE_S` is **2 hours** and the cache window
+  is 120 s, so a freshly-copied folder can never be old enough to be named while
+  the cache is still stale. Checked before it was written, not after.
+
+**And one frontend half was built and reverted.** The offer card polls every
+120 s, so the server fix leaves a ≤2 min wait with the page open; opting that one
+query back into `refetchOnWindowFocus` (the app turns it off globally) is the
+obvious completion — the owner's alt-tab back from the file manager is exactly
+when the answer changes. It was dropped because the claim could not be *tested*
+honestly: TanStack v5 drives focus refetching off `visibilitychange`, which
+switching *applications* does not reliably fire, and the app's own 10 s
+`staleTime` gates it again. A test written against a hand-rolled `QueryClient`
+would have passed on the library default and proved nothing. The server fix is
+the half that removes a *wrong* answer; the poll only delays a right one.
+
+---
+
 ## 2026-09-19 — DOGFOOD `--mosaic --editor --incoming-lag` (at v0.466.0): mechanically CLEAN, and the run's work was in the block it prints
 
 *(Builder, branch `claude/sweet-babbage-foh7rz`. Baseline `6381 passed, 2 skipped`, 10m02s with `-n 4` and

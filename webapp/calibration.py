@@ -23,6 +23,7 @@ import contextlib
 import json
 import logging
 import math
+import os
 import threading
 import time
 from collections.abc import Iterable, Sequence
@@ -1197,11 +1198,61 @@ def _exposure_close(master: dict[str, Any], exposure_s: float | None) -> bool:
 
 
 #: How long the ``incoming/`` calibration-folder walk is cached on the app. The
-#: walk costs one FITS header read per folder (see
-#: :mod:`seestack.calibrate.discover`), so it is shared by every consumer rather
-#: than repeated per page — but it must still notice frames the owner copied in
-#: a minute ago, hence a short TTL rather than a process-lifetime cache.
+#: walk lists every candidate folder and reads one FITS header per folder (see
+#: :mod:`seestack.calibrate.discover`), and on a library of a hundred target
+#: folders holding thousands of subs each the *listing* is the expensive half —
+#: so it is shared by every consumer rather than repeated per page. It is the
+#: upper bound on staleness, not the only thing that ends it: see
+#: :func:`_incoming_subfolder_names`.
 INCOMING_SCAN_TTL_S = 120.0
+
+
+def _incoming_subfolder_names(incoming_dir: str | Path) -> tuple[str, ...] | None:
+    """The immediate sub-folder names of ``incoming/`` — the cheapest thing that
+    changes when a **new** calibration folder could have appeared. ``None`` when
+    the folder can't be read at all.
+
+    Why this exists: the TTL above is shared app-wide and is warmed by whichever
+    consumer asks first — the Dashboard's incoming-lag note polls it — so a
+    folder of darks the owner has just copied over SMB was invisible to the
+    Calibration page's one-click offer for up to two minutes, on the page whose
+    entire job is to notice it. Reproduced in one call: walk an empty
+    ``incoming/``, copy a folder of six declared darks in, walk again — the
+    answer was still "nothing here", while ``find_calibration_folders`` on the
+    same path answered "Darks 10s".
+
+    Why **names** and not mtimes: the cost the TTL protects is real, and a night
+    of capture adds *files* to folders that already exist. Hashing mtimes would
+    therefore re-walk the whole library every few seconds on exactly the night
+    the app is busiest, to notice nothing. A name set changes when a folder is
+    added, renamed or removed — which is every way a *new* calibration folder
+    reaches the top level — and does not change when subs land in a folder that
+    is already there. One ``os.scandir`` of one directory, using the directory
+    entry's own type, so it costs no ``stat`` and never opens a file.
+
+    What it deliberately does not catch, both bounded by the TTL exactly as
+    today: a calibration folder nested one level down (``incoming/2026-09/Darks``
+    — its *parent* is the name that would have to appear), and frames arriving
+    into a folder that was already there and only now clears
+    ``discover.MIN_FRAMES``.
+
+    ``incoming/`` stays strictly read-only here (AGENTS.md §10): a directory
+    listing, nothing else.
+    """
+    try:
+        with os.scandir(str(incoming_dir)) as entries:
+            names = []
+            for entry in entries:
+                if entry.name.startswith("."):
+                    continue
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        names.append(entry.name)
+                except OSError:
+                    continue
+    except OSError:
+        return None
+    return tuple(sorted(names))
 
 
 def cached_incoming_folders(app_state: Any, incoming_dir: str | Path) -> list[Any]:
@@ -1211,13 +1262,23 @@ def cached_incoming_folders(app_state: Any, incoming_dir: str | Path) -> list[An
     come out uncalibrated?" advice, so a page that shows both doesn't pay for it
     twice and the two can never disagree about what is there. Never raises: a
     walk that fails yields an empty list, and the feature simply stays silent.
+
+    The cache is reused only while ``incoming/``'s own sub-folder names are
+    unchanged *and* the TTL has not elapsed, so a folder the owner copied in a
+    second ago is offered on the next request instead of up to
+    :data:`INCOMING_SCAN_TTL_S` later — see :func:`_incoming_subfolder_names`
+    for why that check is a name set rather than a fingerprint of the tree.
+    An unreadable ``incoming/`` yields ``None`` on both sides and so still
+    matches itself, which is today's behaviour exactly.
     """
     from seestack.calibrate import discover
 
     root = str(incoming_dir)
     cache = getattr(app_state, "calibration_incoming_cache", None)
     now = time.monotonic()
+    names = _incoming_subfolder_names(root)
     if cache and cache.get("root") == root \
+            and cache.get("names") == names \
             and (now - cache.get("at", 0.0)) < INCOMING_SCAN_TTL_S:
         return list(cache["folders"])
     try:
@@ -1227,7 +1288,7 @@ def cached_incoming_folders(app_state: Any, incoming_dir: str | Path) -> list[An
         folders = []
     with contextlib.suppress(AttributeError):
         app_state.calibration_incoming_cache = {
-            "root": root, "at": now, "folders": folders}
+            "root": root, "at": now, "names": names, "folders": folders}
     return list(folders)
 
 

@@ -163,6 +163,47 @@ def _majority_exposure_group(values: Sequence[float | None]) -> list[float] | No
     return members[best] or [groups[best]]
 
 
+def _gain_in_group(value: float, group: Sequence[float]) -> bool:
+    """Is ``value`` one of the settings in ``group``, by the module's own
+    "is this the same gain?" question? A header round-trip (80.0 against
+    79.9999) is the same setting; any real step (80 → 160) is not."""
+    from seestack.calibrate.apply import gain_mismatch
+
+    return any(not gain_mismatch(g, value) for g in group)
+
+
+def _majority_gain_group(values: Sequence[float | None]) -> list[float] | None:
+    """The gain setting most of these frames were shot at, as the list of raw
+    values belonging to that group — or ``None`` when there is nothing to gate
+    on (no recorded gain, or only one setting, which is every ordinary folder).
+
+    Grouped by :func:`seestack.calibrate.apply.distinct_gains`, the same grouping
+    the gain advisory uses, so "two gains" means the same thing everywhere. Ties
+    keep the **lowest** setting, because ``distinct_gains`` reports groups
+    lowest-first and the first maximum wins — deterministic, and exactly the
+    shape and exposure rules' own tie-break.
+
+    A gain of 0 is a legitimate setting (unlike a 0 s exposure), so only the
+    missing, the non-finite and the negative are dropped here — the same rule
+    ``distinct_gains`` itself applies.
+    """
+    from seestack.calibrate.apply import distinct_gains
+
+    vals = [float(v) for v in values
+            if v is not None and math.isfinite(float(v)) and float(v) >= 0]
+    groups = distinct_gains(vals)
+    if len(groups) < 2:
+        return None  # nothing to split — behaviour is byte-identical
+    members: list[list[float]] = [[] for _ in groups]
+    for v in vals:
+        for i, g in enumerate(groups):
+            if _gain_in_group(v, [g]):
+                members[i].append(v)
+                break
+    best = max(range(len(groups)), key=lambda i: len(members[i]))
+    return members[best] or [groups[best]]
+
+
 def build_master(
     paths: Sequence[str | Path],
     *,
@@ -186,7 +227,9 @@ def build_master(
         camera or binning mode can't hijack the build. For a **dark**, the same
         majority rule applies to the frames' *exposure* (see below): a dark's
         entire content is its exposure, so a set holding two lengths does not
-        describe either one.
+        describe either one. For a **dark or a bias**, it applies to their
+        *gain* as well, which sets the size of the pedestal they exist to
+        measure.
     kind
         'dark', 'flat' or 'bias' — recorded in the metadata.
     method
@@ -206,7 +249,8 @@ def build_master(
         Optional list to collect ``(filename, reason)`` for every frame that was
         dropped during the build — ``"unreadable"`` (failed to load),
         ``"wrong size"`` (not a 2-D frame, or a shape that doesn't match the
-        majority) or ``"wrong exposure"`` (a dark whose length isn't the majority
+        majority), ``"wrong exposure"`` (a dark whose length isn't the majority
+        one) or ``"wrong gain"`` (a dark or bias whose gain isn't the majority
         one). Lets the caller tell the user *how many* of their frames were
         actually used vs. silently set aside, instead of a bare success. Frames
         dropped by ``max_frames`` sampling are **not** recorded here — that's an
@@ -346,6 +390,42 @@ def build_master(
         ref_exposure_group = _majority_exposure_group(
             [info.exposure_s for _n, _r, info in loaded])
 
+    # ...and, for a dark or a bias, the majority **gain**, by the same rule
+    # again — the same bug as the exposure one, one setting sideways.
+    #
+    # A dark and a bias are both photographs of a pedestal the sensor adds, and
+    # the size of that pedestal is set by the gain: raise the gain and the read
+    # noise, the offset and the amplified dark current all scale with it. So a
+    # folder holding gain-80 and gain-160 darks does not hold one master's worth
+    # of frames either, and `discover.classify_frames` no more prevents that
+    # folder than it prevents the two-exposure one — it groups by folder and
+    # asks only what *kind* the frames are.
+    #
+    # Measured on a synthetic set, at the same 10 s and the same temperature,
+    # with only the gain differing: 100 ADU (gain 80) and 300 ADU (gain 160) in,
+    # an evenly-split folder gives a **200 ADU** master stamped **gain 120** — a
+    # level and a setting no frame in it was ever shot at, on all three combine
+    # methods. The 4-to-2 folder is worse, because it is *silent*: `mean` gives
+    # a 166.7 ADU master stamped gain **80**, so the v0.466.0 gain advisory —
+    # which compares the master's own stamped gain against the lights — sees a
+    # perfect match and says nothing about a pedestal 67 % too big.
+    #
+    # And unlike an exposure, a gain gap has no lever anywhere that corrects it:
+    # `scale_dark_to_light` rescales a mismatched *length*, nothing rescales a
+    # mismatched *setting* (see `CalibrationMasters.calibration_warnings`).
+    #
+    # Flats are exempt, deliberately, and for the same reason they are exempt
+    # from the exposure rule: a flat is normalised to its own median before it
+    # divides, so a constant gain factor divides straight back out and is not
+    # part of what the flat says.
+    #
+    # A frame that recorded **no** gain is kept, exactly as for exposure:
+    # "didn't say" is not "said the wrong thing".
+    ref_gain_group: list[float] | None = None
+    if kind in ("dark", "bias"):
+        ref_gain_group = _majority_gain_group(
+            [info.gain for _n, _r, info in loaded])
+
     arrays: list[np.ndarray] = []
     exposures: list[float] = []
     gains: list[float] = []
@@ -368,6 +448,13 @@ def build_master(
                         kind, name, info.exposure_s, ref_exposure_group[0])
             if skipped is not None:
                 skipped.append((name, "wrong exposure"))
+            continue
+        if (ref_gain_group is not None and info.gain is not None
+                and not _gain_in_group(info.gain, ref_gain_group)):
+            log.warning("master %s: skipping %s (gain %.4g, master is %.4g)",
+                        kind, name, info.gain, ref_gain_group[0])
+            if skipped is not None:
+                skipped.append((name, "wrong gain"))
             continue
         arrays.append(raw)
         declared = frame_kind_from_header(getattr(info, "raw_header", None) or {})
