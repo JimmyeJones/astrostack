@@ -111,6 +111,41 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   case a future run is in them: `pipeline._auto_bind_for_target` and `routers/calibration.py`'s
   `calibration-suggestions` both take the **median** exposure.
 
+- **LEAD (Builder 2026-09-19, filed while shipping v0.468.0 — the half of that fix that reaches the
+  *unattended* path, and the one an agent should not blind-build) — the auto-binder judges a master dark by
+  its stamped (median) temperature and its own median gain, so exactly the master v0.468.0 exists to warn
+  about auto-binds as a perfect match, with nobody there to read the warning.** *(Pillar: autonomy —
+  PRIORITY 2; size **M to write, L to be sure of**; severity low-to-medium; confidence: **mechanism traced
+  and arithmetic-checked in the code**, the tradeoff **not** measured — which is why this is a lead.)*
+  **What is traced.** `webapp/calibration._match_distance` scores a master on `master["sensor_temp_c"]`
+  alone — the median v0.468.0 has just shown can be a temperature no frame in the master was shot at — and
+  `_dark_match_confident` / `_flat_match_confident` / `_bias_match_confident` gate on that same distance. So
+  a dark built across 25 °C whose median happens to land on the target reads as distance 0.0, is bound by
+  `auto_bind_master_ids`, and the run's advisory (which now does say so, v0.468.0) is the only trace — on a
+  walk-away night nobody reads it. Separately, `pipeline._confident_master_binding` passes
+  `gain=_med(...)` and `sensor_temp_c=_med(...)`: the **exposure** half was fixed in v0.457.0 by handing the
+  binder the whole set (`light_exposures_s` + `distinct_exposures`), and gain and temperature were not. On an
+  evenly-split two-gain target the median is a gain *neither* population was shot at (80 and 200 → 140), and
+  both failure directions follow from it — a gain-80 dark matching most of the subs is judged against 140 and
+  **refused**, or a gain-140 dark matching none of them is judged against 140 and **bound**.
+  **Why it was NOT built this run, and what has to be settled first.** The obvious fix — charge a blended
+  master its own half-range as extra distance, which is literally true ("this master's temperature is only
+  known to ±half its range") — is *not* additive, because `_match_distance` feeds the **confidence gate** and
+  `master_coverage`'s "which targets does this cover" page as well as the ranking. Raising a distance can
+  therefore flip a bind into a refusal, i.e. strip calibration from a target that has it today. And that is
+  the tradeoff this repo cannot settle: `auto_bind_master_ids`' own contract says "leave it uncalibrated
+  rather than risk anything", while v0.457.0's reasoning says the opposite for the mixed case ("stripping
+  calibration from a target that is mostly one length is worse than the mismatch on the minority"). **A
+  blended dark still removes most of the pedestal and most of the hot pixels**, so refusing it may well be
+  the worse answer, and which it is depends on how wide the blend is — a number nobody has from the owner's
+  library. **Do not blind-flip it.** The shapes worth costing, cheapest first: **(a)** leave binding alone
+  and make the *choice* prefer an unblended master only as a **tie-break** (equal distance → narrower range
+  wins), which can never strip anything; **(b)** hand the binder `light_gains` / `light_temps_c` the way
+  v0.457.0 handed it `light_exposures_s`, so it judges against the **dominant** value rather than a phantom
+  median — that one is a strict improvement in both directions and is probably the right first slice;
+  **(c)** the half-range charge, only with a before/after on real masters. (a) and (b) are independent of
+  each other and of (c).
+
 - **🟠 OPEN REMAINDER of observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903) — a restack
   still *changes* each target's displayed picture; v0.447.2 only stopped it being silent.** *(Pillar: trust —
   PRIORITY 1-adjacent; size **L**, and not a drive-by. Filed by the Scout 2026-09-16 with three fix options;
