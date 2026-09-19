@@ -1,7 +1,7 @@
 import { MantineProvider } from "@mantine/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Library, UNSTRETCHED_HINT, expo } from "./Library";
 import { UNSTRETCHED_UNEXPORTED_HINT } from "../unstretched";
@@ -23,6 +23,27 @@ function renderLibrary() {
     <MantineProvider>
       <QueryClientProvider client={qc}>
         <MemoryRouter><Library /></MemoryRouter>
+      </QueryClientProvider>
+    </MantineProvider>,
+  );
+}
+
+/** Where the router ended up, so a click can be asserted on rather than
+ *  described. The wall is rendered without a `<Routes>`, so this is the only
+ *  thing in the tree that knows the location. */
+function LocationProbe() {
+  return <div data-testid="where">{useLocation().pathname}</div>;
+}
+
+function renderLibraryWatchingTheUrl() {
+  const qc = new QueryClient();
+  return render(
+    <MantineProvider>
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/library"]}>
+          <Library />
+          <LocationProbe />
+        </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -236,7 +257,14 @@ describe("Library — the \"Not stretched yet\" chip", () => {
     // Mantine's Badge puts the label in a child span, so the tooltip lives on
     // the badge root the label sits inside.
     expect(chip.closest("[title]")).toHaveAttribute("title", UNSTRETCHED_HINT);
-    expect(UNSTRETCHED_HINT).toContain("press Auto");
+    // It names the one click the chip now *is*, and the Auto the editor runs on
+    // arrival. The sentence used to say "Open it and press Auto", which had been
+    // stale since v0.390.0 made the editor seed Auto by itself — and vaguer than
+    // the Gallery's hint for the identical state, which has named its own
+    // control since v0.448.2.
+    expect(UNSTRETCHED_HINT).toContain("Click this chip");
+    expect(UNSTRETCHED_HINT).toContain("editor");
+    expect(UNSTRETCHED_HINT).toContain("Auto");
     expect(UNSTRETCHED_HINT).toContain("reversible");
   });
 
@@ -273,6 +301,80 @@ describe("Library — the \"Not stretched yet\" chip", () => {
     renderLibrary();
 
     const chip = await screen.findByText("Not stretched yet");
+    expect(chip.closest("[title]")).toHaveAttribute("title", UNSTRETCHED_HINT);
+  });
+
+  it("takes one click from the chip to that picture's own editor", async () => {
+    // The point of the chip is the fix, and until now the card could only
+    // offer the target page — the editor's own button is a screen further in,
+    // past a phone page ~3,300 px tall. The run the chip is about is the one
+    // the endpoint already names, so the link costs nothing on the wire.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Andromeda", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 1,
+      items: [{ safe: "Andromeda", target_name: "Andromeda", run_id: 7 }],
+    });
+    renderLibraryWatchingTheUrl();
+
+    const chip = await screen.findByText("Not stretched yet");
+    // A real button, so it is reachable by keyboard and announced as a control
+    // — the chip is no longer only a label.
+    const control = chip.closest("button");
+    expect(control).not.toBeNull();
+    fireEvent.click(control!);
+    await waitFor(() => expect(screen.getByTestId("where"))
+      .toHaveTextContent("/targets/Andromeda/edit/7"));
+  });
+
+  it("leaves the rest of the card going to the target, as it always did", async () => {
+    // The chip stops its own click (the card is one <Link>); nothing else about
+    // the card changes, which is the whole constraint here — the owner's rule is
+    // that nothing may be removed or moved out from under him.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Andromeda", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 1,
+      items: [{ safe: "Andromeda", target_name: "Andromeda", run_id: 7 }],
+    });
+    renderLibraryWatchingTheUrl();
+
+    const name = await screen.findByText("Andromeda");
+    expect(name.closest("a")).toHaveAttribute("href", "/targets/Andromeda");
+    fireEvent.click(name);
+    await waitFor(() => expect(screen.getByTestId("where"))
+      .toHaveTextContent("/targets/Andromeda"));
+    expect(screen.getByTestId("where")).not.toHaveTextContent("/edit/");
+  });
+
+  it("sends a never-exported edit to the same run, to export rather than re-Auto", async () => {
+    // Same destination, different job once you are there: the editor stands
+    // aside for a saved recipe (v0.390.0), so this lands on their own look.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Andromeda", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 1,
+      items: [{ safe: "Andromeda", target_name: "Andromeda", run_id: 12,
+                unexported_edit: true }],
+    });
+    renderLibraryWatchingTheUrl();
+
+    const chip = await screen.findByText("Not stretched yet");
+    fireEvent.click(chip.closest("button")!);
+    await waitFor(() => expect(screen.getByTestId("where"))
+      .toHaveTextContent("/targets/Andromeda/edit/12"));
+  });
+
+  it("stays a plain label when the response carries no usable run id", async () => {
+    // An older backend, or a field that failed to serialise: the chip must read
+    // exactly as it did before rather than become a link to `…/edit/0`.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([mk("Andromeda", [])]);
+    vi.spyOn(client.api, "getUnstretchedPictures").mockResolvedValue({
+      count: 1,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      items: [{ safe: "Andromeda", target_name: "Andromeda" } as any],
+    });
+    renderLibraryWatchingTheUrl();
+
+    const chip = await screen.findByText("Not stretched yet");
+    expect(chip.closest("button")).toBeNull();
     expect(chip.closest("[title]")).toHaveAttribute("title", UNSTRETCHED_HINT);
   });
 
