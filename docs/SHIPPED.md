@@ -1,5 +1,33 @@
 # Shipped — the record
 
+## v0.470.1 — 2026-09-19 — the third surface that prescribes from the grain measurement was still offering the night
+
+*(Builder, branch `claude/sweet-babbage-ceonap`, the same run as v0.470.0 and found by grepping for the other
+readers of the value that fix had just given a new word to.)*
+
+**What was wrong.** v0.470.0 gave `grain_verdict` a companion, `grain_region`, because *"another night on that
+panel is what evens it out"* is a **panel's** advice and a ramping canvas's thin part is partly the ragged
+outline the pointings leave — the same shape after another ten passes. The health note and two of the Target
+page's prescribing surfaces (`grainProjection`, `nextBestMove`) were taught the difference. The third was not:
+`integrationTrend`'s plateau branch reads the same verdict off the same run and ends *"…so another pass over
+it is the thing left worth shooting here."* On a `spread` that is the identical false prescription, on the one
+card whose whole subject is what is still worth shooting.
+
+**What shipped.** The plateau sentence takes the same fork as its two siblings, off the same word and the same
+run: on a `"spread"` it offers the crop — *"where that's the ragged outer edge, cropping it away does more than
+shooting it out"* — and keeps every other clause it had, including the closing *"a darker sky or a brighter
+target"*. A `"panel"`, and an older backend that sends no word at all, keep the sentence byte for byte. No
+plumbing was needed: `IntegrationTrendBadge` passes the run rows straight through, and those rows already
+carry the field.
+
+**Upgrade-safe (§9).** Frontend only; one additive optional field read off a payload that already serves it.
+No endpoint, config, schema, on-disk, API-shape or default change, and no measurement touched — a test pins
+that the hours and the exponent are identical either way.
+
+**Tests (+2 vitest).** The ramp taking the crop and keeping every other clause; the plateau and the
+say-nothing backend keeping today's sentence. **Fail-before verified by a scratch revert** (the fork pinned to
+the panel branch).
+
 ## v0.470.0 — 2026-09-19 — the grain measurement had no plateau to stand on, so it said nothing about any real mosaic
 
 *(Builder, branch `claude/sweet-babbage-ceonap`, from observer issue

@@ -176,6 +176,48 @@ describe("integrationTrend", () => {
         expect(t?.percentCutIfDoubled).toBe(even?.percentCutIfDoubled);
       });
 
+      it("offers the crop instead of the night when the depth is a ramp", () => {
+        // "Another pass over it" is a panel's answer. Where the depth ramps, part
+        // of the thinner region is the picture's ragged outer edge — the same
+        // shape after another ten passes — so this card, the health note and the
+        // other two prescribing surfaces on the page all offer the crop there.
+        const ramp = (t_s: number, sigma: number, ff: number) => ({
+          ...uneven(t_s, sigma, ff), grain_region: "spread",
+        });
+        const t = integrationTrend([
+          ramp(2 * HOUR, 0.030, 4), ramp(8 * HOUR, 0.030, 4),
+        ]);
+        expect(t?.level).toBe("plateaued");
+        expect(t?.unevenDepth).toBe(true);
+        // Everything the scoped sentence carries is still there…
+        expect(t?.sentence).toContain("Across the deepest part of this picture");
+        expect(t?.sentence).toContain("thinner than the rest");
+        expect(t?.sentence).toContain("After that, a darker sky or a brighter target");
+        // …and the lever is the one that can do something.
+        expect(t?.sentence).toContain("ragged outer edge");
+        expect(t?.sentence).toContain("cropping it away");
+        expect(t?.sentence).not.toContain("another pass over it");
+        // The measurement is untouched by the word.
+        const panel = integrationTrend([
+          uneven(2 * HOUR, 0.030, 4), uneven(8 * HOUR, 0.030, 4),
+        ]);
+        expect(t?.hoursNow).toBeCloseTo(panel?.hoursNow as number, 10);
+        expect(t?.exponent).toBeCloseTo(panel?.exponent as number, 10);
+      });
+
+      it("keeps the panel sentence for a plateau and for a backend that says nothing", () => {
+        const absent = integrationTrend([
+          uneven(2 * HOUR, 0.030, 4), uneven(8 * HOUR, 0.030, 4),
+        ]);
+        const named = integrationTrend([
+          { ...uneven(2 * HOUR, 0.030, 4), grain_region: "panel" },
+          { ...uneven(8 * HOUR, 0.030, 4), grain_region: "panel" },
+        ]);
+        expect(named?.sentence).toBe(absent?.sentence);
+        expect(absent?.sentence).toContain("another pass over it");
+        expect(absent?.sentence).not.toContain("ragged outer edge");
+      });
+
       it("reads the verdict off the deepest run, not off any run", () => {
         // The sentence is about the deepest picture, so an *older*, shallower run
         // that happened to be uneven must not scope a verdict about a canvas that

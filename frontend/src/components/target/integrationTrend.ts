@@ -89,6 +89,15 @@ interface RunLike {
    * evenly covered mosaic, and on an older backend, all of which keep today's
    * wording. */
   grain_verdict?: string | null;
+  /** What was found: `"panel"` (one coverage plateau — a panel shot with fewer
+   * subs, which another pass over it evens out) or `"spread"` (no plateau, the
+   * depth ramps — so part of the thin region is the picture's ragged outer
+   * edge, whose width comes from the pointing spread rather than the sub count
+   * and which further passes never narrow). The plateau sentence prescribes
+   * "another pass over it", which is a panel's answer, so it has to know which
+   * it is. Absent on an older backend, which reads as `"panel"` — the wording
+   * those rows have always carried. */
+  grain_region?: string | null;
 }
 
 /** The integration a *pixel* of this run's canvas actually received, in seconds.
@@ -157,6 +166,7 @@ export function integrationTrend(
       // the two halves of one sentence describe two pictures — the same reason
       // `grainProjection` reads it off the run it took σ from.
       uneven: r.grain_verdict === "uneven",
+      spread: r.grain_region === "spread",
     }));
   if (points.length < 2) return null;
 
@@ -224,14 +234,28 @@ export function integrationTrend(
     // verdict, read off the same run, so the two cannot come to different
     // opinions about one picture — and it is null on a single field and on an
     // even mosaic, which is why no other verdict here changes.
-    sentence =
-      `Across the deepest part of this picture your noise has stopped dropping ` +
-      `even as you added time (${now} in) — that part looks sky-limited, so ` +
-      `more subs won't do much for it. One part of this mosaic is thinner than ` +
-      `the rest, though, and that part still comes down with more light, so ` +
-      `another pass over it is the thing left worth shooting here. After that, ` +
-      `a darker sky or a brighter target will do more than extra time on this ` +
-      `one.`;
+    //
+    // …and "another pass over it" is a **panel's** answer. Where the depth is a
+    // ramp rather than a plateau, part of that thinner region is the picture's
+    // ragged outer edge, whose width is the spread of the pointings — the same
+    // shape after another ten passes — so the lever that is actually left there
+    // is the crop, not the night. Same word, same source and same reasoning as
+    // the health note and the other two prescribing surfaces on this page; an
+    // older backend sends none and reads as the panel case.
+    sentence = deep.spread
+      ? `Across the deepest part of this picture your noise has stopped ` +
+        `dropping even as you added time (${now} in) — that part looks ` +
+        `sky-limited, so more subs won't do much for it. Part of it is thinner ` +
+        `than the rest, though: where that's the ragged outer edge, cropping ` +
+        `it away does more than shooting it out. After that, a darker sky or a ` +
+        `brighter target will do more than extra time on this one.`
+      : `Across the deepest part of this picture your noise has stopped ` +
+        `dropping even as you added time (${now} in) — that part looks ` +
+        `sky-limited, so more subs won't do much for it. One part of this ` +
+        `mosaic is thinner than the rest, though, and that part still comes ` +
+        `down with more light, so another pass over it is the thing left worth ` +
+        `shooting here. After that, a darker sky or a brighter target will do ` +
+        `more than extra time on this one.`;
   } else {
     sentence =
       `Your noise has stopped dropping even as you added time (${now} in) — this ` +
