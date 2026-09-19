@@ -1,5 +1,60 @@
 # Shipped — the record
 
+## v0.471.0 — 2026-09-19 — the Library wall's "Not stretched yet" chip is now the one click, and stops telling the owner to press a button the editor already pressed
+
+*(Builder, branch `claude/sweet-babbage-bluf7z`. The last open piece of the wall-chip feature's next-slices
+entry — slice (c), "a one-click deep link from the chip to that run's Auto" — which had been answered on the
+Gallery without building it and left open on the Library card.)*
+
+**What it is.** `GET /api/unstretched-pictures` names every target whose *displayed* picture is still a flat
+linear stack, and the Library wall badges those cards **"Not stretched yet"**. Observer issue
+[#903](https://github.com/JimmyeJones/astrostack/issues/903) found **44 of the owner's 77 targets** in exactly
+that state at once. The chip said what was wrong; getting to the fix meant clicking the card through to the
+target page — ~3,300 px tall on a phone, per the current dogfood baseline — and finding the editor button
+there. The chip is now the control: clicking it goes straight to `/targets/<safe>/edit/<run_id>`, which since
+v0.390.0 opens *on* Auto rather than on a nudge to press it.
+
+**Both of the blockers the entry named turned out to be one, and it was already solved.**
+
+* *"The run id is not even on `TargetOut`."* True, and irrelevant — the wall does not read the chip off
+  `TargetOut`. It reads `/api/unstretched-pictures`, whose `UnstretchedItem.run_id` has carried exactly the
+  run `finishedpicture.displayed_picture_run` picked **since v0.448.0**, for exactly this purpose (its own
+  docstring says "so a caller can link straight to it in the editor"). So **nothing new travels on the
+  wire**: no endpoint, no schema, no response-shape change, and this is a frontend-only commit.
+* *"The whole card is one `<Link>`, and an anchor inside an anchor is invalid HTML."* True of an anchor. The
+  chip is a **`<button>`** that stops its own click (`preventDefault` + `stopPropagation`) and navigates —
+  the shape `components/WishlistStar.tsx` already uses for a control sitting on top of a picture tile that is
+  itself a link. So the card needed no restructuring, and every other part of it still goes to the target.
+
+**The copy change is a correctness fix of its own.** The Library hint said *"Open it and press Auto"*. That
+had been stale since **v0.390.0** made the editor seed Auto by itself on a run with no saved recipe — which is
+every card this chip is on — and it was also a *different account of the same screen* from the Gallery's hint
+for the identical state, which has said *"the editor starts you off with Auto"* since v0.448.2. Both walls now
+promise one click and name the control each can actually offer: the Gallery its **Edit image** button, the
+Library its chip. A test pins that neither hint tells you to press Auto any more.
+
+**The never-exported-edit case goes to the same place, deliberately.** A card that is unstretched because its
+owner saved a recipe and never exported it gets the opposite advice (*don't* press Auto, which would replace
+their work) — but the same destination, because the editor **stands aside for a saved recipe**, so that click
+lands on their own look with the export one step away.
+
+**Degrades rather than guesses.** A response carrying no usable `run_id` — an older backend, a field that
+failed to serialise — renders the plain, unclickable chip the wall had before, never a link at `…/edit/0`.
+That is the same "absent is not a value" rule the endpoint's own optional fields follow.
+
+**Upgrade-safe (§9):** frontend only. No endpoint, config, settings, DB schema, on-disk layout, API shape or
+default change; nothing removed from the card (the owner's one hard constraint) and no new element on it —
+the chip that was already there gained a behaviour.
+
+**Tests (+9; 2 fail before, verified by a scratch revert of the badge JSX with the helpers left in place).**
+`Library.test.tsx` (+4): the chip is a real `<button>` and one click lands on `/targets/Andromeda/edit/7`;
+the rest of the card still has `href="/targets/Andromeda"` and clicking the name still goes there and not to
+an editor; a never-exported edit lands on its own run; and a response with no `run_id` keeps the plain label
+and the standing hint. `unstretched.test.ts` (+5 across 3 cases): `unstretchedEditPath`, the six
+`unstretchedIsLinkable` cases, and the two-walls copy assertions re-pointed at what each hint now promises.
+The existing "says what to do about it" assertion was updated rather than weakened — it pins the new promise
+(the click, the editor, Auto, reversible) where it used to pin only "press Auto".
+
 ## v0.470.2 — 2026-09-19 — the level rule fired once in 680 runs and answered about the wrong pair; the band rule it replaces could not reach the canvases it was written for; and three cards still offered the night for a rim
 
 *(Builder, branch `claude/sweet-babbage-ceonap`. This run built v0.470.0/.1 independently and collided with
