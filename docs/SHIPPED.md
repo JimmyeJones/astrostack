@@ -1,5 +1,120 @@
 # Shipped — the record
 
+## v0.466.2 — 2026-09-19 — the sentence v0.466.1 had just written was itself a whole-canvas claim on a mosaic
+
+*(Builder, branch `claude/sweet-babbage-foh7rz`, the same run, caught by re-reading the new copy against the
+card it now sits beside.)*
+
+**What was still wrong after v0.466.1.** That fix stopped the calibration note claiming a speckle the
+readiness card had measured away. Its replacement sentence — *"The background here already measures clean"*
+— is a claim about **the whole picture**, and on a mosaic `noise_sigma` is not: it is one robust estimate
+over the finished canvas (`stacker._compute_noise_sigma`), so on panels of uneven depth it is dominated by
+the part that got the most subs. On the bundled 2×2 — 3 subs against 6 over 23 % of the canvas, the shape the
+owner's multi-night mosaics actually have — the *same card* carries, a line below, *"about 23 % of the
+picture has 3 subs on it where most of it has 6, so that part looks about 1.4× grainier"*.
+
+So the fix for one over-claim had planted the identical over-claim one card along. `grainProjection.ts`
+already solved this exact problem for its own clean verdict, in its own words — *"across most of it the
+background already looks clean"* — and the reasoning transfers unchanged.
+
+**What shipped.** The clean sentence takes the scope it was measured over: *"Across most of it the
+background already measures clean…"* on a run whose depth is measurably uneven, and today's unqualified
+sentence everywhere else (a single field, an evenly-covered mosaic, and any run missing one of the four
+figures an uneven claim needs).
+
+**One reader of those four figures, not two.** The guard that says a note may never quote a ratio it has no
+depths to explain was inline in the uneven-grain note. It is now the public
+`uneven_grain_verdict(run)`, and both sentences read it — because two readers of one measurement is how the
+bug v0.466.1 fixed got in, and repeating that inside the fix would be a poor joke. The uneven-grain note's
+own behaviour is unchanged (same guard, same verdict, same wording).
+
+**Upgrade-safe (§9).** One new public engine function over figures the row already carried; no config,
+schema, on-disk, API-shape or default change, no threshold moved, no pixel touched. A calibrated run still
+never reaches the branch.
+
+**The same over-claim was in the guide underneath, and it is gone rather than scoped.** `DarksGuide`'s
+clean lead said *"This picture's background already measures clean"* — the note above it had just said that
+*with* a scope on a mosaic, so an unqualified second copy re-introduced what the note had dropped. It now
+says what darks **do** here instead of restating a verdict: *"…on this picture that mostly means hot pixels
+rather than less grain."* True of every part of any canvas once the sky is not dark-current-dominated,
+because darks never reduce shot noise — which is exactly what a mosaic's thin panel has. So the guide needs
+no scope flag of its own, and there is one fewer place for the two to drift.
+
+**Tests (+3 Python functions, 3 frontend assertions re-pointed).** The 2×2's own figures taking the scope clause **and** the uneven-grain note
+beside it still saying what it says; the single-field and evenly-covered-mosaic cases keeping the
+unqualified sentence; and each of the three missing figures withdrawing the verdict *and* the clause.
+**Fail-before verified by scratch revert** — pinning `scope` to the unqualified string reddens the first.
+
+## v0.466.1 — 2026-09-19 — one card guessed at the background another had just measured: the uncalibrated note stops promising to cut a speckle that is not there
+
+*(Builder, branch `claude/sweet-babbage-foh7rz`. Found by a `--mosaic --editor --incoming-lag` dogfood pass
+that was otherwise CLEAN — a flag combination never run before — by reading the block it prints as one
+paragraph, which is the check the probe's own preamble asks for.)*
+
+**What was wrong.** On the Target page, two cards speak about the same picture's background. One of them
+**measures** it. The other did not look.
+
+```
+[readiness-card, inline]   Measured on your own picture: across most of it the background
+                           already looks clean at 4 min (grain 0.001).
+[stack-health-card]        No darks or flats were applied to this stack. Adding master darks
+                           would cut the background speckle and hot pixels.
+```
+
+`stack_health`'s calibration note fired on one thing — `calstat` being empty — and its sentence then made a
+claim about *this* picture's grain (*"would cut the background speckle"*), on a `StackRunRow` that was
+carrying the very number needed to check it (`run.noise_sigma`) the whole time. Reproduced on both samples
+in one pass: the single field (grain 0.001) and the 2×2 mosaic (grain 0.001), with the identical pair of
+sentences on each.
+
+**And it is not a sample artefact.** The clean bar's own provenance is the owner's real deep stacks — 271–787
+frames of one target — measuring σ **0.015–0.020**, i.e. inside the bar. So on every target he has no master
+dark for, this is his everyday state, and the health card's second-ranked note has been contradicting the
+readiness card above it on each one.
+
+**The fix keeps the offer and drops the unearned claim.** Darks are worth having on any uncalibrated stack
+and this note is how a beginner ever hears of them, so the note keeps its rank, its `action="calibration"`,
+its "Set up master darks & flats →" link and its how-to guide. What changes is only the magnitude clause,
+and only where the app has *measured*:
+
+* **Measured clean** → *"No darks or flats were applied to this stack. The background here already measures
+  clean, so darks would mostly tidy up hot pixels and your camera's own warmth rather than bring the grain
+  down."* `estimate_noise_sigma` is robust — a handful of isolated hot pixels barely move it — so the part
+  σ cannot see is exactly what honestly survives a clean reading.
+* **Above the bar, or never measured at all** (a run predating the `noise_sigma` column, a canvas the
+  estimator declined, a non-finite or non-positive σ) → **today's sentence, byte for byte**. `False` is the
+  cautious answer and it covers both, so nothing anywhere says "already clean" about a picture nobody
+  measured.
+
+**One bar, not a second opinion — which is the whole point.** `seestack.stackhealth.CLEAN_BACKGROUND_SIGMA`
+is not invented here: it is the literal
+`frontend/src/components/target/grainProjection.ts::CLEAN_SIGMA` already prints *"the background already
+looks clean"* from. Two cards holding private opinions about one σ is how this happened, so the two literals
+are pinned to each other by a test on each side and neither can move alone. The decision itself is one
+public predicate, `background_reads_clean(noise_sigma)`, beside its sibling `grain_verdict` for the same
+stated reason.
+
+**And the guide underneath the note no longer re-asserts what the note withdrew.** `DarksGuide` opens with
+*"this is the single biggest cleanup for a noisy image"* — a fine thing to say about a noisy image, and the
+wrong thing to say two clicks under a note that has just said this one measures clean. `StackHealthOut`
+gains an additive nullable `background_clean`, the note's own fact served once, threaded to the guide rather
+than re-derived. An older backend sends nothing and the guide keeps its general wording.
+
+**Upgrade-safe (§9).** One additive nullable response field, one additive optional component prop, one new
+public engine constant and one new pure function. No config, schema, on-disk, default or existing-response
+shape change; no threshold moved; no pixel of any picture touched; the calibrated path never reaches the new
+branch at all (pinned by a test).
+
+**Tests (+8 Python functions, +3 frontend cases).** Python: the clean sentence and that it keeps the note's rank and action;
+the grainy case asserted as the **exact** old string; the four unmeasured shapes (`None`, NaN, 0, negative);
+the shared-bar pin; and that a calibrated run acquires no note from any of it. Endpoint: `background_clean`
+served `True`/`False`/`False` across the three, each asserted *together with* the sentence beside it, so the
+flag and the copy cannot drift. Frontend: the guide's two branches (clean, and the three not-clean shapes
+including an older backend's `undefined`), the card threading the flag, and the cross-language bar pin.
+**Fail-before verified by scratch revert on both sides** — `background_reads_clean` forced to `False` reddens
+`test_a_measured_clean_background_stops_the_note_claiming_speckle`; the guide's conditional forced to `false`
+reddens its vitest case.
+
 ## v0.466.0 — 2026-09-18 — the third acquisition number, and the one nothing corrects for: a gain-mismatched master dark was applied in silence
 
 *(Builder, branch `claude/sweet-babbage-31bttf`. Closes the LEAD filed the same day with v0.464.0.)*

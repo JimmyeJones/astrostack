@@ -1299,7 +1299,11 @@ def target_stack_health(
         backfill_coverage_shares,
         backfill_seam_residual,
     )
-    from seestack.stackhealth import recommended_dark_spec, stack_health
+    from seestack.stackhealth import (
+        background_reads_clean,
+        recommended_dark_spec,
+        stack_health,
+    )
     from webapp.pipeline import _newest_genuine_stack_run, _stack_options_from_run_json
 
     lib, proj = deps.open_target_project(request, safe)
@@ -1355,6 +1359,10 @@ def target_stack_health(
         notes = stack_health(run, frames, noise_ratio=noise_ratio,
                              noise_crop_depth=noise_crop_depth)
         spec = recommended_dark_spec(frames)
+        # The same fact the calibration note's own wording turns on, served once
+        # so the how-to guide rendered directly under that note cannot hold a
+        # different opinion about the picture above it.
+        background_clean = background_reads_clean(run.noise_sigma)
     finally:
         proj.close()
         lib.close()
@@ -1365,6 +1373,7 @@ def target_stack_health(
                for n in notes],
         dark_spec=DarkSpecOut(exposure_s=spec.exposure_s, gain=spec.gain,
                               exposures_s=list(spec.exposures_s)),
+        background_clean=background_clean,
     )
 
 

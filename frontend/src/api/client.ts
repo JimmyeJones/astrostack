@@ -811,6 +811,11 @@ export interface StackHealth {
   // The exposure/gain to shoot darks at, for the "How to add darks" guide.
   // Optional — older backends omit it (treat as no pre-filled numbers).
   dark_spec?: DarkSpec | null;
+  // Whether this run's own background was measured and measured clean — the
+  // same fact the uncalibrated note's wording turns on, so the guide beneath it
+  // agrees about the picture above it. Optional: an older backend omits it and
+  // the guide keeps its general wording.
+  background_clean?: boolean | null;
 }
 
 export interface BestFrame {
