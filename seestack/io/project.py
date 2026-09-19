@@ -223,6 +223,22 @@ class FrameRow:
     # written before schema 22. See :meth:`Project.restored_frame_stamps`.
     restored_utc: str | None = None
 
+    @property
+    def solved(self) -> bool:
+        """Whether the plate-solve **located** this sub.
+
+        The question every reader of ``wcs_json`` outside the stacker actually
+        asks. Only located subs reach the accumulator, so "did ASTAP find it?"
+        is a one-bit fact about a column that is a FITS header *text* of ~25
+        eighty-character cards — and a caller grading a *deep* target wants to
+        keep the bit and drop the header (:class:`FrameHealth`).
+
+        Named here, as a property over the stored column, so that bit has **one**
+        definition rather than a copy of the rule at each reader, and a test pins
+        it against :attr:`FrameHealth.solved`.
+        """
+        return bool(self.wcs_json)
+
 
 #: Every column of the ``frames`` table, taken from :class:`FrameRow` itself.
 #:
@@ -273,6 +289,54 @@ class AcquisitionValues:
     def n_frames(self) -> int:
         """How many subs are described — the length every list shares."""
         return len(self.exposures_s)
+
+
+#: The columns that say **how a sub turned out** — whether QC kept it and why
+#: not, whether the plate-solve located it, how its stars measured and how long
+#: it was — and nothing about where it pointed or when it landed.
+#:
+#: Read as a set of their own by :meth:`Project.iter_health_frames`, for the same
+#: reason :data:`_ACQUISITION_COLUMNS` is: the "How's my stack?" card asks these
+#: questions of *every* sub of a target, and one of them — "was it located?" — is
+#: a single bit off the biggest column on the row, which the card then **drops**.
+#: The order here is the order :class:`FrameHealth`'s fields are in, because the
+#: method builds one straight from the other; ``wcs_json`` is last because it is
+#: the one that becomes something else on the way (``bool``).
+_HEALTH_COLUMNS: tuple[str, ...] = (
+    "id", "accept", "reject_reason", "fwhm_px",
+    "eccentricity_median", "exposure_s", "gain", "wcs_json",
+)
+
+
+@dataclass(frozen=True)
+class FrameHealth:
+    """One sub, reduced to the facts a finished stack is graded on.
+
+    What :func:`seestack.stackhealth.stack_health` and its two siblings on the
+    Target page's health card actually read off a frame — they take a
+    :class:`FrameRow` today and touch eight of its thirty-four fields, one of
+    them (``wcs_json``) only to ask whether it is there at all.
+
+    A record rather than the column-major :class:`AcquisitionValues` because
+    these consumers genuinely want *rows*: they partition the subs into accepted
+    and rejected, then locate-succeeded and locate-failed, and take a median of
+    one field across each part. Small enough that 35,894 of them cost ~10 MB
+    against the ~144 MB of whole rows — see :meth:`Project.iter_health_frames`
+    for the measurement.
+
+    ``solved`` is :attr:`FrameRow.solved`'s answer, kept while the header it was
+    read from is let go — the same ``bool`` of the same value, so a function can
+    be handed either kind of record and cannot tell the difference.
+    """
+
+    id: int | None
+    accept: bool
+    reject_reason: str | None
+    fwhm_px: float | None
+    eccentricity_median: float | None
+    exposure_s: float | None
+    gain: float | None
+    solved: bool
 
 
 def readable_frame_path(frame: "FrameRow") -> str | None:
@@ -1286,6 +1350,51 @@ class Project:
             heights_px=[r[4] for r in rows],
             bayer_patterns=[r[5] for r in rows],
         )
+
+    def iter_health_frames(self, *, accepted_only: bool = False
+                           ) -> Iterator[FrameHealth]:
+        """This target's subs as :class:`FrameHealth` records — how each one
+        turned out, and nothing about where it pointed.
+
+        The whole-row read's replacement for the Target page's "How's my
+        stack?" card, which hands *every* sub of the target to three engine
+        functions (:func:`seestack.stackhealth.stack_health`,
+        :func:`~seestack.stackhealth.recommended_dark_spec` and the reference-sub
+        pick behind the noise yardstick) that between them read seven small
+        fields and one bit. A ``FrameRow`` is ``SELECT *``, and the biggest
+        column on a solved sub is its plate solution — ``wcs_json`` is a FITS
+        header *text* of ~25 eighty-character cards — so the card was paying for
+        a header it only ever tested for presence.
+
+        Measured on a synthetic project the size of the owner's deepest target
+        (35,894 subs, ~2 kB of ``wcs_json`` each, best of 3): **1,180 ms /
+        144.0 MB peak** for the rows against **541 ms / 9.8 MB** for these,
+        field-for-field identical. Memory is the point rather than the
+        milliseconds (AGENTS.md §10 — this box has an OOM history) and the card
+        sits on the page the owner opens most.
+
+        The plate solution *is* read, and is then dropped rather than kept: the
+        read streams, so at most one header is alive at a time and testing it
+        here costs about 5 % (measured: 269 ms against 256 ms for a SQL
+        expression that never materialises it, with the same peak). What the old
+        path could not do was let it go — every ``FrameRow`` held its own, all at
+        once, which is the whole 144 MB.
+
+        Order and ``accepted_only`` are :meth:`iter_frames`' own — the callers
+        take medians, where position decides the answer.
+        """
+        for row in self.iter_frame_columns(*_HEALTH_COLUMNS,
+                                           accepted_only=accepted_only):
+            yield FrameHealth(
+                id=row[0],
+                accept=bool(row[1]),
+                reject_reason=row[2],
+                fwhm_px=row[3],
+                eccentricity_median=row[4],
+                exposure_s=row[5],
+                gain=row[6],
+                solved=bool(row[7]),
+            )
 
     def iter_frame_columns(self, *columns: str,
                            accepted_only: bool = False) -> Iterator[tuple]:
