@@ -209,6 +209,21 @@ _TRANSPARENCY_SCALE_FIXED_IN = (0, 304, 2)
 # looking at.
 _GRAIN_UNEVEN_RATIO = 1.25
 
+# At or below this measured background σ the picture's own grain reads as
+# *clean*, and the uncalibrated note below stops claiming darks would cut a
+# speckle that is not there.
+#
+# **It is not a bar invented here, and it must not become a second opinion.** It
+# is the same number the Target page's grain projection already prints "the
+# background already looks clean at 1 min (grain 0.001)" from —
+# ``frontend/src/components/target/grainProjection.ts::CLEAN_SIGMA`` — whose
+# provenance is the owner's own real deep stacks (271–787 frames of one target)
+# measuring σ 0.015–0.020 and being good pictures. Two cards on one page
+# disagreeing about one picture's background is exactly what this constant is
+# here to stop, so the two literals are pinned to each other by a test on each
+# side rather than left to drift.
+CLEAN_BACKGROUND_SIGMA = 0.02
+
 # Fewest frames for which √N is a meaningful yardstick at all. Below this a
 # single unlucky reference sub swings the measured ratio more than the physics
 # does, so we say nothing rather than judge a five-frame stack.
@@ -541,6 +556,47 @@ def grain_verdict(grain_ratio: float | None) -> str | None:
     return "uneven" if ratio >= _GRAIN_UNEVEN_RATIO else None
 
 
+def uneven_grain_verdict(run: StackRunRow) -> str | None:
+    """``"uneven"`` when this run *has* the four figures an uneven-grain claim
+    needs and they say its depth is uneven, else ``None``.
+
+    :func:`grain_verdict` grades the ratio; this adds the guard that a note can
+    never quote a ratio it has no depths to explain. Hoisted out of the note
+    that first needed it because a **second** sentence now depends on the same
+    fact — see the calibration note — and two readers of one measurement is
+    exactly how the bug that note was fixed for got in.
+    """
+    if not (run.grain_thin_frames and run.grain_deep_frames
+            and run.grain_thin_share is not None):
+        return None
+    return grain_verdict(run.grain_ratio)
+
+
+def background_reads_clean(noise_sigma: float | None) -> bool:
+    """Has this run's **own** background been measured, and measured clean?
+
+    ``False`` is the cautious answer and it covers two different states on
+    purpose: a picture whose grain really is above the bar, and a run that
+    carries no σ at all (recorded before the column existed, or a canvas the
+    estimator declined). Only a measurement can make this ``True``, so nothing
+    downstream ever says "already clean" about a picture nobody measured.
+
+    Public and shared for the same reason :func:`grain_verdict` is: the "How's
+    my stack?" calibration note and the Target page's grain projection are two
+    surfaces describing one number, and the way they came to disagree was each
+    having its own opinion about it.
+    """
+    if noise_sigma is None:
+        return False
+    try:
+        sigma = float(noise_sigma)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(sigma) or sigma <= 0:
+        return False
+    return sigma <= CLEAN_BACKGROUND_SIGMA
+
+
 # κ-σ rejection is *mathematically* blind to a lone outlier below a frame count
 # that depends on κ (11 at the default κ=3): a single bright sample's z-score
 # against statistics that still include it peaks at (n−1)/√n, so at n=5 a
@@ -838,13 +894,54 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
         )))
 
     # --- Calibration: were darks/flats applied? (robust presence check) --------
+    # The *offer* is unconditional — darks are worth having on any uncalibrated
+    # stack and this note is how a beginner ever hears of them. What is not
+    # unconditional is the **magnitude**: "would cut the background speckle" is a
+    # claim about this picture's grain, and this note used to make it without
+    # ever looking, on a page where the readiness card an inch above has
+    # *measured* the same background and printed "the background already looks
+    # clean at 4 min (grain 0.001)". Found by reading a dogfood pass's own block
+    # as one paragraph, on both the single field and the 2×2 mosaic; and it is
+    # not a sample artefact — the owner's real deep stacks measure 0.015–0.020,
+    # i.e. inside the same bar, so the contradiction is his everyday state on
+    # every target he has no master for.
+    #
+    # So the note keeps its offer, its rank and its ``action`` (the "Set up
+    # master darks & flats →" link and the how-to guide are unchanged), and
+    # trades the unearned clause for the honest one: on a picture measured clean,
+    # what darks still buy is the part σ cannot see. ``estimate_noise_sigma`` is
+    # robust — a handful of isolated hot pixels barely move it — so "hot pixels
+    # and your camera's own warmth" is exactly what survives a clean reading.
+    # Every other run (grain above the bar, or no σ recorded at all) keeps
+    # today's sentence byte for byte.
+    #
+    # **And the clean sentence states the scope σ was measured over**, because on
+    # a mosaic it is one figure for the whole canvas and is dominated by the part
+    # that got the most subs (``stacker._compute_noise_sigma`` runs the estimator
+    # on the finished image). Saying "the background here already measures clean"
+    # of a canvas a quarter of which this same card calls 1.4× grainier would be
+    # the identical over-claim in a new place — which is why
+    # ``grainProjection.ts`` says "across most of it" on exactly this verdict.
+    # Read from the shared ``uneven_grain_verdict`` the note below already uses,
+    # rather than a second opinion about the same four figures.
     calibrated = bool(run.calstat and run.calstat.strip())
     if not calibrated:
+        if background_reads_clean(run.noise_sigma):
+            scope = ("Across most of it the background"
+                     if uneven_grain_verdict(run) == "uneven"
+                     else "The background here")
+            message = (f"No darks or flats were applied to this stack. {scope} "
+                       "already measures clean, so darks would mostly tidy up "
+                       "hot pixels and your camera's own warmth rather than "
+                       "bring the grain down.")
+        else:
+            message = ("No darks or flats were applied to this stack. Adding "
+                       "master darks would cut the background speckle and hot "
+                       "pixels.")
         scored.append((10, HealthNote(
             kind="calibration",
             severity="info",
-            message=("No darks or flats were applied to this stack. Adding master "
-                     "darks would cut the background speckle and hot pixels."),
+            message=message,
             action="calibration",
         )))
 
@@ -1151,12 +1248,7 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # fewer subs is grainier than the rest however flat its sky came out. Only
     # spoken when all four figures are present, so a note can never quote a
     # ratio it has no depths to explain.
-    grain = (
-        grain_verdict(run.grain_ratio)
-        if (run.grain_thin_frames and run.grain_deep_frames
-            and run.grain_thin_share is not None)
-        else None
-    )
+    grain = uneven_grain_verdict(run)
     if grain == "uneven":
         thin = int(run.grain_thin_frames or 0)
         deep = int(run.grain_deep_frames or 0)

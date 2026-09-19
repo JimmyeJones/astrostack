@@ -66,8 +66,26 @@ export function darkSpecPerLengthNote(spec: DarkSpec | null | undefined): string
  * plain steps and the target's own exposure/gain pre-filled ("shoot darks at the
  * same 10 s / gain 80 as your subs"). Static, jargon-free, self-contained; shown
  * as a collapsible disclosure beside the uncalibrated "How's my stack?" note.
+ *
+ * Its lead sentence used to call darks "the single biggest cleanup for a noisy
+ * image" unconditionally, which is a fine thing to say about a noisy image and
+ * the wrong thing to say directly under a note that has just told the reader
+ * this picture's background measures clean. `backgroundClean` is that note's own
+ * fact, threaded through rather than re-derived, so the two cannot hold
+ * different opinions about one picture — the same reason the note reads the
+ * measurement instead of guessing at it.
  */
-export function DarksGuide({ spec }: { spec?: DarkSpec | null }) {
+export function DarksGuide(
+  { spec, backgroundClean }: {
+    spec?: DarkSpec | null;
+    /** Whether the app has *measured* this picture's background and found it
+     * clean (`StackHealth.background_clean`). Only `true` changes anything:
+     * `false` and `undefined` — an older backend, or a picture nobody measured
+     * — keep the general wording, which is the right thing to say when the
+     * grain is unknown. */
+    backgroundClean?: boolean | null;
+  },
+) {
   const [open, setOpen] = useState(false);
   const match = formatDarkSpec(spec);
   const step2 = match
@@ -96,8 +114,22 @@ export function DarksGuide({ spec }: { spec?: DarkSpec | null }) {
       <Collapse in={open}>
         <Stack gap={6} pl={4}>
           <Text size="xs" c="dimmed">
-            Darks record your camera's own warmth and noise so we can subtract it —
-            this is the single biggest cleanup for a noisy image.
+            {backgroundClean
+              // Deliberately says what darks *do* here rather than restating
+              // that the background is clean. The note above already said that,
+              // and on a mosaic it says it with a scope ("across most of it") —
+              // sigma is one figure for the whole canvas, so a second
+              // unqualified copy of the claim down here would be the very
+              // over-claim v0.466.2 removed from the note. "Mostly hot pixels
+              // rather than less grain" is true of every part of any canvas
+              // once the sky is not dark-current-dominated: darks never reduce
+              // shot noise, which is what the thin part of a mosaic has.
+              ? "Darks record your camera's own warmth and noise so we can "
+                + "subtract it — on this picture that mostly means hot pixels "
+                + "rather than less grain."
+              : "Darks record your camera's own warmth and noise so we can "
+                + "subtract it — this is the single biggest cleanup for a "
+                + "noisy image."}
           </Text>
           <List type="ordered" size="xs" spacing={4} c="dimmed">
             <List.Item>

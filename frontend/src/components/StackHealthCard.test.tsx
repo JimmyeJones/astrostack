@@ -131,6 +131,29 @@ describe("StackHealthCard", () => {
       expect(screen.getByText(/10 s at gain 80/)).toBeInTheDocument());
   });
 
+  it("carries the measured background verdict into the guide", async () => {
+    // The endpoint decides this once (`background_clean`), so the guide under
+    // the note cannot call darks "the single biggest cleanup for a noisy image"
+    // on a picture the note has just said measures clean. The card's only job
+    // here is not to drop the fact on the way through.
+    vi.spyOn(client.api, "stackHealth").mockResolvedValue({
+      run_id: 7,
+      notes: [
+        note({ kind: "calibration", severity: "info",
+          message: "No darks or flats were applied. The background here "
+            + "already measures clean.", action: "calibration" }),
+      ],
+      dark_spec: { exposure_s: 10, gain: 80 },
+      background_clean: true,
+    });
+    renderCard();
+    (await screen.findByText("How to add darks →")).click();
+    await waitFor(() =>
+      expect(screen.getByText(/mostly means hot pixels rather than less grain/))
+        .toBeInTheDocument());
+    expect(screen.queryByText(/single biggest cleanup/)).toBeNull();
+  });
+
   it("does not show the darks guide for a non-calibration note", async () => {
     vi.spyOn(client.api, "stackHealth").mockResolvedValue({
       run_id: 7,

@@ -1,5 +1,60 @@
 # Process notes & QA sweep records
 
+## 2026-09-19 — DOGFOOD `--mosaic --editor --incoming-lag` (at v0.466.0): mechanically CLEAN, and the run's work was in the block it prints
+
+*(Builder, branch `claude/sweet-babbage-foh7rz`. Baseline `6381 passed, 2 skipped`, 10m02s with `-n 4` and
+the BLAS cap on a 4-core box.)*
+
+**Why this combination.** Three flags that had never been run together. `--mosaic` because §1 judges every
+Auto/editor claim on a tiled canvas; `--editor` because priority 1 is what happens *after* a click;
+`--incoming-lag` because the drop folder is the one surface a healthy pass leaves empty. The 2026-09-18 note
+directly below says in as many words that the last two findings came from a **combination**, not from a new
+flag — *"the probe can only see what happens to be on screen"* — so trying an unrun one was the cheapest
+lever available.
+
+**Mechanically it was clean, on every check the pass makes.** Nothing overflowing and no console errors at
+either width on either target; all 21 editor ops re-rendered the preview on both the field and the mosaic
+run, undo and redo applied; trim Auto would apply to the 2×2 is **7.9 %** (the D1 bar is ~15 %); the
+incoming-lag state seeded and read back correctly (8 waiting across 1 folder, 1 of them unreadable). Page
+heights sit in the band the last several passes have measured — tallest `[phone] /tonight: 3807px`, then the
+mosaic Target page at 3673 px.
+
+**The finding was in the paragraph, and it took both samples to make it obvious.** Read as one paragraph,
+the Target page's cards say — on the single field *and* on the 2×2, in the same words —
+
+```
+[readiness-card, inline]  …the background already looks clean at 4 min (grain 0.001).
+[stack-health-card]       …Adding master darks would cut the background speckle and hot pixels.
+```
+
+One card had **measured** the background; the other made a claim about the same background without looking,
+on a `StackRunRow` that was carrying `noise_sigma` the whole time. Shipped as **v0.466.1**.
+
+**Two things worth keeping from how it was found.**
+
+* **The probe's own preamble is the check that works.** It asks, in print, *"whether one is guessing at
+  something the other has measured"*. That is a mechanical question and it has now produced findings on
+  five consecutive runs. It is worth asking of every pair the block prints, including the ones that are
+  each individually true — both sentences above are true; neither is about the same evidence.
+* **A sample number that looks like an artefact may not be.** The reflex on `grain 0.001` is "that is the
+  synthetic sample being unrealistically clean, so the contradiction is not the owner's". It is not: the
+  clean bar's own provenance (`grainProjection.ts::CLEAN_SIGMA`) is his real 271–787-frame stacks measuring
+  σ **0.015–0.020**, i.e. inside the same bar. **Before dismissing a finding as sample-shaped, check which
+  side of the threshold the owner's measured numbers fall on** — here the sample and the owner land in the
+  same branch, so the sample was not exaggerating the bug, only making it easy to see.
+
+**And a class sweep that came back empty, recorded so it is not re-run.** Grepping the app's copy for the
+same shape — an unconditional benefit claim sitting beside a measurement (`would cut`, `would clean`,
+`would reduce`, `biggest cleanup`) — turns up only places that already read their number:
+`nightplan.py:2496` ("another hour would cut its noise about N%") carries its own note about the time it
+read 100 % and was fixed; `grainProjection` and `nextBestMove` are measured by construction. The calibration
+note was the last one guessing.
+
+**One non-finding, again.** The Dashboard's *"Plate-solving isn't set up yet … ASTAP wasn't found"* is the
+scratch environment, not a bug — the bundled samples carry synthetic WCS and the owner's install has ASTAP
+in the image. Every pass ever run has shown this line.
+
+---
 Where the *history of how this project is developed* lives, so
 [`IMPROVEMENTS.md`](IMPROVEMENTS.md) can stay a **working list**.
 

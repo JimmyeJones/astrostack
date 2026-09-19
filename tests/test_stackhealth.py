@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from seestack.io.project import FrameRow, StackRunRow
 from seestack.stackhealth import (
+    CLEAN_BACKGROUND_SIGMA,
+    background_reads_clean,
     recommended_dark_spec,
     seam_scale_is_current,
     stack_health,
     stored_seam_verdict,
+    uneven_grain_verdict,
 )
 
 
@@ -1370,3 +1373,131 @@ def test_a_run_recorded_before_the_median_existed_keeps_the_old_test_exactly():
         [_frame() for _ in range(12)],
     )
     assert "rejection_blind" not in _kinds(notes)
+
+
+# --- The uncalibrated note stops claiming a speckle the app has measured away --
+#
+# Found by reading a dogfood pass's own printed block as one paragraph
+# (2026-09-19, `--mosaic --editor --incoming-lag`, otherwise CLEAN): the
+# readiness card an inch above the health card had *measured* the same
+# background — "across most of it the background already looks clean at 4 min
+# (grain 0.001)" — while this note told the same reader, about the same picture,
+# that darks "would cut the background speckle". One card guessing at what
+# another had measured.
+
+
+def test_a_measured_clean_background_stops_the_note_claiming_speckle():
+    """The offer stays; the unearned magnitude claim goes.
+
+    Fails before the fix: the old note said "would cut the background speckle"
+    on every uncalibrated run whatever its σ.
+    """
+    notes = stack_health(_run(calstat=None, noise_sigma=0.001),
+                         [_frame() for _ in range(10)])
+    note = next(n for n in notes if n.kind == "calibration")
+    # Still the same note, still ranked and wired the same way — only the
+    # sentence about *this* picture's grain changed.
+    assert note.action == "calibration"
+    assert notes[0].kind == "calibration"
+    assert "darks" in note.message.lower()
+    assert "background speckle" not in note.message
+    assert "already measures clean" in note.message
+    # What darks still buy on a picture whose sky is already clean: the part a
+    # robust σ cannot see.
+    assert "hot pixels" in note.message
+
+
+def test_a_grainy_background_keeps_todays_sentence_byte_for_byte():
+    """Above the bar nothing moves — this fix may only ever make the app say
+    *less* than it measured, never more."""
+    notes = stack_health(_run(calstat=None, noise_sigma=0.08),
+                         [_frame() for _ in range(10)])
+    note = next(n for n in notes if n.kind == "calibration")
+    assert note.message == (
+        "No darks or flats were applied to this stack. Adding master darks "
+        "would cut the background speckle and hot pixels.")
+
+
+def test_an_unmeasured_run_is_not_called_clean():
+    """A run recorded before the σ column existed, or one the estimator
+    declined, carries no measurement — so it keeps the general wording rather
+    than being told its background is clean on no evidence."""
+    for sigma in (None, float("nan"), 0.0, -1.0):
+        notes = stack_health(_run(calstat=None, noise_sigma=sigma),
+                             [_frame() for _ in range(10)])
+        note = next(n for n in notes if n.kind == "calibration")
+        assert "already measures clean" not in note.message, sigma
+        assert "background speckle" in note.message, sigma
+
+
+def test_background_reads_clean_is_the_one_bar_and_it_is_the_frontends():
+    """`CLEAN_BACKGROUND_SIGMA` is not a bar invented here — it is the number
+    `frontend/src/components/target/grainProjection.ts::CLEAN_SIGMA` already
+    prints "the background already looks clean" from, and the two cards
+    disagreeing about one picture is what it exists to stop. Pinned on both
+    sides (see `grainProjection.test.ts`) so neither can drift alone."""
+    assert CLEAN_BACKGROUND_SIGMA == 0.02
+    assert background_reads_clean(CLEAN_BACKGROUND_SIGMA) is True
+    assert background_reads_clean(0.0201) is False
+    assert background_reads_clean("not a number") is False
+
+
+def test_a_calibrated_run_says_nothing_about_darks_however_clean_it_is():
+    """The σ branch is reached only through the uncalibrated gate — a stack that
+    *did* get its masters must not acquire a new note from this."""
+    notes = stack_health(_run(calstat="dark+flat", noise_sigma=0.001),
+                         [_frame() for _ in range(10)])
+    assert "calibration" not in _kinds(notes)
+
+
+def test_the_clean_sentence_states_the_scope_it_was_measured_over():
+    """On a mosaic, σ is one figure for the whole canvas and is dominated by the
+    part that got the most subs — so "the background here already measures
+    clean" would be the same over-claim in a new place on a canvas this very
+    card calls 1.4× grainier over a quarter of itself.
+
+    The bundled 2×2's own figures (3 subs against 6 over 23 % of the canvas),
+    which is the shape the owner's multi-night mosaics have. Fails before the
+    scope clause: the sentence read "The background here already measures
+    clean" beside a note saying part of it is grainier.
+    """
+    notes = stack_health(
+        _run(calstat=None, noise_sigma=0.001, is_mosaic=True,
+             grain_ratio=1.43, grain_thin_frames=3, grain_deep_frames=6,
+             grain_thin_share=0.2257),
+        [_frame() for _ in range(10)])
+    cal = next(n for n in notes if n.kind == "calibration")
+    assert "Across most of it the background already measures clean" in cal.message
+    assert "The background here" not in cal.message
+    # It is the same page saying both, so the pair has to hold together.
+    grain = next(n for n in notes if n.kind == "grain_uneven")
+    assert "grain only comes down with more light" in grain.message
+
+
+def test_an_evenly_deep_picture_keeps_the_unqualified_clean_sentence():
+    """A single field, and a mosaic whose panels match, have nothing to scope —
+    the scope clause must not leak onto them."""
+    for extra in ({}, dict(is_mosaic=True, grain_ratio=1.0,
+                           grain_thin_frames=6, grain_deep_frames=6,
+                           grain_thin_share=0.2)):
+        notes = stack_health(_run(calstat=None, noise_sigma=0.001, **extra),
+                             [_frame() for _ in range(10)])
+        cal = next(n for n in notes if n.kind == "calibration")
+        assert "The background here already measures clean" in cal.message
+        assert "Across most of it" not in cal.message
+
+
+def test_uneven_grain_verdict_is_the_one_reader_of_those_four_figures():
+    """Both sentences that depend on it read the same function — a note that
+    cannot explain its ratio must not claim one, in either place."""
+    full = dict(grain_ratio=1.43, grain_thin_frames=3, grain_deep_frames=6,
+                grain_thin_share=0.2257)
+    assert uneven_grain_verdict(_run(**full)) == "uneven"
+    # Any missing figure withdraws the verdict, and with it the scope clause.
+    for missing in ("grain_thin_frames", "grain_deep_frames", "grain_thin_share"):
+        partial = dict(full, **{missing: None})
+        assert uneven_grain_verdict(_run(**partial)) is None
+        notes = stack_health(_run(calstat=None, noise_sigma=0.001, **partial),
+                             [_frame() for _ in range(10)])
+        cal = next(n for n in notes if n.kind == "calibration")
+        assert "Across most of it" not in cal.message, missing
