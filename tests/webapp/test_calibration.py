@@ -786,21 +786,30 @@ def test_auto_bind_still_uncalibrated_when_no_dark_is_bindable(tmp_path):
     assert "bias_path" not in bound
 
 
-def _fake_proj_with_frames(exposure_s=30.0, gain=80.0, width=4, height=4,
-                           bayer_pattern="RGGB"):
-    """A minimal stand-in for a Project exposing ``iter_frames`` for
-    ``_auto_bind_calibration`` — just the frame attributes it reads."""
-    from types import SimpleNamespace
+def _proj_with_frames(tmp_path, exposure_s=30.0, gains=(80.0, 80.0), width=4,
+                      height=4, bayer_pattern="RGGB"):
+    """A **real** target with one accepted sub per entry in *gains*.
 
-    frame = SimpleNamespace(exposure_s=exposure_s, gain=gain, sensor_temp_c=None,
-                            width_px=width, height_px=height,
-                            bayer_pattern=bayer_pattern)
+    Deliberately a `Project` rather than a hand-rolled stand-in: *how* the
+    binder reads a target is part of what these tests are about — it asks for
+    six `acquisition_values` columns rather than whole frames — and a fake
+    exposing only `iter_frames` would keep passing after that read moved to
+    something the real class does not offer.
+    """
+    from seestack.io.project import FrameRow, Project
 
-    class _Proj:
-        def iter_frames(self, accepted_only=False):  # noqa: ARG002
-            return [frame, frame]
-
-    return _Proj()
+    root = tmp_path / f"proj{sum(1 for _ in tmp_path.glob('proj*'))}"
+    proj = Project.create(root, "T")
+    proj.add_frames([
+        FrameRow(source_path=f"/incoming/T/sub_{i}.fit", accept=True,
+                 exposure_s=exposure_s, gain=g, sensor_temp_c=None,
+                 width_px=width, height_px=height, bayer_pattern=bayer_pattern,
+                 # A solved sub's plate solution is the bulk of its row, and the
+                 # whole reason the read is by column — so the fixture has one.
+                 wcs_json="".join(f"CARD{c:02d}  = 1.2345678901E+02".ljust(80)
+                                  for c in range(25)))
+        for i, g in enumerate(gains)])
+    return proj
 
 
 def test_auto_bind_clears_a_stray_scale_dark_to_light_flag(tmp_path):
@@ -816,7 +825,7 @@ def test_auto_bind_clears_a_stray_scale_dark_to_light_flag(tmp_path):
     root = tmp_path / "lib"
     dark = _register(root, "dark", exposure_s=30.0, gain=80.0)
     settings = SimpleNamespace(resolved_library_root=root)
-    proj = _fake_proj_with_frames(exposure_s=30.0, gain=80.0)
+    proj = _proj_with_frames(tmp_path, exposure_s=30.0)
 
     # Global default carried the flag with no dark; the path strip keeps the bool.
     opts = {"scale_dark_to_light": True}
@@ -838,7 +847,7 @@ def test_auto_bind_keeps_scale_dark_to_light_when_it_binds_a_bias_scaled_dark(tm
     _register(root, "dark", exposure_s=30.0, gain=80.0)
     _register(root, "bias", exposure_s=0.0, gain=80.0)
     settings = SimpleNamespace(resolved_library_root=root)
-    proj = _fake_proj_with_frames(exposure_s=10.0, gain=80.0)  # exposure mismatch
+    proj = _proj_with_frames(tmp_path, exposure_s=10.0)  # exposure mismatch
 
     opts: dict = {}
     _auto_bind_calibration(settings, proj, opts)
@@ -857,7 +866,7 @@ def test_auto_bind_clears_a_stray_flag_even_when_no_dark_binds(tmp_path):
     root = tmp_path / "lib"  # empty library — nothing to bind
     root.mkdir(parents=True, exist_ok=True)
     settings = SimpleNamespace(resolved_library_root=root)
-    proj = _fake_proj_with_frames(exposure_s=30.0, gain=80.0)
+    proj = _proj_with_frames(tmp_path, exposure_s=30.0)
 
     opts = {"scale_dark_to_light": True}
     _auto_bind_calibration(settings, proj, opts)
@@ -2529,24 +2538,6 @@ def test_the_build_job_says_at_once_that_its_darks_straddled_two_nights(tmp_path
 # ---- a target is not necessarily one *gain*, and the binder took its median ---
 
 
-def _fake_proj_with_gains(gains, exposure_s=30.0, width=4, height=4,
-                          bayer_pattern="RGGB"):
-    """A stand-in Project whose accepted subs were shot at *gains* — the mixed
-    case ``_fake_proj_with_frames`` above cannot express."""
-    from types import SimpleNamespace
-
-    frames = [SimpleNamespace(exposure_s=exposure_s, gain=g, sensor_temp_c=None,
-                              width_px=width, height_px=height,
-                              bayer_pattern=bayer_pattern)
-              for g in gains]
-
-    class _Proj:
-        def iter_frames(self, accepted_only=False):  # noqa: ARG002
-            return list(frames)
-
-    return _Proj()
-
-
 def test_the_unattended_binder_judges_a_two_gain_target_by_the_gain_it_mostly_is(
         tmp_path):
     """Fail-before: ``_confident_master_binding`` handed the binder the subs'
@@ -2570,7 +2561,7 @@ def test_the_unattended_binder_judges_a_two_gain_target_by_the_gain_it_mostly_is
     settings = SimpleNamespace(resolved_library_root=root)
 
     bound = _confident_master_binding(
-        settings, _fake_proj_with_gains([80.0] * 3 + [200.0] * 3))
+        settings, _proj_with_frames(tmp_path, gains=[80.0] * 3 + [200.0] * 3))
     assert Path(bound["dark_path"]).name == real["filename"]
     assert Path(bound["dark_path"]).name != phantom["filename"]
 
@@ -2589,12 +2580,12 @@ def test_the_unattended_binder_reads_a_single_gain_target_exactly_as_before(
     settings = SimpleNamespace(resolved_library_root=root)
 
     bound = _confident_master_binding(
-        settings, _fake_proj_with_gains([80.0] * 6))
+        settings, _proj_with_frames(tmp_path, gains=[80.0] * 6))
     assert Path(bound["dark_path"]).name == dark["filename"]
     # …and a near-miss inside the engine's own grouping tolerance is still one
     # setting, not two, so header round-trip noise can't move the answer.
     jittered = _confident_master_binding(
-        settings, _fake_proj_with_gains([80.0, 80.0002, 79.9998, 80.0]))
+        settings, _proj_with_frames(tmp_path, gains=[80.0, 80.0002, 79.9998, 80.0]))
     assert jittered == bound
 
 
@@ -2613,7 +2604,7 @@ def test_the_binder_prefers_the_gain_the_majority_of_a_targets_subs_carry(
     settings = SimpleNamespace(resolved_library_root=root)
 
     bound = _confident_master_binding(
-        settings, _fake_proj_with_gains([80.0] * 3 + [140.0] + [200.0] * 3))
+        settings, _proj_with_frames(tmp_path, gains=[80.0] * 3 + [140.0] + [200.0] * 3))
     assert Path(bound["dark_path"]).name == majority["filename"]
     assert Path(bound["dark_path"]).name != lone["filename"]
 
@@ -2777,3 +2768,85 @@ def test_the_form_and_the_coverage_page_describe_one_target_identically(
     assert len(shared["exposures_s"]) == 2
     assert shared["gain"] == 80.0, "the dominant gain, not the median 140"
     assert len(shared["sensor_temps_c"]) > 1
+
+
+# ---- and the walk-away path reads those settings as columns, not as frames ---
+
+
+def _count_frame_objects(monkeypatch):
+    """Arm a counter on the one function that turns a DB row into a `FrameRow`.
+
+    The same trap `tests/test_project_acquisition_values.py` uses, pointed at
+    the callers rather than at the primitive: the memory claim is about what
+    *they* ask for, and nothing else in the suite would notice a whole-table
+    read coming back.
+    """
+    import seestack.io.project as project_module
+
+    built = [0]
+    real = project_module._row_to_frame
+
+    def counting(row):
+        built[0] += 1
+        return real(row)
+
+    monkeypatch.setattr(project_module, "_row_to_frame", counting)
+    return built
+
+
+def test_the_unattended_binder_builds_no_frame_objects(tmp_path, monkeypatch):
+    """Fail-before: `_confident_master_binding` listed a `FrameRow` for every
+    accepted sub to read six small columns off it — 35,894 of them on the
+    owner's deepest target, each carrying its own plate-solve header. Measured
+    on a synthetic project that size: **1,525 ms / 128.3 MB peak against
+    513 ms / 11.7 MB**, same arguments to the binder.
+
+    It matters more here than on the Stack form the same question is asked from
+    (v0.471.2): this one runs in the job worker with a stack about to allocate
+    its canvases, on a box with an OOM history (AGENTS.md §10), and again per
+    target per scan from `_auto_stack_calibration_recheck`.
+    """
+    from types import SimpleNamespace
+
+    from webapp.pipeline import _confident_master_binding
+
+    root = tmp_path / "lib"
+    dark = _register(root, "dark", exposure_s=30.0, gain=80.0)
+    settings = SimpleNamespace(resolved_library_root=root)
+    proj = _proj_with_frames(tmp_path, exposure_s=30.0, gains=[80.0] * 6)
+
+    built = _count_frame_objects(monkeypatch)
+    bound = _confident_master_binding(settings, proj)
+
+    assert Path(bound["dark_path"]).name == dark["filename"]
+    assert built[0] == 0, f"built {built[0]} FrameRow objects to read six columns"
+
+
+def test_the_uncalibrated_advice_builds_no_frame_objects(client, solved_library,
+                                                         monkeypatch):
+    """The same read on the other surface that asks it — the run-info panel a
+    beginner opens beside the picture, which reaches `_uncalibrated_advice`
+    whenever a stack came out with no calibration on it.
+
+    `_uncalibrated_advice` is best-effort by contract and swallows every
+    exception, so a guard that only counted rows could pass by never getting
+    that far. `list_masters` is therefore recorded as well: it is the first
+    thing the function does *after* the read, so seeing it proves the read
+    happened and the zero means what it says.
+    """
+    from types import SimpleNamespace
+
+    from webapp import calibration as calibration_module
+    from webapp.routers import stack as stack_module
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    reached = []
+    real_list = calibration_module.list_masters
+    monkeypatch.setattr(calibration_module, "list_masters",
+                        lambda root: (reached.append(root), real_list(root))[1])
+
+    built = _count_frame_objects(monkeypatch)
+    stack_module._uncalibrated_advice(SimpleNamespace(app=client.app), safe)
+
+    assert reached, "the advice never got past the acquisition read"
+    assert built[0] == 0, f"built {built[0]} FrameRow objects to read five columns"

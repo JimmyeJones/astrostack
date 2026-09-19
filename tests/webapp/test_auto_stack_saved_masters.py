@@ -459,3 +459,54 @@ def test_wrong_bayer_phase_saved_dark_still_binds(solved_library, monkeypatch):
 
     assert opts.dark_path
     assert _recorded_skips(solved_library) == []
+
+
+def test_the_saved_pick_checks_are_read_as_columns_not_as_frames(
+        solved_library, monkeypatch):
+    """The subs' size and colour-filter phase are two columns, and reading them
+    as `FrameRow`s carried every sub's plate solution along for the ride.
+
+    Fail-before: `_sub_dims` and `_sub_bayer` each did
+    `list(proj.iter_frames(accepted_only=True))`, so on the owner's deepest
+    target (35,894 subs) the walk-away run built ~72,000 frame objects — inside
+    the job worker, with a stack about to allocate its canvases, on a box with
+    an OOM history (AGENTS.md §10) — to answer "how wide?" and "which phase?".
+
+    Both lazy reads are forced here: a wrong-sized dark reaches `_sub_dims`, and
+    a wrong-phase flat reaches `_sub_bayer`.
+    """
+    import seestack.io.project as project_module
+
+    root = solved_library / "library"
+    wrong_size = _register(root, "dark", name="Other Camera",
+                           width=FRAME_W // 2, height=FRAME_H // 2)
+    wrong_phase = _register(root, "flat", name="Other Phase", exposure_s=None,
+                            bayer_pattern="GRBG")
+
+    built = [0]
+    real = project_module._row_to_frame
+
+    def counting(row):
+        built[0] += 1
+        return real(row)
+
+    monkeypatch.setattr(project_module, "_row_to_frame", counting)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = lib.list_targets()[0].safe_name
+        proj = lib.open_target(safe)
+        try:
+            skipped = pipeline._apply_saved_calibration_masters(
+                Settings(data_root=str(solved_library)), proj, {},
+                {"dark_master_id": wrong_size["id"],
+                 "flat_master_id": wrong_phase["id"]})
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    # Both lazy reads really did run — otherwise the zero below means nothing.
+    assert len(skipped) == 2, skipped
+    assert any("wasn't used" in s and "pixels" in s for s in skipped), skipped
+    assert built[0] == 0, f"built {built[0]} FrameRow objects to read three columns"

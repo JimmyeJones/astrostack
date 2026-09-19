@@ -1,5 +1,168 @@
 # Shipped — the record
 
+## v0.472.0 — 2026-09-19 — "Needs 3×3 mosaic" vanished from the planner the moment you shot one frame of the object
+
+*(Builder, branch `claude/wizardly-cannon-fgcbme`. Found by a `--mosaic --calibration` dogfood pass that was
+mechanically CLEAN — the finding was in the block it prints, read as one paragraph across two screens.)*
+
+**What the pass showed.** `/tonight`'s week plan said *"Tonight · Sample: Orion Nebula (M42) · 02:57–04:20 ·
+87 min"*, and the same target's page said *"A large part of Orion Nebula is still outside this picture —
+only about 20 % of it made it in, and it's bigger than one frame, so **more time can't bring the rest in**.
+Shooting it in mosaic mode next session is the biggest win here."* The planner's own table carries a badge
+for exactly that — **"Needs 3×2 mosaic"** — and it was not on the row, because
+`nightplan.PlannedTarget.framing` was populated for *catalog* rows only.
+
+**So the advice disappeared at the moment it started to matter.** Mosaic mode is a setting on the scope,
+chosen **before** a session. A beginner sees "Needs 3×3 mosaic" on M 42 while it is a catalog suggestion;
+they shoot one frame of it; from then on — i.e. before every session after the first — the row that tells
+them what to point at says nothing about how to shoot it. The Target page does say it, but that card is read
+the morning after, which is the argument the sibling field `recentre_nudge` is already carried here for
+(*"the moment it is worth anything is while they are pointing the scope"*), and the argument the
+`difficulty` field was carried for one release earlier (*"the same object lost its verdict the moment the
+owner started shooting it"*). This is the third member of that family, and the only one whose absence costs
+a night rather than a badge.
+
+**The stand-down it replaces was reasoned, and half of that reason is kept.** The old comment read:
+*"library rows carry none — the Target page already shows their framing, and a mosaic result would confuse
+the single-frame catalog verdict."* The first clause is the one the two sibling fields already disagree
+with. The second is real and is now the explicit exception: a target whose newest **stacking** run spans
+more than one frame of sky has *answered* "will it fit?", and quoting it the whole grid's cost from scratch
+is the misreading `mosaicDepthText`'s `alreadyAMosaic` clause (v0.451.1) exists for — which a planner row,
+having no picture beside it, cannot anchor. `LibraryTarget.canvas_is_mosaic` carries that, derived from
+`target_field_fulls` against `_MOSAIC_CANVAS_FIELD_FULLS = 1.3` — deliberately the engine's own
+`AUTO_UNION_AREA_RATIO`, so the planner and the stacker cannot disagree about which targets are mosaics.
+
+**The size travels, not the verdict — and that is the load-bearing detail.** A framing verdict is a
+comparison against the owner's *own* measured frame field, which `plan_tonight` already holds and already
+applies to every catalog row. `webapp/routers/plan._annotate_library_targets` calls `identify_object`
+**without** a field, so `info.framing` is a verdict against the module's fallback frame; carrying *that*
+would have put two rules on one table and created a fresh contradiction while closing this one. What goes
+over is `size_arcmin` / `size_minor_arcmin` — catalogue facts, field-independent — and `plan_tonight` makes
+both rows' verdicts with the same `framing_hint` / `mosaic_plan` calls and the same `field`.
+
+**Frontend: nothing to do, which is the point.** `framingRowBadge` and `withMosaicEffort` were already pure
+functions of the row's data with no `already_targeted` branch, so the badge and its "about N clear nights"
+hover appeared the moment the fields did. Two comments that now stated the opposite of the behaviour were
+corrected (the framing one, and the `difficulty` one that still said "catalog rows only").
+
+**Upgrade-safe (§9):** three additive fields with defaults on an internal dataclass; the response keys
+already existed and were already optional in `frontend/src/api/client.ts` (catalog rows have sent them for
+releases). An older frontend ignores them; an older backend omits them and the badge stays absent, which is
+today's behaviour. No config, schema, on-disk, default or endpoint change, and nothing about scoring or
+ranking — every one of these fields is annotation.
+
+**Tests (+6; three fail before, and the fourth is a preservation guard that deliberately does not).**
+Engine: the already-shot row's verdict asserted **equal to the catalog row's for the same object in the same
+plan** rather than to literals (the claim is that one object gets one answer, and only comparing them can
+show it); the field-consistency claim pinned by changing `field` and watching the library row move with it;
+and the mosaic stand-down. Webapp: `/api/plan/tonight` serves the badge on the already-targeted `M_42`, and
+stands it down when the target's canvas is a mosaic. Frontend: the badge renders on an `already_targeted`
+row, and nothing is invented from a size when the backend sent no framing.
+
+## v0.471.7 — 2026-09-19 — "a healthy, up-to-date target pays nothing but a couple of DB reads" — it paid a frame object per sub, five times over, every five minutes
+
+*(Builder, branch `claude/wizardly-cannon-fgcbme`, the same run as v0.471.6. The sentence in the heading is
+`pipeline._auto_stack_degraded_recheck`'s own docstring, and it is the whole finding: the repo's habit of
+reading a comment as a claim about the lines beneath it, applied to the one loop nobody watches.)*
+
+**Where the cost was.** The walk-away scan decides, for **every target on every poll**, whether to stack it.
+Five reads make that decision, and every one of them built a `FrameRow` per accepted sub — `SELECT *` on a
+table whose biggest column is the sub's plate-solve header, to answer questions that never look at it:
+
+| read | asked | what it wanted |
+|---|---|---|
+| `_solved_accepted_count` | once per target, then again in each recheck behind it | a **count** |
+| `_auto_stack_calibration_recheck` | per target with no new subs | that count |
+| `_auto_stack_degraded_recheck` | per target with no new subs and no master | that count |
+| `_detect_mixed_pointings` | per target about to stack | two coordinates |
+| `_auto_stack_panel_depth` | per target about to stack | two coordinates |
+| `_auto_stack_readability_hold` | per target about to stack | two paths, two coordinates, one bit |
+
+So a target with nothing new — which is most targets, most polls — paid the whole table **three times**, and
+one about to stack paid it three more. On the owner's library that is 54,681 accepted subs' worth of row
+building per sweep, in the single job worker, on a box with a recorded OOM history (AGENTS.md §10).
+
+**Measured** on a synthetic project the size of his deepest target (35,894 subs, ~2 kB of `wcs_json` each),
+best of 3 on this box: the count **935 ms → 54 ms**, the pointing read **993 ms → 254 ms**, identical
+answers.
+
+**What it is now.** New `Project.count_accepted_solved()` — `COUNT(*) WHERE accept = 1 AND wcs_json IS NOT
+NULL AND wcs_json != ''`. The empty-string arm is deliberate and is the only subtle part: the engine's test
+is `if f.wcs_json`, so a blank sidecar is *not* a plate solve, and the count that decides whether to stack
+must not disagree with the stacker about which subs exist. (`count_accepted_unsolved` spells its own test
+`IS NULL` and therefore reads a blank as located; that is recorded in `count_solved`'s docstring and left
+alone, since it can only make an *offer* more conservative.) The three pointing reads take
+`iter_frame_columns`.
+
+`readable_frame_path`'s rule gained a second spelling for the column-shaped caller —
+`project.first_existing_frame_path(cached_path, source_path)` — and the row-shaped form is now a one-line
+wrapper over it, so "which file is this frame?" keeps exactly one definition. A test compares the two over
+every shape at once, including a blank path and a dangling cache, because what would go wrong is a
+*divergence* and only comparing them can show it.
+
+**Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change; no new column and no
+migration; nothing in the stacker or the engine's hot path.
+
+**Tests (+4, three of them failing before — verified by scratch reverts).**
+`test_count_accepted_solved_is_exactly_what_the_stacker_would_combine` pins the intersection against a
+fixture carrying a rejected-but-solved sub, a blank sidecar and a NULL one, *and* against the read it
+replaced; `test_count_accepted_solved_builds_no_frame_objects` and
+`test_the_scan_loops_stack_decision_builds_no_frame_objects` count
+`seestack.io.project._row_to_frame` calls — the second drives all six reads above in one arming, because the
+docstring this change is against is a claim about the decision as a whole rather than about any one step,
+and it goes red on a whole-row read reintroduced anywhere along it.
+
+## v0.471.6 — 2026-09-19 — the *walk-away* path asked the same six calibration questions, and was still reading whole frames to answer them
+
+*(Builder, branch `claude/wizardly-cannon-fgcbme`. The unattended sibling of v0.471.2, found by asking that
+fix's question sideways: `/calibration-suggestions` was moved off whole rows because the Stack form asks
+"which master fits these subs?" — **three other places ask the identical question**, and two of them are the
+ones nobody is watching.)*
+
+**The class, and why this half matters more than the half already fixed.** A `FrameRow` is `SELECT *`, and
+the biggest column on a solved sub is its plate solution (`wcs_json`, a FITS header *text* of ~25
+eighty-character cards). Six small columns — how long, what gain, how warm, what size, what Bayer phase, how
+many — decide which master dark, flat and bias a target gets, and `Project.acquisition_values` has existed
+since v0.471.2 to read exactly those. The Stack form was moved onto it; the **walk-away** path was not. That
+is the worse side of the split:
+
+* `pipeline._confident_master_binding` runs **in the job worker**, immediately before a stack allocates its
+  canvases, on a box with a recorded OOM history (AGENTS.md §10) — and again **per target per scan** from
+  `_auto_stack_calibration_recheck`, which is the path an idle library walks every five minutes.
+* `pipeline._apply_saved_calibration_masters` reads the subs' size and colour-filter phase the same way, in
+  two *separate* lazy reads, so a walk-away run that had to check both built the whole table **twice**.
+* `routers/stack._uncalibrated_advice` hangs off the run-info read a beginner opens beside the picture.
+
+**Measured**, on a synthetic project the size of the owner's deepest target (35,894 subs carrying ~2 kB of
+`wcs_json` each), best of 3 on this box: **1,525 ms / 128.3 MB peak → 513 ms / 11.7 MB**, with the arguments
+handed to `auto_bind_master_paths` identical field for field.
+
+**What changed is only *what is read*.** Every representative value keeps its own arithmetic exactly as it
+was — the median exposure, `distinct_exposures`, `dominant_gain`, the median temperature, `modal_dim`,
+`modal_bayer` — so no master can be picked differently than it was yesterday. `acquisition_values` yields the
+same values in the same `id` order `iter_frames` did, which is the property the modal tie-breaks rest on.
+The two lazy reads in `_apply_saved_calibration_masters` take `iter_frame_columns` directly rather than the
+six-column record, because they want two columns and one, and they are reached only on a conflict.
+
+**Upgrade-safe (§9):** no config, schema, on-disk, API-shape or default change; no endpoint added or
+removed; nothing in the engine touched.
+
+**Tests (+3, all three fail before — verified by scratch reverts, not by reasoning).** Each counts
+`seestack.io.project._row_to_frame` calls, the trap `tests/test_project_acquisition_values.py` uses on the
+primitive, pointed at the callers instead:
+`test_the_unattended_binder_builds_no_frame_objects`,
+`test_the_uncalibrated_advice_builds_no_frame_objects` (which also records that `list_masters` was reached,
+because `_uncalibrated_advice` swallows every exception by contract and a guard that only counted rows could
+pass by never getting there), and
+`test_the_saved_pick_checks_are_read_as_columns_not_as_frames` (which forces *both* lazy reads — a
+wrong-sized dark and a wrong-phase flat — and asserts the two skip sentences, so the zero means something).
+
+**And two test fakes became real targets.** `tests/webapp/test_calibration.py`'s `_fake_proj_with_frames` /
+`_fake_proj_with_gains` were hand-rolled objects exposing only `iter_frames`, which is precisely the shape
+that keeps passing while the code under test moves to a read the real class offers and the fake does not.
+They are now one `_proj_with_frames(tmp_path, …)` building an actual `Project` whose subs carry a
+plate-solve header — the thing the whole change is about.
+
 ## v0.471.5 — 2026-09-19 — the "First look" card built a frame object per accepted sub to read four fields off one of them
 
 *(Builder, branch `claude/wizardly-cannon-nc6rhy`, the same run as v0.471.4. Closes shape **(b)** of the
