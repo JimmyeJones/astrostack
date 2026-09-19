@@ -5,8 +5,10 @@ import {
 import { IconChevronRight, IconSearch, IconStars } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { api, type Target, type ThinPictureItem } from "../api/client";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  api, type Target, type ThinPictureItem, type UnstretchedItem,
+} from "../api/client";
 import { CleanupSuggestionsCard } from "../components/CleanupSuggestionsCard";
 import { SkippedFoldersCard } from "../components/SkippedFoldersCard";
 import { FirstImageCard } from "../components/dashboard/FirstImageCard";
@@ -17,7 +19,10 @@ import { formatIntegration } from "../format";
 import {
   THIN_PICTURE_LABEL, thinStackWarning,
 } from "../components/target/thinStack";
-import { UNSTRETCHED_HINT, UNSTRETCHED_LABEL, unstretchedHint } from "../unstretched";
+import {
+  UNSTRETCHED_HINT, UNSTRETCHED_LABEL, unstretchedEditPath, unstretchedHint,
+  unstretchedIsLinkable,
+} from "../unstretched";
 
 // Target-card exposure. Delegates to the app-wide `formatIntegration` so the
 // Library card speaks the same integration-time vocabulary as every other
@@ -92,10 +97,12 @@ function sortTargets(targets: Target[], key: SortKey): Target[] {
 export { UNSTRETCHED_HINT };
 
 function TargetCard(
-  { t, unstretched, unexportedEdit, thin }:
-  { t: Target; unstretched?: boolean; unexportedEdit?: boolean;
-    thin?: ThinPictureItem },
+  { t, unstretched, thin }:
+  { t: Target; unstretched?: UnstretchedItem; thin?: ThinPictureItem },
 ) {
+  // The chip is a control, not only a label, so the card needs a way to
+  // navigate that is not the `<Link>` it is wrapped in — see the badge below.
+  const navigate = useNavigate();
   // The wall's one chip slot, and why depth wins it when a card is both.
   //
   // A card that is thin *and* unstretched gets the depth sentence, because the
@@ -150,10 +157,33 @@ function TargetCard(
             {THIN_PICTURE_LABEL}
           </Badge>
         ) : unstretched ? (
-          <Badge variant="light" color="yellow"
-            title={unstretchedHint(unexportedEdit)}>
-            {UNSTRETCHED_LABEL}
-          </Badge>
+          /* The chip is the one click. The wall's card names a *target* and the
+             editor needs a *run*, which is why this slice waited for the run id
+             the endpoint has served since v0.448.0; with it here, "open it and
+             press Auto" stops being two screens of looking for the button.
+             A button inside the card's own `<Link>`, stopped the way
+             `WishlistStar` stops its tap on a picture tile — so the chip goes
+             to the editor and the rest of the card still goes to the target.
+             Without a usable run id it degrades to the plain label the wall
+             had before. */
+          unstretchedIsLinkable(unstretched.run_id) ? (
+            <Badge variant="light" color="yellow"
+              component="button" type="button"
+              style={{ cursor: "pointer" }}
+              title={unstretchedHint(unstretched.unexported_edit)}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                navigate(unstretchedEditPath(t.safe_name, unstretched.run_id));
+              }}>
+              {UNSTRETCHED_LABEL}
+            </Badge>
+          ) : (
+            <Badge variant="light" color="yellow"
+              title={unstretchedHint(unstretched.unexported_edit)}>
+              {UNSTRETCHED_LABEL}
+            </Badge>
+          )
         ) : null}
       </Group>
       {t.tags.length ? (
@@ -194,12 +224,13 @@ export function Library() {
     queryFn: api.getUnstretchedPictures,
     staleTime: 300_000,
   });
-  // `safe -> unexported_edit` rather than a bare set: the chip renders on
-  // membership, and the hint it carries depends on *which* kind of unstretched
-  // this card is. One map, so the two cannot be read from different snapshots.
+  // `safe -> the whole item` rather than a bare set: the chip renders on
+  // membership, the hint it carries depends on *which* kind of unstretched this
+  // card is, and the link it now carries needs the run id. One map, so all
+  // three are read from one snapshot.
   const unstretchedSafe = useMemo(
     () => new Map((unstretched.data?.items ?? [])
-      .map((i) => [i.safe, i.unexported_edit === true] as const)),
+      .map((i) => [i.safe, i] as const)),
     [unstretched.data],
   );
   // …and which are showing a picture only a few subs deep on any one patch of
@@ -316,8 +347,7 @@ export function Library() {
         <SimpleGrid cols={{ base: 1, sm: 2, md: 3, lg: 4 }}>
           {visible.map((t) => (
             <TargetCard key={t.safe_name} t={t}
-              unstretched={unstretchedSafe.has(t.safe_name)}
-              unexportedEdit={unstretchedSafe.get(t.safe_name)}
+              unstretched={unstretchedSafe.get(t.safe_name)}
               thin={thinSafe.get(t.safe_name)} />
           ))}
         </SimpleGrid>
