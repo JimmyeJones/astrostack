@@ -648,13 +648,19 @@ def target_restack_gain(safe: str, request: Request) -> RestackGainOut | None:
     try:
         runs = [r for r in proj.iter_stack_runs()  # newest first
                 if _stack_options_from_run_json(r.options_json) is not None]
+        # One column, not whole rows: this counts accepted subs and asks which
+        # of them carry a readable capture time, and a `FrameRow` carries the
+        # sub's plate solution as well — a FITS header text nothing here reads.
+        # Measured on a synthetic project the size of the owner's deepest target
+        # (35,894 subs): 1,132 ms against 370 ms, for identical counts. The
+        # accept filter moves into the SQL; `parse_capture_time` stays in Python
+        # because "is this string a time?" is its answer, not SQLite's.
         n_accepted = 0
         n_datable = 0
-        for f in proj.iter_frames():
-            if not f.accept:
-                continue
+        for (timestamp_utc,) in proj.iter_frame_columns("timestamp_utc",
+                                                        accepted_only=True):
             n_accepted += 1
-            if parse_capture_time(f.timestamp_utc) is not None:
+            if parse_capture_time(timestamp_utc) is not None:
                 n_datable += 1
     finally:
         proj.close()
