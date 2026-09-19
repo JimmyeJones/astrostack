@@ -1,5 +1,54 @@
 # Shipped — the record
 
+## v0.471.3 — 2026-09-19 — two more Target-page fetches were building 35,894 frame objects to read four fields and one
+
+*(Builder, branch `claude/wizardly-cannon-dnc0vt`, the same run as v0.471.2 and the same question: what else
+reads a whole deep target per request? Measured before and after.)*
+
+**What it cost.** Two more of the Target page's own fetches went the whole-row way, on the owner's deepest
+target (35,894 subs):
+
+| | before | after |
+|---|---|---|
+| `GET …/frames/sky-brightness` | 1,074 ms | **322 ms** |
+| `GET …/restack-gain` | 1,132 ms | **370 ms** |
+
+Identical answers on both. Unlike v0.471.2 these are *time*, not memory — both already streamed, so nothing
+piled up — but ~1.5 s of a page load is ~1.5 s, and it was being spent building `FrameRow` objects to read
+four small fields (the sky card) and one (the re-stack offer). A `FrameRow` is `SELECT *`, and the biggest
+column on a solved sub is its plate solution: `wcs_json` is a FITS header *text* of ~25 eighty-character cards.
+
+**The primitive.** New `Project.iter_frame_columns(*columns, accepted_only=False)` yields just those columns as
+plain tuples, in `iter_frames`' own `id` order — the general form of what v0.471.2 did for the calibration
+signature, and `acquisition_values` is now expressed on it so there is one piece of SQL rather than two.
+Plain tuples rather than this connection's `sqlite3.Row` for the reason `frames_fingerprint` already gives: a
+Row's `repr` is its memory address, and these are values a caller compares, logs and puts in a test. Column
+names are checked against `_FRAME_COLUMNS` before they reach the SQL — they are code-supplied today, but the
+check is free, it is the rule `iter_frames_page` already follows, and a typo becomes a `ValueError` here
+instead of an `OperationalError` from inside a request.
+
+`ORDER BY id` is kept deliberately and is documented as load-bearing: a caller taking a modal value breaks a
+tie on whichever candidate it met first.
+
+**What was deliberately NOT changed, with the numbers — see the lead in `IMPROVEMENTS.md`.** Three more of the
+same page's fetches read the whole target, and each needs an *engine* signature decision rather than a
+router-local edit, so they are filed rather than half-done: `/best-frame` (1,057 ms / **132.4 MB peak**),
+`/stack-health` (1,153 ms / **145.6 MB peak**) and `/reject-summary` (1,594 ms, streaming). The first two
+`list()` the target, so unlike the two fixed here they are memory as well as time — which makes them the
+bigger fish, not the smaller one.
+
+**Pure optimisation.** Identical responses; `iter_frames` untouched. No endpoint, config, schema, on-disk,
+API-shape or default change.
+
+**Tests (+7).** Six in `tests/test_project_acquisition_values.py` over the primitive: equivalence with
+`iter_frames` in both `accepted_only` modes, no `FrameRow` built at all, a bad column name refused (including
+when it hides behind a good one, and with the table proved still there afterwards), an empty `*columns`
+refused rather than emitting `SELECT  FROM`, and the plain-tuple type. Plus one endpoint guard each in
+`tests/webapp/test_api.py` and `tests/webapp/test_target_restack_gain.py` — **both verified fail-before** by
+reverting the two call sites in a scratch copy, where they go red ("built 3 FrameRow objects to read four
+columns" / "…to take two counts") and the other 62 tests in those files stay green. That is the whole reason
+they exist: nothing in either response can see the difference.
+
 ## v0.471.2 — 2026-09-19 — the Stack form and the Calibration page each read every sub of a target to ask six questions about the camera
 
 *(Builder, branch `claude/wizardly-cannon-dnc0vt`. Found by asking v0.471.1's question one endpoint sideways —

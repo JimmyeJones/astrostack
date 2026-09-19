@@ -1276,15 +1276,8 @@ class Project:
         because a rejected sub is not going into the stack a master would be
         applied to, and both callers have always filtered that way.
         """
-        assert self._conn is not None
-        where = " WHERE accept = 1" if accepted_only else ""
-        cols = ", ".join(_ACQUISITION_COLUMNS)
-        # `ORDER BY id` is the order `iter_frames` yields, kept because a modal
-        # value breaks a tie on whichever candidate it met first — so dropping
-        # it could move `modal_dim`'s answer on a target whose subs are evenly
-        # split between two sizes, for no reason a reader could see.
-        rows = self._conn.execute(
-            f"SELECT {cols} FROM frames{where} ORDER BY id").fetchall()
+        rows = list(self.iter_frame_columns(
+            *_ACQUISITION_COLUMNS, accepted_only=accepted_only))
         return AcquisitionValues(
             exposures_s=[r[0] for r in rows],
             gains=[r[1] for r in rows],
@@ -1293,6 +1286,50 @@ class Project:
             heights_px=[r[4] for r in rows],
             bayer_patterns=[r[5] for r in rows],
         )
+
+    def iter_frame_columns(self, *columns: str,
+                           accepted_only: bool = False) -> Iterator[tuple]:
+        """Just *columns* of this target's frames, as plain tuples in ``id``
+        order — the same rows :meth:`iter_frames` yields, without building one.
+
+        The primitive behind :meth:`acquisition_values`, and the answer for any
+        caller that wants a handful of small fields off a **deep** target. A
+        ``FrameRow`` is ``SELECT *``, and the biggest column on a solved sub is
+        its plate solution — ``wcs_json`` is a FITS header *text* of ~25
+        eighty-character cards — so building one to read a timestamp costs far
+        more than the timestamp. Measured on a synthetic project the size of the
+        owner's deepest target (35,894 subs): the Target page's sky-brightness
+        read is **1,074 ms → 322 ms** and its restack-gain read **1,132 ms →
+        370 ms**, for identical answers.
+
+        ``ORDER BY id`` is :meth:`iter_frames`' own order and is kept
+        deliberately: a caller taking a modal value breaks a tie on whichever
+        candidate it met first, so a different order could move its answer for
+        no reason a reader could see. ``accepted_only`` mirrors
+        :meth:`iter_frames` and defaults to ``False``.
+
+        Column names are checked against :data:`_FRAME_COLUMNS` before they
+        reach the SQL. They are code-supplied today rather than user-supplied,
+        but the check is free, it is the rule :meth:`iter_frames_page` already
+        follows, and a typo becomes a :class:`ValueError` here instead of an
+        ``OperationalError`` from inside a request.
+        """
+        assert self._conn is not None
+        if not columns:
+            raise ValueError("iter_frame_columns needs at least one column")
+        for name in columns:
+            if name not in _FRAME_COLUMNS:
+                raise ValueError(f"not a frame column: {name!r}")
+        where = " WHERE accept = 1" if accepted_only else ""
+        cols = ", ".join(columns)
+        # Plain tuples rather than this connection's ``sqlite3.Row``: a Row's
+        # ``repr`` is its memory address, and these are values a caller compares,
+        # logs and puts in a test — the same reason ``frames_fingerprint`` drops
+        # the row factory. The copy is part of what the numbers above were
+        # measured through, so it is already paid for in them.
+        for row in self._conn.execute(
+                f"SELECT {cols} FROM frames{where} ORDER BY id"):
+            yield tuple(row)
 
     def frames_fingerprint(self) -> str:
         """A short hash of the **entire** ``frames`` table — every column of
