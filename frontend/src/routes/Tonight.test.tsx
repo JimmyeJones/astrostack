@@ -266,6 +266,48 @@ describe("TonightView", () => {
     expect(screen.getByText("Needs mosaic")).toBeInTheDocument();
   });
 
+  it("keeps the mosaic-mode nudge on a target you have already started",
+    async () => {
+      // The badge is advice about the *mode the scope is set to*, and the mode
+      // is set before the session — so it matters most on the object the owner
+      // is already shooting. Until the backend carried the verdict onto library
+      // rows it vanished the moment they shot one frame, i.e. before every
+      // session after the first.
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+        targets: [target({
+          id: "M31", name: "Andromeda Galaxy", already_targeted: true,
+          target_safe: "M_31", frames_accepted: 40, total_exposure_s: 1200,
+          score: 70, size_arcmin: 178,
+          framing: { level: "mosaic", text: "is bigger than the Seestar's single frame." },
+          mosaic: { cols: 3, rows: 2, panels: 6, text: "About a 3x2 mosaic (6 panels) covers all of it." },
+        })],
+      }));
+      renderTonight();
+      await waitFor(() =>
+        expect(screen.getByText(/Andromeda Galaxy/)).toBeInTheDocument());
+      expect(screen.getByText("Needs 3×2 mosaic")).toBeInTheDocument();
+    });
+
+  it("says nothing about framing on a target already shot as a mosaic",
+    async () => {
+      // The backend stands the verdict down there (it has answered the
+      // question, and the row has no picture to anchor "not counting what this
+      // already has"), so the row simply carries no framing — the page must not
+      // invent one from the size alone.
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+        targets: [target({
+          id: "M31", name: "Andromeda Galaxy", already_targeted: true,
+          target_safe: "M_31", frames_accepted: 400, total_exposure_s: 12000,
+          score: 70,
+        })],
+      }));
+      renderTonight();
+      await waitFor(() =>
+        expect(screen.getByText(/Andromeda Galaxy/)).toBeInTheDocument());
+      expect(screen.queryByText(/Needs .*mosaic/)).toBeNull();
+      expect(screen.queryByText("Mosaic for margin")).toBeNull();
+    });
+
   it("draws the top of the catalog ranking and puts the rest one tap away, "
     + "removing nothing", async () => {
       // Measured in a real browser at 420 px (2026-09-12, the first dogfood pass

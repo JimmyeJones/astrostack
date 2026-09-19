@@ -183,6 +183,82 @@ def test_tonight_already_targeted_rows_carry_object_type(client, solved_library)
         assert m42_prog["object_type"] == m42["type"]
 
 
+def test_tonight_already_targeted_rows_carry_the_framing_verdict(
+        client, solved_library):
+    """The same regression as the difficulty one below, one field over — and the
+    one that costs a night rather than a badge.
+
+    "Needs 3×3 mosaic" is advice about the **mode the scope is set to**, and it
+    is set before the session. A *catalog* row of M 42 carries it; an
+    already-targeted row did not, so it disappeared the moment the owner shot one
+    frame — i.e. before every session after the first, on the one screen they are
+    reading while pointing. (The Target page says it, but that card is read the
+    morning after, which is the argument `recentre_nudge` is already carried
+    here for.)
+
+    Asserted against the *catalog* verdict for the same object in the same
+    response where there is one, because the claim is that one object gets one
+    answer — and both have to be measured against the same frame field, which the
+    webapp's own `identify_object` call (which passes none) could not have given.
+    """
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert m42["size_arcmin"] and m42["size_arcmin"] > 0
+    assert m42["framing"] is not None
+    # M 42 is ~85' — comfortably bigger than a Seestar frame either way.
+    assert m42["framing"]["level"] == "mosaic"
+    assert m42["mosaic"] is not None and m42["mosaic"]["panels"] >= 2
+
+    # Every catalog row in the same response is judged the same way, so pick one
+    # that is sized and check the pair share a rule rather than a literal.
+    sized = [t for t in body["targets"]
+             if not t["already_targeted"] and t.get("size_arcmin")]
+    assert sized, "the fixture needs at least one sized catalog row"
+    for t in sized:
+        assert (t["framing"] is None) == (t["size_arcmin"] is None)
+
+
+def test_tonight_stands_the_framing_verdict_down_on_a_mosaic_target(
+        client, solved_library, monkeypatch):
+    """A target already being shot as a mosaic has answered "will it fit?", and
+    quoting it the whole grid's cost from scratch is the misreading the Target
+    page's `alreadyAMosaic` clause exists for — which a planner row has no
+    picture to anchor. The stand-down is keyed on the newest stacking run's
+    canvas spanning more sky than one frame, the engine's own mosaic test."""
+    from webapp.routers import plan as plan_router
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    # A 2x2-ish canvas on every target, which is what `target_field_fulls`
+    # answers for a target whose newest stack is a mosaic.
+    monkeypatch.setattr(plan_router, "_annotate_library_targets",
+                        _mosaic_canvas(plan_router._annotate_library_targets))
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert m42["framing"] is None and m42["mosaic"] is None
+    assert m42["size_arcmin"] is None
+    # Nothing else about the row moved.
+    assert m42["type"] == "nebula" and m42["difficulty"] is not None
+
+
+def _mosaic_canvas(real):
+    """Wrap `_annotate_library_targets` so every row reports a mosaic canvas.
+
+    Cheaper and more honest than faking a 2x2 stack on disk: what is under test
+    is what the planner does with the flag, and the flag's own derivation from
+    `target_field_fulls` is covered where that function is.
+    """
+    import dataclasses
+
+    def wrapped(*args, **kwargs):
+        return [dataclasses.replace(t, canvas_is_mosaic=True)
+                for t in real(*args, **kwargs)]
+
+    return wrapped
+
+
 def test_tonight_already_targeted_rows_carry_the_difficulty_verdict(
         client, solved_library):
     """The same shape of regression as the object type above, on the other input
