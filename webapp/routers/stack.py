@@ -4018,6 +4018,15 @@ def _uncalibrated_advice(request: Request, safe: str) -> str | None:
     gap is actually noticed (looking at the picture), instead of only on the
     Calibration page the owner has no reason to visit. The folder walk is the
     shared, cached one, and only runs when there is no master-derived advice.
+
+    The acquisition numbers are read as **columns**, never as frames
+    (:meth:`~seestack.io.project.Project.acquisition_values`), for the reason
+    ``/calibration-suggestions`` reads them that way: this hangs off the run-info
+    read a beginner opens beside every picture, and a ``FrameRow`` carries the
+    sub's plate solution — the biggest field on the row and one nothing here
+    looks at. Measured on a synthetic project the size of the owner's deepest
+    target (35,894 subs): **1,525 ms / 128.3 MB peak against 513 ms / 11.7 MB**,
+    identical values.
     """
     from seestack.calibrate.apply import dominant_gain
     from webapp import calibration
@@ -4026,22 +4035,22 @@ def _uncalibrated_advice(request: Request, safe: str) -> str | None:
         settings = deps.get_settings(request)
         lib, proj = deps.open_target_project(request, safe)
         try:
-            frames = list(proj.iter_frames(accepted_only=True))
+            acq = proj.acquisition_values()
         finally:
             proj.close()
             lib.close()
-        exposure_s = _median([f.exposure_s for f in frames if f.exposure_s])
+        exposure_s = _median([e for e in acq.exposures_s if e])
         # The gain the most subs were shot at, not their median — the same
         # matcher (`_match_distance` and its confidence gates) the binder and the
         # Stack form ask, so the "why isn't this calibrated?" advice and the
         # stack that would be calibrated cannot judge one target's masters
         # against two different gains. A gain is a discrete setting: a target
         # shot at 80 and 200 has a median of 140, which no master can match.
-        gain = dominant_gain([f.gain for f in frames])
+        gain = dominant_gain(acq.gains)
         sensor_temp_c = _median(
-            [f.sensor_temp_c for f in frames if f.sensor_temp_c is not None])
-        width_px = calibration.modal_dim([f.width_px for f in frames])
-        height_px = calibration.modal_dim([f.height_px for f in frames])
+            [t for t in acq.sensor_temps_c if t is not None])
+        width_px = calibration.modal_dim(acq.widths_px)
+        height_px = calibration.modal_dim(acq.heights_px)
         masters = calibration.list_masters(settings.resolved_library_root)
         advice = calibration.diagnose_uncalibrated(
             masters, exposure_s=exposure_s, gain=gain, sensor_temp_c=sensor_temp_c,

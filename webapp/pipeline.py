@@ -18,7 +18,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from seestack.io.library import Library
-from seestack.io.project import count_unreadable_frames, readable_frame_path
+from seestack.io.project import (
+    count_unreadable_frames,
+    first_existing_frame_path,
+)
 from seestack.io.scanner import ScanResult, run_qc_and_solve, scan_and_organize
 from seestack.render.thumbnail import invalidate_frame_thumbs
 from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
@@ -2738,7 +2741,18 @@ def submit_channel_combine(
 
 
 def _solved_accepted_count(proj: Any) -> int:
-    return sum(1 for f in proj.iter_frames(accepted_only=True) if f.wcs_json)
+    """How many of a target's subs a stack would actually combine.
+
+    A ``COUNT``, not a read (:meth:`~seestack.io.project.Project.count_accepted_solved`).
+    The scan loop asks this of **every target on every poll** — once through
+    :func:`_auto_stack_frame_count`, and again through each of the two rechecks
+    behind it — and counting the rows meant building a ``FrameRow`` per accepted
+    sub, whose biggest field is the very plate solution this question only asks
+    the *existence* of. Measured on a synthetic project the size of the owner's
+    deepest target (35,894 subs): **935 ms → 54 ms**, same number. The SQL spells
+    out the empty-string case so it stays the engine's own ``if f.wcs_json``.
+    """
+    return proj.count_accepted_solved()
 
 
 def _solved_accepted_unreadable(proj: Any) -> int:
@@ -2766,9 +2780,10 @@ def _detect_mixed_pointings(proj: Any) -> MixedPointings | None:
     and clusters their pointings — see :mod:`seestack.stack.pointings`.
     """
     radecs = [
-        (f.ra_center_deg, f.dec_center_deg)
-        for f in proj.iter_frames(accepted_only=True)
-        if f.wcs_json
+        (ra, dec)
+        for ra, dec, wcs in proj.iter_frame_columns(
+            "ra_center_deg", "dec_center_deg", "wcs_json", accepted_only=True)
+        if wcs
     ]
     return detect_mixed_pointings(radecs)
 
@@ -2805,9 +2820,11 @@ def _auto_stack_panel_depth(
     proj = lib.open_target(safe)
     try:
         radecs = [
-            (f.ra_center_deg, f.dec_center_deg)
-            for f in proj.iter_frames(accepted_only=True)
-            if f.wcs_json
+            (ra, dec)
+            for ra, dec, wcs in proj.iter_frame_columns(
+                "ra_center_deg", "dec_center_deg", "wcs_json",
+                accepted_only=True)
+            if wcs
         ]
     finally:
         proj.close()
@@ -2992,13 +3009,18 @@ def _auto_stack_readability_hold(
     try:
         unreadable = 0
         readable_radecs: list[tuple[float | None, float | None]] = []
-        for f in proj.iter_frames(accepted_only=True):
-            if not f.wcs_json:
+        # Five columns, not frames: this runs per target per scan for every
+        # target that is otherwise about to stack, and a `FrameRow` would carry
+        # each sub's plate-solve header along to answer "is there one?".
+        for cached, source, wcs, ra, dec in proj.iter_frame_columns(
+                "cached_path", "source_path", "wcs_json",
+                "ra_center_deg", "dec_center_deg", accepted_only=True):
+            if not wcs:
                 continue
-            if readable_frame_path(f) is None:
+            if first_existing_frame_path(cached, source) is None:
                 unreadable += 1
             else:
-                readable_radecs.append((f.ra_center_deg, f.dec_center_deg))
+                readable_radecs.append((ra, dec))
         if unreadable <= 0:
             return None
         readable = max(0, offered - unreadable)
@@ -3362,12 +3384,25 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
     and the median are the same number. The *temperature* deliberately stays a
     median: unlike a gain it is continuous and drifts through a night, so a value
     between two nights' readings is a temperature the sensor really passed
-    through rather than a setting it was never at."""
+    through rather than a setting it was never at.
+
+    The six values are read as **six columns**, never as frames
+    (:meth:`~seestack.io.project.Project.acquisition_values`). This is the
+    *unattended* half of the question ``/calibration-suggestions`` asks on the
+    Stack form, and v0.471.2 moved that one off whole rows for the same reason:
+    a ``FrameRow`` is ``SELECT *`` and the biggest column on a solved sub is its
+    plate solution, which nothing here reads. It matters more on this side —
+    the answer is computed in the job worker with a stack about to allocate its
+    canvases, on a box with an OOM history (AGENTS.md §10), and again per target
+    per scan by :func:`_auto_stack_calibration_recheck`. Measured on a synthetic
+    project the size of the owner's deepest target (35,894 subs, ~2 kB of
+    ``wcs_json`` each): **1,525 ms / 128.3 MB peak against 513 ms / 11.7 MB**,
+    for bit-identical arguments."""
     from seestack.calibrate.apply import distinct_exposures, dominant_gain
     from webapp import calibration
 
-    frames = list(proj.iter_frames(accepted_only=True))
-    if not frames:
+    acq = proj.acquisition_values()
+    if not acq.n_frames:
         return {}
 
     def _med(vals: list[Any]) -> float | None:
@@ -3380,13 +3415,13 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
     masters = calibration.list_masters(settings.resolved_library_root)
     return calibration.auto_bind_master_paths(
         settings.resolved_library_root, masters,
-        exposure_s=_med([f.exposure_s for f in frames]),
-        light_exposures_s=distinct_exposures([f.exposure_s for f in frames]),
-        gain=dominant_gain([f.gain for f in frames]),
-        sensor_temp_c=_med([f.sensor_temp_c for f in frames]),
-        width_px=calibration.modal_dim([f.width_px for f in frames]),
-        height_px=calibration.modal_dim([f.height_px for f in frames]),
-        bayer_pattern=calibration.modal_bayer([f.bayer_pattern for f in frames]),
+        exposure_s=_med(acq.exposures_s),
+        light_exposures_s=distinct_exposures(acq.exposures_s),
+        gain=dominant_gain(acq.gains),
+        sensor_temp_c=_med(acq.sensor_temps_c),
+        width_px=calibration.modal_dim(acq.widths_px),
+        height_px=calibration.modal_dim(acq.heights_px),
+        bayer_pattern=calibration.modal_bayer(acq.bayer_patterns),
     )
 
 
@@ -3469,20 +3504,29 @@ def _apply_saved_calibration_masters(
     cfa: str | None | object = _UNREAD
 
     def _sub_dims() -> tuple[int | None, int | None]:
-        """The subs' modal raw dimensions, read once and only when needed."""
+        """The subs' modal raw dimensions, read once and only when needed.
+
+        Two columns, not frames: the same reason
+        :func:`_confident_master_binding` reads columns — this runs in the job
+        worker on the walk-away path, and a ``FrameRow`` would carry every sub's
+        plate solution along to answer "how wide?"."""
         nonlocal dims
         if dims is None:
-            frames = list(proj.iter_frames(accepted_only=True))
-            dims = (calibration.modal_dim([f.width_px for f in frames]),
-                    calibration.modal_dim([f.height_px for f in frames]))
+            rows = list(proj.iter_frame_columns("width_px", "height_px",
+                                                accepted_only=True))
+            dims = (calibration.modal_dim([r[0] for r in rows]),
+                    calibration.modal_dim([r[1] for r in rows]))
         return dims
 
     def _sub_bayer() -> str | None:
-        """The subs' modal colour-filter phase, read once and only when needed."""
+        """The subs' modal colour-filter phase, read once and only when needed.
+
+        One column, for the reason :func:`_sub_dims` gives."""
         nonlocal cfa
         if cfa is _UNREAD:
-            frames = list(proj.iter_frames(accepted_only=True))
-            cfa = calibration.modal_bayer([f.bayer_pattern for f in frames])
+            cfa = calibration.modal_bayer(
+                [r[0] for r in proj.iter_frame_columns("bayer_pattern",
+                                                       accepted_only=True)])
         return cfa  # type: ignore[return-value]
 
     def _dims_conflict(entry: dict[str, Any]) -> bool:

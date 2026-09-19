@@ -1,5 +1,80 @@
 # Process notes & QA sweep records
 
+## 2026-09-19 — Builder: the same class asked of the *unattended* half, and a mechanically-CLEAN sweep whose finding was a badge that was missing (v0.471.6 / v0.471.7 / v0.472.0)
+
+*(Builder, branch `claude/wizardly-cannon-fgcbme`. Baseline `6532 passed, 2 skipped` in 11m38s with
+`-n 4 --dist worksteal` + the BLAS cap; `6539` after v0.471.7.)*
+
+**Triage, so the next run does not repeat it.** "Bugs (fix these first)" still holds no buildable entry —
+every open item there is a lead gated on a measurement of the owner's own library, a piece already routed to
+owner sign-off, or a Builder verification saying the named slice is already in the code. Every `READY`
+marker in `IMPROVEMENTS.md` is on a shipped item. That is now three consecutive runs recording the same
+finding.
+
+**Where two of this run's three commits came from: asking the last run's question of the other half of the
+app.** v0.471.1–.5 moved five *endpoints* off whole-row reads. The same question has a second population
+nobody had asked it of — **the unattended path** — and it is the half where the answer matters more,
+because it runs in the job worker with a stack about to allocate its canvases (AGENTS.md §10, this box has
+an OOM history) and it runs *per target per poll* rather than per click.
+
+* **v0.471.6** — three more callers ask "which master fits these subs?": `_confident_master_binding` (the
+  walk-away binder), `_apply_saved_calibration_masters`' two lazy reads, and `_uncalibrated_advice`.
+  `Project.acquisition_values` had existed for them since v0.471.2. **1,525 ms / 128.3 MB → 513 ms /
+  11.7 MB.**
+* **v0.471.7** — the scan's *stack decision* built a `FrameRow` per accepted sub up to six times per target
+  per poll, to take a count and read two coordinates. **935 ms → 54 ms** (count) and **993 ms → 254 ms**
+  (pointings).
+
+**The lever that found v0.471.7, stated so it can be reused: a docstring that promises a cost is a test of
+the lines beneath it.** `_auto_stack_degraded_recheck` says a healthy, up-to-date target "pays nothing but a
+couple of DB reads". Reading that sentence against the code is the whole finding — the reads were
+`SELECT *`. This is the same lever that produced v0.469.2, and it is cheaper than any sweep.
+
+**A caution for anyone continuing the family.** `webapp/routers/plan.py` and
+`seestack/io/library._refresh_target_stats_locked` still read whole rows (the latter twice: an exposure sum
+and `_median_radec`), and `_solved_accepted_unreadable` does too. The first two are *not* the poll path —
+`refresh_target_stats` runs only for targets the scan **touched** — and the third is dominated by its
+`stat()` per frame, not by the row building. So they are a deliberate stop, not an oversight. The measured
+lead in `IMPROVEMENTS.md` already says the general rule: **check whether the caller materialises the set at
+all; if it streams, the projection is a few per cent.**
+
+**And two test fakes became real targets, which is the durable half of v0.471.6.**
+`tests/webapp/test_calibration.py` had hand-rolled stand-ins exposing only `iter_frames`. That is exactly
+the shape that keeps passing while the code under test moves to a read the real class offers and the fake
+does not — i.e. a fixture that cannot exhibit its own bug, the class the fourth external audit filed. They
+are one `_proj_with_frames(tmp_path, …)` building an actual `Project` now.
+
+**DOGFOOD `scripts/agent-dogfood.sh --mosaic --calibration` at v0.471.7 — mechanically CLEAN, and the run's
+third commit was in the block it prints.** Nothing overflowing, no console errors, on the single field and
+the 2×2. Auto's trim on the 2×2 is **7.9 %**, well under the ~15 % that would be D1-shaped. The calibrated
+branch ran end to end and is worth recording as an independent check on v0.471.6: the app discovered the
+seeded darks and flats, built both masters, `auto_bind_calibration` bound `{dark_master_id: 1,
+flat_master_id: 2}`, the run applied them, and the health card said *"a solid stack — calibrated (dark+flat),
+round stars"*. The binder's answer did not move.
+Page heights, unchanged within noise from the last two recorded passes, so **no IA slice is indicated**:
+`/tonight` 3,694 px phone (tallest), the mosaic Target page 3,673 px, `/glossary` 3,364 px, `/` 3,095 px.
+
+**What was NOT clean was the paragraph, and it needed two screens rather than one.** The Target page's four
+cards agree with each other, and the Tonight column has only one card speaking on this fixture — so the
+per-screen reading the §7 instruction asks for comes back clean. The contradiction is *between* them:
+
+> `/tonight`: **"Tonight · Sample: Orion Nebula (M42) · 02:57–04:20 · 87 min"**
+> `/targets/Sample_Orion_Nebula_M42`: **"it's bigger than one frame, so more time can't bring the rest in.
+> Shooting it in mosaic mode next session is the biggest win here."**
+
+The planner's own table has a badge for exactly that — and it was not on the row, because `framing` was a
+catalog-rows-only field. Shipped as **v0.472.0**. The generalisation worth keeping: **the dogfood block
+prints one screen at a time, and this app's prescriptive surfaces are spread over two.** When the Target
+page tells you what to do with a picture and `/tonight` tells you what to point at, the pair is the unit to
+read — and the tell is a *prescription on one screen that the other screen has a control for and is not
+using.*
+
+**And the fix's own trap, recorded because it nearly shipped.** The obvious implementation carries
+`info.framing` from `_annotate_library_targets`' existing `identify_object` call. That call passes **no
+frame field**, while every catalog row on the same table is judged against the owner's measured one — so it
+would have put two rules on one table and opened a fresh contradiction while closing this one. Carry the
+**size**, compute the verdict where the field lives.
+
 ## 2026-09-19 — Builder: two CLEAN dogfood sweeps, and the measurement that reshaped a lead (v0.471.4 / v0.471.5)
 
 *(Builder, branch `claude/wizardly-cannon-nc6rhy`. Baseline `6511 passed, 2 skipped` in 11m38s with

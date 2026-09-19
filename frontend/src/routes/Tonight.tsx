@@ -66,9 +66,13 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
         t.difficulty,
       )
     : null;
-  // Pre-capture "will it fit?" nudge for a catalog candidate that's bigger than
-  // (or as wide as) a single Seestar frame — so a beginner reaches for mosaic
-  // mode before pointing. Only the too-big cases badge; "fits" stays silent.
+  // "Will it fit?" nudge for a target that's bigger than (or as wide as) a
+  // single Seestar frame — so a beginner reaches for mosaic mode before
+  // pointing. Only the too-big cases badge; "fits" stays silent. On rows the
+  // owner has *already started* too: the mode is set before the session, so the
+  // advice is worth most on the object they are going back to. (The backend
+  // stands it down on a target already being shot as a mosaic, which has
+  // answered the question — see `LibraryTarget.canvas_is_mosaic`.)
   // …and, on hover, roughly how many clear nights all those panels would take at
   // this owner's own measured pace — the question a beginner actually asks next.
   // Silent for an owner with no pace history yet, and on an older backend.
@@ -76,7 +80,8 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
     framingRowBadge(t.framing, t.mosaic), t.mosaic, t.type, usualPaceS,
     t.difficulty);
   // "How hard for a Seestar?" so a beginner sees difficulty while choosing, not
-  // only after shooting. Catalog rows only; library/un-vetted rows carry none.
+  // only after shooting. On every row the bundled catalog has a verdict for,
+  // already-shot ones included; un-vetted objects carry none.
   const difficultyBadge = difficultyRowBadge(t.difficulty);
   // "Nudge 1.0° south" — how this target's *last* picture was framed, said here
   // because this is the screen you read while pointing the scope. The finished
