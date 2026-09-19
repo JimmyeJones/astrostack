@@ -23,8 +23,18 @@ from dataclasses import dataclass
 from typing import Iterable
 
 from seestack.bg.coverage_leveling import SEAM_ESTIMATOR_GENERATION
-from seestack.io.project import FrameRow, StackRunRow
+from seestack.io.project import FrameHealth, FrameRow, StackRunRow
 from seestack.session_recap import bucket_reject_reason
+
+#: A sub, as this module grades one. Either a whole :class:`FrameRow` or the
+#: narrow :class:`FrameHealth` the webapp reads for a *deep* target, where 35,894
+#: rows each holding their own plate solution is almost all of what the read
+#: costs (:meth:`seestack.io.project.Project.iter_health_frames`). Nothing here
+#: reads a field the two do not share, and ``solved`` — the one fact a
+#: ``FrameRow`` derives on demand and a ``FrameHealth`` derived once at read
+#: time — is the same ``bool`` of the same value either way, so the choice of
+#: record cannot move an answer.
+GradedFrame = FrameRow | FrameHealth
 
 # Median eccentricity (0 = round, →1 = elongated) at/above which stars read as
 # visibly stretched. QC grades eccentricity *relatively* (percentile), so there's
@@ -764,7 +774,7 @@ class DarkSpec:
     gains: tuple[float, ...] = ()
 
 
-def recommended_dark_spec(frames: Iterable[FrameRow]) -> DarkSpec:
+def recommended_dark_spec(frames: Iterable[GradedFrame]) -> DarkSpec:
     """The exposure and gain to shoot darks at, read from the target's own subs.
 
     Darks must match the lights' exposure and gain to subtract correctly, so we
@@ -813,13 +823,13 @@ def recommended_dark_spec(frames: Iterable[FrameRow]) -> DarkSpec:
     )
 
 
-def _median_eccentricity(accepted: list[FrameRow]) -> float | None:
+def _median_eccentricity(accepted: list[GradedFrame]) -> float | None:
     vals = [f.eccentricity_median for f in accepted
             if f.eccentricity_median is not None]
     return statistics.median(vals) if vals else None
 
 
-def _median_sub_fwhm(accepted: list[FrameRow]) -> float | None:
+def _median_sub_fwhm(accepted: list[GradedFrame]) -> float | None:
     """Median measured star size (FWHM, native-frame px) across the accepted
     subs, or ``None`` when too few recorded one. The per-target anchor the
     stack's own ``stack_fwhm_px`` is compared against for the soft-stars note."""
@@ -830,7 +840,7 @@ def _median_sub_fwhm(accepted: list[FrameRow]) -> float | None:
     return statistics.median(vals)
 
 
-def _typical_sub_exposure(accepted: list[FrameRow]) -> float | None:
+def _typical_sub_exposure(accepted: list[GradedFrame]) -> float | None:
     """The recorded sub exposure, in seconds, that stands for the accepted subs —
     or ``None`` when not one of them recorded it.
 
@@ -864,7 +874,7 @@ def _typical_sub_exposure(accepted: list[FrameRow]) -> float | None:
     return typical_exposure_s(f.exposure_s for f in accepted)
 
 
-def _solve_was_tried(frame: FrameRow) -> bool:
+def _solve_was_tried(frame: GradedFrame) -> bool:
     """Whether plate-solve has actually **run** on an unlocated frame.
 
     A failed solve leaves ``reject_reason='solve_failed:…'`` and does *not* touch
@@ -883,7 +893,7 @@ def _solve_was_tried(frame: FrameRow) -> bool:
     return (frame.reject_reason or "").startswith("solve_failed:")
 
 
-def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
+def stack_health(run: StackRunRow, frames: Iterable[GradedFrame],
                  noise_ratio: float | None = None,
                  noise_crop_depth: int | None = None) -> list[HealthNote]:
     """Return a ranked list of plain-language health notes for ``run``.
@@ -925,8 +935,8 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # healthy night — 84 of 120 "couldn't be located", pointing at a setup problem
     # that does not exist, for as long as the solve takes. On the owner's install
     # that is a night of several hundred new subs.
-    located = [f for f in accepted if f.wcs_json]
-    failed = [f for f in accepted if not f.wcs_json and _solve_was_tried(f)]
+    located = [f for f in accepted if f.solved]
+    failed = [f for f in accepted if not f.solved and _solve_was_tried(f)]
     n_loc = len(located)
     n_failed = len(failed)
     n_tried = n_loc + n_failed

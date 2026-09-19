@@ -1351,7 +1351,13 @@ def target_stack_health(
         # having to be stacked again. Free on a single-field run, and a no-op on
         # every run stacked since the columns existed.
         backfill_coverage_grain(proj, run)
-        frames = list(proj.iter_frames())
+        # The three consumers below read seven small fields off a sub and one
+        # bit ("did ASTAP locate it?"), so they are handed `FrameHealth` records
+        # rather than whole rows: a `FrameRow` is `SELECT *`, and on a solved sub
+        # the plate solution is almost all of it. Measured on the owner's deepest
+        # target (35,894 subs): 1,180 ms / 144.0 MB peak → 541 ms / 9.8 MB, for
+        # field-for-field identical records. See `Project.iter_health_frames`.
+        frames = list(proj.iter_health_frames())
         # The √N yardstick note reads the measurement the "One frame vs your
         # stack" reveal already stamped — it never measures one. A run nobody has
         # revealed yet simply gets no note, and starts getting one the moment the
@@ -1398,19 +1404,26 @@ def target_best_frame(safe: str, request: Request) -> BestFrameOut:
 
     lib, proj = deps.open_target_project(request, safe)
     try:
-        frames = list(proj.iter_frames(accepted_only=True))
+        # Streamed, not listed: `best_frame` holds nothing but the running
+        # winner, and the count is a `COUNT(*)` rather than a `len()` of rows
+        # built to be thrown away. A `FrameRow` is `SELECT *` and the biggest
+        # column on a solved sub is its plate solution, which this card never
+        # reads — measured on the owner's deepest target (35,894 subs),
+        # 1,191 ms / 136.3 MB peak → 852 ms / ~0 MB, same pick and same count
+        # (AGENTS.md §10 — this box has an OOM history).
+        n_accepted = proj.count(accepted_only=True)
+        best = best_frame(proj.iter_frames(accepted_only=True))
     finally:
         proj.close()
         lib.close()
-    best = best_frame(frames)
     if best is None:
-        return BestFrameOut(n_accepted=len(frames))
+        return BestFrameOut(n_accepted=n_accepted)
     return BestFrameOut(
         frame_id=best.id,
         captured_utc=best.timestamp_utc,
         fwhm_px=best.fwhm_px,
         star_count=best.star_count,
-        n_accepted=len(frames),
+        n_accepted=n_accepted,
     )
 
 

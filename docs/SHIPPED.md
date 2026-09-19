@@ -1,5 +1,132 @@
 # Shipped — the record
 
+## v0.471.5 — 2026-09-19 — the "First look" card built a frame object per accepted sub to read four fields off one of them
+
+*(Builder, branch `claude/wizardly-cannon-nc6rhy`, the same run as v0.471.4. Closes shape **(b)** of the
+measured Target-page LEAD — and closes it in a shape the lead had ruled out, because v0.471.4's measurement
+had just moved the ground under it.)*
+
+**What the lead expected, and why it was wrong.** Its words: *"`best_frame` returns the frame, and its caller
+reads four fields off the returned one — so a narrow projection means either returning a tuple (and changing
+every caller) or keeping the id and re-reading that one row, which is one extra query against 132 MB."* Both
+horns of that assume the lever is **what is read**. v0.471.4 measured, on the sibling endpoint, that it is
+not: these reads **stream**, so at most one row is alive at a time and the cost is what the caller **keeps**.
+
+And `best_frame` is a `min()` — it keeps exactly one frame. So there was nothing to project. The 135 MB was
+two lists, both incidental:
+
+1. the endpoint's own `list(proj.iter_frames(accepted_only=True))`, kept only so `len()` could give
+   `n_accepted`; and
+2. the function's internal `eligible = [...]` filter list, which on a streamed input holds every candidate
+   row alive to the end.
+
+**What shipped.**
+
+- `seestack/qc/grading.best_frame` takes an `Iterable[FrameRow]` and streams a running minimum instead of
+  filtering into a list. The comparison is strict `<`, which is what keeps the **first** frame at a winning
+  key — exactly what `min()` did, and the only thing separating two rows that tie on all three terms.
+- `webapp/routers/targets.target_best_frame` hands over `proj.iter_frames(accepted_only=True)` itself, inside
+  the project's own `try`, and takes `n_accepted` from `Project.count(accepted_only=True)` — a `COUNT(*)`
+  instead of a `len()` of rows built to be discarded.
+
+Measured on a synthetic project the size of the owner's deepest target (35,894 subs, ~2 kB of `wcs_json`
+each, best of 3):
+
+| | before | after |
+|---|---|---|
+| time | 1,181 ms | **858 ms** |
+| peak allocation | **135.3 MB** | **~0 MB** |
+
+Same pick, same count. `best_frame` still returns a `FrameRow`, so **no caller changed** and no record type
+was needed — the narrower signature (`list` → `Iterable`) is a widening, and a list still works exactly as
+before.
+
+**What this says about shape (a), the one still open.** `count_unreadable_frames` already streams and peaks
+at ~0, and the 1,594 ms the lead measured is against a fixture where **no file exists** — two `stat()`s per
+frame that a healthy install does not pay (the endpoint's own comment records 44 ms per 5,000 present files).
+So a projection there buys the row building only, on the one entry in the table with nothing to retain. Noted
+in the backlog as probably not worth a slot.
+
+**Upgrade-safe (§9).** Pure optimisation: no endpoint, response shape, config, DB schema, on-disk path or
+default changed; nothing removed.
+
+**Tests (+5).** `tests/test_qc_grading.py` (+3): the streamed read holds only the winner — bounded against the
+same rows in a list rather than an absolute figure, and **failing before** (scratch revert, run); a one-shot
+iterator is consumed exactly once and left exhausted; and the first frame at a winning key wins, asserted both
+ways round. `tests/webapp/test_target_best_frame.py` (+2): the endpoint hands `best_frame` something that is
+not a `list` or `tuple` — structural, because what the endpoint passes is the whole question — **failing
+before**; and `n_accepted` pinned against the accepted rows themselves, on a fixture carrying a rejected sub
+so "all frames" and "accepted frames" are different answers.
+
+## v0.471.4 — 2026-09-19 — the "How's my stack?" card read 35,894 whole frame rows to ask seven small questions and one bit
+
+*(Builder, branch `claude/wizardly-cannon-nc6rhy`. Closes shape **(c)** — the biggest one — of the measured
+LEAD filed with v0.471.2/.3, which deliberately left the three readers that hand their frames to **engine**
+functions rather than building their own small objects in the router.)*
+
+**What it cost.** `GET /api/targets/{safe}/stack-health` does `list(proj.iter_frames())` and hands that list to
+three functions: `stackhealth.stack_health`, `stackhealth.recommended_dark_spec`, and — through
+`routers/stack.stamped_noise_measurement` — `reference_sub_from_frames`. A `FrameRow` is `SELECT *`, and the
+biggest column on a solved sub is its plate solution (`wcs_json`, a FITS header *text* of ~25 eighty-character
+cards). Measured on a synthetic project the size of the owner's deepest target (35,894 subs, ~2 kB of
+`wcs_json` each, best of 3 on this box):
+
+| | before | after |
+|---|---|---|
+| time | 1,180 ms | **541 ms** |
+| peak allocation | **144.0 MB** | **9.8 MB** |
+
+Memory is the point rather than the milliseconds (AGENTS.md §10 — this box has an OOM history), and the card
+sits on the page the owner opens most.
+
+**The decision the lead asked for, made rather than dodged.** Its words were *"`stack_health` is the big one
+and should not be attempted without deciding what a 'frame' means to it first"*. Answered by enumerating every
+attribute the three functions touch, not by guessing: `accept`, `reject_reason`, `fwhm_px`,
+`eccentricity_median`, `exposure_s`, `gain`, `id` — **seven small fields** — and `wcs_json`, which is asked
+only *"is it there?"*, i.e. **one bit**. Seven of thirty-six fields, and the thirty-seventh thing is a boolean
+over the largest column.
+
+So the shape is a **record**, not a tuple and not a changed signature:
+
+- `seestack/io/project.py` gains `FrameHealth` (frozen, eight fields) and
+  `Project.iter_health_frames(*, accepted_only=False)`, expressed on the existing
+  `iter_frame_columns` primitive v0.471.3 introduced — so there is still one piece of SQL behind every narrow
+  frame read, and `_HEALTH_COLUMNS` sits beside `_ACQUISITION_COLUMNS` as the same kind of statement.
+- `FrameRow.solved` is a new **property** (`bool(self.wcs_json)`) so the one derived bit has a **single
+  definition** rather than a copy of the rule at each reader. `FrameHealth.solved` is that same `bool` of that
+  same value, kept while the header it came from is let go.
+- `stackhealth` takes a named `GradedFrame = FrameRow | FrameHealth` union and reads `f.solved` in place of
+  `f.wcs_json`. **Every existing caller still passes whole rows and is unaffected** — the change is additive
+  in both directions.
+
+**What the build measured that the lead had assumed — read this before picking shape (a) or (b).** The first
+implementation answered the bit in SQL (`(wcs_json IS NOT NULL AND wcs_json <> '')`, behind a small
+`_FRAME_EXPRESSIONS` facility on `iter_frame_columns`), on the reasoning that reading a 2 kB header to test
+whether it is there defeats the purpose of a narrow read. **That reasoning is wrong, and the machinery was
+removed before it shipped.** The read *streams*, so at most one header is alive at a time: measured
+**269 ms against 256 ms, with the same peak**. The 144 MB was never the *reading* — it was the **retaining**,
+35,894 rows each holding their own header, all at once. Two consequences worth carrying forward: the lever on
+this family of endpoints is **what the caller keeps**, not what the `SELECT` names; and a narrow projection
+buys nothing where the caller already streams, which is exactly what the lead records about `reject-summary`
+(shape (a), whose `count_unreadable_frames` streams and peaks at ~0). Removing it also made the "one
+definition" claim *stronger*: both spellings of `solved` are now literally `bool()` of the same value, rather
+than a SQL string that has to be argued equivalent to one.
+
+**Upgrade-safe (§9).** Pure optimisation: no endpoint, response shape, config, DB schema, on-disk path or
+default changed; nothing removed; `StackOptions` untouched. The new record, method and property are additive.
+
+**Tests (+16).** New `tests/test_project_health_frames.py` (11): equivalence with the row read field-by-field
+in both `accepted_only` modes, `id` order, **no `FrameRow` built** (fails on a whole-row implementation —
+verified by scratch revert), the retained-memory property measured against the row read on the same frames,
+an empty target, the four `solved` cases pinned across *both* spellings (including the empty string, the one
+value where "is the column there?" and "did it locate?" differ), and the column list against the record's
+fields so a positional unpack cannot drift. `tests/test_stackhealth.py` (+4): the notes, the darks guide, the
+located **count** in its sentence, and the blank-WCS case, each asserted identical whichever record the subs
+arrive as — against the real functions rather than against a list of the fields they read, because that list
+is what goes stale when a note starts reading an eighth one.
+`tests/webapp/test_target_stack_health.py` (+1): the endpoint builds no `FrameRow`, **fails before** (scratch
+revert, run).
+
 ## v0.471.3 — 2026-09-19 — two more Target-page fetches were building 35,894 frame objects to read four fields and one
 
 *(Builder, branch `claude/wizardly-cannon-dnc0vt`, the same run as v0.471.2 and the same question: what else
