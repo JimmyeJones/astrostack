@@ -725,11 +725,18 @@ class DarkSpec:
     first. A target is one *folder*, never one exposure, so a median is a claim
     about uniformity that nothing in the data enforces — and this guide's whole
     sentence is "at the same settings as your subs", which a median between two
-    lengths is not. Empty when nothing recorded an exposure."""
+    lengths is not. Empty when nothing recorded an exposure.
+
+    ``gains`` is the same set for the other half of that sentence, lowest first,
+    and ``gain`` is the setting the **most** subs were shot at rather than their
+    median — because a gain is a *discrete setting* the camera was physically at,
+    so the midpoint of two of them is a number no dark can be dialled to. Empty
+    when nothing recorded a gain."""
 
     exposure_s: float | None
     gain: float | None
     exposures_s: tuple[float, ...] = ()
+    gains: tuple[float, ...] = ()
 
 
 def recommended_dark_spec(frames: Iterable[FrameRow]) -> DarkSpec:
@@ -741,16 +748,33 @@ def recommended_dark_spec(frames: Iterable[FrameRow]) -> DarkSpec:
     ``DarkSpec`` whose fields are ``None`` when no accepted frame recorded them,
     so the caller can degrade to generic wording instead of inventing a value.
 
-    The median is kept (every existing reader gates on it), and the **distinct**
-    lengths travel beside it, grouped by :func:`seestack.calibrate.apply.
-    distinct_exposures` — the same grouping the finished run's dark advisory and
-    the Calibration page's coverage roll-up use, so the three cannot disagree
-    about how many exposures a target has. It matters here because a Seestar
-    owner changes sub length between nights as a matter of course, and a target
-    shot at 10 s and 30 s has a median of **20 s**: a length none of their subs
-    was shot at, offered under the words "the same settings as your subs".
+    The median exposure is kept (every existing reader gates on it), and the
+    **distinct** lengths travel beside it, grouped by
+    :func:`seestack.calibrate.apply.distinct_exposures` — the same grouping the
+    finished run's dark advisory and the Calibration page's coverage roll-up use,
+    so the three cannot disagree about how many exposures a target has. It
+    matters here because a Seestar owner changes sub length between nights as a
+    matter of course, and a target shot at 10 s and 30 s has a median of **20 s**:
+    a length none of their subs was shot at, offered under the words "the same
+    settings as your subs".
+
+    **The gain is the same argument, and it used to be made only for the
+    exposure.** The paragraph above is true of a gain too — more sharply, because
+    a gain is a *discrete setting* rather than a quantity: a target shot at gain
+    80 and gain 200 has a median of **140**, which is not merely a value none of
+    the subs carry but one the camera cannot be dialled to, printed under
+    "shoot darks at the same settings as your subs". So the reported ``gain`` is
+    :func:`~seestack.calibrate.apply.dominant_gain` — the setting the most subs
+    were actually shot at, which is the same number the median was on every
+    single-gain target — and the distinct settings travel beside it via
+    ``distinct_gains``, so the guide can ask for a set per gain the way it
+    already asks for a set per length.
     """
-    from seestack.calibrate.apply import distinct_exposures
+    from seestack.calibrate.apply import (
+        distinct_exposures,
+        distinct_gains,
+        dominant_gain,
+    )
 
     accepted = [f for f in frames if f.accept]
     exps = [f.exposure_s for f in accepted
@@ -758,8 +782,9 @@ def recommended_dark_spec(frames: Iterable[FrameRow]) -> DarkSpec:
     gains = [f.gain for f in accepted if f.gain is not None]
     return DarkSpec(
         exposure_s=statistics.median(exps) if exps else None,
-        gain=statistics.median(gains) if gains else None,
+        gain=dominant_gain(gains),
         exposures_s=tuple(distinct_exposures(exps)),
+        gains=tuple(distinct_gains(gains)),
     )
 
 
