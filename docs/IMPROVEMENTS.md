@@ -76,7 +76,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **Builder, branch `claude/sweet-babbage-luv0qq`** — observer issue
+  [#952](https://github.com/JimmyeJones/astrostack/issues/952), verified by reproduction:
+  `measure_coverage_grain` is silent on every dithered mosaic, because its 10 % bar is per
+  *integer* coverage level. Engine + `stackhealth` wording.
 
 ---
 

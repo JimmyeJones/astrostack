@@ -159,7 +159,12 @@ def _local_sky_mask(
     dilate_px: int,
     max_sigma: float,
 ) -> np.ndarray | None:
-    """Sky pixels of ONE coverage level, thresholded against *its own* stats.
+    """Sky pixels of one region of the canvas, thresholded against *its own* stats.
+
+    Usually one coverage level; the grain measurement also asks it about a band
+    of them (see :func:`_grain_from_depth_bands`), which is why ``max_sigma`` is
+    a parameter rather than read off the context — a region known to be shot
+    shallower carries a legitimately wider sky.
 
     The main object mask thresholds the whole canvas against a single global
     ``median + object_sigma·σ``, which conflates "bright because it is a star or
@@ -402,27 +407,45 @@ def _level_context(
     )
 
 
-def _level_sky_mask(
+def _region_sky_mask(
     ctx: _LevelContext,
-    level: int,
+    region_mask: np.ndarray,
     object_sigma: float,
     dilate_object_mask_px: int,
+    sigma_allowance: float = 1.0,
 ) -> tuple[np.ndarray, bool] | None:
-    """One coverage level's sky pixels + whether a rescue found them.
+    """One region's sky pixels + whether a rescue found them.
 
-    ``None`` when the level has no usable sky at all. Applies the same two
-    guards both passes need: a level the canvas-wide object threshold has
+    ``None`` when the region has no usable sky at all. Applies the same two
+    guards every pass needs: a region the canvas-wide object threshold has
     *starved* is re-thresholded against its own statistics (see
-    :func:`_local_sky_mask`), and a level whose retained sample is far more
+    :func:`_local_sky_mask`), and a region whose retained sample is far more
     spread out than the canvas's own sky is refused outright — it is filled by
     real structure, and reading an object's level as a sky offset would subtract
     real flux.
+
+    Takes the region as a mask rather than a coverage level so that the grain
+    measurement's *band* comparison (:func:`_grain_from_depth_bands`) reads its
+    sky through exactly these guards too, rather than growing a second, laxer
+    definition of "this region's sky".
+
+    ``sigma_allowance`` moves the structure yardstick — in **both** places it is
+    applied, the refusal below and the rescue's own — and only a caller
+    that knows the region is *expected* to be noisier may raise it. The guard
+    asks "is this region filled with structure rather than sky?", and it asks it
+    against the **canvas's** retained sky spread — which is the right question
+    for a levelling pass, where every region is meant to be equally grainy, and
+    the wrong one for a region known to be shot at a fraction of the canvas's
+    depth: grain falls as 1/√depth, so such a region legitimately carries a wider
+    sky, and refusing it means refusing exactly the regions the grain
+    measurement exists to find. The default of 1.0 leaves every levelling caller
+    byte-for-byte as it was.
     """
-    region_mask = (ctx.cov_int == level) & ctx.valid_pix
     region_sky_mask = region_mask & ~ctx.object_mask
+    allowed = ctx.max_level_sigma * max(1.0, float(sigma_allowance))
     rescued_level = int(region_sky_mask.sum()) < ctx.effective_min
     if rescued_level:
-        # The global object threshold has starved this level's sky sample.
+        # The global object threshold has starved this region's sky sample.
         # Most often that is not because the region *is* an object but
         # because its residual sky sits above the canvas-wide median + σ —
         # the offset the leveling pass exists to subtract. Re-threshold it
@@ -431,7 +454,7 @@ def _level_sky_mask(
         # changes.
         rescued = _local_sky_mask(
             ctx.luma, region_mask, object_sigma, dilate_object_mask_px,
-            ctx.max_level_sigma)
+            allowed)
         if rescued is None or int(rescued.sum()) < ctx.effective_min:
             return None
         region_sky_mask = rescued
@@ -439,9 +462,20 @@ def _level_sky_mask(
     # level. A coverage region genuinely *filled* by a galaxy or nebula leaves
     # behind a sample far more spread out than the canvas's own retained sky.
     _, level_sigma = _robust_stats(ctx.detect[region_sky_mask])
-    if not np.isfinite(level_sigma) or level_sigma > ctx.max_level_sigma:
+    if not np.isfinite(level_sigma) or level_sigma > allowed:
         return None
     return region_sky_mask, rescued_level
+
+
+def _level_sky_mask(
+    ctx: _LevelContext,
+    level: int,
+    object_sigma: float,
+    dilate_object_mask_px: int,
+) -> tuple[np.ndarray, bool] | None:
+    """One coverage level's sky pixels + whether a rescue found them."""
+    return _region_sky_mask(ctx, (ctx.cov_int == level) & ctx.valid_pix,
+                            object_sigma, dilate_object_mask_px)
 
 
 @dataclass(frozen=True)
@@ -595,6 +629,26 @@ _GRAIN_MIN_SHARE = 0.10
 # stranding it): nothing is lost by staying silent here.
 _GRAIN_MIN_SKY_PIXELS = 500
 
+# A *dithered* canvas has no plateaus to compare, and the level rule above then
+# finds nothing at all. Measured across the owner's own library (observer report
+# #952, 22 mosaic targets, read off their masters and coverage maps): the
+# per-pixel frame count ramps through 79–1392 distinct integers, the modal level
+# holds 2.0–17.5 % of the canvas and the largest single level *below* it holds
+# 0.0–7.4 % — so ``candidates`` was empty on every genuine mosaic there, and
+# ``grain_ratio`` came out non-NULL on 2 of 680 runs, both of them single fields.
+# The one place it did fire compared 3,116 subs against 3,117.
+#
+# So when no single level is substantial, the same comparison is made between two
+# *bands* of depth. Both bounds are read off ``_GRAIN_UNEVEN_RATIO`` rather than
+# chosen: grain falls as 1/√depth, so a pixel shot at half the bulk depth is
+# 1/√0.5 = 1.41× grainier — the shallowest a pixel can be while still being
+# *predicted* to clear the bar this ratio is graded on, which is what makes half
+# the honest place to draw the line rather than a tunable. And a reference band
+# held to ±15 % of the bulk varies by only 1/√0.85 = 1.08× inside itself, well
+# under that bar, so it reads as one depth rather than as a blend of many.
+_GRAIN_BAND_THIN_OF_BULK = 0.5
+_GRAIN_BAND_DEEP_TOLERANCE = 0.15
+
 
 @dataclass(frozen=True)
 class CoverageGrain:
@@ -614,7 +668,10 @@ class CoverageGrain:
     taken as the median of the three — unit-free, so it means the same thing
     whatever the exposure or normalisation. ``thin_frames``/``deep_frames`` are
     the two regions' per-pixel sub counts, which is what a user can actually act
-    on ("that corner has 3 subs where the rest has 6").
+    on ("that corner has 3 subs where the rest has 6"). On a *dithered* canvas,
+    where the two regions are bands of depth rather than single coverage levels,
+    they are each band's own median depth — the same figure, read the only way a
+    ramp allows.
 
     The σ comes from :func:`_robust_stats`, the same sigma-clipped estimator
     :func:`measure_seam_residual` already uses as its per-level yardstick — not
@@ -635,6 +692,109 @@ class CoverageGrain:
     ratio: float         # thin σ / deep σ, median over the three channels
 
 
+def _grain_sigmas(
+    ctx: _LevelContext,
+    img: np.ndarray,
+    region_mask: np.ndarray,
+    object_sigma: float,
+    dilate_object_mask_px: int,
+    sigma_allowance: float = 1.0,
+) -> list[float] | None:
+    """The three channels' sky σ over one region of the canvas, or ``None``.
+
+    The single definition both halves of :func:`measure_coverage_grain` measure
+    with — one coverage level, or a band of them — so a canvas that falls through
+    to the band comparison is still answered in the same currency as one that is
+    read level by level.
+    """
+    found = _region_sky_mask(ctx, region_mask, object_sigma,
+                             dilate_object_mask_px, sigma_allowance)
+    if found is None:
+        return None
+    region_sky_mask, _rescued = found
+    if int(region_sky_mask.sum()) < _GRAIN_MIN_SKY_PIXELS:
+        return None
+    out = [_robust_stats(img[..., c][region_sky_mask])[1] for c in range(3)]
+    if any(not np.isfinite(s) or s <= 0 for s in out):
+        return None
+    return [float(s) for s in out]
+
+
+def _grain_from_depth_bands(
+    ctx: _LevelContext,
+    img: np.ndarray,
+    object_sigma: float,
+    dilate_object_mask_px: int,
+) -> CoverageGrain | None:
+    """The same grain comparison, taken between *bands* of depth.
+
+    The fallback for a dithered canvas, where no single coverage level is big
+    enough to compare against (see :data:`_GRAIN_BAND_THIN_OF_BULK` for the
+    measurement that made this necessary). Returns ``None`` whenever there is
+    nothing to say, exactly like the level comparison it stands in for, and it is
+    reached *only* when that comparison found no candidate — so every canvas that
+    is answered today is answered identically, by the same code, with the same
+    numbers.
+
+    The bulk depth is the **median** over the covered canvas. Not the mode, which
+    on a ramp is an accident of where the dither happened to pile up (2–17.5 % of
+    the canvas on the owner's mosaics, and on a four-panel fixture in this repo's
+    own tests it lands on the *shallowest* panel); and not the mean, which a
+    ragged fringe drags down. The median also bounds the answer usefully: at most
+    half the canvas can sit below it, so the thin band can never outgrow the depth
+    it is being compared against.
+    """
+    total = int(ctx.valid_pix.sum())
+    if total <= 0:
+        return None
+    bulk = float(np.median(ctx.cov_int[ctx.valid_pix]))
+    if not np.isfinite(bulk) or bulk <= 1.0:
+        return None
+    thin_mask = ctx.valid_pix & (ctx.cov_int < _GRAIN_BAND_THIN_OF_BULK * bulk)
+    deep_mask = ctx.valid_pix & (
+        np.abs(ctx.cov_int - bulk) <= _GRAIN_BAND_DEEP_TOLERANCE * bulk)
+    n_thin, n_deep = int(thin_mask.sum()), int(deep_mask.sum())
+    # Both bands carry the same substantiality bar a single level has to clear: a
+    # sliver of thin fringe is not worth naming, and a reference taken from a
+    # sliver is not a measurement of "the depth most of the picture is at".
+    if n_thin < _GRAIN_MIN_SHARE * total or n_deep < _GRAIN_MIN_SHARE * total:
+        return None
+    # The depths a user can act on: each band's own median, which is the figure
+    # "N subs where most of it has M" is actually true of, rather than either
+    # band's extreme. Read before the σ because the thin band's expected grain is
+    # what its structure guard has to be judged against.
+    thin_frames = int(round(float(np.median(ctx.cov_int[thin_mask]))))
+    deep_frames = int(round(float(np.median(ctx.cov_int[deep_mask]))))
+    if thin_frames < 1 or deep_frames <= thin_frames:
+        return None
+    # A band shot at a fraction of the bulk's depth is *supposed* to carry a
+    # wider sky — by √(deep/thin), which is the very thing being measured — so
+    # the "is this structure rather than sky?" guard is given exactly that much
+    # slack on it and no more. Without it the guard refuses every band grainy
+    # enough to be worth reporting, which is how this fallback first came out
+    # silent on the fixture written to exercise it.
+    thin_sigmas = _grain_sigmas(ctx, img, thin_mask, object_sigma,
+                                dilate_object_mask_px,
+                                math.sqrt(deep_frames / thin_frames))
+    deep_sigmas = _grain_sigmas(ctx, img, deep_mask, object_sigma,
+                                dilate_object_mask_px)
+    if thin_sigmas is None or deep_sigmas is None:
+        return None
+    ratio = float(np.median([t / d for t, d in zip(thin_sigmas, deep_sigmas,
+                                                   strict=True)]))
+    if not np.isfinite(ratio) or ratio <= 0:
+        return None
+    best = CoverageGrain(
+        thin_frames=thin_frames, deep_frames=deep_frames,
+        thin_share=float(n_thin) / float(total), ratio=ratio)
+    log.info(
+        "Coverage grain (depth bands): %.0f%% of the picture is around %d subs "
+        "deep against a bulk %d, and measures %.2fx grainier",
+        best.thin_share * 100.0, best.thin_frames, best.deep_frames, best.ratio,
+    )
+    return best
+
+
 def measure_coverage_grain(
     rgb: np.ndarray,
     coverage: np.ndarray,
@@ -653,6 +813,14 @@ def measure_coverage_grain(
     mode rather than against the deepest level is what keeps an *evenly* shot
     mosaic silent: its overlap strips sit above the mode, never below it, so
     there is no candidate and the answer is ``None``.
+
+    When **no** single level is substantial the canvas is dithered rather than
+    tiled — its coverage ramps through hundreds of one-pixel-apart depths — and
+    the comparison is made between two *bands* of depth instead
+    (:func:`_grain_from_depth_bands`). That fallback is what a multi-night mosaic
+    actually reaches; without it this function was silent on every genuine mosaic
+    in the owner's library. A canvas the level comparison already answers never
+    reaches it, so nothing that is measured today changes.
 
     Returns ``None`` whenever there is nothing to say — a single-coverage-level
     stack, an evenly covered mosaic, a canvas whose levels can't be measured, or
@@ -678,19 +846,17 @@ def measure_coverage_grain(
                   if level < deep_level
                   and counts[level] >= _GRAIN_MIN_SHARE * total]
     if not candidates:
-        return None
+        # No plateau to compare: a mosaic dithered across several nights has a
+        # coverage map that *ramps* rather than steps, so no single depth is a
+        # tenth of the canvas and there is nothing here to pick. Ask the same
+        # question of two bands of depth instead — the only half of this function
+        # such a canvas ever reaches.
+        return _grain_from_depth_bands(ctx, img, object_sigma,
+                                       dilate_object_mask_px)
 
     def _sigmas(level: int) -> list[float] | None:
-        found = _level_sky_mask(ctx, level, object_sigma, dilate_object_mask_px)
-        if found is None:
-            return None
-        region_sky_mask, _rescued = found
-        if int(region_sky_mask.sum()) < _GRAIN_MIN_SKY_PIXELS:
-            return None
-        out = [_robust_stats(img[..., c][region_sky_mask])[1] for c in range(3)]
-        if any(not np.isfinite(s) or s <= 0 for s in out):
-            return None
-        return [float(s) for s in out]
+        return _grain_sigmas(ctx, img, (ctx.cov_int == level) & ctx.valid_pix,
+                             object_sigma, dilate_object_mask_px)
 
     deep_sigmas = _sigmas(deep_level)
     if deep_sigmas is None:

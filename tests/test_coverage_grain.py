@@ -24,6 +24,7 @@ import pytest
 
 pytest.importorskip("astropy")
 
+from seestack.bg import coverage_leveling
 from seestack.bg.coverage_leveling import (
     _GRAIN_MIN_SHARE,
     measure_coverage_grain,
@@ -62,6 +63,56 @@ def _uneven_canvas(thin_depth=3, deep_depth=6, thin_cols=0.25, h=400, w=800,
         x = int(rng.integers(6, w - 6))
         rgb[y - 1:y + 2, x - 1:x + 2, :] += 400.0
     return rgb, cov.astype(np.float32)
+
+
+def _dithered_canvas(depths=(40, 40, 34, 14), jitter=0.015, h=420, w=420,
+                     half=0.28, base_sigma=6.0, stars=250, seed=7):
+    """A 2x2 mosaic *dithered* across several nights, which is the shape
+    :func:`measure_coverage_grain` was silent on.
+
+    Every sub of a panel lands at its own small random offset, so the per-pixel
+    frame count ramps through a hundred-odd one-apart depths instead of sitting
+    on four plateaus — and no single depth then covers a tenth of the canvas,
+    which is the bar a coverage *level* has to clear to be compared at all. The
+    owner's own library measures 79–1392 distinct levels per mosaic against this
+    fixture's ~128 (observer report #952), so this is the mild end of the shape.
+
+    ``depths`` is the panels' sub counts, uneven the way a multi-night mosaic is;
+    the noise in each pixel is scaled by ``1/√depth`` there, exactly what
+    stacking that many subs produces, and the sky level is one constant
+    everywhere so a *seam* measurement has nothing to find.
+    """
+    rng = np.random.default_rng(seed)
+    cov = np.zeros((h, w), dtype=np.float64)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
+    centres = [(0.34, 0.34), (0.34, 0.66), (0.66, 0.34), (0.66, 0.66)]
+    for (cy, cx), n in zip(centres, depths, strict=True):
+        for _ in range(n):
+            oy, ox = rng.normal(0.0, jitter) * h, rng.normal(0.0, jitter) * w
+            cov[(np.abs(yy - (cy * h + oy)) < half * h)
+                & (np.abs(xx - (cx * w + ox)) < half * w)] += 1.0
+    sigma = np.where(cov > 0, base_sigma / np.sqrt(np.maximum(cov, 1.0)), 0.0)
+    rgb = np.zeros((h, w, 3), dtype=np.float32)
+    for c in range(3):
+        rgb[..., c] = (rng.normal(0.0, 1.0, (h, w)) * sigma).astype(np.float32)
+    for _ in range(stars):
+        y, x = int(rng.integers(6, h - 6)), int(rng.integers(6, w - 6))
+        rgb[y - 1:y + 2, x - 1:x + 2, :] += 400.0
+    rgb[cov <= 0] = np.nan
+    return rgb, cov.astype(np.float32)
+
+
+def _no_level_is_substantial(cov) -> bool:
+    """The precondition the tests below rest on: not one coverage level below
+    the modal one covers :data:`_GRAIN_MIN_SHARE` of the canvas, so the level
+    comparison has nothing to pick and cannot be what answered."""
+    cov_int = np.rint(cov).astype(int)
+    valid = cov_int > 0
+    total = int(valid.sum())
+    levels, counts = np.unique(cov_int[valid], return_counts=True)
+    mode = int(levels[int(np.argmax(counts))])
+    return not any(n >= _GRAIN_MIN_SHARE * total
+                   for lv, n in zip(levels, counts, strict=True) if lv < mode)
 
 
 def _run(**kw) -> StackRunRow:
@@ -150,6 +201,55 @@ def test_the_ratio_survives_a_decimated_read():
     assert strided.ratio == pytest.approx(full.ratio, rel=0.15)
     assert strided.thin_frames == full.thin_frames
     assert strided.deep_frames == full.deep_frames
+
+
+def test_a_dithered_mosaic_is_measured_although_no_single_depth_is_substantial():
+    """The bug in observer report #952, reproduced: the measurement was ``None``
+    on **every** genuine mosaic in the owner's library — 42 runs whose depth is
+    under half their sub count — because a dithered canvas has no plateau for the
+    level comparison to pick, and ``grain_ratio`` came out non-NULL on 2 of 680
+    runs, both single fields. Meanwhile a quarter to a half of those canvases
+    really did measure 1.4–1.9x grainier."""
+    rgb, cov = _dithered_canvas()
+    # The precondition, asserted rather than assumed — otherwise this test could
+    # pass on the level comparison and vouch for nothing.
+    assert _no_level_is_substantial(cov)
+
+    grain = measure_coverage_grain(rgb, cov)
+    assert grain is not None
+    # A rim about a fifth of the canvas, a dozen subs deep, against panels of 40.
+    assert 0.15 <= grain.thin_share <= 0.35
+    assert grain.thin_frames < grain.deep_frames
+    assert grain.deep_frames >= 2 * grain.thin_frames
+    assert grain_verdict(grain.ratio) == "uneven"
+    # 12 subs against 40 is √(40/12) = 1.83x more grain; the clipped σ behind the
+    # ratio is inflated by leftover structure on both sides, so — exactly as on
+    # the plateau canvas above — it may only ever understate.
+    predicted = math.sqrt(grain.deep_frames / grain.thin_frames)
+    assert 1.25 <= grain.ratio <= predicted + 0.05
+
+
+def test_an_evenly_shot_dithered_mosaic_still_says_nothing():
+    """The band comparison must not turn every dithered stack into a complaint.
+    Four panels of equal depth, dithered tightly, leave a thin rim of a few per
+    cent — under the same substantiality bar a single coverage level has to
+    clear — so there is still nothing to say."""
+    rgb, cov = _dithered_canvas(depths=(40, 40, 40, 40), jitter=0.008)
+    assert _no_level_is_substantial(cov)
+    assert measure_coverage_grain(rgb, cov) is None
+
+
+def test_a_plateau_canvas_never_reaches_the_band_comparison(monkeypatch):
+    """The fallback is reached *only* when the level comparison found no
+    candidate, which is what makes it one-sided: every canvas the app answers
+    today is answered by the same code, with the same numbers."""
+    def _boom(*a, **kw):                      # pragma: no cover - must not run
+        raise AssertionError("the band comparison answered a plateau canvas")
+
+    monkeypatch.setattr(coverage_leveling, "_grain_from_depth_bands", _boom)
+    rgb, cov = _uneven_canvas()
+    grain = measure_coverage_grain(rgb, cov)
+    assert grain is not None and grain.thin_frames == 3 and grain.deep_frames == 6
 
 
 def test_an_all_nan_canvas_declines_rather_than_raising():
@@ -407,6 +507,63 @@ def test_the_two_surfaces_agree_on_a_mosaic_shot_at_two_sub_lengths(
 
     note = _grain_note(thin_subs, deep_subs, exposures)
     assert ("another night on that panel" in note.message) is map_says_go
+
+
+def test_a_ragged_rim_is_offered_the_trim_instead_of_another_night_out():
+    """Once the measurement reaches a dithered mosaic (the test above), the note
+    it writes has to be true of *that* canvas — and there the thin part is the
+    union canvas's own ragged perimeter, not an under-shot panel. Measured on the
+    owner's library (observer report #952): none of the thin pixels on any of his
+    22 mosaics sits beyond half the footprint's inscribed radius. "Another night
+    on that panel" names a panel that does not exist there, and the card is
+    already offering "Trim border" two notes above — so the two would prescribe
+    opposite things about one region of one picture."""
+    run = _run(grain_ratio=1.72, grain_thin_frames=12, grain_deep_frames=40,
+               grain_thin_share=0.2272, coverage_thin_frac=0.55)
+    notes = stack_health(run, _frames())
+    note = next(n for n in notes if n.kind == "grain_uneven")
+    assert "Trim border" in note.message
+    assert "another night on that panel" not in note.message
+    # The sentence names an in-app fix, so the note hands it over.
+    assert note.action == "trim_border"
+    # …and the measurement itself is unchanged: it still says what it measured.
+    assert "12 subs" in note.message and "has 40" in note.message
+    assert "grain only comes down with more light" in note.message
+
+
+def test_a_thin_panel_on_a_clean_edged_mosaic_is_still_sent_out_for_a_night():
+    """The other side of the same branch: a mosaic panel that is merely thinner
+    than its neighbours does not raise ``coverage_thin_frac`` (that share is
+    measured against one panel's depth, see ``_COVERAGE_THIN_SHARE``), so the
+    sentence this note has always had is kept exactly."""
+    run = _run(grain_ratio=1.43, grain_thin_frames=30, grain_deep_frames=120,
+               grain_thin_share=0.2257, coverage_thin_frac=0.0)
+    note = next(n for n in stack_health(run, _frames())  # 90 × 10 s behind
+                if n.kind == "grain_uneven")
+    assert "another night on that panel" in note.message
+    assert "Trim border" not in note.message
+    assert note.action is None
+
+
+def test_the_two_notes_about_the_thin_part_never_prescribe_opposite_things():
+    """Stated as the property rather than as two cases: on any run where both
+    notes speak, they are reading one predicate, so the card cannot offer the
+    trim in one breath and send the owner out for a night in the next."""
+    for thin_frac in (0.0, 0.04, 0.05, 0.55):
+        for thin, deep in ((12, 40), (30, 120)):   # minutes behind, and hours
+            notes = stack_health(
+                _run(grain_ratio=1.72, grain_thin_frames=thin,
+                     grain_deep_frames=deep, grain_thin_share=0.2272,
+                     coverage_thin_frac=thin_frac),
+                _frames())
+            grain = next(n for n in notes if n.kind == "grain_uneven")
+            border = [n for n in notes if n.kind == "coverage"]
+            says_trim = "Trim border" in grain.message
+            # The trim is offered exactly when the picture has a rim to trim…
+            assert says_trim is bool(border), (thin_frac, thin, deep)
+            # …and never in the same breath as being sent out for a night.
+            assert not (says_trim
+                        and "another night on that panel" in grain.message)
 
 
 def test_the_panel_flatness_praise_stops_claiming_there_is_nothing_to_see():
