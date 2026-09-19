@@ -529,6 +529,31 @@ def stored_hazy_verdict_for(run: StackRunRow) -> str | None:
     return hazy_verdict(readable_transparency_ratio(run))
 
 
+def has_ragged_border(run: StackRunRow) -> bool:
+    """Whether this run's thin part is the canvas's ragged *perimeter* — the
+    thing "Trim border" crops away — rather than a panel that is simply behind.
+
+    One predicate, read by both notes that have an opinion about it, for the
+    same reason :func:`grain_verdict` is shared: the ragged-border note offers
+    the trim, and the uneven-grain note has to decide whether to send the owner
+    out for another night on a panel. Those are opposite prescriptions about one
+    region of one picture, and on a dithered mosaic they fire together — the
+    grain measurement's thin band and this share are measuring the same fringe
+    from two directions. Deriving both from ``coverage_thin_frac`` is what stops
+    the card printing one and then the other.
+
+    ``coverage_thin_frac`` is measured against **one panel's** depth (see
+    :data:`_COVERAGE_THIN_SHARE`), so it is the app's own answer to "is this a
+    border to crop, or a place to point the scope next?" — a mosaic panel that is
+    merely thinner than its neighbours does not raise it. ``False`` for a run
+    recorded before the share was measured, which keeps the older sentence rather
+    than guessing.
+    """
+    share = run.coverage_thin_frac
+    return (share is not None and run.coverage_max >= _COVERAGE_MIN_PEAK
+            and share >= _COVERAGE_THIN_SHARE)
+
+
 def grain_verdict(grain_ratio: float | None) -> str | None:
     """``"uneven"`` when a canvas's thinly-covered region is measurably grainier
     than the depth most of it was shot at, else ``None``.
@@ -984,8 +1009,7 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # peak-referenced rule is re-derived by ``coverage_backfill`` on the read that
     # grades it, and drops to None (silent) when its map is gone.
     thin_share = run.coverage_thin_frac
-    if (thin_share is not None and run.coverage_max >= _COVERAGE_MIN_PEAK
-            and thin_share >= _COVERAGE_THIN_SHARE):
+    if has_ragged_border(run):
         scored.append((20, HealthNote(
             kind="coverage",
             severity="info",
@@ -1324,7 +1348,25 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
             f"{thin} sub{'' if thin == 1 else 's'} on it where most of it "
             f"has {deep}, so that part looks about "
             f"{float(run.grain_ratio or 0.0):.1f}× grainier.")
+        # …and *where* the thin part is decides which of those two it is. On a
+        # mosaic dithered across several nights the thin region is the canvas's
+        # own ragged perimeter, not an under-shot panel: measured on the owner's
+        # library (observer report #952), none of the thin pixels on any of his
+        # 22 mosaics sits beyond half the footprint's inscribed radius — it is a
+        # long, ragged rim reaching a quarter to a half of the canvas by area.
+        # "Another night on that panel" names a panel that does not exist there,
+        # and the card is simultaneously offering the trim in the note above, so
+        # the two would prescribe opposite things about one region. Read from the
+        # shared :func:`has_ragged_border`, which is that note's own condition.
+        # It is checked *before* the catches-up branch deliberately: a rim does
+        # not fill in as you keep shooting, because the dither keeps moving it.
+        rim = has_ragged_border(run)
         ending = (
+            " That isn't something processing can fix — grain only comes down "
+            "with more light — but it's the ragged edge of the canvas rather "
+            "than a panel you can go back to, so Trim border is what evens it "
+            "out."
+            if rim else
             " Processing can't fix that — grain only comes down with more "
             f"light — but it's only about {format_duration(shortfall_s)} "
             "behind, so it evens out on its own as you keep shooting."
@@ -1335,11 +1377,12 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
         scored.append((42, HealthNote(
             kind="grain_uneven",
             severity="info",
+            # On a rim there *is* an in-app fix and the sentence names it, so the
+            # note hands it over. Otherwise none exists, and offering one would
+            # be the untruth this note is here to remove — the panel map on the
+            # Target page already says *which* panel is behind.
             message=measured + ending,
-            # No in-app fix exists, and offering one would be the untruth this
-            # note is here to remove. The panel map on the Target page already
-            # says *which* panel is behind.
-            action=None,
+            action="trim_border" if rim else None,
         )))
 
     seam = run.seam_residual
