@@ -2428,3 +2428,96 @@ def test_building_the_bias_the_page_asks_for_actually_scales_the_dark(tmp_path):
     # "a master dark was used instead" — it is what carries the scaling.
     bias_row = next(r for r in after["masters"] if r["id"] == bias["id"])
     assert bias_row["covered"] == ["Uneven"]
+
+
+# ---- "and was it all shot on one night?" -----------------------------------
+
+
+def test_master_temp_note_is_silent_on_an_ordinary_dark_folder():
+    """A one-night folder, a camera that writes no ``CCD-TEMP``, and every
+    master built before the range was recorded must all say nothing — the note
+    exists to catch a blend, not to badge every master."""
+    assert calibration.master_temp_note("dark", -10.0, -8.0) is None
+    assert calibration.master_temp_note("dark", None, None) is None
+    assert calibration.master_temp_note("dark", -10.0, None) is None
+    # A registry whose JSON says something unusable is "didn't say", never a
+    # sentence built out of it — nothing validates that file on read.
+    assert calibration.master_temp_note("dark", "cold", 15.0) is None
+    assert calibration.master_temp_note("dark", True, 15.0) is None
+    assert calibration.master_temp_note("dark", float("nan"), 15.0) is None
+
+
+def test_master_temp_note_names_the_two_nights_a_dark_was_built_from():
+    note = calibration.master_temp_note("dark", -10.0, 15.0)
+    assert note["severity"] == "warn"
+    assert "mixes frames shot between -10°C and 15°C" in note["message"]
+    assert "25°C apart" in note["message"]
+
+
+def test_master_temp_note_is_darks_only():
+    """A flat is normalised before it divides and a bias is the zero-length read
+    pedestal, so neither carries a dark current that moved — the sentence would
+    be noise on both."""
+    assert calibration.master_temp_note("flat", -10.0, 15.0) is None
+    assert calibration.master_temp_note("bias", -10.0, 15.0) is None
+    # Flat-darks are registered as darks and want it as much as darks do.
+    assert calibration.master_temp_note("DARK", -10.0, 15.0) is not None
+
+
+def test_a_registered_master_keeps_the_range_its_stamped_temperature_hides(tmp_path):
+    """Fail-before: the registry stored only the median, so the Calibration page
+    could not tell a clean dark from a blend of a cold night and a warm one."""
+    from seestack.calibrate.masters import MasterMeta
+
+    root = tmp_path / "lib"
+    arr = np.zeros((4, 4), dtype=np.float32)
+    blended = calibration.register_master(
+        root, name="Two nights", array=arr,
+        meta=MasterMeta("dark", 6, 4, 4, "median", exposure_s=10.0,
+                        sensor_temp_c=2.5, sensor_temp_min_c=-10.0,
+                        sensor_temp_max_c=15.0))
+    assert blended["sensor_temp_min_c"] == -10.0
+    assert blended["sensor_temp_max_c"] == 15.0
+
+    listed = calibration.list_masters(root)
+    assert len(listed) == 1
+    assert "mixes frames shot between -10°C and 15°C" in listed[0]["temp_note"]["message"]
+
+    # …and a master registered before the range existed lists cleanly, with the
+    # key simply absent from its entry. That is the upgrade case: the registry
+    # is JSON on disk and is never rewritten.
+    one_night = calibration.register_master(
+        root, name="One night", array=arr,
+        meta=MasterMeta("dark", 6, 4, 4, "median", exposure_s=10.0,
+                        sensor_temp_c=2.5))
+    del one_night  # registered for the listing below, not read directly
+    rows = {r["name"]: r for r in calibration.list_masters(root)}
+    assert rows["One night"]["temp_note"] is None
+    assert rows["One night"]["sensor_temp_min_c"] is None
+
+
+def test_the_build_job_says_at_once_that_its_darks_straddled_two_nights(tmp_path, client):
+    """The moment it matters is the moment the master is built: no frame is set
+    aside, so every count the summary reports says this was a clean build."""
+    folder = tmp_path / "incoming" / "Darks"
+    folder.mkdir(parents=True, exist_ok=True)
+    for i, temp in enumerate((-10.0, -10.0, -10.0, 15.0, 15.0, 15.0)):
+        hdu = fits.PrimaryHDU(data=np.full((8, 8), 100.0, dtype=np.float32))
+        hdu.header["EXPTIME"] = 10.0
+        hdu.header["GAIN"] = 80.0
+        hdu.header["CCD-TEMP"] = temp
+        hdu.header["BAYERPAT"] = "RGGB"
+        hdu.writeto(folder / f"d{i}.fits", overwrite=True)
+
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": str(folder),
+                          "name": "Two nights"})
+    assert r.status_code == 200
+    body = _wait_job(client, r.json()["job_id"])
+    assert body["state"] == "done"
+    result = body["result"]
+    assert result["n_skipped"] == 0          # nothing was dropped, by design
+    assert result["n_frames"] == 6
+    assert result["sensor_temp_min_c"] == -10.0
+    assert result["sensor_temp_max_c"] == 15.0
+    assert "mixes frames shot between -10°C and 15°C" in result["temp_note"]["message"]

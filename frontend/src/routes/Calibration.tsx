@@ -242,6 +242,19 @@ export function CalibrationView() {
                           {m.header_note.message}
                         </Text>
                       ) : null}
+                      {/* …and was it all shot on one night? The Temp column
+                          shows one number because the master stamps one, but
+                          that number is a median — a dark built from a cold
+                          night and a warm one is stamped with a temperature no
+                          frame in it was shot at. Self-hiding the same way:
+                          darks only, and only when the range is wide enough to
+                          have moved the dark current. */}
+                      {m.temp_note ? (
+                        <Text size="xs"
+                          c={m.temp_note.severity === "warn" ? "yellow.7" : "dimmed"}>
+                          {m.temp_note.message}
+                        </Text>
+                      ) : null}
                       {/* Which of the user's targets this master can actually be
                           applied to — the question the page otherwise makes them
                           answer one target at a time. */}
