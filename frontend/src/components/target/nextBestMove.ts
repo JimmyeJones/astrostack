@@ -197,6 +197,14 @@ export interface NextBestMoveInput {
    * `good` rung and — since v0.438.1, to scope the same claim the same way — by
    * the `integration` rung; see the comments there. */
   grainVerdict?: string | null;
+  /** True when that thinner part is the canvas's ragged *perimeter* rather than
+   * a panel that is behind — the backend's own
+   * `seestack.stackhealth.has_ragged_border`, already decided for the "How's my
+   * stack?" notes. A rim does not fill in as you keep shooting, because the
+   * dither keeps moving it, so "more passes over the same mosaic" is then a
+   * prescription that cannot do what it says. Omit / false / an older backend →
+   * today's phrase. */
+  raggedBorder?: boolean;
   /** The *measured* grain of the picture the readiness card on this same page is
    * describing — `cardGrainProjection(runs)`'s own `level`, so the two cards
    * cannot come to different opinions about one picture. Only the `integration`
@@ -605,6 +613,22 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
   // The prescription matches both endings that note can print ("another night
   // on that panel", and "it evens out on its own as you keep shooting"): more
   // passes over the same mosaic is what serves either.
+  //
+  // …with the one exception the health note itself now makes: where the thin
+  // part is the canvas's ragged *perimeter*, more passes do not narrow it — the
+  // dither keeps moving it — so "more passes over the same mosaic" names a
+  // lever that does nothing for the thing it was offered about. Read off the
+  // same `has_ragged_border` the note decides with, so the two cannot prescribe
+  // opposite things; absent, it reads as the panel case.
+  if (input.grainVerdict === "uneven" && input.raggedBorder === true) {
+    return {
+      kind: "good",
+      phrase:
+        `Across most of it this is a solid result — plenty of subs went in. ` +
+        `Its ragged edge stays thinner however long you shoot, so Trim border ` +
+        `is what tidies that — more time is what adds depth to the rest.`,
+    };
+  }
   if (input.grainVerdict === "uneven") {
     return {
       kind: "good",

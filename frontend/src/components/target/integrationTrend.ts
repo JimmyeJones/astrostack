@@ -89,6 +89,13 @@ interface RunLike {
    * evenly covered mosaic, and on an older backend, all of which keep today's
    * wording. */
   grain_verdict?: string | null;
+  /** True when that thinner part is the canvas's ragged *perimeter* rather than
+   * a panel that is behind — the backend's own
+   * `seestack.stackhealth.has_ragged_border`. The plateau sentence prescribes
+   * "another pass over it", which is a panel's answer, so it has to know: a rim
+   * does not fill in as you keep shooting, because the dither keeps moving it.
+   * Absent on an older backend, which reads as false — today's wording. */
+  ragged_border?: boolean;
 }
 
 /** The integration a *pixel* of this run's canvas actually received, in seconds.
@@ -157,6 +164,7 @@ export function integrationTrend(
       // the two halves of one sentence describe two pictures — the same reason
       // `grainProjection` reads it off the run it took σ from.
       uneven: r.grain_verdict === "uneven",
+      rim: r.ragged_border === true,
     }));
   if (points.length < 2) return null;
 
@@ -224,14 +232,28 @@ export function integrationTrend(
     // verdict, read off the same run, so the two cannot come to different
     // opinions about one picture — and it is null on a single field and on an
     // even mosaic, which is why no other verdict here changes.
-    sentence =
-      `Across the deepest part of this picture your noise has stopped dropping ` +
-      `even as you added time (${now} in) — that part looks sky-limited, so ` +
-      `more subs won't do much for it. One part of this mosaic is thinner than ` +
-      `the rest, though, and that part still comes down with more light, so ` +
-      `another pass over it is the thing left worth shooting here. After that, ` +
-      `a darker sky or a brighter target will do more than extra time on this ` +
-      `one.`;
+    //
+    // …and "another pass over it" is a **panel's** answer. Where the thin part
+    // is the canvas's ragged *perimeter* it does not come down with more light
+    // at all, because the dither keeps moving it — so on such a run this card
+    // would be naming the one lever that cannot work, on the card whose whole
+    // subject is what is still worth shooting. Read off the same
+    // `has_ragged_border` the health note decides with; absent, it reads as the
+    // panel case and the sentence is byte-for-byte what it was.
+    sentence = deep.rim
+      ? `Across the deepest part of this picture your noise has stopped ` +
+        `dropping even as you added time (${now} in) — that part looks ` +
+        `sky-limited, so more subs won't do much for it. Its ragged edge is ` +
+        `thinner and grainier, and that won't fill in as you keep shooting — ` +
+        `Trim border crops it away. After that, a darker sky or a brighter ` +
+        `target will do more than extra time on this one.`
+      : `Across the deepest part of this picture your noise has stopped ` +
+        `dropping even as you added time (${now} in) — that part looks ` +
+        `sky-limited, so more subs won't do much for it. One part of this ` +
+        `mosaic is thinner than the rest, though, and that part still comes ` +
+        `down with more light, so another pass over it is the thing left worth ` +
+        `shooting here. After that, a darker sky or a brighter target will do ` +
+        `more than extra time on this one.`;
   } else {
     sentence =
       `Your noise has stopped dropping even as you added time (${now} in) — this ` +

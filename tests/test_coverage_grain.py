@@ -239,6 +239,75 @@ def test_an_evenly_shot_dithered_mosaic_still_says_nothing():
     assert measure_coverage_grain(rgb, cov) is None
 
 
+def test_two_levels_one_sub_apart_are_not_a_depth_step():
+    """The other half of observer report #952: the one run in 680 where the
+    measurement **fired**, and answered about the wrong pair.
+
+    IC 360 is a 3,117-sub single field whose union area trips the mosaic
+    heuristic. Levels **3,116 and 3,117** each cleared a tenth of its canvas, so
+    the level comparison had a candidate and took it — reporting ``1.0078`` over
+    15 % of the picture, where the depth bands on that same canvas read **2.27**
+    over 27 % (218 subs against 3,116). Grain falls as 1/√depth: one sub apart is
+    a predicted 0.02 %, so whatever a comparison of those two levels reports is
+    their sky samples and not their depths.
+
+    The canvas below is that shape: a bulk and a one-sub-shallower strip, each
+    substantial, and a rim that is genuinely shallow but *ramped* — so no rim
+    level is substantial on its own and the level comparison, left to itself,
+    has exactly one candidate and it is the wrong one.
+    """
+    rng = np.random.default_rng(3)
+    h, w = 420, 420
+    cov = np.full((h, w), 3117, dtype=np.int32)
+    cov[:, :170] = 3116                       # one sub apart, ~40 % of the canvas
+    # A ramped rim: ~25 % of the canvas spread over 60 depths, none substantial.
+    for i in range(60):
+        cov[i, :] = 120 + 8 * i
+        cov[h - 1 - i, :] = 120 + 8 * i
+    sigma = 60.0 / np.sqrt(np.maximum(cov, 1).astype(np.float32))
+    rgb = np.empty((h, w, 3), dtype=np.float32)
+    for c in range(3):
+        rgb[..., c] = rng.normal(0.0, 1.0, size=(h, w)).astype(np.float32) * sigma
+
+    # The preconditions, asserted rather than assumed: the level comparison
+    # really does have a candidate here, and the *only* one it has is the pair
+    # this test is about. Without both, the test could pass for another reason.
+    total = int((cov > 0).sum())
+    levels, counts = np.unique(cov, return_counts=True)
+    substantial = {int(lv) for lv, n in zip(levels, counts)
+                   if n >= _GRAIN_MIN_SHARE * total}
+    assert substantial == {3116, 3117}
+
+    grain = measure_coverage_grain(rgb, cov)
+    assert grain is not None
+    # Not the one-sub pair — the rim against the bulk, which is a depth step.
+    assert (grain.thin_frames, grain.deep_frames) != (3116, 3117)
+    assert grain.deep_frames >= 2 * grain.thin_frames
+    assert grain_verdict(grain.ratio) == "uneven"
+
+
+def test_the_band_answer_survives_a_decimated_read():
+    """`backfill_coverage_grain` is how an already-stacked mosaic picks this
+    measurement up, and it reads the master **strided** (`_seam_read_step`: 3 on
+    a 3494x2470 canvas, capped at 4) — so a healed row and a freshly stacked one
+    have to be the same kind of number, or the library ends up holding two
+    currencies for one quantity. The level comparison has had this test since it
+    shipped; the band comparison is the half the owner's own mosaics actually
+    reach, and had none."""
+    rgb, cov = _dithered_canvas(h=840, w=840)
+    assert _no_level_is_substantial(cov)
+    full = measure_coverage_grain(rgb, cov)
+    strided = measure_coverage_grain(rgb[::2, ::2], cov[::2, ::2],
+                                     proxy_scale=2.0)
+    assert full is not None and strided is not None
+    # The depths and the share are read off integer counts, so they are exact.
+    assert strided.thin_frames == full.thin_frames
+    assert strided.deep_frames == full.deep_frames
+    assert strided.thin_share == pytest.approx(full.thin_share, abs=0.02)
+    # The σ drifts the few percent the level comparison's own stride test allows.
+    assert strided.ratio == pytest.approx(full.ratio, rel=0.15)
+
+
 def test_a_plateau_canvas_never_reaches_the_band_comparison(monkeypatch):
     """The fallback is reached *only* when the level comparison found no
     candidate, which is what makes it one-sided: every canvas the app answers

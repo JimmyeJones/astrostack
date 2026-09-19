@@ -1,5 +1,67 @@
 # Shipped — the record
 
+## v0.470.2 — 2026-09-19 — the level rule fired once in 680 runs and answered about the wrong pair; the band rule it replaces could not reach the canvases it was written for; and three cards still offered the night for a rim
+
+*(Builder, branch `claude/sweet-babbage-ceonap`. This run built v0.470.0/.1 independently and collided with
+[#954](https://github.com/JimmyeJones/astrostack/pull/953), which landed the same core fix first. That work
+was closed as superseded — its own PR comment records what #954 did better, notably
+`_region_sky_mask(sigma_allowance=)`, which found the cause of a symptom this run had only filed as a floor to
+watch. What follows is the three pieces of observer report #952 that #954 did **not** cover, re-landed on top
+of it.)*
+
+**1. The one run in 680 where the measurement fired, and answered about the wrong pair.** `main` still
+selected candidates with `level < deep_level` — any integer below the mode. IC 360 is a 3,117-sub single field
+whose union area trips the mosaic heuristic, and levels **3,116 and 3,117** each held a tenth of its canvas.
+So the level comparison had a candidate, took it, and reported **1.0078 over 15 %** of the picture, where the
+depth bands on that same canvas read **2.27 over 27 %** (218 subs against 3,116). Grain falls as 1/√depth: one
+sub apart is a predicted 0.02 %, so whatever that comparison reports is the two levels' sky samples and not
+their depths. The band fallback could never reach it, because it only runs when the level rule finds *no*
+candidate.
+
+A candidate must now be at least `_GRAIN_MAX_THIN_FRAC` (a tenth) shallower. The bound is read off
+`_GRAIN_BAND_THIN_OF_BULK`'s own reasoning rather than picked: that constant takes half the bulk because
+1/√0.5 = 1.41× is the shallowest a band can be while still being *predicted* to clear the bar the ratio is
+graded on. A tenth shallower predicts 1/√0.9 = **1.054×** — an order below that bar — so no level this
+excludes could have produced a verdict on the physics alone. It is not a threshold on the answer; it is a
+statement that the question was not about depth. Such a canvas now falls through to the band comparison, which
+has something true to say about it, so the test asserts the *pair* rather than silence.
+
+**2. The measurement could not reach the canvases it exists for, because the heal reads strided.**
+`backfill_coverage_grain` is the only path by which an already-stacked mosaic picks this up — a fresh stack
+measures at full resolution — and it reads the master at `_seam_read_step`: **3** on a 3494×2470 canvas,
+capped at 4. `_GRAIN_MIN_SKY_PIXELS` is an absolute 500, so a sample of a ninth the pixels was being asked to
+clear the whole-canvas bar. And a thin band's *sky* sample is a small fraction of its pixels to begin with —
+the object mask thresholds the canvas globally and dilates by 4 px, and a band that is grainier by
+construction loses more of itself to it. The two multiply. Measured on this repo's own dithered fixture: **948
+sky pixels at full resolution, 171 at stride 2** — answered, then silent, about one canvas.
+
+The floor is now scaled by the read's stride, by exactly the arithmetic `include_min` already uses two lines
+above it in the same function (*"a strided proxy pixel stands in for step² full-res pixels"*), with
+`_MIN_STRIDED_PIXELS` as the hard bound. It is a claim about how many **full-resolution** pixels a σ rests on;
+unscaled it was not one floor but a different one per canvas size, landing hardest on exactly the big mosaics
+the measurement is for. Nothing at stride 1 moves.
+
+**3. The three cards that prescribe from the same verdict were still offering the night.** #954's own
+reasoning — *"another night on that panel names a panel that is not there"* — was applied to the "How's my
+stack?" note and to nothing else. `grainProjection` said *"only more light evens that part out"*,
+`nextBestMove` *"more passes over the same mosaic"*, and `integrationTrend` *"another pass over it is the
+thing left worth shooting here"* — the last on the card whose entire subject is what is still worth shooting.
+All three now take the same fork, off the **same** `has_ragged_border` the note decides with, served on the
+run row as `ragged_border` rather than re-derived client-side: a second reader of one rule is how two surfaces
+come to prescribe opposite things about one region. A thin *panel*, and an older backend that sends no flag,
+keep every sentence byte for byte.
+
+**Upgrade-safe (§9).** One additive optional response field and one additive optional client field; no config,
+schema, on-disk, API-shape or default change, no new column, and no threshold moved on any canvas that already
+had an answer. The floor change can only ever make a strided read *answer* where it was silent.
+
+**Tests (+3 Python, +6 vitest).** The one-sub-apart canvas, with both preconditions asserted (the level rule
+really does have a candidate, and the only substantial levels are the pair) so it cannot pass for another
+reason; the band answer across a stride, with the depths and the share exact and the σ inside the same drift
+the level comparison's own stride test allows; the run listing serving the flag for a rim, a panel and a run
+recorded before the share was measured; and each of the three cards taking the trim and keeping its panel
+wording. **Fail-before verified by five scratch reverts.**
+
 ## v0.470.0 + v0.470.1 — 2026-09-19 — the mosaic grain measurement was silent on every mosaic the owner has, and the trim it points at was promising an evenness it cannot deliver
 
 *(Builder, branch `claude/sweet-babbage-luv0qq`, from observer issue
