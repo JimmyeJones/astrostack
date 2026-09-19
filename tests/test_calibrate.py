@@ -2427,3 +2427,67 @@ def test_zero_is_a_length_only_where_a_bias_asks_for_it(tmp_path):
     skipped = []
     _m, meta = build_master(paths, kind="dark", skipped=skipped)
     assert skipped == [] and meta.n_frames == 5
+
+
+def test_dominant_gain_is_the_setting_most_of_the_subs_were_shot_at():
+    """The one number a *master* is judged against when a target holds more than
+    one gain — and deliberately not their median."""
+    from seestack.calibrate.apply import dominant_gain
+
+    assert dominant_gain([80.0] * 4 + [200.0] * 2) == 80.0
+    assert dominant_gain([80.0] * 2 + [200.0] * 4) == 200.0
+    # An ordinary target — one setting all year — is unmoved, which is the whole
+    # installed base's hot path.
+    assert dominant_gain([80.0] * 6) == 80.0
+    # Header round-trip noise stays one setting, exactly as ``distinct_gains``
+    # reads it: the two share their grouping so they cannot drift apart.
+    assert dominant_gain([80.0, 80.0002, 79.9998]) == pytest.approx(80.0, abs=0.01)
+
+
+def test_dominant_gain_never_names_a_setting_the_camera_was_not_at():
+    """The phantom the median invents. Three subs at 80 and three at 200 average
+    to 140 — a gain no frame carries — so the gain-80 dark shot for half the
+    stack is scored 0.43 away and can be refused while a gain-140 dark shot for
+    none of it scores 0 and binds. And with three settings the median need not
+    even be the majority: it can land on the one sub in seven.
+
+    The tie is broken on the *lower* setting: deterministically, so re-reading
+    the same frames in another order cannot rebind a target's calibration, and
+    toward the safer error — a lower-gain dark carries a smaller pedestal, so it
+    under-subtracts on the higher-gain subs where the opposite choice
+    over-subtracts and clips shadows to hard zeros.
+    """
+    from seestack.calibrate.apply import dominant_gain
+
+    assert dominant_gain([80.0] * 3 + [200.0] * 3) == 80.0
+    assert dominant_gain([200.0] * 3 + [80.0] * 3) == 80.0  # order-independent
+    # Three settings, and the median sits on the smallest population of all.
+    assert dominant_gain([80.0] * 3 + [140.0] + [200.0] * 3) == 80.0
+
+
+def test_dominant_gain_is_silent_when_no_sub_recorded_one():
+    """One-sided like every other reading in this module: "this sub never
+    recorded a gain" is not a gain, and neither is a negative — while gain 0 is a
+    real setting that has to survive."""
+    from seestack.calibrate.apply import dominant_gain
+
+    assert dominant_gain([]) is None
+    assert dominant_gain([None, None]) is None
+    assert dominant_gain([None, float("nan"), float("inf"), -5.0, 80.0]) == 80.0
+    assert dominant_gain([0.0, 0.0]) == 0.0
+
+
+def test_the_gain_a_target_is_named_by_is_always_one_of_the_gains_it_holds():
+    """The invariant the median broke and the mode cannot: whatever single value
+    stands for a target's gain, it has to be one of the settings the target was
+    actually shot at — the same list the Stack form prints as ``params.gains``
+    and the run's advisory names in its sentence. A representative outside that
+    list is a number no surface can explain."""
+    from seestack.calibrate.apply import distinct_gains, dominant_gain
+
+    for values in ([80.0] * 3 + [200.0] * 3,
+                   [80.0] * 4 + [200.0] * 2,
+                   [80.0] * 3 + [140.0] + [200.0] * 3,
+                   [0.0] * 2 + [100.0] * 5,
+                   [80.0, 80.0002, 79.9998]):
+        assert dominant_gain(values) in distinct_gains(values)
