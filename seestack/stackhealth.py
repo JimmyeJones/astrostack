@@ -1010,13 +1010,36 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
     # grades it, and drops to None (silent) when its map is gone.
     thin_share = run.coverage_thin_frac
     if has_ragged_border(run):
+        # …and what the trim delivers is a rectangle that is clean by *its own*
+        # yardstick, which is not the same thing as even. "Thin" here means under
+        # a quarter of one panel's depth
+        # (:data:`~seestack.stack.stacker.COVERAGE_THIN_RATIO`, the level the
+        # trim keeps down to, so the note and its action agree by construction);
+        # the grain measurement's bar is half the depth most of the canvas is at,
+        # which is where 1/√depth says the difference starts to *show*.
+        # Everything between those two survives the crop.
+        #
+        # Measured, not reasoned: inside the rectangle ``largest_covered_rect``
+        # keeps on a dithered 2x2, ``coverage_thin_fraction`` reads 0.0 while
+        # ``measure_coverage_grain`` still reads 1.7× over 13 % of it (pinned in
+        # ``tests/test_coverage_grain.py``), and the observer measured 10.1–30.5 %
+        # at 1.39–2.22× across the owner's 22 real mosaics. So the promise is
+        # kept where the app can keep it, and on a run it has itself measured as
+        # uneven the sentence says what the crop really does. Read from the same
+        # ``uneven_grain_verdict`` the grain note uses, so the two notes on one
+        # card cannot make different promises about one button.
+        evens_out = uneven_grain_verdict(run) != "uneven"
         scored.append((20, HealthNote(
             kind="coverage",
             severity="info",
             message=(f"About {thin_share * 100:.0f}% of this picture is a thin "
                      "edge — far fewer frames landed there than on the rest, so "
-                     "it's noisier and uneven. Trim border gives a clean, even "
-                     "rectangle."),
+                     "it's noisier and uneven. "
+                     + ("Trim border gives a clean, even rectangle."
+                        if evens_out else
+                        "Trim border crops the worst of it away, though the "
+                        "depth still varies across what's left, so it won't "
+                        "come out perfectly even.")),
             action="trim_border",
         )))
 
@@ -1360,12 +1383,16 @@ def stack_health(run: StackRunRow, frames: Iterable[FrameRow],
         # shared :func:`has_ragged_border`, which is that note's own condition.
         # It is checked *before* the catches-up branch deliberately: a rim does
         # not fill in as you keep shooting, because the dither keeps moving it.
+        # The ending stops at "crops the worst of it away" rather than claiming
+        # the trim evens the picture out, for the reason measured beside the
+        # ragged-border note above: a rectangle that is clean by the trim's own
+        # yardstick still carries a grain step by this one.
         rim = has_ragged_border(run)
         ending = (
             " That isn't something processing can fix — grain only comes down "
             "with more light — but it's the ragged edge of the canvas rather "
-            "than a panel you can go back to, so Trim border is what evens it "
-            "out."
+            "than a panel you can go back to, so Trim border crops the worst of "
+            "it away."
             if rim else
             " Processing can't fix that — grain only comes down with more "
             f"light — but it's only about {format_duration(shortfall_s)} "

@@ -522,8 +522,11 @@ def test_a_ragged_rim_is_offered_the_trim_instead_of_another_night_out():
                grain_thin_share=0.2272, coverage_thin_frac=0.55)
     notes = stack_health(run, _frames())
     note = next(n for n in notes if n.kind == "grain_uneven")
-    assert "Trim border" in note.message
+    assert "Trim border crops the worst of it away" in note.message
     assert "another night on that panel" not in note.message
+    # …and it stops there: the trim does not make the picture even (the test
+    # below measures what it actually leaves behind).
+    assert "evens it out" not in note.message
     # The sentence names an in-app fix, so the note hands it over.
     assert note.action == "trim_border"
     # …and the measurement itself is unchanged: it still says what it measured.
@@ -564,6 +567,67 @@ def test_the_two_notes_about_the_thin_part_never_prescribe_opposite_things():
             # …and never in the same breath as being sent out for a night.
             assert not (says_trim
                         and "another night on that panel" in grain.message)
+
+
+def test_the_trim_leaves_a_grain_step_its_own_yardstick_cannot_see():
+    """Why the two notes stop short of promising an *even* rectangle.
+
+    "Trim border" crops to what ``coverage_thin_fraction`` calls well covered —
+    under a quarter of one panel's depth — and that share really does go to zero
+    inside the rectangle it keeps. The grain measurement's bar is half the depth
+    most of the canvas is at, which is where 1/√depth says the difference starts
+    to show, and everything between the two survives the crop. So the same
+    rectangle is clean by one measure and measurably uneven by the other, which
+    is the state the owner's mosaics are in: 10.1–30.5 % of the kept canvas at
+    1.39–2.22× across his 22 (observer report #952)."""
+    from seestack.edit.coverage_trim import largest_covered_rect
+    from seestack.stack.stacker import coverage_thin_fraction
+
+    rgb, cov = _dithered_canvas()
+    rect = largest_covered_rect(cov)
+    assert rect is not None, "nothing to trim — this fixture cannot show it"
+    h, w = cov.shape
+    x0, y0, x1, y1 = rect
+    ys, xs = slice(round(y0 * h), round(y1 * h)), slice(round(x0 * w), round(x1 * w))
+    kept_cov, kept_rgb = cov[ys, xs], rgb[ys, xs]
+    assert kept_cov.size < cov.size          # the trim really cropped something
+
+    # The trim keeps its own promise…
+    assert coverage_thin_fraction(kept_cov) == pytest.approx(0.0, abs=0.005)
+    # …and the picture inside it is still not even.
+    grain = measure_coverage_grain(kept_rgb, kept_cov)
+    assert grain is not None
+    assert grain_verdict(grain.ratio) == "uneven"
+    assert grain.thin_share >= _GRAIN_MIN_SHARE
+
+
+def test_a_run_measured_as_uneven_is_not_promised_a_clean_even_rectangle():
+    """The consequence of the measurement above, on the note that offers the
+    button: a run this app has itself measured as unevenly deep must not be told
+    the crop makes it even."""
+    note = next(n for n in stack_health(
+        _run(coverage_thin_frac=0.55, grain_ratio=1.72, grain_thin_frames=12,
+             grain_deep_frames=40, grain_thin_share=0.2272), _frames())
+        if n.kind == "coverage")
+    assert "clean, even rectangle" not in note.message
+    assert "won't come out perfectly even" in note.message
+    # Nothing removed: it still names the share, and still offers the trim.
+    assert "About 55% of this picture is a thin edge" in note.message
+    assert note.action == "trim_border"
+
+
+def test_a_ragged_border_with_no_grain_step_keeps_the_sentence_it_had():
+    """The other side, byte for byte — including a run from before the grain was
+    ever measured, which must read as "nothing measured", never as "uneven"."""
+    for grain in ({}, {"grain_ratio": 1.02, "grain_thin_frames": 5,
+                       "grain_deep_frames": 6, "grain_thin_share": 0.2}):
+        note = next(n for n in stack_health(
+            _run(coverage_thin_frac=0.55, **grain), _frames())
+            if n.kind == "coverage")
+        assert note.message == (
+            "About 55% of this picture is a thin edge — far fewer frames landed "
+            "there than on the rest, so it's noisier and uneven. Trim border "
+            "gives a clean, even rectangle.")
 
 
 def test_the_panel_flatness_praise_stops_claiming_there_is_nothing_to_see():
