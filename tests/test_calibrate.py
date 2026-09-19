@@ -2291,3 +2291,139 @@ def test_no_frame_is_dropped_for_its_temperature_the_way_one_is_for_exposure(tmp
     assert skipped == []
     assert meta.n_frames == 6
     assert np.allclose(master, 200.0)
+
+
+# --- a BIAS folder's exposure ----------------------------------------------
+#
+# "A bias is by definition the zero-length frame" was the reason the exposure
+# gate skipped a bias build — and it is really the argument *for* the gate: it
+# says what a bias is, not what is in the folder.
+
+
+def _bias_folder(tmp_path, *, n_bias=3, n_dark=3, bias_exp=0.0, method="median",
+                 name="b", bias_level=500.0, dark_level=1500.0):
+    """A bias folder with ``n_dark`` seconds-long dark frames mixed into it."""
+    paths = []
+    for i in range(n_bias):
+        p = tmp_path / f"{name}_b{i}.fits"
+        _write_raw(p, np.full((4, 4), bias_level, dtype=np.float32),
+                   exptime=bias_exp, gain=80.0, temp=-10.0)
+        paths.append(str(p))
+    for i in range(n_dark):
+        p = tmp_path / f"{name}_d{i}.fits"
+        _write_raw(p, np.full((4, 4), dark_level, dtype=np.float32),
+                   exptime=10.0, gain=80.0, temp=-10.0)
+        paths.append(str(p))
+    skipped = []
+    master, meta = build_master(paths, kind="bias", method=method,
+                                skipped=skipped)
+    return master, meta, skipped
+
+
+@pytest.mark.parametrize("n_bias,n_dark,bias_exp,method", [
+    (3, 3, 0.0, "median"),      # an even split: the 0 s group wins on the
+    (3, 3, 0.0, "mean"),        # shortest-first tie-break, as everywhere else
+    (3, 3, 0.0, "sigma_mean"),
+    (4, 2, 0.0, "mean"),        # the silent one before the fix: the majority's
+    (4, 2, 0.0, "median"),      # own 0 s label on a pedestal 67 % too big
+    (3, 3, 0.001, "median"),    # a camera whose minimum isn't literally zero
+    (4, 2, 0.001, "mean"),
+])
+def test_a_bias_is_not_built_out_of_the_darks_sitting_beside_it(
+        tmp_path, n_bias, n_dark, bias_exp, method):
+    """Fail-before: every one of these combined all six frames. The even split
+    gave a 1000 ADU master stamped **5 s** — a bias claiming to be a five-second
+    exposure — and the 4-to-2 folder gave 833 ADU stamped 0 s, which is worse
+    because it is silent: the majority's own label on the wrong pedestal."""
+    master, meta, skipped = _bias_folder(
+        tmp_path, n_bias=n_bias, n_dark=n_dark, bias_exp=bias_exp,
+        method=method, name=f"{n_bias}{n_dark}{method}")
+    assert float(np.median(master)) == pytest.approx(500.0)
+    assert meta.exposure_s == pytest.approx(bias_exp)
+    assert meta.n_frames == n_bias
+    assert [reason for _n, reason in skipped] == ["wrong exposure"] * n_dark
+
+
+def test_an_ordinary_bias_folder_is_untouched(tmp_path):
+    """Byte-identical wherever the folder holds one length — which is every
+    bias folder anyone has ever built, including the zero-length one the old
+    grouping could not even see."""
+    for exp in (0.0, 0.001, 0.02):
+        master, meta, skipped = _bias_folder(
+            tmp_path, n_bias=5, n_dark=0, bias_exp=exp, name=f"one{exp}")
+        assert skipped == []
+        assert meta.n_frames == 5
+        assert meta.exposure_s == pytest.approx(exp)
+        assert np.allclose(master, 500.0)
+    # …and a folder whose frames record no exposure at all still builds from
+    # all of them: "didn't say" is not "said the wrong thing".
+    paths = []
+    for i in range(4):
+        p = tmp_path / f"noexp{i}.fits"
+        _write_raw(p, np.full((4, 4), 500.0, dtype=np.float32), gain=80.0)
+        paths.append(str(p))
+    skipped = []
+    _m, meta = build_master(paths, kind="bias", skipped=skipped)
+    assert skipped == [] and meta.n_frames == 4
+
+
+def test_a_lone_zero_stamped_frame_cannot_hijack_a_bias_build(tmp_path):
+    """The reason the rule is a *majority* and not "the shortest wins": one
+    mistyped or truncated header must be the frame that is set aside, not the
+    one that defines the master and skips every real frame after it — the same
+    failure the majority-shape rule already exists to prevent."""
+    paths = []
+    for i in range(5):
+        p = tmp_path / f"real{i}.fits"
+        _write_raw(p, np.full((4, 4), 500.0, dtype=np.float32),
+                   exptime=0.001, gain=80.0)
+        paths.append(str(p))
+    stray = tmp_path / "stray.fits"
+    _write_raw(stray, np.full((4, 4), 9000.0, dtype=np.float32),
+               exptime=0.0, gain=80.0)
+    paths.append(str(stray))
+    skipped = []
+    master, meta = build_master(paths, kind="bias", skipped=skipped)
+    assert meta.n_frames == 5
+    assert meta.exposure_s == pytest.approx(0.001)
+    assert skipped == [("stray.fits", "wrong exposure")]
+    assert np.allclose(master, 500.0)
+
+
+def test_zero_is_a_length_only_where_a_bias_asks_for_it(tmp_path):
+    """The dark path must not move. ``distinct_exposures`` drops a non-positive
+    value on purpose — for a light or a dark a 0 s card is a blank, not a
+    length — so the zero group is opt-in, and a dark build behaves exactly as
+    it did."""
+    from seestack.calibrate.masters import (
+        _exposure_in_group,
+        _majority_exposure_group,
+    )
+
+    assert _exposure_in_group(0.0, [0.0], allow_zero=True) is True
+    assert _exposure_in_group(0.0, [0.0]) is False          # dark path, unchanged
+    assert _exposure_in_group(0.0, [10.0], allow_zero=True) is False
+    assert _exposure_in_group(10.0, [0.0], allow_zero=True) is False
+    assert _exposure_in_group(9.998, [10.0], allow_zero=True) is True
+
+    mixed = [0.0, 0.0, 0.0, 10.0, 10.0]
+    assert _majority_exposure_group(mixed, allow_zero=True) == [0.0, 0.0, 0.0]
+    # Without it the zeros vanish, the set reads as one length, and nothing is
+    # gated — which is exactly what the bug was.
+    assert _majority_exposure_group(mixed) is None
+
+    # A dark folder holding a stray 0 s frame keeps today's answer: the zeros
+    # are dropped, the remaining lengths decide, and nothing new is skipped.
+    paths = []
+    for i in range(4):
+        p = tmp_path / f"d{i}.fits"
+        _write_raw(p, np.full((4, 4), 100.0, dtype=np.float32), exptime=10.0,
+                   gain=80.0)
+        paths.append(str(p))
+    zero = tmp_path / "zero.fits"
+    _write_raw(zero, np.full((4, 4), 5.0, dtype=np.float32), exptime=0.0,
+               gain=80.0)
+    paths.append(str(zero))
+    skipped = []
+    _m, meta = build_master(paths, kind="dark", skipped=skipped)
+    assert skipped == [] and meta.n_frames == 5

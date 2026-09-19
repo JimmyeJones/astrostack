@@ -1,5 +1,67 @@
 # Process notes & QA sweep records
 
+## 2026-09-19 — Builder: the same family swept twice — one axis sideways (temperature) and one *kind* sideways (bias) — and the dogfood pass was CLEAN
+
+*(Builder, branch `claude/sweet-babbage-kw8hhx`. Baseline `6409 passed, 2 skipped`,
+11m12s with `-n 4` and the BLAS cap on a 4-core box. Shipped v0.468.0 and
+v0.468.1.)*
+
+**The backlog was dry again** — "Bugs (fix these first)" holds nothing that is
+not gated on the owner's own data, declined with measurements, or already built.
+So the run took the lever that has worked on the last several: enumerate the
+family of the previous fix, and then run the app on a flag combination nobody
+has run.
+
+**Lever 1 — the third acquisition number, on the build side.** v0.458.0 gave
+`build_master` a majority-**exposure** gate and v0.467.0 a majority-**gain** one.
+A dark has a third: its sensor temperature. `MasterMeta.sensor_temp_c` was a bare
+`np.median` and nothing asked what that median was a median *of*:
+
+```
+3x-10C + 3x15C, median/mean/sigma_mean -> 750.0 ADU, stamped   2.5 C
+4x-10C + 2x15C, mean                   -> 533.3 ADU, stamped -10.0 C
+lights all at 2.5 C -> calibration_warnings() == []
+```
+
+**The answer here is the opposite of the last two, and that is the part worth
+keeping.** An exposure and a gain are *settings*, so a second value is a second
+population by definition and the right response is to skip frames. A temperature
+is continuous, and a Seestar's sensor is uncooled — it follows the night and the
+season — so gating would throw away good frames and leave the master noisier for
+nothing. `apply.py`'s own constant comment already said so ("a temperature…
+earns a tolerance wide enough to cover a night"), which is what stopped this
+being built as a third copy of the same gate. **The family sweep tells you where
+to look; it does not tell you what the fix is.**
+
+**Lever 2 — the same rule one *kind* sideways, found by reading the exemption's
+own reason.** The exposure gate said "darks only", because *"a bias is by
+definition the zero-length frame"*. That is a statement about what a bias **is**,
+not about what is in the folder — so it argues **for** the gate. Measured: the
+identical folder of 0 s readouts plus a few 10 s darks set the darks aside when
+built as a `dark` and combined all six when built as a `bias` (1000 ADU stamped
+**5 s**; the 4-to-2 folder 833 ADU stamped 0 s, silent). **A doc comment that
+explains why a rule is skipped is worth re-reading as a claim, not as an
+authority** — this one had been right about the physics and wrong about the
+conclusion since it was written.
+
+Its one subtlety is worth recording because it would have made a naive extension
+useless: `distinct_exposures` drops a non-positive value on purpose, so the
+commonest contaminated-bias folder groups as *one* length and gates on nothing.
+Zero had to be carried as a length of its own, opt-in, for the bias call only.
+
+**Lever 3 — dogfood `--calibration --editor`: CLEAN.** A combination never run
+(`--calibration` had been run alone, with `--mosaic`, and with
+`--incoming-lag --mosaic`, but never with the editor drive, so a *calibrated*
+run had never been driven through the Add menu). Masters built and bound
+(`{'dark_master_id': 1, 'flat_master_id': 2}`), the health card's calibrated
+branch on screen ("calibrated (dark+flat), round stars, even coverage"), the
+calibration nudge correctly withdrawn, all **21 ops re-rendered the preview**
+plus Undo and Redo, nothing overflowing, no console errors. Tallest phone page
+`/tonight` at 3,545 px. The only note is the container's own missing ASTAP,
+which every pass reports.
+
+---
+
 ## 2026-09-19 — Builder: the family sweep found one bug by *reading*, and the dogfood pass found the other by *running* — and the second was in the tooling's own log line
 
 *(Builder, branch `claude/sweet-babbage-3pa8rc`. Baseline `6392 passed, 2 skipped`,

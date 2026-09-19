@@ -431,11 +431,35 @@ describe("buildMasterSummary", () => {
     // Naming one would send the owner to re-run a build that sets frames aside
     // again for a reason this line never mentioned.
     const line = buildMasterSummary({
-      kind: "bias", n_frames: 10, n_skipped: 4,
+      kind: "dark", n_frames: 10, n_skipped: 4,
       skipped_buckets: { "wrong exposure": 1, "wrong gain": 3 },
     });
     expect(line).toContain("shot at a different length and gain");
     expect(line).toContain("its own exposure and gain");
+  });
+
+  it("gives a bias its own reason for a frame set aside for its length", () => {
+    // A bias is the one master whose exposure rule is not "match your subs" but
+    // "be zero" — it is exposure-independent where it is *applied*. So "a bias
+    // only matches subs of its own exposure" would be false; what it cannot
+    // survive is a seconds-long frame in the folder it is built from.
+    const line = buildMasterSummary({
+      kind: "bias", n_frames: 10, n_skipped: 2,
+      skipped_buckets: { "wrong exposure": 2 },
+    });
+    expect(line).toContain("shot at a different length");
+    expect(line).toContain("a bias is the readout on its own");
+    expect(line).toContain("dark current rather than a bias");
+    expect(line).not.toContain("only matches subs of its own exposure");
+    expect(line).toContain("build a second master");
+
+    const both = buildMasterSummary({
+      kind: "bias", n_frames: 10, n_skipped: 4,
+      skipped_buckets: { "wrong exposure": 1, "wrong gain": 3 },
+    });
+    expect(both).toContain("a bias is the readout on its own");
+    expect(both).toContain("gain-dependent readout pedestal too");
+    expect(both).not.toContain("its own exposure and gain");
   });
 
   it("does not offer that advice when nothing was set aside for its length", () => {
