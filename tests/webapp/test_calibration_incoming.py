@@ -360,3 +360,113 @@ def test_a_manual_build_still_takes_the_folder_as_given(client, data_root):
 
     assert meta.n_frames == 6
     assert meta.header_kinds == {"dark": 4, "light": 2}
+
+
+# --- The offer has to notice a folder that arrived a second ago --------------
+#
+# The `incoming/` walk is cached app-wide for `INCOMING_SCAN_TTL_S`, and it is
+# warmed by whichever consumer asks first — the Dashboard's incoming-lag note
+# polls it on every visit. So the owner who copies a Darks folder over SMB and
+# opens the Calibration page was told there was nothing there, for up to two
+# minutes, on the page whose entire job is to notice it.
+
+
+def test_a_folder_copied_in_after_the_first_look_is_offered_at_once(
+        client, data_root):
+    """The bug in one sequence, over the real endpoint: ask, copy, ask again."""
+    assert client.get("/api/calibration/incoming").json()["folders"] == []
+
+    _write_frames(data_root / "incoming" / "Darks 10s", 8, imagetyp="Dark Frame")
+
+    body = client.get("/api/calibration/incoming").json()
+    assert [f["name"] for f in body["folders"]] == ["Darks 10s"]
+
+
+def test_the_dashboards_own_poll_no_longer_hides_the_offer(client, data_root):
+    """And through the surface that actually warms the cache on a real install:
+    the incoming-lag note reads the same walk, so on the owner's box it is
+    usually *it* that looked first, not the Calibration page."""
+    client.get("/api/incoming-lag")
+
+    _write_frames(data_root / "incoming" / "Flats", 8, imagetyp="Flat Field")
+
+    body = client.get("/api/calibration/incoming").json()
+    assert [f["name"] for f in body["folders"]] == ["Flats"]
+
+
+def test_an_unchanged_incoming_folder_is_still_walked_only_once(
+        client, data_root, monkeypatch):
+    """The cost the TTL exists for is unchanged: two requests in a row over an
+    untouched folder still pay for one walk, not two."""
+    from seestack.calibrate import discover
+
+    _write_frames(data_root / "incoming" / "Dark", 8, imagetyp="Dark Frame")
+    client.get("/api/calibration/incoming")
+
+    calls = []
+    real = discover.find_calibration_folders
+    monkeypatch.setattr(
+        discover, "find_calibration_folders",
+        lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+
+    client.get("/api/calibration/incoming")
+    client.get("/api/calibration/incoming")
+
+    assert calls == [], "an untouched incoming/ must not be re-walked"
+
+
+def test_subs_landing_in_a_folder_that_already_exists_do_not_re_walk(
+        client, data_root):
+    """Deliberate, and the reason the check is a *name set*: a night of capture
+    adds files to folders that already exist, and re-walking the whole library
+    every few seconds to notice nothing is exactly the cost the TTL is for."""
+    from seestack.calibrate import discover
+
+    _write_frames(data_root / "incoming" / "Dark", 8, imagetyp="Dark Frame")
+    client.get("/api/calibration/incoming")
+    state = client.app.state
+    cached_at = state.calibration_incoming_cache["at"]
+
+    _write_frames(data_root / "incoming" / "Dark", 2, imagetyp="Dark Frame",
+                  exposure_s=99.0)
+    client.get("/api/calibration/incoming")
+
+    assert state.calibration_incoming_cache["at"] == cached_at
+    assert discover.find_calibration_folders(data_root / "incoming"), (
+        "the folder is still discoverable — this is staleness, not blindness")
+
+
+def test_a_folder_that_went_away_stops_being_offered_at_once(client, data_root):
+    """The same check pointing the other way: an offer for a folder that is no
+    longer there is a one-click build that 404s."""
+    folder = data_root / "incoming" / "Dark"
+    _write_frames(folder, 8, imagetyp="Dark Frame")
+    assert client.get("/api/calibration/incoming").json()["folders"]
+
+    import shutil
+    shutil.rmtree(folder)
+
+    assert client.get("/api/calibration/incoming").json()["folders"] == []
+
+
+def test_an_unreadable_incoming_folder_falls_back_to_the_ttl(tmp_path):
+    """No ``incoming/`` at all is not a reason to re-walk on every request: both
+    sides read ``None`` and so still match, which is today's behaviour exactly."""
+    import types
+
+    from seestack.calibrate import discover
+
+    state = types.SimpleNamespace()
+    missing = tmp_path / "not-there"
+    assert calibration.cached_incoming_folders(state, missing) == []
+
+    calls = []
+    real = discover.find_calibration_folders
+    try:
+        discover.find_calibration_folders = (
+            lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+        assert calibration.cached_incoming_folders(state, missing) == []
+    finally:
+        discover.find_calibration_folders = real
+
+    assert calls == []
