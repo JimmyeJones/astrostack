@@ -3351,8 +3351,19 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
     in it, and a dark picked against the median alone is bound unscaled onto subs
     it does not match. Given the set, the binder scales that same dark instead
     when a confident bias can carry it (see
-    :func:`calibration.auto_bind_master_ids`)."""
-    from seestack.calibrate.apply import distinct_exposures
+    :func:`calibration.auto_bind_master_ids`).
+
+    The **gain** goes over as the setting the most subs were actually shot at
+    (:func:`~seestack.calibrate.apply.dominant_gain`), not as their median. Gain
+    is a discrete setting, so a median across two of them names a value no frame
+    was shot at — 80 and 200 average to 140 — and the binder then refuses the
+    dark that matches half the target while binding one that matches none of it.
+    An ordinary single-gain target is byte-for-byte unaffected: there the mode
+    and the median are the same number. The *temperature* deliberately stays a
+    median: unlike a gain it is continuous and drifts through a night, so a value
+    between two nights' readings is a temperature the sensor really passed
+    through rather than a setting it was never at."""
+    from seestack.calibrate.apply import distinct_exposures, dominant_gain
     from webapp import calibration
 
     frames = list(proj.iter_frames(accepted_only=True))
@@ -3371,7 +3382,7 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
         settings.resolved_library_root, masters,
         exposure_s=_med([f.exposure_s for f in frames]),
         light_exposures_s=distinct_exposures([f.exposure_s for f in frames]),
-        gain=_med([f.gain for f in frames]),
+        gain=dominant_gain([f.gain for f in frames]),
         sensor_temp_c=_med([f.sensor_temp_c for f in frames]),
         width_px=calibration.modal_dim([f.width_px for f in frames]),
         height_px=calibration.modal_dim([f.height_px for f in frames]),

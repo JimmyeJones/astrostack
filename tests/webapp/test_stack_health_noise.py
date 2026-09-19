@@ -272,3 +272,69 @@ def test_an_ordinary_single_length_target_reports_one_length_on_the_wire(
         f"/api/targets/{safe}/stack-health?run_id={run_id}").json()["dark_spec"]
 
     assert spec["exposures_s"] == [spec["exposure_s"]]
+
+
+# --- …and the same claim about the other setting the guide prints -----------
+
+
+def _split_gains(data_root, safe: str, low: float, high: float) -> int:
+    """The gain twin of ``_split_exposures`` — half the accepted subs at *low*,
+    half at *high*, the shape an owner ends up with after changing the setting
+    between nights."""
+    import sqlite3
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        db = lib.target_dir(lib.find_target(safe)) / "project.sqlite"
+    finally:
+        lib.close()
+    con = sqlite3.connect(db)
+    try:
+        ids = [r[0] for r in con.execute(
+            "SELECT id FROM frames WHERE accept=1 ORDER BY id")]
+        half = (len(ids) + 1) // 2
+        for fid in ids[:half]:
+            con.execute("UPDATE frames SET gain=? WHERE id=?", (low, fid))
+        for fid in ids[half:]:
+            con.execute("UPDATE frames SET gain=? WHERE id=?", (high, fid))
+        con.commit()
+        return len(ids)
+    finally:
+        con.close()
+
+
+def test_the_darks_guide_names_every_gain_the_target_was_shot_at(
+        client, solved_library):
+    """The gain half of the same sentence, which until now took a median of a
+    *discrete setting*: shoot half a target at gain 80 and half at 200 and the
+    guide asked for darks at a gain the camera cannot be dialled to."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_path(solved_library, safe, "master.fits")
+    _write_master(master, sigma=2.0)
+    run_id = _register(solved_library, safe, master)
+    _split_gains(solved_library, safe, 80.0, 200.0)
+
+    spec = client.get(
+        f"/api/targets/{safe}/stack-health?run_id={run_id}").json()["dark_spec"]
+
+    assert spec["gains"] == [80.0, 200.0], (
+        "the gain-200 subs are invisible behind the representative, and need "
+        "their own darks — nothing anywhere rescales a gain")
+    # Whatever single value stands for the target, it has to be one the camera
+    # really was set to — the invariant a median cannot keep.
+    assert spec["gain"] in spec["gains"]
+
+
+def test_an_ordinary_single_gain_target_reports_one_gain_on_the_wire(
+        client, solved_library):
+    """Every library shot at one gain — which is every Seestar library until
+    someone changes the setting — is untouched."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_path(solved_library, safe, "master.fits")
+    _write_master(master, sigma=2.0)
+    run_id = _register(solved_library, safe, master)
+
+    spec = client.get(
+        f"/api/targets/{safe}/stack-health?run_id={run_id}").json()["dark_spec"]
+
+    assert spec["gains"] == [spec["gain"]]

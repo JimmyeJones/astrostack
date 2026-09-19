@@ -21,41 +21,79 @@ export function darkSpecLengths(spec: DarkSpec | null | undefined): number[] {
   return exposure_s != null && exposure_s > 0 ? [exposure_s] : [];
 }
 
+/** The gain settings this guide should name: the target's own *distinct* gains
+ *  when the backend sends them, the single value it has always sent otherwise.
+ *
+ *  The sibling of `darkSpecLengths`, and the argument is sharper here. A gain is
+ *  a discrete **setting**, so a target shot at gain 80 one night and gain 200
+ *  the next does not merely have a median no sub carries — 140 is a number the
+ *  camera cannot be dialled to at all, printed under the words "at the same
+ *  settings as your subs". */
+export function darkSpecGains(spec: DarkSpec | null | undefined): number[] {
+  if (!spec) return [];
+  const set = (spec.gains ?? []).filter((g) => g != null && g >= 0);
+  if (set.length > 0) return [...set].sort((a, b) => a - b);
+  const { gain } = spec;
+  return gain != null ? [gain] : [];
+}
+
+/** `[10, 30]` → `"10 s and 30 s"`; `[80]` → `"80"`. One joiner, so the two
+ *  halves of the phrase are punctuated the same way. */
+function joinParts(parts: string[]): string {
+  if (parts.length <= 1) return parts.join("");
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
 /**
  * Format the target's own exposure/gain into the "match these numbers" phrase,
- * e.g. `"10 s at gain 80"` — or `"10 s and 30 s at gain 80"` for a target shot
- * at two lengths. Returns `null` when neither number is known, so the guide
- * falls back to generic wording instead of showing a wrong/empty value.
- * Pure/testable.
+ * e.g. `"10 s at gain 80"` — or `"10 s and 30 s at gain 80 and 200"` for a
+ * target shot at two lengths and two gains. Returns `null` when neither number
+ * is known, so the guide falls back to generic wording instead of showing a
+ * wrong/empty value. Pure/testable.
  */
 export function formatDarkSpec(spec: DarkSpec | null | undefined): string | null {
   if (!spec) return null;
   const parts: string[] = [];
   const lengths = darkSpecLengths(spec).map(formatSeconds);
-  if (lengths.length === 1) {
-    parts.push(lengths[0]);
-  } else if (lengths.length > 1) {
-    parts.push(`${lengths.slice(0, -1).join(", ")} and ${lengths[lengths.length - 1]}`);
-  }
-  const { gain } = spec;
-  if (gain != null) {
-    const g = Number.isInteger(gain) ? String(gain) : gain.toFixed(0);
-    parts.push(`gain ${g}`);
-  }
+  if (lengths.length > 0) parts.push(joinParts(lengths));
+  const gains = darkSpecGains(spec).map(
+    (g) => (Number.isInteger(g) ? String(g) : g.toFixed(0)),
+  );
+  if (gains.length > 0) parts.push(`gain ${joinParts(gains)}`);
   if (parts.length === 0) return null;
   return parts.join(" at ");
 }
 
-/** The extra sentence a target shot at more than one sub length needs: one dark
- *  only subtracts correctly from subs of its own exposure, so two lengths means
- *  two sets. Empty string on the ordinary single-length target, which is every
- *  target until someone changes their sub length between nights. */
-export function darkSpecPerLengthNote(spec: DarkSpec | null | undefined): string {
-  const n = darkSpecLengths(spec).length;
-  if (n < 2) return "";
+/** The extra sentence a target shot at more than one *setting* needs: a dark
+ *  only subtracts correctly from subs of its own exposure **and** its own gain,
+ *  so two of either means two sets of darks.
+ *
+ *  Both axes in one sentence rather than two, because a reader who changed both
+ *  between nights needs one instruction, not a pair that have to be combined —
+ *  and because the guide sits under the owner's standing "extremely busy"
+ *  complaint. Empty string on the ordinary target, which is every target until
+ *  someone changes a setting between nights. */
+export function darkSpecPerSettingNote(spec: DarkSpec | null | undefined): string {
+  const lengths = darkSpecLengths(spec).length;
+  const gains = darkSpecGains(spec).length;
+  if (lengths < 2 && gains < 2) return "";
+  if (lengths >= 2 && gains < 2) {
+    return (
+      ` You shot this target at ${lengths} different sub lengths, so it needs a set of `
+      + `darks at each — one dark only matches subs of its own exposure.`
+    );
+  }
+  if (gains >= 2 && lengths < 2) {
+    return (
+      ` You shot this target at ${gains} different gains, so it needs a set of `
+      + `darks at each — a dark carries the gain-dependent readout pedestal, and `
+      + `nothing rescales it.`
+    );
+  }
   return (
-    ` You shot this target at ${n} different sub lengths, so it needs a set of `
-    + `darks at each — one dark only matches subs of its own exposure.`
+    ` You shot this target at ${lengths} different sub lengths and ${gains} different `
+    + `gains, so it needs a set of darks for each combination you used — a dark only `
+    + `matches subs of its own exposure and its own gain.`
   );
 }
 
@@ -90,7 +128,7 @@ export function DarksGuide(
   const match = formatDarkSpec(spec);
   const step2 = match
     ? `Shoot about 20–30 dark frames at the same settings as your subs — ${match}.`
-      + darkSpecPerLengthNote(spec)
+      + darkSpecPerSettingNote(spec)
     : "Shoot about 20–30 dark frames at the same exposure and gain as your subs.";
 
   return (

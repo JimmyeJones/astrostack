@@ -1501,3 +1501,57 @@ def test_uneven_grain_verdict_is_the_one_reader_of_those_four_figures():
                              [_frame() for _ in range(10)])
         cal = next(n for n in notes if n.kind == "calibration")
         assert "Across most of it" not in cal.message, missing
+
+
+# --- …and the other half of that same claim: the gain ------------------------
+#
+# The block above makes the argument for the exposure, and the gain sat one line
+# below it taking the median it warns against. The gain case is the sharper one:
+# an exposure is a quantity, so a median between 10 s and 30 s is at least a
+# length a camera could be set to — a gain is a discrete *setting*, so the
+# median of 80 and 200 is 140, a number the Seestar cannot be dialled to at all,
+# printed under an instruction to go and dial it in.
+
+
+def test_the_dark_guide_never_asks_for_a_gain_the_camera_cannot_be_set_to():
+    """Fail-before: ``gain`` was ``statistics.median``, so a target shot half at
+    80 and half at 200 told the owner to shoot his darks at gain 140."""
+    frames = ([_exp_frame(gain=80.0) for _ in range(3)]
+              + [_exp_frame(gain=200.0) for _ in range(3)])
+    spec = recommended_dark_spec(frames)
+    assert spec.gain == 80.0
+    assert spec.gain != 140.0
+    # …and the set travels beside it, so the guide can ask for a set per gain
+    # the way it already asks for a set per length.
+    assert spec.gains == (80.0, 200.0)
+
+
+def test_the_dark_guide_names_the_gain_most_of_the_subs_were_shot_at():
+    """Not the median, and not the first one seen: the setting the most subs
+    actually carry, so the darks the owner shoots calibrate the largest part of
+    the stack."""
+    frames = ([_exp_frame(gain=80.0) for _ in range(4)]
+              + [_exp_frame(gain=200.0) for _ in range(2)])
+    assert recommended_dark_spec(frames).gain == 80.0
+    frames = ([_exp_frame(gain=80.0) for _ in range(2)]
+              + [_exp_frame(gain=200.0) for _ in range(4)])
+    assert recommended_dark_spec(frames).gain == 200.0
+
+
+def test_the_dark_guide_is_unchanged_on_a_single_gain_target():
+    """Every ordinary target — one setting all year. The mode, the median and
+    the only value are the same number, and the set is one entry, so the guide's
+    sentence is byte-for-byte what it was."""
+    spec = recommended_dark_spec([_exp_frame(gain=80.0) for _ in range(5)])
+    assert spec.gain == 80.0
+    assert spec.gains == (80.0,)
+    # A header round-trip is one setting, not two — the engine's own grouping.
+    jittered = recommended_dark_spec(
+        [_exp_frame(gain=g) for g in (80.0, 80.0002, 79.9998)])
+    assert len(jittered.gains) == 1
+
+
+def test_the_dark_guides_gain_set_is_silent_when_nothing_recorded_one():
+    spec = recommended_dark_spec([_exp_frame(gain=None) for _ in range(3)])
+    assert spec.gain is None and spec.gains == ()
+    assert recommended_dark_spec([]).gains == ()

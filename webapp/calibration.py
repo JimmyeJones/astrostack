@@ -710,6 +710,59 @@ def _match_distance(
     return d
 
 
+def _temp_range_span(master: dict[str, Any]) -> float:
+    """How wide a sensor-temperature range *master* was built across, in °C —
+    ``0.0`` when it never recorded one, or recorded something unusable.
+
+    A master's stamped ``sensor_temp_c`` is the **median** of its source frames,
+    so a dark built from two nights carries a temperature none of them was shot
+    at (which is what :func:`master_temp_note` exists to say, v0.468.0). Two
+    masters can therefore sit at exactly the same distance from a target's subs
+    while one of them genuinely *was* that cold and the other only averages to
+    it.
+
+    One-sided like every other reading in this module: a master built before the
+    range was recorded — which is every master on the installed base — scores 0
+    and keeps its place, because "didn't say" cannot be disproved.
+    """
+    lo, hi = master.get("sensor_temp_min_c"), master.get("sensor_temp_max_c")
+    if isinstance(lo, bool) or isinstance(hi, bool):
+        return 0.0
+    if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)):
+        return 0.0
+    lo, hi = float(lo), float(hi)
+    if not (math.isfinite(lo) and math.isfinite(hi)) or hi <= lo:
+        return 0.0
+    return hi - lo
+
+
+def _match_rank(
+    master: dict[str, Any], *, exposure_s: float | None,
+    gain: float | None, sensor_temp_c: float | None, kind: str,
+) -> tuple[float, float]:
+    """The order masters are tried in: ``(match distance, temperature span)``.
+
+    Distance decides, exactly as it always has. The span is a **tie-break only**
+    — among masters the acquisition numbers cannot separate, prefer the one that
+    was actually shot at the temperature it is stamped with over one that merely
+    averages to it (see :func:`_temp_range_span`).
+
+    Deliberately not a distance term. ``_match_distance`` also feeds the
+    confidence gates (:func:`_dark_match_confident` and its siblings) and
+    :func:`master_coverage`'s "which targets does this cover?", so charging a
+    blended master extra distance could flip a bind into a *refusal* and strip
+    calibration off a target that has it today. A tie-break can only ever change
+    *which* of two equally-close masters is picked, so nothing that binds today
+    stops binding, and the answer is the same on every library whose masters
+    predate the recorded range.
+    """
+    return (
+        _match_distance(master, exposure_s=exposure_s, gain=gain,
+                        sensor_temp_c=sensor_temp_c, kind=kind),
+        _temp_range_span(master),
+    )
+
+
 def recommend_masters(
     masters: list[dict[str, Any]], *, exposure_s: float | None = None,
     gain: float | None = None, sensor_temp_c: float | None = None,
@@ -723,7 +776,7 @@ def recommend_masters(
     matched on gain/temperature only.
     """
     scores: dict[int, float] = {}
-    best: dict[str, tuple[int, float]] = {}
+    best: dict[str, tuple[int, tuple[float, float]]] = {}
     darks: list[dict[str, Any]] = []
     flats_by_id: dict[int, dict[str, Any]] = {}
     for m in masters:
@@ -736,13 +789,16 @@ def recommend_masters(
             mid = int(m["id"])
         except (KeyError, TypeError, ValueError):
             continue
-        dist = _match_distance(m, exposure_s=exposure_s, gain=gain,
-                               sensor_temp_c=sensor_temp_c, kind=kind)
-        score = 1.0 / (1.0 + dist)
+        rank = _match_rank(m, exposure_s=exposure_s, gain=gain,
+                           sensor_temp_c=sensor_temp_c, kind=kind)
+        # The badge score is the *distance* alone, unchanged: the tie-break
+        # orders two masters the score cannot tell apart, and a score that moved
+        # with it would put two different numbers on an equally good match.
+        score = 1.0 / (1.0 + rank[0])
         scores[mid] = round(score, 4)
         cur = best.get(kind)
-        if cur is None or dist < cur[1]:
-            best[kind] = (mid, dist)
+        if cur is None or rank < cur[1]:
+            best[kind] = (mid, rank)
         if kind == "dark":
             darks.append(m)
         else:
@@ -1054,7 +1110,7 @@ def auto_bind_master_ids(
     dark_candidates = sorted(
         (m for m in by_id.values()
          if str(m.get("kind", "")) == "dark" and m.get("exists", True)),
-        key=lambda m: _match_distance(
+        key=lambda m: _match_rank(
             m, exposure_s=exposure_s, gain=gain,
             sensor_temp_c=sensor_temp_c, kind="dark"),
     )
@@ -1080,7 +1136,7 @@ def auto_bind_master_ids(
     flat_candidates = sorted(
         (m for m in by_id.values()
          if str(m.get("kind", "")) == "flat" and m.get("exists", True)),
-        key=lambda m: _match_distance(
+        key=lambda m: _match_rank(
             m, exposure_s=None, gain=gain,
             sensor_temp_c=sensor_temp_c, kind="flat"),
     )
@@ -1115,7 +1171,7 @@ def auto_bind_master_ids(
         bias_candidates = sorted(
             (m for m in by_id.values()
              if str(m.get("kind", "")) == "bias" and m.get("exists", True)),
-            key=lambda m: _match_distance(
+            key=lambda m: _match_rank(
                 m, exposure_s=None, gain=gain,
                 sensor_temp_c=sensor_temp_c, kind="bias"),
         )
@@ -1211,7 +1267,7 @@ def existing_master_like(
         "dark": _dark_match_confident, "flat": _flat_match_confident,
         "bias": _bias_match_confident,
     }[kind]
-    best: tuple[float, dict[str, Any]] | None = None
+    best: tuple[tuple[float, float], dict[str, Any]] | None = None
     for m in masters:
         if not m.get("exists", True) or str(m.get("kind", "")).lower() != kind:
             continue
@@ -1221,10 +1277,10 @@ def existing_master_like(
             continue
         if kind == "dark" and not _exposure_close(m, exposure_s):
             continue
-        dist = _match_distance(m, exposure_s=exposure_s, gain=gain,
-                               sensor_temp_c=sensor_temp_c, kind=kind)
-        if best is None or dist < best[0]:
-            best = (dist, m)
+        rank = _match_rank(m, exposure_s=exposure_s, gain=gain,
+                           sensor_temp_c=sensor_temp_c, kind=kind)
+        if best is None or rank < best[0]:
+            best = (rank, m)
     return best[1] if best else None
 
 
@@ -1543,8 +1599,11 @@ def _fmt_seconds(value: float) -> str:
 
 
 #: One target's acquisition signature, as :func:`master_coverage` needs it: the
-#: same five numbers every other binder gates on (median exposure/gain/sensor
-#: temperature of the accepted subs, plus their modal raw frame size), and —
+#: same five numbers every other binder gates on (median exposure and sensor
+#: temperature of the accepted subs, their *dominant* gain — a discrete setting
+#: has no meaningful midpoint, see
+#: :func:`seestack.calibrate.apply.dominant_gain` — plus their modal raw frame
+#: size), and —
 #: since v0.457.0 — the *set* of distinct sub lengths the median stands in for.
 #: A plain dict keeps the helper pure and unit-testable without a Library/Project.
 #:
@@ -1977,7 +2036,7 @@ def _recommend_flat_dark(
     flat_gain = flat.get("gain")
     flat_temp = flat.get("sensor_temp_c")
     best_id: int | None = None
-    best_dist = float("inf")
+    best_rank: tuple[float, float] = (float("inf"), 0.0)
     for d in darks:
         try:
             did = int(d["id"])
@@ -1987,12 +2046,12 @@ def _recommend_flat_dark(
         # that never recorded its dimensions can't be disproved, so it still ranks.
         if dims_conflict(d, flat.get("width_px"), flat.get("height_px")):
             continue
-        dist = _match_distance(d, exposure_s=flat_exp, gain=flat_gain,
-                               sensor_temp_c=flat_temp, kind="dark")
-        if dist < best_dist:
-            best_dist = dist
+        rank = _match_rank(d, exposure_s=flat_exp, gain=flat_gain,
+                           sensor_temp_c=flat_temp, kind="dark")
+        if rank < best_rank:
+            best_rank = rank
             best_id = did
-    return best_id if best_dist <= _FLAT_DARK_MAX_DIST else None
+    return best_id if best_rank[0] <= _FLAT_DARK_MAX_DIST else None
 
 
 def _next_id(library_root: str | Path, entries: list[dict[str, Any]]) -> int:
