@@ -470,6 +470,47 @@ def master_defect_census(path: str | Path) -> dict[str, Any] | None:
     }
 
 
+def master_temp_note(
+    kind: str, sensor_temp_min_c: Any, sensor_temp_max_c: Any,
+) -> dict[str, Any] | None:
+    """The Calibration page's / build job's sentence about a master dark built
+    across a wide sensor-temperature range — or ``None`` when there is nothing
+    to say, which is every ordinary dark folder.
+
+    A thin wrapper over the engine's
+    :func:`seestack.calibrate.apply.dark_temperature_blend_warning`, so the
+    sentence a run's advisory says about a dark it is applying and the sentence
+    this page says about the same master are one sentence. Derived, never
+    stored: the two numbers are what the registry persists, so the wording can
+    be improved later without rewriting it.
+
+    Darks only. A flat is normalised before it divides, so its own temperature
+    is not part of what it says; a bias is the zero-length read pedestal, which
+    moves far less with temperature than dark current does — and a sentence that
+    fired on every kind would be noise on two of them. Flat-darks are registered
+    as ``kind="dark"`` and want this as much as darks do.
+
+    Never raises: the registry's JSON is not validated on read, so a value that
+    isn't a finite number is treated as "didn't say" rather than described.
+    """
+    from seestack.calibrate.apply import dark_temperature_blend_warning
+
+    if str(kind).lower() != "dark":
+        return None
+
+    def _f(value: Any) -> float | None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        v = float(value)
+        return v if math.isfinite(v) else None
+
+    message = dark_temperature_blend_warning(
+        _f(sensor_temp_min_c), _f(sensor_temp_max_c))
+    if not message:
+        return None
+    return {"severity": "warn", "message": message}
+
+
 def list_masters(library_root: str | Path) -> list[dict[str, Any]]:
     """Return all registered masters (newest first), dropping any whose file
     has since been deleted from disk."""
@@ -481,10 +522,16 @@ def list_masters(library_root: str | Path) -> list[dict[str, Any]]:
         # so the wording can be improved later without rewriting the registry.
         # Absent on every master built before v0.356.0 — the helper returns None
         # there and the row simply says nothing, which is the honest answer.
+        # ``temp_note`` is derived the same way and for the same reason — and,
+        # like ``header_note``, is simply absent on every master built before
+        # the range was recorded, which is the honest answer there.
         e = dict(e, exists=fp.exists(),
                  header_note=header_kind_note(
                      str(e.get("kind", "")), e.get("header_kinds"),
-                     e.get("n_frames")))
+                     e.get("n_frames")),
+                 temp_note=master_temp_note(
+                     str(e.get("kind", "")), e.get("sensor_temp_min_c"),
+                     e.get("sensor_temp_max_c")))
         out.append(e)
     out.sort(key=lambda e: e.get("created_utc", ""), reverse=True)
     return out
@@ -1992,6 +2039,11 @@ def register_master(
             "exposure_s": meta.exposure_s,
             "gain": meta.gain,
             "sensor_temp_c": meta.sensor_temp_c,
+            # The range the stamped median sits in, so a master can still say
+            # its temperature is a middle long after the build job has scrolled
+            # away. Both None when no source frame recorded a temperature.
+            "sensor_temp_min_c": meta.sensor_temp_min_c,
+            "sensor_temp_max_c": meta.sensor_temp_max_c,
             "bayer_pattern": meta.bayer_pattern,
             "width_px": meta.width_px,
             "height_px": meta.height_px,
