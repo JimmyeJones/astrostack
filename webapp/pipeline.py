@@ -3362,12 +3362,25 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
     and the median are the same number. The *temperature* deliberately stays a
     median: unlike a gain it is continuous and drifts through a night, so a value
     between two nights' readings is a temperature the sensor really passed
-    through rather than a setting it was never at."""
+    through rather than a setting it was never at.
+
+    The six values are read as **six columns**, never as frames
+    (:meth:`~seestack.io.project.Project.acquisition_values`). This is the
+    *unattended* half of the question ``/calibration-suggestions`` asks on the
+    Stack form, and v0.471.2 moved that one off whole rows for the same reason:
+    a ``FrameRow`` is ``SELECT *`` and the biggest column on a solved sub is its
+    plate solution, which nothing here reads. It matters more on this side —
+    the answer is computed in the job worker with a stack about to allocate its
+    canvases, on a box with an OOM history (AGENTS.md §10), and again per target
+    per scan by :func:`_auto_stack_calibration_recheck`. Measured on a synthetic
+    project the size of the owner's deepest target (35,894 subs, ~2 kB of
+    ``wcs_json`` each): **1,525 ms / 128.3 MB peak against 513 ms / 11.7 MB**,
+    for bit-identical arguments."""
     from seestack.calibrate.apply import distinct_exposures, dominant_gain
     from webapp import calibration
 
-    frames = list(proj.iter_frames(accepted_only=True))
-    if not frames:
+    acq = proj.acquisition_values()
+    if not acq.n_frames:
         return {}
 
     def _med(vals: list[Any]) -> float | None:
@@ -3380,13 +3393,13 @@ def _confident_master_binding(settings: Settings, proj: Any) -> dict[str, Any]:
     masters = calibration.list_masters(settings.resolved_library_root)
     return calibration.auto_bind_master_paths(
         settings.resolved_library_root, masters,
-        exposure_s=_med([f.exposure_s for f in frames]),
-        light_exposures_s=distinct_exposures([f.exposure_s for f in frames]),
-        gain=dominant_gain([f.gain for f in frames]),
-        sensor_temp_c=_med([f.sensor_temp_c for f in frames]),
-        width_px=calibration.modal_dim([f.width_px for f in frames]),
-        height_px=calibration.modal_dim([f.height_px for f in frames]),
-        bayer_pattern=calibration.modal_bayer([f.bayer_pattern for f in frames]),
+        exposure_s=_med(acq.exposures_s),
+        light_exposures_s=distinct_exposures(acq.exposures_s),
+        gain=dominant_gain(acq.gains),
+        sensor_temp_c=_med(acq.sensor_temps_c),
+        width_px=calibration.modal_dim(acq.widths_px),
+        height_px=calibration.modal_dim(acq.heights_px),
+        bayer_pattern=calibration.modal_bayer(acq.bayer_patterns),
     )
 
 
@@ -3469,20 +3482,29 @@ def _apply_saved_calibration_masters(
     cfa: str | None | object = _UNREAD
 
     def _sub_dims() -> tuple[int | None, int | None]:
-        """The subs' modal raw dimensions, read once and only when needed."""
+        """The subs' modal raw dimensions, read once and only when needed.
+
+        Two columns, not frames: the same reason
+        :func:`_confident_master_binding` reads columns — this runs in the job
+        worker on the walk-away path, and a ``FrameRow`` would carry every sub's
+        plate solution along to answer "how wide?"."""
         nonlocal dims
         if dims is None:
-            frames = list(proj.iter_frames(accepted_only=True))
-            dims = (calibration.modal_dim([f.width_px for f in frames]),
-                    calibration.modal_dim([f.height_px for f in frames]))
+            rows = list(proj.iter_frame_columns("width_px", "height_px",
+                                                accepted_only=True))
+            dims = (calibration.modal_dim([r[0] for r in rows]),
+                    calibration.modal_dim([r[1] for r in rows]))
         return dims
 
     def _sub_bayer() -> str | None:
-        """The subs' modal colour-filter phase, read once and only when needed."""
+        """The subs' modal colour-filter phase, read once and only when needed.
+
+        One column, for the reason :func:`_sub_dims` gives."""
         nonlocal cfa
         if cfa is _UNREAD:
-            frames = list(proj.iter_frames(accepted_only=True))
-            cfa = calibration.modal_bayer([f.bayer_pattern for f in frames])
+            cfa = calibration.modal_bayer(
+                [r[0] for r in proj.iter_frame_columns("bayer_pattern",
+                                                       accepted_only=True)])
         return cfa  # type: ignore[return-value]
 
     def _dims_conflict(entry: dict[str, Any]) -> bool:
