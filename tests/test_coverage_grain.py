@@ -320,6 +320,25 @@ def test_a_starved_panel_on_a_dithered_canvas_is_still_measured():
     assert grain is not None and grain_verdict(grain.ratio) == "uneven"
 
 
+def test_the_band_answer_survives_a_decimated_read():
+    """`backfill_coverage_grain` is how the owner's already-stacked mosaics pick
+    this measurement up, and it reads their masters **strided** — so a healed row
+    and a freshly stacked one must be the same kind of number. The depths and the
+    share are read off integer counts and are exact; the σ ratio drifts the same
+    few percent the per-level branch's own stride test allows."""
+    cov = _dithered_coverage(panel_h=340, panel_w=480)
+    rgb, cov_map = _sky_for(cov), _as_map(cov)
+    full = measure_coverage_grain(rgb, cov_map)
+    strided = measure_coverage_grain(rgb[::2, ::2], cov_map[::2, ::2],
+                                     proxy_scale=2.0)
+    assert full is not None and strided is not None
+    assert strided.thin_frames == full.thin_frames
+    assert strided.deep_frames == full.deep_frames
+    assert strided.thin_share == pytest.approx(full.thin_share, abs=0.01)
+    assert strided.ratio == pytest.approx(full.ratio, rel=0.15)
+    assert strided.region == full.region
+
+
 def test_two_levels_one_sub_apart_are_not_a_depth_step():
     """The one place the per-level rule *did* fire in the owner's 680 runs, and
     it answered about the wrong pair: levels 3,116 and 3,117 each held a tenth of

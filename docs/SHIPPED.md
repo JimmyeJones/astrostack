@@ -134,6 +134,15 @@ column round-tripping and an older DB reading NULL as `panel`; the run listing s
 verified by four separate scratch reverts** — the band rule, the adjacent-level guard, the note split and the
 trim promise — plus two more on the frontend branches.
 
+**The heal path, checked rather than assumed.** The owner's 26 mosaics pick this up through
+`backfill_coverage_grain`, which reads their masters **strided** — so a healed row and a freshly stacked one
+must be the same kind of number. Measured on the ramping fixture at stride 2: the depths and the share are
+exact (they are read off integer counts) and the ratio drifts 6 %, the same few percent the per-level branch's
+own stride test allows. A test pins it. The fixture *does* decline at stride 4, on `_GRAIN_MIN_SKY_PIXELS` —
+an absolute floor against a sample that shrinks with the square of the stride — which is recorded as a watch
+on the lead, not as work: the observer measured all 26 real mosaics at the stride the heal itself would use
+and got a ratio for every one.
+
 **One thing the run did NOT do, filed rather than guessed.** Whether the *deep* band is the right reference on
 a canvas whose median sits in the panel-overlap strips is unmeasured here — the observer's figures are the
 only evidence, and they are the band rule's own. And the `panel`/`spread` word is coarse by design: a ramping
