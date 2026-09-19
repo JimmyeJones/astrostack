@@ -2,7 +2,7 @@ import { MantineProvider } from "@mantine/core";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
-  DarksGuide, darkSpecLengths, darkSpecPerLengthNote, formatDarkSpec,
+  DarksGuide, darkSpecGains, darkSpecLengths, darkSpecPerSettingNote, formatDarkSpec,
 } from "./DarksGuide";
 
 describe("formatDarkSpec", () => {
@@ -82,7 +82,7 @@ describe("a target shot at more than one sub length", () => {
       .toBe("10 s, 20 s and 30 s");
   });
   it("adds the sentence that says one dark can't cover both", () => {
-    const note = darkSpecPerLengthNote({
+    const note = darkSpecPerSettingNote({
       exposure_s: 20, gain: 80, exposures_s: [10, 30],
     });
     expect(note).toContain("2 different sub lengths");
@@ -102,12 +102,12 @@ describe("the ordinary single-length target is untouched", () => {
   it("keeps the exact sentence it had", () => {
     expect(formatDarkSpec({ exposure_s: 10, gain: 80, exposures_s: [10] }))
       .toBe("10 s at gain 80");
-    expect(darkSpecPerLengthNote({ exposure_s: 10, gain: 80, exposures_s: [10] }))
+    expect(darkSpecPerSettingNote({ exposure_s: 10, gain: 80, exposures_s: [10] }))
       .toBe("");
   });
   it("falls back to the median against an older backend with no set", () => {
     expect(formatDarkSpec({ exposure_s: 10, gain: 80 })).toBe("10 s at gain 80");
-    expect(darkSpecPerLengthNote({ exposure_s: 10, gain: 80 })).toBe("");
+    expect(darkSpecPerSettingNote({ exposure_s: 10, gain: 80 })).toBe("");
   });
   it("ignores an unusable length rather than printing it", () => {
     expect(darkSpecLengths({ exposure_s: 10, gain: null, exposures_s: [0, -1] }))
@@ -152,5 +152,68 @@ describe("DarksGuide — the lead sentence agrees with the note above it", () =>
       ).not.toBeInTheDocument();
       unmount();
     }
+  });
+});
+
+describe("the gain half of 'at the same settings as your subs'", () => {
+  it("names every gain the target was shot at, never their midpoint", () => {
+    // A gain is a *setting*: 80 and 200 have a median of 140, which — unlike a
+    // sub length no frame happened to use — is a number no camera can be dialled
+    // to at all, printed under an instruction to dial it in.
+    expect(
+      formatDarkSpec({ exposure_s: 10, gain: 140, gains: [80, 200] }),
+    ).toBe("10 s at gain 80 and 200");
+    expect(
+      formatDarkSpec({ exposure_s: 10, gain: 80, gains: [80] }),
+    ).toBe("10 s at gain 80");
+  });
+
+  it("asks for a set of darks per gain, and says why nothing rescales one", () => {
+    const note = darkSpecPerSettingNote({
+      exposure_s: 10, gain: 140, exposures_s: [10], gains: [80, 200],
+    });
+    expect(note).toContain("2 different gains");
+    expect(note).toContain("a set of darks at each");
+    expect(note).toContain("nothing rescales it");
+  });
+
+  it("gives one instruction, not two, when both settings moved", () => {
+    const note = darkSpecPerSettingNote({
+      exposure_s: 20, gain: 140, exposures_s: [10, 30], gains: [80, 200],
+    });
+    expect(note).toContain("2 different sub lengths and 2 different gains");
+    expect(note).toContain("each combination you used");
+    // One sentence: the reader gets a single instruction to follow.
+    expect(note.match(/You shot this target/g)).toHaveLength(1);
+  });
+
+  it("is silent on the ordinary target, and against an older backend", () => {
+    for (const spec of [
+      { exposure_s: 10, gain: 80, exposures_s: [10], gains: [80] },
+      { exposure_s: 10, gain: 80 }, // older backend: no sets at all
+    ]) {
+      expect(darkSpecPerSettingNote(spec)).toBe("");
+      expect(formatDarkSpec(spec)).toBe("10 s at gain 80");
+    }
+  });
+
+  it("reads the set when there is one and the single value otherwise", () => {
+    expect(darkSpecGains({ exposure_s: 10, gain: 140, gains: [80, 200] }))
+      .toEqual([80, 200]);
+    expect(darkSpecGains({ exposure_s: 10, gain: 80 })).toEqual([80]);
+    // Gain 0 is a real setting and must survive; a negative never is.
+    expect(darkSpecGains({ exposure_s: 10, gain: null, gains: [0, -5] }))
+      .toEqual([0]);
+    expect(darkSpecGains({ exposure_s: 10, gain: null, gains: [] })).toEqual([]);
+    expect(darkSpecGains(null)).toEqual([]);
+  });
+
+  it("shows both gains in the rendered step, and not the midpoint", async () => {
+    renderGuide({ exposure_s: 10, gain: 140, exposures_s: [10], gains: [80, 200] });
+    fireEvent.click(screen.getByRole("button", { name: /How to add darks/ }));
+    const step = await screen.findByText(/Shoot about 20–30 dark frames/);
+    expect(step.textContent).toContain("10 s at gain 80 and 200");
+    expect(step.textContent).not.toContain("gain 140");
+    expect(step.textContent).toContain("a set of darks at each");
   });
 });
