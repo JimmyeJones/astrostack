@@ -296,6 +296,19 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `_seestar_output_bases` really does skip mosaics is the **healing** companion, for output frames an old
   scan merged *into* a `_sub` target — a different population from these, which sit in their own bare
   targets.
+  **↳ OBSERVER CONFIRMS RECURRENCE IS DORMANT ON LIVE DATA, Scout 2026-09-19** (from issue #878's
+  2026-09-17 follow-up; the observer re-measured the whole library after ingestion resumed). The duplicated
+  set is **41,732 frames, byte-identical across four readings**, while the denominator grew by 5,885 newly
+  ingested frames — so the falling rate (76.3 % → 68.9 %) is pure dilution, not new duplication. Grouped by
+  capture night, the mechanism **last fired 2026-07-03**; the 18 nights and 18,681 distinct frames since
+  (including all 5,885 post-stall ones) carry **zero** double-registration. A control rules out "the shape is
+  gone": `IC_360` and `IC_360_sub` still both exist and still share 583 `source_path`s, yet `IC_360` has since
+  taken 3,299 new frames from the very `_sub` folder its twin is named for and **none** landed in the twin. So
+  the duplicating *shape* is present and the duplicating *behaviour* is not — which corroborates the Builder's
+  in-code verification above that the sibling-skip rule already closes recurrence. **The only work left is the
+  one-off reconciliation of the 11 historical hash-suffixed pairs, and it is owner-sign-off** (it merges
+  targets / rewrites on-disk layout, §9, and must never touch `incoming/`, §10) — now filed as **gate 16** in
+  "Needs owner sign-off" so the owner can see where the decision lives. No urgency from accumulation.
 
 - **🟡 BUG (friendliness + autonomy, Scout 2026-09-14 — verified from observer issue
   [#880](https://github.com/JimmyeJones/astrostack/issues/880)) — a raw Python exception repr is stored as a
@@ -3594,6 +3607,15 @@ outright bug in existing behaviour, never to add capability.
     Q4's standing LOCAL policy, so asking about them again would re-open a settled question. What is left
     is not a network question at all.)* **Answer:** yes/no to adding one pure-Python offline package to the
     image so a faint field whose subs never plate-solve can still be registered against each other.
+16. **De-duplicate the 11 historical mosaic target pairs (observer [#878](https://github.com/JimmyeJones/astrostack/issues/878)).**
+    The naming collision that minted them is **closed** — recurrence has been dormant since 2026-07-03,
+    confirmed on live data (see the #878 entry under "Bugs"). But the 11 existing `<T>_mosaic-<hex>` /
+    `<T>_mosaic_sub` pairs still register 41,732 frames twice, which cost ~24.9 h of redundant re-stack time
+    on the last full reprocess and shows two Library entries per mosaic. Reconciling them is a **merge
+    migration** that rewrites on-disk target layout (§9) and must never touch `incoming/` (§10), so it needs
+    your OK before an agent runs it. **Decision:** merge each pair, keeping the more-complete target? *(The
+    observer measured no urgency — nothing new has been duplicated since this was filed; this is one-off
+    cleanup, not a live leak.)* **Worth:** removes the redundant re-stack time and the duplicate wall entries.
 
 - ~~**Satellite/aircraft-trail forecast for the Tonight planner (opt-in; needs a data source).**~~ —
   **DECLINED 2026-09-08 by the owner's standing LOCAL policy (AGENTS.md §1 Owner Facts, Q4); struck
