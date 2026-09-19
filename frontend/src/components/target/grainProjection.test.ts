@@ -96,6 +96,44 @@ describe("grainProjection", () => {
     expect(p?.sentence).toContain("only more light evens that part out");
   });
 
+  // …and where that thinner part is the canvas's ragged *perimeter*, "only more
+  // light evens that part out" is the wrong half of the answer: a rim does not
+  // fill in as you keep shooting, because the dither keeps moving it. Same
+  // correction the "How's my stack?" note made in v0.470.1, off the same flag.
+  it("offers the trim, not another night, when the thin part is the ragged edge", () => {
+    const p = grainProjection([
+      {
+        total_exposure_s: 3 * HOUR, noise_sigma: 0.016,
+        grain_verdict: "uneven", ragged_border: true,
+      },
+    ]);
+    expect(p?.level).toBe("clean");
+    // Every fact the scoped sentence carries is still there…
+    expect(p?.sentence).toContain("across most of it");
+    expect(p?.sentence).toContain("3.0 h");
+    expect(p?.sentence).toContain("0.016");
+    expect(p?.sentence).toContain("29 % more");
+    // …and the prescription is the one that can actually do something.
+    expect(p?.sentence).toContain("ragged edge");
+    expect(p?.sentence).toContain("Trim border");
+    expect(p?.sentence).not.toContain("only more light evens that part out");
+  });
+
+  it("keeps the panel wording for a thin panel, and for a backend that says nothing", () => {
+    const panel = grainProjection([
+      {
+        total_exposure_s: 3 * HOUR, noise_sigma: 0.016,
+        grain_verdict: "uneven", ragged_border: false,
+      },
+    ])?.sentence;
+    // An older backend sends no flag and must read as the panel case.
+    expect(grainProjection([
+      { total_exposure_s: 3 * HOUR, noise_sigma: 0.016, grain_verdict: "uneven" },
+    ])?.sentence).toBe(panel);
+    expect(panel).toContain("only more light evens that part out");
+    expect(panel).not.toContain("ragged edge");
+  });
+
   it("keeps the plain clean wording byte-for-byte whenever nothing says uneven", () => {
     const plain = grainProjection([run(3 * HOUR, 0.016)])?.sentence;
     // An evenly covered mosaic and a single field both send null…

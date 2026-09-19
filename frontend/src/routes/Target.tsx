@@ -564,6 +564,7 @@ export function TargetView() {
         // both of these change a rung's *wording*, never its kind, so the
         // plateau badge's deference is unaffected either way.
         grainVerdict: latestRun?.grain_verdict,
+        raggedBorder: latestRun?.ragged_border,
         grainLevel: grain?.level,
         // …unlike these two, the framing verdict *does* change which rung
         // fires, so the mirror has to carry it or the plateau badge would
@@ -1256,6 +1257,7 @@ export function TargetView() {
               objectType={identity.data?.type}
               difficulty={identity.data?.difficulty}
               grainVerdict={latestRun.grain_verdict}
+              raggedBorder={latestRun.ragged_border}
               /* The measured grain the readiness card below is describing, so
                  the "add more time" rung cannot promise a cleaner background
                  over a card that has just measured the background clean. */
