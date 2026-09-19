@@ -1,5 +1,72 @@
 # Shipped — the record
 
+## v0.471.1 — 2026-09-19 — opening the frames table on the owner's deepest target read all 35,894 subs eighteen times
+
+*(Builder, branch `claude/sweet-babbage-bluf7z`. Found by reading `routers/frames.py` at the owner's scale,
+then measured; not in the backlog beforehand. Performance, and the half that matters here is memory — §10's
+"never break the memory bounds" exists because this box has an OOM history.)*
+
+**What it cost.** `GET /api/targets/<t>/frames` paginates (`limit`, default 500), but it answered every request
+by reading **every** row of the target, building a `FrameRow` for each, sorting in Python and discarding all
+but the window. And the client does not make one request: `api.listFrames` pages the whole target 2,000 rows
+at a time until a short page comes back, deliberately, because one good S30 night is ~2,100 subs and a fixed
+cap used to hide the newest ones. So on the owner's largest target — **35,894 subs** — opening the Target page
+or the Stack form meant **eighteen full reads of the frames table**, each materialising all 35,894 rows as
+Python objects.
+
+Measured on a synthetic project of that size (this box, best of 5):
+
+| | full paged read (18 requests) | peak allocation |
+|---|---|---|
+| before | **9.09 s** | **163.6 MB** |
+| after | **2.40 s** | **83.5 MB** |
+
+A single 500-row page went from 472 ms / 84 MB to the cost of 500 rows. This is the scale hole `--deep`
+(v0.455.3) exists for, one layer below the DOM-node count it was built to find: the endpoint's cost is a
+function of the target's depth and nothing in a page-height probe or a 6-sub fixture could ever show it.
+
+**The fix.** New `Project.iter_frames_page(accepted_only=, sort=, descending=, offset=, limit=)` gives SQLite
+the sort and the slice, so only the page's rows are ever built as objects. The endpoint's ordering is
+unchanged — that is the whole claim — and it is the ordering the old code took care to get right:
+
+```sql
+ORDER BY (<col> IS NULL) ASC, <col> ASC|DESC, id ASC LIMIT ? OFFSET ?
+```
+
+* `(<col> IS NULL) ASC` is **nulls last in both directions**, which the frames table has needed since a
+  descending "blurriest first" sort pinned a block of unmeasured subs to the top and hid the actually-worst
+  measured frames. A test fails without it.
+* `id ASC` is the stability Python's sort had for free. **It is insurance, not a fix, and the test says so:**
+  deleting the term changes nothing on this SQLite, whose sorter happens to keep the scan order for equal
+  keys while the scan happens to be in rowid order. That is an accident — a spilled sort, a later SQLite, an
+  index added to one of these columns — and without a fixed order inside a tie group two requests for adjacent
+  windows can repeat one row and never return another. Recorded rather than dressed up as a fail-before test
+  (AGENTS.md §8).
+
+**`sort` arrives from a query string, so the engine checks it itself.** The endpoint has its own `_SORTABLE`
+allow-list, but `Project` cannot rely on its caller having one: the column is validated against
+`_FRAME_COLUMNS`, derived from `FrameRow`'s own dataclass fields — `iter_frames` is `SELECT *` and
+`_row_to_frame` maps each column onto the identically-named field, so the dataclass *is* the column list and
+there is no second copy to keep in step. Anything else raises `ValueError` rather than being interpolated.
+A negative `limit`, which SQLite reads as "no limit" — precisely the whole-table read this exists to avoid —
+clamps to 0, as does a negative `offset`.
+
+**Upgrade-safe (§9):** a pure optimisation. Identical responses, no endpoint, config, settings, DB schema,
+on-disk layout, API shape or default change; nothing is persisted, so an upgrade and a restart are
+indistinguishable from it. `iter_frames` is untouched, so its ~30 other callers are byte-for-byte as they were.
+
+**Tests (+34; the endpoint's own fails before, verified by a scratch revert to the Python sort).**
+`tests/test_project_frames_page.py` (+31): the page equals what the Python sort would have given, over every
+one of the endpoint's eight sortable columns × both directions × seven offsets × four limits, on a 240-frame
+fixture built for the difficulty (ties, unmeasured subs, rejected subs); `accepted_only` filters the same rows
+and is proved not to be a no-op on that fixture; nulls last in both directions; paging in 25s equals the
+single request; **a page builds exactly `limit` `FrameRow` objects**; seven injection-shaped sort values are
+refused *and the table is still there*; negative offset/limit clamp. `tests/webapp/test_frames_paging.py`
+(+3): a 1-row page builds one row (this is the one that fails before — the response is byte-identical either
+way, so counting the objects is the only way to see the regression), paging matches the whole list on a
+tied sort, and an unknown `sort` still falls back to `id` rather than reaching the engine's `ValueError`.
+Each ordering rule was checked by reverting it in a scratch copy and watching the count of failures.
+
 ## v0.471.0 — 2026-09-19 — the Library wall's "Not stretched yet" chip is now the one click, and stops telling the owner to press a button the editor already pressed
 
 *(Builder, branch `claude/sweet-babbage-bluf7z`. The last open piece of the wall-chip feature's next-slices

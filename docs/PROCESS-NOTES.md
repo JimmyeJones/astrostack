@@ -1,5 +1,60 @@
 # Process notes & QA sweep records
 
+## 2026-09-19 — Builder: two CLEAN dogfood sweeps, a dry bug list, and the lever that found the one thing worth shipping (v0.471.0 / v0.471.1)
+
+*(Builder, branch `claude/sweet-babbage-bluf7z`. Baseline `6461 passed, 2 skipped` in 10m11s with
+`-n 4 --dist worksteal` + the BLAS cap.)*
+
+**Two sweeps, both CLEAN — recorded so the next run does not repeat them.**
+
+* `scripts/agent-dogfood.sh --mosaic --editor`. Editor drive clean on **both** the field sample and the
+  mosaic: all 21 ops re-render, undo and redo apply, nothing overflows, no console errors. The mosaic's
+  prescribing paragraph holds together read as one — `next-best-move`, the readiness card, the panel map, the
+  stack-health card and the framing verdict all point at "more passes over the panels you already have", and
+  the arithmetic agrees across the units they each use (4 min total / ~1 min a panel / 3 subs against 6 /
+  ~7.3 h goal over ~4 field-fulls / ~18 h for the 3×3 from scratch). v0.443.0's framing rung, v0.444.2's
+  `framingIsFragment` clause and v0.451.1's "not counting what this picture already has" are all visibly
+  doing their jobs on the page.
+* `scripts/agent-dogfood.sh --big --editor` — the first pass this repo has recorded that both reaches the
+  **decimated** preview (canvas 1693×1150, proxy scale 2, `loupe-info available=True`) *and* drives the ops on
+  it. Also clean. The loupe opens, captions itself, reports where the window is, follows a click on the
+  navigator, offers the split comparison and hugs its window with 0 px spare; the preview-scale caption and
+  the sharpen / hot-pixel / star-reduction advisories fire exactly where their own thresholds say they should
+  (deconvolution's correctly does not: 1.5 px ÷ 2 is 0.75, above `_DECONV_PSF_FLOOR` 0.4).
+
+**One thing checked and found already handled, recorded so it is not re-derived.** The obvious gap on that
+screen is: the five preview↔export advisories all say *"Check it at full size"*, and a `geometry.rotate` with
+a real angle makes the loupe refuse. `FullSizeCheck.tsx` already covers it — a geometry refusal renders the
+server's own sentence *where the button would be*, and its comment names exactly that reasoning. It is
+structurally invisible to the dogfood drive, which adds each op at its identity default.
+
+**The bug list is dry, and that is a finding about the backlog rather than about the app.** All three open
+observer issues are handled or gated: #903's remainder is closed (the run that built the carry measured its
+premise away), #878's recurrence is dormant on live data and its only remaining work is owner-sign-off gate
+16, and #880's three parts are respectively not-user-facing, deliberate, and closed by #878's note. The two
+LEADs at the top of "Bugs" are both explicitly gated on a measurement only the owner's library can supply.
+Most of the Ideas sections are closed-with-measurements. A run that triages from the top will spend a long
+time discovering this; it is written down here instead.
+
+**The lever that found v0.471.1: read a router at the owner's *scale*, not at the sample's.** Nothing in the
+code looked wrong — `list_frames` clamps its pagination, sorts nulls-last in both directions, and carries a
+comment explaining why. What is wrong is only visible with a number attached: it materialises the whole target
+to return 500 rows, and `api.listFrames` asks it for the whole target 2,000 at a time. On his deepest target
+that is eighteen full reads of 35,894 rows per visit — 9.09 s and 163.6 MB peak, against 2.40 s and 83.5 MB
+once SQLite does the sort and the slice. This is the `--deep` hole (v0.455.3) one layer below what that flag
+measures: it counts DOM nodes and first paint, and the *server* cost of the request behind them was never in
+front of anything. **Generalisation worth carrying: for any endpoint the frontend pages through, the cost to
+read is per-request × pages, and a 6-sub fixture multiplies that by 1.**
+
+**And one piece of test honesty, because the temptation was real.** The new `ORDER BY` carries an `id ASC`
+tie-break. Deleting it in a scratch copy leaves all 31 tests passing — this SQLite's sorter happens to keep
+the scan order for equal keys, and the scan happens to be in rowid order. The term stays (that is an
+accident, and without it two adjacent page requests can repeat one row and never return another), but the
+test now *says* it is a contract rather than a fail-before case. AGENTS.md §8's rule — a regression test whose
+fixture cannot show its bug is green for the wrong reason — applies just as much to a test that cannot show
+its bug because there is no bug yet. The other three rules in the same statement (nulls-last, the negative
+clamp, the column check) were each checked by reverting them and watching the failures: 11, 1 and 1.
+
 ## 2026-09-19 — Builder: a head-on collision on observer #952, and the three pieces that survived it (v0.470.2)
 
 *(Builder, branch `claude/sweet-babbage-ceonap`, PR #953 **closed as superseded**, then re-landed as v0.470.2.
