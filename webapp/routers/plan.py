@@ -228,6 +228,16 @@ def _library_targets(request: Request) -> list[LibraryTarget]:
         lib.close()
 
 
+#: How many single-frame field-fulls of sky a target's canvas has to span before
+#: the planner treats it as "already a mosaic" and stands its framing verdict
+#: down. Deliberately the engine's own ``AUTO_UNION_AREA_RATIO`` (1.3) — the
+#: ratio `seestack.stack.mosaic` uses to decide a *stack* is a mosaic — so the
+#: planner and the stacker cannot disagree about which of the owner's targets
+#: are mosaics. A single-field stack is ~1.0 and a 2x2 with 50% overlap ~2.25,
+#: so nothing sits near the line by accident.
+_MOSAIC_CANVAS_FIELD_FULLS = 1.3
+
+
 def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget]:  # noqa: ANN001
     """Build the annotated 'already targeted' rows (see :func:`_library_targets`).
 
@@ -283,6 +293,21 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
             # branch was dropping it, which is why M 33 read "Challenging" until
             # the owner shot it and then read as nothing at all.
             difficulty=info.difficulty if info is not None else None,
+            # …and the same thing one field over, for "will it fit in one
+            # frame?". The **size** goes over, never `info.framing`: this
+            # `identify_object` call passes no `field`, so its verdict is against
+            # the module's default frame, while every catalog row on the same
+            # table is judged against the owner's own measured one. Handing the
+            # planner the size lets it make both verdicts with one field.
+            size_arcmin=info.size_arcmin if info is not None else None,
+            size_minor_arcmin=(info.size_minor_arcmin
+                               if info is not None else None),
+            # A target already being shot as a mosaic has answered the question
+            # (see `LibraryTarget.canvas_is_mosaic`). `target_field_fulls` is
+            # `None` for a single field and for a target with no stack yet —
+            # both of which still want the verdict — and >1 exactly when the
+            # newest *stacking* run's canvas spans more sky than one frame.
+            canvas_is_mosaic=(field_fulls or 1.0) > _MOSAIC_CANVAS_FIELD_FULLS,
         ))
     return out
 

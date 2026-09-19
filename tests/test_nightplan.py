@@ -174,14 +174,87 @@ def test_catalog_plan_rows_carry_a_difficulty_verdict():
         assert m33.difficulty.level == "challenging"
 
 
-def test_library_plan_rows_carry_no_difficulty_verdict():
-    """A user's own library row isn't a catalog object, so it gets no guessed
-    difficulty verdict (mirrors framing — catalog candidates only)."""
+def test_library_plan_rows_carry_no_difficulty_verdict_of_their_own():
+    """The planner never *guesses* a verdict for a library row: what a row
+    carries is what the caller annotated it with (the webapp resolves both the
+    difficulty and the size through `identify_object`). A bare row carries
+    nothing — which is also what an older backend sends."""
     m42 = LibraryTarget(safe="M42", name="Orion Nebula", ra_deg=83.82,
                         dec_deg=-5.39, frames_accepted=100, total_exposure_s=1000.0)
     plan = plan_tonight(LONDON, JAN_EVENING, library_targets=[m42], include_catalog=False)
     entry = next(p for p in plan.targets if p.id == "M42")
     assert entry.difficulty is None
+    assert entry.framing is None and entry.mosaic is None
+
+
+def test_an_already_shot_row_keeps_the_framing_verdict_a_catalog_row_gets():
+    """The badge that says *"Needs 3×2 mosaic"* used to vanish the moment the
+    owner shot one frame of the object — i.e. before every session after the
+    first, on the one screen they read while setting the scope's mode.
+
+    Pinned as an *equality* against the catalog row for the same object in the
+    same plan, not against literals: the point is that one object cannot get two
+    verdicts depending on how far along its owner is, and only comparing them
+    can show that. In particular both go through the same `field`.
+    """
+    m31_lib = LibraryTarget(safe="M31", name="Andromeda Galaxy", ra_deg=10.68,
+                            dec_deg=41.27, frames_accepted=100,
+                            total_exposure_s=1000.0, size_arcmin=178.0,
+                            size_minor_arcmin=63.0)
+    catalog_only = plan_tonight(LONDON, JAN_EVENING)
+    m31_cat = next(t for t in catalog_only.targets if t.id == "M31")
+    assert m31_cat.framing is not None and m31_cat.framing.level == "mosaic"
+
+    plan = plan_tonight(LONDON, JAN_EVENING, library_targets=[m31_lib],
+                        include_catalog=False)
+    row = next(t for t in plan.targets if t.id == "M31")
+    assert row.already_targeted is True
+    assert row.size_arcmin == m31_cat.size_arcmin
+    assert row.framing == m31_cat.framing
+    assert row.mosaic == m31_cat.mosaic
+
+
+def test_the_verdict_and_the_catalog_rows_are_measured_against_one_field():
+    """A framing verdict is a comparison against the owner's own frame, and the
+    webapp resolves a library row's size with an `identify_object` call that
+    passes *no* field — so taking that call's verdict would judge one table's
+    rows two ways. The planner computes both from the size instead, which is
+    what this pins: change the field and the library row moves with the catalog
+    row."""
+    from seestack.framing import FrameField
+
+    wide = FrameField(long_arcmin=480.0, short_arcmin=360.0)  # an 8°x6° frame
+    m31_lib = LibraryTarget(safe="M31", name="Andromeda Galaxy", ra_deg=10.68,
+                            dec_deg=41.27, frames_accepted=100,
+                            total_exposure_s=1000.0, size_arcmin=178.0,
+                            size_minor_arcmin=63.0)
+    plan = plan_tonight(LONDON, JAN_EVENING, library_targets=[m31_lib],
+                        field=wide)
+    row = next(t for t in plan.targets if t.id == "M31" and t.already_targeted)
+    assert row.framing is not None
+    # 178' is under 3° — on an 8°x6° frame it now fits, where it needed a mosaic
+    # on the Seestar's own field two tests up.
+    assert row.framing.level == "fits"
+    assert row.mosaic is None
+
+
+def test_a_target_already_shot_as_a_mosaic_stands_the_verdict_down():
+    """A target being shot as a mosaic has *answered* "will it fit in one
+    frame?", and pricing the whole grid from scratch beside a picture part of
+    the way through it is the misreading `mosaicDepthText`'s `alreadyAMosaic`
+    clause exists for — which a planner row has no picture to anchor. This is
+    the caution the original "library rows carry no framing" comment was written
+    for, kept rather than dropped."""
+    m31 = LibraryTarget(safe="M31", name="Andromeda Galaxy", ra_deg=10.68,
+                        dec_deg=41.27, frames_accepted=100,
+                        total_exposure_s=1000.0, size_arcmin=178.0,
+                        size_minor_arcmin=63.0, canvas_is_mosaic=True)
+    plan = plan_tonight(LONDON, JAN_EVENING, library_targets=[m31],
+                        include_catalog=False)
+    row = next(t for t in plan.targets if t.id == "M31")
+    assert row.framing is None and row.mosaic is None and row.size_arcmin is None
+    # …and everything else about the row is untouched.
+    assert row.already_targeted is True and row.frames_accepted == 100
 
 
 def test_dark_window_is_astronomical_in_winter():

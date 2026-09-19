@@ -334,10 +334,15 @@ class PlannedTarget:
     # behaviour). Purely annotation: it never affects scoring or ranking.
     field_fulls: float | None = None
     # "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
-    # verdict derived from it, for catalog candidates the bundled catalog has a
-    # size for; ``None`` otherwise (library rows carry none — the Target page
-    # already shows their framing, and a mosaic result would confuse the
-    # single-frame catalog verdict). See :mod:`seestack.framing`.
+    # verdict derived from it, for any row the bundled catalog has a size for;
+    # ``None`` otherwise. **Library rows carry it too**, since the verdict is
+    # about the *object* and not about how far along the owner is: dropping it
+    # on an already-shot row meant the badge disappeared the moment they started
+    # shooting, which is before every session but the first. The one stand-down
+    # is a target whose picture is *already* a mosaic
+    # (:attr:`LibraryTarget.canvas_is_mosaic`), which has answered this question
+    # and would be quoted the whole grid's cost from scratch. Computed here, for
+    # both kinds of row, from one ``field`` — see :mod:`seestack.framing`.
     size_arcmin: float | None = None
     framing: FramingHint | None = None
     # "How big a mosaic?" — the panel grid this object's span needs, so the row
@@ -1260,6 +1265,31 @@ class LibraryTarget:
     # an un-vetted object and on an older backend. Purely annotation: it never
     # affects scoring or ranking.
     difficulty: DifficultyHint | None = None
+    # The catalogue's angular size for this target's object, so the planner can
+    # give an already-shot row the same "will it fit in one Seestar frame?"
+    # verdict a *catalog* row of the same object carries — exactly the gap
+    # ``difficulty`` above closed, one field over. Without it the badge that
+    # says *"Needs 3×3 mosaic"* vanishes the moment the owner shoots one frame
+    # of M 42, i.e. before every session after the first, on the one screen
+    # they read *while setting the scope's mode*. (The Target page says it, but
+    # that card is read the morning after — the same argument
+    # ``recentre_nudge`` above is carried for.)
+    #
+    # The **size** travels, not the verdict: a verdict is a comparison against
+    # the owner's own frame field, which :func:`plan_tonight` already holds and
+    # already applies to every catalog row. Computing it there, from this, is
+    # what makes the two rows one answer by construction rather than by two
+    # callers remembering to pass the same field.
+    size_arcmin: float | None = None
+    size_minor_arcmin: float | None = None
+    # Is this target's newest picture *already* a mosaic? A target being shot as
+    # a mosaic is not asking "will it fit in one frame?" — it has answered that
+    # — and pricing the whole grid from scratch beside a picture that is part of
+    # the way through it is the misreading ``mosaicDepthText``'s
+    # ``alreadyAMosaic`` clause exists for, which this row has no picture to
+    # anchor. So the verdict stands down there, which is the caution the
+    # original "library rows carry no framing" comment was written for.
+    canvas_is_mosaic: bool = False
 
 
 def plan_tonight(observer: Observer, when_utc: datetime, *,
@@ -1365,6 +1395,15 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 field_fulls=t.field_fulls,
                 recentre_nudge=t.recentre_nudge,
                 difficulty=t.difficulty,
+                # The same two calls, with the same ``field``, that the catalog
+                # branch below makes — so one object cannot get two verdicts
+                # depending on whether the owner has started shooting it.
+                size_arcmin=None if t.canvas_is_mosaic else t.size_arcmin,
+                framing=(None if t.canvas_is_mosaic
+                         else framing_hint(t.size_arcmin, field=field)),
+                mosaic=(None if t.canvas_is_mosaic
+                        else mosaic_plan(t.size_arcmin, t.size_minor_arcmin,
+                                         field=field)),
             ))
         else:
             obj: CatalogObject = m["obj"]

@@ -1,5 +1,64 @@
 # Shipped — the record
 
+## v0.472.0 — 2026-09-19 — "Needs 3×3 mosaic" vanished from the planner the moment you shot one frame of the object
+
+*(Builder, branch `claude/wizardly-cannon-fgcbme`. Found by a `--mosaic --calibration` dogfood pass that was
+mechanically CLEAN — the finding was in the block it prints, read as one paragraph across two screens.)*
+
+**What the pass showed.** `/tonight`'s week plan said *"Tonight · Sample: Orion Nebula (M42) · 02:57–04:20 ·
+87 min"*, and the same target's page said *"A large part of Orion Nebula is still outside this picture —
+only about 20 % of it made it in, and it's bigger than one frame, so **more time can't bring the rest in**.
+Shooting it in mosaic mode next session is the biggest win here."* The planner's own table carries a badge
+for exactly that — **"Needs 3×2 mosaic"** — and it was not on the row, because
+`nightplan.PlannedTarget.framing` was populated for *catalog* rows only.
+
+**So the advice disappeared at the moment it started to matter.** Mosaic mode is a setting on the scope,
+chosen **before** a session. A beginner sees "Needs 3×3 mosaic" on M 42 while it is a catalog suggestion;
+they shoot one frame of it; from then on — i.e. before every session after the first — the row that tells
+them what to point at says nothing about how to shoot it. The Target page does say it, but that card is read
+the morning after, which is the argument the sibling field `recentre_nudge` is already carried here for
+(*"the moment it is worth anything is while they are pointing the scope"*), and the argument the
+`difficulty` field was carried for one release earlier (*"the same object lost its verdict the moment the
+owner started shooting it"*). This is the third member of that family, and the only one whose absence costs
+a night rather than a badge.
+
+**The stand-down it replaces was reasoned, and half of that reason is kept.** The old comment read:
+*"library rows carry none — the Target page already shows their framing, and a mosaic result would confuse
+the single-frame catalog verdict."* The first clause is the one the two sibling fields already disagree
+with. The second is real and is now the explicit exception: a target whose newest **stacking** run spans
+more than one frame of sky has *answered* "will it fit?", and quoting it the whole grid's cost from scratch
+is the misreading `mosaicDepthText`'s `alreadyAMosaic` clause (v0.451.1) exists for — which a planner row,
+having no picture beside it, cannot anchor. `LibraryTarget.canvas_is_mosaic` carries that, derived from
+`target_field_fulls` against `_MOSAIC_CANVAS_FIELD_FULLS = 1.3` — deliberately the engine's own
+`AUTO_UNION_AREA_RATIO`, so the planner and the stacker cannot disagree about which targets are mosaics.
+
+**The size travels, not the verdict — and that is the load-bearing detail.** A framing verdict is a
+comparison against the owner's *own* measured frame field, which `plan_tonight` already holds and already
+applies to every catalog row. `webapp/routers/plan._annotate_library_targets` calls `identify_object`
+**without** a field, so `info.framing` is a verdict against the module's fallback frame; carrying *that*
+would have put two rules on one table and created a fresh contradiction while closing this one. What goes
+over is `size_arcmin` / `size_minor_arcmin` — catalogue facts, field-independent — and `plan_tonight` makes
+both rows' verdicts with the same `framing_hint` / `mosaic_plan` calls and the same `field`.
+
+**Frontend: nothing to do, which is the point.** `framingRowBadge` and `withMosaicEffort` were already pure
+functions of the row's data with no `already_targeted` branch, so the badge and its "about N clear nights"
+hover appeared the moment the fields did. Two comments that now stated the opposite of the behaviour were
+corrected (the framing one, and the `difficulty` one that still said "catalog rows only").
+
+**Upgrade-safe (§9):** three additive fields with defaults on an internal dataclass; the response keys
+already existed and were already optional in `frontend/src/api/client.ts` (catalog rows have sent them for
+releases). An older frontend ignores them; an older backend omits them and the badge stays absent, which is
+today's behaviour. No config, schema, on-disk, default or endpoint change, and nothing about scoring or
+ranking — every one of these fields is annotation.
+
+**Tests (+6; three fail before, and the fourth is a preservation guard that deliberately does not).**
+Engine: the already-shot row's verdict asserted **equal to the catalog row's for the same object in the same
+plan** rather than to literals (the claim is that one object gets one answer, and only comparing them can
+show it); the field-consistency claim pinned by changing `field` and watching the library row move with it;
+and the mosaic stand-down. Webapp: `/api/plan/tonight` serves the badge on the already-targeted `M_42`, and
+stands it down when the target's canvas is a mosaic. Frontend: the badge renders on an `already_targeted`
+row, and nothing is invented from a size when the backend sent no framing.
+
 ## v0.471.7 — 2026-09-19 — "a healthy, up-to-date target pays nothing but a couple of DB reads" — it paid a frame object per sub, five times over, every five minutes
 
 *(Builder, branch `claude/wizardly-cannon-fgcbme`, the same run as v0.471.6. The sentence in the heading is
