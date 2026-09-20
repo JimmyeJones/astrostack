@@ -1,5 +1,71 @@
 # Process notes & QA sweep records
 
+## 2026-09-20 — Builder: a new badge is a new *neighbour*, and the run's work was all in what it now sits beside (v0.472.1 / v0.472.2 / v0.472.3)
+
+*(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Baseline `6544 passed, 2 skipped` in 10m04s with
+`-n 4 --dist worksteal` + the BLAS cap; `6549` at the end. Frontend `4,336` vitest, `tsc` clean, `vite build`
+clean.)*
+
+**Triage, so the next run does not repeat it.** "Bugs (fix these first)" still holds no buildable entry —
+every open item there is a lead gated on a measurement of the owner's own library, an item already routed to
+owner sign-off, a Builder verification saying the named slice is already in the code, or a stand-down that
+carries numbers. Every `READY` marker in `IMPROVEMENTS.md` is on a shipped item. **That is four consecutive
+runs recording the same finding**, and it is worth reading as a fact about the backlog rather than as a
+complaint: the sections are drained of *ready* work, and what fills a run is what the app is doing when you
+run it.
+
+**The lever, stated so it can be reused: read the diff that just merged, then look at what its new element
+now sits beside.** Both of this run's substantive findings are downstream of **v0.472.0**, which put the
+"Needs 3×2 mosaic" badge on already-shot planner rows for the first time. Nothing in that change was wrong.
+What it did was add a *claim* to a row, and a row is a paragraph: every other claim on it now has to be
+readable alongside the new one, and two of them were not.
+
+* **v0.472.1 — found by reading, in about ten minutes, before the app was even running.** The readiness
+  badge on the same row says "Plenty — try something new"; the new badge says "Needs 3×2 mosaic". *You are
+  done here* beside *you have a sixth of it*. The fix needed no new machinery at all: the Target page had
+  hit the identical contradiction in **v0.444.2** and `integrationReadiness` has taken a `canvasScope` ever
+  since — the planner row was simply the one caller with no framing verdict to pass it. **The generalisable
+  half: when a claim lands on a second surface, grep for the first surface's fix before designing one.**
+* **v0.472.2 — found by the `--mosaic` dogfood pass, which was mechanically CLEAN.** Same object, one card
+  down: "Plan my week" listed *Tonight / Tomorrow / Monday · Point at · Sample: Orion Nebula (M42)* and said
+  nothing about the mode, while that target's own page said *"shooting it in mosaic mode next session is the
+  biggest win here"*. v0.472.0's own argument — the mode is set on the scope **before** a session — applies
+  with more force to the card that plans *seven* of them. `WeekTargetPick` now carries the same pair, from
+  the same two calls against the same measured frame.
+
+**And the third commit is the one worth recording as method.** v0.472.2 was green on every gate §5 names —
+full Python suite, `tsc`, 4,336 vitest, `vite build` — and it shipped a **clipped badge**: the probe's next
+pass printed `[phone] /tonight: CLIPPED LABEL 76px box vs 91px word — "Needs 3×3 mosaic" (scrolling cannot
+reveal it)`. The rule it broke is *already written down* in `frontend/src/badgeFit.ts`, from two earlier
+instances (v0.434.1, v0.436.2), and this card's own comment records the same trap one element up ("a badge
+truncates, and in this column on a phone the caution came out as *Moon 92%, up…*"). I read that comment
+while writing the badge and still omitted `NO_SHRINK`.
+
+**Two things follow, and the second is the more useful.**
+1. **A test suite cannot see a 76 px box.** jsdom has no layout, so every one of 4,336 vitest cases passed
+   on a chip whose text was unreachable. The dogfood probe is not a nicety on a frontend change that adds an
+   element to a table — it is the only gate that can fail.
+2. **"Measure after, not only before."** The standing IA rule says measure before opening a slice. This run
+   is the other direction: measuring *after* an addition caught the defect **and** corrected the story —
+   `/tonight` went 3,834 px (pre-run) → 3,847 px (with the un-shrunk chip) → **3,718 px** with the rule
+   applied, i.e. the finished change left the tallest page in the app **116 px shorter** than it found it,
+   because the un-shrunk chip had been squeezing target names onto extra lines. Without the second
+   measurement the honest entry would have said "+13 px" and been wrong about the sign.
+
+**Dogfood records from this run** (scratch install, observing site set, ASTAP absent as always):
+
+| pass | at | result |
+|---|---|---|
+| `--mosaic` | v0.472.1 | **CLEAN** (nothing overflowing, no console errors). The finding was in the block it prints: the week table against the Target page. Target-page paragraph read coherently on both samples — the field sample's readiness card correctly carried "for this single field" (v0.444.2), and the mosaic's correctly did **not** (75 % captured is above the fragment bar, and `framingDepthFirstClause` had the floor instead). |
+| plain | v0.472.2 | **1 finding** — the clipped badge above. `/tonight` 3,847 px. |
+| plain `--build` | v0.472.3 | **CLEAN.** `/tonight` 3,718 px; the chip renders on the first row naming each target and on no other, as designed. |
+
+**One measurement worth keeping for whoever next touches the planner:** `/tonight` is the tallest page in
+the app on a phone at 3,718 px, ahead of `/glossary` (3,364 px) and the mosaic Target page (3,673 px on a
+`--mosaic` pass). It has been the tallest since v0.437.0 halved it, and every card added to it since has
+been self-hiding. Nothing here argues for a slice — the standing rule is to measure first, and this number
+is not a problem — but it is the page to be careful with.
+
 ## 2026-09-19 — Builder: the same class asked of the *unattended* half, and a mechanically-CLEAN sweep whose finding was a badge that was missing (v0.471.6 / v0.471.7 / v0.472.0)
 
 *(Builder, branch `claude/wizardly-cannon-fgcbme`. Baseline `6532 passed, 2 skipped` in 11m38s with
