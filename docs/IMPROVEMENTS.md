@@ -76,7 +76,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **`claude/wizardly-cannon-met7dm`** (Builder 2026-09-20) — the Tonight row's readiness badge prices the
+  single field beside the badge that has just said the object needs a mosaic: `readinessRowBadge` +
+  `readinessFramingScope`. The Target page's own `readinessCanvasScope` (v0.444.2) one screen over.
 
 ---
 
