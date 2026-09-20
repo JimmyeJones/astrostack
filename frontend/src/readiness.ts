@@ -123,6 +123,13 @@ export interface IntegrationReadiness {
   level: ReadinessLevel;
   // A plain-language one-liner, e.g. "1.8 h of ~4 h — a solid start; …".
   verdict: string;
+  // The canvas the verdict says it is pricing, after the blank/absent cases are
+  // folded together — ``null`` when it is pricing the object outright, which is
+  // every surface that passes no ``canvasScope``. Exposed rather than re-derived
+  // so a caller whose *chip* has to change wording (the planner row's "Plenty —
+  // try something new") asks the same question the sentence answered, instead of
+  // keeping its own copy of the "is this scope worth saying?" rule.
+  canvasScope: string | null;
 }
 
 // The goal as a compact figure: "6", "4", "1.5" (trailing ".0" trimmed), for a
@@ -249,6 +256,7 @@ export function integrationReadiness(
     fraction,
     level,
     verdict,
+    canvasScope: scope,
   };
 }
 
@@ -296,17 +304,32 @@ export function noiseReductionHint(exposureSeconds: number): string | null {
 // deliberately has to win here exactly as it does on the Target page and the
 // Dashboard overview, or the planner tells them to move on from a target they
 // have told the app they want more of.
+//
+// ``canvasScope`` is the same clause ``integrationReadiness`` takes, and on this
+// chip it does one thing more than lengthen a sentence: "Plenty — **try
+// something new**" is a prescription, and on a row whose neighbouring badge says
+// the object needs a mosaic it is the opposite of that badge's. So a scoped
+// "plenty" keeps the verdict and drops the prescription — "Plenty for this
+// framing" — leaving the wider-canvas advice to the badge whose job it is. Omit
+// it (every caller with no framing verdict to hand) and both labels are exactly
+// what they always were.
 export function readinessRowHint(
   exposureSeconds: number,
   type: string | null | undefined,
   goalHoursOverride?: number | null,
   fieldFulls?: number | null,
   difficulty?: GoalDifficulty,
+  canvasScope?: string | null,
 ): { label: string; color: string } | null {
   const r = integrationReadiness(
-    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty);
+    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty, canvasScope);
   if (!r) return null;
-  if (r.level === "plenty") return { label: "Plenty — try something new", color: "green" };
+  if (r.level === "plenty") {
+    return {
+      label: r.canvasScope ? "Plenty for this framing" : "Plenty — try something new",
+      color: "green",
+    };
+  }
   if (r.level === "close") return { label: "Nearly there", color: "teal" };
   return null;
 }
@@ -332,6 +355,11 @@ export function readinessRowHint(
 // table has to be terse, but "~1 more night" is meaningless without "of what,
 // toward what?", so the hover says where the number came from (the owner's own
 // measured pace) and what it is counting toward (their goal).
+//
+// ``canvasScope`` reaches the hover on *every* level, not only the one whose
+// chip changes: "~2 more nights" is compatible with "shoot it wider" — it says
+// keep going on this object either way — but the hours behind it are still the
+// hours for one framing, and that is what the sentence now says.
 export function readinessRowBadge(
   exposureSeconds: number,
   type: string | null | undefined,
@@ -339,9 +367,10 @@ export function readinessRowBadge(
   paceSeconds?: number | null,
   fieldFulls?: number | null,
   difficulty?: GoalDifficulty,
+  canvasScope?: string | null,
 ): { label: string; color: string; tooltip: string } | null {
   const r = integrationReadiness(
-    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty);
+    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty, canvasScope);
   if (r && r.level !== "plenty") {
     const est = clearNightsFromPace((r.goalHours - r.hours) * 3600, paceSeconds);
     if (est && est.nights !== null && est.nights <= FINISH_FIRST_MAX_NIGHTS) {
@@ -353,7 +382,7 @@ export function readinessRowBadge(
     }
   }
   const hint = readinessRowHint(
-    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty);
+    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty, canvasScope);
   // `readinessRowHint` only returns a hint when the readiness itself exists, so
   // `r` is non-null here; the guard keeps the types honest rather than asserting.
   return hint && r ? { ...hint, tooltip: r.verdict } : null;
