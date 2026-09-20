@@ -23,7 +23,7 @@ import { settingsLink } from "../settingsSections";
 import { siteUnknownCopy } from "../siteUnknown";
 import {
   difficultyRowBadge, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge, minAltOptions,
-  recentreNudgeRowBadge,
+  readinessFramingScope, recentreNudgeRowBadge,
   moonCueForTarget, moonPhaseLabel, moonShootColor, moonShootLabel,
   moonShootWindowNote, moonWindowNote, notUpTonightNote,
   partitionByUpTonight, planDateBounds, planNightLabel, scoreColor, splitTargets,
@@ -64,6 +64,11 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
         // …and about the same goal, which the vetted difficulty verdict
         // sharpens on the objects the catalog has been curated for.
         t.difficulty,
+        // …and about which canvas that goal is for. Read off the very framing
+        // verdict the badge two lines below is drawn from, so "have I shot
+        // enough?" and "will it fit in one frame?" cannot answer as if the
+        // other had not been asked. See `readinessFramingScope`.
+        readinessFramingScope(t.framing),
       )
     : null;
   // "Will it fit?" nudge for a target that's bigger than (or as wide as) a

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compassPoint, difficultyRowBadge, filterByTypeBucket, formatClock, formatMinutes, framingRowBadge,
-  recentreNudgeRowBadge,
+  readinessFramingScope, recentreNudgeRowBadge,
   isoDate, minAltOptions, MAX_PLAN_LOOKAHEAD_DAYS, moonCueForTarget, moonPhaseLabel,
   moonShootColor, moonShootLabel, moonShootWindowNote,
   moonWindowNote, notUpTonightNote, objectTypeBucket, partitionByUpTonight,
@@ -247,6 +247,26 @@ describe("targetRowLabel", () => {
     // `rename_target` deliberately leaves `safe_name` alone, so the two really
     // can diverge — and the name is the half a reader recognises.
     expect(targetRowLabel({ ...mk("NGC_6888_SUB", true), name: "NGC 6888" })).toBe("NGC 6888");
+  });
+});
+
+describe("readinessFramingScope", () => {
+  it("scopes the readiness verdict on a row that needs a mosaic", () => {
+    // The row's own framing verdict, not a second copy of the rule — so the
+    // clause and the badge beside it are one answer.
+    expect(readinessFramingScope({ level: "mosaic", text: "is bigger than one frame." }))
+      .toBe("the framing you've shot");
+  });
+
+  it("leaves every other row exactly as it was", () => {
+    // `tight` means it about fits: a single field really is most of it, so a
+    // scope clause there would be a new sentence on a card a big-object owner
+    // sees constantly. `fits`, no verdict, and an older backend say nothing.
+    expect(readinessFramingScope({ level: "tight", text: "is about as wide as one frame." }))
+      .toBeNull();
+    expect(readinessFramingScope({ level: "fits", text: "fits comfortably …" })).toBeNull();
+    expect(readinessFramingScope(null)).toBeNull();
+    expect(readinessFramingScope(undefined)).toBeNull();
   });
 });
 
