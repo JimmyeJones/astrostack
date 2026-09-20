@@ -44,6 +44,41 @@ export function framingRowBadge(
   return { label, color, tooltip: `This target ${framing.text}${plan}` };
 }
 
+// The canvas an already-shot row's readiness verdict is really pricing, or
+// `null` to leave that verdict exactly as it is — the planner-table twin of the
+// Target page's `readinessCanvasScope`.
+//
+// The readiness badge answers *"have I shot enough of this?"* from the
+// integration the target has, which is the integration of the framing it was
+// shot at. That was unambiguous while it was the only thing on the row with an
+// opinion about the canvas. Since the framing verdict reached library rows the
+// two sit side by side, and on an oversized object they read as opposites:
+// "Plenty — try something new" an inch from "Needs 3×2 mosaic", i.e. *you are
+// done here* beside *you have a sixth of it*. Nobody is wrong — the goal is the
+// honest goal for one field — but the reader is asked to hold both.
+//
+// So the number stays and gains the scope it always assumed, and it is derived
+// from the **same** `framing` the badge beside it is drawn from, so the two
+// cannot come to different opinions about which canvas this row is about.
+//
+// Only the `mosaic` level scopes anything. `tight` means the object about fits
+// with no margin, so a single field really is most of it and a scope clause
+// there would be a new sentence on a card a big-object owner sees constantly —
+// the same bar `framingIsFragment` sets on the Target page. And the backend
+// already stands the whole verdict down on a target being shot *as* a mosaic
+// (`LibraryTarget.canvas_is_mosaic`), so a mosaic's own row is untouched here by
+// construction rather than by a second rule.
+//
+// The wording names the framing rather than the canvas ("this single field")
+// deliberately: the verdict is carried on rows with no stacked picture yet, so
+// this app does not always know the canvas — but it always knows the pointing
+// the exposure was taken at.
+export function readinessFramingScope(
+  framing: FramingHint | null | undefined,
+): string | null {
+  return framing?.level === "mosaic" ? "the framing you've shot" : null;
+}
+
 // A compact "how hard for a Seestar?" table badge for a catalog planner row, so a
 // beginner sees the difficulty *while choosing* a target — not only after they've
 // shot it. All three verdicts get a chip (a reassuring "Easy" is exactly what a

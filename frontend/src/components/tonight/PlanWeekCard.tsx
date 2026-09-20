@@ -5,13 +5,14 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
+import { NO_SHRINK } from "../../badgeFit";
 import {
-  closingRowFor, closingWeekNote, nightInProgressDate, otherTargetNights,
+  closingRowFor, closingWeekNote, framingBadgeNights, nightInProgressDate, otherTargetNights,
   targetNightPhrase, weekDarkPhrase, weekEmptyReason, weekHeadline, weekMoonNote,
   weekMoonParts,
   weekNightLabel,
 } from "../../planweek";
-import { formatClock, formatMinutes } from "../../tonight";
+import { formatClock, formatMinutes, framingRowBadge } from "../../tonight";
 
 /**
  * "Plan my week" — which of *your own* targets to point at, on which night.
@@ -66,6 +67,13 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
   // one above the other, often naming the same target. Computed once so the
   // headline, the table and the per-target line cannot disagree about it.
   const nightNow = nightInProgressDate(plan.nights, now);
+  // "Needs 3×3 mosaic" belongs beside the name of the target it is about, and
+  // this is the column that names one for each of the nights ahead — the mode is
+  // set on the scope *before* a session, so a week plan that says what to point
+  // at and nothing about how to shoot it leaves out the half the reader can only
+  // act on beforehand. Once per target, not once per night: see
+  // `framingBadgeNights`.
+  const framingNights = framingBadgeNights(plan.nights);
 
   return (
     <Paper withBorder p="md" data-testid="plan-week">
@@ -105,6 +113,11 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
             {placed.map((n) => {
               const best = n.best!;
               const moon = weekMoonParts(n);
+              // The same helper the tonight table's own rows use, so one object
+              // cannot be badged two ways on one page.
+              const framing = framingNights.has(n.date)
+                ? framingRowBadge(best.framing, best.mosaic)
+                : null;
               return (
                 <Table.Tr key={n.date}>
                   <Table.Td>
@@ -118,6 +131,20 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
                       to={`/targets/${encodeURIComponent(best.safe)}`}>
                       {best.name}
                     </Anchor>
+                    {/* `NO_SHRINK` is not optional here and a dogfood pass
+                        proved it: without it this badge came out as a 76px box
+                        holding a 91px word on a phone, i.e. "Needs 3×3 mos…"
+                        with no way to reach the rest — the third instance of
+                        the mechanism `badgeFit.ts` exists for, in the narrowest
+                        column on the page. */}
+                    {framing ? (
+                      <div title={framing.tooltip} data-testid="plan-week-framing">
+                        <Badge size="xs" variant="light" color={framing.color}
+                          style={NO_SHRINK}>
+                          {framing.label}
+                        </Badge>
+                      </div>
+                    ) : null}
                     {/* Two lines, not one badge. A badge truncates, and in this
                         column on a phone the caution came out as "Moon 92%, up…"
                         — losing the one word ("all" / "part of") that decides

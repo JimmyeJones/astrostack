@@ -1248,6 +1248,52 @@ def test_plan_week_says_which_of_my_targets_on_which_night(client, solved_librar
     assert per_target_dates == sorted(per_target_dates)
 
 
+def test_plan_week_picks_carry_the_framing_verdict(client, solved_library):
+    """The week table's "Point at" column names a target for each of the nights
+    ahead, and mosaic mode is set on the scope **before** a session — so the
+    card that plans seven sessions said what to point at and nothing about how
+    to shoot it. The same gap `/tonight`'s already-shot rows were given the
+    verdict to close, one card over on the same page.
+
+    Asserted against `/tonight`'s own answer for the same target rather than
+    against literals: the two cards sit on one screen, so the claim is that they
+    cannot badge one object two ways — which includes being measured against the
+    same frame field.
+    """
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    tonight = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    row = next(t for t in tonight["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert row["framing"] is not None and row["framing"]["level"] == "mosaic"
+
+    body = client.get("/api/plan/week", params={"when": JAN_EVENING}).json()
+    picks = [n["best"] for n in body["nights"] if n["best"] is not None]
+    assert picks, "Orion is well up on January nights from London"
+    m42_picks = [p for p in picks if p["safe"] == "M_42"]
+    assert m42_picks, "the fixture's M 42 should be placeable"
+    for pick in m42_picks:
+        assert pick["framing"] == row["framing"]
+        assert pick["mosaic"] == row["mosaic"]
+
+
+def test_plan_week_stands_the_framing_verdict_down_on_a_mosaic_target(
+        client, solved_library, monkeypatch):
+    """The same stand-down the tonight row carries, applied by the same rule
+    rather than by a second copy of it: a target already being shot as a mosaic
+    has answered "will it fit in one frame?"."""
+    from webapp.routers import plan as plan_router
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    monkeypatch.setattr(plan_router, "_annotate_library_targets",
+                        _mosaic_canvas(plan_router._annotate_library_targets))
+    body = client.get("/api/plan/week", params={"when": JAN_EVENING}).json()
+    picks = [n["best"] for n in body["nights"] if n["best"] is not None]
+    assert picks
+    assert all(p["framing"] is None and p["mosaic"] is None for p in picks)
+    # Nothing else about the pick moved.
+    assert all(p["safe"] and p["score"] > 0.0 for p in picks)
+
+
 def test_plan_week_without_location_self_hides(client, solved_library):
     """No site configured and no SITELAT in the frames → a clean, empty 200 so
     the card hides itself and the UI can explain why."""

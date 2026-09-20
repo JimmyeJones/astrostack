@@ -1587,6 +1587,70 @@ def test_a_clipped_window_says_so_rather_than_passing_as_a_whole_night():
     assert rest and all(w.in_progress is False for _lbl, w in rest)
 
 
+def test_the_week_plan_says_how_to_shoot_what_it_says_to_point_at():
+    """The "Point at" column of the next seven nights, and mosaic mode is set on
+    the scope **before** a session — so the week table naming a target and
+    saying nothing about its framing leaves out the half of the advice that can
+    only be acted on beforehand. It is the same gap `plan_tonight`'s library
+    rows were given the verdict to close, one card over on the same page.
+
+    Asserted against `plan_tonight`'s own answer for the same object rather than
+    against literals: the claim is that the two cards cannot badge one object
+    two ways, and only comparing them can show it.
+    """
+    m31 = LibraryTarget(safe="M31", name="Andromeda Galaxy", ra_deg=10.68,
+                        dec_deg=41.27, frames_accepted=100,
+                        total_exposure_s=1000.0, size_arcmin=178.0,
+                        size_minor_arcmin=63.0)
+    tonight = np_plan.plan_tonight(LONDON, JAN_EVENING, library_targets=[m31],
+                                   include_catalog=False)
+    row = next(t for t in tonight.targets if t.id == "M31")
+    assert row.framing is not None and row.framing.level == "mosaic"
+
+    week = np_plan.plan_week(LONDON, [m31], start_utc=JAN_EVENING, nights=3)
+    picks = [n.best for n in week.nights if n.best is not None]
+    assert picks, "M31 should be placeable on a January London night"
+    assert picks[0].framing == row.framing
+    assert picks[0].mosaic == row.mosaic
+
+
+def test_the_week_plan_judges_framing_against_the_owners_own_frame():
+    """Same reason `plan_tonight` takes a field: a panel count computed against
+    the wrong telescope is wrong by a whole grid, and the two cards sit on one
+    page. Change the field and the week pick moves with the tonight row."""
+    from seestack.framing import FrameField
+
+    wide = FrameField(long_arcmin=480.0, short_arcmin=360.0)  # an 8°x6° frame
+    m31 = LibraryTarget(safe="M31", name="Andromeda Galaxy", ra_deg=10.68,
+                        dec_deg=41.27, frames_accepted=100,
+                        total_exposure_s=1000.0, size_arcmin=178.0,
+                        size_minor_arcmin=63.0)
+    week = np_plan.plan_week(LONDON, [m31], start_utc=JAN_EVENING, nights=3,
+                             field=wide)
+    pick = next(n.best for n in week.nights if n.best is not None)
+    # 178' is under 3° — on an 8°x6° frame it fits, where it needs a mosaic on
+    # the Seestar's own field in the test above.
+    assert pick.framing is not None and pick.framing.level == "fits"
+    assert pick.mosaic is None
+
+
+def test_the_week_plan_stands_the_verdict_down_on_a_target_already_a_mosaic():
+    """The same stand-down the tonight row carries: a target already being shot
+    as a mosaic has answered "will it fit in one frame?", and quoting the whole
+    grid from scratch beside it is the misreading `alreadyAMosaic` exists for.
+    One rule, applied in both places, rather than two that can drift."""
+    m31 = LibraryTarget(safe="M31", name="Andromeda Galaxy", ra_deg=10.68,
+                        dec_deg=41.27, frames_accepted=100,
+                        total_exposure_s=1000.0, size_arcmin=178.0,
+                        size_minor_arcmin=63.0, canvas_is_mosaic=True)
+    week = np_plan.plan_week(LONDON, [m31], start_utc=JAN_EVENING, nights=3)
+    picks = [n.best for n in week.nights if n.best is not None]
+    assert picks
+    assert all(p.framing is None and p.mosaic is None for p in picks)
+    # …and nothing else about the pick moved.
+    assert all(p.safe == "M31" and p.score > 0 for p in picks)
+
+
 def test_plan_week_marks_the_night_already_under_way():
     """The flag has to reach the card that prints the number, not stop at the
     window: the week table's first row is the one that disagrees with the

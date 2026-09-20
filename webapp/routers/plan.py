@@ -509,6 +509,10 @@ def _cached_week_plan(
     """
     targets = _library_targets(request)
     horizon = HorizonProfile.from_pairs(settings.horizon_profile)
+    # The owner's own measured frame, for the pick's "will it fit in one frame?"
+    # verdict — the same call `/tonight` makes, so the two cards judge one object
+    # against one telescope.
+    field = _frame_field(request)
     bucket = start.astimezone(timezone.utc).replace(second=0, microsecond=0)
     bucket = bucket.replace(minute=(bucket.minute // _WEEK_CACHE_BUCKET_MINUTES)
                             * _WEEK_CACHE_BUCKET_MINUTES)
@@ -524,6 +528,19 @@ def _cached_week_plan(
         # either way.
         tuple((t.safe, t.ra_deg, t.dec_deg, t.total_exposure_s, t.frames_accepted)
               for t in targets),
+        # The framing verdict on each pick is measured against this frame, and a
+        # cache blind to it would keep serving a verdict for the telescope the
+        # owner used to have. It changes about as often as they buy one, so this
+        # costs nothing in practice; leaving it out would cost a wrong panel
+        # count for a whole TTL.
+        (field.long_arcmin, field.short_arcmin) if field is not None else None,
+        # …and the same for what the verdict is *about*: the catalogue size the
+        # object is judged by, and whether this target is already being shot as a
+        # mosaic (which stands the verdict down). Both can move without any of
+        # the acquisition numbers above moving — a rename that identifies the
+        # object, or the first stack whose canvas spans more than one field.
+        tuple((t.size_arcmin, t.size_minor_arcmin, t.canvas_is_mosaic)
+              for t in targets),
     )
     return cached_for_registry(
         request.app, "plan_week", sig,
@@ -533,6 +550,7 @@ def _cached_week_plan(
             nights=int(nights),
             min_altitude_deg=float(min_altitude),
             horizon=horizon,
+            field=field,
         ),
         ttl_s=_WEEK_CACHE_TTL_S,
     )
