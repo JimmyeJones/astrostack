@@ -109,6 +109,13 @@ describe("PlanWeekCard", () => {
     renderCard();
     await waitFor(() => expect(screen.getByText("Plan my week")).toBeInTheDocument());
     expect(screen.getByText("Needs 3×3 mosaic")).toBeInTheDocument();
+    // …and it survives the narrowest column on the page. A Mantine badge
+    // contributes no min-content width, so without this a dogfood pass measured
+    // a 76px box holding a 91px word — "Needs 3×3 mos…", with no scroll that can
+    // reach the rest. See `badgeFit.ts`, where the same mechanism is already
+    // recorded twice.
+    expect(screen.getByText("Needs 3×3 mosaic").closest(".mantine-Badge-root"))
+      .toHaveStyle({ minWidth: "max-content" });
   });
 
   it("says it once per target, not once per night", async () => {
