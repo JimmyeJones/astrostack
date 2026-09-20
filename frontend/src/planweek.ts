@@ -311,3 +311,31 @@ export function weekDarkPhrase(night: WeekNight): string {
   const span = formatMinutes(night.dark_minutes);
   return night.dark_in_progress === true ? `${span} left` : `${span} dark`;
 }
+
+/**
+ * Which night rows should carry their target's framing badge: the **first** row
+ * naming each target.
+ *
+ * The badge is advice about the *object* — will it fit in one frame, and how big
+ * a mosaic does it need — and this table names a target per night, so a week
+ * where one target is best-placed on five of them would stack five identical
+ * "Needs 3×3 mosaic" chips down one column. That is exactly the always-on
+ * repetition the standing "the UI is extremely busy" priority is about, and
+ * repetition is not the thing the reader is missing: the name is already in
+ * every row, so the chip beside its first appearance is where they meet the
+ * object.
+ *
+ * Returns the set of `date`s, because a night is identified by its date
+ * everywhere else in this card. A night with no pick can never be in it.
+ */
+export function framingBadgeNights(nights: WeekNight[]): Set<string> {
+  const seen = new Set<string>();
+  const out = new Set<string>();
+  for (const night of nights) {
+    const best = night.best;
+    if (!best || seen.has(best.safe)) continue;
+    seen.add(best.safe);
+    out.add(night.date);
+  }
+  return out;
+}
