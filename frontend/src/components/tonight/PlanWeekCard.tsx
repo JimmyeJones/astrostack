@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { api } from "../../api/client";
+import { NO_SHRINK } from "../../badgeFit";
 import {
   closingRowFor, closingWeekNote, framingBadgeNights, nightInProgressDate, otherTargetNights,
   targetNightPhrase, weekDarkPhrase, weekEmptyReason, weekHeadline, weekMoonNote,
@@ -130,9 +131,16 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
                       to={`/targets/${encodeURIComponent(best.safe)}`}>
                       {best.name}
                     </Anchor>
+                    {/* `NO_SHRINK` is not optional here and a dogfood pass
+                        proved it: without it this badge came out as a 76px box
+                        holding a 91px word on a phone, i.e. "Needs 3×3 mos…"
+                        with no way to reach the rest — the third instance of
+                        the mechanism `badgeFit.ts` exists for, in the narrowest
+                        column on the page. */}
                     {framing ? (
                       <div title={framing.tooltip} data-testid="plan-week-framing">
-                        <Badge size="xs" variant="light" color={framing.color}>
+                        <Badge size="xs" variant="light" color={framing.color}
+                          style={NO_SHRINK}>
                           {framing.label}
                         </Badge>
                       </div>
