@@ -1,5 +1,277 @@
 # Shipped — the record
 
+## v0.472.3 — 2026-09-20 — and the chip that fix added read "Needs 3×3 mos…" on a phone
+
+*(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Caught by a dogfood probe **before it merged**,
+on a commit that was green on every gate AGENTS.md §5 names.)*
+
+**What the probe printed:** `[phone] /tonight: CLIPPED LABEL 76px box vs 91px word — "Needs 3×3 mosaic"
+(scrolling cannot reveal it)`.
+
+**The mechanism is already written down in this repo**, in `frontend/src/badgeFit.ts`, from two earlier
+instances (v0.434.1 on the Nights card, v0.436.2 on the Tonight score column — 145 clipped badges on one
+phone-width page). A Mantine `Badge` is `overflow: hidden; text-overflow: ellipsis`, so it contributes **no
+min-content width**: when a table is wider than the screen the column squeezes to nothing and the label is
+ellipsised *inside the badge*, where scrolling the table can never reach it. That is not a truncated name
+with the full value elsewhere — it is the value itself, gone.
+
+**And the card's own comment records the same trap one element up.** The moon note beside this badge is two
+lines rather than one badge, because *"a badge truncates, and in this column on a phone the caution came out
+as 'Moon 92%, up…' — losing the one word that decides whether the night is worth going out for"*. The
+"Point at" column is the narrowest on the page. I read that comment while writing the badge and still
+omitted the rule it points at.
+
+**The fix** is `style={NO_SHRINK}` — the shared `min-width: max-content`, which follows whatever the label
+says rather than a width picked against today's words, so a longer verdict cannot re-break it — plus the
+assertion the Tonight row's three badges already carry, on the chip's own test.
+
+**Measured either side, on a real phone-width browser rather than reasoned:**
+
+| | before | after |
+|---|---|---|
+| probe | `1 thing(s) to look at` | `nothing overflowing, no console errors` |
+| `/tonight` phone height | 3,847 px | **3,718 px** |
+
+The second row is the one worth keeping: 3,718 px is **below the 3,834 px `/tonight` measured before this
+run started**, because the un-shrunk chip had been squeezing the target names onto extra lines. Measuring
+only *before* the addition would have recorded "+13 px" and been wrong about the sign.
+
+**The method note, which is the reason this has its own entry.** v0.472.2 passed the full Python suite
+(6,549), `tsc --noEmit`, **4,336 vitest cases** and `vite build`, and shipped a badge whose text was
+unreachable. jsdom has no layout, so no case in that suite could fail on it. On a frontend change that adds
+an element to a table, `scripts/agent-dogfood.sh` is not a nicety — it is the only gate that can fail.
+
+---
+
+## v0.472.2 — 2026-09-20 — "Plan my week" named a target for each of seven nights and said nothing about how to shoot it
+
+*(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Found by a `--mosaic` dogfood pass that was
+mechanically CLEAN — the finding was in the two blocks it prints, read against each other.)*
+
+**What the pass showed.** The week table listed *Tonight · 3.9 h left · **Sample: Orion Nebula (M42)** ·
+02:57 AM – 04:20 AM* and the same for Tomorrow and Monday, while that target's own page said *"only about
+20 % of it made it in, and it's bigger than one frame, so more time can't bring the rest in. **Shooting it
+in mosaic mode next session is the biggest win here.**"*
+
+**This is v0.472.0's own finding, one card down the same page.** That entry's argument is that mosaic mode
+is a setting chosen on the scope **before** a session, so the row telling you what to point at is the one
+place the advice can still be acted on. It applies with more force to the card that plans **seven**
+sessions rather than one — and `WeekTargetPick` was not in that fix.
+
+**What shipped.** `WeekTargetPick` carries `framing`/`mosaic`, made by the **same** `framing_hint` /
+`mosaic_plan` calls against the **same** measured frame — `plan_week` gains a `field`, wired from the
+router's existing `_frame_field` — with the **same** `canvas_is_mosaic` stand-down (a target already being
+shot as a mosaic has answered "will it fit?"). The engine and API tests assert against `plan_tonight`'s own
+answer for the same object rather than against literals, because the claim being pinned is that two cards
+on one screen cannot badge one object two ways. The frontend reuses `framingRowBadge`, the tonight row's own
+helper.
+
+**One deliberate difference from that row: once per _target_, not once per night.** `planweek.
+framingBadgeNights` returns the first date each target appears on. A week where one target is best-placed on
+five nights would otherwise stack five identical "Needs 3×3 mosaic" chips down one column — the always-on
+repetition the standing "the UI is extremely busy" priority is about — and repetition is not what the reader
+is missing, since the name is already in every row. Verified on the running app: the chip renders on the
+Tonight row and on neither the Tomorrow nor the Monday row naming the same target.
+
+**The cache signature gains three things**, all of which can move without any of the acquisition numbers
+already in it moving: the frame field (a verdict measured against the telescope the owner used to have is
+wrong by a whole grid), the catalogue sizes (a rename can identify the object), and `canvas_is_mosaic` (the
+first stack whose canvas spans more than one field). A signature blind to them would serve a wrong panel
+count for a whole TTL.
+
+**Also corrects three stale comments** that still said library rows carry no framing or difficulty verdict —
+`PlannedTarget.difficulty` in the engine, and the framing / difficulty fields on the client's
+`PlannedTarget`. Both have been carried for already-shot rows since v0.472.0. AGENTS.md §11's "grep before
+you build" only works if the field's own comment is true.
+
+**Safety.** Additive optional fields only; no config, schema, on-disk, default, endpoint or ranking change,
+and a pick with no verdict renders byte-for-byte as it did. Tests +5 Python (3 engine, 2 API) / +3 vitest
+plus 2 pure-helper cases; **six fail before**, verified by scratch reverts of the engine half and of the
+render.
+
+---
+
+## v0.472.1 — 2026-09-20 — the planner row said "Plenty — try something new" an inch from "Needs 3×2 mosaic"
+
+*(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Found by reading the diff that had just merged
+and asking what its new element now sits beside.)*
+
+**The contradiction v0.472.0 created.** That change put the framing verdict on already-shot planner rows for
+the first time. The readiness badge on the same row prices the integration the target has — which is the
+integration of *the framing it was shot at* — and that was unambiguous while it was the only thing on the
+row with an opinion about the canvas. On an oversized object a beginner now read **you are done here**
+beside **you have a sixth of it**, on the one screen read while choosing what to point at.
+
+**The Target page had already closed this exact gap**, in v0.444.2, and the fix reuses that machinery rather
+than inventing a second one: `integrationReadiness` has taken a `canvasScope` ever since, and the planner
+row was simply the one caller with no framing verdict to pass it. New pure `tonight.readinessFramingScope`
+reads the scope off the **same** `framing` the badge beside it is drawn from, so "have I shot enough?" and
+"will it fit in one frame?" cannot answer as if the other had not been asked.
+
+**What changes, and what deliberately does not.** The number is unchanged — it is the honest goal for the
+canvas the owner has, and the mosaic is a genuinely different target. What changes is that the *"plenty"*
+chip drops its **prescription**: "Plenty — try something new" is the opposite of the badge beside it, so a
+scoped row reads **"Plenty for this framing"** and leaves "shoot it wider" to the badge whose job that is.
+Every chip's hover gains the scope, at every level — *"1.4 h of ~6 h **for the framing you've shot** —
+a solid start"* — because "~2 more nights" is compatible with shooting wider (it says keep going on this
+object either way) while the hours behind it are still the hours for one framing.
+
+**Two conservative edges.** Only the `mosaic` level scopes anything: `tight` means the object about fits, so
+a single field really is most of it, and a clause there would be a new sentence on a card a big-object owner
+sees constantly — the same bar `framingIsFragment` sets on the Target page. And the backend already stands
+the whole verdict down on a target being shot *as* a mosaic (`LibraryTarget.canvas_is_mosaic`), so a
+mosaic's own row is untouched here by construction rather than by a second rule.
+
+**One small structural addition:** `IntegrationReadiness` now exposes `canvasScope`, so the chip whose
+wording changes asks the same question the sentence answered instead of keeping its own copy of the
+"is this scope worth saying?" rule.
+
+**The wording names the framing, not the canvas** ("the framing you've shot", not "this single field"),
+deliberately: the verdict is carried on rows with no stacked picture yet, so the app does not always know
+the canvas — but it always knows the pointing the exposure was taken at.
+
+**Safety.** Frontend-only: no endpoint, config, schema, on-disk, API-shape or default change, and a row with
+no framing verdict is byte-for-byte what it was, which is pinned by a test. Tests +5 vitest; the Tonight
+page one **fails before**, verified by a scratch revert of the pass-through.
+
+---
+
+## v0.472.3 — 2026-09-20 — and the chip that fix added read "Needs 3×3 mos…" on a phone
+
+*(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Caught by a dogfood probe **before it merged**,
+on a commit that was green on every gate AGENTS.md §5 names.)*
+
+**What the probe printed:** `[phone] /tonight: CLIPPED LABEL 76px box vs 91px word — "Needs 3×3 mosaic"
+(scrolling cannot reveal it)`.
+
+**The mechanism is already written down in this repo**, in `frontend/src/badgeFit.ts`, from two earlier
+instances (v0.434.1 on the Nights card, v0.436.2 on the Tonight score column — 145 clipped badges on one
+phone-width page). A Mantine `Badge` is `overflow: hidden; text-overflow: ellipsis`, so it contributes **no
+min-content width**: when a table is wider than the screen the column squeezes to nothing and the label is
+ellipsised *inside the badge*, where scrolling the table can never reach it. That is not a truncated name
+with the full value elsewhere — it is the value itself, gone.
+
+**And the card's own comment records the same trap one element up.** The moon note beside this badge is two
+lines rather than one badge, because *"a badge truncates, and in this column on a phone the caution came out
+as 'Moon 92%, up…' — losing the one word that decides whether the night is worth going out for"*. The
+"Point at" column is the narrowest on the page. I read that comment while writing the badge and still
+omitted the rule it points at.
+
+**The fix** is `style={NO_SHRINK}` — the shared `min-width: max-content`, which follows whatever the label
+says rather than a width picked against today's words, so a longer verdict cannot re-break it — plus the
+assertion the Tonight row's three badges already carry, on the chip's own test.
+
+**Measured either side, on a real phone-width browser rather than reasoned:**
+
+| | before | after |
+|---|---|---|
+| probe | `1 thing(s) to look at` | `nothing overflowing, no console errors` |
+| `/tonight` phone height | 3,847 px | **3,718 px** |
+
+The second row is the one worth keeping: 3,718 px is **below the 3,834 px `/tonight` measured before this
+run started**, because the un-shrunk chip had been squeezing the target names onto extra lines. Measuring
+only *before* the addition would have recorded "+13 px" and been wrong about the sign.
+
+**The method note, which is the reason this has its own entry.** v0.472.2 passed the full Python suite
+(6,549), `tsc --noEmit`, **4,336 vitest cases** and `vite build`, and shipped a badge whose text was
+unreachable. jsdom has no layout, so no case in that suite could fail on it. On a frontend change that adds
+an element to a table, `scripts/agent-dogfood.sh` is not a nicety — it is the only gate that can fail.
+
+---
+
+## v0.472.2 — 2026-09-20 — "Plan my week" named a target for each of seven nights and said nothing about how to shoot it
+
+*(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Found by a `--mosaic` dogfood pass that was
+mechanically CLEAN — the finding was in the two blocks it prints, read against each other.)*
+
+**What the pass showed.** The week table listed *Tonight · 3.9 h left · **Sample: Orion Nebula (M42)** ·
+02:57 AM – 04:20 AM* and the same for Tomorrow and Monday, while that target's own page said *"only about
+20 % of it made it in, and it's bigger than one frame, so more time can't bring the rest in. **Shooting it
+in mosaic mode next session is the biggest win here.**"*
+
+**This is v0.472.0's own finding, one card down the same page.** That entry's argument is that mosaic mode
+is a setting chosen on the scope **before** a session, so the row telling you what to point at is the one
+place the advice can still be acted on. It applies with more force to the card that plans **seven**
+sessions rather than one — and `WeekTargetPick` was not in that fix.
+
+**What shipped.** `WeekTargetPick` carries `framing`/`mosaic`, made by the **same** `framing_hint` /
+`mosaic_plan` calls against the **same** measured frame — `plan_week` gains a `field`, wired from the
+router's existing `_frame_field` — with the **same** `canvas_is_mosaic` stand-down (a target already being
+shot as a mosaic has answered "will it fit?"). The engine and API tests assert against `plan_tonight`'s own
+answer for the same object rather than against literals, because the claim being pinned is that two cards
+on one screen cannot badge one object two ways. The frontend reuses `framingRowBadge`, the tonight row's own
+helper.
+
+**One deliberate difference from that row: once per _target_, not once per night.**
+`planweek.framingBadgeNights` returns the first date each target appears on. A week where one target is
+best-placed on five nights would otherwise stack five identical "Needs 3×3 mosaic" chips down one column —
+the always-on repetition the standing "the UI is extremely busy" priority is about — and repetition is not
+what the reader is missing, since the name is already in every row. Verified on the running app: the chip
+renders on the Tonight row and on neither the Tomorrow nor the Monday row naming the same target.
+
+**The cache signature gains three things**, all of which can move without any of the acquisition numbers
+already in it moving: the frame field (a verdict measured against the telescope the owner used to have is
+wrong by a whole grid), the catalogue sizes (a rename can identify the object), and `canvas_is_mosaic` (the
+first stack whose canvas spans more than one field). A signature blind to them would serve a wrong panel
+count for a whole TTL.
+
+**Also corrects three stale comments** that still said library rows carry no framing or difficulty verdict —
+`PlannedTarget.difficulty` in the engine, and the framing / difficulty fields on the client's
+`PlannedTarget`. Both have been carried for already-shot rows since v0.472.0. AGENTS.md §11's "grep before
+you build" only works if the field's own comment is true.
+
+**Safety.** Additive optional fields only; no config, schema, on-disk, default, endpoint or ranking change,
+and a pick with no verdict renders byte-for-byte as it did. Tests +5 Python (3 engine, 2 API) / +3 vitest
+plus 2 pure-helper cases; **six fail before**, verified by scratch reverts of the engine half and of the
+render.
+
+---
+
+## v0.472.1 — 2026-09-20 — the planner row said "Plenty — try something new" an inch from "Needs 3×2 mosaic"
+
+*(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Found by reading the diff that had just merged
+and asking what its new element now sits beside.)*
+
+**The contradiction v0.472.0 created.** That change put the framing verdict on already-shot planner rows for
+the first time. The readiness badge on the same row prices the integration the target has — which is the
+integration of *the framing it was shot at* — and that was unambiguous while it was the only thing on the
+row with an opinion about the canvas. On an oversized object a beginner now read **you are done here**
+beside **you have a sixth of it**, on the one screen read while choosing what to point at.
+
+**The Target page had already closed this exact gap**, in v0.444.2, and the fix reuses that machinery rather
+than inventing a second one: `integrationReadiness` has taken a `canvasScope` ever since, and the planner
+row was simply the one caller with no framing verdict to pass it. New pure `tonight.readinessFramingScope`
+reads the scope off the **same** `framing` the badge beside it is drawn from, so "have I shot enough?" and
+"will it fit in one frame?" cannot answer as if the other had not been asked.
+
+**What changes, and what deliberately does not.** The number is unchanged — it is the honest goal for the
+canvas the owner has, and the mosaic is a genuinely different target. What changes is that the *"plenty"*
+chip drops its **prescription**: "Plenty — try something new" is the opposite of the badge beside it, so a
+scoped row reads **"Plenty for this framing"** and leaves "shoot it wider" to the badge whose job that is.
+Every chip's hover gains the scope, at every level — *"1.4 h of ~6 h **for the framing you've shot** —
+a solid start"* — because "~2 more nights" is compatible with shooting wider (it says keep going on this
+object either way) while the hours behind it are still the hours for one framing.
+
+**Two conservative edges.** Only the `mosaic` level scopes anything: `tight` means the object about fits, so
+a single field really is most of it, and a clause there would be a new sentence on a card a big-object owner
+sees constantly — the same bar `framingIsFragment` sets on the Target page. And the backend already stands
+the whole verdict down on a target being shot *as* a mosaic (`LibraryTarget.canvas_is_mosaic`), so a
+mosaic's own row is untouched here by construction rather than by a second rule.
+
+**One small structural addition:** `IntegrationReadiness` now exposes `canvasScope`, so the chip whose
+wording changes asks the same question the sentence answered instead of keeping its own copy of the
+"is this scope worth saying?" rule.
+
+**The wording names the framing, not the canvas** ("the framing you've shot", not "this single field"),
+deliberately: the verdict is carried on rows with no stacked picture yet, so the app does not always know
+the canvas — but it always knows the pointing the exposure was taken at.
+
+**Safety.** Frontend-only: no endpoint, config, schema, on-disk, API-shape or default change, and a row with
+no framing verdict is byte-for-byte what it was, which is pinned by a test. Tests +5 vitest; the Tonight
+page one **fails before**, verified by a scratch revert of the pass-through.
+
+---
+
 ## v0.472.0 — 2026-09-19 — "Needs 3×3 mosaic" vanished from the planner the moment you shot one frame of the object
 
 *(Builder, branch `claude/wizardly-cannon-fgcbme`. Found by a `--mosaic --calibration` dogfood pass that was
