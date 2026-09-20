@@ -70,17 +70,23 @@ export interface PlannedTarget {
   // to the un-scaled goal (today's behaviour).
   field_fulls?: number | null;
   // "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
-  // verdict, for catalog candidates the bundled catalog has a size for. Absent
-  // on library rows and older backends. See FramingHint.
+  // verdict, for any row the bundled catalog has a size for. **Library rows
+  // carry it too**: the verdict is about the object, not about how far along
+  // the owner is, and mosaic mode is set on the scope before a session. Absent
+  // when the object has no vetted size, when the target is already being shot
+  // as a mosaic (which has answered the question), and on older backends. See
+  // FramingHint.
   size_arcmin?: number | null;
   framing?: FramingHint | null;
   // The panel grid this object needs, for one bigger than a single frame;
-  // absent/null when it fits or has no vetted size (older backends omit it —
-  // treat as "nothing to say").
+  // absent/null when it fits, has no vetted size, or is already a mosaic (older
+  // backends omit it — treat as "nothing to say").
   mosaic?: MosaicPlan | null;
   // "How hard is this target for a Seestar?" — easy/moderate/challenging, for
-  // catalog candidates the vetted table/type-rule has a verdict for; absent on
-  // library rows, un-vetted objects, and older backends (treat as "no verdict").
+  // any row the vetted table/type-rule has a verdict for, already-shot ones
+  // included (the same object must not lose its verdict the moment you start
+  // shooting it). Absent for un-vetted objects and on older backends (treat as
+  // "no verdict").
   difficulty?: DifficultyHint | null;
   // "Last time it landed off-centre — nudge about 1.0° south before you start."
   // The framing advice from this target's newest picture, brought forward to the
@@ -134,6 +140,14 @@ export interface WeekTargetPick {
   max_altitude_deg: number;
   moon_up_fraction: number | null;
   score: number;
+  // "Will it fit in one Seestar frame?", and the panel grid it needs if not —
+  // the same pair a `PlannedTarget` carries, made by the same two backend calls
+  // against the same measured frame. Absent when it fits, has no vetted size, is
+  // already being shot as a mosaic, or on an older backend (treat as "nothing to
+  // say"). Mosaic mode is set on the scope before a session, so it belongs in the
+  // column that says what to point at on each of the nights ahead.
+  framing?: FramingHint | null;
+  mosaic?: MosaicPlan | null;
 }
 
 /** One night of the week ahead, with the best-placed target on it. */

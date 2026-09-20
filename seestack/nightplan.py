@@ -352,9 +352,12 @@ class PlannedTarget:
     mosaic: MosaicPlan | None = None
     # "How hard is this target for a Seestar?" — easy/moderate/challenging, so a
     # beginner sees the difficulty *while choosing* what to point at, not only
-    # after they've shot it. For catalog candidates the vetted table/type-rule has
-    # a verdict for; ``None`` otherwise (library rows and un-vetted objects carry
-    # none). See :func:`seestack.target_difficulty.target_difficulty`.
+    # after they've shot it. Carried for **both** kinds of row — a library row's
+    # comes off :attr:`LibraryTarget.difficulty`, because the same object must
+    # not lose its verdict the moment the owner starts shooting it, and the
+    # readiness hint on that row is judged against the goal this verdict
+    # sharpens. ``None`` for an un-vetted object.
+    # See :func:`seestack.target_difficulty.target_difficulty`.
     difficulty: DifficultyHint | None = None
     # "Last time it landed off-centre — nudge about 1.0° south before you start."
     # The framing advice from this target's newest finished picture, repeated
@@ -1581,6 +1584,21 @@ class WeekTargetPick:
     #: Share (0..1) of the usable window the Moon is up, or ``None`` when unknown.
     moon_up_fraction: float | None
     score: float
+    #: "Will it fit in one Seestar frame?", and the panel grid it needs if not —
+    #: the same pair :class:`PlannedTarget` carries, made by the same two calls
+    #: with the same ``field``, so the two cards on one page cannot give one
+    #: object two verdicts.
+    #:
+    #: This is the "Point at" column of the **next seven nights**, and mosaic
+    #: mode is a setting chosen on the scope *before* a session — so a table that
+    #: names a target for each of seven sessions and says nothing about how to
+    #: shoot it is the gap ``PlannedTarget.framing`` was carried onto library
+    #: rows to close, one card over. ``None`` when the object fits, has no vetted
+    #: size, or is already being shot as a mosaic
+    #: (:attr:`LibraryTarget.canvas_is_mosaic`, which has answered the question),
+    #: and on an older backend.
+    framing: FramingHint | None = None
+    mosaic: MosaicPlan | None = None
 
 
 @dataclass
@@ -1651,6 +1669,7 @@ def plan_week(
     horizon: HorizonProfile | None = None,
     min_usable_minutes: float = 45.0,
     max_targets: int = WEEK_MAX_TARGETS,
+    field: FrameField | None = None,
 ) -> WeekPlan:
     """Which of *your own* targets to point at, on which of the next few nights.
 
@@ -1681,6 +1700,13 @@ def plan_week(
     One vectorised observability batch per night over all targets at once, so the
     cost scales with ``nights``, not with the size of the library. Purely offline
     and read-only, like the rest of the planner.
+
+    ``field`` is the owner's own measured single-frame field, used for the one
+    thing on a pick that is about the *telescope* rather than the sky — whether
+    the object fits one frame, and how big a mosaic it needs. Omit it and the
+    module's fallback frame applies, exactly as it does in :func:`plan_tonight`;
+    a caller that can measure the owner's own frame should pass it, or the week
+    card and the tonight table would judge one object against two telescopes.
     """
     positioned = sorted(
         (t for t in library_targets if t.ra_deg is not None and t.dec_deg is not None),
@@ -1735,6 +1761,16 @@ def plan_week(
                 max_altitude_deg=o.max_altitude_deg,
                 moon_up_fraction=o.moon_up_fraction,
                 score=o.score,
+                # The same two calls, with the same ``field``, that
+                # :func:`plan_tonight` makes for the row one card above — so the
+                # week table and the tonight table cannot badge one object two
+                # ways. The stand-down is the same one too: a target already
+                # being shot as a mosaic has answered "will it fit?".
+                framing=(None if t.canvas_is_mosaic
+                         else framing_hint(t.size_arcmin, field=field)),
+                mosaic=(None if t.canvas_is_mosaic
+                        else mosaic_plan(t.size_arcmin, t.size_minor_arcmin,
+                                         field=field)),
             )
         plan.nights.append(WeekNight(
             date=label,

@@ -92,6 +92,78 @@ afterEach(() => {
 });
 
 describe("PlanWeekCard", () => {
+  const MOSAIC = {
+    framing: { level: "mosaic" as const, text: "is bigger than the Seestar's single frame." },
+    mosaic: { cols: 3, rows: 3, panels: 9, text: "About a 3×3 mosaic (9 panels) covers all of it." },
+  };
+
+  it("says how to shoot what it says to point at", async () => {
+    // Mosaic mode is set on the scope *before* a session, and this table plans
+    // seven of them — so naming a target and saying nothing about its framing
+    // leaves out the half of the advice that can only be acted on beforehand.
+    vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+      nights: [night("2026-09-02", {
+        best: { ...night("2026-09-02").best!, ...MOSAIC },
+      })],
+    }));
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Plan my week")).toBeInTheDocument());
+    expect(screen.getByText("Needs 3×3 mosaic")).toBeInTheDocument();
+  });
+
+  it("says it once per target, not once per night", async () => {
+    // A week where one target is best-placed on several nights would otherwise
+    // stack identical chips down one column — always-on repetition on a card the
+    // standing "the UI is extremely busy" priority is about. The name is in
+    // every row already; the chip goes beside the first one.
+    vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+      nights: [
+        night("2026-09-02", { best: { ...night("2026-09-02").best!, ...MOSAIC } }),
+        night("2026-09-03", { best: { ...night("2026-09-03").best!, ...MOSAIC } }),
+        night("2026-09-04", { best: { ...night("2026-09-04").best!, ...MOSAIC } }),
+      ],
+    }));
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Plan my week")).toBeInTheDocument());
+    expect(screen.getAllByTestId("plan-week-framing")).toHaveLength(1);
+  });
+
+  it("gives a second target its own chip rather than silencing it", async () => {
+    // The rule is per target, not "one chip on this card" — two objects that
+    // both need a mosaic are two things the reader has to know.
+    vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+      nights: [
+        night("2026-09-02", { best: { ...night("2026-09-02").best!, ...MOSAIC } }),
+        night("2026-09-03", {
+          best: { ...night("2026-09-03").best!, safe: "M_42", name: "M 42", ...MOSAIC },
+        }),
+      ],
+    }));
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Plan my week")).toBeInTheDocument());
+    expect(screen.getAllByTestId("plan-week-framing")).toHaveLength(2);
+  });
+
+  it("stays silent about framing on a target that fits, and on an older backend",
+    async () => {
+      // `fits` and "the backend sent nothing" are one answer here — no chip —
+      // so an install that has not upgraded reads exactly as it did.
+      vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+        nights: [
+          night("2026-09-02"),
+          night("2026-09-03", {
+            best: {
+              ...night("2026-09-03").best!, safe: "M_13", name: "M 13",
+              framing: { level: "fits", text: "fits comfortably in one frame." },
+            },
+          }),
+        ],
+      }));
+      renderCard();
+      await waitFor(() => expect(screen.getByText("Plan my week")).toBeInTheDocument());
+      expect(screen.queryByTestId("plan-week-framing")).not.toBeInTheDocument();
+    });
+
   it("says which night to go out on and what to point at", async () => {
     vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
       nights: [

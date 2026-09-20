@@ -4,7 +4,8 @@ import type {
   ClosingTarget, PlanWeek, SeasonClosing, TargetBestNight, WeekNight,
 } from "./api/client";
 import {
-  bestNightOfWeek, closingRowFor, closingWeekNote, nightInProgressDate,
+  bestNightOfWeek, closingRowFor, closingWeekNote, framingBadgeNights,
+  nightInProgressDate,
   otherTargetNights, targetNightPhrase, weekDarkPhrase, weekEmptyReason,
   weekHeadline, weekMoonNote, weekMoonParts, weekNightLabel, weekNightLabelInline,
 } from "./planweek";
@@ -458,5 +459,32 @@ describe("weekDarkPhrase", () => {
     expect(weekDarkPhrase(night({
       date: "2026-09-05", dark_minutes: 498, dark_in_progress: false,
     }))).toBe("8.3 h dark");
+  });
+});
+
+describe("framingBadgeNights", () => {
+  it("names the first night each target appears on, and only that one", () => {
+    // The chip is advice about the *object*; the table names a target per
+    // night, so a week where one is best-placed five times would stack five
+    // identical chips down one column.
+    const got = framingBadgeNights([
+      night({ date: "2026-09-02", best: pick() }),
+      night({ date: "2026-09-03", best: pick() }),
+      night({ date: "2026-09-04", best: pick({ safe: "M_42", name: "M 42" }) }),
+      night({ date: "2026-09-05", best: pick() }),
+      night({ date: "2026-09-06", best: pick({ safe: "M_42", name: "M 42" }) }),
+    ]);
+    expect([...got].sort()).toEqual(["2026-09-02", "2026-09-04"]);
+  });
+
+  it("skips the nights with nothing to point at", () => {
+    // A night the planner can't place is an honest "skip this one" and has no
+    // target to say anything about.
+    const got = framingBadgeNights([
+      night({ date: "2026-09-02", best: null, n_usable: 0 }),
+      night({ date: "2026-09-03", best: pick() }),
+    ]);
+    expect([...got]).toEqual(["2026-09-03"]);
+    expect(framingBadgeNights([])).toEqual(new Set());
   });
 });
