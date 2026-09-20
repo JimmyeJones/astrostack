@@ -384,6 +384,38 @@ describe("readinessRowBadge", () => {
       .toBe(integrationReadiness(5 * H, "galaxy")!.verdict);
   });
 
+  it("drops the 'try something new' prescription when the row also says 'needs a mosaic'", () => {
+    // 7 h of a 6 h galaxy goal is "plenty" — and on an oversized object that
+    // goal is the goal for ONE framing, while the badge beside this one says
+    // the object needs a 3x2. "Try something new" is that badge's opposite, so
+    // the verdict keeps the "plenty" and leaves the prescription to it.
+    const scoped = readinessRowBadge(
+      7 * H, "galaxy", null, null, null, undefined, "the framing you've shot");
+    expect(scoped!.label).toBe("Plenty for this framing");
+    expect(scoped!.color).toBe("green");
+    // …and the hover says which canvas, by the same verdict the Target page
+    // prints for the same scope.
+    expect(scoped!.tooltip).toBe(
+      integrationReadiness(7 * H, "galaxy", null, null, undefined,
+        "the framing you've shot")!.verdict);
+    expect(scoped!.tooltip).toContain("the framing you've shot");
+
+    // A row with no framing verdict — every surface but the planner's
+    // already-shot rows — is byte-for-byte what it was.
+    expect(readinessRowBadge(7 * H, "galaxy", null, null, null, undefined, null))
+      .toEqual(readinessRowBadge(7 * H, "galaxy"));
+    expect(readinessRowBadge(7 * H, "galaxy")!.label).toBe("Plenty — try something new");
+  });
+
+  it("scopes the hover of a keep-going chip without touching its words", () => {
+    // "~1 more night" says keep going on this object, which is compatible with
+    // "shoot it wider" — so only the hours behind it get the scope.
+    const scoped = readinessRowBadge(
+      5 * H, "galaxy", null, 2 * H, null, undefined, "the framing you've shot");
+    expect(scoped!.label).toBe("~1 more night");
+    expect(scoped!.tooltip).toContain("of ~6 h for the framing you've shot");
+  });
+
   it("speaks up on a row the plain hint stays silent on", () => {
     // 3 h of a 6 h galaxy goal is "solid" — the badge-only version says nothing,
     // because "keep going" is already implied by the row's integration figure.

@@ -288,6 +288,47 @@ describe("TonightView", () => {
       expect(screen.getByText("Needs 3×2 mosaic")).toBeInTheDocument();
     });
 
+  it("stops telling you to move on from a target it has just said needs a mosaic",
+    async () => {
+      // 8 h of a 6 h galaxy goal is "plenty" — for the single field it was shot
+      // at. Before the framing verdict reached library rows, that was the only
+      // opinion on the row and "try something new" was sound advice. Now the
+      // badge an inch away says a sixth of M31 is in the picture, and the two
+      // read as opposites on one line.
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+        targets: [target({
+          id: "M31", name: "Andromeda Galaxy", already_targeted: true,
+          target_safe: "M_31", frames_accepted: 960, total_exposure_s: 8 * 3600,
+          type: "Galaxy", score: 70, size_arcmin: 178,
+          framing: { level: "mosaic", text: "is bigger than the Seestar's single frame." },
+          mosaic: { cols: 3, rows: 2, panels: 6, text: "About a 3x2 mosaic (6 panels) covers all of it." },
+        })],
+      }));
+      renderTonight();
+      await waitFor(() =>
+        expect(screen.getByText(/Andromeda Galaxy/)).toBeInTheDocument());
+      expect(screen.getByText("Needs 3×2 mosaic")).toBeInTheDocument();
+      expect(screen.getByText("Plenty for this framing")).toBeInTheDocument();
+      expect(screen.queryByText("Plenty — try something new")).not.toBeInTheDocument();
+    });
+
+  it("still says 'try something new' on a target that fits its frame",
+    async () => {
+      // The unscoped case, which is most of the library: nothing about the
+      // canvas is in question, so the prescription is the useful thing.
+      vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+        targets: [target({
+          id: "M13", name: "Hercules Cluster", already_targeted: true,
+          target_safe: "M_13", frames_accepted: 960, total_exposure_s: 8 * 3600,
+          type: "Galaxy", score: 70,
+        })],
+      }));
+      renderTonight();
+      await waitFor(() =>
+        expect(screen.getByText(/Hercules Cluster/)).toBeInTheDocument());
+      expect(screen.getByText("Plenty — try something new")).toBeInTheDocument();
+    });
+
   it("says nothing about framing on a target already shot as a mosaic",
     async () => {
       // The backend stands the verdict down there (it has answered the
