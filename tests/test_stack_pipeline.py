@@ -1842,3 +1842,47 @@ def test_a_target_shot_at_two_gains_is_warned_about_whichever_sub_is_the_referen
         assert "every frame" not in warn     # … and nothing claimed about the rest
     finally:
         proj.close()
+
+
+def test_a_wrong_scale_frame_is_dropped_from_the_stack_and_says_why(tmp_path):
+    """Observer issue #965, end to end. A false solve that lands on the right
+    patch of sky at a scale the optics cannot produce used to reproject into the
+    stack and be counted as a full contributor — the only plate-solve guard is a
+    test on the footprint *centre*, and a scale error is zero there by
+    construction. It must now be excluded, flagged, and flagged with a sentence
+    that is true of it (``footprint far from the group`` is not)."""
+    proj = _build_project(tmp_path, n=11)
+    try:
+        bad = list(proj.iter_frames())[-1]
+        # Same pointing, same pixels, +9.45% on the solved scale.
+        proj.update_frame(
+            bad.id,
+            wcs_json=make_synth_wcs_text(pixscale_arcsec=5.0 * 1.0945),
+            pixscale_arcsec=5.0 * 1.0945,
+        )
+        res = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                           output_name="scaleguard"))
+        assert res.n_frames_used == 10
+        assert len(res.excluded_frames) == 1
+        row = proj.get_frame(bad.id)
+        assert row.accept is False
+        assert row.reject_reason == (
+            "bad plate-solve (scale disagrees with the other frames)")
+        # …and every frame that agreed is untouched.
+        kept = [f for f in proj.iter_frames() if f.id != bad.id]
+        assert all(f.accept is not False for f in kept)
+    finally:
+        proj.close()
+
+
+def test_a_stack_whose_frames_all_agree_on_scale_loses_nothing(tmp_path):
+    """The other direction, on the shape every ordinary stack has."""
+    proj = _build_project(tmp_path, n=11)
+    try:
+        res = run_stack(proj, StackOptions(sigma_clip=False, max_workers=2,
+                                           output_name="scaleguard_clean"))
+        assert res.n_frames_used == 11
+        assert res.excluded_frames == []
+        assert all(f.accept is not False for f in proj.iter_frames())
+    finally:
+        proj.close()

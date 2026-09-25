@@ -1,5 +1,151 @@
 # Shipped — the record
 
+## v0.473.1 — 2026-09-25 — the plate-solve guard asked where a frame landed and never at what scale
+
+*(Builder, branch `claude/wizardly-cannon-hnfyu0`. Verified from observer issue
+[#965](https://github.com/JimmyeJones/astrostack/issues/965) — the mechanism re-traced in the code here, the
+owner-side counts and the same-file control are the observer's.)*
+
+**The defect.** The app's only plate-solve sanity check is
+`mosaic._footprint_outlier_indices`: a median+MAD over each footprint's **centre** RA/Dec, which flags a frame
+that landed somewhere else on the sky. Nothing anywhere compared the solved **scale** against anything. A false
+solve that happens to land on the right patch of sky therefore passed every guard and was reprojected into the
+stack at the wrong scale — and a scale error is **zero at the footprint centre**, the one place the guard looks,
+growing linearly to the corners, which is where the pixels go. `align_one` reprojects by the stored WCS; the
+only correction available is a sub-pixel *shift* (capped at 5 px, off by default, skipped on the drizzle path),
+and a shift cannot undo a scale error.
+
+**The control the observer found, which is what makes this certain.** The duplicate ingestion of
+[#878](https://github.com/JimmyeJones/astrostack/issues/878) means 15,421 files were solved **twice,
+independently, by the app itself**. Two frames accepted in both copies, with each stored WCS mapping that
+frame's own corners onto the sky:
+
+| | centre disagreement | worst corner disagreement |
+|---|---|---|
+| NGC 6960 sub, solved 4.36 vs 3.99″/px | 162″ | **836″** |
+| HIP 4205 sub, solved 4.44 vs 3.98″/px | **16″** | **1,022″** |
+
+The second is the guard's blind spot in one frame: two solves that agree at the centre to 16″ and put the
+corners 1,022″ apart. On the NGC 6960 run the worst corner lands ~210 canvas pixels from where the good solve
+puts it, against that run's own `stack_fwhm_px` of 1.68 — ~125× the size of a star in the finished picture. And
+the frame is not hard to solve: it solved correctly on the other attempt, from the identical bytes. It is a
+solver flake that nothing downstream filtered.
+
+**Scale, on the owner's library:** 178 accepted, solved frames across 25 of 95 targets more than 1 % off the
+scale the optics can produce; 55 beyond 2 %, 19 beyond 3 %, worst **+11.45 %**. They stack, and they are counted
+in `n_frames_used`, `total_exposure_s` and the coverage maps as full contributors.
+
+**The fix — the population's own median, not a hardcoded optic.** New pure
+`mosaic._plate_scale_outlier_indices`, run in `compute_mosaic_canvas` beside the footprint pass (which already
+derives each frame's scale from its WCS, so this costs nothing new). A target's subs come from one instrument in
+one configuration, so they have one plate scale, and the solved population says so loudly: 98.68 % of the
+owner's 89,443 accepted frames sit within ±0.25 % of the optics' 3.99″/px, 99.80 % within ±1 %. That tightness is
+what makes the tail meaningful. Frames beyond **±1 %** of the group median are dropped before the canvas is
+sized — and the canvas's own pixel scale is then taken from the survivors, so an 11 %-off solve cannot nudge it
+either.
+
+**Deliberately *not* symmetric with the footprint test, and that is the design call worth carrying forward.**
+A MAD threshold adapts to however spread the population happens to be. That is right for footprints — a real
+mosaic is legitimately spread out — and wrong here: a genuinely spread set of plate scales means the frames did
+**not** all come from one instrument, which is a reason to say *nothing* rather than a reason to widen the net.
+So this is a fixed relative tolerance around the median, guarded by an explicit consensus bar: unless **90 %** of
+the usable frames already agree with the median to within **±0.5 %**, nothing is flagged at all. A target holding
+two cameras' subs is left exactly as it is. The bar is set by what the two populations look like — a flake is a
+scattered minority (0.199 % library-wide, 7.23 % on his worst single target), a second instrument is a
+substantial group — and it makes a "never drop more than half" backstop unreachable by construction. Note the
+bottom end: at ten frames a lone outlier is exactly the 10 % the bar allows, which is why
+`SCALE_OUTLIER_MIN_FRAMES` is ten and not a smaller number the bar would then override.
+
+**Its own sentence in the Frames table.** The two ways a plate solve can be wrong are two different things to go
+and look at, so `CanvasResult` carries an additive `scale_excluded_frame_ids` (always a subset of
+`excluded_frame_ids`) and the stacker writes **"bad plate-solve (scale disagrees with the other frames)"** for
+those rows. Saying "footprint far from the group" about a frame whose footprint is centred correctly and merely
+the wrong *size* would be plainly false on screen. The Stack page's post-run alert, which hardcoded the
+footprint wording for every excluded frame, now names both and points at the per-frame rows.
+
+**Upgrade-safe (§9):** one additive dataclass field with a default, no config, schema, on-disk, API-shape or
+default change. `estimate_stack`'s basis already filtered on `excluded_frame_ids`, so the estimate and the run
+still agree about the frame count by construction.
+
+**Tests (+10, three fail before).** `tests/test_mosaic.py`: the helper flags only the disagreeing frames; keeps
+the library's real ±0.08 % solver spread; stands down on a 50/50 two-instrument population; is silent below the
+minimum and acts at exactly ten; ignores `None`/NaN/non-positive scales; a wrong-scale solve on the right patch
+of sky is dropped and reported under the scale id list; the canvas's own scale is taken from the frames that
+agree; a healthy 2×2 loses nothing; and a frame that is *both* displaced and oddly scaled is named once, under
+the footprint reason. `tests/test_stack_pipeline.py`: the end-to-end `run_stack` case — the frame is excluded,
+`accept=False`, carries the scale sentence, and every frame that agreed is untouched — plus the clean-stack
+direction.
+
+**Not built, and worth knowing before re-picking it.** (1) A **solve-time** refusal, which is what the issue
+suggests: the header carries `FOCALLEN`/`XPIXSZ` on every sub and `fits_loader.fov_deg_from_header` already
+derives the expected scale from them for ASTAP's own hint, so `apply_solve_result_to_db` could refuse to store
+an implausible solve. It would not help the 178 frames already solved and sitting in the library — this fix
+does — and it needs a decision about re-solve cost first: a frame stored as `solve_failed:` is re-offered on
+every scan, and 178 frames × a ladder that can burn 3× `astap_timeout_s` is hours per scan on a walk-away box.
+(2) **Healing** the existing rows without a stack: today they are caught the next time the target is stacked.
+(3) `n_roughly_aligned` is NULL on all 690 of the owner's stack runs — the column that would surface any of this
+to him — which is its own entry.
+
+
+## v0.473.0 — 2026-09-25 — reprocess-all told the engine somebody was watching, so 7 over-budget mosaics made no picture at all
+
+*(Builder, branch `claude/wizardly-cannon-hnfyu0`. Verified from observer issue
+[#966](https://github.com/JimmyeJones/astrostack/issues/966) — mechanism re-traced in the code here before
+building, the owner-side counts are the observer's from his own `jobs` rows.)*
+
+**The defect.** `webapp/pipeline._stack_target` wrote the run's posture last and derived it from one argument:
+`opts_dict["unattended"] = bool(auto)`. `auto` is set by the watcher auto-stack and "Process target" and by
+nothing else — its own comment says so — so **reprocess-all resolved to `unattended=False`**, i.e. "a human is
+sitting here and will act on the advice".
+
+That single flag gates all three of the engine's over-budget degrade levers, each written precisely for a run
+nobody is watching: `stacker._afford_drizzle_reject` (`if not options.unattended: return True  # someone is
+watching — let the guard refuse loudly instead`), the drizzle-scale step-down (`if eff.unattended and
+eff.drizzle:`) and the outlier-pass reduction (`if eff.unattended and _mmr_charged and …`). With all three off,
+`_guard_stack_memory` raises `MemoryError`, reprocess-all catches it, appends the target to `failed`, and moves
+on. `_afford_drizzle_reject`'s own docstring describes that outcome as the thing it exists to prevent: *"a
+refusal doesn't produce a better picture — it produces **no picture at all** on a target that made one
+yesterday."*
+
+**It had already happened, seven times, in the owner's own record.** Across his three most recent completed
+batches: 2026-09-01 two refusals, 2026-09-09 two, 2026-09-15 three — five distinct targets, every one a mosaic,
+every one a *drizzle with outlier rejection* canvas, every message naming a drizzle scale that would have fit.
+Two were near-misses of ~0.1 GB. Projected over his whole library at one budget, **17 of the 83 targets that
+have ever stacked refuse under `unattended=False` and 0 refuse under `unattended=True`**. And a batch on his
+library runs for **five days**: it is the most unattended job the app has, and it was the one classified as
+attended.
+
+**The fix, and the distinction it turns on.** `auto` and `unattended` had been one parameter because on every
+caller that existed when the posture was written they coincide. They are two questions:
+
+* `auto` — *"did the user make no stacking choices?"* It seeds `auto_reject`, `quality_weighted` and
+  `drizzle_reject` defaults into the merged options.
+* `unattended` — *"is a human there to act on the advice?"* It changes no picture by itself; it only decides
+  what an over-budget run does.
+
+Reprocess-all answers **no** to the first (it reuses each target's own prior `options_json` verbatim, and
+re-defaulting it would change pictures the owner already has) and **no** to the second. So `_stack_target` gains
+a separate `unattended: bool | None = None` keyword that **defaults to `auto`** — every existing call site is
+byte-for-byte unchanged — and reprocess-all passes `unattended=True` while leaving `auto` off.
+
+**Upgrade-safe (§9):** one new keyword-only parameter with a default that reproduces today's value, no config,
+schema, on-disk, API-shape or engine change. The watcher chain, "Process target" and the interactive Stack form
+all build the identical `StackOptions` they did before. What changes is one batch job's posture — and only on a
+run that is *already over budget*, where today's behaviour is no picture.
+
+**Tests (+4, two fail before).** `tests/webapp/test_reprocess_all.py`: the batch stacks with
+`unattended=True`; the posture does **not** re-default the owner's options (`auto_reject` / `quality_weighted`
+stay off, which is what an `auto=True` shortcut would have broken); the interactive Stack form is still
+attended; and one that pins the **consequence** rather than the flag — the options the batch actually builds,
+handed to `stacker._afford_drizzle_reject` on a 9488×5170 canvas against a 1 GB budget, now drop the second pass
+and let the run proceed, while the same options with `unattended=False` still refuse.
+
+**Not built, and filed as a lead:** the observer's second point — that `_stack_memory_budget_bytes` falls
+through to 70 % of *instantaneous* free RAM, so which mosaics survive a batch is decided by the host's memory at
+the minute each one is reached. That is a real irreproducibility, but pricing a whole batch against one budget
+captured at the start is a behaviour change on the memory guard itself and wants its own measurement.
+
+
 ## v0.472.3 — 2026-09-20 — and the chip that fix added read "Needs 3×3 mos…" on a phone
 
 *(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Caught by a dogfood probe **before it merged**,

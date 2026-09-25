@@ -57,6 +57,43 @@ OUTLIER_FLOOR_DEG = 3.0   # never flag a frame closer than this to the group cen
 OUTLIER_SIGMA = 5.0       # MAD-sigmas beyond the median separation to flag
 OUTLIER_MIN_FRAMES = 5    # need at least this many frames for robust statistics
 
+# The *other* axis of the same question, which the test above is blind to by
+# construction. ``_footprint_outlier_indices`` asks **where** a frame landed;
+# nothing asked **at what scale**, and a false solve that happens to land on the
+# right patch of sky passed every guard and was reprojected into the stack at the
+# wrong scale. A scale error is zero at the footprint centre — the one place the
+# centre test looks — and grows linearly to the corners, which is where the pixels
+# go. Observer issue #965 measured one such frame against the *same file's* other
+# solve (the duplicate-ingest pairs of #878 are a free control): the two centres
+# agree to 16″ and the two sets of corners are **1,022″ apart**.
+#
+# A target's subs come from one instrument in one configuration, so they have one
+# plate scale, fixed by focal length and pixel pitch. The solved population says
+# so loudly: on the owner's library 98.68 % of 89,443 accepted frames sit within
+# ±0.25 % of the optics' own 3.99″/px and 99.80 % within ±1 %. That tightness is
+# what makes the tail meaningful — it is not measurement spread. 178 frames sit
+# beyond 1 %, worst +11.45 %, and they stack and are counted as full contributors.
+#
+# So the guard is the population's own median, not a hardcoded optic: it needs no
+# header read at stack time, it is right for whatever camera the frames came from,
+# and it works on frames already solved and sitting in the library. It stands down
+# entirely unless the population has a single obvious truth (see
+# ``SCALE_CONSENSUS_*``), so a library mixing two instruments in one target is
+# left alone rather than having one of them declared wrong.
+#
+# The consensus bar is set by what the two populations look like. A *flake* is a
+# scattered minority: 0.199 % of the owner's whole library, 7.23 % on his worst
+# single target. A *second instrument* is a substantial group. A 0.9 bar admits
+# everything his library actually shows and refuses anything whose minority is
+# bigger than a tenth — which is the smallest share a real second camera would
+# plausibly have. Note what that means at the bottom end: at ten frames a single
+# outlier is exactly 10 %, so below ten frames the guard can never flag anything,
+# which is why the minimum is ten rather than a number the bar then overrides.
+SCALE_OUTLIER_MIN_FRAMES = 10   # below this the bar below can never be met anyway
+SCALE_OUTLIER_REL_TOL = 0.01    # flag beyond ±1% of the median (99.80% are inside)
+SCALE_CONSENSUS_REL = 0.005     # "agrees with the median" for the bar below
+SCALE_CONSENSUS_SHARE = 0.9     # …and this share must agree before anything is flagged
+
 # In "auto" mode, only switch to a union canvas when it's meaningfully bigger
 # than the reference frame — otherwise a normal dithered single-target stack
 # would needlessly get a slightly different canvas size. 1.3× area is the
@@ -76,6 +113,13 @@ class CanvasResult:
     # Frame ids (or names) dropped as gross plate-solve outliers so the canvas
     # would fit. The stacker also excludes these from the stack itself.
     excluded_frame_ids: list = field(default_factory=list)
+    # The subset of the above dropped for an implausible plate *scale* rather than
+    # a displaced footprint (see ``_plate_scale_outlier_indices``). Carried
+    # separately only so the stacker can tell the frame's row *which* of the two
+    # went wrong — they are two different things to go and look at, and "footprint
+    # far from the group" is a lie on a frame whose footprint is centred correctly
+    # and merely the wrong size. Always a subset of ``excluded_frame_ids``.
+    scale_excluded_frame_ids: list = field(default_factory=list)
 
 
 def _ang_sep_deg(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
@@ -135,6 +179,49 @@ def _footprint_outlier_indices(
     return outliers, seps
 
 
+def _plate_scale_outlier_indices(
+    scales: list[float | None],
+) -> tuple[set[int], float | None]:
+    """Indices of frames whose solved plate scale disagrees with the group's.
+
+    ``scales`` is arcsec/pixel per frame, positionally aligned with the footprint
+    list, ``None`` where no scale could be derived (or where the caller has
+    already dropped the frame for another reason and wants it kept out of the
+    statistics). Returns the outlier index set and the group's median scale (for
+    logging), or an empty set when the population cannot answer.
+
+    Deliberately **not** symmetric with ``_footprint_outlier_indices``' MAD test.
+    A MAD threshold adapts to however spread the population happens to be, which
+    is right for footprints — a real mosaic is legitimately spread out — and wrong
+    here: a genuinely spread set of plate scales means the frames did not all come
+    from one instrument, which is a reason to say nothing rather than a reason to
+    widen the net. So this uses a fixed relative tolerance around the median, and
+    guards it with an explicit consensus bar: unless ``SCALE_CONSENSUS_SHARE`` of
+    the usable frames already agree with the median to within
+    ``SCALE_CONSENSUS_REL``, nothing is flagged at all. A target holding two
+    instruments' subs, or a handful of frames with no clear majority, is left
+    exactly as it is.
+
+    (The bar also makes a "never drop more than half" backstop unreachable: at a
+    0.9 consensus at ±0.5 % at most 10 % of the population can be beyond ±1 %.)
+    """
+    usable = [
+        (i, float(v)) for i, v in enumerate(scales)
+        if v is not None and np.isfinite(v) and float(v) > 0.0
+    ]
+    if len(usable) < SCALE_OUTLIER_MIN_FRAMES:
+        return set(), None
+    med = float(np.median([v for _, v in usable]))
+    if not np.isfinite(med) or med <= 0.0:
+        return set(), None
+    agree = sum(1 for _, v in usable if abs(v / med - 1.0) <= SCALE_CONSENSUS_REL)
+    if agree < SCALE_CONSENSUS_SHARE * len(usable):
+        # No single obvious truth in this population — say nothing.
+        return set(), med
+    outliers = {i for i, v in usable if abs(v / med - 1.0) > SCALE_OUTLIER_REL_TOL}
+    return outliers, med
+
+
 def compute_mosaic_canvas(
     frames,
     reference_shape: tuple[int, int],
@@ -170,7 +257,10 @@ def compute_mosaic_canvas(
     # bad plate-solve can be identified and dropped rather than blowing up the
     # whole canvas.
     foot: list[tuple[object, np.ndarray, np.ndarray]] = []  # (key, ra[], dec[])
-    pixscales: list[float] = []
+    # Positionally aligned with ``foot`` (``None`` where the WCS gave no usable
+    # scale), so the plate-scale guard below can name the frame it flags. The
+    # canvas's own pixel scale is the median of the survivors, further down.
+    pixscales: list[float | None] = []
 
     for f in frames:
         if not f.wcs_json or f.width_px is None or f.height_px is None:
@@ -193,19 +283,32 @@ def compute_mosaic_canvas(
         # the DB's pixscale_arcsec is populated by plate-solving and may be
         # None (e.g. frames imported with an embedded WCS). proj_plane_pixel_
         # scales returns degrees/pixel per axis; take the mean and convert.
+        pix_arcsec: float | None = None
         try:
             scales_deg = proj_plane_pixel_scales(wcs)
-            pix_arcsec = float(np.mean(scales_deg)) * 3600.0
-            if np.isfinite(pix_arcsec) and pix_arcsec > 0:
-                pixscales.append(pix_arcsec)
+            v = float(np.mean(scales_deg)) * 3600.0
+            if np.isfinite(v) and v > 0:
+                pix_arcsec = v
         except Exception:  # noqa: BLE001 — degenerate WCS; fall back below
             pass
+        pixscales.append(pix_arcsec)
 
     if not foot or sum(len(r) for _, r, _ in foot) < 4:
         return None
 
-    # Median pixel scale of the inputs; fall back to a Seestar-ish value.
-    pixscale_arcsec = float(np.median(pixscales)) if pixscales else 2.5
+    # A frame whose solved scale disagrees with the group's is a false solve that
+    # happened to land on the right patch of sky — the one thing the footprint
+    # test cannot see (#965). Decided here, *before* the canvas takes its own
+    # pixel scale from the population, so a wrong-scale frame can neither size the
+    # canvas nor land on it; applied to ``active`` alongside the footprint pass
+    # below, so the two exclusions are reported together.
+    scale_outliers, scale_median = _plate_scale_outlier_indices(pixscales)
+
+    # Median pixel scale of the inputs; fall back to a Seestar-ish value. Taken
+    # over the frames that agree, so an 11 %-off solve cannot nudge it.
+    _good_scales = [v for i, v in enumerate(pixscales)
+                    if v is not None and i not in scale_outliers]
+    pixscale_arcsec = float(np.median(_good_scales)) if _good_scales else 2.5
 
     def _bbox(active: list[int]):
         """Bounding box (and provisional WCS) for the union of ``active`` frames.
@@ -257,6 +360,25 @@ def compute_mosaic_canvas(
             "canvas (separations up to %.1f° from the group centre): %s",
             len(outliers), max(seps[i] for i in outliers),
             [foot[i][0] for i in sorted(outliers)],
+        )
+    # …and the same pass on the axis that one is blind to. Only the frames the
+    # footprint test did not already take, so a single bad solve is reported once
+    # and under the reason that best describes it.
+    scale_only = sorted(scale_outliers - outliers)
+    scale_excluded: list[object] = []
+    if scale_only:
+        for i in scale_only:
+            excluded.append(foot[i][0])
+            scale_excluded.append(foot[i][0])
+        active = [i for i in active if i not in scale_outliers]
+        log.warning(
+            "Dropping %d frame(s) whose plate solve came back at an implausible "
+            "scale before sizing the canvas (group median %.3f\u2033/px; worst "
+            "%+.1f%%): %s",
+            len(scale_only), scale_median or float("nan"),
+            100.0 * max(abs((pixscales[i] or 0.0) / (scale_median or 1.0) - 1.0)
+                        for i in scale_only),
+            [foot[i][0] for i in scale_only],
         )
     if not active:
         return None
@@ -342,4 +464,5 @@ def compute_mosaic_canvas(
         n_footprints=len(active),
         span_deg=span_deg,
         excluded_frame_ids=excluded,
+        scale_excluded_frame_ids=scale_excluded,
     )
