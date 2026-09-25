@@ -1,5 +1,89 @@
 # Shipped — the record
 
+## v0.475.2 — 2026-09-25 — a recipe may carry an op twice, and its outcome notes could not
+
+*(Builder, branch `claude/nifty-pasteur-fspzqn`. The backlog entry — "Infra / maintainability", Builder
+2026-09-03, filed while adding the sibling `fitted` channel in v0.328.2 — is quoted at the foot of this
+entry. Its own **"check first"** was carried out before anything was written, and it is what turned an XS
+tidy-up into a priority-1 parity fix.)*
+
+### What the entry asked to be checked, and what the check found
+
+The entry sized itself as *"an XS tidy-up rather than a bug"* **unless** a double-op recipe is reachable
+from the UI. It is: `frontend/src/routes/Editor.tsx::addOp` inserts a new `OpInstance` unconditionally, and
+neither the Add menu (`Menu.Item … onClick={() => addOp(s)}`) nor `insertOnCorrectSide` refuses one whose id
+is already in the list. Two **Color calibration** ops is two clicks.
+
+### The defect
+
+`EditContext.op_notes` was keyed by the op **id**, where its two sibling channels — `fitted` and
+`field_deltas` — have been keyed by the recipe op's **uid** since they were built, for exactly this reason
+(`EditContext.op_uid` exists to carry it, and `_fit_key` already spells the rule). So the second instance's
+note replaced the first's, and the payload the editor captions from described a two-step chain as if it had
+been one step.
+
+Two of the three fields that note carries are fine to read that way. The third is not:
+
+* `mode_used` / `n_stars_used` / `notes` describe **which balance the picture ended up with**. A second
+  calibration runs on top of the first, so the last instance's answer is the right one — which is what the
+  overwrite produced by accident.
+* `proxy_fallback` is a **preview-vs-export parity warning**: the decimated proxy held too few resolvable
+  stars for the star-based solve the full-res export will manage, so it fell back to the starless balance.
+  `frontend/src/components/editor/colorCal.ts::colorCalProxyFallbackCaption` turns it into *"the saved
+  picture's colour will differ a little from this preview."* The chain diverges if **any** step diverged —
+  so with the fallback on the **first** op and not the last, the whole advisory silently disappeared. A
+  parity advisory going quiet is the A2 class AGENTS.md §1 re-opened priority 1 over.
+
+The same payload builder already gets this right one field up: `star_reduce_preview_overstates` is an
+`any(...)` over **every** enabled `stars.reduce` op in the recipe. It could not be written that way for the
+colour one, because the note that carries the flag had already been overwritten.
+
+### The fix
+
+* `EditContext.record_note(op_id, note)` writes through the same `_fit_key` the fits use, so a note is keyed
+  to the instance; `EditContext.notes_for(op_id)` reads every instance's note back **in recipe order**
+  (`op_notes` is insertion-ordered and the pipeline applies enabled ops in order). A direct engine caller
+  that applies an op without the pipeline sets no `op_uid` and lands under the bare op id — the same degrade
+  `record_fit` already has, and what keeps three existing test files reading exactly as they did.
+* New pure `seestack/edit/opnotes.py`: `COLOR_CAL_OP` + `merge_color_cal(notes)`, the one place that decides
+  what "more than one" means — last note with a mode for the balance, `any()` for the parity flag — so the
+  editor's live histogram and the walk-away auto-edit's History stamp cannot describe one render
+  differently. `tone.py` writes through `record_note`; `webapp/routers/editor.py` and `webapp/pipeline.py`
+  both read through `merge_color_cal`.
+
+**Bit-for-bit unchanged on every recipe the app actually renders today**, including the one-click Auto
+recipe: one note in, the same dict out, with `proxy_fallback` recomputed from that same note.
+`tests/webapp/test_editor.py::test_histogram_reports_color_cal_outcome` pins the single-op payload key for
+key and passes untouched.
+
+**Upgrade-safe (§9):** `op_notes` is an engine-internal dataclass field with exactly two readers, both
+changed in the same commit. No response shape changes — the `color_cal` payload keeps its four keys, so the
+`AUTO_EDIT_COLORCAL_PREFIX` metas already stamped on the owner's runs still read. No config, schema,
+on-disk, API or default change.
+
+**Tests (+9, one fails before):** `tests/test_edit_op_notes.py`. The fail-before is the real op run twice
+through `apply_recipe` — two instances, two notes, keyed `first:` / `second:` (before the fix: one note).
+The rest pin the merge rule in both directions, the identity on a single note, the no-mode and empty cases,
+and the bare-id degrade for a direct caller. `tests/test_edit_frozen_fits.py`'s two assertions were the only
+existing ones built on a uid-carrying context by hand; they now read through `notes_for(...)[-1]` and assert
+the identical facts.
+
+> **The entry, as filed (Builder 2026-09-03, "Infra / maintainability"):** *"`EditContext.op_notes` is keyed
+> by op **id** where its new sibling `fitted` is keyed by op **uid**, so a recipe carrying an op twice reports
+> only the last one. (Pillar: editor correctness — PRIORITY 1; size XS; latent, low severity.)
+> `seestack/edit/ops/tone.py` writes `ctx.op_notes["tone.color_calibrate"] = {…}` and
+> `seestack/edit/ops/detail.py` does the same for its advisories … the fix is available: key by uid and have
+> the webapp layer resolve uid → op id when it builds the histogram payload. **Care:** the histogram
+> endpoint's JSON shape is what the frontend reads … and per §9 must not change … Worth confirming a
+> double-op recipe is actually reachable from the UI before spending a run on it; if it is only reachable by
+> hand-editing a recipe JSON, it stays an XS tidy-up rather than a bug."*
+>
+> Two corrections the build owes it. **`detail.py` no longer writes `op_notes` at all** — its advisories moved
+> to `fitted`, so `tone.color_calibrate` was the only writer and the whole blast radius is the `color_cal`
+> payload. And the fix is **not** "the webapp resolves uid → op id": that shape needs the recipe at read time
+> and still has to answer "which of the two?", which is the actual question. `notes_for` + `merge_color_cal`
+> answer it once, in the engine, where the writer is.
+
 ## v0.475.0 / v0.475.1 — 2026-09-25 — the badge that read above √N, because neither side has independent pixels (and because "sharpest" is not "typical")
 
 *(Builder, branch `claude/nifty-pasteur-meo70w`. The Scout's entry, verified from observer issue

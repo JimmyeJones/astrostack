@@ -78,8 +78,13 @@ class EditContext:
     op_notes: dict[str, Any] = field(default_factory=dict)
     #   A best-effort channel for an op to record a small, JSON-safe outcome the
     #   caller may want to surface (e.g. which colour-calibration path actually ran
-    #   and on how many stars). Keyed by op id. Ops write it; nothing reads it in the
-    #   pipeline itself, so leaving it unread is harmless.
+    #   and on how many stars). Written through :meth:`record_note` and keyed by the
+    #   recipe op's ``uid`` exactly as :attr:`fitted` is, and for the same reason: a
+    #   recipe may legitimately carry the same op twice, and an id-keyed note let the
+    #   second instance silently overwrite the first's. Read it back with
+    #   :meth:`notes_for`, which returns every instance's note in recipe order. Ops
+    #   write it; nothing reads it in the pipeline itself, so leaving it unread is
+    #   harmless.
     fitted: dict[str, Any] = field(default_factory=dict)
     #   What each op *measured from the image* this render — see :meth:`fit`.
     #   Written by the ops, keyed by the recipe op's ``uid``; nothing in the
@@ -170,6 +175,31 @@ class EditContext:
         """
         frozen = self.frozen_fit(name, _UNSET)
         return self.record_fit(name, compute() if frozen is _UNSET else frozen)
+
+    # --- op notes: one per op *instance*, like the fits above ----------------
+
+    def record_note(self, op_id: str, note: Any) -> None:
+        """Record ``note`` as what this op instance did — see :attr:`op_notes`.
+
+        Keyed through the same :meth:`_fit_key` the fits use, so two instances of
+        one op in a recipe keep separate notes instead of the later one silently
+        replacing the earlier. A direct engine caller that applies an op without
+        going through the pipeline sets no ``op_uid``; its note then lands under
+        the bare op id, exactly as :meth:`record_fit` degrades.
+        """
+        self.op_notes[self._fit_key(op_id)] = note
+
+    def notes_for(self, op_id: str) -> list[Any]:
+        """Every instance's note for ``op_id``, in the order they were recorded.
+
+        That is recipe order, because ``op_notes`` is insertion-ordered and the
+        pipeline applies enabled ops in order — which is what lets a reader say
+        "the last balance the picture got" and "did *any* step diverge from the
+        export?" as two different questions (:mod:`seestack.edit.opnotes`).
+        """
+        suffix = f":{op_id}"
+        return [v for k, v in self.op_notes.items()
+                if k == op_id or k.endswith(suffix)]
 
     # --- fitted *fields*: the same trick for an op that fits a picture --------
     #
