@@ -1,5 +1,64 @@
 # Shipped — the record
 
+## v0.473.0 — 2026-09-25 — reprocess-all told the engine somebody was watching, so 7 over-budget mosaics made no picture at all
+
+*(Builder, branch `claude/wizardly-cannon-hnfyu0`. Verified from observer issue
+[#966](https://github.com/JimmyeJones/astrostack/issues/966) — mechanism re-traced in the code here before
+building, the owner-side counts are the observer's from his own `jobs` rows.)*
+
+**The defect.** `webapp/pipeline._stack_target` wrote the run's posture last and derived it from one argument:
+`opts_dict["unattended"] = bool(auto)`. `auto` is set by the watcher auto-stack and "Process target" and by
+nothing else — its own comment says so — so **reprocess-all resolved to `unattended=False`**, i.e. "a human is
+sitting here and will act on the advice".
+
+That single flag gates all three of the engine's over-budget degrade levers, each written precisely for a run
+nobody is watching: `stacker._afford_drizzle_reject` (`if not options.unattended: return True  # someone is
+watching — let the guard refuse loudly instead`), the drizzle-scale step-down (`if eff.unattended and
+eff.drizzle:`) and the outlier-pass reduction (`if eff.unattended and _mmr_charged and …`). With all three off,
+`_guard_stack_memory` raises `MemoryError`, reprocess-all catches it, appends the target to `failed`, and moves
+on. `_afford_drizzle_reject`'s own docstring describes that outcome as the thing it exists to prevent: *"a
+refusal doesn't produce a better picture — it produces **no picture at all** on a target that made one
+yesterday."*
+
+**It had already happened, seven times, in the owner's own record.** Across his three most recent completed
+batches: 2026-09-01 two refusals, 2026-09-09 two, 2026-09-15 three — five distinct targets, every one a mosaic,
+every one a *drizzle with outlier rejection* canvas, every message naming a drizzle scale that would have fit.
+Two were near-misses of ~0.1 GB. Projected over his whole library at one budget, **17 of the 83 targets that
+have ever stacked refuse under `unattended=False` and 0 refuse under `unattended=True`**. And a batch on his
+library runs for **five days**: it is the most unattended job the app has, and it was the one classified as
+attended.
+
+**The fix, and the distinction it turns on.** `auto` and `unattended` had been one parameter because on every
+caller that existed when the posture was written they coincide. They are two questions:
+
+* `auto` — *"did the user make no stacking choices?"* It seeds `auto_reject`, `quality_weighted` and
+  `drizzle_reject` defaults into the merged options.
+* `unattended` — *"is a human there to act on the advice?"* It changes no picture by itself; it only decides
+  what an over-budget run does.
+
+Reprocess-all answers **no** to the first (it reuses each target's own prior `options_json` verbatim, and
+re-defaulting it would change pictures the owner already has) and **no** to the second. So `_stack_target` gains
+a separate `unattended: bool | None = None` keyword that **defaults to `auto`** — every existing call site is
+byte-for-byte unchanged — and reprocess-all passes `unattended=True` while leaving `auto` off.
+
+**Upgrade-safe (§9):** one new keyword-only parameter with a default that reproduces today's value, no config,
+schema, on-disk, API-shape or engine change. The watcher chain, "Process target" and the interactive Stack form
+all build the identical `StackOptions` they did before. What changes is one batch job's posture — and only on a
+run that is *already over budget*, where today's behaviour is no picture.
+
+**Tests (+4, two fail before).** `tests/webapp/test_reprocess_all.py`: the batch stacks with
+`unattended=True`; the posture does **not** re-default the owner's options (`auto_reject` / `quality_weighted`
+stay off, which is what an `auto=True` shortcut would have broken); the interactive Stack form is still
+attended; and one that pins the **consequence** rather than the flag — the options the batch actually builds,
+handed to `stacker._afford_drizzle_reject` on a 9488×5170 canvas against a 1 GB budget, now drop the second pass
+and let the run proceed, while the same options with `unattended=False` still refuse.
+
+**Not built, and filed as a lead:** the observer's second point — that `_stack_memory_budget_bytes` falls
+through to 70 % of *instantaneous* free RAM, so which mosaics survive a batch is decided by the host's memory at
+the minute each one is reached. That is a real irreproducibility, but pricing a whole batch against one budget
+captured at the start is a behaviour change on the memory guard itself and wants its own measurement.
+
+
 ## v0.472.3 — 2026-09-20 — and the chip that fix added read "Needs 3×3 mos…" on a phone
 
 *(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Caught by a dogfood probe **before it merged**,

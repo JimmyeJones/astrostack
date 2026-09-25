@@ -1857,3 +1857,121 @@ def test_reprocess_all_binds_a_uniform_target_unscaled_exactly_as_before(
         assert o.dark_path and Path(o.dark_path).name == dark["filename"]
         assert not o.bias_path
         assert o.scale_dark_to_light is False
+
+
+# --------------------------------------------------------------------------- #
+# The batch's posture: nobody is watching a run that walks the whole library
+# (observer issue #966)
+# --------------------------------------------------------------------------- #
+
+def _seed_prior_drizzle_runs(lib) -> None:
+    """Give each target a genuine prior run whose options are the shape that
+    refused on the owner's library: a drizzled canvas with the two-pass
+    rejection on. Reprocess-all reuses them verbatim."""
+    for entry in lib.list_targets():
+        proj = lib.open_target(entry.safe_name)
+        try:
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="master", fits_path=None, tiff_path=None,
+                preview_path=None, n_frames_used=3, canvas_h=10, canvas_w=10,
+                coverage_min=1, coverage_max=3,
+                options_json=json.dumps({
+                    "drizzle": True, "drizzle_scale": 1.5,
+                    "drizzle_reject": True, "mosaic_canvas": "auto",
+                }),
+            ))
+        finally:
+            proj.close()
+
+
+def test_reprocess_all_runs_unattended(solved_library, monkeypatch):
+    """A batch that restacks every target is the most unattended job the app has
+    — on the owner's library it runs for days — so the engine's over-budget
+    degrade levers, which are all gated on ``StackOptions.unattended``, must be
+    live for it. Before the fix it stacked with ``unattended=False`` and an
+    over-budget mosaic raised MemoryError into ``failed`` instead."""
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        _seed_prior_runs_without_calibration(lib)
+        job = Job(kind="reprocess_all")
+        _run_body(pipeline.submit_reprocess_all, _settings(solved_library), job)
+    finally:
+        lib.close()
+
+    assert len(captured) == 2
+    assert all(o.unattended is True for o in captured)
+
+
+def test_reprocess_all_posture_does_not_re_default_the_owners_options(
+        solved_library, monkeypatch):
+    """The posture is *only* the posture. ``auto`` — "the user made no stacking
+    choices", which seeds rejection/weighting defaults — must stay off, or a
+    reprocess would quietly change pictures the owner already has."""
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        _seed_prior_runs_without_calibration(lib)
+        job = Job(kind="reprocess_all")
+        _run_body(pipeline.submit_reprocess_all, _settings(solved_library), job)
+    finally:
+        lib.close()
+
+    assert len(captured) == 2
+    for o in captured:
+        # The reused blob expressed no rejection/weighting preference, so an
+        # ``auto=True`` call would have turned these on. It must not.
+        assert o.auto_reject is False
+        assert o.quality_weighted is False
+
+
+def test_interactive_stack_is_still_attended(solved_library, monkeypatch):
+    """The other half of the same distinction: a user sitting in front of the
+    Stack form still gets the loud refusal that names the one lever to change."""
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = lib.list_targets()[0].safe_name
+    finally:
+        lib.close()
+    job = Job(kind="stack")
+    _run_body(pipeline.submit_stack, _settings(solved_library), job,
+              safe=safe, options={"sigma_clip": True})
+
+    assert len(captured) == 1
+    assert captured[0].unattended is False
+
+
+def test_reprocess_alls_posture_reaches_the_engines_degrade_lever(
+        solved_library, monkeypatch):
+    """Pin the *consequence*, not just the flag: hand the options the batch
+    actually builds to the engine gate that decides refuse-vs-degrade, on a
+    canvas that cannot afford the two-pass rejection. With the batch's posture
+    the pass is dropped and the run proceeds; an attended run refuses."""
+    from dataclasses import replace
+
+    from seestack.stack import stacker
+
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        _seed_prior_drizzle_runs(lib)
+        job = Job(kind="reprocess_all")
+        _run_body(pipeline.submit_reprocess_all, _settings(solved_library), job)
+    finally:
+        lib.close()
+
+    assert captured
+    opts = captured[0]
+    assert opts.drizzle and opts.drizzle_reject   # the reused shape survived
+    # A canvas far too big for a 1 GB budget: the second pass cannot fit.
+    big = (9488, 5170)
+    assert stacker._afford_drizzle_reject(opts, 20, big, 1.0) is False
+    # The same options answered as if somebody were watching still refuse loudly.
+    attended = replace(opts, unattended=False)
+    assert stacker._afford_drizzle_reject(attended, 20, big, 1.0) is True
