@@ -1447,6 +1447,16 @@ export interface GradeReport {
   metrics_used: string[];
   metrics_skipped: Record<string, string>;
   capped: boolean;
+  /** Which of the two 25% rails truncated the list. `capped` is their union and
+   * cannot tell them apart, and they want opposite advice: the target-wide rail
+   * really is "a rough session", while the per-panel rail is a count limit on
+   * one patch of sky that a conservative pass cannot release. Absent on an older
+   * backend, where `capped` alone keeps today's meaning. */
+  capped_overall?: boolean;
+  /** Mosaic panels that hit their own rail, and how many frames they held back
+   * between them. */
+  capped_panels?: number;
+  withheld_per_panel?: number;
   /** Mosaic panels graded against themselves rather than against the whole
    * target (panels are different patches of sky, so a star-poor one is not
    * cloud). 0 — or absent, on an older backend — means ordinary target-wide

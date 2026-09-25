@@ -15,6 +15,7 @@ import { Link, useParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import { api, type Frame } from "../api/client";
 import { formatCaptureNights, formatFrameStamp, formatIntegration } from "../format";
+import { gradeCapNotice } from "../gradeCap";
 import { integrationReadiness, readinessColor, noiseReductionHint, fmtGoal } from "../readiness";
 import { HintAnchor } from "../components/HintAnchor";
 import { QueryError } from "../components/QueryError";
@@ -235,6 +236,9 @@ function AutoGradeModal({
   const report = preview.data;
   const recs = report?.recommendations ?? [];
   const nothingGradable = report && report.metrics_used.length === 0;
+  // Which of the two 25% rails truncated the list — they want opposite advice
+  // (shared with the Stack form's hint, so the two cannot disagree).
+  const capNotice = gradeCapNotice(report);
 
   return (
     <Modal opened={opened} onClose={onClose} title="Auto-grade frames" size="lg">
@@ -276,12 +280,8 @@ function AutoGradeModal({
               <b>{recs.length}</b> of {report?.n_accepted} accepted frames look
               like outliers:
             </Text>
-            {report?.capped ? (
-              <Alert color="orange" p="xs">
-                More frames were flagged than the 25% safety cap allows — only
-                the worst are listed. Consider a conservative pass first, or
-                review the night's data.
-              </Alert>
+            {capNotice ? (
+              <Alert color="orange" p="xs">{capNotice.text}</Alert>
             ) : null}
             <Table.ScrollContainer minWidth={400} mah={300}>
               <Table striped withTableBorder>

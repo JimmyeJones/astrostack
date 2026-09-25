@@ -255,7 +255,28 @@ class GradeReport:
     recommendations: list[FrameGrade] = field(default_factory=list)
     metrics_used: list[str] = field(default_factory=list)
     metrics_skipped: dict[str, str] = field(default_factory=dict)
-    capped: bool = False  # the MAX_REJECT_FRACTION rail truncated the list
+    capped: bool = False  # *a* MAX_REJECT_FRACTION rail truncated the list
+    # …and **which** one, because there are two and they have different causes
+    # and different remedies. ``capped`` stays the union of the pair (every
+    # existing reader keeps its meaning); these two say what actually happened.
+    #
+    # ``capped_overall`` is the target-wide rail: more than a quarter of the
+    # whole target was flagged, which really is "this looks like a rough
+    # session", and a conservative pass really would shorten the list.
+    #
+    # ``capped_panels`` is the number of mosaic panels that hit their **own**
+    # rail, with ``withheld_per_panel`` frames held back between them. That one
+    # is spatial, not temporal, and the advice above is wrong for it twice over:
+    # a conservative pass raises the z threshold, which *shrinks* the flagged set
+    # and cannot release a frame a count limit withheld, and "review the night's
+    # data" points at a night when the frames are concentrated on panels. It also
+    # fires at whole-target flag rates nowhere near the quarter the notice names —
+    # measured on the owner's library, **7 of his 21 capped targets** could not
+    # have reached the target-wide rail at all, one of them on a single withheld
+    # frame at an 8.0 % flag rate (observer issue #968).
+    capped_overall: bool = False
+    capped_panels: int = 0
+    withheld_per_panel: int = 0
     # Ids from ``reconsider`` this pass did **not** flag: previously
     # auto-rejected frames the now-larger population no longer calls outliers,
     # so ``apply_grade_report`` puts them back. Always empty when no
@@ -547,6 +568,7 @@ def grade_frames(
                 per_group_considered[gid] = per_group_considered.get(gid, 0) + 1
         kept: list[FrameGrade] = []
         used: dict[int, int] = {}
+        _panels_at_rail: set[int] = set()
         for g in recs:
             gid = groups.get(g.frame_id)
             if gid is None:
@@ -555,9 +577,12 @@ def grade_frames(
             gcap = max(1, int(per_group_considered.get(gid, 0) * max_reject_fraction))
             if used.get(gid, 0) >= gcap:
                 report.capped = True
+                _panels_at_rail.add(gid)
+                report.withheld_per_panel += 1
                 continue
             used[gid] = used.get(gid, 0) + 1
             kept.append(g)
+        report.capped_panels = len(_panels_at_rail)
         if len(kept) < len(recs):
             log.info(
                 "Auto-grade per-panel rail kept %d of %d flagged frames across "
@@ -570,6 +595,7 @@ def grade_frames(
     cap = max(1, int(len(considered) * max_reject_fraction)) if considered else 0
     if len(recs) > cap:
         report.capped = True
+        report.capped_overall = True
         recs = recs[:cap]
         log.info(
             "Auto-grade capped recommendations to %d of %d flagged frames "
