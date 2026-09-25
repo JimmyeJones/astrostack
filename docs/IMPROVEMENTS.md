@@ -82,57 +82,25 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟠 BUG (trust — PRIORITY 1-adjacent; Scout 2026-09-25, verified in-code from observer issue
-  [#967](https://github.com/JimmyeJones/astrostack/issues/967)) — the "stacking cut your noise ~N×" badge
-  reads *above the √N ceiling on most runs* because both sides are measured with a lag-1 (adjacent-pixel)
-  MAD estimator on pixels that are NOT independent — the sub is bilinear-debayered, the master is
-  registration-warped and usually drizzled — so each σ is understated, the master's more than the sub's,
-  and the ratio inherits the quotient.** *(Size **M to write, M to be sure of** — two separable halves;
-  severity **broken-UX / wrong displayed number + a silenced diagnostic**, no image is corrupted.
-  Confidence: **both mechanisms TRACED in code and the "why nobody caught it" reproduced**; the owner-side
-  magnitudes (73/83 runs above √N, median ratio/√N 1.374) are the **observer's measurements**, which I have
-  not independently reproduced on the owner's data.)*
-  **Mechanism 1 — the estimator assumes independent pixels; neither side has them.** `qc/noise_ratio.py`
-  `_diff_sigma` takes σ from `1.4826·MAD/√2` of **adjacent**-pixel differences (lines 50-71), which is `2σ²`
-  only if neighbours are independent. The sub reaches it through `bilinear_debayer`
-  (`webapp/routers/stack.py:3367-3369` in `_measure_noise_ratio`), the master straight off the linear FITS
-  (`stack.py:3342-3364`) after a registration warp and, on most runs, a drizzle kernel. Both are smoothed,
-  by *different* amounts, so `σ_sub/σ_stack` is inflated. The module docstring already warns against
-  box-averaging one side and striding the other, but it never addresses that *both* sides are correlated by
-  their own pipelines — so the warning is there and the actual bias is not covered by it. √N is a hard
-  ceiling (a mean of independent noise cannot beat it; weighting only lowers effective N), so any run above
-  √N is the estimator being fooled, not a good stack.
-  **Mechanism 2 — the reference sub is picked on sharpness, and sharpness is not sky-noise.**
-  `reference_sub_from_frames`/`_pick_reference_sub` (`stack.py:2934-2965`) take the sharpest accepted frame
-  by FWHM. Sky **shot noise** is the dominant σ term and is uncorrelated with FWHM, so when the sharpest
-  frame is also a bright-sky frame its σ_sub is inflated and the ratio with it (observer: `M 3` reference σ
-  2.53× the sample median, 188× badge off 5,460 subs where √N = 73.9).
-  **Why it matters — the error is toward silence.** The same measured ratio feeds `stackhealth.noise_vs_expected`
-  (`stackhealth.py:299-335`, `NOISE_EXPECTED_LOW_FRACTION` = 0.7·√N) which gates `noise_low_lead`'s advisory
-  ("that usually means the subs didn't line up… worth checking focus and alignment"). Inflation can only push
-  a run *up* toward "expected", so a genuinely underperforming stack has its one noise diagnostic withheld
-  (observer: 5 runs across NGC 281W / NGC 6888 / NGC 6960 graded "expected" that a decorrelated measure grades
-  "low"). And the badge itself is the app's one celebratory "trust me" number on a priority-1 surface.
-  **Why nobody caught it — CONFIRMED by reading the test.** `tests/test_noise_ratio_expectation.py` builds
-  **both** sides with `rng.normal` on one grid: the sub is `subs[0]` (never debayered) and the stack is a plain
-  `.mean(axis=0)` (never registered/resampled/drizzled) — the exact regime where the lag-1 estimator is
-  unbiased. Its `shared_var` case models noise shared *between frames*, a different quantity from noise
-  correlated *between neighbouring pixels*. So this is a **fixture-that-cannot-exhibit-its-bug** (cf. the D1/A1
-  class already in this file): a real regression test must debayer the sub and warp/resample the master, or it
-  is green for the wrong reason.
-  **Fix shape, cheapest first — two independent halves; do NOT blind-flip the estimator on the hot path.**
-  **(a)** Difference at a lag beyond the correlation length in `_diff_sigma` (observer's convergence control
-  puts the plateau at lag ~16-24; σ(lag24)/σ(lag16) = 1.0000 on subs, 1.0076 on masters). This changes the
-  badge number for **every** install, so it is a hot-path behaviour change: check that `test_noise_ratio_expectation`'s
-  independent-pixel fixtures stay ~1.00·√N (they should — lag doesn't matter on independent pixels, which means
-  that suite does **not** protect the fix and a new correlated-pixel fixture is mandatory), and re-confirm the
-  0.7 threshold still separates the honest weighted-mean case from the correlated case *after* decorrelation.
-  **(b)** Constrain the reference pick to "sharpest among frames whose `sky_adu_median` is near the target's
-  median" — `sky_adu_median` is populated on ~99.8% of the owner's frames (observer), so it needs no new
-  measurement, only a filter before the `min(fwhm)`. (a) and (b) are independent; (b) alone caps the worst
-  overshoots (the 188× came almost entirely from the reference frame), (a) alone removes the systematic ~1.34×
-  floor. **The regression test is the gate**, not the arithmetic — revert each half in a scratch script and
-  watch a debayer+warp fixture go red before claiming it pinned.
+- **LEAD, MEASURED (Builder 2026-09-25, filed while shipping v0.475.0 — the one thing that fix measured and
+  deliberately did not change) — the reveal's two sides are not identically sampled when the master is
+  drizzled, so part of the "stacking cut your noise ~N×" number is the drizzle kernel rather than the
+  stacking.** *(Pillar: trust — PRIORITY 1-adjacent; size **S to decide, M to be sure of**; severity low —
+  the number is now physically honest about the pixels it measures, and the question is whether those are the
+  pixels the sentence is about. Confidence: **measured this run** against ground truth on a real
+  debayer+warp+drizzle fixture; how often the owner's runs drizzle is **not** measured.)*
+  `_measure_noise_ratio` reads the sub at native resolution and the master at **its own**, and the module
+  docstring's "Identical sampling" rule is exactly about not doing that. On a 2× drizzle the master's pixels
+  cover a quarter of the area, and the warp + kernel smooth them, so its per-pixel σ falls **further** than
+  averaging alone can explain: ground truth on the v0.475.0 fixtures is a ratio of **7.88** on a 2×-drizzled
+  master against **6.98** native, for the identical 36 frames and a √N of 6.00. No information is gained —
+  the pixels are smaller and correlated — but ~13 % of the drizzled badge is resampling.
+  **Do not "fix" this by re-inflating the estimator**: v0.475.0's numbers are correct *for the pixels the
+  master has*, and `tests/test_noise_ratio_correlated.py` pins them against ground truth. The question is a
+  design one — should the comparison be pixel-**area**-matched (bin the master down by the drizzle scale
+  before measuring, so both sides describe one patch of sky), and if so what does the √N yardstick then mean?
+  **Check first, cheaply:** what share of the owner's runs actually drizzle, and at what scale. If most are
+  1×, this is a footnote and should be **closed with the number** rather than built.
 
 - **LEAD (Builder 2026-09-25, filed while shipping v0.473.0 — the observer's second point in issue
   [#966](https://github.com/JimmyeJones/astrostack/issues/966), which that fix deliberately did not touch) —
@@ -3930,6 +3898,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.475.1** — 🟠 PRIORITY 1-adjacent (trust), second half of observer issue [#967](https://github.com/JimmyeJones/astrostack/issues/967): **the sub that stands in for "one raw frame" was picked on sharpness alone, and sharpness is not sky noise.** Sky shot noise is the dominant term in the σ the badge divides, and it is uncorrelated with FWHM — so a target whose sharpest frame was also one of its brightest-sky frames inflated the number by however much brighter that sky was (observer: a reference σ **2.53×** the sample median, a **188×** badge on 5,460 subs where √N = 73.9). `reference_sub_from_frames` now takes the sharpest frame **among the middle half of the target's measured `sky_adu_median`** (`_typical_sky_frames`) — an interquartile band rather than a tolerance, so there is no constant to get wrong, it survives a bimodal (moonlit/dark) target, and it picks the dominant *exposure* for free, since sky scales with exposure and a 3× longer sub carries √3 the sky noise. One-sided by construction: unchanged below 10 measured skies, unchanged with none, and an empty band falls back to the whole pool. `FrameHealth` gains `sky_adu_median` so the health card and the reveal endpoint make the same pick — a disagreement would make every stamped measurement a permanent miss. Tests +8, three fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
+- **v0.475.0** — 🟠 PRIORITY 1-adjacent (trust), observer issue [#967](https://github.com/JimmyeJones/astrostack/issues/967) verified and fixed: **the "stacking cut your noise ~N×" badge read above √N because neither side has independent pixels.** `noise_ratio._diff_sigma` took σ from the MAD of *adjacent*-pixel differences — `2σ²` only for independent neighbours — while the sub arrives through `bilinear_debayer` and the master through a registration warp and, on most runs, a drizzle kernel. Measured against **ground truth** on a debayer+warp fixture: the old estimator read **+9 %** on a native master and **+119 %** on a 2×-drizzled one (17.2× against a true 7.9×), and the error direction is toward *silence* — `noise_vs_expected` only nudges on a **low** number, so an underperforming stack had its one noise diagnostic withheld. σ is now a **second difference at a lag chosen from the data** (`_lag_sigma`, `Var = 6σ²`, exactly 0 on a linear ramp so a gradient cannot creep in at long lag), walked over L = 1…16 per side until the estimate plateaus — measured, a native master plateaus at 4 and a drizzled one at 8. New reads 0.97× / 0.93× truth. **Faster, not slower** (157 → 81 ms on a 1024² crop, `_MAX_PAIRS`). `_NOISE_RATIO_CACHE_VERSION` 1 → 2, since the stamp fingerprints the inputs and not the estimator. Tests +4, three fail before; the pre-existing `test_noise_ratio_expectation.py` is green either way, exactly as the entry predicted, because its fixture has independent pixels. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.474.0** — 🟡 PRIORITY 3 (friendliness / trust), observer issue [#968](https://github.com/JimmyeJones/astrostack/issues/968) verified in the code and fixed: **auto-grade has two 25 % rails and set one flag from both**, so a mosaic that hit its *per-panel* rail — a count limit on one patch of sky — was shown the target-wide sentence (*"this looks like a rough session… consider a conservative pass, or review the night's data"*). Measured on the owner's library: **7 of the 21 targets showing that banner flagged too few frames to have reached the target-wide cap at all**, one of them raising it off a **single** withheld frame at an 8.0 % flag rate. And the remedy is the wrong lever twice over — a conservative pass *raises* the z threshold, which shrinks the flagged set and cannot release what a count limit withheld, and the withheld frames are concentrated on **panels**, not on a night. Fixed by splitting the flag (`GradeReport.capped_overall` / `capped_panels` / `withheld_per_panel`, with `capped` left as their union so no existing reader changes) and putting the copy in **one shared pure `gradeCap.gradeCapNotice`** the Target page and the Stack form both call, so they cannot tell different stories about one report. Tests +11, four fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.473.1** — 🟠 PRIORITY 4 + engine correctness, observer issue [#965](https://github.com/JimmyeJones/astrostack/issues/965) verified in the code and fixed: **the only plate-solve guard asked *where* a frame landed and never *at what scale*.** `mosaic._footprint_outlier_indices` is a median+MAD on the footprint **centre** — and a scale error is **zero at the centre by construction** and grows linearly to the corners, so a false solve that lands on the right patch of sky passed every guard and reprojected into the stack at the wrong scale, counted as a full contributor in `n_frames_used`, `total_exposure_s` and the coverage maps. The observer's control is the same file solved twice by the app itself (the #878 duplicates): two solves agreeing at the centre to **16″** put the corners **1,022″** apart. 178 of 89,443 accepted frames are beyond ±1 %, worst **+11.45 %**. Fixed with a new pure `mosaic._plate_scale_outlier_indices` run beside the footprint pass: ±1 % of the population's **own median** (no hardcoded optic, no header read, works on frames already in the library), **guarded by a consensus bar** — deliberately *not* a MAD test, because a spread set of plate scales means two instruments, which is a reason to say nothing rather than to widen the net. Own reject sentence via an additive `CanvasResult.scale_excluded_frame_ids`. Tests +10, three fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.473.0** — 🟠 PRIORITY 2 (autonomy / memory safety), observer issue [#966](https://github.com/JimmyeJones/astrostack/issues/966) verified in the code and fixed: **reprocess-all ran with `unattended=False`**, so all three of the engine's over-budget degrade levers were off for the one job that walks the whole library — on the owner's, for five days. Measured in his own `jobs` rows: **7 `MemoryError` refusals across 3 batches**, five distinct mosaics, every one a drizzle-with-rejection canvas whose message named a drizzle scale that would have fit, two of them near-misses of ~0.1 GB; projected library-wide, **17 of 83 targets refuse under `unattended=False` and 0 under `unattended=True`**. Root cause: `pipeline._stack_target` derived the posture from `auto`, and the two are different questions — `auto` is *"the user made no stacking choices"* (it re-defaults rejection and weighting, which a reprocess must never do to the owner's reused options), `unattended` is *"is anybody there to act on the advice?"*. Split into a separate keyword defaulting to `auto`, so every existing caller is byte-for-byte unchanged, and reprocess-all passes `unattended=True`. Tests +4, two fail before — including one pinning the *consequence*, the batch's own options through `stacker._afford_drizzle_reject`. Full entry in [`SHIPPED.md`](SHIPPED.md).
