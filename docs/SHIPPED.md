@@ -1,5 +1,171 @@
 # Shipped — the record
 
+## v0.475.0 / v0.475.1 — 2026-09-25 — the badge that read above √N, because neither side has independent pixels (and because "sharpest" is not "typical")
+
+*(Builder, branch `claude/nifty-pasteur-meo70w`. The Scout's entry, verified from observer issue
+[#967](https://github.com/JimmyeJones/astrostack/issues/967), is quoted in full at the foot of this entry.
+Both mechanisms it traced are fixed; the owner-side magnitudes in it are the observer's and were not
+re-measured here — what *was* measured here is ground truth on a real debayer+warp pipeline.)*
+
+### v0.475.0 — mechanism 1: the estimator assumed independent pixels, and neither side has them
+
+`qc/noise_ratio._diff_sigma` took σ from the MAD of **adjacent**-pixel differences, which is `2σ²` only if
+neighbours are independent. Nothing in this pipeline delivers that. The sub reaches the measurement through
+`bilinear_debayer` (`webapp/routers/stack.py:_measure_noise_ratio`); the master comes straight off the linear
+FITS *after* a registration warp and, on most runs, a drizzle kernel. Both are smoothed, by **different**
+amounts, so both σ are under-read and the master's is under-read more — and `σ_sub/σ_stack` inherits the
+quotient.
+
+**Measured against ground truth**, which this repo had never done for this estimator: push one scene through
+the real `bilinear_debayer`, a sub-pixel bilinear registration warp and a mean, twice — once with noise and
+once without — so `noisy − clean` *is* the noise that ended up in the picture and its std is the σ that is
+really there.
+
+| fixture | true ratio | old (lag-1) | new |
+|---|---|---|---|
+| native master, 36 frames | 6.98 | **7.59 (+9 %)** | 6.80 (−3 %) |
+| 2×-drizzled master, 36 frames | 7.88 | **17.23 (+119 %)** | 7.33 (−7 %) |
+
+**Why it mattered: the error direction is toward silence.** The same ratio feeds
+`stackhealth.noise_vs_expected`, which nudges only when the number comes in **low**
+(`NOISE_EXPECTED_LOW_FRACTION` = 0.7·√N). Inflation can only push a run *up* toward "expected", so a genuinely
+underperforming stack had its one noise diagnostic withheld — and the badge itself is the app's one
+celebratory "trust me" number, on a priority-1 surface.
+
+**The fix — a second difference at a lag chosen from the data.** `_lag_sigma` takes σ from
+`I(x−L) − 2·I(x) + I(x+L)` (`Var = 6σ²` for noise independent at that separation), and `_background_sigma`
+walks `L = 1, 2, 4, 8, 16` until the estimate stops growing: correlation is what was holding it down, so the
+plateau is where the differenced pixels have finally stopped sharing noise. Two properties make that walk
+safe, and they are why it is a *second* difference rather than a longer first one:
+
+* a second difference is **exactly zero on a linear ramp**, so a sky gradient — which a first difference at a
+  long lag swallows whole — contributes nothing. Measured: with first differences the master's estimate
+  climbs past truth to **1.24×** by lag 32; with second differences it sits at 1.006–1.017 across lags 4–16,
+  i.e. flat across the plateau rather than climbing through it, so the answer does not hinge on picking the
+  lag exactly right;
+* the lag is chosen **per side**, so a drizzled master (whose correlation is twice as wide in its own pixels)
+  is measured at its own — measured, the native master plateaus at 4 and the 2×-drizzled one at 8.
+
+**Not slower — faster.** 157 ms → **81 ms** on a 1024² crop, because `_MAX_PAIRS` caps the MAD's sample at
+400k with an odd stride (odd so it can never land on one Bayer phase); a MAD of 400k samples is precise to
+~0.2 %. That matters because `one-sub-vs-stack/noise` is fetched eagerly on every Target-page load.
+
+**`_NOISE_RATIO_CACHE_VERSION` 1 → 2.** The stamp fingerprints the two *inputs* (master mtime/size, reference
+sub id) and not the estimator that read them, so without the bump a library would keep serving numbers the
+lag-1 estimator produced, for ever. Every old stamp is now a miss and heals lazily on the one request that
+needs it — which is the mechanism that cache was built around, not a new one.
+
+### v0.475.1 — mechanism 2: the reference sub was picked on sharpness, and sharpness is not sky noise
+
+`reference_sub_from_frames` / `_pick_reference_sub` took the sharpest accepted frame by FWHM. Sky **shot
+noise** is the dominant term in σ_sub and is **uncorrelated with FWHM**, so when a target's sharpest frame is
+also one of its brightest-sky frames — moon up, a passing cloud lit from below, twilight — it stood in for a
+typical sub and inflated the badge by however much brighter its sky was. (Observer: on `M 3`, a reference σ
+**2.53×** the sample median and a **188×** badge off 5,460 subs where √N = 73.9.)
+
+**The fix — sharpest, among the frames shot under a typical sky.** `_typical_sky_frames` narrows the pool to
+the **middle half** of the target's measured `sky_adu_median` values before the `min(fwhm)`. An interquartile
+band rather than a tolerance, deliberately: there is no honest constant here, it is scale-free, it keeps
+about half the frames whatever the spread, and on a bimodal target (moonlit nights and dark ones) it sits in
+whichever population is the bigger rather than between them. It also picks the dominant **exposure** for
+free — sky level scales with exposure, so a mostly-10 s target's few 30 s subs fall outside the band on their
+own, and a sub that integrated three times as long carries √3 the sky noise: the same inflation in a
+different costume, and the same class `run_stack`'s reference-frame exposure taught in v0.456.0.
+
+**One-sided by construction.** Below `_REF_SKY_MIN_SAMPLE` = 10 measured skies the pick is unchanged (a
+quartile of four numbers is an opinion — the same floor `NOISE_EXPECTED_MIN_FRAMES` puts on the √N yardstick,
+for the same reason), an empty band falls back to the whole pool, and a target with no `sky_adu_median` at
+all behaves exactly as it always did. So this can only ever *narrow* an existing choice, never remove one.
+
+`FrameHealth` gains `sky_adu_median` (ninth field, `_HEALTH_COLUMNS` in step). None of the three grading
+functions read it: it is there so the health card and the reveal endpoint make the **same** pick, because
+`stamped_noise_measurement` fingerprints the stamp on the reference sub's id and a disagreement would make
+every stamped measurement a permanent miss. A REAL costs nothing beside the `wcs_json` that record exists to
+drop.
+
+### What was checked that the entry asked for
+
+* **The 0.7 threshold still separates, re-confirmed after decorrelation** — and on the real pipeline, not
+  only on the independent-pixel sweep. A healthy 25-frame stack reads **1.05·√N**; the same stack with 10 %
+  of its noise shared across the canvas reads **0.33**. The gap is *wider* there than on the independent-pixel
+  sweep, not narrower. `stackhealth`'s threshold comment carries the re-measured numbers (ideal
+  0.989–1.006 across N = 12…400, weighted-U(0.1,1) 0.90, shared-variance 0.58 at 2 % and 0.30 at 10 %).
+* **An honest badge can still read above √N**, and that is not the bug coming back: resampling genuinely
+  lowers *per-pixel* σ further than averaging alone (a warp and a drizzle kernel smooth), so the true ratio on
+  the fixtures above is 6.98 and 7.88 against a √N of 6.00. No information is gained; the pixels are simply
+  smaller and correlated. Recorded here so a future run does not "fix" it.
+* **The fixtures can exhibit their bugs.** `tests/test_noise_ratio_expectation.py` was green before and after,
+  exactly as the entry predicted — it builds both sides with `rng.normal` on one grid, the one regime where
+  lag-1 is unbiased. The new `tests/test_noise_ratio_correlated.py` carries the old estimator inline and
+  asserts it over-reads on every fixture; three of its four tests fail before the fix. In
+  `tests/test_reference_sub_pick.py`, three of eight fail before (the other five are the
+  "nothing-else-moved" guards, which correctly pass both ways), verified by a scratch revert of the pick.
+
+### Left open, deliberately
+
+**The two sides are not identically sampled when the master is drizzled**, which the module docstring's own
+"Identical sampling" rule is about: the sub is measured at native resolution and the master at its own, so on
+a 2× drizzle they are per-pixel σ of different pixel *areas*. That is why the drizzled fixture's true ratio
+(7.88) sits further above √N than the native one's (6.98). This fix makes the measurement match the physical
+per-pixel truth on both, and does not make the sampling question worse; a pixel-area-matched comparison is a
+separate design question and is filed as a lead.
+
+---
+
+**The Scout's entry, as filed:**
+
+> - **🟠 BUG (trust — PRIORITY 1-adjacent; Scout 2026-09-25, verified in-code from observer issue
+>   [#967](https://github.com/JimmyeJones/astrostack/issues/967)) — the "stacking cut your noise ~N×" badge
+>   reads *above the √N ceiling on most runs* because both sides are measured with a lag-1 (adjacent-pixel)
+>   MAD estimator on pixels that are NOT independent — the sub is bilinear-debayered, the master is
+>   registration-warped and usually drizzled — so each σ is understated, the master's more than the sub's,
+>   and the ratio inherits the quotient.** *(Size **M to write, M to be sure of** — two separable halves;
+>   severity **broken-UX / wrong displayed number + a silenced diagnostic**, no image is corrupted.
+>   Confidence: **both mechanisms TRACED in code and the "why nobody caught it" reproduced**; the owner-side
+>   magnitudes (73/83 runs above √N, median ratio/√N 1.374) are the **observer's measurements**, which I have
+>   not independently reproduced on the owner's data.)*
+>   **Mechanism 1 — the estimator assumes independent pixels; neither side has them.** `qc/noise_ratio.py`
+>   `_diff_sigma` takes σ from `1.4826·MAD/√2` of **adjacent**-pixel differences (lines 50-71), which is `2σ²`
+>   only if neighbours are independent. The sub reaches it through `bilinear_debayer`
+>   (`webapp/routers/stack.py:3367-3369` in `_measure_noise_ratio`), the master straight off the linear FITS
+>   (`stack.py:3342-3364`) after a registration warp and, on most runs, a drizzle kernel. Both are smoothed,
+>   by *different* amounts, so `σ_sub/σ_stack` is inflated. The module docstring already warns against
+>   box-averaging one side and striding the other, but it never addresses that *both* sides are correlated by
+>   their own pipelines — so the warning is there and the actual bias is not covered by it. √N is a hard
+>   ceiling (a mean of independent noise cannot beat it; weighting only lowers effective N), so any run above
+>   √N is the estimator being fooled, not a good stack.
+>   **Mechanism 2 — the reference sub is picked on sharpness, and sharpness is not sky-noise.**
+>   `reference_sub_from_frames`/`_pick_reference_sub` (`stack.py:2934-2965`) take the sharpest accepted frame
+>   by FWHM. Sky **shot noise** is the dominant σ term and is uncorrelated with FWHM, so when the sharpest
+>   frame is also a bright-sky frame its σ_sub is inflated and the ratio with it (observer: `M 3` reference σ
+>   2.53× the sample median, 188× badge off 5,460 subs where √N = 73.9).
+>   **Why it matters — the error is toward silence.** The same measured ratio feeds `stackhealth.noise_vs_expected`
+>   (`stackhealth.py:299-335`, `NOISE_EXPECTED_LOW_FRACTION` = 0.7·√N) which gates `noise_low_lead`'s advisory
+>   ("that usually means the subs didn't line up… worth checking focus and alignment"). Inflation can only push
+>   a run *up* toward "expected", so a genuinely underperforming stack has its one noise diagnostic withheld
+>   (observer: 5 runs across NGC 281W / NGC 6888 / NGC 6960 graded "expected" that a decorrelated measure grades
+>   "low"). And the badge itself is the app's one celebratory "trust me" number on a priority-1 surface.
+>   **Why nobody caught it — CONFIRMED by reading the test.** `tests/test_noise_ratio_expectation.py` builds
+>   **both** sides with `rng.normal` on one grid: the sub is `subs[0]` (never debayered) and the stack is a plain
+>   `.mean(axis=0)` (never registered/resampled/drizzled) — the exact regime where the lag-1 estimator is
+>   unbiased. Its `shared_var` case models noise shared *between frames*, a different quantity from noise
+>   correlated *between neighbouring pixels*. So this is a **fixture-that-cannot-exhibit-its-bug** (cf. the D1/A1
+>   class already in this file): a real regression test must debayer the sub and warp/resample the master, or it
+>   is green for the wrong reason.
+>   **Fix shape, cheapest first — two independent halves; do NOT blind-flip the estimator on the hot path.**
+>   **(a)** Difference at a lag beyond the correlation length in `_diff_sigma` (observer's convergence control
+>   puts the plateau at lag ~16-24; σ(lag24)/σ(lag16) = 1.0000 on subs, 1.0076 on masters). This changes the
+>   badge number for **every** install, so it is a hot-path behaviour change: check that `test_noise_ratio_expectation`'s
+>   independent-pixel fixtures stay ~1.00·√N (they should — lag doesn't matter on independent pixels, which means
+>   that suite does **not** protect the fix and a new correlated-pixel fixture is mandatory), and re-confirm the
+>   0.7 threshold still separates the honest weighted-mean case from the correlated case *after* decorrelation.
+>   **(b)** Constrain the reference pick to "sharpest among frames whose `sky_adu_median` is near the target's
+>   median" — `sky_adu_median` is populated on ~99.8% of the owner's frames (observer), so it needs no new
+>   measurement, only a filter before the `min(fwhm)`. (a) and (b) are independent; (b) alone caps the worst
+>   overshoots (the 188× came almost entirely from the reference frame), (a) alone removes the systematic ~1.34×
+>   floor. **The regression test is the gate**, not the arithmetic — revert each half in a scratch script and
+>   watch a debayer+warp fixture go red before claiming it pinned.
+
 ## v0.474.0 — 2026-09-25 — one flag for two rails, so a mosaic that lost one frame on one panel was told it had had a rough night
 
 *(Builder, branch `claude/wizardly-cannon-hnfyu0`. Verified from observer issue
