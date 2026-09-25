@@ -1,5 +1,67 @@
 # Process notes & QA sweep records
 
+## 2026-09-25 — Builder: the backlog was dry and the inbox was not — four untriaged observer issues, three shipped (v0.473.0 / v0.473.1 / v0.474.0)
+
+*(Builder, branch `claude/wizardly-cannon-hnfyu0`, PRs #969 and #970. Baseline `6549 passed, 2 skipped` in
+13m13s with `-n 4 --dist worksteal` + the BLAS cap; `6567` at the end. Frontend `4,345` vitest across 284
+files, `tsc` clean, `vite build` clean.)*
+
+**The lever this run, and it is a triage lever, not a coding one: the Builder's queue was empty and the
+inbox had four unopened letters in it.** Triage of `docs/IMPROVEMENTS.md` came out exactly as the last four
+runs recorded — "Bugs (fix these first)" holds no buildable entry, every open item is a lead gated on a
+measurement of the owner's own library, an item routed to owner sign-off, a Builder verification saying the
+named slice is already in the code, or a stand-down that carries numbers. On the previous four runs that
+finding sent the Builder to the Ideas list. This run it sent me to `list_issues`, and **four open observer
+issues — #965, #966, #967, #968 — appeared in none of `IMPROVEMENTS.md`, `SHIPPED.md` or `PROCESS-NOTES.md`**
+(checked by grepping `issues/<n>` in all three). The oldest had been open five days.
+
+AGENTS.md gives the issue inbox to the **Scout**, and that is the right division — but the rule it states is
+"never copy an issue into the backlog unverified", not "a Builder may not read one". A Builder verifying an
+issue itself, to the same bar it would apply to any bug, and then fixing it, breaks no rule and is the
+highest-value work available when the backlog is in the state above. **So: when triage says the backlog is
+dry, check the issue inbox before the Ideas list.** Three of the four verified cleanly against the code and
+shipped this run; the fourth (#967) is left for the Scout and is the only one still open.
+
+**What the three had in common, which is worth more than any one of them.** Each was a place where **one
+value was answering two different questions**, and the two had come apart on exactly the owner's data:
+
+* **v0.473.0** — `auto` was both "did the user make no stacking choices?" *and* "is anybody watching?".
+  Reprocess-all answers **no** to the first and **no** to the second, and the single parameter forced it to
+  the wrong posture. 7 MemoryError refusals across 3 of his batches; 17 of 83 targets refuse under the flag
+  it had and 0 under the one it should have.
+* **v0.473.1** — the footprint guard was the *whole* plate-solve sanity check, and it asks **where**, never
+  **at what scale**. A scale error is zero at the centre by construction; 178 accepted frames stack at a
+  scale the optics cannot produce.
+* **v0.474.0** — one `capped` boolean carried **two** 25 % rails whose remedies are opposite. 7 of his 21
+  capped targets were shown a sentence that was arithmetically impossible for them.
+
+The shape generalises and is worth grepping for: **a single field that two callers read as two different
+facts**. The repo has hit it before (`auto_reject` standing in for "unattended" until v0.281.0 is the same
+bug in the same file), and each time the tell is a comment explaining that the one value "stands in for" the
+other.
+
+**One thing the observer supplies that this repo cannot, and it decided two of three designs.** Every fix
+above turned on a *distribution* over the owner's library — 99.80 % of solved frames within ±1 % of one
+scale; 7 of 21 banner targets below their own cap; 17 of 83 targets over budget. None of those numbers is
+derivable here, and each set a constant that would otherwise have been a guess: the ±1 % tolerance and the
+90 % consensus bar in v0.473.1 are the observer's tail and the observer's worst target, not round numbers.
+**When an issue carries a distribution, use it as the threshold's justification and say so in the code** —
+that is what turns "do not blind-flip a threshold" into something an agent can actually satisfy.
+
+**And one design call taken twice, in opposite directions, on purpose.** v0.473.1's scale guard is
+deliberately **not** a MAD test like the footprint guard it sits beside: a MAD threshold widens to fit
+whatever spread it is given, and a spread set of plate scales means *two instruments*, which is a reason to
+say nothing rather than to flag the minority. So it is a fixed tolerance plus a stand-down bar. The rule
+underneath: **an adaptive threshold is right when the spread is the signal and wrong when the spread is the
+counter-evidence.** Ask which one it is before reaching for the median-and-MAD that is already in the file.
+
+**Three replies posted on the issues** rather than a bare close — each says which of the observer's own
+suggestions shipped, and where the fix departs from it and why. Two of the three departed: #965 suggested a
+header-derived check at solve time (it would not have helped the 178 frames already solved, and the re-solve
+bill is unmeasured — filed as a lead), and #968 offered a cheaper flag-suppression (declined: it makes a
+wrong sentence rarer rather than right).
+
+
 ## 2026-09-20 — Builder: a new badge is a new *neighbour*, and the run's work was all in what it now sits beside (v0.472.1 / v0.472.2 / v0.472.3)
 
 *(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Baseline `6544 passed, 2 skipped` in 10m04s with
