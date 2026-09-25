@@ -4081,6 +4081,7 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
     )
     from seestack.edit import presets as presets_mod
     from seestack.edit.histogram import measure_sky_cast
+    from seestack.edit.opnotes import COLOR_CAL_OP, merge_color_cal
     from seestack.io.project import Project
     from seestack.stack.output import _write_preview_png
 
@@ -4185,8 +4186,8 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                 # background-neutral fallback, or a no-op — so the History Info panel
                 # can tell the user whether their hands-off image was really
                 # white-balanced. Read-only + best-effort (a nicety, never fatal).
-                cc = render_ctx.op_notes.get("tone.color_calibrate")
-                if isinstance(cc, dict) and cc.get("mode_used"):
+                cc = merge_color_cal(render_ctx.notes_for(COLOR_CAL_OP))
+                if cc is not None:
                     proj.set_meta(f"{AUTO_EDIT_COLORCAL_PREFIX}{run_id}",
                                   json.dumps(cc))
                 # Measure the finished picture's residual sky-background colour
