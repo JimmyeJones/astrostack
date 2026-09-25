@@ -304,7 +304,7 @@ class AcquisitionValues:
 #: the one that becomes something else on the way (``bool``).
 _HEALTH_COLUMNS: tuple[str, ...] = (
     "id", "accept", "reject_reason", "fwhm_px",
-    "eccentricity_median", "exposure_s", "gain", "wcs_json",
+    "eccentricity_median", "exposure_s", "gain", "sky_adu_median", "wcs_json",
 )
 
 
@@ -327,6 +327,14 @@ class FrameHealth:
     ``solved`` is :attr:`FrameRow.solved`'s answer, kept while the header it was
     read from is let go — the same ``bool`` of the same value, so a function can
     be handed either kind of record and cannot tell the difference.
+
+    ``sky_adu_median`` is the ninth field and is not read by any of the three
+    grading functions: it is there for the **reference-sub pick** that rides
+    along on the same read (:func:`webapp.routers.stack.reference_sub_from_frames`),
+    which asks whether a frame was shot under this target's typical sky. Carried
+    here rather than re-queried because the pick has to make the *same* choice
+    for the card and for the reveal endpoint or the noise stamp never hits, and
+    a REAL costs nothing beside the header this record exists to drop.
     """
 
     id: int | None
@@ -336,6 +344,7 @@ class FrameHealth:
     eccentricity_median: float | None
     exposure_s: float | None
     gain: float | None
+    sky_adu_median: float | None
     solved: bool
 
 
@@ -1406,7 +1415,8 @@ class Project:
                 eccentricity_median=row[4],
                 exposure_s=row[5],
                 gain=row[6],
-                solved=bool(row[7]),
+                sky_adu_median=row[7],
+                solved=bool(row[8]),
             )
 
     def iter_frame_columns(self, *columns: str,

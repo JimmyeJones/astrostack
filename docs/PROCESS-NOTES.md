@@ -1,5 +1,48 @@
 # Process notes & QA sweep records
 
+## 2026-09-25 — Builder: the lever was **ground truth**, on a fixture the estimator's own tests could not build
+
+*(Builder, branch `claude/nifty-pasteur-meo70w`, shipping v0.475.0 and v0.475.1 off the Scout's #967 entry.
+Baseline green — 6,567 passed, 2 skipped, 13m05s with the BLAS cap and `-n 4 --dist worksteal`.)*
+
+**The reusable bit is not "the estimator was biased".** It is *how* a biased estimator was shown to be biased
+without any of the owner's data. Every existing test of `noise_ratio` asserts the measurement against **another
+measurement** — a ratio against √N, a σ against the σ that was injected into an `rng.normal` array. Both are
+only true in the regime where the estimator is already unbiased, which is exactly the regime the app never runs
+in, and that is why twenty-odd green runs said nothing. What broke it open was building the fixture so the
+*answer* is knowable independently: push one scene through the **real** `bilinear_debayer`, a bilinear
+registration warp and a mean, **twice** — once with noise injected and once without — so `noisy − clean` is
+precisely the noise that survived the pipeline and its `np.std` is the σ that is really in the picture. The
+estimator then has something to be wrong *about*. The old one came in +9 % on a native master and **+119 %** on
+a drizzled one; nothing short of ground truth would have put a number on either.
+
+**Generalises to anything whose output is a measurement.** Where a test can push the same input through the
+pipeline with and without the thing being measured, the difference *is* the thing, and the assertion stops
+being circular. Worth reaching for before the next "its tests are green so it must be right" — the sibling
+failure mode AGENTS.md §8 already names (a fixture that cannot exhibit its bug) and this is its positive form.
+
+**Two smaller things worth not re-deriving:**
+
+* **A longer lag is not the whole fix, and on its own it is a trap.** The entry's shape (a) said "difference at
+  a lag beyond the correlation length", which is right — but a *first* difference at a long lag swallows the
+  sky gradient, and measured, the master's estimate then climbs straight past truth to **1.24×** by lag 32.
+  Switching to a **second** difference (`I(x−L) − 2·I(x) + I(x+L)`, exactly 0 on a linear ramp) is what makes
+  the long lag safe, and it also makes the answer flat across lags 4–16 (1.006→1.017) instead of monotonically
+  climbing — so the plateau walk stops somewhere meaningful rather than wherever the tolerance happens to bite.
+  The two changes only work together; either alone is worse than neither.
+* **A decorrelated badge can honestly read above √N, and a future run will want to "fix" that.** Resampling
+  genuinely lowers per-pixel σ further than averaging alone — measured true ratios of 6.98 (native) and 7.88
+  (2× drizzle) for 36 frames where √N = 6.00. No information is gained; the pixels are smaller and correlated.
+  The residual design question (should the two sides be pixel-area-matched?) is filed as a lead with the
+  numbers, deliberately *not* built, because re-inflating the estimator to get back under √N would undo
+  v0.475.0 while looking like a fix.
+
+**A cache-version bump is part of a measurement change, not an optional extra.** `_NOISE_RATIO_CACHE_VERSION`
+fingerprints the two *inputs* and not the estimator that read them, so changing `noise_ratio` without bumping it
+would have left the owner's library serving lag-1 numbers for ever, on a code path whose tests were all green.
+The general shape: **any cache keyed on inputs is blind to a change in the function**, so ask what invalidates
+it before shipping the function.
+
 ## 2026-09-25 — Scout: verified the last open observer issue (#967, the noise badge above √N), and an adversarial read of the frame-weighting math came back clean
 
 *(Scout, branch `claude/admiring-brahmagupta-ji7y1l`. Baseline suite green — full headless run with the BLAS cap

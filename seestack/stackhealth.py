@@ -245,14 +245,23 @@ NOISE_EXPECTED_MIN_FRAMES = 10
 # **Measured, not guessed** (against the real ``seestack.qc.noise_ratio``
 # estimator on a synthetic sky + stars + extended object — the sweep lives in
 # ``tests/test_noise_ratio_expectation.py``): an ideal mean stack of
-# independent-noise subs measures ``ratio/√N`` = **0.996–1.012** across
+# independent-noise subs measures ``ratio/√N`` = **0.989–1.006** across
 # N = 12…400, and a *weighted* mean with weights as spread as U(0.1, 1) still
-# measures **0.93** (its effective frame count really is lower — the yardstick is
+# measures **0.90** (its effective frame count really is lower — the yardstick is
 # honest, not the measurement). Stacks whose subs share correlated noise — the
 # shape soft alignment, a drifting gradient or a duplicated sub produces — fall
 # to **0.58 at 2 % shared variance and 0.30 at 10 %**. So 0.7 sits in a wide
 # empty gap: it cannot fire on a healthy or heavily-weighted stack, and it
 # catches the correlated ones early.
+#
+# **Re-measured on the real pipeline too** (2026-09-25, with the decorrelated
+# estimator — ``tests/test_noise_ratio_correlated.py``), because a threshold is a
+# claim about the estimator and the estimator moved: pushed through a real
+# debayer, a registration warp and a mean, a healthy 25-frame stack reads
+# **1.05·√N** — a little *above* the yardstick, since resampling genuinely lowers
+# per-pixel σ further than averaging alone — and the same stack with 10 % of its
+# noise shared across the canvas reads **0.33**. The gap is wider there than on
+# the independent-pixel sweep, not narrower.
 NOISE_EXPECTED_LOW_FRACTION = 0.7
 
 
