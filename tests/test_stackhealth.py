@@ -1578,7 +1578,8 @@ def _as_health(frames: list[FrameRow]) -> list[FrameHealth]:
     return [FrameHealth(
         id=f.id, accept=f.accept, reject_reason=f.reject_reason,
         fwhm_px=f.fwhm_px, eccentricity_median=f.eccentricity_median,
-        exposure_s=f.exposure_s, gain=f.gain, solved=f.solved,
+        exposure_s=f.exposure_s, gain=f.gain,
+        sky_adu_median=f.sky_adu_median, solved=f.solved,
     ) for f in frames]
 
 

@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from scipy.ndimage import shift as nd_shift, zoom as nd_zoom
+from scipy.ndimage import shift as nd_shift
+from scipy.ndimage import zoom as nd_zoom
 
 from seestack.io.fits_loader import bilinear_debayer
 from seestack.qc.noise_ratio import _background_sigma, noise_ratio
