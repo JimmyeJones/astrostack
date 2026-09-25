@@ -2731,6 +2731,12 @@ def run_stack(
             # to the wrong place (or off-canvas) and contaminate the result.
             if canvas.excluded_frame_ids:
                 bad = set(canvas.excluded_frame_ids)
+                # The two ways a plate solve can be wrong are two different things
+                # for the owner to go and look at, so they get their own sentence
+                # in the Frames table: a displaced footprint, or a footprint that
+                # is centred correctly and the wrong *size*. Saying "far from the
+                # group" about the second would be plainly false on screen.
+                bad_scale = set(getattr(canvas, "scale_excluded_frame_ids", ()) or ())
                 dropped = [f for f in frames if getattr(f, "id", None) in bad]
                 frames = [f for f in frames if getattr(f, "id", None) not in bad]
                 for f in dropped:
@@ -2738,10 +2744,14 @@ def run_stack(
                     excluded_frames.append(label)
                     # Flag it rejected so it's visible in the Frames table and
                     # doesn't keep breaking this (and future) stacks.
+                    reason = (
+                        "bad plate-solve (scale disagrees with the other frames)"
+                        if getattr(f, "id", None) in bad_scale
+                        else "bad plate-solve (footprint far from the group)"
+                    )
                     try:
                         project.update_frame(
-                            f.id, accept=False,
-                            reject_reason="bad plate-solve (footprint far from the group)",
+                            f.id, accept=False, reject_reason=reason,
                         )
                     except Exception as exc:  # noqa: BLE001 — flagging is best-effort
                         log.warning("Could not flag outlier frame %s: %s", f.id, exc)

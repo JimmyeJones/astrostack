@@ -267,3 +267,116 @@ def test_the_canvas_is_identical_whether_or_not_the_fast_wcs_path_is_taken(monke
     assert with_fast.is_mosaic == astropy_only.is_mosaic
     assert with_fast.span_deg == astropy_only.span_deg
     assert with_fast.excluded_frame_ids == astropy_only.excluded_frame_ids
+
+
+# --------------------------------------------------------------------------- #
+# Plate *scale* outliers — the axis the footprint test is blind to (issue #965)
+# --------------------------------------------------------------------------- #
+
+def test_scale_outlier_helper_flags_only_the_disagreeing_frames():
+    from seestack.stack.mosaic import _plate_scale_outlier_indices
+
+    scales = [3.99] * 40
+    scales[3] = 4.36        # +9.3% — the observer's NGC 6960 case
+    scales[7] = 3.99 * 0.98  # -2%
+    out, med = _plate_scale_outlier_indices(scales)
+    assert out == {3, 7}
+    assert abs(med - 3.99) < 1e-6
+
+
+def test_scale_outlier_helper_keeps_ordinary_solver_spread():
+    """The library's real spread is ±0.25% on 98.68% of frames. Nothing there
+    may be flagged, or the guard costs good subs."""
+    from seestack.stack.mosaic import _plate_scale_outlier_indices
+
+    rng = np.random.default_rng(7)
+    scales = list(3.99 * (1.0 + rng.normal(0.0, 0.0008, 60)))
+    out, _ = _plate_scale_outlier_indices(scales)
+    assert out == set()
+
+
+def test_scale_outlier_helper_stands_down_without_a_consensus():
+    """Two instruments in one target is not one of them being wrong. With no
+    clear majority the guard says nothing rather than picking a side."""
+    from seestack.stack.mosaic import _plate_scale_outlier_indices
+
+    scales = [3.99] * 6 + [2.40] * 6     # an S30's subs and an S50's, half each
+    out, _ = _plate_scale_outlier_indices(scales)
+    assert out == set()
+
+
+def test_scale_outlier_helper_is_silent_on_a_small_population():
+    from seestack.stack.mosaic import (
+        SCALE_OUTLIER_MIN_FRAMES,
+        _plate_scale_outlier_indices,
+    )
+
+    scales = [3.99] * (SCALE_OUTLIER_MIN_FRAMES - 1)
+    scales[0] = 4.5
+    out, med = _plate_scale_outlier_indices(scales)
+    assert out == set() and med is None
+    # …and one more frame is enough: at ten, a lone outlier is exactly the 10%
+    # the consensus bar allows, which is why the minimum is ten.
+    out, _ = _plate_scale_outlier_indices([*scales, 3.99])
+    assert out == {0}
+
+
+def test_scale_outlier_helper_ignores_unusable_scales():
+    from seestack.stack.mosaic import _plate_scale_outlier_indices
+
+    scales: list[float | None] = [3.99] * 10 + [None, float("nan"), 0.0, -1.0]
+    out, med = _plate_scale_outlier_indices(scales)
+    assert out == set()
+    assert abs(med - 3.99) < 1e-6
+
+
+def test_a_wrong_scale_solve_on_the_right_patch_of_sky_is_dropped():
+    """The whole point: a false solve centred where the group is, at a scale the
+    optics cannot produce. The footprint test cannot see it — a scale error is
+    zero at the centre and grows to the corners — so before this guard it stacked
+    and was counted as a full contributor."""
+    frames = [_frame(83.6 + 0.01 * i, -5.4) for i in range(11)]
+    frames.append(_frame(83.65, -5.4, pixscale=5.0 * 1.0945))   # +9.45%
+    canvas = compute_mosaic_canvas(frames, reference_shape=(320, 480))
+    assert canvas is not None
+    assert canvas.excluded_frame_ids == [11]
+    assert canvas.scale_excluded_frame_ids == [11]
+    assert canvas.n_footprints == 11
+
+
+def test_the_canvas_scale_is_taken_from_the_frames_that_agree():
+    """A wrong-scale frame must not nudge the canvas's own pixel scale either —
+    it is dropped before the median is taken."""
+    good = [_frame(83.6 + 0.01 * i, -5.4) for i in range(11)]
+    clean = compute_mosaic_canvas(good, reference_shape=(320, 480))
+    polluted = compute_mosaic_canvas(
+        [*good, _frame(83.65, -5.4, pixscale=5.0 * 1.0945)],
+        reference_shape=(320, 480),
+    )
+    assert clean is not None and polluted is not None
+    assert polluted.shape == clean.shape
+
+
+def test_a_healthy_mosaic_loses_nothing_to_the_scale_guard():
+    """Every panel of a real 2×2, all solved at the same scale, survives."""
+    frames = []
+    for dra in (-0.3, 0.3):
+        for ddec in (-0.2, 0.2):
+            frames += [_frame(83.6 + dra, -5.4 + ddec) for _ in range(3)]
+    canvas = compute_mosaic_canvas(frames, reference_shape=(320, 480))
+    assert canvas is not None
+    assert canvas.excluded_frame_ids == []
+    assert canvas.scale_excluded_frame_ids == []
+    assert canvas.n_footprints == 12
+
+
+def test_a_displaced_frame_is_still_reported_as_a_displaced_frame():
+    """A frame that is both far away *and* oddly scaled is named once, under the
+    reason that describes it — ``scale_excluded_frame_ids`` is a subset."""
+    frames = [_frame(83.6 + 0.01 * i, -5.4) for i in range(11)]
+    frames.append(_frame(120.0, -5.4, pixscale=5.0 * 1.0945))
+    canvas = compute_mosaic_canvas(frames, reference_shape=(320, 480),
+                                   max_canvas_px=4000)
+    assert canvas is not None
+    assert canvas.excluded_frame_ids == [11]
+    assert canvas.scale_excluded_frame_ids == []
