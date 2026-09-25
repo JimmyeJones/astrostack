@@ -40,6 +40,7 @@ import { memoryFixAction } from "../stackMemoryFix";
 import { printBiggerAction } from "../stackPrintBigger";
 import { stackTimeLine } from "../stackTimeEstimate";
 import { minMaxIgnoresWeightingHint as minMaxIgnoresWeighting } from "../weightingHint";
+import { gradeCapNotice } from "../gradeCap";
 import {
   DRIZZLE_MIN_SAMPLES_PER_PIXEL, samplesPerPixel, samplesPerPixelPhrase,
 } from "../samplesPerPixel";
@@ -939,12 +940,12 @@ export function StackView() {
     if (!rep || rep.recommendations.length === 0) return null;
     const n = rep.recommendations.length;
     const base = `Auto-grade thinks ${n} of your ${rep.n_accepted} accepted frame${n === 1 ? "" : "s"} look like quality outliers (clouds, poor focus or tracking).`;
-    // When a whole session is rough, the grader caps its recommendation at the
-    // worst 25% (MAX_REJECT_FRACTION) so it never nukes half a library — tell
-    // the user that here, since they may skip the Target page's fuller notice.
-    const capped = rep.capped
-      ? " This looks like a rough session — more were flagged than the 25% safety cap allows, so only the worst are recommended; review before stacking."
-      : "";
+    // The grader caps its recommendation at 25% so it never nukes half a
+    // library — tell the user that here, since they may skip the Target page's
+    // fuller notice. Which of the two rails did it is the same question that
+    // page asks, off the same helper, so the two cannot tell different stories.
+    const notice = gradeCapNotice(rep);
+    const capped = notice ? ` ${notice.text}` : "";
     return `${base}${capped} Drop ${n === 1 ? "it" : "them"} in one click, or review on the Target page.`;
   })();
 
