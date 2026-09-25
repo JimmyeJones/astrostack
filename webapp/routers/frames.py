@@ -362,6 +362,9 @@ def _grade_report_out(report, changed_ids: list[int] | None = None) -> GradeRepo
         metrics_used=report.metrics_used,
         metrics_skipped=report.metrics_skipped,
         capped=report.capped,
+        capped_overall=getattr(report, "capped_overall", False),
+        capped_panels=getattr(report, "capped_panels", 0),
+        withheld_per_panel=getattr(report, "withheld_per_panel", 0),
         pointing_groups=getattr(report, "pointing_groups", 0),
         changed_ids=changed_ids,
     )

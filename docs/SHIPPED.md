@@ -1,5 +1,78 @@
 # Shipped — the record
 
+## v0.474.0 — 2026-09-25 — one flag for two rails, so a mosaic that lost one frame on one panel was told it had had a rough night
+
+*(Builder, branch `claude/wizardly-cannon-hnfyu0`. Verified from observer issue
+[#968](https://github.com/JimmyeJones/astrostack/issues/968) — the two `report.capped = True` sites re-read
+here, the library-wide arithmetic is the observer's, replayed through `grade_frames` unmodified.)*
+
+**The defect.** `qc.grading.grade_frames` has **two** 25 % safety rails and set the *same* boolean from both:
+
+* the **per-panel** rail, applied first — no mosaic panel may lose more than a quarter of *its own* subs;
+* the **target-wide** rail — no target may lose more than a quarter of everything.
+
+`GradeReport.capped` is their union, and both surfaces that read it told the target-wide story. The Target
+page: *"More frames were flagged than the 25% safety cap allows — only the worst are listed. Consider a
+conservative pass first, or review the night's data."* The Stack form: *"This looks like a rough session…"*.
+
+**On a mosaic that claim is false, and the remedy it offers is the wrong lever.** The per-panel rail fires on
+its own at whole-target flag rates nowhere near a quarter. On the owner's library, **7 of the 21 targets
+currently showing the banner could not have reached the target-wide rail at all** — the grader flagged fewer
+frames in total than that cap would have allowed, so it cannot have truncated anything:
+
+| target | considered | panels | flagged | 25 % cap | recommended | held by per-panel rail | flag rate |
+|---|---|---|---|---|---|---|---|
+| V772 Herculis_mosaic_sub | 1,524 | 32 | 123 | 381 | 122 | **1** | 8.0 % |
+| QU Serpentis_mosaic_sub (+dup) | 1,495 | 38 | 205 | 373 | 198 | 7 | 13.2 % |
+| HIP 4205_mosaic_sub (+dup) | 1,184 | 32 | 217 | 296 | 161 | 56 | 13.6 % |
+| IC 1318_mosaic_sub (+dup) | 1,405 | 29 | 274 | 351 | 253 | 21 | 18.0 % |
+
+V772 Herculis is the sharpest: **one** withheld frame raises an orange "rough session" warning on a target
+where 8.0 % of the frames were flagged and 122 of them are recommended. And the advice cannot work — "consider
+a conservative pass" *raises* the modified-z threshold, which **shrinks** the flagged set and can never release
+a frame a **count** limit withheld; "review the night's data" points at a night when the withheld frames are
+concentrated on **panels**. The observer's walk of M 44_mosaic_sub found the 285 frames its rail withholds
+include subs scored z = 7.1 on transparency — 0.23× their own panel's typical value. Those stack, and nothing
+said so.
+
+**The fix.** `GradeReport` gains `capped_overall: bool`, `capped_panels: int` and `withheld_per_panel: int`;
+`capped` **stays the union**, so every existing reader keeps its meaning. `GradeReportOut` and
+`/…/auto-grade` carry the three additively with defaults that reproduce today's reading.
+
+The copy is **one shared pure function**, `frontend/src/gradeCap.ts::gradeCapNotice` — not two hand-mirrored
+sentences, because the Target page and the Stack form are answering the same question and the repo has been
+bitten before by two surfaces disagreeing about one fact. It returns:
+
+* **session** (target-wide) — today's sentence, unchanged. A conservative pass really would shorten this list.
+* **panels** — *"56 flagged frames on 4 mosaic panels were held back so no panel loses more than a quarter of
+  its own subs. That's a limit per panel, not a rough night — a conservative pass won't release them; look at
+  those panels instead."* It says out loud that the other remedy is the wrong lever.
+* **both** — names each.
+
+An older backend sends `capped` alone with neither breakdown field; the helper reads that as the target-wide
+case, which is exactly what those installs showed before, so the copy cannot regress in either direction
+during an upgrade.
+
+**Upgrade-safe (§9):** three additive dataclass fields and three additive response fields, all with defaults
+that reproduce the current value; no config, schema, on-disk or default change, and `capped` itself is
+untouched.
+
+**Tests (+11, four fail before).** Python: the per-panel case reports `capped_overall=False`,
+`capped_panels=1`, a non-zero withheld count **and** a recommendation list strictly under the target-wide cap
+(i.e. that rail provably cannot have fired); the target-wide case reports the mirror; an uncapped report
+carries neither; and the endpoint serves all three. Frontend: six cases on the helper (including the older
+backend's bare flag and both pluralisations) plus one per surface asserting the panel wording appears and
+"rough session" / "review the night's data" do **not**, and one per surface that the target-wide sentence
+survives.
+
+**Not built.** The issue's cheaper alternative — suppress the flag when the per-panel rail did not change the
+outcome relative to the target-wide cap — was declined: it makes the banner *quieter* but leaves it saying the
+wrong thing when it does appear, and V772 Herculis's single withheld frame is a real fact about a real panel
+that the owner may well want to see. Saying which rail fired is strictly more information than suppressing it.
+The observer's own open question — whether the per-panel rail's *withholding* is itself right — is untouched
+here; its stated purpose is served and this was only ever about what the flag is reported as.
+
+
 ## v0.473.1 — 2026-09-25 — the plate-solve guard asked where a frame landed and never at what scale
 
 *(Builder, branch `claude/wizardly-cannon-hnfyu0`. Verified from observer issue

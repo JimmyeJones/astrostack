@@ -91,6 +91,19 @@ def test_auto_grade_preview_flags_outlier_without_changing_anything(
     assert frames[bad_id]["accept"] is True
 
 
+def test_auto_grade_preview_serves_which_rail_capped_the_list(
+        client, built_library, data_root):
+    """The two 25% rails want opposite advice, so the endpoint has to say which
+    one fired. ``capped`` alone stays the union of the pair for any older
+    reader (observer issue #968)."""
+    _seed_metrics(data_root, bad={"fwhm_px": 9.0})
+    body = client.get("/api/targets/M_42/frames/auto-grade").json()
+    assert body["capped"] is False
+    assert body["capped_overall"] is False
+    assert body["capped_panels"] == 0
+    assert body["withheld_per_panel"] == 0
+
+
 def test_auto_grade_preview_quiet_on_clean_target(client, built_library, data_root):
     _seed_metrics(data_root)  # no bad frame
     body = client.get("/api/targets/M_42/frames/auto-grade").json()
