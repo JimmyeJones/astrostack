@@ -1761,8 +1761,40 @@ describe("StackView", () => {
     renderStack();
 
     await waitFor(() =>
-      expect(screen.getByText(/only the worst are recommended; review before stacking/))
+      expect(screen.getByText(/rough session.*only the worst are listed/))
         .toBeInTheDocument());
+    // …and the remedy that actually applies to the target-wide rail.
+    expect(screen.getByText(/Consider a conservative pass first/)).toBeInTheDocument();
+  });
+
+  it("blames the panels, not the night, when only the per-panel rail fired", async () => {
+    // The grader has two 25% rails; this one is a count limit on one patch of
+    // sky, and a conservative pass cannot release what it withheld. Before
+    // v0.474.0 both told the "rough session" story (observer issue #968).
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 20 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "autoGradePreview").mockResolvedValue({
+      sensitivity: "normal", n_accepted: 1524, n_considered: 1524,
+      recommendations: [
+        { frame_id: 1, name: "f1.fits", reasons: [
+          { metric: "sky_level", label: "much brighter sky than typical", value: 900, typical: 200, z: 9 },
+        ] },
+      ],
+      metrics_used: ["sky_level"], metrics_skipped: {},
+      capped: true, capped_overall: false, capped_panels: 1,
+      withheld_per_panel: 1, pointing_groups: 32, changed_ids: null,
+    });
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/1 flagged frame on 1 mosaic panel was held back/))
+        .toBeInTheDocument());
+    expect(screen.queryByText(/rough session/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/review the night's data/)).not.toBeInTheDocument();
   });
 
   it("shows the pre-run output canvas + peak-memory estimate line", async () => {
