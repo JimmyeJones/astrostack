@@ -82,6 +82,58 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟠 BUG (trust — PRIORITY 1-adjacent; Scout 2026-09-25, verified in-code from observer issue
+  [#967](https://github.com/JimmyeJones/astrostack/issues/967)) — the "stacking cut your noise ~N×" badge
+  reads *above the √N ceiling on most runs* because both sides are measured with a lag-1 (adjacent-pixel)
+  MAD estimator on pixels that are NOT independent — the sub is bilinear-debayered, the master is
+  registration-warped and usually drizzled — so each σ is understated, the master's more than the sub's,
+  and the ratio inherits the quotient.** *(Size **M to write, M to be sure of** — two separable halves;
+  severity **broken-UX / wrong displayed number + a silenced diagnostic**, no image is corrupted.
+  Confidence: **both mechanisms TRACED in code and the "why nobody caught it" reproduced**; the owner-side
+  magnitudes (73/83 runs above √N, median ratio/√N 1.374) are the **observer's measurements**, which I have
+  not independently reproduced on the owner's data.)*
+  **Mechanism 1 — the estimator assumes independent pixels; neither side has them.** `qc/noise_ratio.py`
+  `_diff_sigma` takes σ from `1.4826·MAD/√2` of **adjacent**-pixel differences (lines 50-71), which is `2σ²`
+  only if neighbours are independent. The sub reaches it through `bilinear_debayer`
+  (`webapp/routers/stack.py:3367-3369` in `_measure_noise_ratio`), the master straight off the linear FITS
+  (`stack.py:3342-3364`) after a registration warp and, on most runs, a drizzle kernel. Both are smoothed,
+  by *different* amounts, so `σ_sub/σ_stack` is inflated. The module docstring already warns against
+  box-averaging one side and striding the other, but it never addresses that *both* sides are correlated by
+  their own pipelines — so the warning is there and the actual bias is not covered by it. √N is a hard
+  ceiling (a mean of independent noise cannot beat it; weighting only lowers effective N), so any run above
+  √N is the estimator being fooled, not a good stack.
+  **Mechanism 2 — the reference sub is picked on sharpness, and sharpness is not sky-noise.**
+  `reference_sub_from_frames`/`_pick_reference_sub` (`stack.py:2934-2965`) take the sharpest accepted frame
+  by FWHM. Sky **shot noise** is the dominant σ term and is uncorrelated with FWHM, so when the sharpest
+  frame is also a bright-sky frame its σ_sub is inflated and the ratio with it (observer: `M 3` reference σ
+  2.53× the sample median, 188× badge off 5,460 subs where √N = 73.9).
+  **Why it matters — the error is toward silence.** The same measured ratio feeds `stackhealth.noise_vs_expected`
+  (`stackhealth.py:299-335`, `NOISE_EXPECTED_LOW_FRACTION` = 0.7·√N) which gates `noise_low_lead`'s advisory
+  ("that usually means the subs didn't line up… worth checking focus and alignment"). Inflation can only push
+  a run *up* toward "expected", so a genuinely underperforming stack has its one noise diagnostic withheld
+  (observer: 5 runs across NGC 281W / NGC 6888 / NGC 6960 graded "expected" that a decorrelated measure grades
+  "low"). And the badge itself is the app's one celebratory "trust me" number on a priority-1 surface.
+  **Why nobody caught it — CONFIRMED by reading the test.** `tests/test_noise_ratio_expectation.py` builds
+  **both** sides with `rng.normal` on one grid: the sub is `subs[0]` (never debayered) and the stack is a plain
+  `.mean(axis=0)` (never registered/resampled/drizzled) — the exact regime where the lag-1 estimator is
+  unbiased. Its `shared_var` case models noise shared *between frames*, a different quantity from noise
+  correlated *between neighbouring pixels*. So this is a **fixture-that-cannot-exhibit-its-bug** (cf. the D1/A1
+  class already in this file): a real regression test must debayer the sub and warp/resample the master, or it
+  is green for the wrong reason.
+  **Fix shape, cheapest first — two independent halves; do NOT blind-flip the estimator on the hot path.**
+  **(a)** Difference at a lag beyond the correlation length in `_diff_sigma` (observer's convergence control
+  puts the plateau at lag ~16-24; σ(lag24)/σ(lag16) = 1.0000 on subs, 1.0076 on masters). This changes the
+  badge number for **every** install, so it is a hot-path behaviour change: check that `test_noise_ratio_expectation`'s
+  independent-pixel fixtures stay ~1.00·√N (they should — lag doesn't matter on independent pixels, which means
+  that suite does **not** protect the fix and a new correlated-pixel fixture is mandatory), and re-confirm the
+  0.7 threshold still separates the honest weighted-mean case from the correlated case *after* decorrelation.
+  **(b)** Constrain the reference pick to "sharpest among frames whose `sky_adu_median` is near the target's
+  median" — `sky_adu_median` is populated on ~99.8% of the owner's frames (observer), so it needs no new
+  measurement, only a filter before the `min(fwhm)`. (a) and (b) are independent; (b) alone caps the worst
+  overshoots (the 188× came almost entirely from the reference frame), (a) alone removes the systematic ~1.34×
+  floor. **The regression test is the gate**, not the arithmetic — revert each half in a scratch script and
+  watch a debayer+warp fixture go red before claiming it pinned.
+
 - **LEAD (Builder 2026-09-25, filed while shipping v0.473.0 — the observer's second point in issue
   [#966](https://github.com/JimmyeJones/astrostack/issues/966), which that fix deliberately did not touch) —
   a reprocess batch prices every target against a budget that is 70 % of *whatever RAM is free at the minute
@@ -332,6 +384,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   option (1) shipped as **v0.447.2**, option (2) declined, option (3) re-sized — reasons below. Full mechanism,
   the traced code paths and the owner's 44-of-77 pixel measurements are in [`SHIPPED.md`](SHIPPED.md) under
   v0.447.2.)*
+  **↳ SEVERITY BOUND, observer re-measure 2026-09-21 (Scout logged 2026-09-25) — the open remainder is confined
+  to *machine* auto-edits; hand edits are protected.** With a `reprocess_all` at target 45/95, the observer
+  found 21 targets newly displaced from an edited run to a recipe-less newest run — and **all 21 are
+  machine-made** (9 carry an `editor_auto_baked_look` stamp, 12 an `editor_auto_note` without one); **none is a
+  hand-made recipe**, which `pipeline._picture_is_auto_finished` stands down on. So the guard (v0.448.1) is doing
+  what it was built to do: it preserves the *current* displayed state and does not *restore* a pre-flattening
+  finished run, which is precisely what option (3) below is for. The displaced renders are all re-derivable Auto
+  output, so the harm ceiling here is "the wall shows a linear stack instead of an Auto render until re-run",
+  not "the owner's own editing is lost". Do not re-prioritise this up on the strength of the 21-target count.
   **The mechanism in one line:** `current_picture_path` resolves cover → newest-with-a-preview, and
   `cover_stack_run_id` is NULL on all 89 of the owner's targets — so a restack, being newest, becomes the
   picture, and with the batch's auto-edit switch off that picture is a flat linear stack. v0.447.2 made the
@@ -2763,6 +2824,42 @@ problems. Dogfood it every big-picture run and fix root causes.
   even after the detector improves.
 
 ### Features that serve real workflows
+
+- **🌟 NEW BEGINNER FEATURE (Scout 2026-09-25) — "Was the moon out?": a retrospective moon note on a session,
+  so a beginner learns *why* one night's subs are brighter/noisier and when to re-shoot.** *(Pillar: understand
+  + plan — PRIORITY 3, with a trust angle; size **M** (all engine + one response field + one small card).
+  Beginner bar: **yes** — plain-language, self-hiding, sane default, offline. Grep-checked: the app's moon
+  machinery is all *forward-looking* (Tonight); nothing explains a night already shot.)*
+  **The gap.** `seestack/nightplan.py` already computes the Moon fully **offline** — `moon_illumination(when_utc)`,
+  `moon_is_waxing`, `_moon_altitudes(stamps, location)`, `moon_window` — but only for **tonight/future** planning
+  ("shoot this near new moon"). A beginner staring at a grainy stack has no way to learn that the sky was bright
+  *because the Moon was 87 % lit and 40° up that night*. The app's own session-recap even lists "Cloud, haze or
+  **moonlight**" as a reject cause (`webapp/rejection_summary`, `session_recap`) — but it is a guess from star
+  counts; it never actually checks where the Moon was, because it can't per-session today.
+  **The feature.** For each capture **session/night** of a target, take the session's median `timestamp_utc`
+  (frames already carry it) and the install's site (`Settings.site_lat`/`site_lon`), and compute the Moon's
+  illuminated fraction and altitude at that time with the *existing* nightplan helpers. Surface a one-line,
+  self-hiding note where a beginner already looks at a night — the session recap / Nights card / the frames
+  table's per-night group — e.g. *"A bright night: the Moon was 87 % lit and 40° up. That lifts the sky and
+  adds noise — this target will come out cleaner shot within a few days of new moon."* Say nothing when the
+  Moon was **down or near-new** at that session (the common good case), so it is signal, not clutter.
+  **Why it clears the bar and the guardrails.** Offline (no network, §1 standing policy; no new dependency —
+  the ephemeris is already in the tree), additive (one computed response field + one card, everything else
+  unchanged), upgrade-safe (§9: no config/schema/on-disk/default change; a site-less install simply omits the
+  note, exactly as Tonight already degrades — see the v0.436.1 dogfood note about the empty-site state), and
+  testable in isolation on the pure nightplan functions plus a session-grouping helper. It also **closes the
+  loop on the rejection-cause guess**: where `session_recap` says "likely moonlight", this can confirm or deny
+  it from geometry rather than star counts.
+  **Shape notes for the Builder.** (1) Per-*session* grouping is the one new primitive — reuse whatever the
+  Nights card / `session_recap` / `stacktime.py` already use to split a target's frames by night, don't invent a
+  second definition. (2) Altitude needs the site; illumination does **not** (`moon_illumination` is
+  location-independent), so on a site-less install you can still say "the Moon was 87 % lit" and just drop the
+  "and 40° up" clause — a graceful two-stage degrade rather than all-or-nothing. (3) Keep the threshold for
+  "worth mentioning" honest: mention only when illumination **and** altitude were both high enough to matter
+  (a 90 %-lit Moon that never rose is not why the night was bright); pick the bar against the owner's own nights
+  if a later run has the observer's distribution, else a conservative default (e.g. illum ≥ 0.5 and median
+  altitude ≥ 20°) that a comment marks as provisional. (4) It is a **note, never an action** — like
+  `new-subs-waiting` it explains and links, it never re-stacks.
 
 *(The Scout's 2026-09-09 "shareable labelled picture" entry shipped as v0.407.0 and was cut to
 [`SHIPPED.md`](SHIPPED.md) — the engine render and the endpoint flag already existed; only the download was
