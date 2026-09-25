@@ -348,7 +348,7 @@ def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndar
     # Record which white-balance path actually ran (star-based, background-neutral
     # fallback, or gave up) so a caller can tell the user whether their image was
     # really colour-calibrated. Best-effort, JSON-safe scalars only.
-    ctx.op_notes["tone.color_calibrate"] = {
+    ctx.record_note("tone.color_calibrate", {
         "mode_used": result.mode_used,
         "n_stars_used": int(result.n_stars_used),
         "notes": result.notes,
@@ -368,7 +368,7 @@ def _color_calibrate(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndar
             and mode in (MODE_GRAY_STAR, MODE_GAIA)
             and result.mode_used not in (MODE_GRAY_STAR, MODE_GAIA)
         ),
-    }
+    })
     return calibrated
 
 

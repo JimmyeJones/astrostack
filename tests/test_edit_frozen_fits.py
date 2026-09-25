@@ -271,5 +271,6 @@ def test_a_frozen_white_balance_is_re_applied_without_re_solving():
                                    rtol=1e-6)
     # …and the note the editor captions from carries the frozen solve's facts,
     # not a fresh window-sized one.
-    assert frozen_ctx.op_notes["tone.color_calibrate"]["mode_used"] == "gray_star"
-    assert frozen_ctx.op_notes["tone.color_calibrate"]["n_stars_used"] == solved.n_stars_used
+    note = frozen_ctx.notes_for("tone.color_calibrate")[-1]
+    assert note["mode_used"] == "gray_star"
+    assert note["n_stars_used"] == solved.n_stars_used
