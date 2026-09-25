@@ -3470,8 +3470,13 @@ def _master_canvas_shape(fits_path: str) -> tuple[int, int] | None:
 NOISE_RATIO_META_PREFIX = "noise_ratio:"
 
 # Bump when the *meaning* of the stored payload changes, so an old stamp is
-# re-measured rather than misread.
-_NOISE_RATIO_CACHE_VERSION = 1
+# re-measured rather than misread. The fingerprint covers the two *inputs* (the
+# master and the representative sub) but not the estimator that read them, so a
+# change to :mod:`seestack.qc.noise_ratio` itself has to be declared here or a
+# whole library keeps serving numbers the old one produced. 2 = the decorrelated
+# second-difference estimator (v0.475.0): every stamp written by the lag-1 one is
+# a miss, and heals on the one request that needs it.
+_NOISE_RATIO_CACHE_VERSION = 2
 
 
 def _noise_ratio_fingerprint(fits_path: str, ref_id: int | None) -> dict[str, Any] | None:
