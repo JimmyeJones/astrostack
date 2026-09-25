@@ -1,5 +1,77 @@
 # Process notes & QA sweep records
 
+## 2026-09-25 — Builder: "grep-checked" is a claim about a query nobody records
+
+*(Builder, branch `claude/nifty-pasteur-fspzqn`, shipping v0.475.2. Baseline green — 6,579 passed, 2
+skipped, 11m55s with the BLAS cap and `-n 4 --dist worksteal`.)*
+
+**The lever: §11 says a freshly-filed entry is the most *contended*; this run found it can also be the least
+*checked*.** The top of "Features that serve real workflows" was a 🌟 beginner feature filed by the Scout ten
+hours earlier — *"Was the moon out?": a retrospective moon note on a session* — sized M, marked **"Grep-checked:
+the app's moon machinery is all forward-looking (Tonight); nothing explains a night already shot."* It was the
+obvious pick and the run's first candidate. It is **already built, end to end**: `nightplan.session_moon` /
+`session_moons` grade a finished session at its midpoint through the same `_moon_verdict` the forward-looking
+readout uses, `_session_moon_text` writes the sentence, `_session_moon_note` puts it on the "Last night" card
+and `_night_moons` puts it on **every** row of the Nights card — five test files, one ephemeris pass for the
+whole table, and a *better* verdict than the entry proposed (it also requires the Moon to be **close to the
+target**, which illumination-plus-altitude does not).
+
+**Why the entry's own grep missed it, stated so the next one does not.** It searched the feature's
+*description* — the forward-looking planner helpers it names (`moon_illumination`, `moon_window`) — and those
+are exactly the helpers the shipped feature is built *on*, so finding them confirmed the premise instead of
+refuting it. The query that answers "is this already built?" is the feature's **most specific identifier**,
+the noun you would name the function after: `session_moon`. Two seconds, and it lands on the module, the
+router, both cards and the tests at once.
+
+**So: grep for the identifier, not the description — and do it even when the entry says it was grep-checked.**
+"Grep-checked" records a verdict, never the query, so it cannot be audited and it is exactly as strong as one
+agent's choice of search term. The entry is struck with the verification in it; the one piece of it that is
+genuinely not built (the two-stage degrade on a site-less install) is **declined** there on the shipped
+design's own reasoning, because without a site you know neither *up* nor *close*, so the only sentence left is
+one that may be describing a Moon that never rose.
+
+**Second thing, filed rather than acted on: a stranded branch can carry owner answers.**
+`origin/claude/busy-pascal-2HNTL` (docs-only, 2026-09-25 00:55 UTC, no PR, never merged) records owner answers
+to sign-off items 3, 7, 8, 10, 14, 15, 16 — including an approval for the `astroalign` dependency and for
+reconciling the 11 historical mosaic pairs, i.e. two gates that have blocked real work for weeks. **Flagged
+here rather than merged**, deliberately: curating that list is the Scout's lane, the answers' provenance is
+not visible in the diff, and merging it would put a claim of owner consent for a **new dependency** and an
+**on-disk merge migration** into the source of truth on one agent's unverified say-so — the two shapes §10
+requires sign-off for. A Scout run that can confirm where those answers came from should land it; until then
+the branch is the record and this note is the pointer.
+
+**And the fix itself carried one reusable shape.** The entry behind v0.475.2 sized itself as "an XS tidy-up
+**unless** a double-op recipe is reachable from the UI" — i.e. it deferred its own severity to a check it did
+not make. Making that check first (`Editor.tsx::addOp` has no duplicate guard, so two **Color calibration**
+ops is two clicks) is what turned it into a priority-1 parity fix, and it also reframed the defect: the
+overwrite is *right* for "which balance did the picture end up with" and *wrong* for "does the preview match
+the export", which is why the answer is a merge rule rather than a re-key. **An entry that ends with a
+condition on its own size is an entry whose first line of work is that condition**, not its implementation.
+
+**QA sweep record — `--mosaic --editor` dogfood pass, CLEAN.** Final suite **6,588 passed, 2 skipped**
+(13m10s), i.e. the baseline's 6,579 plus this run's nine. The pass: mosaic trim **7.9 %** of the canvas (the
+bug bar is ~15 %); every one of the **21** ops in the Add menu added, one at a time, on **both** the single
+field and the mosaic run, each re-rendering the live preview with no console error and no failed request,
+then Undo and Redo; nothing overflowing at 420 px or 1440 px; tallest page the mosaic Target page at
+**3,673 px** on a phone, `/tonight` **3,655 px**.
+
+Reading the mosaic Target page's five cards as one paragraph, which is what that block is for: they all point
+the same way, and the one that could have contradicted the others resolves it out loud — the framing verdict
+says *"Orion Nebula is bigger than this mosaic … Adding more panels next session would capture the rest.
+**Most of it is already in this picture, though — until you're happy with the depth, more passes over the
+panels you already have do more for it than a wider grid.**"* against next-best-move's "another pass or two
+over the same mosaic". Worth recording as a **positive** example of the shape the last five findings had: two
+cards with opposite prescriptions is only a bug when neither says which wins. The one asymmetry, noted and
+not filed: the card that says *where* the thin part is (the panel map, "at the top-right") is folded behind
+"more notes", while the two inline cards say only *that* there is one — which costs nothing here, because the
+prescription they give ("another pass over the whole mosaic") does not need the panel's name to act on.
+
+Not reached on this pass, and the reason is on the tin: `full-size check: not offered (preview is 1:1 — run
+with --big to reach it)`. **v0.475.2 touches `proxy_fallback`, which can only ever be true when
+`proxy_scale > 1`** — so the surface this fix is about is one a `--mosaic` pass structurally cannot render.
+The engine tests cover the rule; a future run touching the editor's preview should spend the `--big` pass on
+it.
+
 ## 2026-09-25 — Builder: the lever was **ground truth**, on a fixture the estimator's own tests could not build
 
 *(Builder, branch `claude/nifty-pasteur-meo70w`, shipping v0.475.0 and v0.475.1 off the Scout's #967 entry.

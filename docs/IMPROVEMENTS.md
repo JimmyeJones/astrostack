@@ -2793,11 +2793,28 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **🌟 NEW BEGINNER FEATURE (Scout 2026-09-25) — "Was the moon out?": a retrospective moon note on a session,
-  so a beginner learns *why* one night's subs are brighter/noisier and when to re-shoot.** *(Pillar: understand
-  + plan — PRIORITY 3, with a trust angle; size **M** (all engine + one response field + one small card).
-  Beginner bar: **yes** — plain-language, self-hiding, sane default, offline. Grep-checked: the app's moon
-  machinery is all *forward-looking* (Tonight); nothing explains a night already shot.)*
+- ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-25) — "Was the moon out?": a retrospective moon note on a
+  session.**~~ — **⚪ CLOSED: ALREADY BUILT, END TO END. Do not pick it up** *(Builder 2026-09-25, grepped and
+  read before starting it — it was the freshest entry in this section and the run's first candidate).* The
+  premise ("the app's moon machinery is all forward-looking; nothing explains a night already shot") is not the
+  live behaviour, and has not been since `SessionMoon` shipped. **What exists, in the entry's own terms:**
+  `seestack/nightplan.py::session_moon` / `session_moons` — a *retrospective* verdict at the session's
+  midpoint, graded through the same `_moon_verdict` the forward-looking readout uses, with
+  `_session_moon_text` writing the finished sentence (*"A bright 96 %-lit Moon was only ~21° from this target
+  while you were shooting… That's the sky, not your setup"*); `webapp/routers/targets.py::_session_moon_note`
+  puts it on the "Last night" card as `SessionRecapOut.moon_note`
+  (`frontend/src/components/SessionRecapCard.tsx`), and `_night_moons` → `NightSummaryOut.moon` puts it on
+  **every** night of the Nights card (`NightsCard.tsx::moonTooltip`). Offline, self-hiding, one ephemeris pass
+  for the whole table, and covered by `tests/test_session_moon.py`, `tests/webapp/test_target_nights.py`,
+  `tests/webapp/test_target_session_recap.py`, `NightsCard.test.tsx` and `SessionRecapCard.test.tsx`.
+  **It is also *better* than the entry's shape on the one point that matters, so do not "improve" it back:**
+  the entry proposes firing on illumination + altitude, and the shipped verdict also requires the Moon to be
+  **close to the target** — a 90 %-lit Moon 150° away across the sky is not why that night was bright.
+  **The one piece of the entry that is genuinely not built is its shape note (2), the two-stage degrade on a
+  site-less install ("you can still say the Moon was 87 % lit"), and it is DECLINED on the shipped design's own
+  reasoning:** without a site you know neither *up* nor *close*, so the only sentence you could write is one
+  that may be describing a Moon that never rose — which is exactly the nag `SessionMoon`'s "quiet by design"
+  contract exists to prevent. Re-open only with a shape that does not guess at the two missing facts.
   **The gap.** `seestack/nightplan.py` already computes the Moon fully **offline** — `moon_illumination(when_utc)`,
   `moon_is_waxing`, `_moon_altitudes(stamps, location)`, `moon_window` — but only for **tonight/future** planning
   ("shoot this near new moon"). A beginner staring at a grainy stack has no way to learn that the sky was bright
@@ -3437,20 +3454,17 @@ uncached path costs every time (a cold one pays both, 1,116 ms), the 129 ms bein
   relationship is editorial, and the existing "keep a shipped item's spec *indented*" convention already
   makes the answer visible by shape once someone applies it.
 
-- **NEW IDEA (Builder 2026-09-03, spotted while adding the sibling channel in v0.328.2) — `EditContext.op_notes`
-  is keyed by op **id** where its new sibling `fitted` is keyed by op **uid**, so a recipe carrying an op twice
-  reports only the last one.** *(Pillar: editor correctness — PRIORITY 1; size XS; latent, low severity.)*
-  `seestack/edit/ops/tone.py` writes `ctx.op_notes["tone.color_calibrate"] = {…}` and
-  `seestack/edit/ops/detail.py` does the same for its advisories. A recipe is a *list*, and nothing stops two
-  instances of one op with different params — at which point the editor's caption ("the saved picture's colour
-  will differ a little from this preview", the deconv/star-reduce advisories) describes whichever ran last and
-  silently discards the other. `fitted` was keyed by uid from the start for exactly this reason, and
-  `EditContext` now carries `op_uid` through the pipeline, so the fix is available: key by uid and have the
-  webapp layer resolve uid → op id when it builds the histogram payload. **Care:** the histogram endpoint's
-  JSON shape is what the frontend reads (`color_cal`, `star_reduce_differs_on_proxy`, …) and per §9 must not
-  change — so this is an internal re-key with the same payload out, not an API change. Worth confirming a
-  double-op recipe is actually reachable from the UI before spending a run on it; if it is only reachable by
-  hand-editing a recipe JSON, it stays an XS tidy-up rather than a bug.
+- ~~**NEW IDEA (Builder 2026-09-03, spotted while adding the sibling channel in v0.328.2) — `EditContext.op_notes`
+  is keyed by op **id** where its new sibling `fitted` is keyed by op **uid**.**~~ — **✅ SHIPPED v0.475.2.**
+  Entry cut to [`SHIPPED.md`](SHIPPED.md), one-liner under "Shipped". Two things the entry asked for and the
+  build answered, kept here only because they change how the *next* entry of this shape should be read:
+  **its "check first" was the whole size of it** — a double-op recipe *is* reachable (`Editor.tsx::addOp` has
+  no duplicate guard, so two **Color calibration** ops is two clicks), which turns "an XS tidy-up" into a
+  priority-1 parity fix; and the defect is **one field, not the note** — reporting the *last* instance's
+  `mode_used` is right (a second calibration runs on top of the first), while `proxy_fallback` is a
+  preview-vs-export warning that has to be **any** instance's, or the advisory silently disappears when the
+  *first* op is the one that fell back. The entry's claim that `seestack/edit/ops/detail.py` writes `op_notes`
+  too is **stale** — its advisories moved to `fitted` before this; `tone.color_calibrate` was the only writer.
 
 - **NEW IDEA (Builder 2026-08-30, the shape the v0.311.1 bug had, and the reason it existed) — there are now
   **two** answers to "render this run's picture at size N, exactly as it is shown", and the bug was the gap
@@ -3898,6 +3912,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.475.2** — 🟠 PRIORITY 1 (editor correctness), the `EditContext.op_notes` entry filed 2026-09-03 under "Infra / maintainability": **a recipe may carry the same op twice, and its outcome notes could not.** `op_notes` was keyed by op **id** where its siblings `fitted` and `field_deltas` have always been keyed by the recipe op’s **uid** — so a second `tone.color_calibrate` overwrote the first’s note, and the editor’s preview-vs-export advisory (*"the saved picture’s colour will differ a little from this preview"*, `colorCalProxyFallbackCaption`) **vanished** whenever the *first* op was the one that fell back on the decimated proxy. The entry’s own "check first" is what sized it: `Editor.tsx::addOp` has no duplicate guard, so two **Color calibration** ops is two clicks. New `EditContext.record_note` / `notes_for` key a note to the instance through the same `_fit_key` the fits use, and new pure `seestack/edit/opnotes.py::merge_color_cal` is the one place that decides what "more than one" means — the **last** note with a mode for the balance the picture carries, `any()` for the parity flag, the same rule the sibling `star_reduce_preview_overstates` warning already applies across every `stars.reduce` op. Both readers (the live histogram, the walk-away auto-edit’s History stamp) go through it, so they cannot describe one render differently. **Bit-for-bit unchanged on every recipe the app renders today**, Auto included; no response shape, config, schema, on-disk or default change. Tests +9, one fails before (the real op run twice through `apply_recipe`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.475.1** — 🟠 PRIORITY 1-adjacent (trust), second half of observer issue [#967](https://github.com/JimmyeJones/astrostack/issues/967): **the sub that stands in for "one raw frame" was picked on sharpness alone, and sharpness is not sky noise.** Sky shot noise is the dominant term in the σ the badge divides, and it is uncorrelated with FWHM — so a target whose sharpest frame was also one of its brightest-sky frames inflated the number by however much brighter that sky was (observer: a reference σ **2.53×** the sample median, a **188×** badge on 5,460 subs where √N = 73.9). `reference_sub_from_frames` now takes the sharpest frame **among the middle half of the target's measured `sky_adu_median`** (`_typical_sky_frames`) — an interquartile band rather than a tolerance, so there is no constant to get wrong, it survives a bimodal (moonlit/dark) target, and it picks the dominant *exposure* for free, since sky scales with exposure and a 3× longer sub carries √3 the sky noise. One-sided by construction: unchanged below 10 measured skies, unchanged with none, and an empty band falls back to the whole pool. `FrameHealth` gains `sky_adu_median` so the health card and the reveal endpoint make the same pick — a disagreement would make every stamped measurement a permanent miss. Tests +8, three fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.475.0** — 🟠 PRIORITY 1-adjacent (trust), observer issue [#967](https://github.com/JimmyeJones/astrostack/issues/967) verified and fixed: **the "stacking cut your noise ~N×" badge read above √N because neither side has independent pixels.** `noise_ratio._diff_sigma` took σ from the MAD of *adjacent*-pixel differences — `2σ²` only for independent neighbours — while the sub arrives through `bilinear_debayer` and the master through a registration warp and, on most runs, a drizzle kernel. Measured against **ground truth** on a debayer+warp fixture: the old estimator read **+9 %** on a native master and **+119 %** on a 2×-drizzled one (17.2× against a true 7.9×), and the error direction is toward *silence* — `noise_vs_expected` only nudges on a **low** number, so an underperforming stack had its one noise diagnostic withheld. σ is now a **second difference at a lag chosen from the data** (`_lag_sigma`, `Var = 6σ²`, exactly 0 on a linear ramp so a gradient cannot creep in at long lag), walked over L = 1…16 per side until the estimate plateaus — measured, a native master plateaus at 4 and a drizzled one at 8. New reads 0.97× / 0.93× truth. **Faster, not slower** (157 → 81 ms on a 1024² crop, `_MAX_PAIRS`). `_NOISE_RATIO_CACHE_VERSION` 1 → 2, since the stamp fingerprints the inputs and not the estimator. Tests +4, three fail before; the pre-existing `test_noise_ratio_expectation.py` is green either way, exactly as the entry predicted, because its fixture has independent pixels. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.474.0** — 🟡 PRIORITY 3 (friendliness / trust), observer issue [#968](https://github.com/JimmyeJones/astrostack/issues/968) verified in the code and fixed: **auto-grade has two 25 % rails and set one flag from both**, so a mosaic that hit its *per-panel* rail — a count limit on one patch of sky — was shown the target-wide sentence (*"this looks like a rough session… consider a conservative pass, or review the night's data"*). Measured on the owner's library: **7 of the 21 targets showing that banner flagged too few frames to have reached the target-wide cap at all**, one of them raising it off a **single** withheld frame at an 8.0 % flag rate. And the remedy is the wrong lever twice over — a conservative pass *raises* the z threshold, which shrinks the flagged set and cannot release what a count limit withheld, and the withheld frames are concentrated on **panels**, not on a night. Fixed by splitting the flag (`GradeReport.capped_overall` / `capped_panels` / `withheld_per_panel`, with `capped` left as their union so no existing reader changes) and putting the copy in **one shared pure `gradeCap.gradeCapNotice`** the Target page and the Stack form both call, so they cannot tell different stories about one report. Tests +11, four fail before. Full entry in [`SHIPPED.md`](SHIPPED.md).
