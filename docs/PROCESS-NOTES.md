@@ -1,5 +1,46 @@
 # Process notes & QA sweep records
 
+## 2026-09-25 — Scout: verified the last open observer issue (#967, the noise badge above √N), and an adversarial read of the frame-weighting math came back clean
+
+*(Scout, branch `claude/admiring-brahmagupta-ji7y1l`. Baseline suite green — full headless run with the BLAS cap
+and `-n 4 --dist worksteal`; see the run's own log. Only docs touched this run.)*
+
+**The inbox was the lever, as it was for the Builder before me.** Four observer issues open (#878, #880, #903,
+#967); the Builder's 2026-09-25 run had verified and shipped the fixes for #965/#966/#968 and left #967 — the
+noise-reduction badge reading above the √N ceiling on most runs — for the Scout. Three of the four remaining were
+already triaged into the backlog with their current disposition correct (#878 recurrence dormant → dedup is
+gate 16 owner-sign-off; #880 (a) storage-hygiene not user-facing, (b) deliberate, (c) shared with #878;
+#903 open remainder is option (3) cover-pin). The one that needed action was #967.
+
+**#967 verified in-code and filed (not shipped — it's a Builder job with a hot-path recalibration attached).**
+Both mechanisms trace exactly: `qc/noise_ratio.py::_diff_sigma` is a lag-1 adjacent-pixel MAD, and
+`stack.py::_measure_noise_ratio` feeds it a `bilinear_debayer`'d sub against a warped/drizzled master — two
+different smoothings, so σ_sub/σ_stack is inflated and can exceed √N (which is a hard ceiling, not a target).
+The reference sub is picked on FWHM alone, which is uncorrelated with sky shot noise. The same ratio feeds
+`noise_vs_expected`'s 0.7·√N bar, so the error direction is *toward silence* — a genuinely underperforming stack
+has its focus/alignment advisory withheld. **The "why nobody caught it" is the interesting part and it
+reproduced by reading one test:** `tests/test_noise_ratio_expectation.py` builds both sides with `rng.normal` on
+one grid (`subs[0]`, `.mean(axis=0)`) — the one independent-pixel regime the estimator is unbiased in, so it is a
+**fixture-that-cannot-exhibit-its-bug** (same class as the D1/A1 cases already in this repo). The lesson for the
+Builder who fixes it: the current suite does *not* protect the fix, because lag doesn't matter on independent
+pixels — a new correlated-pixel (debayer + warp) fixture is mandatory, and the estimator change moves the badge
+number on *every* install, so `NOISE_EXPECTED_LOW_FRACTION` must be re-confirmed after decorrelation.
+
+**Adversarial read of `seestack/stack/weighting.py` — CLEAN (traced, no bug filed).** Since the prompt asks the
+Scout to lead with the stacking engine, I read the frame-weighting math against the "one value, two questions"
+lens the Builder's own note recommends. The mosaic per-panel split (`_positional_medians` /
+`compute_frame_weights`) is correct: the position-dependent trio (stars/sky/transparency) is taken per panel with
+a `_MIN_PANEL_FRAMES` fallback to target-wide, while FWHM/eccentricity stay target-wide — exactly the split the
+docstring argues for, and the one that stops a star-poor panel being penalised for its sky. `label < 0` frames
+fall back to target-wide medians cleanly. `combine_weights_with_photometric` can produce a weight > 1.0 for a
+scaled-*down* transparent sub, but that is harmless in a normalized weighted-mean/inverse-variance combine (only
+relative weights matter), and the `1/s²` variance correction is sound. The `np.float64` overflow guard on the
+FWHM ratio is deliberate and correct. No bug — recorded as a clean sweep per the three-file rule.
+
+**One beginner feature filed** ("Was the moon out?" — a retrospective moon note reusing `nightplan.py`'s existing
+offline lunar ephemeris to explain why a night was bright; understand/plan, PRIORITY 3, M). Grep-checked: the
+Moon machinery is all forward-looking today, so this is genuinely new.
+
 ## 2026-09-25 — Builder: the backlog was dry and the inbox was not — four untriaged observer issues, three shipped (v0.473.0 / v0.473.1 / v0.474.0)
 
 *(Builder, branch `claude/wizardly-cannon-hnfyu0`, PRs #969 and #970. Baseline `6549 passed, 2 skipped` in
