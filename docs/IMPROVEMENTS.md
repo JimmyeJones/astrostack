@@ -369,6 +369,14 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   — no image is wrong, but 76 % of the owner's frames (41,732 of 54,681) are double-registered, doubling
   CPU/disk on a box with a recorded OOM history, and the Library shows two entries per mosaic. Confidence:
   **mechanism TRACED and arithmetic-verified**; owner-side counts **measured** by the observer.)*
+  **✅ OWNER SAID YES 2026-09-25 to reconciling the 11 existing pairs (sign-off item 16) — that half of this
+  entry is now buildable.** Merge each `<T>_mosaic-<hex>` / `<T>_mosaic_sub` pair through
+  `seestack/io/merge.py::carry_stack_runs` (v0.460.0), so no stack run, saved recipe or picture is lost, keeping
+  the more complete target. Where the more complete twin is the one classified single-field (`<T> mosaic_sub`,
+  below), keep its *data* but land it in the correctly-classified `(mosaic)` target: the answer is about keeping
+  frames and pictures, not a name. One-off and idempotent — a no-op on a library with no such pairs — and §10
+  holds absolutely: nothing under `incoming/` is written, moved or deleted. Pin it on a synthetic library with
+  the same shape (both naming mechanisms), and read the reverted-fix test failing before claiming it.
   **Root cause, confirmed by computing the hashes:** `mosaic_target_name` names a mosaic subs folder
   `<T>_mosaic_sub/` → display `"<T> (mosaic)"`, and `make_safe_name("<T> (mosaic)")` collapses the spaces
   and parens to `_` and strips them, yielding safe stem `<T>_mosaic` — *identical* to the safe stem of the
@@ -577,46 +585,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   before the plateau/connectivity work) rather than to move a constant. **Probably not worth building**: the
   cheaper and more useful fix for a real install is a re-stack, and the whole population shrinks every night the
   owner shoots.
-
-- **🟡 BROKEN-UX / AUTONOMY (Scout QA audit 2026-08-26 #4, traced + verified end-to-end) — PARTIALLY FIXED
-  (misleading-copy half shipped v0.272.2; optional behavioural half open) — the `astap_timeout_s` setting bounds
-  ONE solve *attempt*, not one frame, so an unsolvable sub can burn up to 3× the configured seconds; the Settings
-  help text used to say the opposite and now says so honestly.** *(Severity was broken-UX / autonomy — it
-  silently triples the wasted time on a cloudy walk-away night, the owner's exact workflow; not wrong-result.
-  Confidence: traced against the code.)*
-  `ASTAPSolver.solve` (`seestack/solve/astap.py:206`) runs a **3-rung** ladder (`_SOLVE_LADDER`, ~line 147:
-  default → full-res `-s 1000` → bin-2×), and each rung calls `_solve_once` → `subprocess.run(timeout=self.timeout_s)`
-  (~line 294). A timeout on a rung raises `ASTAPError`, which is caught and **falls through to the next rung**
-  (~line 216–226) — each getting the *full* `timeout_s` again. So a frame that never solves (heavy cloud, star-poor
-  sub) consumes up to `3 × astap_timeout_s` of wall clock: **180 s at the 60 s default**. Meanwhile the
-  frontend tooltip (`frontend/src/routes/Settings.tsx:52`) reads *"Give up on solving a single frame after this
-  many seconds."* — literally per-frame, which is false. On a clear night this is invisible (frames solve on rung 1
-  in a second or two; only *timeouts* accumulate), but on a cloudy night with hundreds of unsolvable subs it can turn
-  an expected ~100 min of wasted solve time into ~5 h, delaying the very auto-stack the owner walked away for.
-  **Fix options (the ladder's multi-attempt rescue is load-bearing, so don't just cut it):**
-  (a) ~~*Honest-copy, safe:* correct the tooltip.~~ — **SHIPPED v0.272.2** (Scout 2026-08-26, this run): the
-  `astap_timeout_s` hint now reads *"Give up on each solve attempt after this many seconds. The solver tries up to
-  3 strategies per frame, so a frame that never solves can take up to about 3× this before it's set aside (and
-  retried on the next scan)."* with a `Settings.test.tsx` assertion pinning the per-attempt wording. So the setting
-  is no longer *misleading*; the wasted-time behaviour itself is unchanged. **(b) is the remaining open half:**
-  *Behavioural, careful:* budget the timeout across the ladder (e.g. full `timeout_s` on rung 1 where most frames
-  solve, a fraction on rungs 2–3, or a shared deadline for the whole frame) so the setting bounds *per-frame* time as
-  its name implies, without starving the coarse rescue rungs — needs a test that a hard frame still gets its rescue
-  attempts and that total per-frame time is bounded. Only worth doing if the owner wants true per-frame bounding;
-  the label fix above already removes the surprise.
-  **Builder 2026-08-26 — considered and deliberately DECLINED this run; read this before picking it up.** I sized
-  it against the real code and stopped, because every workable shape is a **blind threshold flip on the
-  on-by-default hot path**, which AGENTS.md §1 tells an agent not to do. The ladder cannot be given a true
-  per-frame bound without a per-rung floor (a shared deadline alone gives rungs 2–3 *nothing* on exactly the
-  frames a timeout means they exist to rescue), and the floor's size *is* the tradeoff: at 25 % of `timeout_s`
-  the worst case falls 3× → 1.5×, at 50 % it falls to 2×, and in both cases a hard frame that rung 3 would have
-  cracked in, say, 20 s is now abandoned. Which frames that loses is unmeasurable from the repo — it needs a real
-  cloudy night's subs, which no agent has. Meanwhile the cost of leaving it is now *bounded and honest*: the
-  Settings hint says "up to about 3×" (v0.272.2), and as of **v0.276.4** a sub that burned the whole ladder is
-  no longer silent — it lands in its own "Ran out of time being located" bucket on the Target page telling the
-  owner to raise the timeout. So the surprise and the invisibility are both gone; only the wasted minutes
-  remain. **Leave this for the owner to ask for**, and if they do, ship it with the floor as a named constant and
-  the measured before/after on their own data — not on a synthetic frame.
 
 - **⚪ HARDENING NOTE (Scout QA audit 2026-08-27 #8, traced — possibly by-design; low confidence) — the folder
   watcher's stability gate compares host wall-clock `now` to the source file's `mtime`
@@ -1531,6 +1499,7 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 - **IMPROVEMENT IDEA (Scout 2026-07-24) — a WCS-free star-registration *fallback* so a faint field whose subs mostly
   fail to plate-solve can still stack from all its frames, instead of collapsing to a ~1–3-frame gibberish stack.**
+  **✅ OWNER APPROVED THE `astroalign` DEPENDENCY 2026-09-25 (sign-off item 15)** — the gate below is lifted.
   *(Autonomy + image quality — priorities 2/4; a direct attack on the remaining root of the ⭐⭐ thin-stack/gibberish
   top bug. Size L — file as a scoped Builder slice, and flag the dependency question below for owner sign-off before
   any new package lands.)* **Why this is the highest-value autonomy gap:** the whole engine registers frames via ASTAP
@@ -1568,7 +1537,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   measurement. This idea (a full **similarity** transform tolerant of accumulated alt-az **field rotation** across a
   whole night, and/or registering *every* unsolved sub rather than just bootstrapping the deep image) remains the
   more general L attack for long sessions where rotation between the first and last sub exceeds what a translation can
-  absorb. Still gated on the astroalign-vs-in-house dependency call (owner sign-off). Reassess after the bootstrap has
+  absorb. The dependency call is answered (owner: yes to `astroalign`, 2026-09-25). Reassess after the bootstrap has
   been validated on real faint-field data — the bootstrap may cover enough of the owner's cases that the full-rotation
   path isn't needed.
 
@@ -2712,6 +2681,27 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **OWNER-REQUESTED 2026-09-25 — a progression video per target, ordered by when the subs were SHOT, "so I can
+  see how my added frames affect targets."** *(Pillar: enjoy/understand — beginner feature. Size L.)* **Most of
+  this exists and is not what he asked for:** `seestack/render/deepening.py` builds a "night after night" reel
+  (`DeepeningReelCard` on the Target page), but `webapp/routers/stack.py::_deepening_runs` orders it by **stack
+  time** (`timestamp_utc`) and labels each frame with that date. So a frame means "the day he pressed Stack",
+  not "the night he shot"; a target he stacked once has no reel; and a reprocess-all restack of the same subs
+  lands as a new last frame showing no change. What he wants is **one frame per capture night, cumulative**
+  (night 1; nights 1–2; …), labelled with the capture date and sub count. That needs stacks nobody has run, so
+  the design question is cost: a full stack per night per target is hours on his deepest targets — look first at
+  a reduced-resolution cumulative pass, and reuse any existing run whose sub set already matches a cumulative
+  step. Keep the current stack-history reel; this is a second mode, not a replacement.
+- **OWNER-APPROVED 2026-09-25 — a noise-delta *picture* beside the "Did it get better?" sentence.** *(Pillar:
+  understand — size S/M.)* `frontend/src/components/CompareWithLastCard.tsx` answers in words and a number; add
+  a small matched crop of the same sky patch from the two runs, rendered with one shared stretch (the fair-
+  comparison rule `seestack/render/deepening.py` already follows), so the difference is visible, not only stated.
+- **OWNER-APPROVED 2026-09-25 — auto-*apply* the classified object preset instead of offering it as a chip.**
+  *(Pillar: autonomy — size S/M.)* `seestack/edit/presets.py` (content classification, ~line 420) feeds the "try
+  this preset?" chip in `frontend/src/routes/Editor.tsx` (~line 2429). The owner asked for it to be applied, not
+  offered. Conditions, per §9: never over a saved or hand-edited recipe; say what was applied and offer one-click
+  undo; and a Settings switch to turn it off.
+
 *(The Scout's 2026-09-09 "shareable labelled picture" entry shipped as v0.407.0 and was cut to
 [`SHIPPED.md`](SHIPPED.md) — the engine render and the endpoint flag already existed; only the download was
 missing. Don't re-file it.)*
@@ -3109,22 +3099,6 @@ uncached path costs every time (a cold one pays both, 1,116 ms), the 129 ms bein
   about, and the complete one measures cheaply enough that there is no reason to want it. Entry in
   [`SHIPPED.md`](SHIPPED.md).
 
-- **NEW IDEA (Builder 2026-08-06, MEASURED while auditing the stack path) — `detect_mixed_pointings` is a pure-Python
-  O(n²) pair loop with no cap, so the mixed-pointing preflight grows quadratically with a target's sub count.**
-  *(Performance — size S; **off-by-default setting, so this is a latency note, not a live problem**.)*
-  `seestack/stack/pointings.py::detect_mixed_pointings` single-linkage-clusters every accepted+solved sub against
-  every other one. The inner loop never short-circuits (a single tight target means *every* pair links), and
-  `webapp/pipeline.py::_detect_mixed_pointings` passes the full frame list with **no cap** — unlike the frontend
-  mirror (`frontend/src/components/target/mixedPointings.ts`), whose comment notes it is "bounded by the 2000-frame
-  list cap". **Measured** (one tight cluster, the ordinary single-target case): 0.17 s at 1 000 subs, 0.70 s at
-  2 000, 2.7 s at 4 000, **10.8 s at 8 000** — and 4× again per doubling, so the §1 owner's "thousands of subs"
-  target is a tens-of-seconds stall inside a stack job. **Only reachable with `mixed_pointing_guard` on** (it is
-  **off** by default), and it runs in a background job rather than an HTTP request, which is why this is filed as
-  perf rather than a bug. **Care:** any speed-up must be **exactly** verdict-preserving (a grid/KD-tree prefilter
-  is only exact if the neighbour radius is the chord `2·sin(d/2)`; naive cell-representative merging is *not*).
-  Cheapest honest option is simply to vectorise the pair test in NumPy in blocks (same O(n²), ~100× the constant)
-  or cap the input with a deterministic subsample — a cap changes the verdict, so it needs its own argument.
-  **Gate:** only worth doing if the owner turns the guard on.
 - Profile the stack hot path on a large synthetic target; find a safe win that
   doesn't touch memory bounds or correctness. (M)
 
@@ -3629,6 +3603,30 @@ outright bug in existing behaviour, never to add capability.
 ## Needs owner sign-off (do NOT start autonomously)
 ### The owner's one-sitting list (consolidated 2026-09-08 — every gate in this file, in one place)
 
+> ## ✅ OWNER ANSWERED SEVEN MORE — 2026-09-25. Read before picking anything from the list below.
+>
+> Asked in one sitting (items 3, 7, 8, 10, 14, 15, 16). **Five are settled and two stay open**; each answer
+> is also written into the entry it unblocks, so a run that lands there first still sees it.
+>
+> - **Item 16 — de-duplicate the 11 historical mosaic pairs ([#878](https://github.com/JimmyeJones/astrostack/issues/878)) → YES.**
+>   Merge each pair, keeping the more complete target. **Buildable now**; the constraints are on the #878
+>   entry under "Bugs" — above all, it goes through `seestack/io/merge.py::carry_stack_runs`, so no picture,
+>   saved recipe or run history is lost.
+> - **Item 15 — `astroalign` for the WCS-free fallback → YES.** The dependency is approved; the entry under
+>   "Autonomy" is no longer gated on it. Still offline-only, pinned in `pyproject.toml` so the image carries it,
+>   and the `Image contract` CI job must stay green.
+> - **Item 14 — the three small extras → noise picture YES, auto-apply preset YES, 9:16 portrait clip NO**
+>   (declined; do not re-ask). In its place the owner asked for something else: **a progression video per
+>   target, ordered by when the subs were shot, "so I can see how my added frames affect targets."** All three
+>   are entries at the top of "Features that serve real workflows".
+> - **Item 10 — `mixed_pointing_guard` → the owner wants it ON.** It is his stored `config.json` value, so per
+>   §9 **he** flips it (Settings → "Skip a hands-off stack when the batch looks like two different targets");
+>   no agent flips it. The O(n²) speed-up this item was said to unblock had already shipped (v0.374.7 backend,
+>   v0.455.5 frontend) — re-measured 2026-09-25 at **58 ms for 35,894 subs** — so that idea is closed.
+> - **Item 7 — a hard per-frame plate-solve limit → NO, keep trying.** Every rescue attempt beats wall-clock
+>   for him. The ladder-budget half is closed; do not re-ask.
+> - **Item 8 → "not sure"; item 3 → "haven't checked".** Both stay open as written below.
+
 > ## ✅ OWNER ANSWERED FOUR OF THESE — 2026-09-08. Read before picking anything from the list below.
 >
 > **Q1 — Auto-edit the walk-away picture too? → YES, _with a condition_.** The owner's words:
@@ -3694,6 +3692,7 @@ outright bug in existing behaviour, never to add capability.
    root cause "medium confidence as the *sole* contributor". **Answer:** yes/no, and the target's name.
    Unblocks: "bisect the rest of the v0.158→v0.220 colour chain" under "Bugs". Worth: closes or reopens the
    oldest mosaic complaint.
+   *(Re-asked 2026-09-25: "haven't checked" — still open.)*
 4. **One real solved sub's `.wcs` sidecar, or the `wcs_json` of any solved frame.** Unblocks the sky-atlas
    `CROTA2 → CD` sign check under "Bugs" (fallback path only; low impact). **Command:** on the NAS,
    `sqlite3 <library>/targets/<any target>/project.sqlite "select wcs_json from frames where wcs_json is not
@@ -3706,16 +3705,14 @@ outright bug in existing behaviour, never to add capability.
 6. **Your M42 (or M31) stack, or a screenshot of its core in the editor with "Hold back highlights" at
    max.** Unblocks the highlight-knee redesign ("Image quality", the v0.240.0 measurement). Worth: blown cores
    on the brightest targets a beginner shoots first.
-7. **On a cloudy night, does the "locating" stage run unreasonably long?** ASTAP's 3-rung ladder can spend
-   3× `astap_timeout_s` per unsolvable sub. **Question:** *would you trade fewer rescue attempts on hard
-   frames for a hard per-frame time limit (yes/no)?* Unblocks the ladder-budget half under "Bugs".
+7. ~~**A hard per-frame plate-solve time limit?**~~ — **ANSWERED NO 2026-09-25** (keep every rescue attempt). The ladder-budget entry is closed; its text is in `SHIPPED.md` under 2026-09-25.
 8. **Have you ever seen new subs sit un-ingested until you pressed Scan?** Unblocks the watcher clock-skew
    hardening note under "Bugs" (a NAS clock ahead of the app's). **Answer:** yes/no.
+   *(Re-asked 2026-09-25: "not sure" — still open.)*
 9. ~~**Skip folders named `batch_stack_tmp` at scan time?**~~ — **ANSWERED YES 2026-09-08 and SHIPPED in
    v0.393.0.** The scanner skips it, the skipped-folders report says so in its own words, and the report's
    "bring it in" still ingests it — the owner's condition. Nothing left to ask.
-10. **The mixed-pointing guard (`mixed_pointing_guard`, off): do you want it on?** Unblocks the O(n²)
-    preflight speed-up under "Performance", which only matters if the guard runs. **Answer:** yes/no.
+10. ~~**The mixed-pointing guard: do you want it on?**~~ — **ANSWERED YES 2026-09-25 — the owner flips his own switch** (§9); the speed-up it gated had already shipped and is closed.
 11. **A target with an edge-on galaxy or a bright elongated nebula (NGC 891, NGC 4565, M82), and whether
     any of its subs were flagged "streak".** Unblocks the per-frame trail-vs-object detector under "Image
     quality" (needs real data to tune). **Command:** the target's Frames table filtered to "rejected" —
@@ -3730,23 +3727,9 @@ outright bug in existing behaviour, never to add capability.
     what the rescue made of it.)*
 13. **A heavy-nebulosity stack (North America, Rosette).** Unblocks the SExtractor skew-guard confidence
     check under "Image quality" — a log read, no code change unless it fails.
-14. **Three yes/no's on residue from shipped features:** a 9:16 portrait zoom clip for Reels/Shorts? A
-    noise-delta *picture* beside the "Did it get better?" sentence? Auto-*apply* the classified object
-    preset instead of offering it as a chip? Each is small; none is built until wanted.
-15. **One offline dependency: `astroalign` for the WCS-free star-registration fallback?** *(Cut down
-    2026-09-11 — the four networked items this row used to bundle with it were **declined outright** by
-    Q4's standing LOCAL policy, so asking about them again would re-open a settled question. What is left
-    is not a network question at all.)* **Answer:** yes/no to adding one pure-Python offline package to the
-    image so a faint field whose subs never plate-solve can still be registered against each other.
-16. **De-duplicate the 11 historical mosaic target pairs (observer [#878](https://github.com/JimmyeJones/astrostack/issues/878)).**
-    The naming collision that minted them is **closed** — recurrence has been dormant since 2026-07-03,
-    confirmed on live data (see the #878 entry under "Bugs"). But the 11 existing `<T>_mosaic-<hex>` /
-    `<T>_mosaic_sub` pairs still register 41,732 frames twice, which cost ~24.9 h of redundant re-stack time
-    on the last full reprocess and shows two Library entries per mosaic. Reconciling them is a **merge
-    migration** that rewrites on-disk target layout (§9) and must never touch `incoming/` (§10), so it needs
-    your OK before an agent runs it. **Decision:** merge each pair, keeping the more-complete target? *(The
-    observer measured no urgency — nothing new has been duplicated since this was filed; this is one-off
-    cleanup, not a live leak.)* **Worth:** removes the redundant re-stack time and the duplicate wall entries.
+14. ~~**Three yes/no's on residue from shipped features**~~ — **ANSWERED 2026-09-25:** noise picture yes, auto-apply preset yes, 9:16 clip no, plus a new owner request (a capture-date progression video). See the 2026-09-25 block above.
+15. ~~**One offline dependency: `astroalign`?**~~ — **ANSWERED YES 2026-09-25.** The WCS-free fallback entry under "Autonomy" is ungated.
+16. ~~**De-duplicate the 11 historical mosaic target pairs ([#878](https://github.com/JimmyeJones/astrostack/issues/878))**~~ — **ANSWERED YES 2026-09-25.** Buildable; constraints on the #878 entry under "Bugs".
 
 - ~~**Satellite/aircraft-trail forecast for the Tonight planner (opt-in; needs a data source).**~~ —
   **DECLINED 2026-09-08 by the owner's standing LOCAL policy (AGENTS.md §1 Owner Facts, Q4); struck
@@ -3781,6 +3764,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **CLOSED, not built (no version)** — the `astap_timeout_s` per-frame budget (the ASTAP ladder's open half (b)):
+  the owner answered sign-off item 7 on 2026-09-25 — keep every rescue attempt rather than cap per-frame time.
+  Full entry in [`SHIPPED.md`](SHIPPED.md) under 2026-09-25.
+- **CLOSED, not built (no version)** — Performance: `detect_mixed_pointings`'s O(n²) pair loop. Already fixed by
+  v0.374.7 (`fold_pointings`) and v0.455.5 (frontend); re-measured 2026-09-25 at **58 ms for 35,894 subs** of one
+  dithered pointing, 1.9 s at a deliberately wide 0.3° scatter, and a mixed batch is still caught. Full entry in
+  [`SHIPPED.md`](SHIPPED.md) under 2026-09-25.
 - **v0.472.3** — 🟢 PRIORITY 3 (friendliness), the defect **v0.472.2 shipped and the probe caught before it merged**: the new week-plan chip read *"Needs 3×3 mos…"* on a phone, **a 76 px box holding a 91 px word, with no scroll that could reach the rest**. Third instance of the one mechanism `frontend/src/badgeFit.ts` was written for (v0.434.1 on the Nights card, v0.436.2 on the Tonight score column): a Mantine `Badge` is `overflow: hidden; text-overflow: ellipsis`, so it contributes **no min-content width** and a squeezed table column ellipsises the value *inside* it — not a truncated label with the value elsewhere, the value itself, gone. The week table's "Point at" column is the narrowest on the page, and the card's own comment about its moon note had already recorded the same trap ("a badge truncates, and in this column on a phone the caution came out as *Moon 92%, up…*"). `style={NO_SHRINK}` — the shared rule, not a width picked against today's words — and a test pinning `min-width: max-content` on that badge, the same assertion the Tonight row's three badges already carry. **Measured either side on a real phone-width browser:** `1 thing(s) to look at` → `nothing overflowing, no console errors`, and `/tonight` **3,847 px → 3,718 px** (below the 3,834 px it measured *before* this run, because the un-shrunk chip had been squeezing the target names onto extra lines). Frontend-only, one style prop; no new test case — the assertion is added to the chip's own test, which is where a reader looks for it. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.472.2** — 🟢 PRIORITY 2/3 (autonomy + friendliness), found by a `--mosaic` dogfood pass that was mechanically CLEAN, reading the "what the TONIGHT page SAYS" block against the Target page's: **"Plan my week" named a target for each of the next seven nights and said nothing about how to shoot it.** The week table listed *Tonight / Tomorrow / Monday · Point at · Sample: Orion Nebula (M42)* while that target's own page said *"only about 20% of it made it in… shooting it in mosaic mode next session is the biggest win here"*. That is **exactly the gap v0.472.0 closed one card up the same page** — mosaic mode is a setting chosen on the scope *before* a session, so the row that says what to point at is the one place the advice can still be acted on — and the week card, which plans seven sessions rather than one, was not in that fix. `WeekTargetPick` now carries `framing`/`mosaic`, made by the **same** `framing_hint`/`mosaic_plan` calls against the **same** measured frame (`plan_week` gains a `field`, wired from the router's existing `_frame_field`), with the same `canvas_is_mosaic` stand-down — so the two cards on one page cannot badge one object two ways, which is what the engine and API tests assert (against `plan_tonight`'s own answer, never against a literal). The frontend reuses `framingRowBadge`, the tonight row's own helper. **One deliberate difference from that row:** the chip appears once per **target**, not once per night (`planweek.framingBadgeNights`) — a week where one target is best-placed on five nights would otherwise stack five identical "Needs 3×3 mosaic" chips down one column, which is the always-on repetition the standing "extremely busy" priority is about, and the name is already in every row. The week cache signature gains the frame field, the catalogue sizes and the mosaic flag, since all three can move without any of the acquisition numbers already in it moving. Additive optional fields only; no config, schema, on-disk, default, endpoint or ranking change, and a pick with no verdict renders exactly as it did. Tests +8 (3 engine, 2 API, 3 vitest) plus 2 pure-helper cases; **six fail before**, verified by scratch reverts of the engine half and the render. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.472.1** — 🟢 PRIORITY 3 (friendliness / trust), the contradiction **v0.472.0 itself created** and the Target page had already closed one screen over: **the planner row said "Plenty — try something new" an inch from "Needs 3×2 mosaic".** The readiness badge prices the integration the target has, which is the integration of the *framing it was shot at*; that was unambiguous while it was the only thing on the row with an opinion about the canvas, and v0.472.0 put a second one beside it. On an oversized object a beginner now read *you are done here* beside *you have a sixth of it*, on the one screen read while choosing what to point at. Fixed the way v0.444.2 fixed it on the Target page, reusing the machinery that fix added rather than inventing a second one: `integrationReadiness` has taken a `canvasScope` since then, and the planner row was simply the caller with no framing verdict to pass it. New pure `tonight.readinessFramingScope` reads the scope off the **same** `framing` the badge beside it is drawn from — so "have I shot enough?" and "will it fit in one frame?" cannot answer as if the other had not been asked — and `readinessRowBadge`/`readinessRowHint` pass it through. The number is unchanged (it is the honest goal for the canvas the owner has); what changes is that the *"plenty"* chip drops its **prescription** — "Plenty for this framing", leaving "shoot it wider" to the badge whose job that is — and every chip's hover gains the scope ("of ~6 h **for the framing you've shot**"). `IntegrationReadiness` now carries `canvasScope` so the chip asks the same question the sentence answered instead of keeping its own copy of the blank-scope rule. Only the `mosaic` level scopes anything — `tight` means it about fits, the same bar `framingIsFragment` sets — and a target already shot *as* a mosaic carries no verdict at all (`canvas_is_mosaic`), so its row is untouched by construction. Frontend-only; no endpoint, config, schema, on-disk, API-shape or default change, and a row with no framing verdict is byte-for-byte what it was (pinned). Tests +5 vitest, **one fails before** (verified by a scratch revert). Full entry in [`SHIPPED.md`](SHIPPED.md).

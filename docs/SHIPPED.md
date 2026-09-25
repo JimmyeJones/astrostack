@@ -1,5 +1,74 @@
 # Shipped — the record
 
+## Closed by owner answers — 2026-09-25 (no version)
+
+*(Docs only. The owner answered seven sign-off items in one sitting; two of them closed entries outright.
+The answers themselves are in `IMPROVEMENTS.md` → "Needs owner sign-off", 2026-09-25 block.)*
+
+**Item 7 answered NO — the ladder-budget half is closed.** Entry as it stood:
+
+- **🟡 BROKEN-UX / AUTONOMY (Scout QA audit 2026-08-26 #4, traced + verified end-to-end) — PARTIALLY FIXED
+  (misleading-copy half shipped v0.272.2; optional behavioural half open) — the `astap_timeout_s` setting bounds
+  ONE solve *attempt*, not one frame, so an unsolvable sub can burn up to 3× the configured seconds; the Settings
+  help text used to say the opposite and now says so honestly.** *(Severity was broken-UX / autonomy — it
+  silently triples the wasted time on a cloudy walk-away night, the owner's exact workflow; not wrong-result.
+  Confidence: traced against the code.)*
+  `ASTAPSolver.solve` (`seestack/solve/astap.py:206`) runs a **3-rung** ladder (`_SOLVE_LADDER`, ~line 147:
+  default → full-res `-s 1000` → bin-2×), and each rung calls `_solve_once` → `subprocess.run(timeout=self.timeout_s)`
+  (~line 294). A timeout on a rung raises `ASTAPError`, which is caught and **falls through to the next rung**
+  (~line 216–226) — each getting the *full* `timeout_s` again. So a frame that never solves (heavy cloud, star-poor
+  sub) consumes up to `3 × astap_timeout_s` of wall clock: **180 s at the 60 s default**. Meanwhile the
+  frontend tooltip (`frontend/src/routes/Settings.tsx:52`) reads *"Give up on solving a single frame after this
+  many seconds."* — literally per-frame, which is false. On a clear night this is invisible (frames solve on rung 1
+  in a second or two; only *timeouts* accumulate), but on a cloudy night with hundreds of unsolvable subs it can turn
+  an expected ~100 min of wasted solve time into ~5 h, delaying the very auto-stack the owner walked away for.
+  **Fix options (the ladder's multi-attempt rescue is load-bearing, so don't just cut it):**
+  (a) ~~*Honest-copy, safe:* correct the tooltip.~~ — **SHIPPED v0.272.2** (Scout 2026-08-26, this run): the
+  `astap_timeout_s` hint now reads *"Give up on each solve attempt after this many seconds. The solver tries up to
+  3 strategies per frame, so a frame that never solves can take up to about 3× this before it's set aside (and
+  retried on the next scan)."* with a `Settings.test.tsx` assertion pinning the per-attempt wording. So the setting
+  is no longer *misleading*; the wasted-time behaviour itself is unchanged. **(b) is the remaining open half:**
+  *Behavioural, careful:* budget the timeout across the ladder (e.g. full `timeout_s` on rung 1 where most frames
+  solve, a fraction on rungs 2–3, or a shared deadline for the whole frame) so the setting bounds *per-frame* time as
+  its name implies, without starving the coarse rescue rungs — needs a test that a hard frame still gets its rescue
+  attempts and that total per-frame time is bounded. Only worth doing if the owner wants true per-frame bounding;
+  the label fix above already removes the surprise.
+  **Builder 2026-08-26 — considered and deliberately DECLINED this run; read this before picking it up.** I sized
+  it against the real code and stopped, because every workable shape is a **blind threshold flip on the
+  on-by-default hot path**, which AGENTS.md §1 tells an agent not to do. The ladder cannot be given a true
+  per-frame bound without a per-rung floor (a shared deadline alone gives rungs 2–3 *nothing* on exactly the
+  frames a timeout means they exist to rescue), and the floor's size *is* the tradeoff: at 25 % of `timeout_s`
+  the worst case falls 3× → 1.5×, at 50 % it falls to 2×, and in both cases a hard frame that rung 3 would have
+  cracked in, say, 20 s is now abandoned. Which frames that loses is unmeasurable from the repo — it needs a real
+  cloudy night's subs, which no agent has. Meanwhile the cost of leaving it is now *bounded and honest*: the
+  Settings hint says "up to about 3×" (v0.272.2), and as of **v0.276.4** a sub that burned the whole ladder is
+  no longer silent — it lands in its own "Ran out of time being located" bucket on the Target page telling the
+  owner to raise the timeout. So the surprise and the invisibility are both gone; only the wasted minutes
+  remain. **Leave this for the owner to ask for**, and if they do, ship it with the floor as a named constant and
+  the measured before/after on their own data — not on a synthetic frame.
+
+**Item 10 answered YES — and the speed-up it gated had already shipped.** Re-measured 2026-09-25 on the current
+`seestack/stack/pointings.py::detect_mixed_pointings`: 14.7 ms at 5,477 subs and 57.6 ms at 35,894 (one dithered
+pointing, ±0.07°), 1,885 ms at 35,894 with a deliberately wide ±0.3° scatter, and an M42 + M31 batch of 6,000
+still returned MIXED in 12.7 ms. Entry as it stood:
+
+- **NEW IDEA (Builder 2026-08-06, MEASURED while auditing the stack path) — `detect_mixed_pointings` is a pure-Python
+  O(n²) pair loop with no cap, so the mixed-pointing preflight grows quadratically with a target's sub count.**
+  *(Performance — size S; **off-by-default setting, so this is a latency note, not a live problem**.)*
+  `seestack/stack/pointings.py::detect_mixed_pointings` single-linkage-clusters every accepted+solved sub against
+  every other one. The inner loop never short-circuits (a single tight target means *every* pair links), and
+  `webapp/pipeline.py::_detect_mixed_pointings` passes the full frame list with **no cap** — unlike the frontend
+  mirror (`frontend/src/components/target/mixedPointings.ts`), whose comment notes it is "bounded by the 2000-frame
+  list cap". **Measured** (one tight cluster, the ordinary single-target case): 0.17 s at 1 000 subs, 0.70 s at
+  2 000, 2.7 s at 4 000, **10.8 s at 8 000** — and 4× again per doubling, so the §1 owner's "thousands of subs"
+  target is a tens-of-seconds stall inside a stack job. **Only reachable with `mixed_pointing_guard` on** (it is
+  **off** by default), and it runs in a background job rather than an HTTP request, which is why this is filed as
+  perf rather than a bug. **Care:** any speed-up must be **exactly** verdict-preserving (a grid/KD-tree prefilter
+  is only exact if the neighbour radius is the chord `2·sin(d/2)`; naive cell-representative merging is *not*).
+  Cheapest honest option is simply to vectorise the pair test in NumPy in blocks (same O(n²), ~100× the constant)
+  or cap the input with a deterministic subsample — a cap changes the verdict, so it needs its own argument.
+  **Gate:** only worth doing if the owner turns the guard on.
+
 ## v0.472.3 — 2026-09-20 — and the chip that fix added read "Needs 3×3 mos…" on a phone
 
 *(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Caught by a dogfood probe **before it merged**,
