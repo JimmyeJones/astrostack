@@ -1641,8 +1641,10 @@ export function StackView() {
               {job.state === "done" && excludedFrames.length > 0 ? (
                 <Alert color="orange" mt="xs" p="xs">
                   <Text size="xs">
-                    Dropped {excludedFrames.length} frame(s) with a bad plate-solve (footprint far
-                    from the group) and flagged them rejected: {excludedFrames.join(", ")}
+                    Dropped {excludedFrames.length} frame(s) with a bad plate-solve — they landed
+                    away from the group, or came back at a scale the rest of the frames disagree
+                    with — and flagged them rejected: {excludedFrames.join(", ")}. Each frame's row
+                    in the Frames table says which.
                   </Text>
                 </Alert>
               ) : null}
