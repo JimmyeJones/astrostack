@@ -15,7 +15,10 @@ mapping can be reused anywhere the counts are known.
 
 from __future__ import annotations
 
-from seestack.io.project import REJECT_REASON_FILE_MISSING
+from seestack.io.project import (
+    REJECT_REASON_FILE_MISSING,
+    REJECT_REASON_SEESTAR_OUTPUT,
+)
 from seestack.qc import grading
 from seestack.solve.astap import SOLVE_FAILED_TIMEOUT
 
@@ -60,6 +63,10 @@ _BUCKETS: list[tuple[str, str, str]] = [
      "Settings and run Plate Solve again."),
     ("removed", "You removed these",
      "Frames you rejected by hand."),
+    ("seestar_output", "The Seestar's own pictures, not your subs",
+     "The Seestar saves its own finished picture alongside the raw frames it "
+     "shot. Those aren't subs, so they're set aside rather than stacked — your "
+     "night is all still here."),
     ("missing", "Their files aren't on your disk any more",
      "You told AstroStack these subs are gone, so it carries on without them. "
      "Nothing was deleted by the app — and if the files ever turn up again, "
@@ -90,6 +97,12 @@ def _bucket_for(reason: str) -> str:
                 else "solve_failed")
     if reason == "user":
         return "removed"
+    if reason == REJECT_REASON_SEESTAR_OUTPUT:
+        # The device's own stacked image sitting in the same folder as the subs.
+        # Its own bucket rather than the vague "other" for the same reason
+        # "missing" has one: the honest answer is reassuring ("nothing of yours
+        # was left out"), and "left out for other reasons" is not.
+        return "seestar_output"
     if reason == REJECT_REASON_FILE_MISSING:
         # The owner's own "those subs are gone, carry on without them". Its own
         # bucket rather than the vague "other", because it is a thing he *did*
