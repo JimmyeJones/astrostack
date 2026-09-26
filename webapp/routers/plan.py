@@ -897,6 +897,16 @@ def get_plan_week_ics(
 #: rebuilds immediately either way).
 _CLOSING_CACHE_TTL_S = 900.0
 
+#: How many closing targets the response lists outright. The count is exact —
+#: ``n_closing`` carries it — and this only bounds the list, the same way
+#: :data:`webapp.incominglag.INCOMING_LAG_MAX` bounds its own.
+#:
+#: Deliberately the number of rows this endpoint could already return before
+#: :data:`~seestack.nightplan.SEASON_MAX_TARGETS` widened the *scan*: the card
+#: on a page the owner already calls busy must not get longer because a bug in
+#: which targets were scanned was fixed.
+CLOSING_MAX_ROWS = 40
+
 
 @router.get("/closing")
 def get_season_closing(
@@ -916,11 +926,19 @@ def get_season_closing(
     gone until next year. This is the library-wide half — and the one planning
     answer worth interrupting someone with, because it expires.
 
-    Library targets only (this is "finish what I've got"), capped at
-    :data:`~seestack.nightplan.WEEK_MAX_TARGETS` exactly like ``/week``, soonest
-    first. Read-only and offline. An empty ``targets`` list is the ordinary
-    answer — nothing is leaving — and is also what a site-less install gets, so
-    the card self-hides rather than guessing.
+    Library targets only (this is "finish what I've got"), soonest first.
+    Read-only and offline. An empty ``targets`` list is the ordinary answer —
+    nothing is leaving — and is also what a site-less install gets, so the card
+    self-hides rather than guessing.
+
+    **Two separate bounds, and they used to be one.** The *scan* is capped at
+    :data:`~seestack.nightplan.SEASON_MAX_TARGETS` (a cost bound, nearly free —
+    see there); the *list* is capped at :data:`CLOSING_MAX_ROWS`, with
+    ``n_closing`` carrying the exact total so nothing is hidden silently. This
+    used to borrow ``/week``'s single ``WEEK_MAX_TARGETS`` cap, which selected
+    the forty targets with the **most** integration on them — the opposite end
+    of the axis this card ranks by, and so the end whose season ending costs
+    least. See :func:`~seestack.nightplan.season_closing` for the measurement.
     """
     settings = deps.get_settings(request)
 
@@ -953,8 +971,8 @@ def get_season_closing(
         observer.lat_deg, observer.lon_deg, observer.elevation_m,
         tuple(tuple(p) for p in (settings.horizon_profile or [])),
         # Depth is in the signature for the same reason it is in the week plan's:
-        # the ``WEEK_MAX_TARGETS`` cap selects *by* it, so a night's capture can
-        # change which targets get scanned without adding or moving one.
+        # the ``SEASON_MAX_TARGETS`` cap selects *by* it, so a night's capture
+        # can change which targets get scanned without adding or moving one.
         tuple((t.safe, t.ra_deg, t.dec_deg, t.total_exposure_s, t.frames_accepted)
               for t in targets),
     )
@@ -969,7 +987,11 @@ def get_season_closing(
         ),
         ttl_s=_CLOSING_CACHE_TTL_S,
     )
-    payload["targets"] = [asdict(c) for c in closing]
+    # Exact count, bounded list — a card that named "40 of your targets" while
+    # 50 were leaving would be a small untruth of exactly the kind this app
+    # keeps having to unpick.
+    payload["n_closing"] = len(closing)
+    payload["targets"] = [asdict(c) for c in closing[:CLOSING_MAX_ROWS]]
     return payload
 
 
