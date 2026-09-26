@@ -220,3 +220,52 @@ def test_a_real_stack_write_leaves_nothing_the_delete_path_cannot_find(tmp_path)
         canvas_h=8, canvas_w=8, coverage_min=0, coverage_max=1, options_json="{}",
     ))
     assert list(out_dir.iterdir()) == []
+
+
+def test_deleting_a_run_takes_its_deepening_reel_with_it(tmp_path):
+    """The cross-run "night after night" reel is cached beside the *newest* run's
+    basename, and it was not a registered artefact — so deleting that run left the
+    reel and its signature on disk for good, where nothing would ever look at them
+    again. Reproduced before the fix at 2.0 MB on one synthetic run; a real reel is
+    a 1024 px animation of every stack a target has.
+
+    Sits beside ``test_a_real_stack_write_leaves_nothing_the_delete_path_cannot_find``
+    because that guard runs the *writer*, and this file is written later, by the
+    webapp, on demand."""
+    import numpy as np
+
+    from seestack.render.deepening import write_deepening_reel
+    from seestack.stack.output import write_stack_outputs
+    from webapp.routers.storage import delete_run_artifacts
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    written = write_stack_outputs(
+        project_dir=project_dir,
+        rgb=np.full((8, 8, 3), 0.2, dtype=np.float32),
+        coverage=np.ones((8, 8), dtype=np.float32),
+        wcs_text=None, out_basename="master",
+    )
+    out_dir = project_dir / "output"
+
+    # Write the reel with its *own* writer, so the test cannot be wrong about the
+    # names, plus the signature the resolver keeps beside it.
+    from PIL import Image
+    frames = [Image.new("RGB", (8, 8), (10 * i, 10 * i, 10 * i)) for i in (1, 2, 3)]
+    reel = write_deepening_reel(frames, out_dir, "master")
+    assert reel is not None and reel.exists()
+    # Spelled out rather than read from RUN_ARTEFACT_SUFFIXES on purpose, so this
+    # test states the failure in the terms the bug had: these were files on disk
+    # that the table did not know about. `test_run_artefact_coverage.py` is what
+    # pins the name against the table.
+    (out_dir / "master_deepening.sig").write_text("some-series-signature")
+
+    delete_run_artifacts(StackRunRow(
+        id=1, timestamp_utc="2026-05-01T00:00:00Z", output_basename="master",
+        fits_path=str(written["fits"]), tiff_path=str(written["tiff"]),
+        preview_path=str(written["preview"]), n_frames_used=1,
+        canvas_h=8, canvas_w=8, coverage_min=0, coverage_max=1, options_json="{}",
+    ))
+
+    left = sorted(p.name for p in out_dir.iterdir())
+    assert left == [], f"deleting the run left files behind: {left}"

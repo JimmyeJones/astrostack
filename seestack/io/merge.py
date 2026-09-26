@@ -287,7 +287,11 @@ def carry_stack_runs(destination: Project, source: Project) -> CarryResult:
     :meth:`seestack.io.library.Library.merge_targets_result` decides by **not
     deleting that source folder**, which keeps the promise either way.
     """
-    from seestack.stack.output import OUTPUT_DIRNAME, RUN_ARTEFACT_SUFFIXES
+    from seestack.stack.output import (
+        OUTPUT_DIRNAME,
+        RUN_ARTEFACT_SUFFIXES,
+        SERIES_ARTEFACTS,
+    )
 
     runs = list(source.iter_stack_runs())
     if not runs:
@@ -304,6 +308,12 @@ def carry_stack_runs(destination: Project, source: Project) -> CarryResult:
         landed: dict[str, Path] = {}
         present = 0
         for kind, suffix in RUN_ARTEFACT_SUFFIXES.items():
+            if kind in SERIES_ARTEFACTS:
+                # A cache describing the *source* target's whole series of stacks;
+                # the destination's series is a different series, and its own reel
+                # is rebuilt on demand. Carrying it would land a picture of the
+                # wrong history beside the merged runs.
+                continue
             src_file = src_dir / f"{src_base}{suffix}"
             if not src_file.is_file():
                 continue

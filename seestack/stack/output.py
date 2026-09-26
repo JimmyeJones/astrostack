@@ -777,6 +777,18 @@ RUN_ARTEFACT_SUFFIXES: dict[str, str] = {
     # output tree can hold.
     "share_png": "_share.png",
     "share_sig": "_share.sig",
+    # The cross-run "night after night" reel (webp, or an APNG fallback) and its
+    # series signature. Cached beside the *newest* run's basename
+    # (`webapp.routers.stack._build_or_get_deepening_reel`), which is why it has
+    # to be here: unregistered, deleting that run left the reel and its signature
+    # on disk for good — measured at 2.0 MB on one synthetic run, and a reel is a
+    # 1024 px animation of every stack a target has, so it is the second-largest
+    # orphan the output tree can hold after `_share.png`. A cache like the two
+    # above, rebuilt from the masters whenever the series moves, so travelling
+    # with the run costs at most one render.
+    "deepening_webp": "_deepening.webp",
+    "deepening_apng": "_deepening.png",
+    "deepening_sig": "_deepening.sig",
 }
 
 # The artefacts that have a dedicated ``stack_runs`` column, i.e. the only ones a
@@ -786,6 +798,21 @@ RUN_ARTEFACT_SUFFIXES: dict[str, str] = {
 # sibling ``_framecov.fits``) resolves from the FITS basename like coverage does,
 # and an exclusion list silently let it into the map instead.
 _REPOINTABLE_ARTEFACTS = frozenset({"fits", "tiff", "preview"})
+
+# The artefacts that describe the target's whole *series* of stacks rather than
+# one run, and are merely cached at the newest run's basename: the "night after
+# night" deepening reel and its signature.
+#
+# They are in ``RUN_ARTEFACT_SUFFIXES`` because a run's **delete** must reclaim
+# them — that is the bug this set was added with — but they are the one kind that
+# must not be *archived* aside on a re-stack. Renaming them onto the superseded
+# basename would leave one stale reel of a different series behind per re-stack,
+# each waiting on that run's delete: strictly worse for disk than what happened
+# before they were registered, where the rebuild simply overwrote the one copy.
+# So an archive **removes** them (they are a cache, rebuilt from the masters on
+# the next request), and a merge does not carry them (the destination target's
+# series is a different series).
+SERIES_ARTEFACTS = frozenset({"deepening_webp", "deepening_apng", "deepening_sig"})
 
 
 def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str]:
@@ -805,8 +832,11 @@ def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str
     appear" reel are archived too but aren't in the returned map (they have no
     dedicated history column — they're resolved from the FITS basename).
 
-    The set moved is :data:`RUN_ARTEFACT_SUFFIXES`; the compound ``_preview`` /
-    ``_coverage`` / ``_progress`` names rebuild cleanly from the new basename.
+    The set moved is :data:`RUN_ARTEFACT_SUFFIXES` minus
+    :data:`SERIES_ARTEFACTS`, which is *removed* instead — a whole-series cache
+    has no meaning under a superseded basename, and moving it would leave one
+    stale copy behind per re-stack. The compound ``_preview`` / ``_coverage`` /
+    ``_progress`` names rebuild cleanly from the new basename.
     """
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     archived_basename = f"{out_basename}_{stamp}"
@@ -815,7 +845,8 @@ def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str
     n = 2
     while any(
         (out_dir / f"{archived_basename}{suffix}").exists()
-        for suffix in RUN_ARTEFACT_SUFFIXES.values()
+        for kind, suffix in RUN_ARTEFACT_SUFFIXES.items()
+        if kind not in SERIES_ARTEFACTS
     ):
         archived_basename = f"{out_basename}_{stamp}_{n}"
         n += 1
@@ -824,6 +855,15 @@ def _archive_existing_outputs(out_dir: Path, out_basename: str) -> dict[str, str
     for kind, suffix in RUN_ARTEFACT_SUFFIXES.items():
         orig = out_dir / f"{out_basename}{suffix}"
         if not orig.exists():
+            continue
+        if kind in SERIES_ARTEFACTS:
+            # A whole-series cache: removed rather than moved (see the set's own
+            # comment). Best-effort, like every other step here.
+            try:
+                orig.unlink()
+                log.info("cleared series cache %s (rebuilt on demand)", orig.name)
+            except OSError as exc:
+                log.warning("could not clear %s: %s", orig, exc)
             continue
         dst = out_dir / f"{archived_basename}{suffix}"
         try:

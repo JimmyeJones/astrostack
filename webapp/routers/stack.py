@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import math
 import os
 from collections.abc import Sequence
 from functools import partial
@@ -2243,8 +2244,14 @@ def _build_or_get_deepening_reel(runs: list) -> Path | None:
     out_dir = Path(newest.fits_path).parent
     basename = newest.output_basename or "master"
     sig = _deepening_signature(runs)
-    sig_file = out_dir / f"{basename}_deepening.sig"
-    for suffix in ("_deepening.webp", "_deepening.png"):
+    # Named from `RUN_ARTEFACT_SUFFIXES`, the table the delete / archive / merge
+    # paths act on, so a reel can never be a file nothing cleans up again.
+    from seestack.stack.output import RUN_ARTEFACT_SUFFIXES
+
+    reel_suffixes = (RUN_ARTEFACT_SUFFIXES["deepening_webp"],
+                     RUN_ARTEFACT_SUFFIXES["deepening_apng"])
+    sig_file = out_dir / f"{basename}{RUN_ARTEFACT_SUFFIXES['deepening_sig']}"
+    for suffix in reel_suffixes:
         cand = out_dir / f"{basename}{suffix}"
         if cand.exists() and sig_file.exists():
             with contextlib.suppress(OSError):
@@ -2252,7 +2259,7 @@ def _build_or_get_deepening_reel(runs: list) -> Path | None:
                     return cand
     # (Re)build: clear any stale reel of either format first so a format change
     # (WEBP↔APNG) can't leave two files that the resolver disagrees on.
-    for suffix in ("_deepening.webp", "_deepening.png"):
+    for suffix in reel_suffixes:
         with contextlib.suppress(OSError):
             (out_dir / f"{basename}{suffix}").unlink()
     from seestack.render.deepening import build_deepening_reel, deepening_frame_label
@@ -2931,33 +2938,98 @@ async def save_stack_preview(
 _BAYER_PATTERNS = {"RGGB", "BGGR", "GRBG", "GBRG"}
 
 
+# Below this many *measured* sky levels a target has no "typical" sky to speak
+# of, so the pick stays on sharpness alone. Ten — the same floor
+# :data:`seestack.stackhealth.NOISE_EXPECTED_MIN_FRAMES` puts on the √N
+# yardstick, for the same reason: on a handful of subs one unlucky frame *is*
+# the population, and a quartile of four numbers is an opinion.
+_REF_SKY_MIN_SAMPLE = 10
+
+
+def _quartile(sorted_values: list[float], q: float) -> float:
+    """Linear-interpolated quantile of an already-sorted list — ``numpy``'s
+    default, without importing it into a function that is otherwise pure Python
+    and may be handed 35,894 records."""
+    pos = (len(sorted_values) - 1) * q
+    lo = int(pos)
+    hi = min(lo + 1, len(sorted_values) - 1)
+    frac = pos - lo
+    return sorted_values[lo] * (1.0 - frac) + sorted_values[hi] * frac
+
+
+def _typical_sky_frames(frames: list[Any]) -> list[Any]:
+    """``frames`` narrowed to those shot under this target's **typical** sky —
+    the middle half of its measured ``sky_adu_median`` values.
+
+    The middle half rather than a tolerance because there is no honest constant
+    here: an interquartile band needs no threshold, is scale-free, keeps about
+    half the frames whatever the spread, and survives a bimodal target (moonlit
+    nights and dark ones) by sitting in whichever population is the bigger. It
+    also picks the dominant *exposure* for free on a mixed-exposure target —
+    sky level scales with exposure, so the 30 s subs of a mostly-10 s target
+    fall outside the band on their own, and a sub that integrated three times
+    as long carries √3 the sky noise and would inflate the ratio by that much.
+
+    Falls back to ``frames`` unchanged when too few subs carry a measurement
+    (:data:`_REF_SKY_MIN_SAMPLE`) or when the band somehow empties, so this can
+    only ever *narrow* an existing choice and never remove one.
+    """
+    skies = sorted(
+        float(f.sky_adu_median) for f in frames
+        if getattr(f, "sky_adu_median", None) is not None
+        and math.isfinite(float(f.sky_adu_median))
+    )
+    if len(skies) < _REF_SKY_MIN_SAMPLE:
+        return frames
+    lo, hi = _quartile(skies, 0.25), _quartile(skies, 0.75)
+    typical = [f for f in frames
+               if getattr(f, "sky_adu_median", None) is not None
+               and lo <= float(f.sky_adu_median) <= hi]
+    return typical or frames
+
+
 def reference_sub_from_frames(frames: list[Any]) -> Any | None:
     """The same choice as :func:`_pick_reference_sub`, made over a frame list the
     caller already has in hand — so a page that has just read every frame doesn't
     re-query for one of them. Pure; ``frames`` may be the whole set or just the
     accepted ones (accepted are preferred either way).
 
-    It reads three fields — ``accept``, ``fwhm_px`` and ``id`` — so a caller may
-    hand it :class:`~seestack.io.project.FrameHealth` records as readily as whole
-    rows, which is what the stack-health card does."""
+    It reads four fields — ``accept``, ``fwhm_px``, ``sky_adu_median`` and
+    ``id`` — so a caller may hand it :class:`~seestack.io.project.FrameHealth`
+    records as readily as whole rows, which is what the stack-health card does.
+
+    **Sharpest, among the frames shot under a typical sky** (v0.475.1).
+    Sharpness alone was the whole test until then, and sharpness is not sky
+    noise: the badge this pick feeds is a σ *ratio*, σ is dominated by sky shot
+    noise, and shot noise is uncorrelated with FWHM — so the sharpest frame of a
+    target being also one of its brightest-sky frames inflated the number by
+    however much brighter that sky was, on the app's one celebratory "trust me"
+    figure. Narrowing to :func:`_typical_sky_frames` first costs nothing a user
+    would see (the reveal's single frame is still the sharpest of a large pool)
+    and makes the comparison a *representative* sub against the stack, which is
+    what the card claims it is."""
     accepted = [f for f in frames if f.accept]
     pool = accepted or list(frames)
     if not pool:
         return None
-    with_fwhm = [f for f in pool if f.fwhm_px is not None]
-    if with_fwhm:
-        return min(with_fwhm, key=lambda f: (f.fwhm_px, f.id or 0))
+    for candidates in (_typical_sky_frames(pool), pool):
+        with_fwhm = [f for f in candidates if f.fwhm_px is not None]
+        if with_fwhm:
+            return min(with_fwhm, key=lambda f: (f.fwhm_px, f.id or 0))
     return pool[0]
 
 
 def _pick_reference_sub(proj: Any) -> Any | None:
-    """Choose a *good* single accepted sub to stand in for "one raw frame".
+    """Choose a *representative* single accepted sub to stand in for "one raw
+    frame".
 
-    Picks the sharpest accepted frame (lowest measured FWHM), tie-broken by id so
-    the choice is deterministic, so the comparison is honest — a genuinely good
-    frame, not a cloud-ruined one — rather than stacked in our favour. Falls back
-    to the first accepted frame (then any frame) when no FWHM is measured, and
-    returns ``None`` only when the target has no frames at all.
+    Picks the sharpest accepted frame (lowest measured FWHM) **among those shot
+    under the target's typical sky**, tie-broken by id so the choice is
+    deterministic — so the comparison is honest rather than stacked either way:
+    not a cloud-ruined frame, and not a bright-sky one whose own noise would
+    flatter the ratio (see :func:`reference_sub_from_frames`). Falls back to the
+    first accepted frame (then any frame) when no FWHM is measured, and returns
+    ``None`` only when the target has no frames at all.
     """
     frames = list(proj.iter_frames(accepted_only=True))
     if not frames:
@@ -3470,8 +3542,13 @@ def _master_canvas_shape(fits_path: str) -> tuple[int, int] | None:
 NOISE_RATIO_META_PREFIX = "noise_ratio:"
 
 # Bump when the *meaning* of the stored payload changes, so an old stamp is
-# re-measured rather than misread.
-_NOISE_RATIO_CACHE_VERSION = 1
+# re-measured rather than misread. The fingerprint covers the two *inputs* (the
+# master and the representative sub) but not the estimator that read them, so a
+# change to :mod:`seestack.qc.noise_ratio` itself has to be declared here or a
+# whole library keeps serving numbers the old one produced. 2 = the decorrelated
+# second-difference estimator (v0.475.0): every stamp written by the lag-1 one is
+# a miss, and heals on the one request that needs it.
+_NOISE_RATIO_CACHE_VERSION = 2
 
 
 def _noise_ratio_fingerprint(fits_path: str, ref_id: int | None) -> dict[str, Any] | None:
@@ -3479,8 +3556,8 @@ def _noise_ratio_fingerprint(fits_path: str, ref_id: int | None) -> dict[str, An
 
     The run row is immutable, but the two inputs are addressed by path: the
     master could be rewritten in place by some future flow, and
-    :func:`_pick_reference_sub` picks the *sharpest accepted* sub, which changes
-    the moment the user accepts or rejects a frame. Both are cheap to
+    :func:`_pick_reference_sub` picks the sharpest typical-sky accepted sub,
+    which changes the moment the user accepts or rejects a frame. Both are cheap to
     fingerprint (one ``stat`` and an id), so the cache is exact rather than
     merely probable. ``None`` when the master can't be stat-ed — then nothing is
     cached and the measurement runs as before.

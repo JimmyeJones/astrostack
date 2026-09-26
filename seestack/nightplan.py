@@ -1815,6 +1815,20 @@ SEASON_HORIZON_WEEKS = 8
 #: ``SEASON_HORIZON_WEEKS + 1`` dark-window searches rather than eighty-five.
 SEASON_STEP_DAYS = 7
 
+#: How many of the library's positioned targets :func:`season_closing` will
+#: scan. Deliberately **not** :data:`WEEK_MAX_TARGETS`, which this used to
+#: borrow, and deliberately far larger.
+#:
+#: This is a **cost** bound, not a filter on which targets are worth answering
+#: about, and the measurement says the cost is nearly flat in it: the work per
+#: sampled night is one dark-window search, one Moon ephemeris and one
+#: vectorised alt/az batch, so on this box the whole scan takes 1.96 s for one
+#: target, 1.99 s for 104, 2.18 s for 400 and 2.53 s for 1,000. The cap exists
+#: only so a pathological registry cannot turn a landing-page card into a slow
+#: request; 400 is past any library a Seestar owner accumulates by hand, and the
+#: answer is cached for a quarter of an hour at both ends besides.
+SEASON_MAX_TARGETS = 400
+
 
 @dataclass(frozen=True)
 class ClosingTarget:
@@ -1848,7 +1862,7 @@ def season_closing(
     min_altitude_deg: float = 30.0,
     horizon: HorizonProfile | None = None,
     min_usable_minutes: float = 45.0,
-    max_targets: int = WEEK_MAX_TARGETS,
+    max_targets: int = SEASON_MAX_TARGETS,
 ) -> list[ClosingTarget]:
     """Which of *your own* targets stop being shootable within the season ahead.
 
@@ -1870,6 +1884,24 @@ def season_closing(
     (:func:`noise_gain_from_more_time`) so the least-finished of two targets
     leaving in the same week is named first, then by ``safe`` for determinism.
 
+    **Which targets are scanned, and why it is the mirror of :func:`plan_week`.**
+    ``max_targets`` is :data:`SEASON_MAX_TARGETS`, a *cost* bound (see there),
+    and when it bites the targets kept are the **least**-finished — the exact
+    opposite of ``plan_week``, which keeps the most-finished and is right to.
+    The two are answering opposite questions. "Which of my projects should I
+    push on this week?" is about investment, so the deepest targets are the ones
+    worth planning around. "What am I about to lose until next year?" is about
+    what the loss *costs*, which is ``noise_gain_from_more_time`` — an hour on a
+    45-minute target is worth a third of its noise and an hour on a 20-hour
+    target about 2 % — and that is already the key this function *ranks* by.
+    Selecting on one key and ranking on its opposite is how this cap came to
+    hide the very rows the ranking exists to put first: measured on a
+    104-target library, borrowing ``WEEK_MAX_TARGETS`` reported 7 of the 18
+    targets that were leaving, every one shown had 12.7-19.1 h on it, every one
+    hidden had 0.3-9.4 h, and one of the three targets in its *last week* was
+    hidden — the one the Dashboard's "Last chance this year" note would have
+    named first.
+
     **Silent rather than wrong**, in three cases that are all about the *sky*
     rather than about any target: no positioned targets; fewer than two sampled
     nights with any darkness (nothing to compare); and — the one worth stating —
@@ -1880,9 +1912,12 @@ def season_closing(
 
     Deterministic, offline and read-only, like the rest of the planner.
     """
+    # Least-finished first, the mirror of ``plan_week``'s key and for the reason
+    # in the docstring above: if the cost cap bites, keep the targets whose
+    # season ending actually costs the owner something.
     positioned = sorted(
         (t for t in library_targets if t.ra_deg is not None and t.dec_deg is not None),
-        key=lambda t: (-(t.total_exposure_s or 0.0), -(t.frames_accepted or 0), t.safe),
+        key=lambda t: ((t.total_exposure_s or 0.0), (t.frames_accepted or 0), t.safe),
     )
     considered = positioned[:max(0, max_targets)]
     weeks = max(1, int(horizon_weeks))
@@ -1952,6 +1987,82 @@ def season_closing(
         ))
     out.sort(key=lambda c: (c.weeks_left, -c.noise_gain, c.safe))
     return out
+
+
+# ---- Where would a *demo* closing target have to sit? ------------------------
+#
+# Not a planning answer: nothing in the app asks this. It exists so the dogfood
+# tooling can seed a target whose season really is ending, on whatever date the
+# pass runs and from whatever site it set — because a season closes as a function
+# of the target's RA against the *date*, so no fixture and no observing site can
+# make the bundled M 42 sample close, and the card that names closing targets has
+# therefore never been rendered in a browser (see ``docs/IMPROVEMENTS.md``).
+
+#: Right-ascension step, in hours, of the grid :func:`closing_sky_position`
+#: probes. Half an hour of RA is ~7.5° — finer than the ~1° a week of the Earth's
+#: own motion moves the sky, so the grid cannot step over a closing band.
+CLOSING_PROBE_RA_STEP_H = 0.5
+
+#: Declinations the probe tries, in degrees. Five samples spanning both
+#: hemispheres, so the search works from a southern site as readily as a northern
+#: one rather than quietly finding nothing below the equator.
+CLOSING_PROBE_DECS_DEG: tuple[float, ...] = (-40.0, -20.0, 0.0, 20.0, 40.0)
+
+
+def closing_sky_position(
+    observer: Observer,
+    *,
+    start_utc: datetime,
+    horizon_weeks: int = SEASON_HORIZON_WEEKS,
+    min_altitude_deg: float = 30.0,
+    horizon: HorizonProfile | None = None,
+) -> tuple[float, float] | None:
+    """A sky position that :func:`season_closing` *would* report, or ``None``.
+
+    Probes a grid of right ascensions at :data:`CLOSING_PROBE_DECS_DEG` and asks
+    :func:`season_closing` itself which of them are leaving — so the answer cannot
+    disagree with the card it exists to light up, whatever either does next.
+
+    Returns the candidate whose season ends nearest the **middle** of the horizon
+    and which is highest in the sky right now: a demo wants a comfortably typical
+    row, not one balanced on the edge of the scan where a day's drift would make
+    it vanish. ``None`` when nothing on the grid closes — from a polar site in
+    midsummer there are no dark nights to compare, and no target's RA can fix
+    that.
+
+    Deterministic, offline and read-only, like the rest of the planner. Ties break
+    on right ascension so two runs on the same date agree.
+    """
+    weeks = max(1, int(horizon_weeks))
+    step = max(0.05, float(CLOSING_PROBE_RA_STEP_H))
+    probes: list[LibraryTarget] = []
+    n_ra = max(1, int(round(24.0 / step)))
+    for dec in CLOSING_PROBE_DECS_DEG:
+        for i in range(n_ra):
+            ra = (i * step) * 15.0
+            probes.append(LibraryTarget(
+                # The safe name carries the grid index so ``season_closing``'s own
+                # deterministic ``safe`` tie-break is stable and readable, and so
+                # the position can be recovered from the row it returns.
+                safe=f"probe-{i:03d}-{int(dec):+04d}",
+                name="probe", ra_deg=ra, dec_deg=float(dec),
+                frames_accepted=0, total_exposure_s=0.0,
+            ))
+    closing = season_closing(
+        observer, probes, start_utc=start_utc, horizon_weeks=weeks,
+        min_altitude_deg=min_altitude_deg, horizon=horizon,
+    )
+    if not closing:
+        return None
+    by_safe = {t.safe: t for t in probes}
+    middle = weeks / 2.0
+    best = min(
+        closing,
+        key=lambda c: (abs(c.weeks_left - middle), -c.minutes_now,
+                       by_safe[c.safe].ra_deg, by_safe[c.safe].dec_deg),
+    )
+    row = by_safe[best.safe]
+    return (float(row.ra_deg), float(row.dec_deg))
 
 
 @dataclass

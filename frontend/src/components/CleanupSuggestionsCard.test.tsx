@@ -124,7 +124,13 @@ describe("CleanupSuggestionsCard", () => {
       expect(screen.getByText(/are duplicates left by an older scan/i)).toBeInTheDocument(),
     );
     expect(screen.getByText(/look like Seestar outputs, videos or photos/i)).toBeInTheDocument();
-    expect(screen.getByText(/M 31_sub · duplicate/)).toBeInTheDocument();
+    const chip = screen.getByText(/M 31_sub · duplicate/);
+    expect(chip).toBeInTheDocument();
+    // The chip grows downwards rather than ellipsising its own reason away: a
+    // long folder name plus " · duplicate" is wider than this Alert's body on a
+    // phone, and an Alert does not scroll (`badgeFit.WRAPPING_BADGE`).
+    expect(chip.closest(".mantine-Badge-root")).toHaveStyle({ height: "auto" });
+    expect(chip).toHaveStyle({ whiteSpace: "normal" });
   });
 
   it("removes only the duplicate group when its own Remove is clicked", async () => {

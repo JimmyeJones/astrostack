@@ -50,6 +50,28 @@ describe("MergeSuggestionsCard", () => {
     await waitFor(() => expect(merge).toHaveBeenCalledWith("m31_n2", ["m31_n1"]));
   });
 
+  it("lets a long target name wrap rather than hiding the fact beside it", async () => {
+    // Measured at 420 px on a real browser: `"<name> · <N> subs · <duration>"`
+    // wanted 299 px and 317 px inside a 288 px badge, so the tail — how many
+    // subs, how many hours — was ellipsised away with no scroll and no tooltip
+    // to reach it. A badge in a *table* gets `NO_SHRINK`; this one sits in an
+    // `Alert` body that does not scroll, so it grows downwards instead.
+    vi.spyOn(client.api, "mergeSuggestions").mockResolvedValue([suggestion({
+      targets: [
+        { safe: "a", name: "Lagoon and Trifid Nebulae mosaic_sub",
+          n_frames_accepted: 583, total_exposure_s: 5830 },
+        { safe: "b", name: "Lagoon and Trifid Nebulae (mosaic)",
+          n_frames_accepted: 120, total_exposure_s: 1200 },
+      ],
+    })]);
+    renderCard();
+
+    const chip = await screen.findByText(/Lagoon and Trifid Nebulae mosaic_sub · 583 subs/);
+    const root = chip.closest(".mantine-Badge-root");
+    expect(root).toHaveStyle({ height: "auto" });
+    expect(chip).toHaveStyle({ whiteSpace: "normal", overflow: "visible" });
+  });
+
   it("says the pictures came too — the fine print promises nothing is deleted", async () => {
     vi.spyOn(client.api, "mergeSuggestions").mockResolvedValue([suggestion()]);
     vi.spyOn(client.api, "mergeTargets").mockResolvedValue(

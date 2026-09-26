@@ -1,5 +1,631 @@
 # Process notes & QA sweep records
 
+## 2026-09-26 — Builder: the lever the last run wrote down paid twice, and the second mirror was a disk leak
+
+*(Builder, branch `claude/exciting-tesla-a4kwsq`, shipping v0.478.1 and v0.478.2. Baseline green — **6,623
+passed, 2 skipped**, 14m35s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared
+first. End of run: **6,636 passed, 2 skipped**, 13m54s; frontend **4,370 tests / 285 files**, `tsc` and
+`vite build` clean, all three run from `frontend/`.)*
+
+**The lever: the previous run ended by asking "which other hand-mirrored list in this repo has nothing
+checking it?", and the answer was two, in one hour, both already drifted.** Neither was found by dogfooding
+— they were found by reading the *pairs* rather than the pages. Worth recording because the question turns
+out to be cheap to ask and the hit rate was 2 for 4:
+
+* **`rejectReasonLabel` vs the Python that writes `reject_reason`** — drifted by two
+  (`auto:seestar_output`, `auto:file_missing` shown as their own identifiers). Shipped as **v0.478.1**.
+* **`RUN_ARTEFACT_SUFFIXES` vs the code that writes files beside a run's basename** — drifted by three
+  (`_deepening.webp` / `.png` / `.sig`, so deleting a run left the reel on disk for good, 2.0 MB measured).
+  Shipped as **v0.478.2**.
+* **`frontend/src/nav.tsx` vs the registered routes** — *checked and clean.* The two routes not in the nav
+  are `/compare` (its URL carries two picture refs, so it cannot be a nav destination) and `/show`, which is
+  reached in one click from `/best`'s "Play slideshow" button. No orphan page; no test added, because the
+  interesting half ("is it reachable by clicking?") is not statically checkable.
+* **`METRIC_LABEL` vs `seestack.qc.grading.METRIC_LABELS`** — *checked and clean*, word for word. Pinned by
+  the v0.478.1 drift test anyway, since it is one line beside the one that was not clean.
+
+**What made both fixes more than a patch is that the guard is derived, not declared.** Both new tests read
+the vocabulary out of *the code that produces it* — `ast` over every `reject_reason` write for one, a scan
+for `f"{basename}_<name>.<ext>"` literals for the other — so the thing being checked cannot be updated by
+editing the checker. Both carry a tiny `_EXEMPT` map with a written reason per entry, plus a test that a
+stale exemption cannot sit there hiding the next one, which is the shape `test_dogfood_route_coverage.py`
+established the day before.
+
+**And one thing the second fix had to get right that the entry did not see at first:** registering the
+deepening reel would have *archived* it onto each superseded basename, leaving one stale reel per re-stack
+where before there was one copy the rebuild overwrote — i.e. the fix for the delete leak would have been a
+worse leak. Hence `output.SERIES_ARTEFACTS`: registered for the delete, removed by the archive, skipped by
+the merge. **Generalisable: when you add something to a shared list, read every consumer of that list, not
+just the one you are fixing.**
+
+### `--mosaic` dogfood pass at v0.478.2 — CLEAN
+
+Mechanically clean at both widths: nothing overflowing, no console errors. Tallest phone pages: the mosaic
+Target page 3,673 px, `/tonight` 3,638 px, the mosaic editor 3,419 px, `/glossary` 3,364 px, `/` 3,121 px,
+`/life-list` 3,094 px. In line with the standing baselines; no IA slice taken. Auto's trim on the 2×2 is
+**7.9 %** (the gate is ~15 %).
+
+Read as one paragraph, both prescribing columns hold:
+
+* **The mosaic Target page.** Coaching ("another pass or two over the same mosaic evens out the thinner
+  part"), readiness ("goal ~7.3 h, about 4 fields of sky"), the panel map ("a little behind at the
+  top-right… it evens out on its own"), the health card's grain note ("about 23 % of the picture has 3 subs
+  where most has 6… only about 30 s behind") and the seam note ("the sky matches across the joins, so where
+  it looks grainier that is a difference in depth, not a step in the sky") all say the same thing in the
+  same direction. The framing verdict asks for a wider grid *and* says the depth comes first. No finding.
+* **`/tonight`.** The week plan's headline ("Your best night is Friday") is scored with the Moon in it —
+  `nightplan._score` applies `moon_penalty` and the rows carry their own MOON chips — so the "scored on
+  altitude alone" class that produced v0.445.0 does not apply here. No finding.
+
+**One hypothesis raised and killed by checking rather than by reasoning:** the planner lists the single-field
+sample and the 2×2 mosaic of *the same object* one after another ("Add more to what you're shooting", scored
+28 and 27), which on the owner's library — where `<T>` and `<T>_sub` pairs and 11 hash-suffixed mosaic
+duplicates exist — looked like it might contradict the Library wall's own "Same object in more than one
+folder?" nudge. It does not: the wall stayed silent on this pair, because the merge suggester deliberately
+splits mosaic from single-field targets. Two framings of one object are not duplicates, and the app already
+says so consistently.
+
+### The one claim in this run that a browser had to settle
+
+v0.478.1 adds two labels to a badge that is `flexShrink: 0` in a table row — the same element class as the
+v0.477.1 clipping finding — and no sample produces a frame carrying those reasons, so no dogfood pass could
+show them. Rather than ship the claim unmeasured: three frames of the scratch mosaic were rejected through
+the **real** `PATCH …/frames/{id}` endpoint with `auto:seestar_output`, `auto:file_missing` and
+`bulk:streaked`, and the page was re-probed. At **420 px**: horizontal overflow **0 px**, no console errors,
+and all three labels un-clipped — `"Seestar's own stack"` 112 of 112 px, `"File missing"` 63 of 63,
+`"Streaked (bulk)"` 87 of 87 — each sitting on one line beside its timestamp. The live
+`/frames/reject-summary` also renders the new `seestar_output` bucket with its sentence. **Generalisable:
+a surface no sample can reach is reachable anyway through the app's own write endpoints — that is much
+cheaper than a new dogfood flag, when what is missing is one row rather than a whole state.**
+
+## 2026-09-26 — Builder: the probe's own route table was the hole, and both pages it was missing paid on their first pass
+
+*(Builder, branch `claude/exciting-tesla-2cd04h`, shipping v0.477.2, v0.477.3 and v0.478.0. Baseline green —
+**6,618 passed, 2 skipped**, 15m13s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root`
+cleared first.)*
+
+**The lever this run is worth recording: the list that decides what gets dogfooded is itself a hand-mirrored
+list, and nothing was checking it.** This repo has now paid five times for a surface its tooling could not
+reach — the missing observing site (v0.436.1), the empty `incoming/` (v0.442.0), the click-only Compare
+comparators (v0.440.2), the 1:1 editor preview (v0.446.0), the never-held master dark (v0.455.1) — and each
+time the fix was a new *flag*. This one needed no flag at all: `scripts/dogfood_probe.mjs`'s `ROUTES` is
+mirrored by hand from `frontend/src/main.tsx`, its own comment says so, and it had drifted by **three
+routes** — `/live`, `/show` and `/sky-so-far/:year`.
+
+`/live` is the sharp one. It is a **nav entry** — one click from the sidebar, in the group a beginner reads —
+and its own docstring says it is *"meant to be left open on a phone for hours"*, i.e. the 420 px pass is the
+pass that matters for it, and it had never had one. It came back clean, which is worth knowing rather than
+assuming.
+
+**Both of the other two produced a real finding on the very first pass that opened them**, which is the same
+return this repo keeps getting from closing one of these holes:
+
+* **v0.477.3** — `/sky-so-far/:year` rendered *"First light in 2024"* directly above *"What you pointed at"*,
+  holding the identical single chip, the lower one linking nowhere. The page already solves this class **for
+  its nights** one function up (`yearNightCards`), with a docstring naming the exact complaint. The shape of
+  a beginner's first year makes the duplicate guaranteed, not incidental.
+* **v0.478.0** — `/show` said *"Nothing to show yet"* over a finished picture, because the slideshow is built
+  from the wall that self-hides below two pictures. The floor's own comment argues it from **curating**; a
+  slideshow does not curate.
+
+**The durable half is a test, not a flag.** `tests/test_dogfood_route_coverage.py` parses `main.tsx`'s router
+children and every route-shaped literal in the probe, normalises both, and goes red when a registered route is
+neither reachable nor exempted-with-a-reason. Fails before on exactly `['live', 'show', 'sky-so-far/*']`.
+Generalisable question for the next run: **which other hand-mirrored list in this repo has nothing checking
+it?**
+
+### Baseline for a default pass at v0.477.2 (sample loaded and stacked, observing site 40.0, −2.0)
+
+Mechanically CLEAN across all 24 routes at both widths — nothing overflowing, no console errors. Tallest
+phone pages: `/tonight` 3,506 px, `/glossary` 3,364 px, the Target page 3,287 px, the editor 3,184 px,
+`/life-list` 3,094 px, `/` 2,558 px. In line with the standing baselines; no IA slice taken. The three new
+routes all sit below the reported top-8 cut.
+
+Read the prescriptive blocks as one paragraph, both clean: the Target page's four cards agree that the object
+is bigger than one frame and that a 3×3 mosaic is the next move, with the readiness card scoped to *"this
+single field"*; `/tonight`'s week plan names one target and one best night, with nothing to contradict (the
+closing card is silent without `--closing`).
+
+### And the `--empty` pass, re-run because the tooling changed — also CLEAN
+
+Worth recording because it is the first time `/live` and `/show` have been photographed in the state a
+**beginner meets first**, and because it exercises `yearRoute()`'s stand-down: with no nights the year route
+resolves to `""` and is skipped, so `--empty` sweeps 25 routes rather than 26 and nothing probes an error
+state the page is right to show. Nothing overflowing, no console errors. `/live` shows one Alert ("Nothing
+captured yet — once frames start arriving, this page will show the night filling up"); `/show` shows its
+paragraph and a "Go to your library" button. Tallest phone pages unchanged from the 2026-09-07 first-run
+baseline: `/glossary` 3,364 px, `/life-list` 2,779 px, `/` 1,402 px, `/library` 1,252 px — the two new pages
+are both short and sit well below the reported cut.
+
+
+## 2026-09-26 — Builder: the `--closing` dogfood baseline, and what a new flag cost in its first hour
+
+*(Builder, branch `claude/exciting-tesla-m7wvjb`, shipping v0.477.0 and v0.477.1. Baseline green — **6,597
+passed, 2 skipped**, 12m00s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first.
+End of run: **6,618 passed, 2 skipped**, 11m49s; frontend **4,351 tests / 284 files**, `tsc` and `vite build`
+clean, all three run from `frontend/`.)*
+
+**The lever this run is worth recording: a new dogfood flag pays before it is finished, and its first bill is
+its own.** `--closing` found two things on its first pass, and one of them was a defect *it had introduced* —
+its two seeded targets sat on the identical sky position, which is exactly what `find_same_object_target_groups`
+exists to detect, so the Library wall raised **"Same object in more than one folder?"** on a pass whose whole
+job is to make screenshots readable. That is the same shape as the rule the script's own header keeps
+restating about `--incoming-lag` (*a flag seeds the state it is **for**, and photographing a second, unrelated
+fault by default makes "CLEAN" mean less rather than more*), arrived at from the inside. The fix is one degree
+of declination; the lesson is to ask, of any seeded state, **which other features are now looking at it**.
+
+The other finding was real and pre-existing and shipped as v0.477.1 (three nudge cards ellipsising the fact
+beside a target's name, inside a badge, with no scroll and no tooltip). Note it was found on `/library` — not
+on `/tonight`, the page the flag was built for. Four of the five recent findings came out of *reading one
+surface while seeding another*.
+
+### Baseline for a `--closing` pass (v0.477.1, sample + closing pair, observing site 40.0, −2.0)
+
+The closing card populates `/tonight`, which is by construction the page that grows:
+
+* `[phone] /tonight` **4,301 px** — against **3,578 px** with the card silent (the v0.437.0 measurement in
+  AGENTS.md §1). The difference is the card doing its job, not a regression; **compare a `--closing` pass only
+  against another `--closing` pass.**
+* `[phone] /glossary` 3,364 px, `[phone] /targets/<sample>` 3,287 px, `[desktop] /glossary` 3,276 px,
+  `[phone] .../edit/1` 3,184 px, `[phone] /life-list` 3,094 px, `[desktop] /tonight` 2,820 px, `[phone] /`
+  2,735 px — all within a few px of the numbers a site-only pass takes, i.e. nothing else moved.
+* `/api/plan/closing`: `location_source=settings`, `n_closing=2`, rows ordered *just started* (0.02 h) then
+  *hours in* (1.50 h) — v0.476.0's least-finished-first ranking, rendered rather than asserted.
+* Final pass: **nothing overflowing, no console errors.**
+
+### Read `/tonight`'s prescribing column as one paragraph — this run's answer: it holds
+
+With the closing card finally speaking, the column says: *"2 of your targets are on their way out of your sky —
+just started first, about 4 weeks left"*, then *"Your best night is tonight — **hours in**, 2.2 h above 30°"*,
+then *"**just started** is on its way out of your sky… its best night this week is tonight — and unlike the
+others here, that one doesn't come round again."* The week plan's headline and its own closing clause name
+**different** targets — and the clause says which wins, in as many words. That is v0.445.0 working, checked in
+a browser for the first time rather than in jsdom. No finding.
+
+
+## 2026-09-26 — Scout: rotation item (3) — ASTAP/ffmpeg filesystem side effects with a stub binary — CLEAN, and the guard that makes it clean is already in the suite
+
+*(Scout, branch `claude/admiring-brahmagupta-bsgjyy`. Baseline green — **6,597 passed, 2 skipped**, 12m31s
+with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Only docs touched.)*
+
+**Triage came out where the last four runs left it, and the inbox is quiet.** "Bugs (fix these first)" holds
+the same set: five Builder-filed LEADs each gated on a measurement only the owner's library can supply (the
+drizzle noise-ratio sampling question, the per-batch memory-budget drift, the ragged-mosaic interior fraction,
+the deep-target router reads, the mosaic seam/depth proxy), the #903 open remainder (L — an auto-cover with
+provenance, not the small fix it looks like), and the #878/#880 routing (owner sign-off for the merge
+migration). The three open GitHub issues — #878, #880, #903 — are **all already verified into the backlog with
+their current dispositions correct against the code and against their own latest observer follow-ups**
+(#903's 2026-09-25 follow-up confirms the keep-finished guard held over the full library and the mechanism did
+not recur; the residual is 44 already-flattened targets that nothing repairs, which is exactly what the open
+#903 remainder entry is about). No new issue since the last Scout run. So this run had no bug to file and no
+issue to open or close — it verified, swept, and dogfooded.
+
+### QA sweep — rotation item (3), `seestack/solve/astap.py` + `seestack/video/ffmpeg.py`, CLEAN (traced + ran the tests)
+
+The rotation's fourth-listed item and the one most directly tied to §10 (the owner's `copy_to_cache` is **off**,
+so anything ASTAP or ffmpeg does beside its input touches the owner's only copy of his raws in `incoming/`).
+Read both invocation paths adversarially and confirmed the guarantee is structural, not incidental:
+
+* **ASTAP never sees the source.** `ASTAPSolver._solve_once` copies the frame into a
+  `tempfile.TemporaryDirectory` and runs there, so ASTAP's `.wcs`/`.ini` sidecars are born and die inside the
+  scratch dir; the sidecar *content* is read back before the `with` block exits. `-update` is deliberately
+  **not** passed (the one flag that would rewrite the FITS header), and the copy — not a symlink or hardlink —
+  is chosen precisely because a link would lead a write back to the original. The runner (`solve/runner.py`)
+  only ever calls `solver.solve()`, so there is no second, unprotected path.
+* **ffmpeg only reads `-i` and pipes to stdout.** `iter_video_frames` runs `ffmpeg … -f rawvideo -pix_fmt
+  rgb24 -` with `-nostdin`, output to a `subprocess.PIPE`, and kills the process in `finally` on abandonment.
+  No output file is ever named next to the input capture; the video "crop"/"uncrop"/"stack" results are written
+  into the library's own target tree, not `incoming/`.
+* **The guard is already pinned end-to-end.** `tests/webapp/test_incoming_readonly_guard.py` seeds an
+  `incoming/` tree with a sentinel and drives the *whole* workflow — QC, solve (with a **stub `astap` that
+  `test_the_stub_astap_really_would_litter` proves writes sidecars beside its `-f` file**), reprocess-all, the
+  video pipeline (stack + crop + uncrop), ingest and the scanner — then asserts every seeded file is unchanged.
+  Plus `tests/test_astap.py::test_astap_is_never_pointed_at_the_callers_own_frame` at unit level. This is the
+  "ran the code on data shaped like the owner's" bar the sweep rotation asks for, and it is green.
+
+No bug. Recorded here per the three-file rule (a clean sweep never goes into a priority section).
+
+### Adversarial reads, all CLEAN (traced, no bug filed)
+
+Since the stacking engine is closed until a new bug is found there (twenty-plus clean sweeps; the last Scout
+read `weighting.py` clean), I spent the reading budget on trust surfaces the rotation touches:
+
+* **`seestack/render/deepening.py`** (the cross-run "night after night" reel — a trust surface, because it is
+  the app's claim about the owner's *progress*). The one thing that must be right is a fair comparison, and it
+  is: one STF stretch is solved from the deepest **linear** master (searched deepest→shallowest, skipping any
+  display-space export) and replayed on every frame, NaN floors to black, and a label follows its frame through
+  the unreadable-skip filter with `zip(strict=True)` so a dropped frame never shifts the captions off by one.
+* **`seestack/qc/grading.py`** (rotation item 2 — per-panel vs target-wide thresholds). The v0.474.0 split is
+  intact: `capped_overall` is the target-wide 25 % rail, `capped_panels`/`withheld_per_panel` the per-panel one,
+  and the flux-like metrics (stars/sky/transparency) take per-panel populations while FWHM/eccentricity stay
+  target-wide — the exact split that stops a star-poor panel being graded as "cloud". No single value read as
+  two facts.
+* **`webapp/pipeline.py`** auto-stack decision (priority 2, the "just works" path). The walk-away family is
+  fully guarded: `held_thin` (count **and** `_auto_stack_panel_depth`, so a mosaic that clears the count but is
+  one-sub-deep everywhere is held), `held_unreadable`, `held_settling`, and the degraded-heal recheck — each
+  holding the target back **without** stamping the attempt marker, so recovery is automatic.
+
+### Dogfood — `--mosaic`, CLEAN, and the two prescriptive pages read coherently
+
+Baseline sample + generated 2×2 mosaic (uneven depth 6/6/6/3, one hazy panel, ragged union). **Mosaic trim
+7.9 %** (bug bar ~15 %). Nothing overflowing at 420 px or 1440 px, no console errors. Tallest phone page the
+mosaic Target page at 3,673 px, `/tonight` 3,638 px — both in line with the last run's standing baseline; no IA
+slice taken.
+
+Read the cards as one paragraph, which is what that block is for:
+
+* **Mosaic Target page — coherent, and a positive example.** next-best-move ("another pass or two over the
+  same mosaic evens out the thinner part"), readiness ("part is thinner, only more light evens that out;
+  elsewhere more time buys fainter detail"), the panel map ("~30 s behind at top-right, evens out on its own")
+  and the framing verdict all point the same way, and the framing verdict resolves the depth-vs-width tension
+  out loud: *"Most of it is already in this picture… until you're happy with the depth, more passes over the
+  panels you already have do more for it than a wider grid."*
+* **Single-field Target page — a soft pairing I checked and did NOT file.** next-best-move says the biggest
+  win is switching to mosaic mode (only ~20 % of Orion is in the frame; "more time can't bring the rest in"),
+  while the readiness card frames a "~2 h goal for this single field" and says "more time pulls out fainter
+  detail". A beginner asking "keep shooting this, or switch?" gets a strategic answer (go mosaic) and a
+  tactical one (this fragment deepens with time). I traced `seestack/framing.py` to check whether the
+  reconciling clause the mosaic page carries is *missing* here by mistake: it is not — that clause
+  ("more passes over the panels you already have") is deliberately the `CANVAS_MOSAIC` branch, and on a single
+  field capturing 20 % it would be wrong advice (there is one panel, holding a fifth of the object). The two
+  cards are on different axes (coverage vs depth), the readiness card scopes its goal "for this single field"
+  in its own words, and neither is arithmetically wrong — so this is complementary, not the "two cards
+  disagree" defect the last five findings were, and filing it would be speculation. Noted here for a future
+  run that wants to weigh whether the readiness card should *acknowledge* the framing verdict on a fragment
+  (e.g. lead with "this is ~20 % of the object" before the depth goal); it is a polish judgement, not a bug.
+
+### No new idea filed — and why that is the right call this run
+
+The task asks for a beginner feature each run; AGENTS.md §4 (corrected 2026-09-04, R3) removed the "add a
+couple every run" mandate because *"supply was never the constraint; a Builder's hour is"*. "Features that
+serve real workflows" already holds seven open, ready ideas, so the section is stocked and the Builder is not
+starved. I grep-checked several candidates against the code and every one is already built end-to-end — the
+"deepening reel across nights" (`render/deepening.py`), the shareable montage wall (`montage.py`), the zoom
+and in-stack progress reels (`render/zoomclip.py`), the scale bar (`scalebar.py`), the recap/year-recap/
+life-list posters, the retrospective moon note (`nightplan.session_moon`, filed *and closed as already-built*
+by the last two runs). Manufacturing an eighth marginal idea against that is exactly the busywork §2 and §4
+warn against, so I did not.
+
+## 2026-09-26 (second run) — Builder: a cap copied from the function next door, and the key came with it
+
+*(Builder, branch `claude/exciting-tesla-yq3d1s`, shipping v0.476.0. Baseline green — **6,593 passed,
+2 skipped**, 11m56s with the BLAS cap and `-n 4 --dist worksteal`.)*
+
+**Triage agreed with the previous run's, to the letter.** "Bugs (fix these first)" is five gated LEADs, the
+#903 remainder and the #878/#880 routing; `grep READY` returns only the banner saying the two starred items
+shipped; the three open GitHub issues (#878, #880, #903) are all already verified into the backlog, none
+new since yesterday. So this run also had to *find* its work.
+
+### The lever: a constant borrowed from a neighbour brings its neighbour's reasoning with it
+
+The previous run's lever was *"does the cure name something the reader can actually find?"* — a prescription
+checked against the rest of the app. This run's is its structural cousin: **when one function reuses
+another's constant, check whether it also reused the argument for it.**
+
+`season_closing` ("Shoot these before they're gone") borrowed `plan_week`'s `WEEK_MAX_TARGETS = 40`. It also
+borrowed, verbatim, the `sorted(...)` line that cap is applied to — and *that* line carries `plan_week`'s
+answer to a question `season_closing` never asked. `plan_week` keeps the forty targets with the **most**
+integration on them, and its docstring argues the point at length: "finish what I've got" must not be
+answered by planning a big library's week around the first forty objects alphabetically. Correct there. In
+`season_closing` it is exactly backwards, and the same file says so twice over: the function's own docstring
+("the least-finished of two targets leaving in the same week is named first") and the card's own row copy
+("a target already 10 h deep reads, correctly, as one that can be let go"). **Selection on one key, ranking
+on its opposite.**
+
+**The tell was in the docstring, and it was a self-contradiction rather than an error.** `season_closing`
+says "one vectorised batch per sampled night, so the cost scales with the horizon, not with the library" —
+in a function whose first statement caps the library. One of those two had to be wrong. Measured: 1.96 s for
+one target, 1.96 s for 40, 1.99 s for 104, 2.18 s for 400, 2.53 s for 1,000. The docstring was right and the
+cap was buying ~30 ms on an owner-shaped library.
+
+**What it cost, measured on a 104-target library** (the owner has 104): 7 of the 18 targets that were
+leaving were reported. Every one shown had 12.7–19.1 h on it; every one hidden had 0.3–9.4 h. One of the
+three targets in its **last week** was hidden — and it was the whole-library answer's first row, i.e. the one
+the Dashboard's "Last chance this year" interrupt would have named.
+
+**Generalising it, for the next run.** A borrowed constant is cheap and usually right; a borrowed *sort key*
+is a borrowed judgement. The question to ask at every copy site is not "is this number still about the right
+magnitude?" but **"is the thing this orders by still the thing this surface cares about?"** Here the answer
+was written down two lines below the copy, in the tie-break — the function already knew its own key and used
+it for half the job. Worth grepping for elsewhere: `-(t.total_exposure_s or 0.0)` now appears in exactly one
+place (`plan_week`), which is the only place it belongs.
+
+**Also checked and left alone:** `/api/life-list/nearly-there` (its candidate cap orders by *closeness to
+finishing*, which is the question it asks) and `webapp/incominglag.py` (its `INCOMING_LAG_MAX` already
+documents itself as a list bound with exact counts beside it — the pattern this fix copied for
+`CLOSING_MAX_ROWS` + `n_closing`).
+
+## 2026-09-26 — Builder: four clean sweeps, and the finding came from reading a *note's second clause*
+
+*(Builder, branch `agent/run-0002`, shipping v0.475.3. Baseline green — **6,588 passed, 2 skipped**, 12m32s
+with the BLAS cap and `-n 4 --dist worksteal`.)*
+
+**Triage first, and it is worth recording how dry the list now is.** "Bugs (fix these first)" holds seven
+top-level entries and **none of them is ready work**: five are LEADs explicitly gated on a measurement only
+the owner's library can supply, one is the #903 remainder (L, and its own entry says why the obvious shapes
+are wrong), and one (#878/#880) routes to owner sign-off. The three open GitHub issues are all already
+verified into the backlog. `grep READY` returns nothing but the banner saying the two starred items shipped.
+Down in Ideas, the top entries of every priority section are `⚪ CLOSED — measured and stood down`,
+`✅ ALREADY BUILT` or `MEASURED AND STOOD DOWN`. That is the backlog working as designed, not a fault — but a
+run that starts here should expect to *find* its work rather than pick it.
+
+**So: four dogfood sweeps, all CLEAN.** The previous run's note asked for the first one by name.
+
+* **`--big --editor`** — the decimated-preview surface, structurally unreachable before v0.446.0 and not yet
+  swept. Canvas 1693×1150, `proxy_scale` 2, `full-size check available=True`. The whole loupe drives: modal
+  opens, caption reads *"…shrunk to about **half** of full size"* (the `keptFractionWords` fix holding at the
+  one scale that used to say "a 2th"), `[where]` "the middle of your picture" → "the top-left" after a
+  navigator click, split comparison draws and drags, black box hugs the window (**0 px** spare). All 21 ops
+  added one at a time, preview re-rendered each time, Undo/Redo clean, no console error, no failed request.
+  Three of the five preview↔export advisories spoke and were correct at scale 2 (sharpen, hot pixels, star
+  reduction); deconvolution and denoise correctly stayed quiet.
+* **`--empty`** — the first-run state, last baselined 2026-09-07. Nothing overflowing; the notice board
+  carries exactly one note (ASTAP not set up), which is the right one.
+* **`--deep`** — 1,200 subs. **301 rows of 1,200 · 7,483 DOM nodes · 1,195 ms first paint**, window foot
+  offers "Show all 1,200", scrolling grows it to 601 rows / 14,473 nodes. v0.455.2's windowing is holding
+  (it measured 28,266 nodes and 4.5 s before the fix).
+* **`--calibration`** — masters discovered from `incoming/`, built through the endpoints a beginner would
+  use, auto-bound and applied (`{'dark_master_id': 1, 'flat_master_id': 2}`), and the health card's
+  vocabulary switches correctly to *"calibrated (dark+flat), round stars, even coverage"* with the
+  darks-advisory withdrawn.
+
+**Page heights, for the standing IA baseline.** Ordinary library: `/tonight` **3,730 px**, `/glossary`
+3,364, mosaic Target 3,538. Deep library: `/tonight` **4,028 px**. First-run: `/glossary` **3,364 px** is the
+tallest page in an app with no data at all, `/life-list` 2,779, `/` 1,402. `/tonight` has grown from the
+**3,578 px** its v0.437.0 slice left it at and is now consistently the tallest page; **no slice taken this
+run** — AGENTS.md says one per run and to let the owner react, and nothing on it is stacked badly (four
+self-hiding cards and two preview-limited tables). Recorded so the next run can decide on three
+measurements rather than one.
+
+### The lever: a prescription is a claim that the reader can find the thing you named
+
+All four sweeps were clean, and the run's actual finding came from **reading `stackhealth.py`** — and
+specifically from reading a note's *second clause* rather than its verdict. `soft_stars` says
+*"the combine — not the sky — softened them"*, which is true and well-measured. What it then said was *"a
+steadier mount, or re-solving **the roughly-aligned subs**, keeps them tight"* — and that noun phrase is not
+general English in this app, it is a population with a column, a FITS card and a health note of its own,
+which exists **only** when `subpixel_refine` ran. It defaults off. So the clause was addressed to a set that
+is empty on every default install, on the one card whose job is to say what to do next.
+
+**The generalisable shape, and it is a sibling of the "read the cards as one paragraph" rule this file keeps
+finding things with.** That rule asks whether two cards *contradict*. This is the same question asked of one
+sentence: **does the cure name something the reader can actually find?** A diagnosis is checked against the
+data; a prescription has to be checked against *the rest of the app* — is the thing it names on a screen, is
+it reachable, and does it exist in the state the reader is in? Here it failed all three, and the app's real
+remedy for the very diagnosis sat one collapsed disclosure away, unnamed.
+
+**Two smaller things worth not re-deriving:**
+
+* **A link to a form is not a link to a control.** The Stack form's switch lives inside the collapsed
+  **Advanced options** accordion, and `Stack.tsx` already says out loud (at `printBiggerAction`) that
+  *"reading the sentence still left a beginner hunting"* for exactly that reason. Naming a knob without
+  opening the drawer is half a fix; `?open=advanced` is the other half, and it generalises to every future
+  note that names an advanced field.
+* **Three states, not two, when reading a stored option.** The neighbouring `_run_sigma_kappa` falls back to
+  the app default for an unreadable `options_json`, and its comment explains why that is safe — *every
+  shipped default for κ has been 3.0*. That reasoning does **not** transfer: a boolean option's default can
+  change between versions, so "the record doesn't say" has to stay distinct from "the run said no", or the
+  card makes a claim about a specific run that nothing in the record supports. `run_option_flag` returns
+  `bool | None` for that reason, and a non-`bool` value is `None` too.
+
+## 2026-09-25 — Builder: "grep-checked" is a claim about a query nobody records
+
+*(Builder, branch `claude/nifty-pasteur-fspzqn`, shipping v0.475.2. Baseline green — 6,579 passed, 2
+skipped, 11m55s with the BLAS cap and `-n 4 --dist worksteal`.)*
+
+**The lever: §11 says a freshly-filed entry is the most *contended*; this run found it can also be the least
+*checked*.** The top of "Features that serve real workflows" was a 🌟 beginner feature filed by the Scout ten
+hours earlier — *"Was the moon out?": a retrospective moon note on a session* — sized M, marked **"Grep-checked:
+the app's moon machinery is all forward-looking (Tonight); nothing explains a night already shot."* It was the
+obvious pick and the run's first candidate. It is **already built, end to end**: `nightplan.session_moon` /
+`session_moons` grade a finished session at its midpoint through the same `_moon_verdict` the forward-looking
+readout uses, `_session_moon_text` writes the sentence, `_session_moon_note` puts it on the "Last night" card
+and `_night_moons` puts it on **every** row of the Nights card — five test files, one ephemeris pass for the
+whole table, and a *better* verdict than the entry proposed (it also requires the Moon to be **close to the
+target**, which illumination-plus-altitude does not).
+
+**Why the entry's own grep missed it, stated so the next one does not.** It searched the feature's
+*description* — the forward-looking planner helpers it names (`moon_illumination`, `moon_window`) — and those
+are exactly the helpers the shipped feature is built *on*, so finding them confirmed the premise instead of
+refuting it. The query that answers "is this already built?" is the feature's **most specific identifier**,
+the noun you would name the function after: `session_moon`. Two seconds, and it lands on the module, the
+router, both cards and the tests at once.
+
+**So: grep for the identifier, not the description — and do it even when the entry says it was grep-checked.**
+"Grep-checked" records a verdict, never the query, so it cannot be audited and it is exactly as strong as one
+agent's choice of search term. The entry is struck with the verification in it; the one piece of it that is
+genuinely not built (the two-stage degrade on a site-less install) is **declined** there on the shipped
+design's own reasoning, because without a site you know neither *up* nor *close*, so the only sentence left is
+one that may be describing a Moon that never rose.
+
+**Second thing, filed rather than acted on: a stranded branch can carry owner answers.**
+`origin/claude/busy-pascal-2HNTL` (docs-only, 2026-09-25 00:55 UTC, no PR, never merged) records owner answers
+to sign-off items 3, 7, 8, 10, 14, 15, 16 — including an approval for the `astroalign` dependency and for
+reconciling the 11 historical mosaic pairs, i.e. two gates that have blocked real work for weeks. **Flagged
+here rather than merged**, deliberately: curating that list is the Scout's lane, the answers' provenance is
+not visible in the diff, and merging it would put a claim of owner consent for a **new dependency** and an
+**on-disk merge migration** into the source of truth on one agent's unverified say-so — the two shapes §10
+requires sign-off for. A Scout run that can confirm where those answers came from should land it; until then
+the branch is the record and this note is the pointer.
+
+**And the fix itself carried one reusable shape.** The entry behind v0.475.2 sized itself as "an XS tidy-up
+**unless** a double-op recipe is reachable from the UI" — i.e. it deferred its own severity to a check it did
+not make. Making that check first (`Editor.tsx::addOp` has no duplicate guard, so two **Color calibration**
+ops is two clicks) is what turned it into a priority-1 parity fix, and it also reframed the defect: the
+overwrite is *right* for "which balance did the picture end up with" and *wrong* for "does the preview match
+the export", which is why the answer is a merge rule rather than a re-key. **An entry that ends with a
+condition on its own size is an entry whose first line of work is that condition**, not its implementation.
+
+**QA sweep record — `--mosaic --editor` dogfood pass, CLEAN.** Final suite **6,588 passed, 2 skipped**
+(13m10s), i.e. the baseline's 6,579 plus this run's nine. The pass: mosaic trim **7.9 %** of the canvas (the
+bug bar is ~15 %); every one of the **21** ops in the Add menu added, one at a time, on **both** the single
+field and the mosaic run, each re-rendering the live preview with no console error and no failed request,
+then Undo and Redo; nothing overflowing at 420 px or 1440 px; tallest page the mosaic Target page at
+**3,673 px** on a phone, `/tonight` **3,655 px**.
+
+Reading the mosaic Target page's five cards as one paragraph, which is what that block is for: they all point
+the same way, and the one that could have contradicted the others resolves it out loud — the framing verdict
+says *"Orion Nebula is bigger than this mosaic … Adding more panels next session would capture the rest.
+**Most of it is already in this picture, though — until you're happy with the depth, more passes over the
+panels you already have do more for it than a wider grid.**"* against next-best-move's "another pass or two
+over the same mosaic". Worth recording as a **positive** example of the shape the last five findings had: two
+cards with opposite prescriptions is only a bug when neither says which wins. The one asymmetry, noted and
+not filed: the card that says *where* the thin part is (the panel map, "at the top-right") is folded behind
+"more notes", while the two inline cards say only *that* there is one — which costs nothing here, because the
+prescription they give ("another pass over the whole mosaic") does not need the panel's name to act on.
+
+Not reached on this pass, and the reason is on the tin: `full-size check: not offered (preview is 1:1 — run
+with --big to reach it)`. **v0.475.2 touches `proxy_fallback`, which can only ever be true when
+`proxy_scale > 1`** — so the surface this fix is about is one a `--mosaic` pass structurally cannot render.
+The engine tests cover the rule; a future run touching the editor's preview should spend the `--big` pass on
+it.
+
+## 2026-09-25 — Builder: the lever was **ground truth**, on a fixture the estimator's own tests could not build
+
+*(Builder, branch `claude/nifty-pasteur-meo70w`, shipping v0.475.0 and v0.475.1 off the Scout's #967 entry.
+Baseline green — 6,567 passed, 2 skipped, 13m05s with the BLAS cap and `-n 4 --dist worksteal`.)*
+
+**The reusable bit is not "the estimator was biased".** It is *how* a biased estimator was shown to be biased
+without any of the owner's data. Every existing test of `noise_ratio` asserts the measurement against **another
+measurement** — a ratio against √N, a σ against the σ that was injected into an `rng.normal` array. Both are
+only true in the regime where the estimator is already unbiased, which is exactly the regime the app never runs
+in, and that is why twenty-odd green runs said nothing. What broke it open was building the fixture so the
+*answer* is knowable independently: push one scene through the **real** `bilinear_debayer`, a bilinear
+registration warp and a mean, **twice** — once with noise injected and once without — so `noisy − clean` is
+precisely the noise that survived the pipeline and its `np.std` is the σ that is really in the picture. The
+estimator then has something to be wrong *about*. The old one came in +9 % on a native master and **+119 %** on
+a drizzled one; nothing short of ground truth would have put a number on either.
+
+**Generalises to anything whose output is a measurement.** Where a test can push the same input through the
+pipeline with and without the thing being measured, the difference *is* the thing, and the assertion stops
+being circular. Worth reaching for before the next "its tests are green so it must be right" — the sibling
+failure mode AGENTS.md §8 already names (a fixture that cannot exhibit its bug) and this is its positive form.
+
+**Two smaller things worth not re-deriving:**
+
+* **A longer lag is not the whole fix, and on its own it is a trap.** The entry's shape (a) said "difference at
+  a lag beyond the correlation length", which is right — but a *first* difference at a long lag swallows the
+  sky gradient, and measured, the master's estimate then climbs straight past truth to **1.24×** by lag 32.
+  Switching to a **second** difference (`I(x−L) − 2·I(x) + I(x+L)`, exactly 0 on a linear ramp) is what makes
+  the long lag safe, and it also makes the answer flat across lags 4–16 (1.006→1.017) instead of monotonically
+  climbing — so the plateau walk stops somewhere meaningful rather than wherever the tolerance happens to bite.
+  The two changes only work together; either alone is worse than neither.
+* **A decorrelated badge can honestly read above √N, and a future run will want to "fix" that.** Resampling
+  genuinely lowers per-pixel σ further than averaging alone — measured true ratios of 6.98 (native) and 7.88
+  (2× drizzle) for 36 frames where √N = 6.00. No information is gained; the pixels are smaller and correlated.
+  The residual design question (should the two sides be pixel-area-matched?) is filed as a lead with the
+  numbers, deliberately *not* built, because re-inflating the estimator to get back under √N would undo
+  v0.475.0 while looking like a fix.
+
+**A cache-version bump is part of a measurement change, not an optional extra.** `_NOISE_RATIO_CACHE_VERSION`
+fingerprints the two *inputs* and not the estimator that read them, so changing `noise_ratio` without bumping it
+would have left the owner's library serving lag-1 numbers for ever, on a code path whose tests were all green.
+The general shape: **any cache keyed on inputs is blind to a change in the function**, so ask what invalidates
+it before shipping the function.
+
+## 2026-09-25 — Scout: verified the last open observer issue (#967, the noise badge above √N), and an adversarial read of the frame-weighting math came back clean
+
+*(Scout, branch `claude/admiring-brahmagupta-ji7y1l`. Baseline suite green — full headless run with the BLAS cap
+and `-n 4 --dist worksteal`; see the run's own log. Only docs touched this run.)*
+
+**The inbox was the lever, as it was for the Builder before me.** Four observer issues open (#878, #880, #903,
+#967); the Builder's 2026-09-25 run had verified and shipped the fixes for #965/#966/#968 and left #967 — the
+noise-reduction badge reading above the √N ceiling on most runs — for the Scout. Three of the four remaining were
+already triaged into the backlog with their current disposition correct (#878 recurrence dormant → dedup is
+gate 16 owner-sign-off; #880 (a) storage-hygiene not user-facing, (b) deliberate, (c) shared with #878;
+#903 open remainder is option (3) cover-pin). The one that needed action was #967.
+
+**#967 verified in-code and filed (not shipped — it's a Builder job with a hot-path recalibration attached).**
+Both mechanisms trace exactly: `qc/noise_ratio.py::_diff_sigma` is a lag-1 adjacent-pixel MAD, and
+`stack.py::_measure_noise_ratio` feeds it a `bilinear_debayer`'d sub against a warped/drizzled master — two
+different smoothings, so σ_sub/σ_stack is inflated and can exceed √N (which is a hard ceiling, not a target).
+The reference sub is picked on FWHM alone, which is uncorrelated with sky shot noise. The same ratio feeds
+`noise_vs_expected`'s 0.7·√N bar, so the error direction is *toward silence* — a genuinely underperforming stack
+has its focus/alignment advisory withheld. **The "why nobody caught it" is the interesting part and it
+reproduced by reading one test:** `tests/test_noise_ratio_expectation.py` builds both sides with `rng.normal` on
+one grid (`subs[0]`, `.mean(axis=0)`) — the one independent-pixel regime the estimator is unbiased in, so it is a
+**fixture-that-cannot-exhibit-its-bug** (same class as the D1/A1 cases already in this repo). The lesson for the
+Builder who fixes it: the current suite does *not* protect the fix, because lag doesn't matter on independent
+pixels — a new correlated-pixel (debayer + warp) fixture is mandatory, and the estimator change moves the badge
+number on *every* install, so `NOISE_EXPECTED_LOW_FRACTION` must be re-confirmed after decorrelation.
+
+**Adversarial read of `seestack/stack/weighting.py` — CLEAN (traced, no bug filed).** Since the prompt asks the
+Scout to lead with the stacking engine, I read the frame-weighting math against the "one value, two questions"
+lens the Builder's own note recommends. The mosaic per-panel split (`_positional_medians` /
+`compute_frame_weights`) is correct: the position-dependent trio (stars/sky/transparency) is taken per panel with
+a `_MIN_PANEL_FRAMES` fallback to target-wide, while FWHM/eccentricity stay target-wide — exactly the split the
+docstring argues for, and the one that stops a star-poor panel being penalised for its sky. `label < 0` frames
+fall back to target-wide medians cleanly. `combine_weights_with_photometric` can produce a weight > 1.0 for a
+scaled-*down* transparent sub, but that is harmless in a normalized weighted-mean/inverse-variance combine (only
+relative weights matter), and the `1/s²` variance correction is sound. The `np.float64` overflow guard on the
+FWHM ratio is deliberate and correct. No bug — recorded as a clean sweep per the three-file rule.
+
+**One beginner feature filed** ("Was the moon out?" — a retrospective moon note reusing `nightplan.py`'s existing
+offline lunar ephemeris to explain why a night was bright; understand/plan, PRIORITY 3, M). Grep-checked: the
+Moon machinery is all forward-looking today, so this is genuinely new.
+
+## 2026-09-25 — Builder: the backlog was dry and the inbox was not — four untriaged observer issues, three shipped (v0.473.0 / v0.473.1 / v0.474.0)
+
+*(Builder, branch `claude/wizardly-cannon-hnfyu0`, PRs #969 and #970. Baseline `6549 passed, 2 skipped` in
+13m13s with `-n 4 --dist worksteal` + the BLAS cap; `6567` at the end. Frontend `4,345` vitest across 284
+files, `tsc` clean, `vite build` clean.)*
+
+**The lever this run, and it is a triage lever, not a coding one: the Builder's queue was empty and the
+inbox had four unopened letters in it.** Triage of `docs/IMPROVEMENTS.md` came out exactly as the last four
+runs recorded — "Bugs (fix these first)" holds no buildable entry, every open item is a lead gated on a
+measurement of the owner's own library, an item routed to owner sign-off, a Builder verification saying the
+named slice is already in the code, or a stand-down that carries numbers. On the previous four runs that
+finding sent the Builder to the Ideas list. This run it sent me to `list_issues`, and **four open observer
+issues — #965, #966, #967, #968 — appeared in none of `IMPROVEMENTS.md`, `SHIPPED.md` or `PROCESS-NOTES.md`**
+(checked by grepping `issues/<n>` in all three). The oldest had been open five days.
+
+AGENTS.md gives the issue inbox to the **Scout**, and that is the right division — but the rule it states is
+"never copy an issue into the backlog unverified", not "a Builder may not read one". A Builder verifying an
+issue itself, to the same bar it would apply to any bug, and then fixing it, breaks no rule and is the
+highest-value work available when the backlog is in the state above. **So: when triage says the backlog is
+dry, check the issue inbox before the Ideas list.** Three of the four verified cleanly against the code and
+shipped this run; the fourth (#967) is left for the Scout and is the only one still open.
+
+**What the three had in common, which is worth more than any one of them.** Each was a place where **one
+value was answering two different questions**, and the two had come apart on exactly the owner's data:
+
+* **v0.473.0** — `auto` was both "did the user make no stacking choices?" *and* "is anybody watching?".
+  Reprocess-all answers **no** to the first and **no** to the second, and the single parameter forced it to
+  the wrong posture. 7 MemoryError refusals across 3 of his batches; 17 of 83 targets refuse under the flag
+  it had and 0 under the one it should have.
+* **v0.473.1** — the footprint guard was the *whole* plate-solve sanity check, and it asks **where**, never
+  **at what scale**. A scale error is zero at the centre by construction; 178 accepted frames stack at a
+  scale the optics cannot produce.
+* **v0.474.0** — one `capped` boolean carried **two** 25 % rails whose remedies are opposite. 7 of his 21
+  capped targets were shown a sentence that was arithmetically impossible for them.
+
+The shape generalises and is worth grepping for: **a single field that two callers read as two different
+facts**. The repo has hit it before (`auto_reject` standing in for "unattended" until v0.281.0 is the same
+bug in the same file), and each time the tell is a comment explaining that the one value "stands in for" the
+other.
+
+**One thing the observer supplies that this repo cannot, and it decided two of three designs.** Every fix
+above turned on a *distribution* over the owner's library — 99.80 % of solved frames within ±1 % of one
+scale; 7 of 21 banner targets below their own cap; 17 of 83 targets over budget. None of those numbers is
+derivable here, and each set a constant that would otherwise have been a guess: the ±1 % tolerance and the
+90 % consensus bar in v0.473.1 are the observer's tail and the observer's worst target, not round numbers.
+**When an issue carries a distribution, use it as the threshold's justification and say so in the code** —
+that is what turns "do not blind-flip a threshold" into something an agent can actually satisfy.
+
+**And one design call taken twice, in opposite directions, on purpose.** v0.473.1's scale guard is
+deliberately **not** a MAD test like the footprint guard it sits beside: a MAD threshold widens to fit
+whatever spread it is given, and a spread set of plate scales means *two instruments*, which is a reason to
+say nothing rather than to flag the minority. So it is a fixed tolerance plus a stand-down bar. The rule
+underneath: **an adaptive threshold is right when the spread is the signal and wrong when the spread is the
+counter-evidence.** Ask which one it is before reaching for the median-and-MAD that is already in the file.
+
+**Three replies posted on the issues** rather than a bare close — each says which of the observer's own
+suggestions shipped, and where the fix departs from it and why. Two of the three departed: #965 suggested a
+header-derived check at solve time (it would not have helped the 178 frames already solved, and the re-solve
+bill is unmeasured — filed as a lead), and #968 offered a cheaper flag-suppression (declined: it makes a
+wrong sentence rarer rather than right).
+
+
 ## 2026-09-20 — Builder: a new badge is a new *neighbour*, and the run's work was all in what it now sits beside (v0.472.1 / v0.472.2 / v0.472.3)
 
 *(Builder, branch `claude/wizardly-cannon-met7dm`, PR #962. Baseline `6544 passed, 2 skipped` in 10m04s with

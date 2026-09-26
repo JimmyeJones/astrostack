@@ -1,5 +1,1040 @@
 # Shipped — the record
 
+## v0.478.2 — 2026-09-26 — the deepening reel was not a registered run artefact, so deleting a stack left it on disk for good
+
+**Pillar: disk hygiene / trust (PRIORITY 3, on a box where "reclaiming space is the entire point of the
+button"). The second drifted hand mirror found by the v0.478.1 lever — *which list has nothing checking
+it?*.**
+
+`seestack.stack.output.RUN_ARTEFACT_SUFFIXES` is the single list every operation on a run's whole file set
+reads: `_archive_existing_outputs` on a re-stack, `merge._carry_pictures` on a merge, and
+`webapp.routers.storage.delete_run_artifacts` on a delete. Its own docstring says so, and the `_share.png`
+entry's comment spells out the stake ("left behind by a delete it would be the single largest orphan the
+output tree can hold").
+
+`webapp.routers.stack._build_or_get_deepening_reel` — the cross-run "night after night" reel, cached at the
+**newest** run's basename — spelled its three filenames by hand instead:
+`{basename}_deepening.webp` / `.png` / `.sig`. None was registered.
+
+**Reproduced before fixing**, through the real delete path: a run with its full artefact set plus a reel and
+signature beside it, deleted with `delete_run_artifacts`, left
+
+    LEFT BEHIND: ['master_deepening.sig', 'master_deepening.webp'] (2000003 bytes)
+
+Nothing would ever look at those again: the resolver only ever reads the reel of the *current* newest run's
+basename. A real reel is a 1024 px animation of **every** stack a target has, which puts it second only to
+`_share.png` among the orphans this tree can hold, and it leaks once per deleted newest run — on a library
+of 104 targets that is reprocessed in library-wide batches.
+
+### The fix is two halves, and the second one is what keeps the first from being a regression
+
+**(a) Register them, and make the writer read the table.** `deepening_webp` / `deepening_apng` /
+`deepening_sig` are now entries in `RUN_ARTEFACT_SUFFIXES`, and `render.deepening.write_deepening_reel` plus
+`_build_or_get_deepening_reel` take their names *from* it rather than spelling them — so the file that is
+written and the file that is deleted cannot be two different strings again.
+
+**(b) `SERIES_ARTEFACTS`: registered for delete, excluded from archive and merge.** A reel describes the
+target's whole *series* of stacks and is merely cached beside the newest run, so there is no such thing as
+the superseded run's copy of it. Renaming it onto each archived basename — which is what registering it
+alone would have done — would leave **one stale reel of a different series behind per re-stack**, each
+waiting on that run's delete. That is strictly worse for disk than the pre-fix behaviour, where the
+signature mismatch made the rebuild simply overwrite the single copy. So the new frozenset makes an archive
+**remove** them (a cache: the next request rebuilds from the masters), a merge **skip** them (the
+destination target's series is a different series, and carrying one would land a picture of the wrong
+history), and a delete reclaim them. The "avoid clobbering an already-archived set" probe skips them too,
+since the function no longer writes them to the archived basename.
+
+### The durable half: a static scan for hand-spelled siblings
+
+`tests/webapp/test_run_purge.py` already had a guard of this kind — it runs the real `write_stack_outputs`
+and asserts everything *it* produces is registered. That is structurally blind to the caches, which are
+written later and elsewhere (the progress reel by the stacker, the zoom clip, the share render, this reel by
+a router). Which is exactly how this one got in.
+
+New `tests/test_run_artefact_coverage.py` closes that half statically: it finds every
+`f"{<basename>}_<name>.<ext>"` literal in `seestack/` and `webapp/` — matched on the *variable* name
+(`base` / `basename` / `stem`), because a run's siblings are the files named after its basename, which is
+what the delete path resolves from — and requires each suffix to be registered. One `_EXEMPT` entry, with
+its reason: `_fullres.png` is a `Content-Disposition` download filename, never a file on disk. Plus a test
+that a stale exemption cannot sit there excusing the next one, the same pairing
+`test_dogfood_route_coverage.py` uses.
+
+**Tests: +5 (2 drift, 1 the leak itself, 1 archive, 1 merge). Two fail before** — the drift test on exactly
+`{'_deepening.webp': …, '_deepening.png': …, '_deepening.sig': …}`, and the purge test on
+`['master_deepening.png', 'master_deepening.sig', 'master_deepening.webp']` left behind — each verified by
+restoring the pre-fix files from git in a scratch checkout. The purge test writes the reel with the reel's
+**own writer**, so it cannot be wrong about the filenames, and spells the signature literally on purpose, so
+it states the failure in the terms the bug had.
+
+**One existing assertion deliberately updated, not weakened:** `test_output_archive.py`'s
+`len(archived) == len(RUN_ARTEFACT_SUFFIXES)` became `- len(SERIES_ARTEFACTS)`. The rule it was pinning —
+nothing is left at the canonical name, and everything archived shares one new basename — is untouched and
+still asserted; the new rule (the series cache is removed rather than moved) is asserted beside it, and a
+second test states it in its own terms, including that the run's own artefacts *are* still archived so this
+cannot have become "clear everything".
+
+**Upgrade-safe (§9):** three additive entries in a lookup table, one new frozenset, no on-disk layout change
+(the reel's path is unchanged — only who cleans it up), no config, schema, API-shape or default change. An
+install carrying reels left behind by earlier deletes keeps them; nothing hunts for them, because that would
+be a destructive sweep over a tree on the strength of a name pattern.
+
+## v0.478.1 — 2026-09-26 — two reject reasons reached the owner as their own internal identifier, and the list that translates them had nothing checking it
+
+**Pillar: friendliness (PRIORITY 3). Found by asking the question the v0.477.2 run wrote down —
+*which other hand-mirrored list in this repo has nothing checking it?* — rather than by a dogfood pass.**
+
+`frontend/src/routes/Target.tsx::rejectReasonLabel` turns the engine's stored `reject_reason` into the
+sentence fragment a beginner reads on a rejected sub's badge (and in its tooltip, and in the
+older-backend fallback breakdown). It is a **hand mirror** of a vocabulary owned by the Python that
+writes those reasons, and it had drifted by two:
+
+* `auto:seestar_output` (`project.REJECT_REASON_SEESTAR_OUTPUT`) → **"Auto: seestar_output"**
+* `auto:file_missing` (`project.REJECT_REASON_FILE_MISSING`) → **"Auto: file_missing"**
+
+Neither had a branch of its own, so both fell through the generic `auto:<metric>` branch, whose
+`METRIC_LABEL` lookup misses and hands back the raw suffix. Both are live on the owner's install: the
+observer counted **18** frames carrying the clean `auto:seestar_output` reason (issue
+[#880](https://github.com/JimmyeJones/astrostack/issues/880)), and `auto:file_missing` is what his own
+"these subs are gone, carry on without them" writes (`Project.mark_missing_frames_rejected`).
+
+**The labels are deliberately short.** The badge is `<Badge size="xs" … style={{ flexShrink: 0 }}>` inside
+a `Group` in a table row, i.e. the v0.477.1 clipping mechanism one element along, so the wording stays
+inside the range the existing labels occupy ("Streaked (bulk)" is 15 characters): **"Seestar's own stack"**
+(19) and **"File missing"** (12). The reassurance that belongs with them — *nothing was deleted by the
+app*, *your night is all still here* — lives in the grouped breakdown's note, where there is room for a
+sentence, rather than in a badge.
+
+**The same drift on the sibling surface, fixed with it.** `webapp/rejection_summary._bucket_for` had an
+explicit branch for `REJECT_REASON_FILE_MISSING` ("Their files aren't on your disk any more") and none for
+`REJECT_REASON_SEESTAR_OUTPUT`, which therefore landed in **"Left out for other reasons"** — and on a
+target where the device's own pictures are the *only* rejects, that reads as *some of your night is
+unaccounted for*. It now has its own bucket, *"The Seestar's own pictures, not your subs / The Seestar
+saves its own finished picture alongside the raw frames it shot. Those aren't subs, so they're set aside
+rather than stacked — your night is all still here."*, slotted between "You removed these" and "Their
+files aren't on your disk any more" — the three benign buckets together, after the ones about the sky.
+Purely additive on the wire: `RejectionBreakdown` renders buckets generically and `bucketAction` returns
+`null` for any key it has no destination for, so no frontend change was needed for it.
+
+### The durable half: a drift test that derives the vocabulary from the code that writes it
+
+`tests/test_reject_reason_labels.py`, in the shape `test_dogfood_route_coverage.py` established a day
+earlier. It walks every `.py` under `seestack/` and `webapp/` with **`ast`** — not a grep, which is what
+makes it trustworthy here: `io/project.py` and `stackhealth.py` both *document* `solve_failed:…` in a
+docstring, and a regex sweep reads those as writes. It collects every
+
+* `reject_reason=` keyword argument,
+* `fields["reject_reason"] = …` subscript assignment,
+* `row.reject_reason = …` attribute assignment,
+
+and reduces each assigned value to vocabulary: a `str` constant is an **exact** reason; an f-string
+contributes the literal head as a **namespace**; a `Name` resolving to a `REJECT_REASON_*` constant is
+exact; an `IfExp` or `BoolOp` is recursed into (`None if accept else "user"`,
+`body.reject_reason or "user"`); an attribute or subscript read *copies* an existing row's reason and so
+contributes nothing. Anything else is opaque and must be named in a two-entry `_EXEMPT` map **with its
+reason**:
+
+* `seestack/qc/runner.py:113` — `f"{reason}:…"`, where the namespace is a local chosen one line above
+  (`qc_error` retryable / `qc_error_final` terminal); both are covered by the `qc_error` entry in
+  `HANDLED_PREFIXES`, which a vitest case exercises.
+* `seestack/stack/stacker.py:2754` — a plain-English sentence composed at stack time (*"bad plate-solve
+  (footprint far from the group)"*), deliberately shown verbatim, which is what the fall-through is for.
+
+Derived today: exact `{user, auto:streak, bulk:streaked, bulk:trailed, auto:seestar_output,
+auto:file_missing}`; namespaces `{auto:grade:, bulk:, solve_failed:}`.
+
+Four assertions, and the first is the one that catches this bug: **an exact reason must have a label of
+its own** — being covered by a broader prefix is not the same as having a label, which is exactly how the
+two above hid. Then: every namespace is one the frontend slices; every exact reason buckets to something
+other than `"other"`; and a stale exemption cannot sit there hiding the next opaque write. A fifth pins a
+**third** mirror that happened to still agree: the frontend's `METRIC_LABEL` against
+`seestack.qc.grading.METRIC_LABELS`, word for word, so one graded-out frame cannot be described two ways
+depending on which surface is describing it.
+
+`rejectReasonLabel` moved into its own `frontend/src/rejectReason.ts` (the `fullres.ts` / `unstretched.ts`
+pattern — one place owns the wording, and the drift test has a stable file to parse), re-exported from
+`Target.tsx` so no caller changed. The function reads its exact answers **from the same exported
+`EXACT_LABELS` table the test parses**, so the table and the function cannot drift either; a vitest case
+asserts every entry of it and every declared prefix really is handled, which is what stops
+`HANDLED_PREFIXES` becoming a list of claims.
+
+**Tests: +5 drift, +2 `rejection_summary` unit, +6 vitest. Three fail before**, each verified by reverting
+the production change in a scratch copy and watching it go red: the two missing labels
+(`['auto:file_missing', 'auto:seestar_output']`), and the missing bucket (`['auto:seestar_output']`).
+Nothing weakened or rewritten.
+
+**Upgrade-safe (§9):** one new bucket key on a response whose consumer is generic, two new entries in a
+frontend lookup table, one file moved with a re-export. No config, DB schema, on-disk layout, API shape or
+default change.
+
+## v0.478.0 — 2026-09-26 — "Show and tell" told a beginner with their first finished picture that there was nothing to show
+
+*(Builder, branch `claude/exciting-tesla-2cd04h`. Found on the **first** dogfood pass that ever opened
+`/show` — v0.477.2, an hour earlier.)*
+
+### The defect
+
+The scratch install had a finished, stacked picture on the Gallery, on the Target page and on the Dashboard.
+`/show` — the full-screen slideshow, whose whole promise is *"point a screen at it and it plays"* — said:
+
+> **Nothing to show yet.** Once you've finished stacking **a target** — or made a Moon or Sun picture — this
+> plays them full-screen, one after another, with their names on.
+
+The copy says *a target*, singular, and it was false. The show is built from `/api/gallery/best`, which
+**self-hides below `BEST_PICTURES_MIN = 2`** finished pictures. That floor is well argued *for the wall* — its
+own comment says *"with one picture there's nothing to curate"* — and that argument is about **curating**. The
+slideshow does not curate; it plays them one at a time, which one picture does perfectly well.
+
+Two consequences, and the second is worse than the first:
+
+1. A beginner who has just stacked their first target opens the show and is told there is nothing to show.
+2. Once they have *also* shot the Moon, the show **plays** — and silently leaves the nebula out, with nothing
+   on screen saying so, because the Moon/Sun stills come from a different endpoint with no such floor.
+
+And the way in was gone too: `/show` is not in the nav, so it is reached from the **"Play slideshow"** button
+on `/best` — which decides whether a show exists from `hasAnythingToShow(items, videos)`, where `items` is
+*this wall's* list, empty below the same floor. Its own comment had the right instinct and the wrong list:
+*"`hasAnythingToShow` asks the show's own builder rather than this wall's length, because a first finished
+Moon still is a real show with an empty wall."*
+
+### The fix
+
+* **`min_targets`** — an additive query parameter on `GET /api/gallery/best`, defaulting to
+  `BEST_PICTURES_MIN`, so `/best` and every existing caller get **byte-identical** answers. `ge=1`, so it can
+  only ever lower a floor, never turn it off. `ShowAndTellView` asks with `min_targets=1` — **on its own
+  react-query key**, because `/best` shares this endpoint and must keep self-hiding; one cache entry for two
+  floors would let whichever page loaded first decide what the other shows.
+* **`n_finished`** — an additive response field: how many targets have a finished picture at all, reported
+  whichever way the floor goes. `hasAnythingToShow` takes it as an optional third argument (`undefined` means
+  "no extra information", i.e. exactly the old answer), so `/best` can keep its own floor for the *wall* while
+  the **button** answers the question it was always asking. A count rather than a second `min_targets=1`
+  request, because this endpoint opens every project in the library and the owner has 104 targets.
+
+The empty-state copy needed no change: with the floor at one, *"Once you've finished stacking a target"*
+became true.
+
+### Tests
+
++3 Python (`test_gallery_best.py`: the slideshow's floor returns the picture the wall hides and it is a whole
+captionable record; `min_targets=0` is a 422 and an empty library is still empty at the lowest legal floor;
+`n_finished` reported while the wall self-hides **and** agreeing with what the lower floor returns) and +4
+frontend (`hasAnythingToShow` over a self-hidden wall and the undefined/zero no-ops; the show calling with the
+floor; `/best` still offering the button over the one picture its own wall hides, while the wall stays honest
+about having nothing to rank; and the wall never passing a floor of its own). **Six fail before**, verified by
+scratch reverts of `webapp/routers/gallery.py`, `showAndTell.ts`, `BestPictures.tsx` and `ShowAndTell.tsx`.
+
+**Upgrade-safe (§9):** one optional query parameter and one defaulted response field. No config, schema,
+on-disk, default or existing-response-shape change; an older frontend ignores `n_finished`, and an older
+backend omitting it reads as "no extra information", which is today's behaviour.
+
+## v0.477.3 — 2026-09-26 — "Your year under the stars" named the same targets twice, in two cards, and the second one linked nowhere
+
+*(Builder, branch `claude/exciting-tesla-2cd04h`. Found on the **first** dogfood pass that ever opened
+`/sky-so-far/:year` — v0.477.2, an hour earlier. Photographed at 1440 px and 420 px.)*
+
+### The defect
+
+The year page ends with two cards, one directly above the other:
+
+* **"First light in 2024"** — *"One object you'd never imaged before."* — chips that **link** to the target.
+* **"What you pointed at"** — the same names again, as plain badges that link nowhere.
+
+Those are two different facts on a year with repeat visits, and **one fact** on a year where everything was
+new — which is the guaranteed shape of a beginner's **first** year, i.e. of the reader this page is written
+for. On the scratch install the two cards held the identical single chip
+`SAMPLE: ORION NEBULA (M42)`, one above the other, the lower one adding nothing.
+
+It is the class this repo has a name for — *two superlatives that can resolve to the same thing* — and this
+page **already answers it for its nights**, one function up: `yearNightCards` folds the longest and sharpest
+night into one card when they are the same night, with a docstring that reads *"Rendered as two cards it read
+as the page repeating itself — the same date, the same target, twice, side by side."* The identical complaint,
+unanswered for the targets.
+
+### The fix
+
+New pure `frontend/src/yourYear.ts::yearTargetCards(year, targetNames, firstLights)` — the same shape and the
+same reasoning as `yearNightCards` beside it. When every target the year pointed at was a first light, the two
+cards become **one**, keeping the first-light framing (the richer one: it links, and it has a sentence) with a
+blurb that says the thing two cards could never say:
+
+* one target → *"The one object you pointed at in 2024 — and you'd never imaged it before."*
+* many → *"All 4 objects you pointed at in 2026 were ones you'd never imaged before."*
+
+**Nothing is removed** (AGENTS.md §1): every name is still on screen, once, and in the folded case each one
+now carries its link instead of sitting as a dead badge. A year with any repeat visit renders exactly as it
+did.
+
+Folding requires **set equality**, not containment: `first_light_names` is derived from the same nights as
+`target_names` (`seestack/yearrecap.py`), so equal counts mean equal sets, and an older or inconsistent
+payload naming a first light the year never shot stays on the two-card path rather than quietly folding a name
+out of view.
+
+`YourYear.tsx` now renders `targetCards.map(...)` through one card component, so the two cards cannot drift
+into two layouts either. `data-testid` is the card key, so `first-lights` and `year-targets` keep working.
+
+### Tests
+
++6 pure cases in `yourYear.test.ts` (fold, the one-target wording, the repeat-visit two-card path, the
+unequal-sets guard, a target the registry no longer has, and the empty year) and +2 rendered in
+`YourYear.test.tsx`. The rendered fold test **fails before** — verified by a scratch revert of
+`YourYear.tsx`, where it reports the `year-targets` card still present.
+
+Frontend-only. No API, config, schema, on-disk or default change.
+
+## v0.477.2 — 2026-09-26 — three registered routes had never been in front of a browser, and the list that decides which are is hand-mirrored
+
+*(Builder, branch `claude/exciting-tesla-2cd04h`. Found by diffing `scripts/dogfood_probe.mjs`'s `ROUTES`
+against `frontend/src/main.tsx`; both new pages produced a finding on their very first pass — v0.477.3 and
+v0.478.0 below.)*
+
+### The gap
+
+`dogfood_probe.mjs`'s route table carries the comment *"the real route table (frontend/src/main.tsx)"*, and a
+list mirrored by hand goes stale. Three routes the app registers had **never been opened by any dogfood pass**
+— no screenshot at either width, no overflow probe, no squeeze probe, no clipped-label probe, no console-error
+capture, no page height:
+
+| route | what it is | why it was missed |
+| --- | --- | --- |
+| `/live` | **"Tonight, live"** — a **nav** entry, and the one page whose own docstring says it is *"meant to be left open on a phone for hours"* | simply absent from the list |
+| `/show` | "Show and tell", the full-screen slideshow | reached from a button on `/best`, never from the nav |
+| `/sky-so-far/:year` | "Your year under the stars" | the year is a property of the **library**, so like `/compare` it cannot be written as a constant |
+
+That last one is the same shape as the holes this repo has already paid for — the missing observing site, the
+empty `incoming/`, the click-only Compare comparators, the 1:1 editor preview: a surface the tooling is
+*structurally* unable to reach. And it paid the same way: **both new pages produced a real finding on the
+first pass that opened them.**
+
+### What shipped
+
+* `/show` and `/live` added to `ROUTES` as plain constants.
+* New `yearRoute()` beside `compareRoute()`, asking `/api/recap/year/<thisYear>` the way `YourYearCard` does
+  and resolving the year by the same rule as `yourYear.defaultRecapYear` (the most recent year with nights —
+  the year the card actually links to). Returns `""` when the library has no nights at all, where the card
+  self-hides and there is no route to sweep, so `--empty` is unaffected.
+* New **`tests/test_dogfood_route_coverage.py`** — the durable half. It parses the router children out of
+  `main.tsx` and every route-shaped literal out of the probe, normalises both (query string stripped,
+  `:param` and `${VAR}` alike reduced to `*`), and requires each registered route to be reachable or listed in
+  a tiny `_EXEMPT` map **with its reason**. A second test deletes the reverse failure mode: an exemption that
+  no longer names a real route is stale and hides the next one. **Fails before** on exactly `['live', 'show',
+  'sky-so-far/*']`.
+
+One exemption today: `settings/*`, which renders the same component as `/settings` deep-linked to a panel.
+
+### Baseline for a default pass at v0.477.2 (sample loaded and stacked, observing site 40.0, −2.0)
+
+Mechanically **CLEAN** — nothing overflowing, no console errors, on all 24 routes at both widths. Page heights
+unchanged on every route that was already swept; the three new ones all sit below the reported top-8 cut
+(`/tonight` 3,506 px phone remains the wall).
+
+## v0.477.1 — 2026-09-26 — three nudge cards chipped a target's name and hid the fact beside it
+
+*(Builder, branch `claude/exciting-tesla-m7wvjb`. Found by the `--closing` dogfood flag shipped an hour
+earlier in v0.477.0 — its **first** pass, on its first route. Measured in a real browser before and after.)*
+
+### The defect
+
+Three cards name the targets they are about as a chip reading `"<target name> · <fact>"`:
+
+| card | chip |
+| --- | --- |
+| `MergeSuggestionsCard` | `M 31_sub · 583 subs · 1.6 h` |
+| `CleanupSuggestionsCard` | `M 31_sub · duplicate` |
+| `LastNightCard` | `M 31 · 6 subs` |
+
+That is a **sentence**, not a token, and a Mantine `Badge` is
+`height: var(--badge-height); overflow: hidden` with a `nowrap` + `text-overflow: ellipsis` label. Measured at
+420 px on the seeded pair: the Alert body is **306 px**, the badge label box **288 px**, and the two strings
+wanted **299 px** and **317 px** — so the tail was ellipsised away *inside* the chip, with **no scroll and no
+`title` to reach it**. On the merge nudge that tail is how many subs and how many hours each folder holds,
+which is the whole basis of the decision the card is asking for.
+
+This is the fourth instance of the mechanism `frontend/src/badgeFit.ts` exists for (v0.434.1 on the Nights
+card, v0.436.2 on the Tonight score column, v0.472.3 on the week-plan chip) and the first one its existing rule
+could not fix.
+
+### Why `NO_SHRINK` is the wrong lever here
+
+`minWidth: "max-content"` is right for a badge in a **table**: making the table wider is honest, because the
+table's own scroll container can then reach it. These badges sit in an `Alert` body, which does not scroll — so
+asking for 320 px inside a 290 px box would push the overflow one element outwards instead of removing it, and
+the value would be just as unreachable.
+
+So the chip is allowed to grow **downwards** instead: new shared `badgeFit.WRAPPING_BADGE` clears the root's
+fixed height and the label's `nowrap`/`ellipsis`, and the chip takes two lines. After, in the same browser:
+both labels **288 px of 288 px**, 34 px tall, nothing overflowing and nothing hidden. Nothing was removed and
+no copy changed — the owner's standing constraint (AGENTS.md §1).
+
+The rule is documented against its sibling so the next card picks the right one: `NO_SHRINK` for a one-word
+verdict in a table, `WRAPPING_BADGE` for a label *composed* from data.
+
+### Tests
+
++1 vitest case and +2 assertions on existing rendering tests, one per card, so the rule is pinned where a
+reader of that card looks. The new case **fails before** the fix (verified by reverting the `styles` prop in a
+scratch edit and re-running) on a realistic long name — `"Lagoon and Trifid Nebulae mosaic_sub"`, the shape the
+owner's own `<T>_mosaic_sub` duplicates take.
+
+### Upgrade-safety (§9)
+
+Frontend-only, three `styles` props and one exported constant. No API, config, schema, on-disk or default
+change.
+
+
+## v0.477.0 — 2026-09-26 — the season-closing dogfood hole: a sample shape whose sky the *planner* chooses
+
+*(Builder, branch `claude/exciting-tesla-m7wvjb`. Built as the backlog's own preferred shape (a) for the
+"Infra / maintainability" entry *"the season-closing card is the next self-hiding surface no dogfood pass can
+reach"*, which its second finding — v0.476.0 — had just promoted.)*
+
+### The hole
+
+`/tonight` prescribes from **four independent self-hiding cards in one column**. Three of them can be put in
+front of a browser by giving the scratch install an observing site (v0.436.1). The fourth — **"Shoot these
+before they're gone"**, `/api/plan/closing`, the one card in the app whose whole argument is that its answer
+*expires* — could not, and the reason is not a state the tooling forgot to seed:
+
+> A season closes as a function of the target's **right ascension against the date**, not of where you stand.
+
+Both bundled samples sit at M 42 (RA ≈ 5h35m). No `DOGFOOD_SITE`, no fixture and no clock makes M 42 leave the
+sky in the eight weeks ahead, so the card had **never been rendered** on any pass ever recorded — it was pinned
+by jsdom alone, and the one bug found in it so far (v0.476.0: the endpoint scanned the forty targets with the
+**most** integration and then headlined about what you are about to lose) had to be read out of the code.
+
+That is the missing-observing-site (v0.436.1) / click-only-Compare (v0.440.2) / empty-`incoming/` (v0.442.0) /
+no-master-dark (v0.455.1) hole a fifth time, and this instance is the one with no setting behind it.
+
+### What shipped
+
+**1. `seestack/nightplan.closing_sky_position(observer, *, start_utc, …)`** — where would such a target have to
+sit *today*, from *here*? It builds probe targets on a 48-step RA grid at five declinations spanning both
+hemispheres and asks **`season_closing` itself** which of them are leaving, then returns the candidate nearest
+the middle of the horizon and highest in the sky now. Going through the very function the card reads is the
+load-bearing choice: the demo and the card cannot come to different conclusions about what "closing" means,
+whatever either does next. `None` — not a plausible-looking pair — when nothing on the grid closes, because at
+78°N in midsummer there is no darkness to compare and no right ascension can fix that. Deterministic, offline,
+read-only, ~2.5 s (the scan's cost is in the horizon, not the target count, as `season_closing` documents).
+
+**2. A fifth `POST /api/sample` shape, `"closing"`** — a **pair** of targets, at **one** sky position, with
+**1 min** and **1.5 h** kept on them:
+
+* *A pair*, because the card's job is to say what the season ending will **cost**, which is a function of how
+  much you already have; one row exercises none of it. This is the backlog entry's own requirement (*"a range
+  of `total_exposure_s` … or it cannot exercise what was just fixed"*).
+* *One patch of sky*, because then the only thing differing between its two rows is **depth** — the axis the
+  endpoint ranks and caps by — and neither row's placement can be blamed for the order they come out in.
+  Measured on load: `noise_gain` 0.872 against 0.225, shallow first, which is v0.476.0's ranking rendered.
+* …but **not the identical position**, which the first build of this shape used and the flag's own first pass
+  caught within a minute: two targets whose centres agree to within `library.SAME_OBJECT_TOL_DEG` (0.1°) are
+  exactly what the merge nudge exists to find, so the Library wall raised **"Same object in more than one
+  folder?"** — an owner-facing warning about nothing, in every screenshot and every page-height baseline the
+  pass takes. A flag must seed the state it is *for* and no other. The deeper target now sits **1°** north:
+  ten times that tolerance, and about a thousandth of the sky's daily turn, so the pair still shares a season
+  and a placement to within a minute of dark time.
+* *Not stacked.* The card reads the **library registry** (position + kept exposure), so a stack would cost a
+  pass a minute and change nothing on the screen under test. The whole shape costs ~7 s.
+* Frames are the deep sample's cheap 160×120 sensor, for the reason it is, and the session's cadence follows
+  its own exposure so 180 subs read as one plausible evening.
+
+**3. `--closing` in `scripts/agent-dogfood.sh`** — resolves the position, seeds the pair, and then prints what
+`/api/plan/closing` answers: `location_source`, the exact `n_closing`, and every row's weeks-left, minutes-up
+and hours-kept. It says **"NOTHING IS CLOSING — do not read it as CLEAN"** when the list is empty, because a
+pass that silently failed here would look exactly like the coverage hole it exists to close (the guard
+`--calibration`'s own first run had to learn). Skipped under `--no-site` and `--empty`, since it needs a site.
+
+### The Care note, honoured
+
+The entry's caution was that a seeded target must not *"teach the planner to plan a real owner's night from
+coordinates nobody chose"* — the line v0.436.1 drew when it put the observing site in **Settings** rather than
+in the sample's FITS headers. Here the coordinates are a **target's**, not an observer's, they are supplied by
+the caller rather than invented by the app, and the targets name themselves demos
+(`"Sample: season closing (just started)"` / `"(hours in)"`, swept by the one existing remove).
+
+And the other direction is closed too: `center=` is **refused** by every other shape rather than ignored, so a
+caller cannot believe it moved a sample that did not move — the field and mosaic samples' pixels are pinned
+bit-identical, and every recorded page-height, trim and coverage baseline rests on them.
+
+### Tests
+
++14 Python (5 engine cases × parametrisation = 12 runs in `tests/test_nightplan.py`, 8 in
+`tests/webapp/test_sample_data.py`). The engine tests deliberately pin the **property** rather than the
+coordinates, which move with the calendar: on three dates × three sites (including the dogfood default and a
+southern one), the returned position is one `season_closing` reports, comfortably inside the scan rather than
+balanced on its edge. The webapp tests include the end-to-end path the flag actually walks — placement helper →
+`POST /api/sample` → `GET /api/plan/closing` names both rows, least-finished first — so the flag's claim to
+reach the state is pinned in the suite rather than in a shell script nobody runs.
+
+### Upgrade-safety (§9)
+
+Purely additive. Three optional request fields (`ra_deg`/`dec_deg`, and `"closing"` added to the `shape` enum)
+and three defaulted response fields on `/api/sample`; a new optional `center=` keyword on
+`sample_data.load_sample` and on three private WCS helpers, every existing call byte-identical; one new pure
+engine function nothing in the app calls. No config, schema, migration, on-disk, default or API-shape change.
+
+
+## v0.475.3 — 2026-09-26 — the health card diagnosed registration smear and prescribed a set of subs that only exists once the cure is already on
+
+*(Builder, branch `agent/run-0002`. Found by reading `seestack/stackhealth.py` during a run whose four
+dogfood sweeps — `--big --editor`, `--empty`, `--deep`, `--calibration` — all came back clean; the sweep
+records are in [`PROCESS-NOTES.md`](PROCESS-NOTES.md). Not filed in the backlog beforehand: this is a bug the
+Builder verified itself in the code.)*
+
+### The defect
+
+`stack_health`'s **`soft_stars`** note is the one that fires when the finished stack's own star size is
+materially fatter than the median of its contributing subs — *"the combine, not the sky, softened them"*,
+i.e. accumulated sub-pixel registration error. It ended, on every run, with one cure:
+
+> …This is usually small alignment drift building up over the night; **a steadier mount, or re-solving the
+> roughly-aligned subs, keeps them tight.**
+
+"The roughly-aligned subs" is not a general phrase in this app — it is a specific population with its own
+column, its own FITS card and its own health note. And it only exists when **sub-pixel alignment refine**
+ran:
+
+* `n_roughly_aligned` counts the contributing subs *refine* had to leave unshifted because their measured
+  shift exceeded its cap (`stacker._pass` → `align.align_one`'s `roughly_aligned_ids`).
+* `stacker` stamps it — and persists it — only under
+  `eff.subpixel_refine and not eff.drizzle and refine_active`, deliberately, so that "absent" reads as
+  *"refine didn't run"* rather than a reassuring zero.
+* `StackOptions.subpixel_refine` defaults **`False`**, and nothing turns it on automatically: it is an
+  **advanced**, hand-set field on the Stack form (`schemas.py`, `group: "advanced"`).
+* So on a default install the column is NULL, and the sibling note that *would* have named those subs
+  (`kind="roughly_aligned"`) is silent by design in exactly that state.
+
+The card therefore diagnosed the problem and then sent the reader after a set of frames the app had never
+shown them and never would — while the app's own remedy for that diagnosis, *"a phase-correlation pass that
+nudges each frame by a fraction of a pixel after the plate-solve align, **for slightly tighter stars**"*,
+sat unnamed behind the Stack form's collapsed **Advanced options** disclosure.
+
+**Verified against the owner's own state, not assumed.** The backlog's open lead on observer issue
+[#965](https://github.com/JimmyeJones/astrostack/issues/965) carries a point (c) — *"`n_roughly_aligned` is
+NULL on all 690 of the owner's stack runs… it may simply never be written"*. It is written; it is NULL
+because `subpixel_refine` is off on every one of those runs, which is the default and the only way it can
+be. That is now recorded on the lead (see below), and it is also what makes this note's second clause dead
+on his install specifically.
+
+### What shipped
+
+`soft_stars`'s **diagnosis is unchanged**; only the cure is chosen by what the run actually did.
+
+* New pure `stackhealth.run_option_flag(options_json, key) -> bool | None` — a boolean the run was stacked
+  with, keeping **three** states apart. `True`/`False` are the run's answer; `None` is *"the record can't
+  say"* (absent, garbled, non-object, key missing, or a non-`bool` value). Deliberately unlike the
+  neighbouring `_run_sigma_kappa`, whose fallback to the app default is safe only because every shipped
+  default for κ has been the same number — an option's default can and does change between versions, so
+  guessing would put a claim about *this* run on screen that nothing in the record supports. Real runs
+  persist `asdict(eff)`, so both keys are always present on anything the stacker wrote.
+* New `_refine_is_the_open_lever(run)`: true only when the run says `subpixel_refine: false` **and**
+  `drizzle: false`. Three runs are never offered the switch, for three different reasons — it was already
+  on (the pass ran, and this is the one state where "the roughly-aligned subs" names something real); the
+  run **drizzled** (drizzle places samples through a pixmap and never runs the refine step, which is why
+  `stacker` stamps no `NROUGHAL` there, so the switch would change nothing); or the options can't be read.
+* New `_soft_stars_message(run)`. With the lever open the sentence becomes *"…small alignment drift building
+  up over the night. **Sub-pixel alignment refine** nudges each sub by a fraction of a pixel before
+  combining, which is what tightens them up — it was off for this stack, and it costs a little more time per
+  sub."* Honest about the cost, because it is not free on a 5,477-sub target. Otherwise the original
+  sentence is kept **byte for byte**.
+* `HealthNote.action` gains `"subpixel_refine"`. The key is free-form on the wire by design
+  (`schemas.HealthNoteOut`: *"an older frontend simply renders no link for a key it doesn't know"*), so this
+  is upgrade-safe in both directions.
+* `StackHealthCard.noteAction` wires it to `/targets/<safe>/stack?open=advanced`, labelled *"Re-stack with
+  sub-pixel alignment refine →"*.
+* `routes/Stack.tsx`'s Advanced accordion becomes **controlled**, seeded open from `?open=advanced`. This is
+  the same gap `printBiggerAction` exists for and says out loud — *"both knobs it names live inside the
+  collapsed advanced disclosure, so reading the sentence still left a beginner hunting"*. The value is a
+  *default*, so the reader can still close it, and without the parameter the form is unchanged.
+
+### Tests (+5 Python, +3 vitest)
+
+`test_soft_stars_names_the_refine_switch_when_the_run_did_not_use_it` is the regression test and **fails
+before** (verified by a scratch revert of `seestack/stackhealth.py`): it asserts the switch is named, the
+action key is set, the diagnosis sentence is intact, the cost is stated, and — the half that is the actual
+bug — that the message does **not** send the reader after "roughly-aligned" subs that cannot exist there.
+Beside it: the refine-on and drizzled runs keep the original sentence and no action; four shapes of
+unreadable options (`{}`, unparseable, and each key present without the other) fall back rather than guess;
+and `run_option_flag` is pinned across all three states including a non-`bool` value.
+`StackView > opens the Advanced disclosure when the link asked it to` **fails before** too (verified by a
+scratch revert of `Stack.tsx`), and asserts `aria-expanded` on the control rather than jsdom visibility —
+jsdom lays nothing out, so a visibility assertion there would pass on a panel that is merely rendered. The
+one existing assertion that pinned the pre-fix behaviour (`sf.action is None` on a `{}`-options fixture)
+still passes untouched, and gained a docstring line saying *why* it is the unreadable-options case.
+
+### Upgrade-safety (§9)
+
+Additive throughout: no config key, no schema change, no migration, no on-disk path, no default flipped, and
+no API shape changed (one new value for an already-free-form string field). An older frontend against this
+backend renders the new sentence with no link; this frontend against an older backend never sees the key.
+`subpixel_refine` itself is untouched — it stays off by default, and the note *names* it rather than setting
+it.
+
+## v0.475.2 — 2026-09-25 — a recipe may carry an op twice, and its outcome notes could not
+
+*(Builder, branch `claude/nifty-pasteur-fspzqn`. The backlog entry — "Infra / maintainability", Builder
+2026-09-03, filed while adding the sibling `fitted` channel in v0.328.2 — is quoted at the foot of this
+entry. Its own **"check first"** was carried out before anything was written, and it is what turned an XS
+tidy-up into a priority-1 parity fix.)*
+
+### What the entry asked to be checked, and what the check found
+
+The entry sized itself as *"an XS tidy-up rather than a bug"* **unless** a double-op recipe is reachable
+from the UI. It is: `frontend/src/routes/Editor.tsx::addOp` inserts a new `OpInstance` unconditionally, and
+neither the Add menu (`Menu.Item … onClick={() => addOp(s)}`) nor `insertOnCorrectSide` refuses one whose id
+is already in the list. Two **Color calibration** ops is two clicks.
+
+### The defect
+
+`EditContext.op_notes` was keyed by the op **id**, where its two sibling channels — `fitted` and
+`field_deltas` — have been keyed by the recipe op's **uid** since they were built, for exactly this reason
+(`EditContext.op_uid` exists to carry it, and `_fit_key` already spells the rule). So the second instance's
+note replaced the first's, and the payload the editor captions from described a two-step chain as if it had
+been one step.
+
+Two of the three fields that note carries are fine to read that way. The third is not:
+
+* `mode_used` / `n_stars_used` / `notes` describe **which balance the picture ended up with**. A second
+  calibration runs on top of the first, so the last instance's answer is the right one — which is what the
+  overwrite produced by accident.
+* `proxy_fallback` is a **preview-vs-export parity warning**: the decimated proxy held too few resolvable
+  stars for the star-based solve the full-res export will manage, so it fell back to the starless balance.
+  `frontend/src/components/editor/colorCal.ts::colorCalProxyFallbackCaption` turns it into *"the saved
+  picture's colour will differ a little from this preview."* The chain diverges if **any** step diverged —
+  so with the fallback on the **first** op and not the last, the whole advisory silently disappeared. A
+  parity advisory going quiet is the A2 class AGENTS.md §1 re-opened priority 1 over.
+
+The same payload builder already gets this right one field up: `star_reduce_preview_overstates` is an
+`any(...)` over **every** enabled `stars.reduce` op in the recipe. It could not be written that way for the
+colour one, because the note that carries the flag had already been overwritten.
+
+### The fix
+
+* `EditContext.record_note(op_id, note)` writes through the same `_fit_key` the fits use, so a note is keyed
+  to the instance; `EditContext.notes_for(op_id)` reads every instance's note back **in recipe order**
+  (`op_notes` is insertion-ordered and the pipeline applies enabled ops in order). A direct engine caller
+  that applies an op without the pipeline sets no `op_uid` and lands under the bare op id — the same degrade
+  `record_fit` already has, and what keeps three existing test files reading exactly as they did.
+* New pure `seestack/edit/opnotes.py`: `COLOR_CAL_OP` + `merge_color_cal(notes)`, the one place that decides
+  what "more than one" means — last note with a mode for the balance, `any()` for the parity flag — so the
+  editor's live histogram and the walk-away auto-edit's History stamp cannot describe one render
+  differently. `tone.py` writes through `record_note`; `webapp/routers/editor.py` and `webapp/pipeline.py`
+  both read through `merge_color_cal`.
+
+**Bit-for-bit unchanged on every recipe the app actually renders today**, including the one-click Auto
+recipe: one note in, the same dict out, with `proxy_fallback` recomputed from that same note.
+`tests/webapp/test_editor.py::test_histogram_reports_color_cal_outcome` pins the single-op payload key for
+key and passes untouched.
+
+**Upgrade-safe (§9):** `op_notes` is an engine-internal dataclass field with exactly two readers, both
+changed in the same commit. No response shape changes — the `color_cal` payload keeps its four keys, so the
+`AUTO_EDIT_COLORCAL_PREFIX` metas already stamped on the owner's runs still read. No config, schema,
+on-disk, API or default change.
+
+**Tests (+9, one fails before):** `tests/test_edit_op_notes.py`. The fail-before is the real op run twice
+through `apply_recipe` — two instances, two notes, keyed `first:` / `second:` (before the fix: one note).
+The rest pin the merge rule in both directions, the identity on a single note, the no-mode and empty cases,
+and the bare-id degrade for a direct caller. `tests/test_edit_frozen_fits.py`'s two assertions were the only
+existing ones built on a uid-carrying context by hand; they now read through `notes_for(...)[-1]` and assert
+the identical facts.
+
+> **The entry, as filed (Builder 2026-09-03, "Infra / maintainability"):** *"`EditContext.op_notes` is keyed
+> by op **id** where its new sibling `fitted` is keyed by op **uid**, so a recipe carrying an op twice reports
+> only the last one. (Pillar: editor correctness — PRIORITY 1; size XS; latent, low severity.)
+> `seestack/edit/ops/tone.py` writes `ctx.op_notes["tone.color_calibrate"] = {…}` and
+> `seestack/edit/ops/detail.py` does the same for its advisories … the fix is available: key by uid and have
+> the webapp layer resolve uid → op id when it builds the histogram payload. **Care:** the histogram
+> endpoint's JSON shape is what the frontend reads … and per §9 must not change … Worth confirming a
+> double-op recipe is actually reachable from the UI before spending a run on it; if it is only reachable by
+> hand-editing a recipe JSON, it stays an XS tidy-up rather than a bug."*
+>
+> Two corrections the build owes it. **`detail.py` no longer writes `op_notes` at all** — its advisories moved
+> to `fitted`, so `tone.color_calibrate` was the only writer and the whole blast radius is the `color_cal`
+> payload. And the fix is **not** "the webapp resolves uid → op id": that shape needs the recipe at read time
+> and still has to answer "which of the two?", which is the actual question. `notes_for` + `merge_color_cal`
+> answer it once, in the engine, where the writer is.
+
+## v0.475.0 / v0.475.1 — 2026-09-25 — the badge that read above √N, because neither side has independent pixels (and because "sharpest" is not "typical")
+
+*(Builder, branch `claude/nifty-pasteur-meo70w`. The Scout's entry, verified from observer issue
+[#967](https://github.com/JimmyeJones/astrostack/issues/967), is quoted in full at the foot of this entry.
+Both mechanisms it traced are fixed; the owner-side magnitudes in it are the observer's and were not
+re-measured here — what *was* measured here is ground truth on a real debayer+warp pipeline.)*
+
+### v0.475.0 — mechanism 1: the estimator assumed independent pixels, and neither side has them
+
+`qc/noise_ratio._diff_sigma` took σ from the MAD of **adjacent**-pixel differences, which is `2σ²` only if
+neighbours are independent. Nothing in this pipeline delivers that. The sub reaches the measurement through
+`bilinear_debayer` (`webapp/routers/stack.py:_measure_noise_ratio`); the master comes straight off the linear
+FITS *after* a registration warp and, on most runs, a drizzle kernel. Both are smoothed, by **different**
+amounts, so both σ are under-read and the master's is under-read more — and `σ_sub/σ_stack` inherits the
+quotient.
+
+**Measured against ground truth**, which this repo had never done for this estimator: push one scene through
+the real `bilinear_debayer`, a sub-pixel bilinear registration warp and a mean, twice — once with noise and
+once without — so `noisy − clean` *is* the noise that ended up in the picture and its std is the σ that is
+really there.
+
+| fixture | true ratio | old (lag-1) | new |
+|---|---|---|---|
+| native master, 36 frames | 6.98 | **7.59 (+9 %)** | 6.80 (−3 %) |
+| 2×-drizzled master, 36 frames | 7.88 | **17.23 (+119 %)** | 7.33 (−7 %) |
+
+**Why it mattered: the error direction is toward silence.** The same ratio feeds
+`stackhealth.noise_vs_expected`, which nudges only when the number comes in **low**
+(`NOISE_EXPECTED_LOW_FRACTION` = 0.7·√N). Inflation can only push a run *up* toward "expected", so a genuinely
+underperforming stack had its one noise diagnostic withheld — and the badge itself is the app's one
+celebratory "trust me" number, on a priority-1 surface.
+
+**The fix — a second difference at a lag chosen from the data.** `_lag_sigma` takes σ from
+`I(x−L) − 2·I(x) + I(x+L)` (`Var = 6σ²` for noise independent at that separation), and `_background_sigma`
+walks `L = 1, 2, 4, 8, 16` until the estimate stops growing: correlation is what was holding it down, so the
+plateau is where the differenced pixels have finally stopped sharing noise. Two properties make that walk
+safe, and they are why it is a *second* difference rather than a longer first one:
+
+* a second difference is **exactly zero on a linear ramp**, so a sky gradient — which a first difference at a
+  long lag swallows whole — contributes nothing. Measured: with first differences the master's estimate
+  climbs past truth to **1.24×** by lag 32; with second differences it sits at 1.006–1.017 across lags 4–16,
+  i.e. flat across the plateau rather than climbing through it, so the answer does not hinge on picking the
+  lag exactly right;
+* the lag is chosen **per side**, so a drizzled master (whose correlation is twice as wide in its own pixels)
+  is measured at its own — measured, the native master plateaus at 4 and the 2×-drizzled one at 8.
+
+**Not slower — faster.** 157 ms → **81 ms** on a 1024² crop, because `_MAX_PAIRS` caps the MAD's sample at
+400k with an odd stride (odd so it can never land on one Bayer phase); a MAD of 400k samples is precise to
+~0.2 %. That matters because `one-sub-vs-stack/noise` is fetched eagerly on every Target-page load.
+
+**`_NOISE_RATIO_CACHE_VERSION` 1 → 2.** The stamp fingerprints the two *inputs* (master mtime/size, reference
+sub id) and not the estimator that read them, so without the bump a library would keep serving numbers the
+lag-1 estimator produced, for ever. Every old stamp is now a miss and heals lazily on the one request that
+needs it — which is the mechanism that cache was built around, not a new one.
+
+### v0.475.1 — mechanism 2: the reference sub was picked on sharpness, and sharpness is not sky noise
+
+`reference_sub_from_frames` / `_pick_reference_sub` took the sharpest accepted frame by FWHM. Sky **shot
+noise** is the dominant term in σ_sub and is **uncorrelated with FWHM**, so when a target's sharpest frame is
+also one of its brightest-sky frames — moon up, a passing cloud lit from below, twilight — it stood in for a
+typical sub and inflated the badge by however much brighter its sky was. (Observer: on `M 3`, a reference σ
+**2.53×** the sample median and a **188×** badge off 5,460 subs where √N = 73.9.)
+
+**The fix — sharpest, among the frames shot under a typical sky.** `_typical_sky_frames` narrows the pool to
+the **middle half** of the target's measured `sky_adu_median` values before the `min(fwhm)`. An interquartile
+band rather than a tolerance, deliberately: there is no honest constant here, it is scale-free, it keeps
+about half the frames whatever the spread, and on a bimodal target (moonlit nights and dark ones) it sits in
+whichever population is the bigger rather than between them. It also picks the dominant **exposure** for
+free — sky level scales with exposure, so a mostly-10 s target's few 30 s subs fall outside the band on their
+own, and a sub that integrated three times as long carries √3 the sky noise: the same inflation in a
+different costume, and the same class `run_stack`'s reference-frame exposure taught in v0.456.0.
+
+**One-sided by construction.** Below `_REF_SKY_MIN_SAMPLE` = 10 measured skies the pick is unchanged (a
+quartile of four numbers is an opinion — the same floor `NOISE_EXPECTED_MIN_FRAMES` puts on the √N yardstick,
+for the same reason), an empty band falls back to the whole pool, and a target with no `sky_adu_median` at
+all behaves exactly as it always did. So this can only ever *narrow* an existing choice, never remove one.
+
+`FrameHealth` gains `sky_adu_median` (ninth field, `_HEALTH_COLUMNS` in step). None of the three grading
+functions read it: it is there so the health card and the reveal endpoint make the **same** pick, because
+`stamped_noise_measurement` fingerprints the stamp on the reference sub's id and a disagreement would make
+every stamped measurement a permanent miss. A REAL costs nothing beside the `wcs_json` that record exists to
+drop.
+
+### What was checked that the entry asked for
+
+* **The 0.7 threshold still separates, re-confirmed after decorrelation** — and on the real pipeline, not
+  only on the independent-pixel sweep. A healthy 25-frame stack reads **1.05·√N**; the same stack with 10 %
+  of its noise shared across the canvas reads **0.33**. The gap is *wider* there than on the independent-pixel
+  sweep, not narrower. `stackhealth`'s threshold comment carries the re-measured numbers (ideal
+  0.989–1.006 across N = 12…400, weighted-U(0.1,1) 0.90, shared-variance 0.58 at 2 % and 0.30 at 10 %).
+* **An honest badge can still read above √N**, and that is not the bug coming back: resampling genuinely
+  lowers *per-pixel* σ further than averaging alone (a warp and a drizzle kernel smooth), so the true ratio on
+  the fixtures above is 6.98 and 7.88 against a √N of 6.00. No information is gained; the pixels are simply
+  smaller and correlated. Recorded here so a future run does not "fix" it.
+* **The fixtures can exhibit their bugs.** `tests/test_noise_ratio_expectation.py` was green before and after,
+  exactly as the entry predicted — it builds both sides with `rng.normal` on one grid, the one regime where
+  lag-1 is unbiased. The new `tests/test_noise_ratio_correlated.py` carries the old estimator inline and
+  asserts it over-reads on every fixture; three of its four tests fail before the fix. In
+  `tests/test_reference_sub_pick.py`, three of eight fail before (the other five are the
+  "nothing-else-moved" guards, which correctly pass both ways), verified by a scratch revert of the pick.
+
+### Left open, deliberately
+
+**The two sides are not identically sampled when the master is drizzled**, which the module docstring's own
+"Identical sampling" rule is about: the sub is measured at native resolution and the master at its own, so on
+a 2× drizzle they are per-pixel σ of different pixel *areas*. That is why the drizzled fixture's true ratio
+(7.88) sits further above √N than the native one's (6.98). This fix makes the measurement match the physical
+per-pixel truth on both, and does not make the sampling question worse; a pixel-area-matched comparison is a
+separate design question and is filed as a lead.
+
+---
+
+**The Scout's entry, as filed:**
+
+> - **🟠 BUG (trust — PRIORITY 1-adjacent; Scout 2026-09-25, verified in-code from observer issue
+>   [#967](https://github.com/JimmyeJones/astrostack/issues/967)) — the "stacking cut your noise ~N×" badge
+>   reads *above the √N ceiling on most runs* because both sides are measured with a lag-1 (adjacent-pixel)
+>   MAD estimator on pixels that are NOT independent — the sub is bilinear-debayered, the master is
+>   registration-warped and usually drizzled — so each σ is understated, the master's more than the sub's,
+>   and the ratio inherits the quotient.** *(Size **M to write, M to be sure of** — two separable halves;
+>   severity **broken-UX / wrong displayed number + a silenced diagnostic**, no image is corrupted.
+>   Confidence: **both mechanisms TRACED in code and the "why nobody caught it" reproduced**; the owner-side
+>   magnitudes (73/83 runs above √N, median ratio/√N 1.374) are the **observer's measurements**, which I have
+>   not independently reproduced on the owner's data.)*
+>   **Mechanism 1 — the estimator assumes independent pixels; neither side has them.** `qc/noise_ratio.py`
+>   `_diff_sigma` takes σ from `1.4826·MAD/√2` of **adjacent**-pixel differences (lines 50-71), which is `2σ²`
+>   only if neighbours are independent. The sub reaches it through `bilinear_debayer`
+>   (`webapp/routers/stack.py:3367-3369` in `_measure_noise_ratio`), the master straight off the linear FITS
+>   (`stack.py:3342-3364`) after a registration warp and, on most runs, a drizzle kernel. Both are smoothed,
+>   by *different* amounts, so `σ_sub/σ_stack` is inflated. The module docstring already warns against
+>   box-averaging one side and striding the other, but it never addresses that *both* sides are correlated by
+>   their own pipelines — so the warning is there and the actual bias is not covered by it. √N is a hard
+>   ceiling (a mean of independent noise cannot beat it; weighting only lowers effective N), so any run above
+>   √N is the estimator being fooled, not a good stack.
+>   **Mechanism 2 — the reference sub is picked on sharpness, and sharpness is not sky-noise.**
+>   `reference_sub_from_frames`/`_pick_reference_sub` (`stack.py:2934-2965`) take the sharpest accepted frame
+>   by FWHM. Sky **shot noise** is the dominant σ term and is uncorrelated with FWHM, so when the sharpest
+>   frame is also a bright-sky frame its σ_sub is inflated and the ratio with it (observer: `M 3` reference σ
+>   2.53× the sample median, 188× badge off 5,460 subs where √N = 73.9).
+>   **Why it matters — the error is toward silence.** The same measured ratio feeds `stackhealth.noise_vs_expected`
+>   (`stackhealth.py:299-335`, `NOISE_EXPECTED_LOW_FRACTION` = 0.7·√N) which gates `noise_low_lead`'s advisory
+>   ("that usually means the subs didn't line up… worth checking focus and alignment"). Inflation can only push
+>   a run *up* toward "expected", so a genuinely underperforming stack has its one noise diagnostic withheld
+>   (observer: 5 runs across NGC 281W / NGC 6888 / NGC 6960 graded "expected" that a decorrelated measure grades
+>   "low"). And the badge itself is the app's one celebratory "trust me" number on a priority-1 surface.
+>   **Why nobody caught it — CONFIRMED by reading the test.** `tests/test_noise_ratio_expectation.py` builds
+>   **both** sides with `rng.normal` on one grid: the sub is `subs[0]` (never debayered) and the stack is a plain
+>   `.mean(axis=0)` (never registered/resampled/drizzled) — the exact regime where the lag-1 estimator is
+>   unbiased. Its `shared_var` case models noise shared *between frames*, a different quantity from noise
+>   correlated *between neighbouring pixels*. So this is a **fixture-that-cannot-exhibit-its-bug** (cf. the D1/A1
+>   class already in this file): a real regression test must debayer the sub and warp/resample the master, or it
+>   is green for the wrong reason.
+>   **Fix shape, cheapest first — two independent halves; do NOT blind-flip the estimator on the hot path.**
+>   **(a)** Difference at a lag beyond the correlation length in `_diff_sigma` (observer's convergence control
+>   puts the plateau at lag ~16-24; σ(lag24)/σ(lag16) = 1.0000 on subs, 1.0076 on masters). This changes the
+>   badge number for **every** install, so it is a hot-path behaviour change: check that `test_noise_ratio_expectation`'s
+>   independent-pixel fixtures stay ~1.00·√N (they should — lag doesn't matter on independent pixels, which means
+>   that suite does **not** protect the fix and a new correlated-pixel fixture is mandatory), and re-confirm the
+>   0.7 threshold still separates the honest weighted-mean case from the correlated case *after* decorrelation.
+>   **(b)** Constrain the reference pick to "sharpest among frames whose `sky_adu_median` is near the target's
+>   median" — `sky_adu_median` is populated on ~99.8% of the owner's frames (observer), so it needs no new
+>   measurement, only a filter before the `min(fwhm)`. (a) and (b) are independent; (b) alone caps the worst
+>   overshoots (the 188× came almost entirely from the reference frame), (a) alone removes the systematic ~1.34×
+>   floor. **The regression test is the gate**, not the arithmetic — revert each half in a scratch script and
+>   watch a debayer+warp fixture go red before claiming it pinned.
+
+## v0.474.0 — 2026-09-25 — one flag for two rails, so a mosaic that lost one frame on one panel was told it had had a rough night
+
+*(Builder, branch `claude/wizardly-cannon-hnfyu0`. Verified from observer issue
+[#968](https://github.com/JimmyeJones/astrostack/issues/968) — the two `report.capped = True` sites re-read
+here, the library-wide arithmetic is the observer's, replayed through `grade_frames` unmodified.)*
+
+**The defect.** `qc.grading.grade_frames` has **two** 25 % safety rails and set the *same* boolean from both:
+
+* the **per-panel** rail, applied first — no mosaic panel may lose more than a quarter of *its own* subs;
+* the **target-wide** rail — no target may lose more than a quarter of everything.
+
+`GradeReport.capped` is their union, and both surfaces that read it told the target-wide story. The Target
+page: *"More frames were flagged than the 25% safety cap allows — only the worst are listed. Consider a
+conservative pass first, or review the night's data."* The Stack form: *"This looks like a rough session…"*.
+
+**On a mosaic that claim is false, and the remedy it offers is the wrong lever.** The per-panel rail fires on
+its own at whole-target flag rates nowhere near a quarter. On the owner's library, **7 of the 21 targets
+currently showing the banner could not have reached the target-wide rail at all** — the grader flagged fewer
+frames in total than that cap would have allowed, so it cannot have truncated anything:
+
+| target | considered | panels | flagged | 25 % cap | recommended | held by per-panel rail | flag rate |
+|---|---|---|---|---|---|---|---|
+| V772 Herculis_mosaic_sub | 1,524 | 32 | 123 | 381 | 122 | **1** | 8.0 % |
+| QU Serpentis_mosaic_sub (+dup) | 1,495 | 38 | 205 | 373 | 198 | 7 | 13.2 % |
+| HIP 4205_mosaic_sub (+dup) | 1,184 | 32 | 217 | 296 | 161 | 56 | 13.6 % |
+| IC 1318_mosaic_sub (+dup) | 1,405 | 29 | 274 | 351 | 253 | 21 | 18.0 % |
+
+V772 Herculis is the sharpest: **one** withheld frame raises an orange "rough session" warning on a target
+where 8.0 % of the frames were flagged and 122 of them are recommended. And the advice cannot work — "consider
+a conservative pass" *raises* the modified-z threshold, which **shrinks** the flagged set and can never release
+a frame a **count** limit withheld; "review the night's data" points at a night when the withheld frames are
+concentrated on **panels**. The observer's walk of M 44_mosaic_sub found the 285 frames its rail withholds
+include subs scored z = 7.1 on transparency — 0.23× their own panel's typical value. Those stack, and nothing
+said so.
+
+**The fix.** `GradeReport` gains `capped_overall: bool`, `capped_panels: int` and `withheld_per_panel: int`;
+`capped` **stays the union**, so every existing reader keeps its meaning. `GradeReportOut` and
+`/…/auto-grade` carry the three additively with defaults that reproduce today's reading.
+
+The copy is **one shared pure function**, `frontend/src/gradeCap.ts::gradeCapNotice` — not two hand-mirrored
+sentences, because the Target page and the Stack form are answering the same question and the repo has been
+bitten before by two surfaces disagreeing about one fact. It returns:
+
+* **session** (target-wide) — today's sentence, unchanged. A conservative pass really would shorten this list.
+* **panels** — *"56 flagged frames on 4 mosaic panels were held back so no panel loses more than a quarter of
+  its own subs. That's a limit per panel, not a rough night — a conservative pass won't release them; look at
+  those panels instead."* It says out loud that the other remedy is the wrong lever.
+* **both** — names each.
+
+An older backend sends `capped` alone with neither breakdown field; the helper reads that as the target-wide
+case, which is exactly what those installs showed before, so the copy cannot regress in either direction
+during an upgrade.
+
+**Upgrade-safe (§9):** three additive dataclass fields and three additive response fields, all with defaults
+that reproduce the current value; no config, schema, on-disk or default change, and `capped` itself is
+untouched.
+
+**Tests (+11, four fail before).** Python: the per-panel case reports `capped_overall=False`,
+`capped_panels=1`, a non-zero withheld count **and** a recommendation list strictly under the target-wide cap
+(i.e. that rail provably cannot have fired); the target-wide case reports the mirror; an uncapped report
+carries neither; and the endpoint serves all three. Frontend: six cases on the helper (including the older
+backend's bare flag and both pluralisations) plus one per surface asserting the panel wording appears and
+"rough session" / "review the night's data" do **not**, and one per surface that the target-wide sentence
+survives.
+
+**Not built.** The issue's cheaper alternative — suppress the flag when the per-panel rail did not change the
+outcome relative to the target-wide cap — was declined: it makes the banner *quieter* but leaves it saying the
+wrong thing when it does appear, and V772 Herculis's single withheld frame is a real fact about a real panel
+that the owner may well want to see. Saying which rail fired is strictly more information than suppressing it.
+The observer's own open question — whether the per-panel rail's *withholding* is itself right — is untouched
+here; its stated purpose is served and this was only ever about what the flag is reported as.
+
+
+## v0.473.1 — 2026-09-25 — the plate-solve guard asked where a frame landed and never at what scale
+
+*(Builder, branch `claude/wizardly-cannon-hnfyu0`. Verified from observer issue
+[#965](https://github.com/JimmyeJones/astrostack/issues/965) — the mechanism re-traced in the code here, the
+owner-side counts and the same-file control are the observer's.)*
+
+**The defect.** The app's only plate-solve sanity check is
+`mosaic._footprint_outlier_indices`: a median+MAD over each footprint's **centre** RA/Dec, which flags a frame
+that landed somewhere else on the sky. Nothing anywhere compared the solved **scale** against anything. A false
+solve that happens to land on the right patch of sky therefore passed every guard and was reprojected into the
+stack at the wrong scale — and a scale error is **zero at the footprint centre**, the one place the guard looks,
+growing linearly to the corners, which is where the pixels go. `align_one` reprojects by the stored WCS; the
+only correction available is a sub-pixel *shift* (capped at 5 px, off by default, skipped on the drizzle path),
+and a shift cannot undo a scale error.
+
+**The control the observer found, which is what makes this certain.** The duplicate ingestion of
+[#878](https://github.com/JimmyeJones/astrostack/issues/878) means 15,421 files were solved **twice,
+independently, by the app itself**. Two frames accepted in both copies, with each stored WCS mapping that
+frame's own corners onto the sky:
+
+| | centre disagreement | worst corner disagreement |
+|---|---|---|
+| NGC 6960 sub, solved 4.36 vs 3.99″/px | 162″ | **836″** |
+| HIP 4205 sub, solved 4.44 vs 3.98″/px | **16″** | **1,022″** |
+
+The second is the guard's blind spot in one frame: two solves that agree at the centre to 16″ and put the
+corners 1,022″ apart. On the NGC 6960 run the worst corner lands ~210 canvas pixels from where the good solve
+puts it, against that run's own `stack_fwhm_px` of 1.68 — ~125× the size of a star in the finished picture. And
+the frame is not hard to solve: it solved correctly on the other attempt, from the identical bytes. It is a
+solver flake that nothing downstream filtered.
+
+**Scale, on the owner's library:** 178 accepted, solved frames across 25 of 95 targets more than 1 % off the
+scale the optics can produce; 55 beyond 2 %, 19 beyond 3 %, worst **+11.45 %**. They stack, and they are counted
+in `n_frames_used`, `total_exposure_s` and the coverage maps as full contributors.
+
+**The fix — the population's own median, not a hardcoded optic.** New pure
+`mosaic._plate_scale_outlier_indices`, run in `compute_mosaic_canvas` beside the footprint pass (which already
+derives each frame's scale from its WCS, so this costs nothing new). A target's subs come from one instrument in
+one configuration, so they have one plate scale, and the solved population says so loudly: 98.68 % of the
+owner's 89,443 accepted frames sit within ±0.25 % of the optics' 3.99″/px, 99.80 % within ±1 %. That tightness is
+what makes the tail meaningful. Frames beyond **±1 %** of the group median are dropped before the canvas is
+sized — and the canvas's own pixel scale is then taken from the survivors, so an 11 %-off solve cannot nudge it
+either.
+
+**Deliberately *not* symmetric with the footprint test, and that is the design call worth carrying forward.**
+A MAD threshold adapts to however spread the population happens to be. That is right for footprints — a real
+mosaic is legitimately spread out — and wrong here: a genuinely spread set of plate scales means the frames did
+**not** all come from one instrument, which is a reason to say *nothing* rather than a reason to widen the net.
+So this is a fixed relative tolerance around the median, guarded by an explicit consensus bar: unless **90 %** of
+the usable frames already agree with the median to within **±0.5 %**, nothing is flagged at all. A target holding
+two cameras' subs is left exactly as it is. The bar is set by what the two populations look like — a flake is a
+scattered minority (0.199 % library-wide, 7.23 % on his worst single target), a second instrument is a
+substantial group — and it makes a "never drop more than half" backstop unreachable by construction. Note the
+bottom end: at ten frames a lone outlier is exactly the 10 % the bar allows, which is why
+`SCALE_OUTLIER_MIN_FRAMES` is ten and not a smaller number the bar would then override.
+
+**Its own sentence in the Frames table.** The two ways a plate solve can be wrong are two different things to go
+and look at, so `CanvasResult` carries an additive `scale_excluded_frame_ids` (always a subset of
+`excluded_frame_ids`) and the stacker writes **"bad plate-solve (scale disagrees with the other frames)"** for
+those rows. Saying "footprint far from the group" about a frame whose footprint is centred correctly and merely
+the wrong *size* would be plainly false on screen. The Stack page's post-run alert, which hardcoded the
+footprint wording for every excluded frame, now names both and points at the per-frame rows.
+
+**Upgrade-safe (§9):** one additive dataclass field with a default, no config, schema, on-disk, API-shape or
+default change. `estimate_stack`'s basis already filtered on `excluded_frame_ids`, so the estimate and the run
+still agree about the frame count by construction.
+
+**Tests (+10, three fail before).** `tests/test_mosaic.py`: the helper flags only the disagreeing frames; keeps
+the library's real ±0.08 % solver spread; stands down on a 50/50 two-instrument population; is silent below the
+minimum and acts at exactly ten; ignores `None`/NaN/non-positive scales; a wrong-scale solve on the right patch
+of sky is dropped and reported under the scale id list; the canvas's own scale is taken from the frames that
+agree; a healthy 2×2 loses nothing; and a frame that is *both* displaced and oddly scaled is named once, under
+the footprint reason. `tests/test_stack_pipeline.py`: the end-to-end `run_stack` case — the frame is excluded,
+`accept=False`, carries the scale sentence, and every frame that agreed is untouched — plus the clean-stack
+direction.
+
+**Not built, and worth knowing before re-picking it.** (1) A **solve-time** refusal, which is what the issue
+suggests: the header carries `FOCALLEN`/`XPIXSZ` on every sub and `fits_loader.fov_deg_from_header` already
+derives the expected scale from them for ASTAP's own hint, so `apply_solve_result_to_db` could refuse to store
+an implausible solve. It would not help the 178 frames already solved and sitting in the library — this fix
+does — and it needs a decision about re-solve cost first: a frame stored as `solve_failed:` is re-offered on
+every scan, and 178 frames × a ladder that can burn 3× `astap_timeout_s` is hours per scan on a walk-away box.
+(2) **Healing** the existing rows without a stack: today they are caught the next time the target is stacked.
+(3) `n_roughly_aligned` is NULL on all 690 of the owner's stack runs — the column that would surface any of this
+to him — which is its own entry.
+
+
+## v0.473.0 — 2026-09-25 — reprocess-all told the engine somebody was watching, so 7 over-budget mosaics made no picture at all
+
+*(Builder, branch `claude/wizardly-cannon-hnfyu0`. Verified from observer issue
+[#966](https://github.com/JimmyeJones/astrostack/issues/966) — mechanism re-traced in the code here before
+building, the owner-side counts are the observer's from his own `jobs` rows.)*
+
+**The defect.** `webapp/pipeline._stack_target` wrote the run's posture last and derived it from one argument:
+`opts_dict["unattended"] = bool(auto)`. `auto` is set by the watcher auto-stack and "Process target" and by
+nothing else — its own comment says so — so **reprocess-all resolved to `unattended=False`**, i.e. "a human is
+sitting here and will act on the advice".
+
+That single flag gates all three of the engine's over-budget degrade levers, each written precisely for a run
+nobody is watching: `stacker._afford_drizzle_reject` (`if not options.unattended: return True  # someone is
+watching — let the guard refuse loudly instead`), the drizzle-scale step-down (`if eff.unattended and
+eff.drizzle:`) and the outlier-pass reduction (`if eff.unattended and _mmr_charged and …`). With all three off,
+`_guard_stack_memory` raises `MemoryError`, reprocess-all catches it, appends the target to `failed`, and moves
+on. `_afford_drizzle_reject`'s own docstring describes that outcome as the thing it exists to prevent: *"a
+refusal doesn't produce a better picture — it produces **no picture at all** on a target that made one
+yesterday."*
+
+**It had already happened, seven times, in the owner's own record.** Across his three most recent completed
+batches: 2026-09-01 two refusals, 2026-09-09 two, 2026-09-15 three — five distinct targets, every one a mosaic,
+every one a *drizzle with outlier rejection* canvas, every message naming a drizzle scale that would have fit.
+Two were near-misses of ~0.1 GB. Projected over his whole library at one budget, **17 of the 83 targets that
+have ever stacked refuse under `unattended=False` and 0 refuse under `unattended=True`**. And a batch on his
+library runs for **five days**: it is the most unattended job the app has, and it was the one classified as
+attended.
+
+**The fix, and the distinction it turns on.** `auto` and `unattended` had been one parameter because on every
+caller that existed when the posture was written they coincide. They are two questions:
+
+* `auto` — *"did the user make no stacking choices?"* It seeds `auto_reject`, `quality_weighted` and
+  `drizzle_reject` defaults into the merged options.
+* `unattended` — *"is a human there to act on the advice?"* It changes no picture by itself; it only decides
+  what an over-budget run does.
+
+Reprocess-all answers **no** to the first (it reuses each target's own prior `options_json` verbatim, and
+re-defaulting it would change pictures the owner already has) and **no** to the second. So `_stack_target` gains
+a separate `unattended: bool | None = None` keyword that **defaults to `auto`** — every existing call site is
+byte-for-byte unchanged — and reprocess-all passes `unattended=True` while leaving `auto` off.
+
+**Upgrade-safe (§9):** one new keyword-only parameter with a default that reproduces today's value, no config,
+schema, on-disk, API-shape or engine change. The watcher chain, "Process target" and the interactive Stack form
+all build the identical `StackOptions` they did before. What changes is one batch job's posture — and only on a
+run that is *already over budget*, where today's behaviour is no picture.
+
+**Tests (+4, two fail before).** `tests/webapp/test_reprocess_all.py`: the batch stacks with
+`unattended=True`; the posture does **not** re-default the owner's options (`auto_reject` / `quality_weighted`
+stay off, which is what an `auto=True` shortcut would have broken); the interactive Stack form is still
+attended; and one that pins the **consequence** rather than the flag — the options the batch actually builds,
+handed to `stacker._afford_drizzle_reject` on a 9488×5170 canvas against a 1 GB budget, now drop the second pass
+and let the run proceed, while the same options with `unattended=False` still refuse.
+
+**Not built, and filed as a lead:** the observer's second point — that `_stack_memory_budget_bytes` falls
+through to 70 % of *instantaneous* free RAM, so which mosaics survive a batch is decided by the host's memory at
+the minute each one is reached. That is a real irreproducibility, but pricing a whole batch against one budget
+captured at the start is a behaviour change on the memory guard itself and wants its own measurement.
+
 ## Closed by owner answers — 2026-09-25 (no version)
 
 *(Docs only. The owner answered seven sign-off items in one sitting; two of them closed entries outright.

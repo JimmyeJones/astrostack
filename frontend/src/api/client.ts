@@ -224,6 +224,11 @@ export interface SeasonClosing {
   generated_utc: string;
   min_altitude_deg: number;
   horizon_weeks: number;
+  /** How many of your targets are leaving in all. `targets` is bounded (the
+   * card must not grow without limit), this is exact — so the headline can say
+   * the true number while listing the soonest ones. Absent on an older
+   * backend, where the list *is* the total. */
+  n_closing?: number;
   targets: ClosingTarget[];
 }
 
@@ -1447,6 +1452,16 @@ export interface GradeReport {
   metrics_used: string[];
   metrics_skipped: Record<string, string>;
   capped: boolean;
+  /** Which of the two 25% rails truncated the list. `capped` is their union and
+   * cannot tell them apart, and they want opposite advice: the target-wide rail
+   * really is "a rough session", while the per-panel rail is a count limit on
+   * one patch of sky that a conservative pass cannot release. Absent on an older
+   * backend, where `capped` alone keeps today's meaning. */
+  capped_overall?: boolean;
+  /** Mosaic panels that hit their own rail, and how many frames they held back
+   * between them. */
+  capped_panels?: number;
+  withheld_per_panel?: number;
   /** Mosaic panels graded against themselves rather than against the whole
    * target (panels are different patches of sky, so a star-poor one is not
    * cloud). 0 — or absent, on an older backend — means ordinary target-wide
@@ -4094,11 +4109,19 @@ export const api = {
   getGallery: () =>
     req<{ items: GalleryItem[]; videos?: VideoStill[] }>("/api/gallery"),
   // "My best pictures": the newest finished stack of every target, auto-ranked
-  // best-first. Self-hides (empty items) until there are ≥2 finished pictures.
-  getGalleryBest: (limit?: number) =>
-    req<{ items: BestPicture[] }>(
-      `/api/gallery/best${limit != null ? `?limit=${limit}` : ""}`,
-    ),
+  // best-first. Self-hides (empty items) until there are ≥2 finished pictures —
+  // `minTargets` lowers that floor for a caller that only wants to *play* them
+  // (the slideshow), and must come with its own query key so the two answers
+  // never share a cache entry.
+  getGalleryBest: (limit?: number, minTargets?: number) => {
+    const q = [
+      limit != null ? `limit=${limit}` : "",
+      minTargets != null ? `min_targets=${minTargets}` : "",
+    ].filter(Boolean).join("&");
+    return req<{ items: BestPicture[]; n_finished?: number }>(
+      `/api/gallery/best${q ? `?${q}` : ""}`,
+    );
+  },
   // How many pictures library-wide carry an edit that was saved and never
   // exported. Its own endpoint on purpose: it is deliberately cheap (one indexed
   // meta scan per target, no run listing), because the Dashboard asks it and

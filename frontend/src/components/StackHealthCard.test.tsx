@@ -69,6 +69,20 @@ describe("noteAction", () => {
     // It doesn't need a run to point at, unlike trim_border.
     expect(noteAction("restack", "M_42", null)?.href).toBe("/targets/M_42/stack");
   });
+  it("wires subpixel_refine to the Stack form with Advanced already open", () => {
+    // The switch it names lives inside the collapsed Advanced disclosure, so a
+    // bare /stack link would leave the reader hunting for the phrase they just
+    // read. The parameter is what makes the link land on the control.
+    expect(noteAction("subpixel_refine", "M_42", 7)).toEqual({
+      label: "Re-stack with sub-pixel alignment refine →",
+      href: "/targets/M_42/stack?open=advanced",
+    });
+    // Off-page from the editor too, and it needs no run to point at.
+    expect(noteAction("subpixel_refine", "M_42", 7, true)?.href)
+      .toBe("/targets/M_42/stack?open=advanced");
+    expect(noteAction("subpixel_refine", "M_42", null)?.href)
+      .toBe("/targets/M_42/stack?open=advanced");
+  });
   it("wires background (the mosaic-seam note) to the editor for this run", () => {
     expect(noteAction("background", "M_42", 7)).toEqual({
       label: "Open the editor to even out the background →",

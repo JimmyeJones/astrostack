@@ -1548,6 +1548,13 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
     Cancellable between targets (and within each target's stack). A target that
     fails to stack is isolated: its error is recorded and the batch carries on.
 
+    Each target's stack runs with ``unattended=True`` — the posture, not ``auto``
+    (see :func:`_stack_target`). A batch that walks the whole library is the most
+    unattended job the app has; on the owner's it runs for days, and until v0.473.0
+    it told the engine somebody was watching, so every over-budget mosaic refused
+    with ``MemoryError`` into ``failed`` rather than stepping its drizzle scale
+    down and making a picture.
+
     ``stale_only`` skips targets whose most recent *genuine* stack was already
     produced by the current app version — so after an upgrade the user reprocesses
     only the images that would actually change, not the whole library. A target
@@ -1708,7 +1715,15 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                     res = _stack_target(
                         settings, jm, job, lib, safe,
                         options=reuse, output_name=fresh_name,
-                        auto_bind_calibration=settings.auto_bind_calibration)
+                        auto_bind_calibration=settings.auto_bind_calibration,
+                        # Nobody is watching a batch that walks the whole library
+                        # one target at a time — on the owner's it runs for days.
+                        # ``auto`` stays off (the reused options are the owner's
+                        # own and must not be re-defaulted); the posture alone is
+                        # what lets an over-budget mosaic step its drizzle scale
+                        # down and still make a picture instead of raising
+                        # MemoryError into ``failed`` days before anyone reads it.
+                        unattended=True)
                 except Exception as exc:  # noqa: BLE001 — isolate one bad target
                     log.exception("reprocess-all: target %s failed", safe)
                     failed.append({"target": safe, "error": f"{type(exc).__name__}: {exc}"})
@@ -3657,6 +3672,7 @@ def _stack_target(
     output_name: str | None = None,
     auto_bind_calibration: bool = False,
     auto: bool = False,
+    unattended: bool | None = None,
 ) -> dict[str, Any]:
     """Run a stack for one target and record it. Returns a small summary.
 
@@ -3709,7 +3725,7 @@ def _stack_target(
     ``stacker._afford_drizzle_reject``. A run somebody is *watching* still refuses
     loudly, because that user can act on the advice.
 
-    ``auto`` finally sets ``StackOptions.unattended`` — the plain "nobody is
+    ``unattended`` sets ``StackOptions.unattended`` — the plain "nobody is
     watching this run" posture, written after every option merge so it can't be
     spoofed by a saved default or a POST body. It is not a preference and changes
     no picture by itself; the engine reads it wherever the right answer to an
@@ -3717,6 +3733,22 @@ def _stack_target(
     It replaces ``auto_reject`` in that role, which only *looked* like the same
     question: ``get_stack_defaults`` seeds ``auto_reject=True`` into the manual
     Stack form for a never-configured target, so a watching beginner sent it too.
+
+    It defaults to ``auto`` — the two questions coincide on every caller that
+    existed when the flag was written — but they are **not** the same question,
+    and reprocess-all is where they come apart. ``auto`` asks "did the user make
+    no stacking choices?", so reprocess-all must answer **no**: it reuses each
+    target's own prior options verbatim, and letting ``auto`` seed rejection or
+    weighting defaults into them would change pictures the owner already has.
+    ``unattended`` asks "is a human there to act on the advice?", and on a batch
+    that runs for days across the whole library the answer is **no** as plainly
+    as it is for the 3 a.m. watcher. Answering it ``False`` cost the owner real
+    pictures: a reprocess of his library refused **7 over-budget mosaics with
+    MemoryError across 3 batches** (observer issue #966, measured from his own
+    ``jobs`` rows) — every one a drizzle-with-rejection canvas that the engine's
+    own degrade path would have stacked at a slightly smaller drizzle scale, and
+    two of them near-misses of ~0.1 GB. So the two are separate parameters, and
+    reprocess-all passes ``unattended=True`` while leaving ``auto`` off.
     """
     from seestack.stack.stacker import run_stack
     from webapp.field_fulls import (
@@ -3806,14 +3838,20 @@ def _stack_target(
         # The posture, written **last** so nothing can spoof it: a stale saved
         # per-target default, a crafted POST body or a reused prior-run option
         # blob may all carry ``unattended``, and only this function knows whether
-        # anybody is actually watching. ``auto`` is exactly that question — it is
-        # set by the watcher auto-stack and "Process target" and by nothing else,
-        # so the manual Stack form and reprocess-all resolve to False. The engine
-        # reads it where "refuse loudly with a fix" and "degrade quietly and still
-        # make a picture" are the two right answers to the same over-budget run
-        # (see ``stacker._afford_drizzle_reject``). Always written, so the value is
-        # a property of *this* run rather than of whatever was merged into it.
-        opts_dict["unattended"] = bool(auto)
+        # anybody is actually watching. The engine reads it where "refuse loudly
+        # with a fix" and "degrade quietly and still make a picture" are the two
+        # right answers to the same over-budget run (see
+        # ``stacker._afford_drizzle_reject``). Always written, so the value is a
+        # property of *this* run rather than of whatever was merged into it.
+        #
+        # ``auto`` is the *default* answer, not the question — it asks "did the
+        # user make no stacking choices?", which is a different thing from "is
+        # anybody watching?". They coincide on the watcher auto-stack and
+        # "Process target" (both pass ``auto=True``) and on the manual Stack form
+        # (neither), and they come apart on reprocess-all, which reuses each
+        # target's own prior options — so ``auto`` must stay off there — while
+        # running for days with nobody watching. It passes ``unattended=True``.
+        opts_dict["unattended"] = bool(auto if unattended is None else unattended)
         calibration_skipped: list[str] = []
         if saved_master_ids:
             # The user's own "Save as defaults" calibration picks win over the
@@ -4043,6 +4081,7 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
     )
     from seestack.edit import presets as presets_mod
     from seestack.edit.histogram import measure_sky_cast
+    from seestack.edit.opnotes import COLOR_CAL_OP, merge_color_cal
     from seestack.io.project import Project
     from seestack.stack.output import _write_preview_png
 
@@ -4147,8 +4186,8 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
                 # background-neutral fallback, or a no-op — so the History Info panel
                 # can tell the user whether their hands-off image was really
                 # white-balanced. Read-only + best-effort (a nicety, never fatal).
-                cc = render_ctx.op_notes.get("tone.color_calibrate")
-                if isinstance(cc, dict) and cc.get("mode_used"):
+                cc = merge_color_cal(render_ctx.notes_for(COLOR_CAL_OP))
+                if cc is not None:
                     proj.set_meta(f"{AUTO_EDIT_COLORCAL_PREFIX}{run_id}",
                                   json.dumps(cc))
                 # Measure the finished picture's residual sky-background colour

@@ -7,6 +7,7 @@ from seestack.stackhealth import (
     CLEAN_BACKGROUND_SIGMA,
     background_reads_clean,
     recommended_dark_spec,
+    run_option_flag,
     seam_scale_is_current,
     stack_health,
     stored_seam_verdict,
@@ -529,7 +530,13 @@ def _fwhm_frame(fwhm: float | None, *, accept=True) -> FrameRow:
 
 def test_soft_stars_note_fires_when_the_stack_is_bloated_vs_its_subs():
     """The finished stack's stars are materially fatter than the subs that made
-    them → a soft, no-gate note pointing at registration smear."""
+    them → a soft, no-gate note pointing at registration smear.
+
+    ``options_json`` is ``{}`` here — a run whose options can't be read — so the
+    note keeps its general wording and offers no switch. That case is pinned on
+    purpose below; the fixtures that *can* say what the run did are the ones that
+    exercise the cure-splitting.
+    """
     # Subs median FWHM 3.0 px; stack FWHM 5.0 px → 1.67× ≥ 1.5× floor.
     frames = [_fwhm_frame(3.0) for _ in range(8)]
     notes = stack_health(_run(stack_fwhm_px=5.0), frames)
@@ -560,6 +567,98 @@ def test_soft_stars_note_silent_with_too_few_sub_fwhm_measurements():
     frames = [_fwhm_frame(3.0) for _ in range(4)] + [_fwhm_frame(None) for _ in range(4)]
     notes = stack_health(_run(stack_fwhm_px=6.0), frames)
     assert "soft_stars" not in _kinds(notes)
+
+
+def _soft_stars(options: dict | None) -> object:
+    """The soft-stars note for a run stacked with ``options``, or ``None``.
+
+    Real runs persist ``asdict(eff)`` — the whole ``StackOptions`` — so both keys
+    this note reads are always present on anything the stacker wrote; a dict of
+    just those two is the honest minimum.
+    """
+    import json
+
+    frames = [_fwhm_frame(3.0) for _ in range(8)]
+    run = _run(stack_fwhm_px=5.0,
+               options_json="not json at all" if options is None
+               else json.dumps(options))
+    notes = stack_health(run, frames)
+    return next((n for n in notes if n.kind == "soft_stars"), None)
+
+
+def test_soft_stars_names_the_refine_switch_when_the_run_did_not_use_it():
+    """The cure has to be one the reader can act on.
+
+    "Re-solving the roughly-aligned subs" names a population that only exists
+    when sub-pixel refine ran: ``n_roughly_aligned`` counts the frames *refine*
+    left unshifted, so it is NULL with the option off (its default) and the
+    sibling ``roughly_aligned`` note is silent by design in exactly that state.
+    So on the common install this card diagnosed registration smear and sent the
+    reader after subs it had never shown them. With the option off the note now
+    names the option instead, and carries the key that links to it.
+    """
+    sf = _soft_stars({"subpixel_refine": False, "drizzle": False})
+    assert sf is not None
+    assert sf.action == "subpixel_refine"
+    assert "Sub-pixel alignment refine" in sf.message
+    # …and it must not send them after the population that cannot exist here.
+    assert "roughly-aligned" not in sf.message
+    # The diagnosis is unchanged — only the cure moved.
+    assert "the combine — not the sky — softened them" in sf.message
+    # Honest about the cost, because it is not free on a deep target.
+    assert "more time per sub" in sf.message
+
+
+def test_soft_stars_keeps_the_original_cure_when_refine_already_ran():
+    """With refine on, the roughly-aligned subs are a real set the sibling note
+    can name — so "turn it on" is not the next step and the original sentence is
+    kept byte for byte."""
+    sf = _soft_stars({"subpixel_refine": True, "drizzle": False})
+    assert sf is not None
+    assert sf.action is None
+    assert "re-solving the roughly-aligned subs" in sf.message
+    assert "Sub-pixel alignment refine" not in sf.message
+
+
+def test_soft_stars_does_not_offer_refine_on_a_drizzled_run():
+    """Drizzle places samples through a pixmap and never runs the refine step —
+    ``stacker`` deliberately stamps no ``NROUGHAL`` there — so the switch would
+    change nothing about the picture and must not be offered."""
+    sf = _soft_stars({"subpixel_refine": False, "drizzle": True})
+    assert sf is not None
+    assert sf.action is None
+    assert "Sub-pixel alignment refine" not in sf.message
+
+
+def test_soft_stars_says_nothing_new_when_the_run_options_cannot_be_read():
+    """An older or garbled ``options_json`` cannot say what the run did, and a
+    suggestion premised on a guess is worse than the general advice. Both the
+    unparseable and the key-absent shapes fall back."""
+    for options in (None, {}, {"subpixel_refine": False}, {"drizzle": False}):
+        sf = _soft_stars(options)
+        assert sf is not None, options
+        assert sf.action is None, options
+        assert "Sub-pixel alignment refine" not in sf.message, options
+
+
+def test_run_option_flag_keeps_true_false_and_unknown_apart():
+    """Three states, because "the run said no" and "the run did not say" lead to
+    different sentences."""
+    import json
+
+    assert run_option_flag(json.dumps({"drizzle": True}), "drizzle") is True
+    assert run_option_flag(json.dumps({"drizzle": False}), "drizzle") is False
+    # Absent key, empty options, no options at all, garbage, and a non-object.
+    assert run_option_flag(json.dumps({"other": True}), "drizzle") is None
+    assert run_option_flag("{}", "drizzle") is None
+    assert run_option_flag(None, "drizzle") is None
+    assert run_option_flag("", "drizzle") is None
+    assert run_option_flag("{not json", "drizzle") is None
+    assert run_option_flag("[1, 2]", "drizzle") is None
+    # A truthy non-bool is not an answer either: ``StackOptions`` types these as
+    # bools, so anything else means the record is not what we think it is.
+    assert run_option_flag(json.dumps({"drizzle": 1}), "drizzle") is None
+    assert run_option_flag(json.dumps({"drizzle": None}), "drizzle") is None
 
 
 def test_soft_stars_note_ignores_rejected_subs_for_the_sub_median():
@@ -1578,7 +1677,8 @@ def _as_health(frames: list[FrameRow]) -> list[FrameHealth]:
     return [FrameHealth(
         id=f.id, accept=f.accept, reject_reason=f.reject_reason,
         fwhm_px=f.fwhm_px, eccentricity_median=f.eccentricity_median,
-        exposure_s=f.exposure_s, gain=f.gain, solved=f.solved,
+        exposure_s=f.exposure_s, gain=f.gain,
+        sky_adu_median=f.sky_adu_median, solved=f.solved,
     ) for f in frames]
 
 

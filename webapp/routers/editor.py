@@ -32,6 +32,7 @@ from seestack.edit.ops.detail import (
     hot_pixels_skipped_on_proxy,
     sharpen_understates_on_proxy,
 )
+from seestack.edit.opnotes import COLOR_CAL_OP, merge_color_cal
 from seestack.edit.ops.stars import star_reduce_differs_on_proxy
 from seestack.edit.pipeline import apply_recipe
 from seestack.edit.proxy import (
@@ -1949,8 +1950,13 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         # here for the in-editor Auto too. Read-only; absent when no colour-cal op
         # ran (old clients ignore the extra key). On the decimated proxy Gaia
         # falls back to gray-star, so ``mode_used`` here reflects the preview.
-        cc = ctx.op_notes.get("tone.color_calibrate")
-        hist["color_cal"] = cc if isinstance(cc, dict) and cc.get("mode_used") else None
+        # A recipe may carry the op twice (the Add menu has no duplicate guard),
+        # so ``merge_color_cal`` reports the *last* balance — the one the picture
+        # ends up with — while ORing the ``proxy_fallback`` parity flag across
+        # every instance, the same rule the star-reduce warning above already
+        # applies across every ``stars.reduce`` op. Unchanged on the single-op
+        # recipe every surface actually renders.
+        hist["color_cal"] = merge_color_cal(ctx.notes_for(COLOR_CAL_OP))
         return hist
 
     return await run_in_threadpool(work)

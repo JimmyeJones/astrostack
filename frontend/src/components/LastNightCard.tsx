@@ -9,6 +9,7 @@ import {
   formatIntegration, formatNightDate, formatNightDayMonth, isRecentNight,
 } from "../format";
 import { describeRejects } from "./SessionRecapCard";
+import { WRAPPING_BADGE } from "../badgeFit";
 
 /** The Dashboard recap paragraph: what the whole library's last night brought in
  *  across every target, how much was kept vs. set aside (and why). Pure and
@@ -254,7 +255,7 @@ export function LastNightCard() {
               {r.targets.map((t) => (
                 <Badge key={t.safe} variant="light" color="gray" size="sm"
                   component={Link} to={`/targets/${t.safe}`}
-                  style={{ cursor: "pointer" }}>
+                  style={{ cursor: "pointer" }} styles={WRAPPING_BADGE}>
                   {t.name} · {t.n_frames} sub{t.n_frames === 1 ? "" : "s"}
                 </Badge>
               ))}

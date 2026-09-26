@@ -34,8 +34,20 @@ import { useKeepAwake } from "../useKeepAwake";
  * thirty previews at once; the next one is warmed in a hidden preloader so the
  * dissolve never lands on a blank frame.
  */
+/** One finished picture is a show. See the query below. */
+const SHOW_MIN_TARGETS = 1;
+
 export function ShowAndTellView() {
-  const best = useQuery({ queryKey: ["galleryBest"], queryFn: () => api.getGalleryBest() });
+  // `min_targets: 1` — the wall's own floor of two exists so a brand-new
+  // install isn't offered "a wall of one" to *curate*, and this page does not
+  // curate: it plays the pictures full-screen, one at a time, which one picture
+  // does perfectly well. Its own query key, because `/best` shares this
+  // endpoint and must keep self-hiding — one cache entry for two floors would
+  // put a wall of one on that page depending on which loaded first.
+  const best = useQuery({
+    queryKey: ["galleryBest", { minTargets: SHOW_MIN_TARGETS }],
+    queryFn: () => api.getGalleryBest(undefined, SHOW_MIN_TARGETS),
+  });
   const gallery = useQuery({ queryKey: ["gallery"], queryFn: api.getGallery });
 
   const [index, setIndex] = useState(0);

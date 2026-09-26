@@ -37,7 +37,7 @@ from seestack.render.thumbnail import (
     _robust_median_sigma,
     load_stack_rgb,
 )
-from seestack.stack.output import pack_unit
+from seestack.stack.output import RUN_ARTEFACT_SUFFIXES, pack_unit
 
 log = logging.getLogger(__name__)
 
@@ -304,12 +304,15 @@ def write_deepening_reel(frames: list, out_dir: Path, out_basename: str) -> Path
     norm = [_fit_onto(f, base.size) for f in frames]
     durations = [900] * (len(norm) - 1) + [2200]
     out_dir = Path(out_dir)
+    # The suffixes come from `RUN_ARTEFACT_SUFFIXES` rather than being spelled
+    # here, because that table is what the delete/archive/merge paths act on — a
+    # reel named by hand is a reel nothing cleans up (which is what happened).
     if features.check("webp"):
-        path = out_dir / f"{out_basename}_deepening.webp"
+        path = out_dir / f"{out_basename}{RUN_ARTEFACT_SUFFIXES['deepening_webp']}"
         norm[0].save(path, format="WEBP", save_all=True, append_images=norm[1:],
                      duration=durations, loop=0, minimize_size=True)
     else:
-        path = out_dir / f"{out_basename}_deepening.png"
+        path = out_dir / f"{out_basename}{RUN_ARTEFACT_SUFFIXES['deepening_apng']}"
         norm[0].save(path, format="PNG", save_all=True, append_images=norm[1:],
                      duration=durations, loop=0)
     log.info("Deepening reel saved (%d stacks) → %s", len(norm), path.name)
