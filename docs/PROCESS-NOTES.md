@@ -48,6 +48,17 @@ is bigger than one frame and that a 3×3 mosaic is the next move, with the readi
 single field"*; `/tonight`'s week plan names one target and one best night, with nothing to contradict (the
 closing card is silent without `--closing`).
 
+### And the `--empty` pass, re-run because the tooling changed — also CLEAN
+
+Worth recording because it is the first time `/live` and `/show` have been photographed in the state a
+**beginner meets first**, and because it exercises `yearRoute()`'s stand-down: with no nights the year route
+resolves to `""` and is skipped, so `--empty` sweeps 25 routes rather than 26 and nothing probes an error
+state the page is right to show. Nothing overflowing, no console errors. `/live` shows one Alert ("Nothing
+captured yet — once frames start arriving, this page will show the night filling up"); `/show` shows its
+paragraph and a "Go to your library" button. Tallest phone pages unchanged from the 2026-09-07 first-run
+baseline: `/glossary` 3,364 px, `/life-list` 2,779 px, `/` 1,402 px, `/library` 1,252 px — the two new pages
+are both short and sit well below the reported cut.
+
 
 ## 2026-09-26 — Builder: the `--closing` dogfood baseline, and what a new flag cost in its first hour
 
