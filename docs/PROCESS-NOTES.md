@@ -1,5 +1,83 @@
 # Process notes & QA sweep records
 
+## 2026-09-26 — Builder: the lever the last run wrote down paid twice, and the second mirror was a disk leak
+
+*(Builder, branch `claude/exciting-tesla-a4kwsq`, shipping v0.478.1 and v0.478.2. Baseline green — **6,623
+passed, 2 skipped**, 14m35s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared
+first. End of run: **6,636 passed, 2 skipped**, 13m54s; frontend **4,370 tests / 285 files**, `tsc` and
+`vite build` clean, all three run from `frontend/`.)*
+
+**The lever: the previous run ended by asking "which other hand-mirrored list in this repo has nothing
+checking it?", and the answer was two, in one hour, both already drifted.** Neither was found by dogfooding
+— they were found by reading the *pairs* rather than the pages. Worth recording because the question turns
+out to be cheap to ask and the hit rate was 2 for 4:
+
+* **`rejectReasonLabel` vs the Python that writes `reject_reason`** — drifted by two
+  (`auto:seestar_output`, `auto:file_missing` shown as their own identifiers). Shipped as **v0.478.1**.
+* **`RUN_ARTEFACT_SUFFIXES` vs the code that writes files beside a run's basename** — drifted by three
+  (`_deepening.webp` / `.png` / `.sig`, so deleting a run left the reel on disk for good, 2.0 MB measured).
+  Shipped as **v0.478.2**.
+* **`frontend/src/nav.tsx` vs the registered routes** — *checked and clean.* The two routes not in the nav
+  are `/compare` (its URL carries two picture refs, so it cannot be a nav destination) and `/show`, which is
+  reached in one click from `/best`'s "Play slideshow" button. No orphan page; no test added, because the
+  interesting half ("is it reachable by clicking?") is not statically checkable.
+* **`METRIC_LABEL` vs `seestack.qc.grading.METRIC_LABELS`** — *checked and clean*, word for word. Pinned by
+  the v0.478.1 drift test anyway, since it is one line beside the one that was not clean.
+
+**What made both fixes more than a patch is that the guard is derived, not declared.** Both new tests read
+the vocabulary out of *the code that produces it* — `ast` over every `reject_reason` write for one, a scan
+for `f"{basename}_<name>.<ext>"` literals for the other — so the thing being checked cannot be updated by
+editing the checker. Both carry a tiny `_EXEMPT` map with a written reason per entry, plus a test that a
+stale exemption cannot sit there hiding the next one, which is the shape `test_dogfood_route_coverage.py`
+established the day before.
+
+**And one thing the second fix had to get right that the entry did not see at first:** registering the
+deepening reel would have *archived* it onto each superseded basename, leaving one stale reel per re-stack
+where before there was one copy the rebuild overwrote — i.e. the fix for the delete leak would have been a
+worse leak. Hence `output.SERIES_ARTEFACTS`: registered for the delete, removed by the archive, skipped by
+the merge. **Generalisable: when you add something to a shared list, read every consumer of that list, not
+just the one you are fixing.**
+
+### `--mosaic` dogfood pass at v0.478.2 — CLEAN
+
+Mechanically clean at both widths: nothing overflowing, no console errors. Tallest phone pages: the mosaic
+Target page 3,673 px, `/tonight` 3,638 px, the mosaic editor 3,419 px, `/glossary` 3,364 px, `/` 3,121 px,
+`/life-list` 3,094 px. In line with the standing baselines; no IA slice taken. Auto's trim on the 2×2 is
+**7.9 %** (the gate is ~15 %).
+
+Read as one paragraph, both prescribing columns hold:
+
+* **The mosaic Target page.** Coaching ("another pass or two over the same mosaic evens out the thinner
+  part"), readiness ("goal ~7.3 h, about 4 fields of sky"), the panel map ("a little behind at the
+  top-right… it evens out on its own"), the health card's grain note ("about 23 % of the picture has 3 subs
+  where most has 6… only about 30 s behind") and the seam note ("the sky matches across the joins, so where
+  it looks grainier that is a difference in depth, not a step in the sky") all say the same thing in the
+  same direction. The framing verdict asks for a wider grid *and* says the depth comes first. No finding.
+* **`/tonight`.** The week plan's headline ("Your best night is Friday") is scored with the Moon in it —
+  `nightplan._score` applies `moon_penalty` and the rows carry their own MOON chips — so the "scored on
+  altitude alone" class that produced v0.445.0 does not apply here. No finding.
+
+**One hypothesis raised and killed by checking rather than by reasoning:** the planner lists the single-field
+sample and the 2×2 mosaic of *the same object* one after another ("Add more to what you're shooting", scored
+28 and 27), which on the owner's library — where `<T>` and `<T>_sub` pairs and 11 hash-suffixed mosaic
+duplicates exist — looked like it might contradict the Library wall's own "Same object in more than one
+folder?" nudge. It does not: the wall stayed silent on this pair, because the merge suggester deliberately
+splits mosaic from single-field targets. Two framings of one object are not duplicates, and the app already
+says so consistently.
+
+### The one claim in this run that a browser had to settle
+
+v0.478.1 adds two labels to a badge that is `flexShrink: 0` in a table row — the same element class as the
+v0.477.1 clipping finding — and no sample produces a frame carrying those reasons, so no dogfood pass could
+show them. Rather than ship the claim unmeasured: three frames of the scratch mosaic were rejected through
+the **real** `PATCH …/frames/{id}` endpoint with `auto:seestar_output`, `auto:file_missing` and
+`bulk:streaked`, and the page was re-probed. At **420 px**: horizontal overflow **0 px**, no console errors,
+and all three labels un-clipped — `"Seestar's own stack"` 112 of 112 px, `"File missing"` 63 of 63,
+`"Streaked (bulk)"` 87 of 87 — each sitting on one line beside its timestamp. The live
+`/frames/reject-summary` also renders the new `seestar_output` bucket with its sentence. **Generalisable:
+a surface no sample can reach is reachable anyway through the app's own write endpoints — that is much
+cheaper than a new dogfood flag, when what is missing is one row rather than a whole state.**
+
 ## 2026-09-26 — Builder: the probe's own route table was the hole, and both pages it was missing paid on their first pass
 
 *(Builder, branch `claude/exciting-tesla-2cd04h`, shipping v0.477.2, v0.477.3 and v0.478.0. Baseline green —
