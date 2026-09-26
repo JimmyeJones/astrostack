@@ -26,6 +26,8 @@
 #                                           #    "these can't be read" note is reachable too)
 #   scripts/agent-dogfood.sh --calibration   # ALSO build a master dark + flat and stack WITH them
 #   scripts/agent-dogfood.sh --deep         # ALSO one field shot 1,200 times: the owner's SCALE,
+#   scripts/agent-dogfood.sh --closing       # ALSO a target whose SEASON is ending, so
+#                                          # /tonight's fourth card finally renders
 #                                           #   and the only pass that measures DOM node counts
 #
 # --no-site turns OFF something a normal pass now does by default. Every pass
@@ -140,6 +142,33 @@
 # with masters is a *further along* install, not a more representative one, and
 # turning it on by default would move every page-height baseline at once.
 #
+# --closing exists because `/tonight`'s fourth prescriptive card — "Shoot these
+# before they're gone", which names the targets whose observing SEASON is ending —
+# has never been rendered in a browser on any pass ever recorded. This one is not
+# a state the script forgot to seed: a season closes as a function of the target's
+# right ascension against the DATE, and both bundled samples sit at M 42
+# (RA ~5h35m), whose season in the northern autumn is *opening*. So no
+# DOGFOOD_SITE, no fixture and no clock skew makes them close, the card is pinned
+# by jsdom alone, and the one bug found in it so far (v0.476.0 — the endpoint
+# scanned the forty targets with the MOST integration and then headlined about
+# what you are about to lose) had to be read out of the code rather than seen.
+#
+# It asks the planner where such a target would have to sit
+# (`nightplan.closing_sky_position` probes an RA/Dec grid through the very
+# `season_closing` the card reads, so the demo and the card cannot disagree about
+# what closing means), then loads a fifth sample shape at that position: a PAIR of
+# targets on one patch of sky with 1 min and 1.5 h kept on them. A pair, because
+# the card's job is to say what the season ending will COST, which is a function
+# of how much you already have — and one sky position, because then the only thing
+# that differs between its two rows is depth, which is the axis the endpoint ranks
+# and caps by. Neither is stacked: the card reads the library registry, so a stack
+# would cost a minute and change nothing on the screen under test.
+#
+# It needs the observing site, so --no-site and --empty skip it, and it prints what
+# `/api/plan/closing` answers (including `n_closing` and each row) so a pass where
+# nothing closed cannot pass for a pass where the card was read. Run it on any run
+# that touches the planner, `/tonight`, or the Dashboard's "Last chance" note.
+#
 # --empty exists because every measurement this script has ever taken was of the
 # sample-loaded app, so the screens a beginner meets *first* — an empty Dashboard,
 # Library, Gallery, life list — had never been in front of a browser. It boots a
@@ -164,7 +193,7 @@ REPO="$PWD"
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
 DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0; DO_MOSAIC=0
 DO_BIG=0; DO_DEEP=0
-DO_SITE=1; DO_LAG=0; DO_CAL=0
+DO_SITE=1; DO_LAG=0; DO_CAL=0; DO_CLOSING=0
 # How many aged subs --incoming-lag leaves in the scratch incoming/, and how old
 # it makes them. Eleven days is the observer's own measurement; the count is
 # small on purpose (this seeds a *state*, not a workload).
@@ -198,6 +227,7 @@ for arg in "$@"; do
     --incoming-lag) DO_LAG=1 ;;
     --calibration) DO_CAL=1 ;;
     --deep) DO_DEEP=1 ;;
+    --closing) DO_CLOSING=1 ;;
     # The whole header block, found rather than hard-coded: a fixed line count
     # silently truncates -h every time the header grows, which it has.
     -h|--help) sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;;
@@ -373,6 +403,71 @@ print("   [tonight] location_source=%s, %d row(s) to show" % (src, len(rows)))
 if src != "settings":
     print("   [tonight] the site did NOT take — the plan half is still empty")
 ' 2>/dev/null || echo "   [tonight] could not read /api/plan/tonight"
+fi
+
+# 3c2. A target whose observing SEASON IS ENDING (--closing). See the header
+#      block. `/tonight`'s fourth prescriptive card, "Shoot these before they're
+#      gone", has never been rendered in a browser on any pass ever recorded,
+#      because a season closes as a function of the target's right ascension
+#      against the DATE — so unlike the missing observing site (v0.436.1) there is
+#      no setting that makes the bundled M 42 sample close, and the card is pinned
+#      by jsdom alone. The one bug found in it so far (v0.476.0) had to be read out
+#      of the code.
+#
+#      Where the demo goes is asked of the planner itself
+#      (`nightplan.closing_sky_position` probes an RA grid through the same
+#      `season_closing` the card reads), so the sample and the card cannot come to
+#      different conclusions about what "closing" means. It needs the observing
+#      site, so it is skipped under --no-site, and it seeds a PAIR at one sky
+#      position with 1 min and 1.5 h on them: the card's job is to say what the
+#      season ending will cost, which is a function of depth, so one row exercises
+#      none of it.
+if [ "$DO_CLOSING" = 1 ] && [ "$DO_EMPTY" = 0 ]; then
+  if [ "$DO_SITE" = 0 ]; then
+    echo "-- --closing needs an observing site; skipped under --no-site"
+  else
+    echo "-- asking the planner where a closing target would have to sit tonight"
+    CLOSING_CENTER="$(python - "$SITE_LAT" "$SITE_LON" <<'PY' 2>/dev/null || true
+import sys
+from datetime import datetime, timezone
+from seestack.nightplan import Observer, closing_sky_position
+obs = Observer(float(sys.argv[1]), float(sys.argv[2]))
+pos = closing_sky_position(obs, start_utc=datetime.now(timezone.utc))
+print("" if pos is None else "%.4f %.4f" % pos)
+PY
+)"
+    if [ -z "$CLOSING_CENTER" ]; then
+      echo "   [closing] the planner found NO closing position from this site today"
+      echo "   [closing] (a polar site in its midnight-sun months has no dark nights"
+      echo "   [closing]  to compare, and no target's RA can fix that) — nothing seeded"
+    else
+      CLOSING_RA="${CLOSING_CENTER%% *}"
+      CLOSING_DEC="${CLOSING_CENTER##* }"
+      echo "-- loading the CLOSING sample: two targets at RA ${CLOSING_RA}, Dec ${CLOSING_DEC}"
+      echo "   (1 min and 1.5 h kept, same sky — so the only thing that differs is depth)"
+      curl -sf -X POST "$BASE/api/sample" -H 'Content-Type: application/json' \
+           -d "{\"shape\":\"closing\",\"ra_deg\":${CLOSING_RA},\"dec_deg\":${CLOSING_DEC}}" \
+           >/dev/null || echo "warn: closing sample load failed"
+      # What the app now SAYS about them — the line that makes a silent failure
+      # visible, the guard --calibration's own first run had to learn (v0.455.1).
+      # `n_closing` is the endpoint's exact total; the card headlines with it.
+      curl -sf "$BASE/api/plan/closing" \
+        | python -c '
+import json, sys
+d = json.load(sys.stdin) or {}
+rows = d.get("targets") or []
+print("   [closing] location_source=%s, n_closing=%s, %d row(s) listed"
+      % (d.get("location_source"), d.get("n_closing"), len(rows)))
+for r in rows:
+    print("   [closing]   %s - %s weeks left, %.0f min up now, %.2f h kept"
+          % (r.get("name"), r.get("weeks_left"), r.get("minutes_now") or 0.0,
+             (r.get("total_exposure_s") or 0.0) / 3600.0))
+if not rows:
+    print("   [closing] NOTHING IS CLOSING — the card is still in its empty state,")
+    print("   [closing] so this pass says nothing about it. Do not read it as CLEAN.")
+' 2>/dev/null || echo "   [closing] could not read /api/plan/closing"
+    fi
+  fi
 fi
 
 # 3d. Subs in `incoming/` that never reached the library (--incoming-lag). Every

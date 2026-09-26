@@ -1,5 +1,96 @@
 # Shipped — the record
 
+## v0.477.0 — 2026-09-26 — the season-closing dogfood hole: a sample shape whose sky the *planner* chooses
+
+*(Builder, branch `claude/exciting-tesla-m7wvjb`. Built as the backlog's own preferred shape (a) for the
+"Infra / maintainability" entry *"the season-closing card is the next self-hiding surface no dogfood pass can
+reach"*, which its second finding — v0.476.0 — had just promoted.)*
+
+### The hole
+
+`/tonight` prescribes from **four independent self-hiding cards in one column**. Three of them can be put in
+front of a browser by giving the scratch install an observing site (v0.436.1). The fourth — **"Shoot these
+before they're gone"**, `/api/plan/closing`, the one card in the app whose whole argument is that its answer
+*expires* — could not, and the reason is not a state the tooling forgot to seed:
+
+> A season closes as a function of the target's **right ascension against the date**, not of where you stand.
+
+Both bundled samples sit at M 42 (RA ≈ 5h35m). No `DOGFOOD_SITE`, no fixture and no clock makes M 42 leave the
+sky in the eight weeks ahead, so the card had **never been rendered** on any pass ever recorded — it was pinned
+by jsdom alone, and the one bug found in it so far (v0.476.0: the endpoint scanned the forty targets with the
+**most** integration and then headlined about what you are about to lose) had to be read out of the code.
+
+That is the missing-observing-site (v0.436.1) / click-only-Compare (v0.440.2) / empty-`incoming/` (v0.442.0) /
+no-master-dark (v0.455.1) hole a fifth time, and this instance is the one with no setting behind it.
+
+### What shipped
+
+**1. `seestack/nightplan.closing_sky_position(observer, *, start_utc, …)`** — where would such a target have to
+sit *today*, from *here*? It builds probe targets on a 48-step RA grid at five declinations spanning both
+hemispheres and asks **`season_closing` itself** which of them are leaving, then returns the candidate nearest
+the middle of the horizon and highest in the sky now. Going through the very function the card reads is the
+load-bearing choice: the demo and the card cannot come to different conclusions about what "closing" means,
+whatever either does next. `None` — not a plausible-looking pair — when nothing on the grid closes, because at
+78°N in midsummer there is no darkness to compare and no right ascension can fix that. Deterministic, offline,
+read-only, ~2.5 s (the scan's cost is in the horizon, not the target count, as `season_closing` documents).
+
+**2. A fifth `POST /api/sample` shape, `"closing"`** — a **pair** of targets, at **one** sky position, with
+**1 min** and **1.5 h** kept on them:
+
+* *A pair*, because the card's job is to say what the season ending will **cost**, which is a function of how
+  much you already have; one row exercises none of it. This is the backlog entry's own requirement (*"a range
+  of `total_exposure_s` … or it cannot exercise what was just fixed"*).
+* *One patch of sky*, because then the only thing differing between its two rows is **depth** — the axis the
+  endpoint ranks and caps by — and neither row's placement can be blamed for the order they come out in.
+  Measured on load: `noise_gain` 0.872 against 0.225, shallow first, which is v0.476.0's ranking rendered.
+* …but **not the identical position**, which the first build of this shape used and the flag's own first pass
+  caught within a minute: two targets whose centres agree to within `library.SAME_OBJECT_TOL_DEG` (0.1°) are
+  exactly what the merge nudge exists to find, so the Library wall raised **"Same object in more than one
+  folder?"** — an owner-facing warning about nothing, in every screenshot and every page-height baseline the
+  pass takes. A flag must seed the state it is *for* and no other. The deeper target now sits **1°** north:
+  ten times that tolerance, and about a thousandth of the sky's daily turn, so the pair still shares a season
+  and a placement to within a minute of dark time.
+* *Not stacked.* The card reads the **library registry** (position + kept exposure), so a stack would cost a
+  pass a minute and change nothing on the screen under test. The whole shape costs ~7 s.
+* Frames are the deep sample's cheap 160×120 sensor, for the reason it is, and the session's cadence follows
+  its own exposure so 180 subs read as one plausible evening.
+
+**3. `--closing` in `scripts/agent-dogfood.sh`** — resolves the position, seeds the pair, and then prints what
+`/api/plan/closing` answers: `location_source`, the exact `n_closing`, and every row's weeks-left, minutes-up
+and hours-kept. It says **"NOTHING IS CLOSING — do not read it as CLEAN"** when the list is empty, because a
+pass that silently failed here would look exactly like the coverage hole it exists to close (the guard
+`--calibration`'s own first run had to learn). Skipped under `--no-site` and `--empty`, since it needs a site.
+
+### The Care note, honoured
+
+The entry's caution was that a seeded target must not *"teach the planner to plan a real owner's night from
+coordinates nobody chose"* — the line v0.436.1 drew when it put the observing site in **Settings** rather than
+in the sample's FITS headers. Here the coordinates are a **target's**, not an observer's, they are supplied by
+the caller rather than invented by the app, and the targets name themselves demos
+(`"Sample: season closing (just started)"` / `"(hours in)"`, swept by the one existing remove).
+
+And the other direction is closed too: `center=` is **refused** by every other shape rather than ignored, so a
+caller cannot believe it moved a sample that did not move — the field and mosaic samples' pixels are pinned
+bit-identical, and every recorded page-height, trim and coverage baseline rests on them.
+
+### Tests
+
++14 Python (5 engine cases × parametrisation = 12 runs in `tests/test_nightplan.py`, 8 in
+`tests/webapp/test_sample_data.py`). The engine tests deliberately pin the **property** rather than the
+coordinates, which move with the calendar: on three dates × three sites (including the dogfood default and a
+southern one), the returned position is one `season_closing` reports, comfortably inside the scan rather than
+balanced on its edge. The webapp tests include the end-to-end path the flag actually walks — placement helper →
+`POST /api/sample` → `GET /api/plan/closing` names both rows, least-finished first — so the flag's claim to
+reach the state is pinned in the suite rather than in a shell script nobody runs.
+
+### Upgrade-safety (§9)
+
+Purely additive. Three optional request fields (`ra_deg`/`dec_deg`, and `"closing"` added to the `shape` enum)
+and three defaulted response fields on `/api/sample`; a new optional `center=` keyword on
+`sample_data.load_sample` and on three private WCS helpers, every existing call byte-identical; one new pure
+engine function nothing in the app calls. No config, schema, migration, on-disk, default or API-shape change.
+
+
 ## v0.475.3 — 2026-09-26 — the health card diagnosed registration smear and prescribed a set of subs that only exists once the cure is already on
 
 *(Builder, branch `agent/run-0002`. Found by reading `seestack/stackhealth.py` during a run whose four
