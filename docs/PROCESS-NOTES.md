@@ -1,5 +1,65 @@
 # Process notes & QA sweep records
 
+## 2026-09-26 — Builder: the probe's own route table was the hole, and both pages it was missing paid on their first pass
+
+*(Builder, branch `claude/exciting-tesla-2cd04h`, shipping v0.477.2, v0.477.3 and v0.478.0. Baseline green —
+**6,618 passed, 2 skipped**, 15m13s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root`
+cleared first.)*
+
+**The lever this run is worth recording: the list that decides what gets dogfooded is itself a hand-mirrored
+list, and nothing was checking it.** This repo has now paid five times for a surface its tooling could not
+reach — the missing observing site (v0.436.1), the empty `incoming/` (v0.442.0), the click-only Compare
+comparators (v0.440.2), the 1:1 editor preview (v0.446.0), the never-held master dark (v0.455.1) — and each
+time the fix was a new *flag*. This one needed no flag at all: `scripts/dogfood_probe.mjs`'s `ROUTES` is
+mirrored by hand from `frontend/src/main.tsx`, its own comment says so, and it had drifted by **three
+routes** — `/live`, `/show` and `/sky-so-far/:year`.
+
+`/live` is the sharp one. It is a **nav entry** — one click from the sidebar, in the group a beginner reads —
+and its own docstring says it is *"meant to be left open on a phone for hours"*, i.e. the 420 px pass is the
+pass that matters for it, and it had never had one. It came back clean, which is worth knowing rather than
+assuming.
+
+**Both of the other two produced a real finding on the very first pass that opened them**, which is the same
+return this repo keeps getting from closing one of these holes:
+
+* **v0.477.3** — `/sky-so-far/:year` rendered *"First light in 2024"* directly above *"What you pointed at"*,
+  holding the identical single chip, the lower one linking nowhere. The page already solves this class **for
+  its nights** one function up (`yearNightCards`), with a docstring naming the exact complaint. The shape of
+  a beginner's first year makes the duplicate guaranteed, not incidental.
+* **v0.478.0** — `/show` said *"Nothing to show yet"* over a finished picture, because the slideshow is built
+  from the wall that self-hides below two pictures. The floor's own comment argues it from **curating**; a
+  slideshow does not curate.
+
+**The durable half is a test, not a flag.** `tests/test_dogfood_route_coverage.py` parses `main.tsx`'s router
+children and every route-shaped literal in the probe, normalises both, and goes red when a registered route is
+neither reachable nor exempted-with-a-reason. Fails before on exactly `['live', 'show', 'sky-so-far/*']`.
+Generalisable question for the next run: **which other hand-mirrored list in this repo has nothing checking
+it?**
+
+### Baseline for a default pass at v0.477.2 (sample loaded and stacked, observing site 40.0, −2.0)
+
+Mechanically CLEAN across all 24 routes at both widths — nothing overflowing, no console errors. Tallest
+phone pages: `/tonight` 3,506 px, `/glossary` 3,364 px, the Target page 3,287 px, the editor 3,184 px,
+`/life-list` 3,094 px, `/` 2,558 px. In line with the standing baselines; no IA slice taken. The three new
+routes all sit below the reported top-8 cut.
+
+Read the prescriptive blocks as one paragraph, both clean: the Target page's four cards agree that the object
+is bigger than one frame and that a 3×3 mosaic is the next move, with the readiness card scoped to *"this
+single field"*; `/tonight`'s week plan names one target and one best night, with nothing to contradict (the
+closing card is silent without `--closing`).
+
+### And the `--empty` pass, re-run because the tooling changed — also CLEAN
+
+Worth recording because it is the first time `/live` and `/show` have been photographed in the state a
+**beginner meets first**, and because it exercises `yearRoute()`'s stand-down: with no nights the year route
+resolves to `""` and is skipped, so `--empty` sweeps 25 routes rather than 26 and nothing probes an error
+state the page is right to show. Nothing overflowing, no console errors. `/live` shows one Alert ("Nothing
+captured yet — once frames start arriving, this page will show the night filling up"); `/show` shows its
+paragraph and a "Go to your library" button. Tallest phone pages unchanged from the 2026-09-07 first-run
+baseline: `/glossary` 3,364 px, `/life-list` 2,779 px, `/` 1,402 px, `/library` 1,252 px — the two new pages
+are both short and sit well below the reported cut.
+
+
 ## 2026-09-26 — Builder: the `--closing` dogfood baseline, and what a new flag cost in its first hour
 
 *(Builder, branch `claude/exciting-tesla-m7wvjb`, shipping v0.477.0 and v0.477.1. Baseline green — **6,597

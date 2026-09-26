@@ -46,6 +46,9 @@ router = APIRouter(tags=["gallery"])
 BEST_PICTURES_MAX = 24
 # The wall needs at least this many finished stacks to be worth showing — with
 # one picture there's nothing to curate, so the endpoint self-hides (empty list).
+# That argument is about *curating*; a caller that only wants to **play** the
+# pictures (the "Show and tell" slideshow) asks for ``min_targets=1``, because a
+# slideshow of one picture is exactly what a beginner's first night deserves.
 BEST_PICTURES_MIN = 2
 
 
@@ -531,6 +534,17 @@ class BestPicture(BaseModel):
 
 class BestPicturesResponse(BaseModel):
     items: list[BestPicture]
+    #: How many targets have a finished picture at all — i.e. how many entries
+    #: ``items`` would hold with no floor and no ``limit``. Additive, so an
+    #: older frontend ignores it. It exists because "is the wall worth
+    #: curating?" and "is there anything to *play*?" are different questions
+    #: with different floors, and the page that offers the slideshow was
+    #: answering the second from the first list: on a library with one finished
+    #: picture the wall self-hides, so its "Play slideshow" button vanished over
+    #: a perfectly good one-picture show. Reading a count instead of issuing a
+    #: second ``min_targets=1`` request keeps that button free on a library with
+    #: a hundred targets, where this endpoint opens every project.
+    n_finished: int = 0
 
 
 def _run_has_preview(run: Any) -> bool:
@@ -564,6 +578,7 @@ def _representative_run(runs: list[Any], cover_run_id: int | None) -> tuple[Any,
 def get_best_pictures(
     request: Request,
     limit: int = Query(BEST_PICTURES_MAX, ge=1, le=BEST_PICTURES_MAX),
+    min_targets: int = Query(BEST_PICTURES_MIN, ge=1, le=BEST_PICTURES_MAX),
 ) -> BestPicturesResponse:
     """Auto-curated cross-target portfolio: one *finished* stack per target,
     ranked best-first by the transparent quality blend
@@ -571,6 +586,14 @@ def get_best_pictures(
     Library — no schema/state change. Self-hides (empty list) until at least
     :data:`BEST_PICTURES_MIN` targets have a finished picture, so a brand-new
     install shows nothing rather than a wall of one.
+
+    ``min_targets`` moves that floor for a caller whose job is not curating.
+    "Show and tell" plays these pictures full-screen one at a time, so one
+    finished picture is a perfectly good show — and with the wall's floor it
+    instead told a beginner who had just stacked their first target that there
+    was *"nothing to show yet"*, or, once they had also shot the Moon, played
+    the Moon and silently left the nebula out. The default is unchanged, so
+    "My best pictures" and every existing caller see byte-identical answers.
 
     A target's representative is the run the user **pinned as its cover** ("Set as
     cover" in History) when there is one and its preview still exists, otherwise
@@ -691,16 +714,20 @@ def get_best_pictures(
     finally:
         lib.close()
 
-    # Not enough finished pictures to curate → self-hide.
-    if len(by_key) < BEST_PICTURES_MIN:
-        return BestPicturesResponse(items=[])
+    # Reported whichever way the floor goes: the count is about the library,
+    # not about this caller's floor or limit.
+    n_finished = len(by_key)
+
+    # Not enough finished pictures for what the caller wants to do with them.
+    if n_finished < min_targets:
+        return BestPicturesResponse(items=[], n_finished=n_finished)
 
     ranked = rank_portfolio(entries, limit=limit)
     items: list[BestPicture] = []
     for r in ranked:
         pic = by_key[r.key]
         items.append(pic.model_copy(update={"score": r.score}))
-    return BestPicturesResponse(items=items)
+    return BestPicturesResponse(items=items, n_finished=n_finished)
 
 
 class UnexportedEditItem(BaseModel):

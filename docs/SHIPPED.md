@@ -1,5 +1,165 @@
 # Shipped — the record
 
+## v0.478.0 — 2026-09-26 — "Show and tell" told a beginner with their first finished picture that there was nothing to show
+
+*(Builder, branch `claude/exciting-tesla-2cd04h`. Found on the **first** dogfood pass that ever opened
+`/show` — v0.477.2, an hour earlier.)*
+
+### The defect
+
+The scratch install had a finished, stacked picture on the Gallery, on the Target page and on the Dashboard.
+`/show` — the full-screen slideshow, whose whole promise is *"point a screen at it and it plays"* — said:
+
+> **Nothing to show yet.** Once you've finished stacking **a target** — or made a Moon or Sun picture — this
+> plays them full-screen, one after another, with their names on.
+
+The copy says *a target*, singular, and it was false. The show is built from `/api/gallery/best`, which
+**self-hides below `BEST_PICTURES_MIN = 2`** finished pictures. That floor is well argued *for the wall* — its
+own comment says *"with one picture there's nothing to curate"* — and that argument is about **curating**. The
+slideshow does not curate; it plays them one at a time, which one picture does perfectly well.
+
+Two consequences, and the second is worse than the first:
+
+1. A beginner who has just stacked their first target opens the show and is told there is nothing to show.
+2. Once they have *also* shot the Moon, the show **plays** — and silently leaves the nebula out, with nothing
+   on screen saying so, because the Moon/Sun stills come from a different endpoint with no such floor.
+
+And the way in was gone too: `/show` is not in the nav, so it is reached from the **"Play slideshow"** button
+on `/best` — which decides whether a show exists from `hasAnythingToShow(items, videos)`, where `items` is
+*this wall's* list, empty below the same floor. Its own comment had the right instinct and the wrong list:
+*"`hasAnythingToShow` asks the show's own builder rather than this wall's length, because a first finished
+Moon still is a real show with an empty wall."*
+
+### The fix
+
+* **`min_targets`** — an additive query parameter on `GET /api/gallery/best`, defaulting to
+  `BEST_PICTURES_MIN`, so `/best` and every existing caller get **byte-identical** answers. `ge=1`, so it can
+  only ever lower a floor, never turn it off. `ShowAndTellView` asks with `min_targets=1` — **on its own
+  react-query key**, because `/best` shares this endpoint and must keep self-hiding; one cache entry for two
+  floors would let whichever page loaded first decide what the other shows.
+* **`n_finished`** — an additive response field: how many targets have a finished picture at all, reported
+  whichever way the floor goes. `hasAnythingToShow` takes it as an optional third argument (`undefined` means
+  "no extra information", i.e. exactly the old answer), so `/best` can keep its own floor for the *wall* while
+  the **button** answers the question it was always asking. A count rather than a second `min_targets=1`
+  request, because this endpoint opens every project in the library and the owner has 104 targets.
+
+The empty-state copy needed no change: with the floor at one, *"Once you've finished stacking a target"*
+became true.
+
+### Tests
+
++3 Python (`test_gallery_best.py`: the slideshow's floor returns the picture the wall hides and it is a whole
+captionable record; `min_targets=0` is a 422 and an empty library is still empty at the lowest legal floor;
+`n_finished` reported while the wall self-hides **and** agreeing with what the lower floor returns) and +4
+frontend (`hasAnythingToShow` over a self-hidden wall and the undefined/zero no-ops; the show calling with the
+floor; `/best` still offering the button over the one picture its own wall hides, while the wall stays honest
+about having nothing to rank; and the wall never passing a floor of its own). **Six fail before**, verified by
+scratch reverts of `webapp/routers/gallery.py`, `showAndTell.ts`, `BestPictures.tsx` and `ShowAndTell.tsx`.
+
+**Upgrade-safe (§9):** one optional query parameter and one defaulted response field. No config, schema,
+on-disk, default or existing-response-shape change; an older frontend ignores `n_finished`, and an older
+backend omitting it reads as "no extra information", which is today's behaviour.
+
+## v0.477.3 — 2026-09-26 — "Your year under the stars" named the same targets twice, in two cards, and the second one linked nowhere
+
+*(Builder, branch `claude/exciting-tesla-2cd04h`. Found on the **first** dogfood pass that ever opened
+`/sky-so-far/:year` — v0.477.2, an hour earlier. Photographed at 1440 px and 420 px.)*
+
+### The defect
+
+The year page ends with two cards, one directly above the other:
+
+* **"First light in 2024"** — *"One object you'd never imaged before."* — chips that **link** to the target.
+* **"What you pointed at"** — the same names again, as plain badges that link nowhere.
+
+Those are two different facts on a year with repeat visits, and **one fact** on a year where everything was
+new — which is the guaranteed shape of a beginner's **first** year, i.e. of the reader this page is written
+for. On the scratch install the two cards held the identical single chip
+`SAMPLE: ORION NEBULA (M42)`, one above the other, the lower one adding nothing.
+
+It is the class this repo has a name for — *two superlatives that can resolve to the same thing* — and this
+page **already answers it for its nights**, one function up: `yearNightCards` folds the longest and sharpest
+night into one card when they are the same night, with a docstring that reads *"Rendered as two cards it read
+as the page repeating itself — the same date, the same target, twice, side by side."* The identical complaint,
+unanswered for the targets.
+
+### The fix
+
+New pure `frontend/src/yourYear.ts::yearTargetCards(year, targetNames, firstLights)` — the same shape and the
+same reasoning as `yearNightCards` beside it. When every target the year pointed at was a first light, the two
+cards become **one**, keeping the first-light framing (the richer one: it links, and it has a sentence) with a
+blurb that says the thing two cards could never say:
+
+* one target → *"The one object you pointed at in 2024 — and you'd never imaged it before."*
+* many → *"All 4 objects you pointed at in 2026 were ones you'd never imaged before."*
+
+**Nothing is removed** (AGENTS.md §1): every name is still on screen, once, and in the folded case each one
+now carries its link instead of sitting as a dead badge. A year with any repeat visit renders exactly as it
+did.
+
+Folding requires **set equality**, not containment: `first_light_names` is derived from the same nights as
+`target_names` (`seestack/yearrecap.py`), so equal counts mean equal sets, and an older or inconsistent
+payload naming a first light the year never shot stays on the two-card path rather than quietly folding a name
+out of view.
+
+`YourYear.tsx` now renders `targetCards.map(...)` through one card component, so the two cards cannot drift
+into two layouts either. `data-testid` is the card key, so `first-lights` and `year-targets` keep working.
+
+### Tests
+
++6 pure cases in `yourYear.test.ts` (fold, the one-target wording, the repeat-visit two-card path, the
+unequal-sets guard, a target the registry no longer has, and the empty year) and +2 rendered in
+`YourYear.test.tsx`. The rendered fold test **fails before** — verified by a scratch revert of
+`YourYear.tsx`, where it reports the `year-targets` card still present.
+
+Frontend-only. No API, config, schema, on-disk or default change.
+
+## v0.477.2 — 2026-09-26 — three registered routes had never been in front of a browser, and the list that decides which are is hand-mirrored
+
+*(Builder, branch `claude/exciting-tesla-2cd04h`. Found by diffing `scripts/dogfood_probe.mjs`'s `ROUTES`
+against `frontend/src/main.tsx`; both new pages produced a finding on their very first pass — v0.477.3 and
+v0.478.0 below.)*
+
+### The gap
+
+`dogfood_probe.mjs`'s route table carries the comment *"the real route table (frontend/src/main.tsx)"*, and a
+list mirrored by hand goes stale. Three routes the app registers had **never been opened by any dogfood pass**
+— no screenshot at either width, no overflow probe, no squeeze probe, no clipped-label probe, no console-error
+capture, no page height:
+
+| route | what it is | why it was missed |
+| --- | --- | --- |
+| `/live` | **"Tonight, live"** — a **nav** entry, and the one page whose own docstring says it is *"meant to be left open on a phone for hours"* | simply absent from the list |
+| `/show` | "Show and tell", the full-screen slideshow | reached from a button on `/best`, never from the nav |
+| `/sky-so-far/:year` | "Your year under the stars" | the year is a property of the **library**, so like `/compare` it cannot be written as a constant |
+
+That last one is the same shape as the holes this repo has already paid for — the missing observing site, the
+empty `incoming/`, the click-only Compare comparators, the 1:1 editor preview: a surface the tooling is
+*structurally* unable to reach. And it paid the same way: **both new pages produced a real finding on the
+first pass that opened them.**
+
+### What shipped
+
+* `/show` and `/live` added to `ROUTES` as plain constants.
+* New `yearRoute()` beside `compareRoute()`, asking `/api/recap/year/<thisYear>` the way `YourYearCard` does
+  and resolving the year by the same rule as `yourYear.defaultRecapYear` (the most recent year with nights —
+  the year the card actually links to). Returns `""` when the library has no nights at all, where the card
+  self-hides and there is no route to sweep, so `--empty` is unaffected.
+* New **`tests/test_dogfood_route_coverage.py`** — the durable half. It parses the router children out of
+  `main.tsx` and every route-shaped literal out of the probe, normalises both (query string stripped,
+  `:param` and `${VAR}` alike reduced to `*`), and requires each registered route to be reachable or listed in
+  a tiny `_EXEMPT` map **with its reason**. A second test deletes the reverse failure mode: an exemption that
+  no longer names a real route is stale and hides the next one. **Fails before** on exactly `['live', 'show',
+  'sky-so-far/*']`.
+
+One exemption today: `settings/*`, which renders the same component as `/settings` deep-linked to a panel.
+
+### Baseline for a default pass at v0.477.2 (sample loaded and stacked, observing site 40.0, −2.0)
+
+Mechanically **CLEAN** — nothing overflowing, no console errors, on all 24 routes at both widths. Page heights
+unchanged on every route that was already swept; the three new ones all sit below the reported top-8 cut
+(`/tonight` 3,506 px phone remains the wall).
+
 ## v0.477.1 — 2026-09-26 — three nudge cards chipped a target's name and hid the fact beside it
 
 *(Builder, branch `claude/exciting-tesla-m7wvjb`. Found by the `--closing` dogfood flag shipped an hour
