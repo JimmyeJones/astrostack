@@ -3914,6 +3914,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.479.2** — 🟠 PRIORITY 3 (trust / friendliness), **recovered from a branch that never merged**: the readiness
+  card's "is more time worth it?" line projected along the ideal √t law even when the target's own stacks had measured
+  a slower falloff — quoting "roughly 16 h more" where the measured rate implies ~750 h. `grainProjection` now projects
+  along `min(IDEAL_EXPONENT, integrationTrend.exponent)`, the same fit History's noise-trend card prints. Built as
+  v0.407.2 on 2026-09-10 (`claude/sweet-babbage-qz96hz`), never PR'd; re-applied onto current `main` alongside the later
+  lower-fence change. 7 tests fail before, pass after. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.479.1** — INFRA / tooling, found while shipping v0.479.0: **no dogfood pass had ever held two stacks of
   one target**, so every surface whose precondition is "this target has a previous picture" had only ever been
   photographed self-hidden — the "Did it get better?" card and its "How far you've come" link, the deepening
