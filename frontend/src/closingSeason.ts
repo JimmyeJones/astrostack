@@ -60,10 +60,15 @@ export function closingHeadline(plan: SeasonClosing | null | undefined): string 
   const rows = plan?.targets ?? [];
   if (rows.length === 0) return null;
   const soonest = rows[0];
-  if (rows.length === 1) {
+  // The count is the endpoint's exact total, not the length of the list it
+  // sent: the list is bounded so the card cannot grow without limit, and a
+  // headline counting the rows it happens to show would quietly undercount.
+  // An older backend omits it, and there the list *is* the total.
+  const total = Math.max(plan?.n_closing ?? rows.length, rows.length);
+  if (total === 1) {
     return `${soonest.name} is on its way out of your sky — ${weeksLeftPhrase(soonest.weeks_left)}.`;
   }
-  return `${rows.length} of your targets are on their way out of your sky — `
+  return `${total} of your targets are on their way out of your sky — `
     + `${soonest.name} first, ${weeksLeftPhrase(soonest.weeks_left)}.`;
 }
 
