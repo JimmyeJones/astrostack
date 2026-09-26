@@ -1,5 +1,108 @@
 # Process notes & QA sweep records
 
+## 2026-09-26 — Scout: rotation item (3) — ASTAP/ffmpeg filesystem side effects with a stub binary — CLEAN, and the guard that makes it clean is already in the suite
+
+*(Scout, branch `claude/admiring-brahmagupta-bsgjyy`. Baseline green — **6,597 passed, 2 skipped**, 12m31s
+with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Only docs touched.)*
+
+**Triage came out where the last four runs left it, and the inbox is quiet.** "Bugs (fix these first)" holds
+the same set: five Builder-filed LEADs each gated on a measurement only the owner's library can supply (the
+drizzle noise-ratio sampling question, the per-batch memory-budget drift, the ragged-mosaic interior fraction,
+the deep-target router reads, the mosaic seam/depth proxy), the #903 open remainder (L — an auto-cover with
+provenance, not the small fix it looks like), and the #878/#880 routing (owner sign-off for the merge
+migration). The three open GitHub issues — #878, #880, #903 — are **all already verified into the backlog with
+their current dispositions correct against the code and against their own latest observer follow-ups**
+(#903's 2026-09-25 follow-up confirms the keep-finished guard held over the full library and the mechanism did
+not recur; the residual is 44 already-flattened targets that nothing repairs, which is exactly what the open
+#903 remainder entry is about). No new issue since the last Scout run. So this run had no bug to file and no
+issue to open or close — it verified, swept, and dogfooded.
+
+### QA sweep — rotation item (3), `seestack/solve/astap.py` + `seestack/video/ffmpeg.py`, CLEAN (traced + ran the tests)
+
+The rotation's fourth-listed item and the one most directly tied to §10 (the owner's `copy_to_cache` is **off**,
+so anything ASTAP or ffmpeg does beside its input touches the owner's only copy of his raws in `incoming/`).
+Read both invocation paths adversarially and confirmed the guarantee is structural, not incidental:
+
+* **ASTAP never sees the source.** `ASTAPSolver._solve_once` copies the frame into a
+  `tempfile.TemporaryDirectory` and runs there, so ASTAP's `.wcs`/`.ini` sidecars are born and die inside the
+  scratch dir; the sidecar *content* is read back before the `with` block exits. `-update` is deliberately
+  **not** passed (the one flag that would rewrite the FITS header), and the copy — not a symlink or hardlink —
+  is chosen precisely because a link would lead a write back to the original. The runner (`solve/runner.py`)
+  only ever calls `solver.solve()`, so there is no second, unprotected path.
+* **ffmpeg only reads `-i` and pipes to stdout.** `iter_video_frames` runs `ffmpeg … -f rawvideo -pix_fmt
+  rgb24 -` with `-nostdin`, output to a `subprocess.PIPE`, and kills the process in `finally` on abandonment.
+  No output file is ever named next to the input capture; the video "crop"/"uncrop"/"stack" results are written
+  into the library's own target tree, not `incoming/`.
+* **The guard is already pinned end-to-end.** `tests/webapp/test_incoming_readonly_guard.py` seeds an
+  `incoming/` tree with a sentinel and drives the *whole* workflow — QC, solve (with a **stub `astap` that
+  `test_the_stub_astap_really_would_litter` proves writes sidecars beside its `-f` file**), reprocess-all, the
+  video pipeline (stack + crop + uncrop), ingest and the scanner — then asserts every seeded file is unchanged.
+  Plus `tests/test_astap.py::test_astap_is_never_pointed_at_the_callers_own_frame` at unit level. This is the
+  "ran the code on data shaped like the owner's" bar the sweep rotation asks for, and it is green.
+
+No bug. Recorded here per the three-file rule (a clean sweep never goes into a priority section).
+
+### Adversarial reads, all CLEAN (traced, no bug filed)
+
+Since the stacking engine is closed until a new bug is found there (twenty-plus clean sweeps; the last Scout
+read `weighting.py` clean), I spent the reading budget on trust surfaces the rotation touches:
+
+* **`seestack/render/deepening.py`** (the cross-run "night after night" reel — a trust surface, because it is
+  the app's claim about the owner's *progress*). The one thing that must be right is a fair comparison, and it
+  is: one STF stretch is solved from the deepest **linear** master (searched deepest→shallowest, skipping any
+  display-space export) and replayed on every frame, NaN floors to black, and a label follows its frame through
+  the unreadable-skip filter with `zip(strict=True)` so a dropped frame never shifts the captions off by one.
+* **`seestack/qc/grading.py`** (rotation item 2 — per-panel vs target-wide thresholds). The v0.474.0 split is
+  intact: `capped_overall` is the target-wide 25 % rail, `capped_panels`/`withheld_per_panel` the per-panel one,
+  and the flux-like metrics (stars/sky/transparency) take per-panel populations while FWHM/eccentricity stay
+  target-wide — the exact split that stops a star-poor panel being graded as "cloud". No single value read as
+  two facts.
+* **`webapp/pipeline.py`** auto-stack decision (priority 2, the "just works" path). The walk-away family is
+  fully guarded: `held_thin` (count **and** `_auto_stack_panel_depth`, so a mosaic that clears the count but is
+  one-sub-deep everywhere is held), `held_unreadable`, `held_settling`, and the degraded-heal recheck — each
+  holding the target back **without** stamping the attempt marker, so recovery is automatic.
+
+### Dogfood — `--mosaic`, CLEAN, and the two prescriptive pages read coherently
+
+Baseline sample + generated 2×2 mosaic (uneven depth 6/6/6/3, one hazy panel, ragged union). **Mosaic trim
+7.9 %** (bug bar ~15 %). Nothing overflowing at 420 px or 1440 px, no console errors. Tallest phone page the
+mosaic Target page at 3,673 px, `/tonight` 3,638 px — both in line with the last run's standing baseline; no IA
+slice taken.
+
+Read the cards as one paragraph, which is what that block is for:
+
+* **Mosaic Target page — coherent, and a positive example.** next-best-move ("another pass or two over the
+  same mosaic evens out the thinner part"), readiness ("part is thinner, only more light evens that out;
+  elsewhere more time buys fainter detail"), the panel map ("~30 s behind at top-right, evens out on its own")
+  and the framing verdict all point the same way, and the framing verdict resolves the depth-vs-width tension
+  out loud: *"Most of it is already in this picture… until you're happy with the depth, more passes over the
+  panels you already have do more for it than a wider grid."*
+* **Single-field Target page — a soft pairing I checked and did NOT file.** next-best-move says the biggest
+  win is switching to mosaic mode (only ~20 % of Orion is in the frame; "more time can't bring the rest in"),
+  while the readiness card frames a "~2 h goal for this single field" and says "more time pulls out fainter
+  detail". A beginner asking "keep shooting this, or switch?" gets a strategic answer (go mosaic) and a
+  tactical one (this fragment deepens with time). I traced `seestack/framing.py` to check whether the
+  reconciling clause the mosaic page carries is *missing* here by mistake: it is not — that clause
+  ("more passes over the panels you already have") is deliberately the `CANVAS_MOSAIC` branch, and on a single
+  field capturing 20 % it would be wrong advice (there is one panel, holding a fifth of the object). The two
+  cards are on different axes (coverage vs depth), the readiness card scopes its goal "for this single field"
+  in its own words, and neither is arithmetically wrong — so this is complementary, not the "two cards
+  disagree" defect the last five findings were, and filing it would be speculation. Noted here for a future
+  run that wants to weigh whether the readiness card should *acknowledge* the framing verdict on a fragment
+  (e.g. lead with "this is ~20 % of the object" before the depth goal); it is a polish judgement, not a bug.
+
+### No new idea filed — and why that is the right call this run
+
+The task asks for a beginner feature each run; AGENTS.md §4 (corrected 2026-09-04, R3) removed the "add a
+couple every run" mandate because *"supply was never the constraint; a Builder's hour is"*. "Features that
+serve real workflows" already holds seven open, ready ideas, so the section is stocked and the Builder is not
+starved. I grep-checked several candidates against the code and every one is already built end-to-end — the
+"deepening reel across nights" (`render/deepening.py`), the shareable montage wall (`montage.py`), the zoom
+and in-stack progress reels (`render/zoomclip.py`), the scale bar (`scalebar.py`), the recap/year-recap/
+life-list posters, the retrospective moon note (`nightplan.session_moon`, filed *and closed as already-built*
+by the last two runs). Manufacturing an eighth marginal idea against that is exactly the busywork §2 and §4
+warn against, so I did not.
+
 ## 2026-09-26 (second run) — Builder: a cap copied from the function next door, and the key came with it
 
 *(Builder, branch `claude/exciting-tesla-yq3d1s`, shipping v0.476.0. Baseline green — **6,593 passed,
