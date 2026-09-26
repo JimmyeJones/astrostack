@@ -1,5 +1,65 @@
 # Shipped — the record
 
+## v0.478.0 — 2026-09-26 — "Show and tell" told a beginner with their first finished picture that there was nothing to show
+
+*(Builder, branch `claude/exciting-tesla-2cd04h`. Found on the **first** dogfood pass that ever opened
+`/show` — v0.477.2, an hour earlier.)*
+
+### The defect
+
+The scratch install had a finished, stacked picture on the Gallery, on the Target page and on the Dashboard.
+`/show` — the full-screen slideshow, whose whole promise is *"point a screen at it and it plays"* — said:
+
+> **Nothing to show yet.** Once you've finished stacking **a target** — or made a Moon or Sun picture — this
+> plays them full-screen, one after another, with their names on.
+
+The copy says *a target*, singular, and it was false. The show is built from `/api/gallery/best`, which
+**self-hides below `BEST_PICTURES_MIN = 2`** finished pictures. That floor is well argued *for the wall* — its
+own comment says *"with one picture there's nothing to curate"* — and that argument is about **curating**. The
+slideshow does not curate; it plays them one at a time, which one picture does perfectly well.
+
+Two consequences, and the second is worse than the first:
+
+1. A beginner who has just stacked their first target opens the show and is told there is nothing to show.
+2. Once they have *also* shot the Moon, the show **plays** — and silently leaves the nebula out, with nothing
+   on screen saying so, because the Moon/Sun stills come from a different endpoint with no such floor.
+
+And the way in was gone too: `/show` is not in the nav, so it is reached from the **"Play slideshow"** button
+on `/best` — which decides whether a show exists from `hasAnythingToShow(items, videos)`, where `items` is
+*this wall's* list, empty below the same floor. Its own comment had the right instinct and the wrong list:
+*"`hasAnythingToShow` asks the show's own builder rather than this wall's length, because a first finished
+Moon still is a real show with an empty wall."*
+
+### The fix
+
+* **`min_targets`** — an additive query parameter on `GET /api/gallery/best`, defaulting to
+  `BEST_PICTURES_MIN`, so `/best` and every existing caller get **byte-identical** answers. `ge=1`, so it can
+  only ever lower a floor, never turn it off. `ShowAndTellView` asks with `min_targets=1` — **on its own
+  react-query key**, because `/best` shares this endpoint and must keep self-hiding; one cache entry for two
+  floors would let whichever page loaded first decide what the other shows.
+* **`n_finished`** — an additive response field: how many targets have a finished picture at all, reported
+  whichever way the floor goes. `hasAnythingToShow` takes it as an optional third argument (`undefined` means
+  "no extra information", i.e. exactly the old answer), so `/best` can keep its own floor for the *wall* while
+  the **button** answers the question it was always asking. A count rather than a second `min_targets=1`
+  request, because this endpoint opens every project in the library and the owner has 104 targets.
+
+The empty-state copy needed no change: with the floor at one, *"Once you've finished stacking a target"*
+became true.
+
+### Tests
+
++3 Python (`test_gallery_best.py`: the slideshow's floor returns the picture the wall hides and it is a whole
+captionable record; `min_targets=0` is a 422 and an empty library is still empty at the lowest legal floor;
+`n_finished` reported while the wall self-hides **and** agreeing with what the lower floor returns) and +4
+frontend (`hasAnythingToShow` over a self-hidden wall and the undefined/zero no-ops; the show calling with the
+floor; `/best` still offering the button over the one picture its own wall hides, while the wall stays honest
+about having nothing to rank; and the wall never passing a floor of its own). **Six fail before**, verified by
+scratch reverts of `webapp/routers/gallery.py`, `showAndTell.ts`, `BestPictures.tsx` and `ShowAndTell.tsx`.
+
+**Upgrade-safe (§9):** one optional query parameter and one defaulted response field. No config, schema,
+on-disk, default or existing-response-shape change; an older frontend ignores `n_finished`, and an older
+backend omitting it reads as "no extra information", which is today's behaviour.
+
 ## v0.477.3 — 2026-09-26 — "Your year under the stars" named the same targets twice, in two cards, and the second one linked nowhere
 
 *(Builder, branch `claude/exciting-tesla-2cd04h`. Found on the **first** dogfood pass that ever opened
