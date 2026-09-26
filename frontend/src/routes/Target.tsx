@@ -73,6 +73,7 @@ import { fieldsOfSkyLabel } from "../components/target/perPixel";
 import { softerThanUsual } from "../components/target/softStars";
 import { detectMixedPointings } from "../components/target/mixedPointings";
 import { SavePictureMenu } from "../components/SavePictureMenu";
+import { rejectReasonLabel } from "../rejectReason";
 import {
   FRAME_WINDOW_STEP, frameWindowForIndex, frameWindowNote, growFrameWindow,
 } from "../frameWindow";
@@ -141,38 +142,11 @@ export function countQcUncheckable(frames: Frame[]): number {
   return frames.filter((f) => (f.reject_reason ?? "").startsWith("qc_error")).length;
 }
 
-// Turn a raw `reject_reason` (qc:fwhm, bulk:streaked, user, …) into a plain-language
-// label so a beginner can see *why* frames were dropped, not just how many.
-const METRIC_LABEL: Record<string, string> = {
-  fwhm_px: "FWHM", star_count: "star count",
-  eccentricity_median: "eccentricity", sky_adu_median: "sky level",
-  transparency_score: "transparency",
-};
-export function rejectReasonLabel(reason: string): string {
-  if (reason === "user") return "Manual reject";
-  if (reason === "bulk:streaked") return "Streaked (bulk)";
-  if (reason === "bulk:trailed") return "Trailed (bulk)";
-  if (reason.startsWith("auto:grade:")) {
-    const m = reason.slice(11);
-    return `Auto-grade: ${METRIC_LABEL[m] ?? m}`;
-  }
-  if (reason.startsWith("qc:")) {
-    const m = reason.slice(3);
-    return `QC: ${METRIC_LABEL[m] ?? m}`;
-  }
-  if (reason.startsWith("bulk:")) {
-    const m = reason.slice(5);
-    return `Worst ${METRIC_LABEL[m] ?? m} (bulk)`;
-  }
-  if (reason === "auto:streak") return "Auto: streak";
-  if (reason.startsWith("auto:")) {
-    const m = reason.slice(5);
-    return `Auto: ${METRIC_LABEL[m] ?? m}`;
-  }
-  if (reason.startsWith("qc_error")) return "QC error";
-  if (reason.startsWith("solve_failed")) return "Plate-solve failed";
-  return reason;
-}
+// The raw `reject_reason` -> plain-language label mapping lives in its own
+// module so one place owns the wording (and the drift test that keeps it in
+// step with the Python that writes those reasons can grep for it).
+// Re-exported because the frames table's badge is its main reader.
+export { rejectReasonLabel };
 
 const SENSITIVITIES = [
   { value: "conservative", label: "Conservative — only gross outliers" },
