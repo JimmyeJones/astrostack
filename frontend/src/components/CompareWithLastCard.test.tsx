@@ -1,4 +1,5 @@
 import { MantineProvider } from "@mantine/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
@@ -19,12 +20,21 @@ function run(id: number, over: Partial<StackRun> = {}): StackRun {
   } as StackRun;
 }
 
+// The card now carries the matched-crop strip, which asks the backend whether
+// there is an honest patch to show — so the tree needs a query client. The strip
+// itself fetches nothing until its button is pressed (see NoiseDeltaStrip), so
+// these tests still exercise the card without any network stubbing.
 function renderCard(runs?: StackRun[] | null) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
     <MantineProvider>
-      <MemoryRouter>
-        <CompareWithLastCard safe="M_42" runs={runs} />
-      </MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <CompareWithLastCard safe="M_42" runs={runs} />
+        </MemoryRouter>
+      </QueryClientProvider>
     </MantineProvider>,
   );
 }
@@ -102,5 +112,20 @@ describe("CompareWithLastCard", () => {
     ]);
     expect(screen.getByTestId("first-vs-now-hint").textContent)
       .toMatch(/14 Sep 2025/);
+  });
+
+  it("offers the matched-crop picture, and asks for nothing until it is wanted", () => {
+    // The strip is the picture half of the same question. It must be *offered*
+    // whenever the links are (a pair exists), and must not fetch on render: the
+    // two crops cost a pass over both masters to place, and this card sits on a
+    // page the owner opens constantly.
+    renderCard([run(9), run(7)]);
+    expect(screen.getByTestId("noise-delta-show")).toBeInTheDocument();
+    expect(screen.queryByTestId("noise-delta-strip")).toBeNull();
+  });
+
+  it("offers no picture when there is no pair to compare", () => {
+    renderCard([run(9)]);
+    expect(screen.queryByTestId("noise-delta-show")).toBeNull();
   });
 });

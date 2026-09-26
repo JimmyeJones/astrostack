@@ -1,5 +1,115 @@
 # Shipped — the record
 
+## v0.479.1 — 2026-09-26 — no dogfood pass had ever held two stacks of one target, so every cross-run card had only been photographed self-hidden
+
+**Pillar: infra / tooling (the same hole as the missing observing site, the empty `incoming/`, the click-only
+Compare modes, the absent master dark and `--deep`'s missing magnitude — this one is a *precondition*, not a
+state or a scale).**
+
+Every sample `scripts/agent-dogfood.sh` builds is stacked exactly **once**. So every surface whose precondition
+is *"this target has a previous picture"* has only ever been in front of a browser in its self-hidden state:
+
+* `pickCompareWithLast` / `pickFirstVsNow` — the "Did it get better?" card and its "How far you've come" link
+  both return `null` under two comparable runs, so `CompareWithLastCard` renders **nothing**;
+* `/api/targets/{safe}/deepening-reel/info` answers `available: false` under two stacks, so `DeepeningReelCard`
+  renders nothing;
+* History's per-row **Compare** button, and the whole supersede / `kept_finished` family the reprocess warning
+  is about;
+* and, as of v0.479.0, the matched-crop noise-delta picture.
+
+**`--mosaic` does not close it.** Its pair is the mosaic and the **field** — two *different* targets, which is
+the one comparison where a per-pixel figure and a total are different numbers. None of the above is about that;
+they are all about the same object one week deeper.
+
+**`--restack`** stacks the field sample **twice, thin then deep**: half the subs set aside for the first run
+through the same `POST /frames/bulk` `{"action": "reject"}` the frames table's own button uses, re-accepted for
+the second — so this is a state a user can actually put a library in, not a fixture poked into the DB, and the
+newest picture is genuinely the deeper one. (An identical restack is the other real state and is cheaper to
+reach, but it makes every one of these cards say "no change", which is the least informative thing they can
+say.) It runs **before** the ordinary stack step, because `stack_target` returns early once a run exists — so
+the later call no-ops instead of adding a third run.
+
+It then prints what the app answers about the pair — the run list with each run's sub count,
+`/deepening-reel/info`, and `/noise-delta/info` — and **names the two ways the pair can fail silently** (fewer
+than two runs; a newest run that is not deeper). Both would leave every surface above self-hidden while the pass
+still read CLEAN, which is the trap the observing site's `location_source` line and `--big`'s `proxy_scale` line
+close for their own flags.
+
+**One side effect to expect rather than investigate:** the field sample's Target page grows (a compare card, a
+reel, a second History row), so a `--restack` pass is a poor one on which to read this script's page-height
+baselines. Read those on an ordinary pass. The header block says so.
+
+Tests: `tests/test_dogfood_restack_anchors.py` (+5), in the shape of `test_dogfood_lag_anchors.py` — every
+endpoint it calls is asserted to still be a route *and* still be called with that spelling, the bulk actions are
+asserted against `BulkFrameAction`'s own `Literal`, the flag is asserted off by default and present in the usage
+header, and the before-the-stack-step ordering is asserted because getting it wrong turns the "is the newest
+deeper?" line into a lie. `scripts/` is not in the Docker image's file set, so this cannot reach the owner's
+install at all.
+
+## v0.479.0 — 2026-09-26 — "Did it get better?" now shows the difference instead of only asserting it
+
+**Pillar: understand / trust (PRIORITY 3-adjacent, and the owner asked for it by name on 2026-09-25). The
+owner-approved noise-delta picture beside the compare card's sentence.**
+
+`CompareWithLastCard` has always answered *"is my new picture actually better than last week's?"* in words and
+a link to `/compare`. The owner asked to **see** it. A card-sized A/B of the whole canvas cannot show it: both
+previews are shrunk 5–10× on the way to the screen and decimation averages the grain away before it arrives —
+the difference the sentence is about is thrown out before it is drawn. So what ships is a **crop**: one patch
+of sky from each of the two masters, at **native resolution**, side by side under **one shared stretch**.
+
+**Engine — `seestack/render/noisedelta.py` (new).** `build_noise_delta(older_fits, newer_fits)` →
+`NoiseDeltaPatch(png, patch_px, pixel_exact, noise_ratio)`, or `None` for "there is no honest picture here".
+Three rules, each of which is the reason a line of it exists:
+
+* **One stretch, solved once.** `_solve_stf_params` on the *newer* crop, replayed verbatim on the older one via
+  `_apply_stf_params` — the same pair `seestack/render/deepening.py` uses to keep a reel from flickering.
+  Solved on the **crop** rather than the whole master deliberately: a whole-frame STF renders a sky patch almost
+  flat and the grain would be invisible.
+* **No resampling where it can be avoided.** `_native_shape` reads both canvases from the header, `_read_crop`
+  slices the rectangle straight out of the memory map per channel (so a 150 MP mosaic costs the crop, not the
+  canvas). Same canvas shape → the *same pixel rectangle* out of both, neither side touched. Different shapes (a
+  mosaic that grew, a drizzled restack) → the same *relative* rectangle, both resized to one size.
+* **The number is withheld the moment its precondition stops holding.** `seestack/qc/noise_ratio.noise_ratio`
+  is explicit that both sides must be sampled identically, and a resize lowers the resampled side's per-pixel σ
+  for reasons that have nothing to do with stacking. So `noise_ratio` is `None` unless `pixel_exact`.
+
+`choose_patch_centre` picks the patch: a 5×5 grid over a 384 px scout view of the deeper master, keeping the
+candidate with the most *faint* signal (1–8 σ above sky — where the grain and the emerging detail both live; a
+blown core is saturated in both halves and shows neither, bare sky shows only the first). A candidate ragged in
+**either** master is skipped, because a crop that is half an uncovered mosaic corner on one side is not a
+comparison — that cross-check is in the chooser rather than after it, so a target whose older stack has a NaN
+corner still gets its picture from a patch the two masters share.
+
+**Webapp.** `GET /api/targets/{safe}/noise-delta/info?a=&b=` (available / patch_px / pixel_exact / noise_ratio)
+and `GET /api/targets/{safe}/noise-delta?a=&b=` (the PNG), `a` the newest run and `b` the one before it — the
+same way round as `/compare`. Both resolve the two masters from the project DB via `_noise_delta_masters`, never
+from the request. `webapp/noise_delta_cache.py` (new, shaped on `estimate_cache`) holds the last 4 answers keyed
+on both paths **and their mtime+size**, so the card's two questions cost one build and a re-stack that rewrites
+a master is a miss rather than a stale picture.
+
+**Frontend.** `NoiseDeltaStrip` inside the existing card — no new always-on surface (the owner's standing "the
+pages are extremely busy" priority) — behind a *"Show me the difference"* button, because placing the crop costs
+a pass over both masters and the Target page must not spend that on every view (exactly the deepening reel's
+"Play"). `frontend/src/noiseDelta.ts` holds the words: which half is which, and a verdict that says *coarser*
+as plainly as *finer* — a card that can only report good news is decoration, not a measurement.
+
+**Self-hides, never errors,** on: a display-space export either side, a canvas too small for a patch
+(`MIN_PATCH_PX` 96), no patch covered in both, a missing master, one run against itself, or a failed request.
+
+**The test that nearly passed for the wrong reason, and the AGENTS.md §8 check that caught it.** The first
+version of the shared-stretch test asserted the two halves' medians *agree*. Reverting the fix in a scratch
+script (two independent autostretches, which is what the stored `_preview.png`s are) **also passed it**: an STF
+pins whatever sky it is given to its own `target_bg`, so both sides land at 51/255 either way. The fixture could
+not show the defect. What distinguishes the two is a *level* difference: two masters with the same pixels except
+a constant sky pedestal come out **48 display levels apart** under one shared curve and **exactly 0** apart
+under two independent ones — while the independent stretch also re-slopes everything above the sky, flattening
+the noisier half's structure ~30 %. The test now asserts the halves may legitimately *differ* in brightness, and
+re-verifying against the reverted module fails it.
+
+Tests +9 engine (`tests/test_noise_delta_patch.py`), +7 API (`tests/webapp/test_noise_delta.py`), +8 vitest
+(`noiseDelta.test.ts`), +5 vitest (`NoiseDeltaStrip.test.tsx`), +2 on the card. No config, schema, on-disk,
+default or API-shape change; two new read-only endpoints and one new opt-in button.
+
 ## v0.478.2 — 2026-09-26 — the deepening reel was not a registered run artefact, so deleting a stack left it on disk for good
 
 **Pillar: disk hygiene / trust (PRIORITY 3, on a box where "reclaiming space is the entire point of the
