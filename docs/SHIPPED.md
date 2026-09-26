@@ -1,5 +1,51 @@
 # Shipped — the record
 
+## v0.479.1 — 2026-09-26 — no dogfood pass had ever held two stacks of one target, so every cross-run card had only been photographed self-hidden
+
+**Pillar: infra / tooling (the same hole as the missing observing site, the empty `incoming/`, the click-only
+Compare modes, the absent master dark and `--deep`'s missing magnitude — this one is a *precondition*, not a
+state or a scale).**
+
+Every sample `scripts/agent-dogfood.sh` builds is stacked exactly **once**. So every surface whose precondition
+is *"this target has a previous picture"* has only ever been in front of a browser in its self-hidden state:
+
+* `pickCompareWithLast` / `pickFirstVsNow` — the "Did it get better?" card and its "How far you've come" link
+  both return `null` under two comparable runs, so `CompareWithLastCard` renders **nothing**;
+* `/api/targets/{safe}/deepening-reel/info` answers `available: false` under two stacks, so `DeepeningReelCard`
+  renders nothing;
+* History's per-row **Compare** button, and the whole supersede / `kept_finished` family the reprocess warning
+  is about;
+* and, as of v0.479.0, the matched-crop noise-delta picture.
+
+**`--mosaic` does not close it.** Its pair is the mosaic and the **field** — two *different* targets, which is
+the one comparison where a per-pixel figure and a total are different numbers. None of the above is about that;
+they are all about the same object one week deeper.
+
+**`--restack`** stacks the field sample **twice, thin then deep**: half the subs set aside for the first run
+through the same `POST /frames/bulk` `{"action": "reject"}` the frames table's own button uses, re-accepted for
+the second — so this is a state a user can actually put a library in, not a fixture poked into the DB, and the
+newest picture is genuinely the deeper one. (An identical restack is the other real state and is cheaper to
+reach, but it makes every one of these cards say "no change", which is the least informative thing they can
+say.) It runs **before** the ordinary stack step, because `stack_target` returns early once a run exists — so
+the later call no-ops instead of adding a third run.
+
+It then prints what the app answers about the pair — the run list with each run's sub count,
+`/deepening-reel/info`, and `/noise-delta/info` — and **names the two ways the pair can fail silently** (fewer
+than two runs; a newest run that is not deeper). Both would leave every surface above self-hidden while the pass
+still read CLEAN, which is the trap the observing site's `location_source` line and `--big`'s `proxy_scale` line
+close for their own flags.
+
+**One side effect to expect rather than investigate:** the field sample's Target page grows (a compare card, a
+reel, a second History row), so a `--restack` pass is a poor one on which to read this script's page-height
+baselines. Read those on an ordinary pass. The header block says so.
+
+Tests: `tests/test_dogfood_restack_anchors.py` (+5), in the shape of `test_dogfood_lag_anchors.py` — every
+endpoint it calls is asserted to still be a route *and* still be called with that spelling, the bulk actions are
+asserted against `BulkFrameAction`'s own `Literal`, the flag is asserted off by default and present in the usage
+header, and the before-the-stack-step ordering is asserted because getting it wrong turns the "is the newest
+deeper?" line into a lie. `scripts/` is not in the Docker image's file set, so this cannot reach the owner's
+install at all.
+
 ## v0.479.0 — 2026-09-26 — "Did it get better?" now shows the difference instead of only asserting it
 
 **Pillar: understand / trust (PRIORITY 3-adjacent, and the owner asked for it by name on 2026-09-25). The
