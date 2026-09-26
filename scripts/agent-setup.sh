@@ -9,6 +9,17 @@
 # Usage:  source scripts/agent-setup.sh   (leaves the .venv activated)
 #     or: bash scripts/agent-setup.sh
 set -euo pipefail
+
+# 0. Git identity + the push guard (2026-09-26). This repository is PUBLIC and a
+#    commit's email is published with it: 22 agent commits reached `main`
+#    carrying the owner's personal email because a session set `user.email` from
+#    its context. Pin the no-reply identity for this clone and install the
+#    pre-push hook that refuses anything else (scripts/check-commit-identity.sh).
+#    Never override either (AGENTS.md §10).
+_repo_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+git -C "$_repo_root" config user.name "Claude"
+git -C "$_repo_root" config user.email "noreply@anthropic.com"
+git -C "$_repo_root" config core.hooksPath scripts/git-hooks
 cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.."
 
 # 1. System libs PySide6/pytest-qt need at import time (headless container).
@@ -72,6 +83,7 @@ if [ "${PY_DEPS_FAILED:-0}" = "1" ]; then
 fi
 
 echo "agent env ready: $(python --version 2>&1)"
+echo "  git:      commits as $(git -C "$_repo_root" config user.name) <$(git -C "$_repo_root" config user.email)>; pre-push identity guard on"
 if [ "${QT_LIBS_MISSING:-0}" = "1" ]; then
   echo "  tests:    python -m pytest tests/ -p no:pytest-qt \\"
   echo "              --ignore=tests/test_compare_dialog.py \\"
