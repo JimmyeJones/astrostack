@@ -84,6 +84,7 @@ def test_repoint_map_holds_only_the_artefacts_with_a_history_column(tmp_path):
     """
     from seestack.stack.output import (
         RUN_ARTEFACT_SUFFIXES,
+        SERIES_ARTEFACTS,
         _archive_existing_outputs,
     )
 
@@ -104,7 +105,17 @@ def test_repoint_map_holds_only_the_artefacts_with_a_history_column(tmp_path):
     for suffix in RUN_ARTEFACT_SUFFIXES.values():
         assert not (out_dir / f"master{suffix}").exists()
     archived = sorted(p.name for p in out_dir.iterdir())
-    assert len(archived) == len(RUN_ARTEFACT_SUFFIXES)
+    # …under the one shared new basename. The whole-series caches
+    # (`SERIES_ARTEFACTS`, the deepening reel + its signature) are the deliberate
+    # exception: they are *removed* rather than moved, because an archived copy of
+    # a reel of a different series is meaningless and one would be left behind per
+    # re-stack. So they are not left at the canonical name (asserted above) and
+    # they are not among the archived files either.
+    assert len(archived) == len(RUN_ARTEFACT_SUFFIXES) - len(SERIES_ARTEFACTS)
+    for kind in SERIES_ARTEFACTS:
+        suffix = RUN_ARTEFACT_SUFFIXES[kind]
+        assert not any(name.endswith(suffix) for name in archived), (
+            f"{suffix} should have been cleared, not archived: {archived}")
 
 
 def test_repoint_stack_runs_moves_old_row_to_archived_files(tmp_path):
@@ -159,3 +170,38 @@ def test_repoint_is_a_noop_when_nothing_archived(tmp_path):
         assert proj.repoint_stack_runs({}) == 0
     finally:
         proj.close()
+
+
+def test_a_re_stack_clears_the_series_reel_instead_of_archiving_a_stale_copy(tmp_path):
+    """The deepening reel describes a target's whole *series* of stacks and is
+    merely cached at the newest run's basename, so there is no such thing as the
+    archived run's copy of it.
+
+    This is the half that keeps registering it (so a delete reclaims it) from
+    being a regression in its own right: renamed onto each superseded basename it
+    would leave one stale reel of a different series behind **per re-stack**, each
+    waiting on that run's delete, where before it was registered the rebuild
+    simply overwrote the single copy.
+    """
+    from seestack.stack.output import (
+        RUN_ARTEFACT_SUFFIXES,
+        SERIES_ARTEFACTS,
+        _archive_existing_outputs,
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    for suffix in RUN_ARTEFACT_SUFFIXES.values():
+        (out_dir / f"master{suffix}").write_bytes(b"x")
+
+    _archive_existing_outputs(out_dir, "master")
+
+    names = sorted(p.name for p in out_dir.iterdir())
+    for kind in sorted(SERIES_ARTEFACTS):
+        suffix = RUN_ARTEFACT_SUFFIXES[kind]
+        assert not any(n.endswith(suffix) for n in names), (
+            f"{suffix} survived the re-stack, under some basename: {names}")
+    # And the run's own artefacts are still there, archived — this must not have
+    # become "clear everything".
+    assert any(n.endswith("_coverage.fits") for n in names), names
+    assert any(n.endswith("_share.png") for n in names), names

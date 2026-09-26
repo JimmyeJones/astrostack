@@ -377,3 +377,32 @@ def test_the_key_is_additive_and_the_wording_is_unchanged():
     assert set(s["verdict"]) == {"tone", "text", "key"}
     assert s["verdict"]["tone"] == "good"
     assert s["verdict"]["text"] == "This is normal — a healthy night."
+
+
+def test_the_seestars_own_pictures_get_their_own_reassuring_bucket():
+    """The device saves its finished picture beside the subs, and the app sets
+    those files aside (`auto:seestar_output`). They used to land in "Left out for
+    other reasons", which reads as "some of your night is unaccounted for" on a
+    target where they are the only rejects — the owner's live library holds
+    dozens of these rows."""
+    from seestack.io.project import REJECT_REASON_SEESTAR_OUTPUT
+
+    s = summarize_rejections({REJECT_REASON_SEESTAR_OUTPUT: 12}, n_accepted=400)
+    k = _keys(s)
+    assert k == {"seestar_output": 12}
+    (bucket,) = s["buckets"]
+    assert "Seestar" in bucket["label"]
+    assert "set aside" in bucket["note"]
+    # Reassuring, not a warning: 12 of 412 is a healthy night.
+    assert s["verdict"]["tone"] == "good"
+
+
+def test_the_seestars_own_pictures_sit_beside_the_real_rejects_in_order():
+    """Its slot is between "you removed these" and "their files are gone" — the
+    three benign buckets together, after the ones about the sky."""
+    counts = {"auto:streak": 1, "user": 1, "auto:seestar_output": 1,
+              "auto:file_missing": 1, "qc_error:x": 1}
+    s = summarize_rejections(counts, n_accepted=10)
+    assert [b["key"] for b in s["buckets"]] == [
+        "trailed", "removed", "seestar_output", "missing", "error",
+    ]

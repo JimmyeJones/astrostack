@@ -2244,8 +2244,14 @@ def _build_or_get_deepening_reel(runs: list) -> Path | None:
     out_dir = Path(newest.fits_path).parent
     basename = newest.output_basename or "master"
     sig = _deepening_signature(runs)
-    sig_file = out_dir / f"{basename}_deepening.sig"
-    for suffix in ("_deepening.webp", "_deepening.png"):
+    # Named from `RUN_ARTEFACT_SUFFIXES`, the table the delete / archive / merge
+    # paths act on, so a reel can never be a file nothing cleans up again.
+    from seestack.stack.output import RUN_ARTEFACT_SUFFIXES
+
+    reel_suffixes = (RUN_ARTEFACT_SUFFIXES["deepening_webp"],
+                     RUN_ARTEFACT_SUFFIXES["deepening_apng"])
+    sig_file = out_dir / f"{basename}{RUN_ARTEFACT_SUFFIXES['deepening_sig']}"
+    for suffix in reel_suffixes:
         cand = out_dir / f"{basename}{suffix}"
         if cand.exists() and sig_file.exists():
             with contextlib.suppress(OSError):
@@ -2253,7 +2259,7 @@ def _build_or_get_deepening_reel(runs: list) -> Path | None:
                     return cand
     # (Re)build: clear any stale reel of either format first so a format change
     # (WEBP↔APNG) can't leave two files that the resolver disagrees on.
-    for suffix in ("_deepening.webp", "_deepening.png"):
+    for suffix in reel_suffixes:
         with contextlib.suppress(OSError):
             (out_dir / f"{basename}{suffix}").unlink()
     from seestack.render.deepening import build_deepening_reel, deepening_frame_label
