@@ -130,6 +130,50 @@ describe("YourYearView", () => {
     expect(firsts.getByText("Gone").closest("a")).toBeNull();
   });
 
+  it("does not name the same targets twice when the whole year was new", async () => {
+    // The shape of every beginner's FIRST year — and of the dogfood install
+    // that found it: "First light in 2026" and "What you pointed at" rendered
+    // as two stacked cards holding the identical names, the lower one linking
+    // nowhere. One card now, saying the thing two cards could not.
+    vi.spyOn(client.api, "getYearRecap").mockResolvedValue(recap({
+      target_names: ["M 31", "M 42"],
+      first_lights: [
+        { name: "M 31", safe: "M_31" },
+        { name: "M 42", safe: "M_42" },
+      ],
+    }));
+    renderPage("2026");
+    await waitFor(() =>
+      expect(screen.getByTestId("first-lights")).toBeInTheDocument());
+    expect(screen.queryByTestId("year-targets")).not.toBeInTheDocument();
+    expect(screen.queryByText("What you pointed at")).not.toBeInTheDocument();
+    expect(screen.getByText(
+      "All 2 objects you pointed at in 2026 were ones you'd never imaged before."))
+      .toBeInTheDocument();
+    // Nothing was dropped, and both names are links now rather than one.
+    const firsts = within(screen.getByTestId("first-lights"));
+    expect(firsts.getByText("M 31").closest("a"))
+      .toHaveAttribute("href", "/targets/M_31");
+    expect(firsts.getByText("M 42").closest("a"))
+      .toHaveAttribute("href", "/targets/M_42");
+  });
+
+  it("still shows both cards when the year had a repeat visit", async () => {
+    vi.spyOn(client.api, "getYearRecap").mockResolvedValue(recap({
+      target_names: ["M 31", "M 42"],
+      first_lights: [{ name: "M 42", safe: "M_42" }],
+    }));
+    renderPage("2026");
+    await waitFor(() =>
+      expect(screen.getByTestId("year-targets")).toBeInTheDocument());
+    expect(screen.getByTestId("first-lights")).toBeInTheDocument();
+    expect(screen.getByText("One object you'd never imaged before."))
+      .toBeInTheDocument();
+    // M 31 is only in the lower list, where it is named and not linked.
+    const pointed = within(screen.getByTestId("year-targets"));
+    expect(pointed.getByText("M 31").closest("a")).toBeNull();
+  });
+
   it("offers the years that do have data when this one is empty", async () => {
     vi.spyOn(client.api, "getYearRecap").mockResolvedValue(recap({
       year: 2026, has_anything: false, headline: "", stats: [],

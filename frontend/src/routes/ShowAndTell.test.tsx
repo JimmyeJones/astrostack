@@ -197,6 +197,20 @@ describe("ShowAndTellView", () => {
     await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
   });
 
+  it("asks for the one-picture floor, and not on the wall's cache key", async () => {
+    // "My best pictures" self-hides below two finished pictures because a wall
+    // of one is nothing to curate. This page does not curate — it plays them —
+    // so one finished picture is a show, and a beginner's first night was
+    // meeting "nothing to show yet" over a picture they had just made.
+    const best = vi.spyOn(client.api, "getGalleryBest")
+      .mockResolvedValue({ items: [pic({})] });
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [], videos: [] });
+    renderShow();
+    await waitFor(() => expect(screen.getByText("M31")).toBeInTheDocument());
+    // Second argument is the floor; the limit is left to the endpoint.
+    expect(best).toHaveBeenCalledWith(undefined, 1);
+  });
+
   it("says something friendly when there is nothing to show yet", async () => {
     mockLibrary([], []);
     renderShow();

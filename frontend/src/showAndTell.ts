@@ -161,8 +161,16 @@ export function videoSlideKey(captureId: string): string {
 export function hasAnythingToShow(
   best: BestPicture[] | undefined,
   videos: VideoStill[] | undefined,
+  nFinished?: number,
 ): boolean {
-  return buildSlides(best, videos).length > 0;
+  if (buildSlides(best, videos).length > 0) return true;
+  // A wall that self-hides is not an empty library. `/best` returns no items
+  // below its two-picture curation floor, and the show's own floor is one — so
+  // a caller holding the *wall's* list has to be told how many finished
+  // pictures there really are, or it hides the entry point to a working show.
+  // Undefined (an older backend, or a caller that has no count) means "no extra
+  // information", i.e. exactly the old answer.
+  return (nFinished ?? 0) > 0;
 }
 
 /** A link that opens the slideshow *on* a given picture (and keeps looping

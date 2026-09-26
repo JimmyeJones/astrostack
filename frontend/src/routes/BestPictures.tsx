@@ -156,10 +156,14 @@ export function BestPicturesView() {
             gather here later, under a primary-looking button that goes nowhere.
             `hasAnythingToShow` asks the show's own builder rather than this
             wall's length, because a first finished Moon still is a real show
-            with an empty wall. A failed gallery query is *unknown*, not empty,
+            with an empty wall — and `n_finished` for the same reason pointing
+            the other way: this wall is empty below two finished pictures, while
+            the show plays from one, so `items` alone hid the button over a
+            picture the beginner had just made. A failed gallery query is *unknown*, not empty,
             so the button stays: /show has a graceful "nothing to show yet"
             state, and hiding a working slideshow is the worse mistake. */}
-        {hasAnythingToShow(items, gallery.data?.videos) || gallery.isError ? (
+        {hasAnythingToShow(items, gallery.data?.videos, best.data?.n_finished)
+          || gallery.isError ? (
           <Button
             component={Link} to="/show" size="xs" variant="light" ml="auto"
             leftSection={<IconPlayerPlay size={14} />}

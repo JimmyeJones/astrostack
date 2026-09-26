@@ -4109,11 +4109,19 @@ export const api = {
   getGallery: () =>
     req<{ items: GalleryItem[]; videos?: VideoStill[] }>("/api/gallery"),
   // "My best pictures": the newest finished stack of every target, auto-ranked
-  // best-first. Self-hides (empty items) until there are ≥2 finished pictures.
-  getGalleryBest: (limit?: number) =>
-    req<{ items: BestPicture[] }>(
-      `/api/gallery/best${limit != null ? `?limit=${limit}` : ""}`,
-    ),
+  // best-first. Self-hides (empty items) until there are ≥2 finished pictures —
+  // `minTargets` lowers that floor for a caller that only wants to *play* them
+  // (the slideshow), and must come with its own query key so the two answers
+  // never share a cache entry.
+  getGalleryBest: (limit?: number, minTargets?: number) => {
+    const q = [
+      limit != null ? `limit=${limit}` : "",
+      minTargets != null ? `min_targets=${minTargets}` : "",
+    ].filter(Boolean).join("&");
+    return req<{ items: BestPicture[]; n_finished?: number }>(
+      `/api/gallery/best${q ? `?${q}` : ""}`,
+    );
+  },
   // How many pictures library-wide carry an edit that was saved and never
   // exported. Its own endpoint on purpose: it is deliberately cheap (one indexed
   // meta scan per target, no run listing), because the Dashboard asks it and

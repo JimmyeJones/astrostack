@@ -84,6 +84,36 @@ describe("BestPicturesView", () => {
       .toHaveAttribute("href", "/show?from=run%3Am42%3A2");
   });
 
+  it("still offers the slideshow over the one picture its own wall hides",
+    async () => {
+      // A beginner's first finished target: the wall self-hides (nothing to
+      // curate) and used to hide the "Play slideshow" button with it, over a
+      // picture that plays perfectly well. The count says otherwise.
+      vi.spyOn(client.api, "getGalleryBest")
+        .mockResolvedValue({ items: [], n_finished: 1 });
+      renderWall();
+      await waitFor(() => expect(
+        screen.getByRole("link", { name: /play slideshow/i }))
+        .toHaveAttribute("href", "/show"));
+      // The wall itself is still honest about having nothing to rank.
+      expect(screen.getByText(/your best pictures will gather here/i))
+        .toBeInTheDocument();
+    });
+
+  it("keeps the wall's own two-picture floor, which the slideshow lowers",
+    async () => {
+      // `/show` asks the same endpoint with `min_targets=1`, because playing
+      // one picture is a show while a wall of one is nothing to curate. This
+      // page must keep asking without it — and the two answers must not share a
+      // react-query cache entry, or which page loaded first would decide what
+      // the other shows.
+      const best = vi.spyOn(client.api, "getGalleryBest")
+        .mockResolvedValue({ items: [] });
+      renderWall();
+      await waitFor(() => expect(best).toHaveBeenCalled());
+      for (const call of best.mock.calls) expect(call[1]).toBeUndefined();
+    });
+
   it("shows a friendly empty state when the wall self-hides, and does not offer "
     + "a slideshow of nothing", async () => {
     vi.spyOn(client.api, "getGalleryBest").mockResolvedValue({ items: [] });
