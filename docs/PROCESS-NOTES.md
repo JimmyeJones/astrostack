@@ -1,5 +1,78 @@
 # Process notes & QA sweep records
 
+## 2026-09-26 — Builder: four clean sweeps, and the finding came from reading a *note's second clause*
+
+*(Builder, branch `agent/run-0002`, shipping v0.475.3. Baseline green — **6,588 passed, 2 skipped**, 12m32s
+with the BLAS cap and `-n 4 --dist worksteal`.)*
+
+**Triage first, and it is worth recording how dry the list now is.** "Bugs (fix these first)" holds seven
+top-level entries and **none of them is ready work**: five are LEADs explicitly gated on a measurement only
+the owner's library can supply, one is the #903 remainder (L, and its own entry says why the obvious shapes
+are wrong), and one (#878/#880) routes to owner sign-off. The three open GitHub issues are all already
+verified into the backlog. `grep READY` returns nothing but the banner saying the two starred items shipped.
+Down in Ideas, the top entries of every priority section are `⚪ CLOSED — measured and stood down`,
+`✅ ALREADY BUILT` or `MEASURED AND STOOD DOWN`. That is the backlog working as designed, not a fault — but a
+run that starts here should expect to *find* its work rather than pick it.
+
+**So: four dogfood sweeps, all CLEAN.** The previous run's note asked for the first one by name.
+
+* **`--big --editor`** — the decimated-preview surface, structurally unreachable before v0.446.0 and not yet
+  swept. Canvas 1693×1150, `proxy_scale` 2, `full-size check available=True`. The whole loupe drives: modal
+  opens, caption reads *"…shrunk to about **half** of full size"* (the `keptFractionWords` fix holding at the
+  one scale that used to say "a 2th"), `[where]` "the middle of your picture" → "the top-left" after a
+  navigator click, split comparison draws and drags, black box hugs the window (**0 px** spare). All 21 ops
+  added one at a time, preview re-rendered each time, Undo/Redo clean, no console error, no failed request.
+  Three of the five preview↔export advisories spoke and were correct at scale 2 (sharpen, hot pixels, star
+  reduction); deconvolution and denoise correctly stayed quiet.
+* **`--empty`** — the first-run state, last baselined 2026-09-07. Nothing overflowing; the notice board
+  carries exactly one note (ASTAP not set up), which is the right one.
+* **`--deep`** — 1,200 subs. **301 rows of 1,200 · 7,483 DOM nodes · 1,195 ms first paint**, window foot
+  offers "Show all 1,200", scrolling grows it to 601 rows / 14,473 nodes. v0.455.2's windowing is holding
+  (it measured 28,266 nodes and 4.5 s before the fix).
+* **`--calibration`** — masters discovered from `incoming/`, built through the endpoints a beginner would
+  use, auto-bound and applied (`{'dark_master_id': 1, 'flat_master_id': 2}`), and the health card's
+  vocabulary switches correctly to *"calibrated (dark+flat), round stars, even coverage"* with the
+  darks-advisory withdrawn.
+
+**Page heights, for the standing IA baseline.** Ordinary library: `/tonight` **3,730 px**, `/glossary`
+3,364, mosaic Target 3,538. Deep library: `/tonight` **4,028 px**. First-run: `/glossary` **3,364 px** is the
+tallest page in an app with no data at all, `/life-list` 2,779, `/` 1,402. `/tonight` has grown from the
+**3,578 px** its v0.437.0 slice left it at and is now consistently the tallest page; **no slice taken this
+run** — AGENTS.md says one per run and to let the owner react, and nothing on it is stacked badly (four
+self-hiding cards and two preview-limited tables). Recorded so the next run can decide on three
+measurements rather than one.
+
+### The lever: a prescription is a claim that the reader can find the thing you named
+
+All four sweeps were clean, and the run's actual finding came from **reading `stackhealth.py`** — and
+specifically from reading a note's *second clause* rather than its verdict. `soft_stars` says
+*"the combine — not the sky — softened them"*, which is true and well-measured. What it then said was *"a
+steadier mount, or re-solving **the roughly-aligned subs**, keeps them tight"* — and that noun phrase is not
+general English in this app, it is a population with a column, a FITS card and a health note of its own,
+which exists **only** when `subpixel_refine` ran. It defaults off. So the clause was addressed to a set that
+is empty on every default install, on the one card whose job is to say what to do next.
+
+**The generalisable shape, and it is a sibling of the "read the cards as one paragraph" rule this file keeps
+finding things with.** That rule asks whether two cards *contradict*. This is the same question asked of one
+sentence: **does the cure name something the reader can actually find?** A diagnosis is checked against the
+data; a prescription has to be checked against *the rest of the app* — is the thing it names on a screen, is
+it reachable, and does it exist in the state the reader is in? Here it failed all three, and the app's real
+remedy for the very diagnosis sat one collapsed disclosure away, unnamed.
+
+**Two smaller things worth not re-deriving:**
+
+* **A link to a form is not a link to a control.** The Stack form's switch lives inside the collapsed
+  **Advanced options** accordion, and `Stack.tsx` already says out loud (at `printBiggerAction`) that
+  *"reading the sentence still left a beginner hunting"* for exactly that reason. Naming a knob without
+  opening the drawer is half a fix; `?open=advanced` is the other half, and it generalises to every future
+  note that names an advanced field.
+* **Three states, not two, when reading a stored option.** The neighbouring `_run_sigma_kappa` falls back to
+  the app default for an unreadable `options_json`, and its comment explains why that is safe — *every
+  shipped default for κ has been 3.0*. That reasoning does **not** transfer: a boolean option's default can
+  change between versions, so "the record doesn't say" has to stay distinct from "the run said no", or the
+  card makes a claim about a specific run that nothing in the record supports. `run_option_flag` returns
+  `bool | None` for that reason, and a non-`bool` value is `None` too.
+
 ## 2026-09-25 — Builder: "grep-checked" is a claim about a query nobody records
 
 *(Builder, branch `claude/nifty-pasteur-fspzqn`, shipping v0.475.2. Baseline green — 6,579 passed, 2
