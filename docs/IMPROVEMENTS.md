@@ -76,7 +76,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **`claude/exciting-tesla-m7wvjb`** — the season-closing dogfood hole (Infra / maintainability,
+  "the season-closing card is the next self-hiding surface no dogfood pass can reach"), built as that
+  entry's own shape (a): a fifth, opt-in `POST /api/sample` shape placed at caller-chosen coordinates,
+  plus `nightplan.closing_sky_position` and a `--closing` dogfood flag.
 
 ---
 
