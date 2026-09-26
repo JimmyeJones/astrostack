@@ -1203,6 +1203,66 @@ def test_season_closing_is_deterministic():
             == np_plan.season_closing(LONDON, tg, start_utc=when))
 
 
+# --- where a *demo* closing target would have to sit (dogfood tooling) --------
+#
+# ``closing_sky_position`` answers nothing the app asks. It exists because a
+# season closes as a function of the target's RA against the DATE, so no fixture
+# and no observing site makes the bundled M 42 sample close — which is why the card
+# that names closing targets had never been rendered in a browser. The property
+# worth pinning is not the coordinates (they move with the calendar) but that the
+# answer really is one ``season_closing`` reports, on any date, from either
+# hemisphere.
+
+
+@pytest.mark.parametrize("when", [
+    datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc),
+    datetime(2026, 4, 5, 21, 0, tzinfo=timezone.utc),
+    datetime(2026, 9, 26, 21, 0, tzinfo=timezone.utc),
+])
+@pytest.mark.parametrize("observer", [
+    LONDON,
+    Observer(lat_deg=40.0, lon_deg=-2.0, elevation_m=0.0),      # the dogfood site
+    Observer(lat_deg=-33.9, lon_deg=151.2, elevation_m=0.0),    # Sydney
+])
+def test_the_placement_helper_answers_a_position_season_closing_agrees_with(
+    observer, when,
+):
+    pos = np_plan.closing_sky_position(observer, start_utc=when)
+    assert pos is not None, "a mid-latitude site always has a closing band"
+    closing = np_plan.season_closing(
+        observer, [_closing_target("demo", pos)], start_utc=when)
+    assert [c.safe for c in closing] == ["demo"]
+    # Comfortably inside the scan rather than balanced on its edge: a demo whose
+    # row vanishes when the calendar turns over is worse than no demo.
+    assert 0 < closing[0].weeks_left < np_plan.SEASON_HORIZON_WEEKS - 1
+    assert closing[0].minutes_now > 45.0
+
+
+def test_the_placement_helper_says_nothing_when_the_nights_are_gone():
+    """Midsummer at 78°N: there is no darkness to compare, and that is about the
+    sky rather than about any right ascension — so there is no position to offer
+    and the honest answer is ``None`` rather than a plausible-looking pair."""
+    svalbard = Observer(lat_deg=78.2, lon_deg=15.6, elevation_m=0.0)
+    assert np_plan.closing_sky_position(
+        svalbard, start_utc=datetime(2026, 6, 21, 12, 0, tzinfo=timezone.utc)) is None
+
+
+def test_the_placement_helper_is_deterministic():
+    when = datetime(2026, 9, 26, 21, 0, tzinfo=timezone.utc)
+    assert (np_plan.closing_sky_position(LONDON, start_utc=when)
+            == np_plan.closing_sky_position(LONDON, start_utc=when))
+
+
+def test_the_placement_grid_is_finer_than_a_week_of_the_earths_own_motion():
+    """The grid cannot step over a closing band. A week of the Earth's orbit moves
+    the sky about a degree of RA; a probe step coarser than the band it is looking
+    for would find nothing on some dates and something on others, which is the
+    one failure mode a dogfood flag must not have."""
+    assert np_plan.CLOSING_PROBE_RA_STEP_H * 15.0 <= 10.0
+    # Both hemispheres, or the helper quietly only works from the north.
+    assert min(np_plan.CLOSING_PROBE_DECS_DEG) < 0 < max(np_plan.CLOSING_PROBE_DECS_DEG)
+
+
 # --- Moon interference readout ("is the Moon going to wash this out?") ---------
 
 from seestack.nightplan import (  # noqa: E402

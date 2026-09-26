@@ -31,3 +31,35 @@ export const NO_SHRINK = { minWidth: "max-content" } as const;
  * date, a clock time, an angle) — never on prose, which should wrap.
  */
 export const NO_WRAP = { whiteSpace: "nowrap" } as const;
+
+/** …and a badge carrying a *sentence* wraps rather than hiding the end of it.
+ *
+ * The third shape of the same mechanism, and the one `NO_SHRINK` cannot fix.
+ * Three nudge cards chip each target they name as `"<target name> · <fact>"` —
+ * `MergeSuggestionsCard`, `CleanupSuggestionsCard` and `LastNightCard`. That is
+ * a sentence, not a token: on a phone the card body is ~290 px and the string
+ * wants 300–320 px, so the badge ellipsises **inside itself** and the fact it
+ * was naming is gone with no scroll and no tooltip to reach it.
+ *
+ * `max-content` is the wrong lever here. It is right for a badge in a *table*,
+ * where making the table wider is honest because the table scrolls; these
+ * badges sit in an `Alert` body that does not, so asking for 320 px in a 290 px
+ * box would overflow the card instead of clipping inside it — the same value
+ * lost, one element further out.
+ *
+ * So the badge is allowed to grow **downwards**: the root stops being a fixed
+ * `--badge-height` box and the label stops being `nowrap`/`ellipsis`, and the
+ * chip takes two lines. Measured at 420 px on a real browser against the seeded
+ * closing pair: label 288 px box holding 299 px and 317 px of text before, both
+ * exactly 288 px and two lines (34 px tall) after, with nothing overflowing.
+ *
+ * Use it on a badge whose label is *composed* from data — never on a one-word
+ * verdict in a table, which wants `NO_SHRINK`.
+ */
+export const WRAPPING_BADGE = {
+  root: { height: "auto", whiteSpace: "normal", paddingTop: 2, paddingBottom: 2 },
+  label: {
+    whiteSpace: "normal", overflow: "visible", textOverflow: "clip",
+    lineHeight: 1.4,
+  },
+} as const;

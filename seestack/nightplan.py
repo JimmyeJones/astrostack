@@ -1989,6 +1989,82 @@ def season_closing(
     return out
 
 
+# ---- Where would a *demo* closing target have to sit? ------------------------
+#
+# Not a planning answer: nothing in the app asks this. It exists so the dogfood
+# tooling can seed a target whose season really is ending, on whatever date the
+# pass runs and from whatever site it set — because a season closes as a function
+# of the target's RA against the *date*, so no fixture and no observing site can
+# make the bundled M 42 sample close, and the card that names closing targets has
+# therefore never been rendered in a browser (see ``docs/IMPROVEMENTS.md``).
+
+#: Right-ascension step, in hours, of the grid :func:`closing_sky_position`
+#: probes. Half an hour of RA is ~7.5° — finer than the ~1° a week of the Earth's
+#: own motion moves the sky, so the grid cannot step over a closing band.
+CLOSING_PROBE_RA_STEP_H = 0.5
+
+#: Declinations the probe tries, in degrees. Five samples spanning both
+#: hemispheres, so the search works from a southern site as readily as a northern
+#: one rather than quietly finding nothing below the equator.
+CLOSING_PROBE_DECS_DEG: tuple[float, ...] = (-40.0, -20.0, 0.0, 20.0, 40.0)
+
+
+def closing_sky_position(
+    observer: Observer,
+    *,
+    start_utc: datetime,
+    horizon_weeks: int = SEASON_HORIZON_WEEKS,
+    min_altitude_deg: float = 30.0,
+    horizon: HorizonProfile | None = None,
+) -> tuple[float, float] | None:
+    """A sky position that :func:`season_closing` *would* report, or ``None``.
+
+    Probes a grid of right ascensions at :data:`CLOSING_PROBE_DECS_DEG` and asks
+    :func:`season_closing` itself which of them are leaving — so the answer cannot
+    disagree with the card it exists to light up, whatever either does next.
+
+    Returns the candidate whose season ends nearest the **middle** of the horizon
+    and which is highest in the sky right now: a demo wants a comfortably typical
+    row, not one balanced on the edge of the scan where a day's drift would make
+    it vanish. ``None`` when nothing on the grid closes — from a polar site in
+    midsummer there are no dark nights to compare, and no target's RA can fix
+    that.
+
+    Deterministic, offline and read-only, like the rest of the planner. Ties break
+    on right ascension so two runs on the same date agree.
+    """
+    weeks = max(1, int(horizon_weeks))
+    step = max(0.05, float(CLOSING_PROBE_RA_STEP_H))
+    probes: list[LibraryTarget] = []
+    n_ra = max(1, int(round(24.0 / step)))
+    for dec in CLOSING_PROBE_DECS_DEG:
+        for i in range(n_ra):
+            ra = (i * step) * 15.0
+            probes.append(LibraryTarget(
+                # The safe name carries the grid index so ``season_closing``'s own
+                # deterministic ``safe`` tie-break is stable and readable, and so
+                # the position can be recovered from the row it returns.
+                safe=f"probe-{i:03d}-{int(dec):+04d}",
+                name="probe", ra_deg=ra, dec_deg=float(dec),
+                frames_accepted=0, total_exposure_s=0.0,
+            ))
+    closing = season_closing(
+        observer, probes, start_utc=start_utc, horizon_weeks=weeks,
+        min_altitude_deg=min_altitude_deg, horizon=horizon,
+    )
+    if not closing:
+        return None
+    by_safe = {t.safe: t for t in probes}
+    middle = weeks / 2.0
+    best = min(
+        closing,
+        key=lambda c: (abs(c.weeks_left - middle), -c.minutes_now,
+                       by_safe[c.safe].ra_deg, by_safe[c.safe].dec_deg),
+    )
+    row = by_safe[best.safe]
+    return (float(row.ra_deg), float(row.dec_deg))
+
+
 @dataclass
 class SuggestedTarget:
     """A not-yet-captured showpiece that's well-placed tonight (for the API/UI).

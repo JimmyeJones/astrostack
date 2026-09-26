@@ -93,9 +93,20 @@ SAMPLE_BIG_TARGET_NAME = "Sample: M42 mosaic (2×2, full size)"
 # are not. Use ``big`` for those.
 SAMPLE_DEEP_TARGET_NAME = "Sample: M42 (deep, many subs)"
 
+# The fifth, opt-in demo: a pair of targets on a patch of sky whose season is
+# ending, so ``/tonight``'s "Shoot these before they're gone" card has something
+# to say. Two names rather than one because the card is about what the loss
+# *costs*, which is a function of depth — see the ``_CLOSING_*`` block below.
+SAMPLE_CLOSING_SHALLOW_TARGET_NAME = "Sample: season closing (just started)"
+SAMPLE_CLOSING_DEEP_TARGET_NAME = "Sample: season closing (hours in)"
+SAMPLE_CLOSING_TARGET_NAMES = (
+    SAMPLE_CLOSING_SHALLOW_TARGET_NAME,
+    SAMPLE_CLOSING_DEEP_TARGET_NAME,
+)
+
 #: Which demo to load / ask about. ``"field"`` is the default everywhere, so an
 #: existing caller (and the Dashboard button) is unchanged.
-SampleShape = Literal["field", "mosaic", "big", "deep"]
+SampleShape = Literal["field", "mosaic", "big", "deep", "closing"]
 
 # Subfolder (inside the target dir) that holds the generated source subs, so a
 # ``remove_files=True`` delete of the target sweeps them away too.
@@ -128,6 +139,60 @@ _DEEP_N_STARS = 14
 # the field sample's ``22:{10 + index:02d}`` — stays a valid clock past sub 49.
 _DEEP_START_HOUR = 21
 _DEEP_CADENCE_S = 120
+
+# The fifth, opt-in demo (see ``SAMPLE_CLOSING_TARGET_NAMES``): a **pair** of
+# targets sitting on a patch of sky whose observing season is about to end.
+#
+# Why it exists. Everything else in this module is fixed sky — both mosaics and
+# the deep session sit at M 42 — and a season closes as a function of the
+# target's right ascension against the *date*, so no fixture, and no observing
+# site, can make M 42 leave the sky in the eight weeks ahead. The card that names
+# closing targets ("Shoot these before they're gone", ``/api/plan/closing``) was
+# therefore the last prescriptive card on ``/tonight`` that no dogfood pass had
+# ever rendered: it is pinned by jsdom alone, and the one bug found in it so far
+# (v0.476.0) had to be read out of the code.
+#
+# Why a *pair*, and why one patch of sky. The card's whole job is to say what the
+# season ending will *cost*, which is a function of how much the owner already
+# has on each target — so one row cannot exercise it. Both targets sit on
+# essentially the same sky deliberately: then the only thing that differs between
+# the two rows is depth, which is exactly the axis the endpoint ranks and caps by,
+# and neither row's placement can be blamed for the order they come out in.
+#
+# …but NOT on the *identical* position, which is the one thing the first build of
+# this shape got wrong and a dogfood pass caught immediately. Two targets whose
+# centres agree to within ``library.SAME_OBJECT_TOL_DEG`` (0.1°) are, correctly,
+# what the merge nudge exists to find — so a `--closing` pass raised **"Same
+# object in more than one folder?"** on the Library wall, an owner-facing warning
+# about nothing, in every screenshot and every page-height baseline the pass takes.
+# A flag must seed the state it is *for* and no other. One degree of declination
+# is ten times that tolerance and about a thousandth of the sky's daily turn, so
+# the two still share a season and a placement to within a minute of dark time.
+_CLOSING_WIDTH = _DEEP_WIDTH
+_CLOSING_HEIGHT = _DEEP_HEIGHT
+_CLOSING_N_STARS = _DEEP_N_STARS
+
+# "Just started" vs "well along": one short first session against 1.5 h. The
+# numbers are what the demo is for — a spread wide enough that the card's
+# "you have N on it" clause reads differently on the two rows — and the frames
+# are the deep sample's cheap 160x120 sensor for the same reason it is, so the
+# whole shape costs a few seconds rather than a few minutes.
+_CLOSING_SHALLOW_SUBS = 6
+_CLOSING_SHALLOW_EXPTIME_S = 10.0
+_CLOSING_DEEP_SUBS = 180
+_CLOSING_DEEP_EXPTIME_S = 30.0
+
+# When the demo's session starts, and the download gap between its subs — so the
+# cadence follows the exposure rather than being a constant that would make a 30 s
+# sub look like a 2-minute one.
+_CLOSING_START_HOUR = 21
+_CLOSING_GAP_S = 5.0
+
+#: How far apart in declination the pair's two targets sit — see the block above.
+#: Ten times ``seestack.io.library.SAME_OBJECT_TOL_DEG``, so the merge nudge reads
+#: them as two objects; small enough that both keep the same season and the same
+#: minutes above the altitude floor.
+_CLOSING_DEC_OFFSET_DEG = 1.0
 
 
 @dataclass(frozen=True)
@@ -260,6 +325,7 @@ def _frame_wcs(
     origin: tuple[int, int] = (0, 0),
     window: tuple[int, int] | None = None,
     frame: tuple[int, int] | None = None,
+    center: tuple[float, float] | None = None,
 ):
     """The true WCS for a frame dithered by ``star_shift`` on the sensor.
 
@@ -272,6 +338,12 @@ def _frame_wcs(
     corner sits at ``origin`` in that window sees it that many pixels off to one
     side. A single field is ``origin=(0, 0)`` with the window equal to the frame,
     which reproduces the original expression exactly.
+
+    ``center`` is the sky the whole thing points at, defaulting to M 42 so every
+    existing sample is byte-identical. Only the ``"closing"`` demo passes one: the
+    sky position at which a season is ending is a function of the *date* the pass
+    runs, so that shape's coordinates are chosen by its caller rather than fixed
+    here (see :func:`_load_closing_sample`).
     """
     from astropy.wcs import WCS
 
@@ -279,9 +351,10 @@ def _frame_wcs(
     ox, oy = origin
     frame_w, frame_h = frame if frame is not None else (_WIDTH, _HEIGHT)
     win_w, win_h = window if window is not None else (frame_w, frame_h)
+    ra0, dec0 = center if center is not None else (_RA_CENTER_DEG, _DEC_CENTER_DEG)
     w = WCS(naxis=2)
     w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
-    w.wcs.crval = [_RA_CENTER_DEG, _DEC_CENTER_DEG]
+    w.wcs.crval = [ra0, dec0]
     w.wcs.crpix = [win_w / 2 + 0.5 - ox + dx, win_h / 2 + 0.5 - oy + dy]
     w.wcs.cdelt = [-_PIXSCALE_ARCSEC / 3600.0, _PIXSCALE_ARCSEC / 3600.0]
     return w
@@ -293,10 +366,12 @@ def _wcs_header_text(
     origin: tuple[int, int] = (0, 0),
     window: tuple[int, int] | None = None,
     frame: tuple[int, int] | None = None,
+    center: tuple[float, float] | None = None,
 ) -> str:
     """:func:`_frame_wcs` as the header text the project DB stores."""
     return str(
-        _frame_wcs(star_shift, origin=origin, window=window, frame=frame)
+        _frame_wcs(star_shift, origin=origin, window=window, frame=frame,
+                   center=center)
         .to_header(relax=True)
     )
 
@@ -307,6 +382,7 @@ def _frame_center_deg(
     origin: tuple[int, int] = (0, 0),
     window: tuple[int, int] | None = None,
     frame: tuple[int, int] | None = None,
+    center: tuple[float, float] | None = None,
 ) -> tuple[float, float]:
     """Where *this frame's* centre points, in RA/Dec degrees.
 
@@ -317,7 +393,8 @@ def _frame_center_deg(
     exercise none of it.
     """
     frame_w, frame_h = frame if frame is not None else (_WIDTH, _HEIGHT)
-    w = _frame_wcs(star_shift, origin=origin, window=window, frame=frame)
+    w = _frame_wcs(star_shift, origin=origin, window=window, frame=frame,
+                   center=center)
     ra, dec = w.wcs_pix2world([[(frame_w - 1) / 2, (frame_h - 1) / 2]], 0)[0]
     return float(ra), float(dec)
 
@@ -527,15 +604,24 @@ def _dither_offsets(n: int) -> list[tuple[float, float]]:
 
 
 def sample_target_name(shape: SampleShape = "field") -> str:
-    """The reserved display name for one demo shape."""
+    """The reserved display name for one demo shape.
+
+    ``"closing"`` is the one shape that is a *pair* of targets, and this answers
+    with the first of them — the shallow one, which is the row its card names
+    first. Callers that need both use :data:`SAMPLE_CLOSING_TARGET_NAMES`.
+    """
     if shape == "deep":
         return SAMPLE_DEEP_TARGET_NAME
+    if shape == "closing":
+        return SAMPLE_CLOSING_SHALLOW_TARGET_NAME
     cfg = _MOSAIC_SAMPLES.get(shape)
     return cfg.name if cfg is not None else SAMPLE_TARGET_NAME
 
 
 def get_sample_status(lib: Library, shape: SampleShape = "field") -> SampleStatus:
     """Report whether the demo target exists (by its reserved display name)."""
+    if shape == "closing":
+        return _closing_sample_status(lib)
     entry = lib.find_target(sample_target_name(shape))
     if entry is None:
         return SampleStatus(loaded=False)
@@ -550,7 +636,12 @@ def get_sample_status(lib: Library, shape: SampleShape = "field") -> SampleStatu
     return SampleStatus(loaded=True, safe=entry.safe_name, n_frames=n_frames)
 
 
-def load_sample(lib: Library, shape: SampleShape = "field") -> SampleStatus:
+def load_sample(
+    lib: Library,
+    shape: SampleShape = "field",
+    *,
+    center: tuple[float, float] | None = None,
+) -> SampleStatus:
     """Create the demo target from generated subs, run QC, inject WCS.
 
     Idempotent: if the sample already exists it is returned unchanged rather than
@@ -558,9 +649,26 @@ def load_sample(lib: Library, shape: SampleShape = "field") -> SampleStatus:
     opt-in demo (a separate target) and ``shape="big"`` the third, full-size one;
     the default is the single field the Dashboard's "Try it" button has always
     loaded.
+
+    ``center`` is the sky position, and is **only** accepted for
+    ``shape="closing"``, which requires it: every other shape is fixed sky on
+    purpose (its generated pixels are pinned bit-identical), while a target whose
+    season is ending is one whose right ascension depends on today's date. Passing
+    it anywhere else raises rather than being quietly ignored, so a caller cannot
+    believe it moved a sample that did not move.
     """
     if shape == "deep":
         return _load_deep_sample(lib)
+    if shape == "closing":
+        if center is None:
+            raise ValueError(
+                "shape='closing' needs a sky centre: where a season is ending "
+                "depends on the date, so the caller chooses it "
+                "(seestack.nightplan.closing_sky_position)")
+        return _load_closing_sample(lib, center=center)
+    if center is not None:
+        raise ValueError(f"shape={shape!r} has a fixed sky centre; 'center' is "
+                         "only for shape='closing'")
     cfg = _MOSAIC_SAMPLES.get(shape)
     if cfg is not None:
         return _load_mosaic_sample(lib, cfg)
@@ -929,6 +1037,165 @@ def _load_deep_sample(lib: Library, *, n_subs: int | None = None) -> SampleStatu
     return SampleStatus(loaded=True, safe=entry.safe_name, n_frames=n_frames)
 
 
+def _closing_date_obs(index: int, *, exptime_s: float) -> str:
+    """``DATE-OBS`` for one sub of a closing demo's session.
+
+    Cadence follows the exposure (plus :data:`_CLOSING_GAP_S` of download), so the
+    deep half's 180 subs read as one plausible evening rather than as a session
+    whose frames are four times further apart than they are long.
+
+    Dated on the *mosaic* sample's night rather than today's, like every other
+    shape here: a demo claiming to have been shot tonight would put itself at the
+    top of every "recent activity" surface and quietly change what the rest of a
+    dogfood pass is looking at.
+    """
+    from datetime import datetime, timedelta
+
+    start = datetime(2024, 11, 15, _CLOSING_START_HOUR, 0, 0)
+    cadence = float(exptime_s) + _CLOSING_GAP_S
+    return (start + timedelta(seconds=cadence * index)).strftime(
+        "%Y-%m-%dT%H:%M:%S.000")
+
+
+def _write_closing_fits(
+    path: Path, *, index: int, star_shift: tuple[float, float],
+    stars: list[tuple[int, int, float]], exptime_s: float,
+) -> None:
+    """One sub of a closing demo's session — the small sensor, no WCS.
+
+    The only thing that differs between the pair's two targets is ``exptime_s``
+    and how many of these there are: the sky, the catalog and the noise seeds are
+    shared, because depth is the single variable the demo exists to vary.
+    """
+    from astropy.io import fits
+
+    data = _render_star_field(
+        stars, noise_seed=100 + index, star_shift=star_shift,
+        frame=(_CLOSING_WIDTH, _CLOSING_HEIGHT),
+    )
+    hdu = fits.PrimaryHDU(data=data)
+    hdu.header["BAYERPAT"] = "RGGB"
+    hdu.header["EXPTIME"] = float(exptime_s)
+    hdu.header["GAIN"] = 80.0
+    hdu.header["CCD-TEMP"] = -10.0
+    hdu.header["DATE-OBS"] = _closing_date_obs(index, exptime_s=exptime_s)
+    hdu.header["INSTRUME"] = "Seestar S50"
+    hdu.header["OBJECT"] = "season closing (sample)"
+    hdu.writeto(path, overwrite=True)
+
+
+def _closing_sample_status(lib: Library) -> SampleStatus:
+    """The pair's status: loaded only when **both** targets are there.
+
+    Half a pair is not the demo — the card it exists to light up needs two rows of
+    different depth — so a partly-removed pair reads as not loaded and a reload
+    rebuilds the missing half.
+    """
+    total = 0
+    for name in SAMPLE_CLOSING_TARGET_NAMES:
+        entry = lib.find_target(name)
+        if entry is None:
+            return SampleStatus(loaded=False)
+        try:
+            proj = Project.open(lib.target_dir(entry))
+        except Exception:  # noqa: BLE001 — a half-removed target reads as "not loaded"
+            return SampleStatus(loaded=False)
+        try:
+            total += sum(1 for _ in proj.iter_frames())
+        finally:
+            proj.close()
+    first = lib.find_target(SAMPLE_CLOSING_SHALLOW_TARGET_NAME)
+    return SampleStatus(
+        loaded=True, safe=first.safe_name if first else None, n_frames=total)
+
+
+def _load_one_closing_target(
+    lib: Library, *, name: str, center: tuple[float, float], n_subs: int,
+    exptime_s: float,
+) -> int:
+    """Build one half of the closing pair. Returns its frame count."""
+    entry, proj = lib.create_target(
+        name, ra_deg=float(center[0]), dec_deg=float(center[1]),
+        notes="A generated demo target — remove it any time from the Dashboard.",
+    )
+    frame = (_CLOSING_WIDTH, _CLOSING_HEIGHT)
+    try:
+        sample_dir = lib.target_dir(entry) / _SAMPLE_SUBDIR
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        stars = _star_catalog(
+            seed=42, width=_CLOSING_WIDTH, height=_CLOSING_HEIGHT,
+            n_stars=_CLOSING_N_STARS)
+        offsets = _dither_offsets(n_subs)
+        for i, shift in enumerate(offsets):
+            _write_closing_fits(
+                sample_dir / f"closing_{i:05d}.fit", index=i, star_shift=shift,
+                stars=stars, exptime_s=exptime_s)
+
+        cache = CacheManager(lib.target_dir(entry))
+        for _ in ingest_files(proj, cache, sorted(sample_dir.glob("*.fit")),
+                              copy_to_cache=True):
+            pass
+        run_qc_and_solve(proj, run_qc=True, run_solve=False, serial=True)
+
+        frames = sorted(proj.iter_frames(), key=lambda f: f.source_path)
+        # ``strict=False`` is today's behaviour spelled out: one frame per offset by
+        # construction, and a sub QC could not read is simply not annotated.
+        for db_frame, shift in zip(frames, offsets, strict=False):
+            if db_frame.id is None:
+                continue
+            ra, dec = _frame_center_deg(shift, frame=frame, center=center)
+            proj.update_frame(
+                db_frame.id,
+                wcs_json=_wcs_header_text(shift, frame=frame, center=center),
+                ra_center_deg=ra,
+                dec_center_deg=dec,
+                pixscale_arcsec=_PIXSCALE_ARCSEC,
+                width_px=_CLOSING_WIDTH,
+                height_px=_CLOSING_HEIGHT,
+                bayer_pattern="RGGB",
+            )
+        n_frames = sum(1 for _ in proj.iter_frames())
+    finally:
+        proj.close()
+    lib.refresh_target_stats(entry.safe_name)
+    return n_frames
+
+
+def _load_closing_sample(
+    lib: Library, *, center: tuple[float, float],
+) -> SampleStatus:
+    """Build the closing demo: two targets on one patch of sky, different depths.
+
+    ``center`` is chosen by the caller because the answer depends on the date —
+    :func:`seestack.nightplan.closing_sky_position` asks ``season_closing`` itself
+    where such a target would have to sit, so the demo and the card it lights up
+    cannot come to different conclusions. The deeper of the two sits
+    :data:`_CLOSING_DEC_OFFSET_DEG` north of it, for the reason in the block above
+    the constant: on the identical position the merge nudge is right to call them
+    one object, and a dogfood flag must seed the state it is for and no other.
+
+    Neither target is stacked. The card reads the *library registry* (position and
+    kept exposure), which ``refresh_target_stats`` fills, so a stack would cost a
+    dogfood pass a minute and change nothing on the screen under test.
+    """
+    existing = _closing_sample_status(lib)
+    if existing.loaded:
+        return existing
+    ra, dec = float(center[0]), float(center[1])
+    plan = (
+        (SAMPLE_CLOSING_SHALLOW_TARGET_NAME, _CLOSING_SHALLOW_SUBS,
+         _CLOSING_SHALLOW_EXPTIME_S, (ra, dec)),
+        (SAMPLE_CLOSING_DEEP_TARGET_NAME, _CLOSING_DEEP_SUBS,
+         _CLOSING_DEEP_EXPTIME_S, (ra, dec + _CLOSING_DEC_OFFSET_DEG)),
+    )
+    for name, n_subs, exptime_s, at in plan:
+        if lib.find_target(name) is not None:
+            continue                    # already there — rebuild only what's missing
+        _load_one_closing_target(
+            lib, name=name, center=at, n_subs=n_subs, exptime_s=exptime_s)
+    return _closing_sample_status(lib)
+
+
 def remove_sample(lib: Library) -> bool:
     """Delete the demo targets and their generated files.
 
@@ -936,8 +1203,13 @@ def remove_sample(lib: Library) -> bool:
     user asked for — and returns False only when none existed.
     """
     removed = False
-    for shape in ("field", "mosaic", "big", "deep"):
-        entry = lib.find_target(sample_target_name(shape))  # type: ignore[arg-type]
+    names = [sample_target_name(shape) for shape in ("field", "mosaic", "big", "deep")]
+    # The closing demo is a pair, so it contributes both of its names rather than
+    # the one ``sample_target_name`` answers with — otherwise one remove would
+    # leave the deeper half of it behind in the library for good.
+    names.extend(SAMPLE_CLOSING_TARGET_NAMES)
+    for name in names:
+        entry = lib.find_target(name)
         if entry is None:
             continue
         removed = lib.delete_target(entry.safe_name, remove_files=True) or removed
