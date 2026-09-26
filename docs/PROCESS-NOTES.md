@@ -1,5 +1,50 @@
 # Process notes & QA sweep records
 
+## 2026-09-26 — Builder: the `--closing` dogfood baseline, and what a new flag cost in its first hour
+
+*(Builder, branch `claude/exciting-tesla-m7wvjb`, shipping v0.477.0 and v0.477.1. Baseline green — **6,597
+passed, 2 skipped**, 12m00s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first.
+End of run: **6,618 passed, 2 skipped**, 11m49s; frontend **4,351 tests / 284 files**, `tsc` and `vite build`
+clean, all three run from `frontend/`.)*
+
+**The lever this run is worth recording: a new dogfood flag pays before it is finished, and its first bill is
+its own.** `--closing` found two things on its first pass, and one of them was a defect *it had introduced* —
+its two seeded targets sat on the identical sky position, which is exactly what `find_same_object_target_groups`
+exists to detect, so the Library wall raised **"Same object in more than one folder?"** on a pass whose whole
+job is to make screenshots readable. That is the same shape as the rule the script's own header keeps
+restating about `--incoming-lag` (*a flag seeds the state it is **for**, and photographing a second, unrelated
+fault by default makes "CLEAN" mean less rather than more*), arrived at from the inside. The fix is one degree
+of declination; the lesson is to ask, of any seeded state, **which other features are now looking at it**.
+
+The other finding was real and pre-existing and shipped as v0.477.1 (three nudge cards ellipsising the fact
+beside a target's name, inside a badge, with no scroll and no tooltip). Note it was found on `/library` — not
+on `/tonight`, the page the flag was built for. Four of the five recent findings came out of *reading one
+surface while seeding another*.
+
+### Baseline for a `--closing` pass (v0.477.1, sample + closing pair, observing site 40.0, −2.0)
+
+The closing card populates `/tonight`, which is by construction the page that grows:
+
+* `[phone] /tonight` **4,301 px** — against **3,578 px** with the card silent (the v0.437.0 measurement in
+  AGENTS.md §1). The difference is the card doing its job, not a regression; **compare a `--closing` pass only
+  against another `--closing` pass.**
+* `[phone] /glossary` 3,364 px, `[phone] /targets/<sample>` 3,287 px, `[desktop] /glossary` 3,276 px,
+  `[phone] .../edit/1` 3,184 px, `[phone] /life-list` 3,094 px, `[desktop] /tonight` 2,820 px, `[phone] /`
+  2,735 px — all within a few px of the numbers a site-only pass takes, i.e. nothing else moved.
+* `/api/plan/closing`: `location_source=settings`, `n_closing=2`, rows ordered *just started* (0.02 h) then
+  *hours in* (1.50 h) — v0.476.0's least-finished-first ranking, rendered rather than asserted.
+* Final pass: **nothing overflowing, no console errors.**
+
+### Read `/tonight`'s prescribing column as one paragraph — this run's answer: it holds
+
+With the closing card finally speaking, the column says: *"2 of your targets are on their way out of your sky —
+just started first, about 4 weeks left"*, then *"Your best night is tonight — **hours in**, 2.2 h above 30°"*,
+then *"**just started** is on its way out of your sky… its best night this week is tonight — and unlike the
+others here, that one doesn't come round again."* The week plan's headline and its own closing clause name
+**different** targets — and the clause says which wins, in as many words. That is v0.445.0 working, checked in
+a browser for the first time rather than in jsdom. No finding.
+
+
 ## 2026-09-26 — Scout: rotation item (3) — ASTAP/ffmpeg filesystem side effects with a stub binary — CLEAN, and the guard that makes it clean is already in the suite
 
 *(Scout, branch `claude/admiring-brahmagupta-bsgjyy`. Baseline green — **6,597 passed, 2 skipped**, 12m31s

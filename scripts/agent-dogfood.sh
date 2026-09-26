@@ -443,8 +443,10 @@ PY
     else
       CLOSING_RA="${CLOSING_CENTER%% *}"
       CLOSING_DEC="${CLOSING_CENTER##* }"
-      echo "-- loading the CLOSING sample: two targets at RA ${CLOSING_RA}, Dec ${CLOSING_DEC}"
-      echo "   (1 min and 1.5 h kept, same sky — so the only thing that differs is depth)"
+      echo "-- loading the CLOSING sample: two targets near RA ${CLOSING_RA}, Dec ${CLOSING_DEC}"
+      echo "   (1 min and 1.5 h kept, one season and one placement — so the only thing"
+      echo "    that differs is depth; a degree apart in Dec so the merge nudge does not"
+      echo "    read them as one object split across two folders)"
       curl -sf -X POST "$BASE/api/sample" -H 'Content-Type: application/json' \
            -d "{\"shape\":\"closing\",\"ra_deg\":${CLOSING_RA},\"dec_deg\":${CLOSING_DEC}}" \
            >/dev/null || echo "warn: closing sample load failed"
