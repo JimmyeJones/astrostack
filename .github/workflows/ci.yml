@@ -13,12 +13,37 @@ on:
   pull_request:
   workflow_dispatch:
 
-# A newer push to the same branch cancels an in-flight run for it.
+# A newer push to the same PR branch cancels its in-flight run. Never on main:
+# there every merge is a separate change that needs its own verdict, and a
+# cancelled run is neither red nor green (6 of 25 main runs were cancelled
+# before this changed, 2026-09-26 audit).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  identity:
+    name: Commit identity (no personal emails)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every new commit uses a no-reply address
+        # The backstop to the pre-push hook scripts/agent-setup.sh installs: by
+        # the time this runs the commit is already public, so its job is to make
+        # a leak loud, not to prevent it. Checks only the commits this PR/push
+        # adds, so the 22 historical ones do not fail every run.
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            scripts/check-commit-identity.sh -1 "$HEAD_SHA"
+          else
+            scripts/check-commit-identity.sh "$BASE..$HEAD_SHA"
+          fi
+
   python:
     name: Python tests
     runs-on: ubuntu-latest

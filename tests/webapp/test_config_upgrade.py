@@ -271,9 +271,9 @@ def test_settings_store_refuses_incoming_that_would_swallow_the_library(tmp_path
 
 
 def test_settings_store_still_accepts_ordinary_folder_moves(tmp_path):
-    """The guard is one-directional and narrow: separate trees are fine, and so
-    is ``incoming/`` sitting inside the library root — that is the app's own
-    default shape one level up, and nothing deletes outside ``targets/``."""
+    """The guard is narrow: separate trees are fine, and so is ``incoming/``
+    sitting inside the library root outside ``targets/`` and ``calibration/`` —
+    nothing deletes anywhere else in the library."""
     from webapp.config import SettingsStore
 
     store = SettingsStore(str(tmp_path))
@@ -340,3 +340,56 @@ def test_the_settings_page_and_this_guard_read_the_same_table():
             assert got is None, where
         else:                       # "both" and "server" are both refusals here
             assert got is not None, where
+
+
+def test_settings_store_refuses_incoming_inside_the_library_targets_tree(tmp_path):
+    """The reverse nesting: ``incoming/`` at or under ``<library>/targets``. A scan
+    there adopts each raw folder as a target's project folder, and deleting that
+    target rmtrees the raws (audit 2026-09-26, reproduced). Refused on save, and
+    the running config is left untouched."""
+    import pytest
+
+    from webapp.config import SettingsStore
+
+    store = SettingsStore(str(tmp_path))
+    lib = store.get().resolved_library_root
+    for bad in (lib / "targets", lib / "targets" / "raw", lib / "calibration",
+                lib / "calibration" / "darks"):
+        with pytest.raises(ValueError, match="library's own"):
+            store.update({"incoming_dir": str(bad)})
+        assert store.get().incoming_dir == ""
+
+
+def test_nested_incoming_conflict_covers_the_library_managed_subtrees(tmp_path):
+    from webapp.config import nested_incoming_conflict
+
+    lib = tmp_path / "library"
+    assert nested_incoming_conflict(lib / "targets", lib, tmp_path) is not None
+    assert nested_incoming_conflict(lib / "targets" / "M 42_sub", lib, tmp_path) is not None
+    assert nested_incoming_conflict(lib / "calibration", lib, tmp_path) is not None
+    # Elsewhere in the library root is still fine, as is a look-alike sibling.
+    assert nested_incoming_conflict(lib / "drop", lib, tmp_path) is None
+    assert nested_incoming_conflict(lib / "targets2", lib, tmp_path) is None
+
+
+def test_an_install_already_inside_the_targets_tree_still_loads(tmp_path):
+    """§9, same as the other direction: refuse to *enter* the layout, never refuse
+    to boot an install already in it."""
+    _write_cfg(tmp_path, {
+        "incoming_dir": str(tmp_path / "library" / "targets"),
+        "cpu_workers": 6,
+    })
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.incoming_dir == str(tmp_path / "library" / "targets")
+    assert s.cpu_workers == 6
+
+
+def test_library_managed_subdirs_match_their_owners():
+    """The guard names these folders literally; pin them to the constants the
+    library and the calibration registry actually use."""
+    from seestack.io import library
+    from webapp import calibration
+    from webapp.config import LIBRARY_MANAGED_SUBDIRS
+
+    assert library._TARGETS_SUBDIR in LIBRARY_MANAGED_SUBDIRS
+    assert calibration.CALIBRATION_SUBDIR in LIBRARY_MANAGED_SUBDIRS

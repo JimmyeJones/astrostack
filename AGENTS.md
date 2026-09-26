@@ -1133,6 +1133,16 @@ add a test that an *old* config/DB upgrades cleanly.
   record it in the backlog as "needs owner sign-off" instead.
 - Never commit secrets or the `webapp/static/` build artifact. Never disable TLS
   verification or touch proxy/CA settings.
+- **Never set `git config user.name` / `user.email`, and never write the owner's email
+  address anywhere** — not in a commit's author or committer, a file, an issue, a
+  comment or a PR. A session may be handed his email as context ("for authorship");
+  it is not for commits. This repository is public, a commit's email is published with
+  it and cannot be taken back, and **22 agent commits reached `main` carrying his
+  personal address** (2026-08-26 → 09-26) because sessions did exactly this.
+  `scripts/agent-setup.sh` pins the no-reply identity and installs a pre-push hook
+  (`scripts/check-commit-identity.sh`) that refuses anything else; CI's `Commit
+  identity` job is the backstop. If the hook refuses your push, fix the identity and
+  re-author only your unpushed commits — never `--no-verify` past it.
 - Never regress the security posture (auth, server-side path resolution,
   input validation).
 - Don't rewrite large subsystems speculatively. Refactor only in service of a
