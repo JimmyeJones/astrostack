@@ -1815,6 +1815,20 @@ SEASON_HORIZON_WEEKS = 8
 #: ``SEASON_HORIZON_WEEKS + 1`` dark-window searches rather than eighty-five.
 SEASON_STEP_DAYS = 7
 
+#: How many of the library's positioned targets :func:`season_closing` will
+#: scan. Deliberately **not** :data:`WEEK_MAX_TARGETS`, which this used to
+#: borrow, and deliberately far larger.
+#:
+#: This is a **cost** bound, not a filter on which targets are worth answering
+#: about, and the measurement says the cost is nearly flat in it: the work per
+#: sampled night is one dark-window search, one Moon ephemeris and one
+#: vectorised alt/az batch, so on this box the whole scan takes 1.96 s for one
+#: target, 1.99 s for 104, 2.18 s for 400 and 2.53 s for 1,000. The cap exists
+#: only so a pathological registry cannot turn a landing-page card into a slow
+#: request; 400 is past any library a Seestar owner accumulates by hand, and the
+#: answer is cached for a quarter of an hour at both ends besides.
+SEASON_MAX_TARGETS = 400
+
 
 @dataclass(frozen=True)
 class ClosingTarget:
@@ -1848,7 +1862,7 @@ def season_closing(
     min_altitude_deg: float = 30.0,
     horizon: HorizonProfile | None = None,
     min_usable_minutes: float = 45.0,
-    max_targets: int = WEEK_MAX_TARGETS,
+    max_targets: int = SEASON_MAX_TARGETS,
 ) -> list[ClosingTarget]:
     """Which of *your own* targets stop being shootable within the season ahead.
 
@@ -1870,6 +1884,24 @@ def season_closing(
     (:func:`noise_gain_from_more_time`) so the least-finished of two targets
     leaving in the same week is named first, then by ``safe`` for determinism.
 
+    **Which targets are scanned, and why it is the mirror of :func:`plan_week`.**
+    ``max_targets`` is :data:`SEASON_MAX_TARGETS`, a *cost* bound (see there),
+    and when it bites the targets kept are the **least**-finished — the exact
+    opposite of ``plan_week``, which keeps the most-finished and is right to.
+    The two are answering opposite questions. "Which of my projects should I
+    push on this week?" is about investment, so the deepest targets are the ones
+    worth planning around. "What am I about to lose until next year?" is about
+    what the loss *costs*, which is ``noise_gain_from_more_time`` — an hour on a
+    45-minute target is worth a third of its noise and an hour on a 20-hour
+    target about 2 % — and that is already the key this function *ranks* by.
+    Selecting on one key and ranking on its opposite is how this cap came to
+    hide the very rows the ranking exists to put first: measured on a
+    104-target library, borrowing ``WEEK_MAX_TARGETS`` reported 7 of the 18
+    targets that were leaving, every one shown had 12.7-19.1 h on it, every one
+    hidden had 0.3-9.4 h, and one of the three targets in its *last week* was
+    hidden — the one the Dashboard's "Last chance this year" note would have
+    named first.
+
     **Silent rather than wrong**, in three cases that are all about the *sky*
     rather than about any target: no positioned targets; fewer than two sampled
     nights with any darkness (nothing to compare); and — the one worth stating —
@@ -1880,9 +1912,12 @@ def season_closing(
 
     Deterministic, offline and read-only, like the rest of the planner.
     """
+    # Least-finished first, the mirror of ``plan_week``'s key and for the reason
+    # in the docstring above: if the cost cap bites, keep the targets whose
+    # season ending actually costs the owner something.
     positioned = sorted(
         (t for t in library_targets if t.ra_deg is not None and t.dec_deg is not None),
-        key=lambda t: (-(t.total_exposure_s or 0.0), -(t.frames_accepted or 0), t.safe),
+        key=lambda t: ((t.total_exposure_s or 0.0), (t.frames_accepted or 0), t.safe),
     )
     considered = positioned[:max(0, max_targets)]
     weeks = max(1, int(horizon_weeks))
