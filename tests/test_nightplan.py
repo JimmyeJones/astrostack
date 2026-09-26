@@ -1151,6 +1151,51 @@ def test_two_targets_leaving_together_put_the_least_finished_first():
     assert closing[0].noise_gain > closing[1].noise_gain
 
 
+def test_a_barely_started_target_is_not_hidden_behind_forty_finished_ones():
+    """The cap must not be a filter on *investment*.
+
+    ``season_closing`` used to borrow ``plan_week``'s ``WEEK_MAX_TARGETS`` cap,
+    and with it ``plan_week``'s selection key — the forty targets with the
+    **most** integration on them. That key is right for "which project should I
+    push on this week?" and exactly backwards here: this card ranks by what
+    another hour would buy, so the rows worth keeping are the *least*-finished
+    ones, and the cap was dropping precisely those.
+
+    Forty deep circumpolar targets never leave, so they contribute no rows —
+    they only consume the cap. The one target that really is leaving has twenty
+    minutes on it, and under the old key it was the forty-first.
+    """
+    deep = [_closing_target(f"m81_{i:03d}", _CLOSING_M81, exposure_s=72000.0)
+            for i in range(40)]
+    barely = _closing_target("m42", _CLOSING_M42, exposure_s=1200.0)
+    closing = np_plan.season_closing(
+        LONDON, [*deep, barely],
+        start_utc=datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc))
+    assert [c.safe for c in closing] == ["m42"]
+
+
+def test_when_the_cost_cap_bites_it_keeps_the_target_the_card_would_name_first():
+    """The bound that is left is about request cost, not about worth — so what
+    it keeps has to agree with what the ranking puts first. Two targets leaving
+    the same week and room for one: the barely-started one is the answer, and
+    it is the one the ordering two tests up would have listed first anyway."""
+    finished = _closing_target("aaa", _CLOSING_M42, exposure_s=72000.0)
+    barely = _closing_target("zzz", _CLOSING_M42, exposure_s=600.0)
+    closing = np_plan.season_closing(
+        LONDON, [finished, barely], max_targets=1,
+        start_utc=datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc))
+    assert [c.safe for c in closing] == ["zzz"]
+
+
+def test_the_scan_cap_is_its_own_number_and_is_far_wider_than_the_week_plan_s():
+    """Recorded as a claim rather than left in a comment: the cost of the scan
+    is dominated by the horizon (nine dark-window searches and nine Moon
+    ephemerides), not by the library, so this cap is free to be wide. See
+    ``SEASON_MAX_TARGETS`` for the measurement."""
+    assert np_plan.SEASON_MAX_TARGETS >= 400
+    assert np_plan.SEASON_MAX_TARGETS > np_plan.WEEK_MAX_TARGETS
+
+
 def test_season_closing_is_deterministic():
     tg = [_closing_target("m42", _CLOSING_M42)]
     when = datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc)

@@ -224,6 +224,11 @@ export interface SeasonClosing {
   generated_utc: string;
   min_altitude_deg: number;
   horizon_weeks: number;
+  /** How many of your targets are leaving in all. `targets` is bounded (the
+   * card must not grow without limit), this is exact — so the headline can say
+   * the true number while listing the soonest ones. Absent on an older
+   * backend, where the list *is* the total. */
+  n_closing?: number;
   targets: ClosingTarget[];
 }
 

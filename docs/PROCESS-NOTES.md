@@ -1,5 +1,54 @@
 # Process notes & QA sweep records
 
+## 2026-09-26 (second run) — Builder: a cap copied from the function next door, and the key came with it
+
+*(Builder, branch `claude/exciting-tesla-yq3d1s`, shipping v0.476.0. Baseline green — **6,593 passed,
+2 skipped**, 11m56s with the BLAS cap and `-n 4 --dist worksteal`.)*
+
+**Triage agreed with the previous run's, to the letter.** "Bugs (fix these first)" is five gated LEADs, the
+#903 remainder and the #878/#880 routing; `grep READY` returns only the banner saying the two starred items
+shipped; the three open GitHub issues (#878, #880, #903) are all already verified into the backlog, none
+new since yesterday. So this run also had to *find* its work.
+
+### The lever: a constant borrowed from a neighbour brings its neighbour's reasoning with it
+
+The previous run's lever was *"does the cure name something the reader can actually find?"* — a prescription
+checked against the rest of the app. This run's is its structural cousin: **when one function reuses
+another's constant, check whether it also reused the argument for it.**
+
+`season_closing` ("Shoot these before they're gone") borrowed `plan_week`'s `WEEK_MAX_TARGETS = 40`. It also
+borrowed, verbatim, the `sorted(...)` line that cap is applied to — and *that* line carries `plan_week`'s
+answer to a question `season_closing` never asked. `plan_week` keeps the forty targets with the **most**
+integration on them, and its docstring argues the point at length: "finish what I've got" must not be
+answered by planning a big library's week around the first forty objects alphabetically. Correct there. In
+`season_closing` it is exactly backwards, and the same file says so twice over: the function's own docstring
+("the least-finished of two targets leaving in the same week is named first") and the card's own row copy
+("a target already 10 h deep reads, correctly, as one that can be let go"). **Selection on one key, ranking
+on its opposite.**
+
+**The tell was in the docstring, and it was a self-contradiction rather than an error.** `season_closing`
+says "one vectorised batch per sampled night, so the cost scales with the horizon, not with the library" —
+in a function whose first statement caps the library. One of those two had to be wrong. Measured: 1.96 s for
+one target, 1.96 s for 40, 1.99 s for 104, 2.18 s for 400, 2.53 s for 1,000. The docstring was right and the
+cap was buying ~30 ms on an owner-shaped library.
+
+**What it cost, measured on a 104-target library** (the owner has 104): 7 of the 18 targets that were
+leaving were reported. Every one shown had 12.7–19.1 h on it; every one hidden had 0.3–9.4 h. One of the
+three targets in its **last week** was hidden — and it was the whole-library answer's first row, i.e. the one
+the Dashboard's "Last chance this year" interrupt would have named.
+
+**Generalising it, for the next run.** A borrowed constant is cheap and usually right; a borrowed *sort key*
+is a borrowed judgement. The question to ask at every copy site is not "is this number still about the right
+magnitude?" but **"is the thing this orders by still the thing this surface cares about?"** Here the answer
+was written down two lines below the copy, in the tie-break — the function already knew its own key and used
+it for half the job. Worth grepping for elsewhere: `-(t.total_exposure_s or 0.0)` now appears in exactly one
+place (`plan_week`), which is the only place it belongs.
+
+**Also checked and left alone:** `/api/life-list/nearly-there` (its candidate cap orders by *closeness to
+finishing*, which is the question it asks) and `webapp/incominglag.py` (its `INCOMING_LAG_MAX` already
+documents itself as a list bound with exact counts beside it — the pattern this fix copied for
+`CLOSING_MAX_ROWS` + `n_closing`).
+
 ## 2026-09-26 — Builder: four clean sweeps, and the finding came from reading a *note's second clause*
 
 *(Builder, branch `agent/run-0002`, shipping v0.475.3. Baseline green — **6,588 passed, 2 skipped**, 12m32s
