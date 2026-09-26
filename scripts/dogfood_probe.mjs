@@ -54,6 +54,13 @@
 // so navigating could not see them, which is where v0.440.0 lived. Each mode is
 // clicked and held to the identical checks.
 //
+// The route table below is mirrored from frontend/src/main.tsx by hand, and a
+// hand-mirrored list goes stale: /show, /live and /sky-so-far/:year were all
+// registered routes that no pass had ever opened — "Tonight, live" being a NAV
+// entry whose own docstring says it lives on a phone. That cannot come back:
+// tests/test_dogfood_route_coverage.py fails when main.tsx registers a route
+// this file does not reach.
+//
 // It is a FINDER, not a test: what it reports still needs a real regression test
 // in the suite before anything is called fixed.
 import { existsSync } from "node:fs";
@@ -102,6 +109,32 @@ async function compareRoute() {
 
 const COMPARE = await compareRoute();
 
+/** The year drill-down, `/sky-so-far/:year`. Like `/compare` it cannot be a
+ * constant — the year is a property of the library, not of the app — which is
+ * why it was never in the table below and why "Your year under the stars" had
+ * never been photographed at any width.
+ *
+ * Asked the same way the entry card asks (`YourYearCard` → `/api/recap/year/…`)
+ * and resolved by the same rule as `yourYear.defaultRecapYear`: the most recent
+ * year that actually has nights, because that is the year the card links to.
+ * Returns "" when the library has no nights at all (`--empty`), where the card
+ * self-hides and there is no route to sweep. */
+async function yearRoute() {
+  try {
+    const thisYear = new Date().getUTCFullYear();
+    const res = await fetch(`${BASE}/api/recap/year/${thisYear}`);
+    if (!res.ok) return "";
+    const years = ((await res.json()).years_with_data ?? [])
+      .filter((y) => Number.isFinite(y));
+    if (!years.length) return "";
+    return `/sky-so-far/${Math.max(...years)}`;
+  } catch {
+    return "";
+  }
+}
+
+const YEAR = await yearRoute();
+
 /** The comparators that only exist behind a click. `page.goto` lands on "Side
  * by side", so a sweep that only navigates can never see the other two — the
  * same blind spot `--editor` exists for on the editor. */
@@ -110,11 +143,16 @@ const COMPARE_MODES = ["Split", "Blink"];
 // The real route table (frontend/src/main.tsx) — a typo here reads as a bug
 // ("Unexpected Application Error! 404 Not Found") that is entirely the probe's.
 const ROUTES = [
-  "/", "/library", "/gallery", "/best", "/sky-so-far", "/tonight", "/sky",
-  "/universe", "/life-list",
+  "/", "/library", "/gallery", "/best", "/show", "/sky-so-far", "/tonight",
+  // "Tonight, live" is the one NAV entry this table was missing, and its own
+  // docstring says it is meant to be left open on a phone for hours — i.e. the
+  // 420 px pass is the pass that matters for it, and it had never had one.
+  "/live",
+  "/sky", "/universe", "/life-list",
   "/telescope", "/moon-sun", "/calibration", "/combine", "/jobs", "/storage",
   "/logs", "/settings", "/glossary",
   ...(COMPARE ? [COMPARE] : []),
+  ...(YEAR ? [YEAR] : []),
   ...(SAFE ? [`/targets/${SAFE}`, `/targets/${SAFE}/stack`,
               `/targets/${SAFE}/history`] : []),
   // The editor is priority 1, so it is worth a shot even though it is slow.

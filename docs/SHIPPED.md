@@ -1,5 +1,51 @@
 # Shipped — the record
 
+## v0.477.2 — 2026-09-26 — three registered routes had never been in front of a browser, and the list that decides which are is hand-mirrored
+
+*(Builder, branch `claude/exciting-tesla-2cd04h`. Found by diffing `scripts/dogfood_probe.mjs`'s `ROUTES`
+against `frontend/src/main.tsx`; both new pages produced a finding on their very first pass — v0.477.3 and
+v0.478.0 below.)*
+
+### The gap
+
+`dogfood_probe.mjs`'s route table carries the comment *"the real route table (frontend/src/main.tsx)"*, and a
+list mirrored by hand goes stale. Three routes the app registers had **never been opened by any dogfood pass**
+— no screenshot at either width, no overflow probe, no squeeze probe, no clipped-label probe, no console-error
+capture, no page height:
+
+| route | what it is | why it was missed |
+| --- | --- | --- |
+| `/live` | **"Tonight, live"** — a **nav** entry, and the one page whose own docstring says it is *"meant to be left open on a phone for hours"* | simply absent from the list |
+| `/show` | "Show and tell", the full-screen slideshow | reached from a button on `/best`, never from the nav |
+| `/sky-so-far/:year` | "Your year under the stars" | the year is a property of the **library**, so like `/compare` it cannot be written as a constant |
+
+That last one is the same shape as the holes this repo has already paid for — the missing observing site, the
+empty `incoming/`, the click-only Compare comparators, the 1:1 editor preview: a surface the tooling is
+*structurally* unable to reach. And it paid the same way: **both new pages produced a real finding on the
+first pass that opened them.**
+
+### What shipped
+
+* `/show` and `/live` added to `ROUTES` as plain constants.
+* New `yearRoute()` beside `compareRoute()`, asking `/api/recap/year/<thisYear>` the way `YourYearCard` does
+  and resolving the year by the same rule as `yourYear.defaultRecapYear` (the most recent year with nights —
+  the year the card actually links to). Returns `""` when the library has no nights at all, where the card
+  self-hides and there is no route to sweep, so `--empty` is unaffected.
+* New **`tests/test_dogfood_route_coverage.py`** — the durable half. It parses the router children out of
+  `main.tsx` and every route-shaped literal out of the probe, normalises both (query string stripped,
+  `:param` and `${VAR}` alike reduced to `*`), and requires each registered route to be reachable or listed in
+  a tiny `_EXEMPT` map **with its reason**. A second test deletes the reverse failure mode: an exemption that
+  no longer names a real route is stale and hides the next one. **Fails before** on exactly `['live', 'show',
+  'sky-so-far/*']`.
+
+One exemption today: `settings/*`, which renders the same component as `/settings` deep-linked to a panel.
+
+### Baseline for a default pass at v0.477.2 (sample loaded and stacked, observing site 40.0, −2.0)
+
+Mechanically **CLEAN** — nothing overflowing, no console errors, on all 24 routes at both widths. Page heights
+unchanged on every route that was already swept; the three new ones all sit below the reported top-8 cut
+(`/tonight` 3,506 px phone remains the wall).
+
 ## v0.477.1 — 2026-09-26 — three nudge cards chipped a target's name and hid the fact beside it
 
 *(Builder, branch `claude/exciting-tesla-m7wvjb`. Found by the `--closing` dogfood flag shipped an hour
