@@ -61,6 +61,15 @@ export function StackView() {
   const { safe = "" } = useParams();
   const [searchParams] = useSearchParams();
   const reuseRunId = searchParams.get("from");
+  // `?open=advanced` — a caller that has just named a switch living inside the
+  // collapsed Advanced disclosure can open it, so the reader lands on the
+  // control rather than on a long form with the answer folded away. The health
+  // card's sub-pixel-refine note is the first such caller. Uncontrolled and
+  // closed without the parameter, exactly as before; the value is a *default*,
+  // so the reader can still close it.
+  const [openSections, setOpenSections] = useState<string[]>(
+    () => (searchParams.get("open") === "advanced" ? ["advanced"] : []),
+  );
   const qc = useQueryClient();
   const [values, setValues] = useState<Record<string, unknown>>({});
   // True once `values` has been seeded from the loaded defaults (see the sync
@@ -1313,7 +1322,8 @@ export function StackView() {
             )}
           </Paper>
 
-          <Accordion variant="separated" mt="xs">
+          <Accordion variant="separated" mt="xs" multiple
+                     value={openSections} onChange={setOpenSections}>
             <Accordion.Item value="advanced">
               <Accordion.Control>Advanced options</Accordion.Control>
               <Accordion.Panel>

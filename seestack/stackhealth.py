@@ -668,6 +668,30 @@ def _run_sigma_kappa(options_json: str | None) -> float:
     return _DEFAULT_SIGMA_KAPPA
 
 
+def run_option_flag(options_json: str | None, key: str) -> bool | None:
+    """A boolean option a run was stacked with, or ``None`` when it can't be read.
+
+    Three states, and keeping them apart is the point: ``True``/``False`` are the
+    run's own answer, and ``None`` means the stored options were absent, garbled
+    or carried no such key (an older run, or one written before the option
+    existed). A caller that cannot tell should say nothing rather than assume a
+    default — unlike :func:`_run_sigma_kappa`, whose fallback is safe because
+    every shipped default for κ has been the same number, an option's default can
+    and does change between versions, so guessing would put a claim about *this*
+    run on screen that nothing in the record supports.
+    """
+    import json
+
+    try:
+        opts = json.loads(options_json) if options_json else {}
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(opts, dict) or key not in opts:
+        return None
+    value = opts.get(key)
+    return bool(value) if isinstance(value, bool) else None
+
+
 def _factor_label(value: float) -> str:
     """A noise-reduction factor as the "One frame vs your stack" badge writes it:
     a big reduction as a whole number ("15"), a smaller one to one decimal
@@ -750,7 +774,9 @@ class HealthNote:
     ``"good"`` | ``"info"`` (colour only, never alarming); ``action`` is an
     optional key the UI can wire to the page that already does it
     (``"trim_border"`` | ``"calibration"`` | ``"solve_help"`` | ``"restack"``
-    | ``"background"`` | ``None``)."""
+    | ``"background"`` | ``"subpixel_refine"`` | ``None``). The key is free-form
+    on the wire (``schemas.HealthNoteOut``): an older frontend renders no link
+    for one it does not know, so adding a key is upgrade-safe."""
 
     kind: str
     severity: str
@@ -900,6 +926,59 @@ def _solve_was_tried(frame: GradedFrame) -> bool:
     it cry wolf on every night in progress, which is what it used to do.
     """
     return (frame.reject_reason or "").startswith("solve_failed:")
+
+
+def _refine_is_the_open_lever(run: StackRunRow) -> bool:
+    """Is sub-pixel alignment refine a lever this run has *not* already pulled?
+
+    Only then is it worth naming. Three runs must not be offered it, for three
+    different reasons:
+
+    * **It was already on.** The pass ran, so "turn it on" is not the next step —
+      and this is the one state in which the sibling ``roughly_aligned`` note can
+      speak, i.e. in which "the roughly-aligned subs" names a real population.
+    * **The run drizzled.** Drizzle places each sample through a pixmap and never
+      runs the refine step at all (``stacker`` deliberately stamps no ``NROUGHAL``
+      there), so the switch would change nothing about the picture.
+    * **The options can't be read.** An older or garbled ``options_json`` cannot
+      say what this run did, and a suggestion premised on a guess is worse than
+      the general advice it would replace.
+    """
+    return (run_option_flag(run.options_json, "subpixel_refine") is False
+            and run_option_flag(run.options_json, "drizzle") is False)
+
+
+def _soft_stars_message(run: StackRunRow) -> str:
+    """The registration-smear note's sentence, with the cure the run can act on.
+
+    The diagnosis is the same either way — the combine, not the sky, softened the
+    stars — but the second half used to be one sentence for every run: *"a
+    steadier mount, or re-solving the roughly-aligned subs, keeps them tight."*
+    That advice quietly assumed the reader had a set of roughly-aligned subs to
+    re-solve, and they only exist when sub-pixel refine actually ran: the count
+    behind them (``n_roughly_aligned``) is the number of frames *refine* had to
+    leave unshifted, so it is NULL on every run stacked with the option off — its
+    default — and the note that would have named them
+    (:data:`kind="roughly_aligned"`) is silent by design in exactly that state.
+    So on the common install this card diagnosed registration smear and then sent
+    the reader after a population the app had never shown them, while the app's
+    own remedy for that diagnosis — a phase-correlation pass that nudges each sub
+    by a fraction of a pixel, "for slightly tighter stars" — sat unnamed behind
+    the Stack form's collapsed Advanced disclosure.
+
+    Where the option *is* on (or the run drizzled, or we cannot tell), the
+    original sentence is exactly right and is kept byte for byte.
+    """
+    lead = ("Your stacked stars came out fatter than the subs that made them, so "
+            "the combine — not the sky — softened them. This is usually small "
+            "alignment drift building up over the night")
+    if _refine_is_the_open_lever(run):
+        return (lead + ". Sub-pixel alignment refine nudges each sub by a "
+                "fraction of a pixel before combining, which is what tightens "
+                "them up — it was off for this stack, and it costs a little more "
+                "time per sub.")
+    return (lead + "; a steadier mount, or re-solving the roughly-aligned subs, "
+            "keeps them tight.")
 
 
 def stack_health(run: StackRunRow, frames: Iterable[GradedFrame],
@@ -1290,12 +1369,8 @@ def stack_health(run: StackRunRow, frames: Iterable[GradedFrame],
         scored.append((37, HealthNote(
             kind="soft_stars",
             severity="info",
-            message=("Your stacked stars came out fatter than the subs that made "
-                     "them, so the combine — not the sky — softened them. This is "
-                     "usually small alignment drift building up over the night; a "
-                     "steadier mount, or re-solving the roughly-aligned subs, keeps "
-                     "them tight."),
-            action=None,
+            message=_soft_stars_message(run),
+            action=("subpixel_refine" if _refine_is_the_open_lever(run) else None),
         )))
 
     # --- Did the stack get what its subs should have bought? ------------------
