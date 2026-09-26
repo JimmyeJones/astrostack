@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { NightActivity, YearRecap } from "./api/client";
 import {
   defaultRecapYear, longestNightLines, recapYearOptions, sharpestNightLines,
-  yearNightCards,
+  yearNightCards, yearTargetCards,
 } from "./yourYear";
 import { formatIntegration } from "./format";
 
@@ -154,5 +154,68 @@ describe("yearNightCards", () => {
       formatIntegration,
     );
     expect(cards.map((c) => c.key)).toEqual(["longest"]);
+  });
+});
+
+describe("yearTargetCards", () => {
+  it("folds the two cards into one when every target was a first light", () => {
+    // A beginner's first year is this shape by construction: everything you
+    // shot, you had never shot before. Two cards then name the same objects in
+    // the same order, and the second one links nowhere.
+    const cards = yearTargetCards(2026, ["M 31", "M 42"], [
+      { name: "M 31", safe: "M_31" }, { name: "M 42", safe: "M_42" },
+    ]);
+    expect(cards.map((c) => c.key)).toEqual(["first-lights"]);
+    expect(cards[0].blurb).toBe(
+      "All 2 objects you pointed at in 2026 were ones you'd never imaged before.");
+    // Nothing is dropped, and every name now carries its link.
+    expect(cards[0].chips).toEqual([
+      { name: "M 31", safe: "M_31" }, { name: "M 42", safe: "M_42" },
+    ]);
+  });
+
+  it("words the one-target year as a sentence rather than a count", () => {
+    const cards = yearTargetCards(2024, ["M 42"], [{ name: "M 42", safe: "M_42" }]);
+    expect(cards.map((c) => c.key)).toEqual(["first-lights"]);
+    expect(cards[0].blurb).toBe(
+      "The one object you pointed at in 2024 — and you'd never imaged it before.");
+  });
+
+  it("keeps both cards when the year had a repeat visit", () => {
+    // M 31 was shot in an earlier year, so "what you pointed at" really does
+    // say something "first light" does not.
+    const cards = yearTargetCards(2026, ["M 31", "M 42"], [
+      { name: "M 42", safe: "M_42" },
+    ]);
+    expect(cards.map((c) => c.key)).toEqual(["first-lights", "year-targets"]);
+    expect(cards[0].blurb).toBe("One object you'd never imaged before.");
+    expect(cards[1].title).toBe("What you pointed at");
+    expect(cards[1].chips.map((c) => c.name)).toEqual(["M 31", "M 42"]);
+    // The plain list is still a plain list — unlinked, as it has always been.
+    expect(cards[1].chips.every((c) => c.safe === null)).toBe(true);
+    expect(cards[1].highlight).toBe(false);
+  });
+
+  it("does not fold on a payload whose firsts are not the targets it shot", () => {
+    // Equal sets, not merely equal membership one way: a first light the year's
+    // own target list has never heard of would otherwise fold a name out of
+    // view. Both cards, so nothing is hidden by an inconsistent answer.
+    const cards = yearTargetCards(2026, ["M 31"], [
+      { name: "M 42", safe: "M_42" }, { name: "Gone", safe: null },
+    ]);
+    expect(cards.map((c) => c.key)).toEqual(["first-lights", "year-targets"]);
+  });
+
+  it("names a target the registry no longer has, without linking it", () => {
+    const cards = yearTargetCards(2026, ["Gone"], [{ name: "Gone", safe: null }]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].chips).toEqual([{ name: "Gone", safe: null }]);
+  });
+
+  it("shows only what it has, and nothing at all on an empty year", () => {
+    expect(yearTargetCards(2026, ["M 31"], []).map((c) => c.key))
+      .toEqual(["year-targets"]);
+    expect(yearTargetCards(2026, [], []).length).toBe(0);
+    expect(yearTargetCards(2026, undefined, undefined).length).toBe(0);
   });
 });
