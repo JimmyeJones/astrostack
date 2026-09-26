@@ -1,5 +1,59 @@
 # Shipped — the record
 
+## v0.477.1 — 2026-09-26 — three nudge cards chipped a target's name and hid the fact beside it
+
+*(Builder, branch `claude/exciting-tesla-m7wvjb`. Found by the `--closing` dogfood flag shipped an hour
+earlier in v0.477.0 — its **first** pass, on its first route. Measured in a real browser before and after.)*
+
+### The defect
+
+Three cards name the targets they are about as a chip reading `"<target name> · <fact>"`:
+
+| card | chip |
+| --- | --- |
+| `MergeSuggestionsCard` | `M 31_sub · 583 subs · 1.6 h` |
+| `CleanupSuggestionsCard` | `M 31_sub · duplicate` |
+| `LastNightCard` | `M 31 · 6 subs` |
+
+That is a **sentence**, not a token, and a Mantine `Badge` is
+`height: var(--badge-height); overflow: hidden` with a `nowrap` + `text-overflow: ellipsis` label. Measured at
+420 px on the seeded pair: the Alert body is **306 px**, the badge label box **288 px**, and the two strings
+wanted **299 px** and **317 px** — so the tail was ellipsised away *inside* the chip, with **no scroll and no
+`title` to reach it**. On the merge nudge that tail is how many subs and how many hours each folder holds,
+which is the whole basis of the decision the card is asking for.
+
+This is the fourth instance of the mechanism `frontend/src/badgeFit.ts` exists for (v0.434.1 on the Nights
+card, v0.436.2 on the Tonight score column, v0.472.3 on the week-plan chip) and the first one its existing rule
+could not fix.
+
+### Why `NO_SHRINK` is the wrong lever here
+
+`minWidth: "max-content"` is right for a badge in a **table**: making the table wider is honest, because the
+table's own scroll container can then reach it. These badges sit in an `Alert` body, which does not scroll — so
+asking for 320 px inside a 290 px box would push the overflow one element outwards instead of removing it, and
+the value would be just as unreachable.
+
+So the chip is allowed to grow **downwards** instead: new shared `badgeFit.WRAPPING_BADGE` clears the root's
+fixed height and the label's `nowrap`/`ellipsis`, and the chip takes two lines. After, in the same browser:
+both labels **288 px of 288 px**, 34 px tall, nothing overflowing and nothing hidden. Nothing was removed and
+no copy changed — the owner's standing constraint (AGENTS.md §1).
+
+The rule is documented against its sibling so the next card picks the right one: `NO_SHRINK` for a one-word
+verdict in a table, `WRAPPING_BADGE` for a label *composed* from data.
+
+### Tests
+
++1 vitest case and +2 assertions on existing rendering tests, one per card, so the rule is pinned where a
+reader of that card looks. The new case **fails before** the fix (verified by reverting the `styles` prop in a
+scratch edit and re-running) on a realistic long name — `"Lagoon and Trifid Nebulae mosaic_sub"`, the shape the
+owner's own `<T>_mosaic_sub` duplicates take.
+
+### Upgrade-safety (§9)
+
+Frontend-only, three `styles` props and one exported constant. No API, config, schema, on-disk or default
+change.
+
+
 ## v0.477.0 — 2026-09-26 — the season-closing dogfood hole: a sample shape whose sky the *planner* chooses
 
 *(Builder, branch `claude/exciting-tesla-m7wvjb`. Built as the backlog's own preferred shape (a) for the

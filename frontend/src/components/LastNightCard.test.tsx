@@ -138,6 +138,11 @@ describe("LastNightCard", () => {
     // Per-target chips only show for a multi-target night.
     expect(screen.getByText("M 31 · 6 subs")).toBeInTheDocument();
     expect(screen.getByText("M 42 · 4 subs")).toBeInTheDocument();
+    // …and a chip whose name is long enough to outgrow the card wraps rather
+    // than hiding its own sub count (`badgeFit.WRAPPING_BADGE`).
+    const chip = screen.getByText("M 31 · 6 subs");
+    expect(chip.closest(".mantine-Badge-root")).toHaveStyle({ height: "auto" });
+    expect(chip).toHaveStyle({ whiteSpace: "normal" });
   });
 
   it("omits the chip row for a single-target night", async () => {
