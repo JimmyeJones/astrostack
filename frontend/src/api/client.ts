@@ -3829,6 +3829,23 @@ export const api = {
       is_mosaic?: boolean | null;
     }>(
       `/api/targets/${safe}/stack-runs/${id}/one-sub-vs-stack/noise`),
+  // "Did it get better?" as a picture: one patch of sky from two of a target's
+  // stacks, side by side at full resolution under one shared stretch. `a` is the
+  // newest run and `b` the one before it, the same way round as /compare.
+  // `available: false` (never an error) on an editor export either side, a canvas
+  // too small for a patch, or no patch covered in both. `noise_ratio` is
+  // sigma_previous / sigma_newest and is **null** unless `pixel_exact` — a resize
+  // lowers the resampled side's per-pixel grain for reasons that have nothing to
+  // do with stacking, so the number is withheld rather than guessed.
+  noiseDeltaInfo: (safe: string, a: number, b: number) =>
+    req<{
+      available: boolean;
+      patch_px?: number | null;
+      pixel_exact?: boolean | null;
+      noise_ratio?: number | null;
+    }>(`/api/targets/${safe}/noise-delta/info?a=${a}&b=${b}`),
+  noiseDeltaUrl: (safe: string, a: number, b: number) =>
+    `/api/targets/${safe}/noise-delta?a=${a}&b=${b}`,
   stackReferenceSubUrl: (safe: string, id: number) =>
     `/api/targets/${safe}/stack-runs/${id}/reference-sub`,
   // "Share your glow-up" — the reveal composed into one labelled, captioned

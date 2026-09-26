@@ -6,6 +6,7 @@ import {
   pickCompareWithLast, pickFirstVsNow, sameTargetCompareHref,
 } from "../compareWithLast";
 import { pictureDateLabel } from "../format";
+import { NoiseDeltaStrip } from "./NoiseDeltaStrip";
 
 /**
  * "Is my new picture actually better than last week's?" — the one affordance
@@ -37,6 +38,13 @@ import { pictureDateLabel } from "../format";
  * clutter rather than a feature. Both links put "now" on the same side of the
  * divider (`a` is always the newest run), so the two comparisons read the same
  * way round.
+ *
+ * **And it can now show the difference rather than only asserting it**
+ * (`NoiseDeltaStrip`, owner-requested 2026-09-25): one patch of sky from each of
+ * the two stacks, at full resolution and under one shared stretch. A card-sized
+ * A/B of the whole canvas cannot carry that — both previews are shrunk 5–10× and
+ * decimation averages the grain away — so the strip is a *crop*, behind a button,
+ * and self-hides when there is no honest patch to show.
  *
  * Renders **nothing** on a target with fewer than two comparable pictures, which
  * is every freshly-stacked target; see `pickCompareWithLast` for what counts.
@@ -86,6 +94,13 @@ export function CompareWithLastCard(
               {" "}beside where it is now.
             </Text>
           ) : null}
+          {/* See the difference, don't just read about it. Behind a button: the
+              two crops cost a pass over both masters to place, and the Target
+              page must not spend that on every view (as the deepening reel's
+              "Play"). */}
+          <NoiseDeltaStrip safe={safe} newestId={pair.newest.id}
+            previousId={pair.previous.id}
+            newestLabel={newest} previousLabel={previous} />
           <Group gap="xs">
             <Button
               size="xs" variant="light" color="grape"

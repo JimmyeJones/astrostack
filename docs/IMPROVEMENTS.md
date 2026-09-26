@@ -2783,15 +2783,40 @@ problems. Dogfood it every big-picture run and fix root causes.
   the design question is cost: a full stack per night per target is hours on his deepest targets — look first at
   a reduced-resolution cumulative pass, and reuse any existing run whose sub set already matches a cumulative
   step. Keep the current stack-history reel; this is a second mode, not a replacement.
-- **OWNER-APPROVED 2026-09-25 — a noise-delta *picture* beside the "Did it get better?" sentence.** *(Pillar:
-  understand — size S/M.)* `frontend/src/components/CompareWithLastCard.tsx` answers in words and a number; add
-  a small matched crop of the same sky patch from the two runs, rendered with one shared stretch (the fair-
-  comparison rule `seestack/render/deepening.py` already follows), so the difference is visible, not only stated.
+- ~~**OWNER-APPROVED 2026-09-25 — a noise-delta *picture* beside the "Did it get better?" sentence.**~~ —
+  **✅ SHIPPED v0.479.0** (Builder 2026-09-26). Entry cut to [`SHIPPED.md`](SHIPPED.md); one-liner under
+  "Shipped" below. One finding came out of sizing its sibling: the third owner-approved item in this section
+  (auto-*apply* the classified preset) cannot be built the way it reads — the ⚠ note is on that entry.
 - **OWNER-APPROVED 2026-09-25 — auto-*apply* the classified object preset instead of offering it as a chip.**
-  *(Pillar: autonomy — size S/M.)* `seestack/edit/presets.py` (content classification, ~line 420) feeds the "try
-  this preset?" chip in `frontend/src/routes/Editor.tsx` (~line 2429). The owner asked for it to be applied, not
-  offered. Conditions, per §9: never over a saved or hand-edited recipe; say what was applied and offer one-click
-  undo; and a Settings switch to turn it off.
+  *(Pillar: autonomy — size S/M as filed; **M/L as it actually is**, see the finding.)*
+  `seestack/edit/presets.py` (content classification, ~line 420) feeds the "try this preset?" chip in
+  `frontend/src/routes/Editor.tsx` (~line 2429). The owner asked for it to be applied, not offered. Conditions,
+  per §9: never over a saved or hand-edited recipe; say what was applied and offer one-click undo; and a Settings
+  switch to turn it off.
+  **⚠ BUILDER FINDING 2026-09-26, read before starting: the literal build is an image-quality DOWNGRADE, and
+  the chip is not where the owner saw this.** Read in the code while sizing it, not reasoned from the entry.
+  **(1) Where the sentence he reacted to actually is.** The chip at ~2510 renders inside the *empty-pipeline*
+  nudge, and since the auto-seed (v0.390.0) a run with no saved recipe opens with Auto **already applied** — so
+  on the owner's own install (nothing saved, `auto_edit_on_autostack` off) that nudge is not what he sees. What
+  he sees is the dimmed informational line at ~2434, inside "What Auto-process did". So "instead of offering it
+  as a chip" means *instead of Auto*, not *instead of an empty pipeline*.
+  **(2) Why swapping Auto for the preset loses picture quality.** The four `BUILTIN_PRESETS` are fixed op
+  lists (`presets.py:43`): a gradient pass, colour calibration, a stretch at a hard-coded `target_bg`, a fixed
+  curve, a fixed saturation, sometimes a fixed sharpen. `auto_recipe` (`presets.py:668`) is the data-driven
+  one: `detail.denoise` and `detail.chroma_denoise` sized by the *measured* `sky_sigma` crossfade,
+  `detail.sharpen` radius from the target's own median FWHM, `tone.curves {auto: true}` deriving its midtone
+  lift from the stretched data, `background.level_coverage` on a mosaic canvas, the ragged-border trim, and the
+  owner's stored taste profile. `applySuggestedPreset`'s `applyDataDrivenDefaults` + `prependCoverageLeveling`
+  recover only the sizing and the mosaic levelling of ops the preset already carries — **a preset with no
+  denoise op stays with no denoise op**, on the noisy stacks Auto's crossfade exists for.
+  **(3) The shape that honours the ask without the loss** — and the reason this is not S/M: make **Auto**
+  archetype-aware, i.e. fold each preset's *distinguishing* choices (galaxy: `per_channel` gradient + its
+  S-curve; nebula: the stronger SCNR/saturation; cluster: the asinh stretch + `stars.reduce`) into the
+  data-driven recipe when `classify_target` is confident, so the classification is *applied* and nothing is
+  given up. That changes the on-by-default Auto hot path, which AGENTS.md §1 judges on a tiled mosaic at the
+  owner's scale — a dogfood pass with `--mosaic` and `--editor`, not a drive-by. **Do not blind-flip the seed
+  to the preset** to close this entry; if a cheap version is wanted, the honest one is the *chip*, moved from
+  the nudge nobody sees to beside Auto's own note, which is a copy change and not what he asked for.
 - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-25) — "Was the moon out?": a retrospective moon note on a
   session.**~~ — **⚪ CLOSED: ALREADY BUILT, END TO END. Do not pick it up** *(Builder 2026-09-25, grepped and
   read before starting it — it was the freshest entry in this section and the run's first candidate).* The
@@ -2872,46 +2897,11 @@ off by default. Don't re-file it.)*
   are now served by one shared `preview_orient.preview_geometry_out` that the run listing uses too, so the
   page that draws the picture and the page that captions it cannot describe it differently.
 
-- **NEXT SLICES of the "finished / not stretched / thin" card signal — the Library wall shipped as v0.448.0;
-  three pieces are left.** *(Scout 2026-09-16, first slice built by the Builder the same day. Pillar:
-  understand + trust — PRIORITY 3; each S. Beginner bar: yes — the shipped half is proof.)*
-  **What shipped:** `GET /api/unstretched-pictures` (`webapp/routers/unstretched.py`) names every target whose
-  *displayed* picture is a flat linear stack, and `Library.tsx` badges those cards "Not stretched yet" with a
-  plain-language `title`. "Finished" is one shared definition, `webapp/finishedpicture.py`
-  (`displayed_picture_run` + `run_is_a_finished_picture`), the same two functions v0.447.2's reprocess warning
-  counts with; a test asserts the two partition a library exactly. **One deliberate change of shape from the
-  idea as filed: it chips only the cards that need something, never "Finished"** — a chip on the nine in ten
-  that are fine is a wall of badges saying nothing, and clutter is the owner's standing complaint (AGENTS.md
-  §1). Don't re-file that half. Full entry in [`SHIPPED.md`](SHIPPED.md).
-  (a) ~~**The same chip on Gallery cards**~~ — **✅ SHIPPED v0.448.2, and NOT off the same query.** The slice as
-  filed said "`Gallery.tsx` reading the same query", and that would have been wrong: `/api/unstretched-pictures`
-  answers per **target**, about the one run it displays, while the Gallery lists **every run of every target** —
-  so it would have badged each target's displayed run and said nothing at all about the older linear runs beside
-  it, on the page whose whole job is looking at pictures. It is instead a per-run `GalleryItem.finished`, off a
-  new `finishedpicture.run_is_a_finished_picture_from` that takes the recipe row `_gallery_item` had already read
-  for `unexported_edit` (so the field costs no extra DB read on the one endpoint whose meta reads are counted);
-  the `proj`-taking form is now a wrapper over it, and a test asserts the two can never answer differently.
-  Shared copy moved to `frontend/src/unstretched.ts` + `components/UnstretchedBadge.tsx`.
-  (b) ~~**The idea's optional "Thin — keep shooting" state.**~~ — **✅ SHIPPED v0.450.0**, and its "check what
-  the Target page already says" is what decided the shape: the sentence is not new copy at all, it is
-  `thinStackWarning`'s own — the function the Gallery card's orange frame badge already asks — given the two
-  numbers it names on a mosaic (`n_frames_used` + `field_fulls`, off `derived_light.stacking_field_fulls` so a
-  finished picture's crop cannot read as depth). Depth takes the card's one chip slot when a card is both,
-  because "press Auto" cannot make a one-sub stack anything but a stretched one-sub stack. Entry in
-  [`SHIPPED.md`](SHIPPED.md).
-  (c) ~~**A one-click deep link from the chip to that run's Auto**~~ — **✅ BOTH HALVES NOW DONE: answered on the
-  Gallery (v0.448.2) without building it, and shipped on the Library card as v0.471.0.** On a Gallery card the one
-  click already existed: an **Edit image** button straight to `/targets/<safe>/edit/<run_id>`, which since v0.390.0
-  opens *on* Auto rather than on a nudge to press it. So that chip's hint names that button instead, and a second
-  link to the same place was declined as exactly the duplicate surface the owner's standing clutter complaint is
-  about. **The Library half's two stated blockers turned out to be one, and it was already solved:** the run id is
-  indeed not on `TargetOut`, but the wall does not read the chip off `TargetOut` — it reads
-  `/api/unstretched-pictures`, whose `UnstretchedItem.run_id` has carried exactly the run
-  `displayed_picture_run` picked since v0.448.0, so nothing new travels on the wire. And the card did not need
-  restructuring: the chip is a `<button>` inside the card's `<Link>` that stops its own click, the shape
-  `WishlistStar` already uses for a control sitting on a picture tile — so the chip goes to the editor and every
-  other part of the card still goes to the target. Entry in [`SHIPPED.md`](SHIPPED.md).
-
+- ~~**NEXT SLICES of the "finished / not stretched / thin" card signal**~~ — **⚪ CLOSED: all three slices
+  shipped** (a) v0.448.2, (b) v0.450.0, (c) v0.448.2 + v0.471.0, on top of the wall itself (v0.448.0). Full
+  entries, including the two shape changes worth not undoing — the chip appears only on cards that need
+  something, and the Gallery's chip is per-*run* rather than per-target — are in [`SHIPPED.md`](SHIPPED.md).
+  Nothing here is open.
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
   *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
@@ -3924,6 +3914,33 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.479.1** — INFRA / tooling, found while shipping v0.479.0: **no dogfood pass had ever held two stacks of
+  one target**, so every surface whose precondition is "this target has a previous picture" had only ever been
+  photographed self-hidden — the "Did it get better?" card and its "How far you've come" link, the deepening
+  reel, History's per-row Compare, the supersede family, and v0.479.0's own matched crop. `--mosaic` does not
+  close it: its pair is two *different* targets. `scripts/agent-dogfood.sh --restack` stacks the field sample
+  **twice, thin then deep** (half the subs set aside through the same `POST /frames/bulk` the frames table uses,
+  then re-accepted), before the ordinary stack step so `stack_target`'s early return no-ops rather than adding a
+  third run, and prints what `/stack-runs`, `/deepening-reel/info` and `/noise-delta/info` say about the pair
+  **plus the two ways it can fail silently**. Off by default: it grows the field sample's Target page, so a
+  `--restack` pass is a poor one on which to read page-height baselines. Tests +5
+  (`tests/test_dogfood_restack_anchors.py`). `scripts/` is not in the image's file set. Full entry in
+  [`SHIPPED.md`](SHIPPED.md).
+- **v0.479.0** — PRIORITY 3 (understand/trust), the owner-approved entry of 2026-09-25: **"Did it get better?"
+  now shows the difference instead of only asserting it.** New `seestack/render/noisedelta.py`
+  (`build_noise_delta`, `choose_patch_centre`) crops one patch of sky from each of two masters at **native
+  resolution** and draws them side by side under **one shared stretch** — a card-sized whole-canvas A/B cannot
+  carry the grain, because both previews are shrunk 5–10× and decimation averages exactly that away. Served by
+  `GET /api/targets/{safe}/noise-delta[/info]` (masters resolved from the project DB, never the request) through
+  a new `webapp/noise_delta_cache.py` keyed on both paths' mtime+size, and shown by `NoiseDeltaStrip` inside the
+  existing `CompareWithLastCard` behind a *"Show me the difference"* button — no new always-on surface, and no
+  pass over the masters until it is wanted. The σ ratio is **withheld** whenever the two canvases differ, because
+  the resize that makes them comparable lowers the resampled side's per-pixel grain for reasons that are not
+  stacking; the verdict copy says *coarser* as plainly as *finer*. **The shared-stretch test's first fixture
+  could not show its own defect** (two independent autostretches pin both skies to the same `target_bg`, so the
+  medians agreed either way) — re-cut onto a sky-pedestal fixture that separates them 48 display levels to 0, and
+  verified by reverting the fix. Tests +16 Python / +15 vitest. No config, schema, on-disk, default or API-shape
+  change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.478.3** — 🔴 §10 (raw-data safety) + public-repo privacy, from the 2026-09-26 setup audit: **the layout guard
   accepted `incoming_dir` at or under `<library>/targets` or `<library>/calibration`**, where a scan adopts each raw
   folder as a target's project folder and `Library.delete_target(remove_files=True)` then rmtrees the raws
