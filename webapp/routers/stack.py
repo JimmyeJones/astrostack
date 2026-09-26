@@ -2323,6 +2323,105 @@ async def deepening_reel(safe: str, request: Request) -> FileResponse:
     return FileResponse(reel, media_type=media, filename=reel.name)
 
 
+# --- "Did it get better?" as a picture ---------------------------------------
+# The Target page's compare card has always answered that question in words and a
+# link to /compare. This is the same question as a *picture*: one patch of sky
+# from two of the target's masters, side by side at native resolution under one
+# shared stretch (owner-requested 2026-09-25). A card-sized A/B of the whole
+# canvas cannot carry it — both previews are shrunk 5-10x on the way to the screen
+# and decimation averages the grain away — which is why this serves a crop.
+# The honesty rules (one stretch, no resampling where it can be avoided, the sigma
+# ratio withheld the moment identical sampling stops holding) live in
+# seestack.render.noisedelta; webapp.noise_delta_cache holds the last few answers
+# so the card's two questions cost one build.
+
+
+def _noise_delta_masters(proj, newer_id: int, older_id: int) -> tuple[str, str] | None:
+    """``(older_fits, newer_fits)`` for two of this target's runs, or ``None``.
+
+    ``None`` means "no picture": one of the runs has no master on disk any more,
+    or the two ids are the same run (comparing a picture with itself is not a
+    comparison). Both paths come out of the project DB — never off the request —
+    so this endpoint cannot be pointed at an arbitrary file.
+    """
+    by_id = {r.id: r for r in proj.iter_stack_runs()}
+    newer, older = by_id.get(newer_id), by_id.get(older_id)
+    if newer is None or older is None:
+        raise HTTPException(status_code=404, detail="No such run")
+    if newer_id == older_id:
+        return None
+    for run in (newer, older):
+        if not run.fits_path or not Path(run.fits_path).exists():
+            return None
+    return str(older.fits_path), str(newer.fits_path)
+
+
+@router.get("/api/targets/{safe}/noise-delta/info")
+async def noise_delta_info(safe: str, request: Request,
+                           a: int, b: int) -> dict[str, Any]:
+    """Whether a matched-crop picture can honestly be drawn for runs ``a`` (the
+    newest) and ``b`` (the one before it), plus what may be said about it.
+
+    ``available`` is ``false`` — never an error — when either side is a
+    display-space editor export, a canvas is too small to yield a patch, or no
+    patch of sky is covered in both. ``noise_ratio`` (sigma of ``b`` over sigma of
+    ``a``, so >1 means the newer picture is cleaner) is ``null`` unless
+    ``pixel_exact``: when the two canvases differ, one crop has to be resized to
+    be shown beside the other, and a resize lowers the resampled side's per-pixel
+    grain for reasons that have nothing to do with stacking.
+
+    Builds the picture (cached) rather than guessing, because every one of those
+    answers is a property of the pixels; the PNG beside it then costs nothing.
+    """
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        pair = _noise_delta_masters(proj, a, b)
+    finally:
+        proj.close()
+        lib.close()
+    if pair is None:
+        return {"available": False}
+    from webapp import noise_delta_cache
+
+    patch = await run_in_threadpool(noise_delta_cache.noise_delta, pair[0], pair[1])
+    if patch is None:
+        return {"available": False}
+    return {
+        "available": True,
+        "patch_px": patch.patch_px,
+        "pixel_exact": patch.pixel_exact,
+        "noise_ratio": (round(patch.noise_ratio, 3)
+                        if patch.noise_ratio is not None else None),
+    }
+
+
+@router.get("/api/targets/{safe}/noise-delta")
+async def noise_delta_png(safe: str, request: Request,
+                          a: int, b: int) -> Response:
+    """The matched-crop picture for runs ``a`` (newest, drawn on the right) and
+    ``b`` (previous, on the left), as PNG. 404s on exactly the cases the info
+    endpoint reports as unavailable, so the card only ever asks for a picture it
+    has been told exists."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        pair = _noise_delta_masters(proj, a, b)
+    finally:
+        proj.close()
+        lib.close()
+    if pair is None:
+        raise HTTPException(status_code=404,
+                            detail="These two pictures can't be compared")
+    from webapp import noise_delta_cache
+
+    patch = await run_in_threadpool(noise_delta_cache.noise_delta, pair[0], pair[1])
+    if patch is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No patch of sky is covered in both of these pictures")
+    return Response(content=patch.png, media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
 # --- Share-ready "zoom clip" -------------------------------------------------
 # A short looping push-in on ONE finished picture, for posting. Unlike the two
 # animations above (the progress reel and the deepening reel, both of which show a

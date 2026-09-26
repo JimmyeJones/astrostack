@@ -2783,15 +2783,40 @@ problems. Dogfood it every big-picture run and fix root causes.
   the design question is cost: a full stack per night per target is hours on his deepest targets — look first at
   a reduced-resolution cumulative pass, and reuse any existing run whose sub set already matches a cumulative
   step. Keep the current stack-history reel; this is a second mode, not a replacement.
-- **OWNER-APPROVED 2026-09-25 — a noise-delta *picture* beside the "Did it get better?" sentence.** *(Pillar:
-  understand — size S/M.)* `frontend/src/components/CompareWithLastCard.tsx` answers in words and a number; add
-  a small matched crop of the same sky patch from the two runs, rendered with one shared stretch (the fair-
-  comparison rule `seestack/render/deepening.py` already follows), so the difference is visible, not only stated.
+- ~~**OWNER-APPROVED 2026-09-25 — a noise-delta *picture* beside the "Did it get better?" sentence.**~~ —
+  **✅ SHIPPED v0.479.0** (Builder 2026-09-26). Entry cut to [`SHIPPED.md`](SHIPPED.md); one-liner under
+  "Shipped" below. One finding came out of sizing its sibling: the third owner-approved item in this section
+  (auto-*apply* the classified preset) cannot be built the way it reads — the ⚠ note is on that entry.
 - **OWNER-APPROVED 2026-09-25 — auto-*apply* the classified object preset instead of offering it as a chip.**
-  *(Pillar: autonomy — size S/M.)* `seestack/edit/presets.py` (content classification, ~line 420) feeds the "try
-  this preset?" chip in `frontend/src/routes/Editor.tsx` (~line 2429). The owner asked for it to be applied, not
-  offered. Conditions, per §9: never over a saved or hand-edited recipe; say what was applied and offer one-click
-  undo; and a Settings switch to turn it off.
+  *(Pillar: autonomy — size S/M as filed; **M/L as it actually is**, see the finding.)*
+  `seestack/edit/presets.py` (content classification, ~line 420) feeds the "try this preset?" chip in
+  `frontend/src/routes/Editor.tsx` (~line 2429). The owner asked for it to be applied, not offered. Conditions,
+  per §9: never over a saved or hand-edited recipe; say what was applied and offer one-click undo; and a Settings
+  switch to turn it off.
+  **⚠ BUILDER FINDING 2026-09-26, read before starting: the literal build is an image-quality DOWNGRADE, and
+  the chip is not where the owner saw this.** Read in the code while sizing it, not reasoned from the entry.
+  **(1) Where the sentence he reacted to actually is.** The chip at ~2510 renders inside the *empty-pipeline*
+  nudge, and since the auto-seed (v0.390.0) a run with no saved recipe opens with Auto **already applied** — so
+  on the owner's own install (nothing saved, `auto_edit_on_autostack` off) that nudge is not what he sees. What
+  he sees is the dimmed informational line at ~2434, inside "What Auto-process did". So "instead of offering it
+  as a chip" means *instead of Auto*, not *instead of an empty pipeline*.
+  **(2) Why swapping Auto for the preset loses picture quality.** The four `BUILTIN_PRESETS` are fixed op
+  lists (`presets.py:43`): a gradient pass, colour calibration, a stretch at a hard-coded `target_bg`, a fixed
+  curve, a fixed saturation, sometimes a fixed sharpen. `auto_recipe` (`presets.py:668`) is the data-driven
+  one: `detail.denoise` and `detail.chroma_denoise` sized by the *measured* `sky_sigma` crossfade,
+  `detail.sharpen` radius from the target's own median FWHM, `tone.curves {auto: true}` deriving its midtone
+  lift from the stretched data, `background.level_coverage` on a mosaic canvas, the ragged-border trim, and the
+  owner's stored taste profile. `applySuggestedPreset`'s `applyDataDrivenDefaults` + `prependCoverageLeveling`
+  recover only the sizing and the mosaic levelling of ops the preset already carries — **a preset with no
+  denoise op stays with no denoise op**, on the noisy stacks Auto's crossfade exists for.
+  **(3) The shape that honours the ask without the loss** — and the reason this is not S/M: make **Auto**
+  archetype-aware, i.e. fold each preset's *distinguishing* choices (galaxy: `per_channel` gradient + its
+  S-curve; nebula: the stronger SCNR/saturation; cluster: the asinh stretch + `stars.reduce`) into the
+  data-driven recipe when `classify_target` is confident, so the classification is *applied* and nothing is
+  given up. That changes the on-by-default Auto hot path, which AGENTS.md §1 judges on a tiled mosaic at the
+  owner's scale — a dogfood pass with `--mosaic` and `--editor`, not a drive-by. **Do not blind-flip the seed
+  to the preset** to close this entry; if a cheap version is wanted, the honest one is the *chip*, moved from
+  the nudge nobody sees to beside Auto's own note, which is a copy change and not what he asked for.
 - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-25) — "Was the moon out?": a retrospective moon note on a
   session.**~~ — **⚪ CLOSED: ALREADY BUILT, END TO END. Do not pick it up** *(Builder 2026-09-25, grepped and
   read before starting it — it was the freshest entry in this section and the run's first candidate).* The
@@ -3924,6 +3949,21 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.479.0** — PRIORITY 3 (understand/trust), the owner-approved entry of 2026-09-25: **"Did it get better?"
+  now shows the difference instead of only asserting it.** New `seestack/render/noisedelta.py`
+  (`build_noise_delta`, `choose_patch_centre`) crops one patch of sky from each of two masters at **native
+  resolution** and draws them side by side under **one shared stretch** — a card-sized whole-canvas A/B cannot
+  carry the grain, because both previews are shrunk 5–10× and decimation averages exactly that away. Served by
+  `GET /api/targets/{safe}/noise-delta[/info]` (masters resolved from the project DB, never the request) through
+  a new `webapp/noise_delta_cache.py` keyed on both paths' mtime+size, and shown by `NoiseDeltaStrip` inside the
+  existing `CompareWithLastCard` behind a *"Show me the difference"* button — no new always-on surface, and no
+  pass over the masters until it is wanted. The σ ratio is **withheld** whenever the two canvases differ, because
+  the resize that makes them comparable lowers the resampled side's per-pixel grain for reasons that are not
+  stacking; the verdict copy says *coarser* as plainly as *finer*. **The shared-stretch test's first fixture
+  could not show its own defect** (two independent autostretches pin both skies to the same `target_bg`, so the
+  medians agreed either way) — re-cut onto a sky-pedestal fixture that separates them 48 display levels to 0, and
+  verified by reverting the fix. Tests +16 Python / +15 vitest. No config, schema, on-disk, default or API-shape
+  change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.478.3** — 🔴 §10 (raw-data safety) + public-repo privacy, from the 2026-09-26 setup audit: **the layout guard
   accepted `incoming_dir` at or under `<library>/targets` or `<library>/calibration`**, where a scan adopts each raw
   folder as a target's project folder and `Library.delete_target(remove_files=True)` then rmtrees the raws
