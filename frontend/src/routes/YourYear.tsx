@@ -24,7 +24,9 @@ import { api } from "../api/client";
 import { QueryError } from "../components/QueryError";
 import { YearShareCard } from "../components/YearShareCard";
 import { formatIntegration } from "../format";
-import { defaultRecapYear, recapYearOptions, yearNightCards } from "../yourYear";
+import {
+  defaultRecapYear, recapYearOptions, yearNightCards, yearTargetCards,
+} from "../yourYear";
 
 function StatCard({ value, label }: { value: string; label: string }) {
   return (
@@ -83,6 +85,8 @@ export function YourYearView() {
   const suggested = defaultRecapYear(data.years_with_data, thisYear);
   const nightCards = yearNightCards(
     data.longest_night, data.sharpest_night, formatIntegration);
+  const targetCards = yearTargetCards(
+    data.year, data.target_names, data.first_lights);
 
   return (
     <Stack gap="md">
@@ -154,47 +158,39 @@ export function YourYearView() {
             </SimpleGrid>
           ) : null}
 
-          {data.first_lights.length > 0 ? (
-            <Card withBorder radius="md" padding="md" data-testid="first-lights">
+          {/* One card when everything the year pointed at was new — the same
+              call `yearNightCards` makes above, for the same reason. */}
+          {targetCards.map((card) => (
+            <Card key={card.key} withBorder radius="md" padding="md"
+              data-testid={card.key}>
               <Group gap="xs" mb="xs" wrap="nowrap">
-                <IconSparkles size={18} color="var(--mantine-color-yellow-5)" />
-                <Text fw={600}>
-                  First light in {data.year}
-                </Text>
+                {card.highlight ? (
+                  <IconSparkles size={18} color="var(--mantine-color-yellow-5)" />
+                ) : null}
+                <Text fw={600}>{card.title}</Text>
               </Group>
-              <Text size="xs" c="dimmed" mb="sm">
-                {data.first_lights.length === 1
-                  ? "One object you'd never imaged before."
-                  : `${data.first_lights.length} objects you'd never imaged before.`}
-              </Text>
+              {card.blurb ? (
+                <Text size="xs" c="dimmed" mb="sm">{card.blurb}</Text>
+              ) : null}
               <Group gap="xs">
-                {data.first_lights.map((f) => (
-                  f.safe ? (
-                    <Badge key={f.name} variant="light" size="lg"
-                      component={Link} to={`/targets/${f.safe}`}
+                {card.chips.map((chip) => (
+                  chip.safe ? (
+                    <Badge key={chip.name} variant="light" size="lg"
+                      component={Link} to={`/targets/${chip.safe}`}
                       style={{ cursor: "pointer" }}>
-                      {f.name}
+                      {chip.name}
                     </Badge>
                   ) : (
-                    <Badge key={f.name} variant="light" size="lg" color="gray">
-                      {f.name}
+                    <Badge key={chip.name} size="lg"
+                      variant={card.highlight ? "light" : "default"}
+                      color={card.highlight ? "gray" : undefined}>
+                      {chip.name}
                     </Badge>
                   )
                 ))}
               </Group>
             </Card>
-          ) : null}
-
-          {data.target_names.length > 0 ? (
-            <Card withBorder radius="md" padding="md" data-testid="year-targets">
-              <Text fw={600} mb="xs">What you pointed at</Text>
-              <Group gap="xs">
-                {data.target_names.map((n) => (
-                  <Badge key={n} variant="default" size="lg">{n}</Badge>
-                ))}
-              </Group>
-            </Card>
-          ) : null}
+          ))}
         </>
       )}
     </Stack>

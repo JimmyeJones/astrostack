@@ -1,5 +1,59 @@
 # Shipped — the record
 
+## v0.477.3 — 2026-09-26 — "Your year under the stars" named the same targets twice, in two cards, and the second one linked nowhere
+
+*(Builder, branch `claude/exciting-tesla-2cd04h`. Found on the **first** dogfood pass that ever opened
+`/sky-so-far/:year` — v0.477.2, an hour earlier. Photographed at 1440 px and 420 px.)*
+
+### The defect
+
+The year page ends with two cards, one directly above the other:
+
+* **"First light in 2024"** — *"One object you'd never imaged before."* — chips that **link** to the target.
+* **"What you pointed at"** — the same names again, as plain badges that link nowhere.
+
+Those are two different facts on a year with repeat visits, and **one fact** on a year where everything was
+new — which is the guaranteed shape of a beginner's **first** year, i.e. of the reader this page is written
+for. On the scratch install the two cards held the identical single chip
+`SAMPLE: ORION NEBULA (M42)`, one above the other, the lower one adding nothing.
+
+It is the class this repo has a name for — *two superlatives that can resolve to the same thing* — and this
+page **already answers it for its nights**, one function up: `yearNightCards` folds the longest and sharpest
+night into one card when they are the same night, with a docstring that reads *"Rendered as two cards it read
+as the page repeating itself — the same date, the same target, twice, side by side."* The identical complaint,
+unanswered for the targets.
+
+### The fix
+
+New pure `frontend/src/yourYear.ts::yearTargetCards(year, targetNames, firstLights)` — the same shape and the
+same reasoning as `yearNightCards` beside it. When every target the year pointed at was a first light, the two
+cards become **one**, keeping the first-light framing (the richer one: it links, and it has a sentence) with a
+blurb that says the thing two cards could never say:
+
+* one target → *"The one object you pointed at in 2024 — and you'd never imaged it before."*
+* many → *"All 4 objects you pointed at in 2026 were ones you'd never imaged before."*
+
+**Nothing is removed** (AGENTS.md §1): every name is still on screen, once, and in the folded case each one
+now carries its link instead of sitting as a dead badge. A year with any repeat visit renders exactly as it
+did.
+
+Folding requires **set equality**, not containment: `first_light_names` is derived from the same nights as
+`target_names` (`seestack/yearrecap.py`), so equal counts mean equal sets, and an older or inconsistent
+payload naming a first light the year never shot stays on the two-card path rather than quietly folding a name
+out of view.
+
+`YourYear.tsx` now renders `targetCards.map(...)` through one card component, so the two cards cannot drift
+into two layouts either. `data-testid` is the card key, so `first-lights` and `year-targets` keep working.
+
+### Tests
+
++6 pure cases in `yourYear.test.ts` (fold, the one-target wording, the repeat-visit two-card path, the
+unequal-sets guard, a target the registry no longer has, and the empty year) and +2 rendered in
+`YourYear.test.tsx`. The rendered fold test **fails before** — verified by a scratch revert of
+`YourYear.tsx`, where it reports the `year-targets` card still present.
+
+Frontend-only. No API, config, schema, on-disk or default change.
+
 ## v0.477.2 — 2026-09-26 — three registered routes had never been in front of a browser, and the list that decides which are is hand-mirrored
 
 *(Builder, branch `claude/exciting-tesla-2cd04h`. Found by diffing `scripts/dogfood_probe.mjs`'s `ROUTES`

@@ -7,7 +7,7 @@
  * nights. Keeping it out of the components means both surfaces can't drift
  * about which year "your year" means.
  */
-import type { NightActivity, YearRecap } from "./api/client";
+import type { NightActivity, YearFirstLight, YearRecap } from "./api/client";
 import { formatNightDate } from "./format";
 
 /**
@@ -146,5 +146,93 @@ export function yearNightCards(
   const out: YearNightCard[] = [];
   if (longest) out.push({ key: "longest", title: "Longest night", lines: longest });
   if (sharpest) out.push({ key: "sharpest", title: "Sharpest night", lines: sharpest });
+  return out;
+}
+
+/** One chip on a year's target card. `safe` is the target's folder name when
+ * the registry still has it, and `null` for a target since removed — which is
+ * still named, just not linked. */
+export interface YearTargetChip {
+  name: string;
+  safe: string | null;
+}
+
+export interface YearTargetCard {
+  /** Which card this is — also its React key and its `data-testid`. */
+  key: "first-lights" | "year-targets";
+  title: string;
+  /** The dimmed line under the title, or "" when the card has none. */
+  blurb: string;
+  chips: YearTargetChip[];
+  /** First lights get the accent badge and a link to the target; the plain
+   * "what you pointed at" list does not. */
+  highlight: boolean;
+}
+
+/**
+ * The target cards to render, in order — none, one or two.
+ *
+ * The year names its targets twice: the ones that were **new** ("First light in
+ * 2026") and then everything it pointed at. Those are two different facts on a
+ * year with any repeat visits — and the *same* fact on a year where everything
+ * was new, which is exactly the shape of a beginner's **first** year and so of
+ * the reader this page is written for. Rendered as two cards it read as the page
+ * repeating itself: the same names, in the same order, in two boxes one above
+ * the other, the second adding nothing and linking nowhere.
+ *
+ * So when every target the year pointed at was a first light they become **one**
+ * card that says so — nothing is dropped, every name is still on screen, and
+ * each one now links to its target instead of sitting as a dead badge. The
+ * reader gains the thing two cards could never say: that the whole year was new
+ * sky.
+ *
+ * Same call, and the same reasoning, as :func:`yearNightCards` one function up
+ * (the longest night that was also the sharpest); this page already had the
+ * answer for its nights and not for its targets.
+ */
+export function yearTargetCards(
+  year: number,
+  targetNames: readonly string[] | undefined,
+  firstLights: readonly YearFirstLight[] | undefined,
+): YearTargetCard[] {
+  const names = (targetNames ?? []).filter((n) => !!n);
+  const firsts = (firstLights ?? []).filter((f) => !!f?.name);
+
+  // `first_light_names` is derived from the same nights as `target_names`
+  // (`seestack/yearrecap.py`), so in a real answer the firsts are a subset and
+  // equal counts mean equal sets. Requiring the count too keeps an older or
+  // inconsistent payload — one naming a first light the year never shot — on
+  // today's two-card path rather than quietly folding a name out of view.
+  const allNew = firsts.length > 0
+    && names.length === firsts.length
+    && names.every((n) => firsts.some((f) => f.name === n));
+
+  const out: YearTargetCard[] = [];
+  if (firsts.length) {
+    out.push({
+      key: "first-lights",
+      title: `First light in ${year}`,
+      blurb: allNew
+        ? (firsts.length === 1
+          ? `The one object you pointed at in ${year} — and you'd never imaged `
+            + "it before."
+          : `All ${firsts.length} objects you pointed at in ${year} were ones `
+            + "you'd never imaged before.")
+        : (firsts.length === 1
+          ? "One object you'd never imaged before."
+          : `${firsts.length} objects you'd never imaged before.`),
+      chips: firsts.map((f) => ({ name: f.name, safe: f.safe ?? null })),
+      highlight: true,
+    });
+  }
+  if (names.length && !allNew) {
+    out.push({
+      key: "year-targets",
+      title: "What you pointed at",
+      blurb: "",
+      chips: names.map((n) => ({ name: n, safe: null })),
+      highlight: false,
+    });
+  }
   return out;
 }
