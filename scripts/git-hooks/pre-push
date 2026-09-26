@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Installed by scripts/agent-setup.sh (core.hooksPath). Blocks a push that would
+# publish a personal email — see scripts/check-commit-identity.sh.
+exec "$(git rev-parse --show-toplevel)/scripts/check-commit-identity.sh" --pre-push
