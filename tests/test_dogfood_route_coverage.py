@@ -2,11 +2,11 @@
 
 ``scripts/dogfood_probe.mjs`` carries a ``ROUTES`` table whose own comment says
 it is "the real route table (frontend/src/main.tsx)" — and mirroring a list by
-hand is how a list goes stale. It had: ``/show`` ("Show & tell"), ``/live``
-("Tonight, live" — the page whose docstring says it is *meant to be left open on
-a phone for hours*, and the only nav entry that was missing) and
-``/sky-so-far/:year`` were registered routes that **no dogfood pass had ever
-photographed**, so nothing had measured their height, their overflow, their
+hand is how a list goes stale. Three registered routes had **never been
+photographed by any dogfood pass**: ``/show`` ("Show and tell"), ``/live``
+("Tonight, live" — the only nav entry that was missing, and the page whose own
+docstring says it is *meant to be left open on a phone for hours*) and
+``/sky-so-far/:year``. Nothing had measured their height, their overflow, their
 squeezed text or their clipped badges at 420 px.
 
 That is the same hole as the missing observing site, the empty ``incoming/``,
