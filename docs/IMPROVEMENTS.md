@@ -2897,46 +2897,11 @@ off by default. Don't re-file it.)*
   are now served by one shared `preview_orient.preview_geometry_out` that the run listing uses too, so the
   page that draws the picture and the page that captions it cannot describe it differently.
 
-- **NEXT SLICES of the "finished / not stretched / thin" card signal — the Library wall shipped as v0.448.0;
-  three pieces are left.** *(Scout 2026-09-16, first slice built by the Builder the same day. Pillar:
-  understand + trust — PRIORITY 3; each S. Beginner bar: yes — the shipped half is proof.)*
-  **What shipped:** `GET /api/unstretched-pictures` (`webapp/routers/unstretched.py`) names every target whose
-  *displayed* picture is a flat linear stack, and `Library.tsx` badges those cards "Not stretched yet" with a
-  plain-language `title`. "Finished" is one shared definition, `webapp/finishedpicture.py`
-  (`displayed_picture_run` + `run_is_a_finished_picture`), the same two functions v0.447.2's reprocess warning
-  counts with; a test asserts the two partition a library exactly. **One deliberate change of shape from the
-  idea as filed: it chips only the cards that need something, never "Finished"** — a chip on the nine in ten
-  that are fine is a wall of badges saying nothing, and clutter is the owner's standing complaint (AGENTS.md
-  §1). Don't re-file that half. Full entry in [`SHIPPED.md`](SHIPPED.md).
-  (a) ~~**The same chip on Gallery cards**~~ — **✅ SHIPPED v0.448.2, and NOT off the same query.** The slice as
-  filed said "`Gallery.tsx` reading the same query", and that would have been wrong: `/api/unstretched-pictures`
-  answers per **target**, about the one run it displays, while the Gallery lists **every run of every target** —
-  so it would have badged each target's displayed run and said nothing at all about the older linear runs beside
-  it, on the page whose whole job is looking at pictures. It is instead a per-run `GalleryItem.finished`, off a
-  new `finishedpicture.run_is_a_finished_picture_from` that takes the recipe row `_gallery_item` had already read
-  for `unexported_edit` (so the field costs no extra DB read on the one endpoint whose meta reads are counted);
-  the `proj`-taking form is now a wrapper over it, and a test asserts the two can never answer differently.
-  Shared copy moved to `frontend/src/unstretched.ts` + `components/UnstretchedBadge.tsx`.
-  (b) ~~**The idea's optional "Thin — keep shooting" state.**~~ — **✅ SHIPPED v0.450.0**, and its "check what
-  the Target page already says" is what decided the shape: the sentence is not new copy at all, it is
-  `thinStackWarning`'s own — the function the Gallery card's orange frame badge already asks — given the two
-  numbers it names on a mosaic (`n_frames_used` + `field_fulls`, off `derived_light.stacking_field_fulls` so a
-  finished picture's crop cannot read as depth). Depth takes the card's one chip slot when a card is both,
-  because "press Auto" cannot make a one-sub stack anything but a stretched one-sub stack. Entry in
-  [`SHIPPED.md`](SHIPPED.md).
-  (c) ~~**A one-click deep link from the chip to that run's Auto**~~ — **✅ BOTH HALVES NOW DONE: answered on the
-  Gallery (v0.448.2) without building it, and shipped on the Library card as v0.471.0.** On a Gallery card the one
-  click already existed: an **Edit image** button straight to `/targets/<safe>/edit/<run_id>`, which since v0.390.0
-  opens *on* Auto rather than on a nudge to press it. So that chip's hint names that button instead, and a second
-  link to the same place was declined as exactly the duplicate surface the owner's standing clutter complaint is
-  about. **The Library half's two stated blockers turned out to be one, and it was already solved:** the run id is
-  indeed not on `TargetOut`, but the wall does not read the chip off `TargetOut` — it reads
-  `/api/unstretched-pictures`, whose `UnstretchedItem.run_id` has carried exactly the run
-  `displayed_picture_run` picked since v0.448.0, so nothing new travels on the wire. And the card did not need
-  restructuring: the chip is a `<button>` inside the card's `<Link>` that stops its own click, the shape
-  `WishlistStar` already uses for a control sitting on a picture tile — so the chip goes to the editor and every
-  other part of the card still goes to the target. Entry in [`SHIPPED.md`](SHIPPED.md).
-
+- ~~**NEXT SLICES of the "finished / not stretched / thin" card signal**~~ — **⚪ CLOSED: all three slices
+  shipped** (a) v0.448.2, (b) v0.450.0, (c) v0.448.2 + v0.471.0, on top of the wall itself (v0.448.0). Full
+  entries, including the two shape changes worth not undoing — the chip appears only on cards that need
+  something, and the Gallery's chip is per-*run* rather than per-target — are in [`SHIPPED.md`](SHIPPED.md).
+  Nothing here is open.
 - **NEW IDEA (Builder 2026-08-29, the two halves deliberately left out of "See what stacking removed"
   v0.299.0) — put the overlay where people actually *look* at a picture, and count what it removed.**
   *(Pillar: trust + understand — PRIORITY 3; both small, both purely additive on machinery that now exists.)*
@@ -3949,6 +3914,18 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.479.1** — INFRA / tooling, found while shipping v0.479.0: **no dogfood pass had ever held two stacks of
+  one target**, so every surface whose precondition is "this target has a previous picture" had only ever been
+  photographed self-hidden — the "Did it get better?" card and its "How far you've come" link, the deepening
+  reel, History's per-row Compare, the supersede family, and v0.479.0's own matched crop. `--mosaic` does not
+  close it: its pair is two *different* targets. `scripts/agent-dogfood.sh --restack` stacks the field sample
+  **twice, thin then deep** (half the subs set aside through the same `POST /frames/bulk` the frames table uses,
+  then re-accepted), before the ordinary stack step so `stack_target`'s early return no-ops rather than adding a
+  third run, and prints what `/stack-runs`, `/deepening-reel/info` and `/noise-delta/info` say about the pair
+  **plus the two ways it can fail silently**. Off by default: it grows the field sample's Target page, so a
+  `--restack` pass is a poor one on which to read page-height baselines. Tests +5
+  (`tests/test_dogfood_restack_anchors.py`). `scripts/` is not in the image's file set. Full entry in
+  [`SHIPPED.md`](SHIPPED.md).
 - **v0.479.0** — PRIORITY 3 (understand/trust), the owner-approved entry of 2026-09-25: **"Did it get better?"
   now shows the difference instead of only asserting it.** New `seestack/render/noisedelta.py`
   (`build_noise_delta`, `choose_patch_centre`) crops one patch of sky from each of two masters at **native

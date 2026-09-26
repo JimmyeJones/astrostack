@@ -26,6 +26,8 @@
 #                                           #    "these can't be read" note is reachable too)
 #   scripts/agent-dogfood.sh --calibration   # ALSO build a master dark + flat and stack WITH them
 #   scripts/agent-dogfood.sh --deep         # ALSO one field shot 1,200 times: the owner's SCALE,
+#   scripts/agent-dogfood.sh --restack        # ALSO stack the sample TWICE, thin then deep,
+#                                           #   so every same-target two-run surface exists
 #   scripts/agent-dogfood.sh --closing       # ALSO a target whose SEASON is ending, so
 #                                          # /tonight's fourth card finally renders
 #                                           #   and the only pass that measures DOM node counts
@@ -169,6 +171,34 @@
 # nothing closed cannot pass for a pass where the card was read. Run it on any run
 # that touches the planner, `/tonight`, or the Dashboard's "Last chance" note.
 #
+# --restack exists because NO PASS HAS EVER HELD TWO STACKS OF ONE TARGET. Every
+# sample here is stacked exactly once, so every surface whose precondition is "this
+# target has a previous picture" has only ever been photographed in its self-hidden
+# state: the "Did it get better?" card and its "How far you've come" link
+# (`pickCompareWithLast` / `pickFirstVsNow` both need two comparable runs), the
+# "night after night" deepening reel (`/deepening-reel/info` reports
+# `available: false` under two), History's per-row Compare button, the matched-crop
+# noise-delta picture (v0.479.0), and the whole supersede / "kept finished" family
+# the reprocess warning is about. `--mosaic` does not close this: its pair is the
+# mosaic and the FIELD, i.e. two different targets, which is the one comparison
+# where a per-pixel figure and a total are different numbers — not the same object
+# one week deeper, which is what all of the above are for.
+#
+# It stacks the field sample twice, thin then deep: half the subs set aside for the
+# first run, all of them re-accepted for the second, so the newest picture is
+# genuinely the deeper one and the cards have a real improvement to describe rather
+# than two identical masters. (An identical restack is the *other* real state and is
+# cheaper to reach — it is what a reprocess does — but it makes every one of these
+# surfaces say "no change", which is the least informative thing they can say.)
+# It then prints what the app answers about the pair, so a pass where the second
+# stack quietly failed cannot pass for a pass where the cards were read.
+#
+# ONE SIDE EFFECT TO EXPECT RATHER THAN INVESTIGATE: the field sample's Target page
+# grows — a compare card, a reel, a second History row — so a --restack pass is a
+# poor one on which to read this script's page-height baselines. Read those on an
+# ordinary pass. Run this one on anything touching cross-run comparison, History, or
+# the finished-picture / supersede logic.
+#
 # --empty exists because every measurement this script has ever taken was of the
 # sample-loaded app, so the screens a beginner meets *first* — an empty Dashboard,
 # Library, Gallery, life list — had never been in front of a browser. It boots a
@@ -193,7 +223,7 @@ REPO="$PWD"
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
 DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0; DO_MOSAIC=0
 DO_BIG=0; DO_DEEP=0
-DO_SITE=1; DO_LAG=0; DO_CAL=0; DO_CLOSING=0
+DO_SITE=1; DO_LAG=0; DO_CAL=0; DO_CLOSING=0; DO_RESTACK=0
 # How many aged subs --incoming-lag leaves in the scratch incoming/, and how old
 # it makes them. Eleven days is the observer's own measurement; the count is
 # small on purpose (this seeds a *state*, not a workload).
@@ -228,6 +258,7 @@ for arg in "$@"; do
     --calibration) DO_CAL=1 ;;
     --deep) DO_DEEP=1 ;;
     --closing) DO_CLOSING=1 ;;
+    --restack) DO_RESTACK=1 ;;
     # The whole header block, found rather than hard-coded: a fixed line count
     # silently truncates -h every time the header grows, which it has.
     -h|--help) sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;;
@@ -778,6 +809,87 @@ run_id_of() {  # newest stack run id for a target, or empty
     | python -c 'import json,sys; r=json.load(sys.stdin); print(r[0]["id"] if r else "")' \
     2>/dev/null || true
 }
+
+# 3f. Two stacks of ONE target (--restack): thin first, then deep. See the header
+#     block — every "this target has a previous picture" surface in the app has only
+#     ever been photographed self-hidden, because no pass has stacked anything twice.
+#     This runs BEFORE the ordinary stack step below on purpose: `stack_target`
+#     returns early once a run exists, so by doing both runs here the later call
+#     no-ops rather than adding a third.
+if [ "$DO_RESTACK" = 1 ] && [ "$DO_STACK" = 1 ] && [ -n "$SAFE" ]; then
+  echo "-- --restack: stacking the sample TWICE (thin, then deep) so the"
+  echo "   cross-run comparison surfaces exist at all"
+  # Which subs to set aside for the first run. Half, by id, through the same bulk
+  # endpoint the frames table's own "reject" uses — so this is a state a user can
+  # actually put their library in, not a fixture poked into the DB.
+  RESTACK_ASIDE="$(curl -sf "$BASE/api/targets/$SAFE/frames" \
+    | python -c '
+import json, sys
+ids = [f["id"] for f in (json.load(sys.stdin) or []) if f.get("accept")]
+print(",".join(str(i) for i in ids[: max(1, len(ids) // 2)]))
+' 2>/dev/null || true)"
+  if [ -z "$RESTACK_ASIDE" ]; then
+    echo "   warn: no accepted frames to set aside — the two runs would be identical"
+  else
+    echo "   setting aside $(echo "$RESTACK_ASIDE" | tr ',' ' ' | wc -w) sub(s) for the first, thin run"
+    curl -sf -X POST "$BASE/api/targets/$SAFE/frames/bulk" \
+         -H 'Content-Type: application/json' \
+         -d "{\"action\": \"reject\", \"ids\": [${RESTACK_ASIDE}]}" >/dev/null \
+      || echo "   warn: could not set them aside — both runs will be the full depth"
+  fi
+  RESTACK_JOB="$(curl -sf -X POST "$BASE/api/targets/$SAFE/process" \
+                   | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' \
+                 2>/dev/null || true)"
+  echo "   thin run: $(wait_job "$RESTACK_JOB" 180)"
+  if [ -n "$RESTACK_ASIDE" ]; then
+    curl -sf -X POST "$BASE/api/targets/$SAFE/frames/bulk" \
+         -H 'Content-Type: application/json' \
+         -d "{\"action\": \"accept\", \"ids\": [${RESTACK_ASIDE}]}" >/dev/null \
+      || echo "   warn: could not re-accept them — the second run is not deeper"
+  fi
+  RESTACK_JOB2="$(curl -sf -X POST "$BASE/api/targets/$SAFE/process" \
+                    | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' \
+                  2>/dev/null || true)"
+  echo "   deep run: $(wait_job "$RESTACK_JOB2" 180)"
+  # What the app now SAYS about the pair. Printed, never asserted — but printed
+  # loudly, because a second run that quietly failed leaves every surface below in
+  # exactly the self-hidden state this flag exists to escape, and the pass would
+  # still read CLEAN (the same trap the observing site's `location_source` line and
+  # --big's `proxy_scale` line close for their own flags).
+  curl -sf "$BASE/api/targets/$SAFE/stack-runs" | python -c '
+import json, sys
+runs = json.load(sys.stdin) or []
+print("   [restack] %d run(s); newest first: %s"
+      % (len(runs), ", ".join("#%s/%s subs" % (r.get("id"), r.get("n_frames_used"))
+                              for r in runs[:4])))
+if len(runs) < 2:
+    print("   [restack] FEWER THAN TWO RUNS — every cross-run card is still hidden")
+elif (runs[0].get("n_frames_used") or 0) <= (runs[1].get("n_frames_used") or 0):
+    print("   [restack] the newest run is NOT deeper — the cards have no gain to describe")
+' 2>/dev/null || echo "   [restack] could not read the run list"
+  RESTACK_NEW="$(run_id_of "$SAFE")"
+  RESTACK_PREV="$(curl -sf "$BASE/api/targets/$SAFE/stack-runs" \
+    | python -c 'import json,sys; r=json.load(sys.stdin); print(r[1]["id"] if len(r)>1 else "")' \
+    2>/dev/null || true)"
+  if [ -n "$RESTACK_NEW" ] && [ -n "$RESTACK_PREV" ]; then
+    curl -sf "$BASE/api/targets/$SAFE/deepening-reel/info" | python -c '
+import json, sys
+d = json.load(sys.stdin) or {}
+print("   [reel] available=%s over %s stack(s), %s -> %s subs"
+      % (d.get("available"), d.get("n_stacks"), d.get("first_subs"), d.get("last_subs")))
+' 2>/dev/null || echo "   [reel] could not read /deepening-reel/info"
+    curl -sf "$BASE/api/targets/$SAFE/noise-delta/info?a=$RESTACK_NEW&b=$RESTACK_PREV" \
+      | python -c '
+import json, sys
+d = json.load(sys.stdin) or {}
+print("   [noise-delta] available=%s patch=%spx pixel_exact=%s ratio=%s"
+      % (d.get("available"), d.get("patch_px"), d.get("pixel_exact"), d.get("noise_ratio")))
+if not d.get("available"):
+    print("   [noise-delta] the matched-crop picture is hidden — canvas too small,")
+    print("                 an edited run, or no patch covered in both")
+' 2>/dev/null || echo "   [noise-delta] could not read /noise-delta/info"
+  fi
+fi
 
 if [ "$DO_STACK" = 1 ]; then
   stack_target "$SAFE" "sample"
