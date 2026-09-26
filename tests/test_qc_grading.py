@@ -698,6 +698,39 @@ def test_a_panel_cannot_lose_more_than_the_rail_allows():
     assert 0 < hit <= int(40 * MAX_REJECT_FRACTION), (
         f"the per-panel rail should keep this to <= 10 subs, got {hit}")
     assert report.capped
+    # …and the report says **which** rail did it. Before v0.474.0 one boolean
+    # carried both, so every surface told the target-wide story ("this looks
+    # like a rough session — consider a conservative pass") about a rail that is
+    # spatial and that a higher threshold cannot release. Here the whole target
+    # is nowhere near the target-wide cap.
+    assert report.capped_overall is False
+    assert report.capped_panels == 1
+    assert report.withheld_per_panel > 0
+    assert len(report.recommendations) < int(
+        report.n_considered * MAX_REJECT_FRACTION), (
+        "the target-wide rail cannot have truncated this list")
+
+
+def test_the_target_wide_rail_is_reported_as_the_target_wide_rail():
+    """The other direction, on a target with no panels at all: a genuinely rough
+    session still reads as one."""
+    frames = clean_population(n=30)
+    for k, fid in enumerate(range(100, 115)):
+        frames.append(make_frame(fid, fwhm=8.0 + k))
+    report = grade_frames(frames)
+    assert report.pointing_groups == 0
+    assert report.capped is True
+    assert report.capped_overall is True
+    assert report.capped_panels == 0
+    assert report.withheld_per_panel == 0
+
+
+def test_an_uncapped_report_carries_neither_rail():
+    report = grade_frames(clean_population(n=30))
+    assert report.capped is False
+    assert report.capped_overall is False
+    assert report.capped_panels == 0
+    assert report.withheld_per_panel == 0
 
 
 def test_a_panel_too_thin_to_grade_falls_back_to_the_whole_target():

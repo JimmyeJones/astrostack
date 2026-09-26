@@ -785,6 +785,13 @@ class GradeReportOut(BaseModel):
     metrics_used: list[str]
     metrics_skipped: dict[str, str]
     capped: bool
+    # Which of the two 25% rails truncated the list — they have different causes
+    # and different remedies, and ``capped`` alone cannot tell them apart (see
+    # ``GradeReport``). Additive with defaults that reproduce today's reading:
+    # an older frontend keeps showing the target-wide sentence off ``capped``.
+    capped_overall: bool = False
+    capped_panels: int = 0
+    withheld_per_panel: int = 0
     # How many mosaic panels the star-count / sky / transparency metrics were
     # graded against separately (each panel judged against itself, since panels
     # are different patches of sky). 0 for an ordinary single-pointing target,

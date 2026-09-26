@@ -82,6 +82,25 @@ describe("closingHeadline", () => {
     expect(many).toContain("M 31 first, about a week left");
   });
 
+  it("counts what is leaving, not what the endpoint had room to send", () => {
+    // The list is bounded so the card cannot grow without limit; `n_closing` is
+    // exact. Counting the rows would quietly undercount the moment it bites.
+    const truncated = { ...plan([row({ safe: "m_31", name: "M 31", weeks_left: 1 })]),
+                        n_closing: 17 };
+    const line = closingHeadline(truncated);
+    expect(line).toContain("17 of your targets");
+    expect(line).toContain("M 31 first, about a week left");
+  });
+
+  it("falls back to the list on a backend too old to send the count", () => {
+    // `n_closing` is additive; without it the list *is* the total, which is the
+    // behaviour every install had before it existed.
+    expect(closingHeadline(plan([row()]))).toBe(
+      "M 42 is on its way out of your sky — about 3 weeks left.");
+    expect(closingHeadline({ ...plan([row(), row({ safe: "m_31" })]), n_closing: undefined }))
+      .toContain("2 of your targets");
+  });
+
   it("explains the consequence in seasons, not in degrees", () => {
     expect(CLOSING_WHY).toContain("next year");
     expect(CLOSING_WHY).not.toContain("30°");

@@ -55,6 +55,60 @@ def test_best_self_hides_with_fewer_than_two_pictures(client, solved_library):
     assert client.get("/api/gallery/best").json()["items"] == []
 
 
+def test_a_slideshow_can_ask_for_the_one_picture_the_wall_hides(
+    client, solved_library,
+):
+    """``min_targets=1`` — the floor exists so a new install is not offered a
+    wall of *one* to curate, and "Show and tell" does not curate: it plays the
+    pictures full-screen, one at a time. Before this, a beginner who had just
+    stacked their first target opened that page and was told there was nothing
+    to show — and once they had also shot the Moon, the show played the Moon and
+    left the nebula out with nothing saying so."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_preview_run(solved_library, safe, basename="first-light",
+                          n_frames=50, exposure_s=1500, noise_sigma=0.05,
+                          coverage_max=50)
+
+    # The wall still self-hides, byte for byte as before.
+    assert client.get("/api/gallery/best").json()["items"] == []
+
+    items = client.get("/api/gallery/best?min_targets=1").json()["items"]
+    assert [i["output_basename"] for i in items] == ["first-light"]
+    # And it is a whole picture, not a stub: the slideshow captions it.
+    assert items[0]["safe"] == safe
+    assert items[0]["n_frames_used"] == 50
+
+
+def test_the_wall_reports_how_many_finished_pictures_exist_even_when_it_hides(
+    client, solved_library,
+):
+    """``n_finished`` is about the library, not about this caller's floor — the
+    page that offers the slideshow reads it instead of issuing a second
+    ``min_targets=1`` request, which on a hundred-target library would open
+    every project twice for one button."""
+    assert client.get("/api/gallery/best").json()["n_finished"] == 0
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_preview_run(solved_library, safe, basename="only",
+                          n_frames=50, exposure_s=1500, noise_sigma=0.05,
+                          coverage_max=50)
+    hidden = client.get("/api/gallery/best").json()
+    assert hidden["items"] == []          # the wall still self-hides ...
+    assert hidden["n_finished"] == 1      # ... over a picture that does exist
+    # And it agrees with what the lower floor actually returns.
+    shown = client.get("/api/gallery/best?min_targets=1").json()
+    assert shown["n_finished"] == len(shown["items"]) == 1
+
+
+def test_min_targets_cannot_be_used_to_turn_the_wall_off(client, solved_library):
+    """The knob only ever *lowers* a floor for a caller that wants fewer; asking
+    for zero is rejected rather than quietly meaning "everything"."""
+    assert client.get("/api/gallery/best?min_targets=0").status_code == 422
+    # And an empty library is still empty at the lowest legal floor — the
+    # parameter moves the floor, it does not invent pictures.
+    assert client.get("/api/gallery/best?min_targets=1").json()["items"] == []
+
+
 def test_best_ranks_deeper_cleaner_stacks_first(client, solved_library):
     targets = client.get("/api/targets").json()
     assert len(targets) >= 2

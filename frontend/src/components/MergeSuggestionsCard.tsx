@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type MergeSuggestion } from "../api/client";
 import { formatIntegration } from "../format";
+import { WRAPPING_BADGE } from "../badgeFit";
 import {
   describeMergeSuggestion,
   mergeInto,
@@ -105,7 +106,8 @@ export function MergeSuggestionsCard() {
             <Text size="sm">{describeMergeSuggestion(s)}</Text>
             <Group gap={6}>
               {s.targets.map((t) => (
-                <Badge key={t.safe} variant="outline" color="gray" size="sm">
+                <Badge key={t.safe} variant="outline" color="gray" size="sm"
+                  styles={WRAPPING_BADGE}>
                   {t.name} · {t.n_frames_accepted} subs · {formatIntegration(t.total_exposure_s)}
                 </Badge>
               ))}

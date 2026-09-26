@@ -697,3 +697,158 @@ def test_api_loads_the_deep_sample_on_request(client, monkeypatch):
     gone = client.delete("/api/sample").json()
     assert gone["deep_loaded"] is False and gone["deep_safe"] is None
     assert client.get(f"/api/targets/{deep_safe}").status_code == 404
+
+
+# ---- the closing pair (dogfood tooling for `/tonight`'s fourth card) --------
+#
+# The one sample shape whose sky is chosen by its caller, because "whose season is
+# ending?" is a question about the *date*. Nothing in the running app loads it;
+# `scripts/agent-dogfood.sh --closing` does, so that the card which names closing
+# targets is finally rendered rather than pinned by jsdom alone.
+
+
+_CLOSING_CENTER = (240.0, 40.0)      # a summer-evening RA, from the north
+
+
+def test_the_closing_pair_is_two_positioned_targets_of_different_depth(lib):
+    """What the card needs and nothing else: two rows, one sky, two depths.
+
+    Depth is the axis `/api/plan/closing` ranks and caps by, so a demo with one
+    row — or with two rows of the same depth — exercises none of what the card is
+    for.
+    """
+    status = sample_data.load_sample(lib, shape="closing", center=_CLOSING_CENTER)
+    assert status.loaded is True
+    assert status.n_frames == (sample_data._CLOSING_SHALLOW_SUBS
+                               + sample_data._CLOSING_DEEP_SUBS)
+
+    rows = {t.name: t for t in lib.list_targets()}
+    assert set(rows) == set(sample_data.SAMPLE_CLOSING_TARGET_NAMES)
+    shallow = rows[sample_data.SAMPLE_CLOSING_SHALLOW_TARGET_NAME]
+    deep = rows[sample_data.SAMPLE_CLOSING_DEEP_TARGET_NAME]
+
+    # Both are positioned where the caller asked (the registry's centre comes back
+    # off the frames' own injected WCS, so a little dither slack is expected), the
+    # deeper one a degree north …
+    assert shallow.ra_deg == pytest.approx(_CLOSING_CENTER[0], abs=0.1)
+    assert shallow.dec_deg == pytest.approx(_CLOSING_CENTER[1], abs=0.1)
+    assert deep.ra_deg == pytest.approx(_CLOSING_CENTER[0], abs=0.1)
+    assert deep.dec_deg == pytest.approx(
+        _CLOSING_CENTER[1] + sample_data._CLOSING_DEC_OFFSET_DEG, abs=0.1)
+    # … and the only thing that differs between them is how much is kept on them.
+    assert shallow.total_exposure_s == pytest.approx(
+        sample_data._CLOSING_SHALLOW_SUBS * sample_data._CLOSING_SHALLOW_EXPTIME_S)
+    assert deep.total_exposure_s == pytest.approx(
+        sample_data._CLOSING_DEEP_SUBS * sample_data._CLOSING_DEEP_EXPTIME_S)
+    assert deep.total_exposure_s > shallow.total_exposure_s * 10
+
+
+def test_the_closing_pair_does_not_read_as_one_object_split_in_two(lib):
+    """The first build of this shape put both targets on the identical position,
+    and a dogfood pass raised "Same object in more than one folder?" on the
+    Library wall — an owner-facing warning about nothing, in every screenshot the
+    flag takes. A flag must seed the state it is for and no other."""
+    from seestack.io.library import find_same_object_target_groups
+
+    sample_data.load_sample(lib, shape="closing", center=_CLOSING_CENTER)
+    assert find_same_object_target_groups(lib.list_targets()) == []
+
+
+def test_the_closing_pair_is_idempotent_and_swept_by_one_remove(lib):
+    first = sample_data.load_sample(lib, shape="closing", center=_CLOSING_CENTER)
+    again = sample_data.load_sample(lib, shape="closing", center=_CLOSING_CENTER)
+    assert again.safe == first.safe and again.n_frames == first.n_frames
+    assert len(lib.list_targets()) == 2
+
+    dirs = [lib.targets_dir / t.safe_name for t in lib.list_targets()]
+    assert sample_data.remove_sample(lib) is True
+    assert sample_data.get_sample_status(lib, shape="closing").loaded is False
+    assert not any(d.exists() for d in dirs)
+
+
+def test_half_a_closing_pair_reads_as_not_loaded_and_reloads_the_missing_half(lib):
+    """Half the pair is not the demo — the card needs two depths to compare."""
+    sample_data.load_sample(lib, shape="closing", center=_CLOSING_CENTER)
+    deep = lib.find_target(sample_data.SAMPLE_CLOSING_DEEP_TARGET_NAME)
+    assert deep is not None
+    lib.delete_target(deep.safe_name, remove_files=True)
+
+    assert sample_data.get_sample_status(lib, shape="closing").loaded is False
+    sample_data.load_sample(lib, shape="closing", center=_CLOSING_CENTER)
+    assert sample_data.get_sample_status(lib, shape="closing").loaded is True
+    assert lib.find_target(sample_data.SAMPLE_CLOSING_DEEP_TARGET_NAME) is not None
+
+
+def test_the_closing_shape_refuses_to_guess_its_own_sky(lib):
+    with pytest.raises(ValueError, match="closing"):
+        sample_data.load_sample(lib, shape="closing")
+    assert lib.list_targets() == []
+
+
+def test_a_fixed_sky_shape_refuses_a_centre_rather_than_ignoring_it(lib):
+    """A caller that believed it moved a sample which did not move is worse than
+    an error — the other shapes' pixels are pinned bit-identical on purpose."""
+    with pytest.raises(ValueError, match="fixed sky centre"):
+        sample_data.load_sample(lib, shape="field", center=_CLOSING_CENTER)
+    assert lib.list_targets() == []
+
+
+def test_the_other_shapes_still_point_at_m42(lib):
+    """The `center=` parameter is additive: leaving it out is byte-identical."""
+    sample_data.load_sample(lib)
+    field = lib.find_target(sample_data.SAMPLE_TARGET_NAME)
+    assert field is not None
+    assert field.ra_deg == pytest.approx(sample_data._RA_CENTER_DEG, abs=0.2)
+    assert field.dec_deg == pytest.approx(sample_data._DEC_CENTER_DEG, abs=0.2)
+
+
+def test_api_loads_the_closing_pair_and_refuses_a_bad_request(client):
+    bad = client.post("/api/sample", json={"shape": "closing"})
+    assert bad.status_code == 422 and "closing" in bad.json()["detail"]
+    partial = client.post("/api/sample", json={"shape": "closing", "ra_deg": 240.0})
+    assert partial.status_code == 422
+    wrong = client.post(
+        "/api/sample", json={"shape": "field", "ra_deg": 240.0, "dec_deg": 40.0})
+    assert wrong.status_code == 422
+    assert client.get("/api/sample").json()["closing_loaded"] is False
+
+    body = client.post("/api/sample", json={
+        "shape": "closing", "ra_deg": _CLOSING_CENTER[0],
+        "dec_deg": _CLOSING_CENTER[1]}).json()
+    # The other shapes are untouched — this is a fifth demo, not a replacement.
+    assert body["loaded"] is False and body["mosaic_loaded"] is False
+    assert body["closing_loaded"] is True
+    assert body["closing_n_frames"] == (sample_data._CLOSING_SHALLOW_SUBS
+                                        + sample_data._CLOSING_DEEP_SUBS)
+    safe = body["closing_safe"]
+    assert client.get(f"/api/targets/{safe}").status_code == 200
+
+    gone = client.delete("/api/sample").json()
+    assert gone["closing_loaded"] is False and gone["closing_safe"] is None
+    assert client.get(f"/api/targets/{safe}").status_code == 404
+
+
+def test_the_seeded_pair_is_what_the_closing_endpoint_then_names(client):
+    """End to end, which is the whole point: the planner's own placement helper
+    picks the sky, the sample goes there, and the card's endpoint reports both
+    rows — least-finished first, which is the ranking v0.476.0 is about."""
+    from datetime import datetime, timezone
+
+    from seestack.nightplan import Observer, closing_sky_position
+
+    lat, lon = 40.0, -2.0            # `scripts/agent-dogfood.sh`'s own default site
+    center = closing_sky_position(
+        Observer(lat, lon), start_utc=datetime.now(timezone.utc))
+    assert center is not None, "a mid-latitude site always has a closing band"
+
+    client.put("/api/settings", json={"site_lat": lat, "site_lon": lon})
+    client.post("/api/sample", json={
+        "shape": "closing", "ra_deg": center[0], "dec_deg": center[1]})
+
+    plan = client.get("/api/plan/closing").json()
+    assert plan["location_source"] == "settings"
+    assert plan["n_closing"] == 2
+    names = [r["name"] for r in plan["targets"]]
+    assert names == [sample_data.SAMPLE_CLOSING_SHALLOW_TARGET_NAME,
+                     sample_data.SAMPLE_CLOSING_DEEP_TARGET_NAME]
+    assert plan["targets"][0]["total_exposure_s"] < plan["targets"][1]["total_exposure_s"]

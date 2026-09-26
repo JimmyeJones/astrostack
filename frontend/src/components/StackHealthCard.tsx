@@ -29,8 +29,9 @@ export function noteColor(severity: string): string {
  * border lives); `background` opens the same editor for the mosaic-seam note
  * (where the background ops live); `calibration` opens the Calibration page
  * (build master darks/flats); `solve_help` opens Settings (the ASTAP
- * star-database status). All are read-only navigations — nothing is changed
- * until the user acts.
+ * star-database status); `subpixel_refine` opens the Stack form with its
+ * Advanced disclosure already open, on the one switch that answers the note.
+ * All are read-only navigations — nothing is changed until the user acts.
  *
  * When the card is rendered *inside* the editor (`inEditor`), an editor link
  * would just point at the page the user is already on — and the op it names is
@@ -77,6 +78,17 @@ export function noteAction(
       return {
         label: "Re-stack with Auto outlier removal →",
         href: `/targets/${safe}/stack`,
+      };
+    case "subpixel_refine":
+      // The combine softened the stars and this run did not use the pass that
+      // exists to stop that. The switch is one field on the Stack form — but it
+      // lives inside the collapsed **Advanced options** disclosure, so a bare
+      // link would leave a beginner hunting through a long form for a phrase
+      // they have only just read. `?open=advanced` opens it for them; the form
+      // is unchanged without the parameter.
+      return {
+        label: "Re-stack with sub-pixel alignment refine →",
+        href: `/targets/${safe}/stack?open=advanced`,
       };
     default:
       return null;

@@ -1575,6 +1575,29 @@ def test_closing_without_location_self_hides(client, solved_library):
     assert body["targets"] == []
 
 
+def test_closing_reports_the_exact_count_and_bounds_the_list(client, solved_library,
+                                                             monkeypatch):
+    """Two bounds, not one. The scan is wide (its cost is the horizon's, not the
+    library's); the *list* is bounded so a card on a page the owner already
+    calls busy cannot grow without limit — and ``n_closing`` carries the true
+    total, so the headline never counts the rows it happens to have been sent.
+    """
+    from webapp.routers import plan as plan_router
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    full = client.get("/api/plan/closing", params={"when": JAN_EVENING}).json()
+    assert len(full["targets"]) >= 2, "the fixture's two targets both leave in January"
+    assert full["n_closing"] == len(full["targets"])
+    soonest = full["targets"][0]
+
+    monkeypatch.setattr(plan_router, "CLOSING_MAX_ROWS", 1)
+    body = client.get("/api/plan/closing", params={"when": JAN_EVENING}).json()
+    # The count does not shrink with the list, and what survives truncation is
+    # the row the card leads with.
+    assert body["n_closing"] == full["n_closing"]
+    assert [t["safe"] for t in body["targets"]] == [soonest["safe"]]
+
+
 def test_closing_rejects_bad_when_and_bounds_the_horizon(client, solved_library):
     client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
     assert client.get("/api/plan/closing",

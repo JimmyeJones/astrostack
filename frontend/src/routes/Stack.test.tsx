@@ -78,6 +78,44 @@ describe("StackView", () => {
     expect(screen.getByText("Start stacking")).toBeInTheDocument();
   });
 
+  it("opens the Advanced disclosure when the link asked it to", async () => {
+    // The health card's sub-pixel-refine note names a switch that lives in the
+    // collapsed Advanced group, so its link carries `?open=advanced`. Without
+    // the parameter the panel stays shut, which is the state every other caller
+    // (and a bare visit) gets — Mantine only mounts an open panel's content, so
+    // "is the advanced field on screen?" is the honest question to ask.
+    mockSchema([
+      { key: "subpixel_refine", label: "Sub-pixel alignment refine", type: "bool",
+        group: "advanced", default: false, min: null, max: null, step: null,
+        options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ subpixel_refine: false });
+
+    renderStackAt("/targets/M_42/stack?open=advanced");
+    await waitFor(() =>
+      expect(screen.getByText("Advanced options")).toBeInTheDocument());
+    // `aria-expanded` on the control is the definitive answer — jsdom lays
+    // nothing out, so a visibility assertion here would pass on a panel that is
+    // merely rendered.
+    expect(screen.getByRole("button", { name: /Advanced options/ }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Sub-pixel alignment refine")).toBeInTheDocument();
+  });
+
+  it("leaves the Advanced disclosure shut without the parameter", async () => {
+    mockSchema([
+      { key: "subpixel_refine", label: "Sub-pixel alignment refine", type: "bool",
+        group: "advanced", default: false, min: null, max: null, step: null,
+        options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ subpixel_refine: false });
+
+    renderStackAt("/targets/M_42/stack");
+    await waitFor(() => expect(screen.getByText("Advanced options")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /Advanced options/ }))
+      .toHaveAttribute("aria-expanded", "false");
+  });
+
   it("badges and applies the recommended calibration masters", async () => {
     mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
@@ -1761,8 +1799,40 @@ describe("StackView", () => {
     renderStack();
 
     await waitFor(() =>
-      expect(screen.getByText(/only the worst are recommended; review before stacking/))
+      expect(screen.getByText(/rough session.*only the worst are listed/))
         .toBeInTheDocument());
+    // …and the remedy that actually applies to the target-wide rail.
+    expect(screen.getByText(/Consider a conservative pass first/)).toBeInTheDocument();
+  });
+
+  it("blames the panels, not the night, when only the per-panel rail fired", async () => {
+    // The grader has two 25% rails; this one is a count limit on one patch of
+    // sky, and a conservative pass cannot release what it withheld. Before
+    // v0.474.0 both told the "rough session" story (observer issue #968).
+    mockSchema([]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
+    vi.spyOn(client.api, "listFrames").mockResolvedValue(
+      Array.from({ length: 20 }, (_, i) => mkFrame(i + 1)));
+    vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([]);
+    vi.spyOn(client.api, "autoGradePreview").mockResolvedValue({
+      sensitivity: "normal", n_accepted: 1524, n_considered: 1524,
+      recommendations: [
+        { frame_id: 1, name: "f1.fits", reasons: [
+          { metric: "sky_level", label: "much brighter sky than typical", value: 900, typical: 200, z: 9 },
+        ] },
+      ],
+      metrics_used: ["sky_level"], metrics_skipped: {},
+      capped: true, capped_overall: false, capped_panels: 1,
+      withheld_per_panel: 1, pointing_groups: 32, changed_ids: null,
+    });
+
+    renderStack();
+
+    await waitFor(() =>
+      expect(screen.getByText(/1 flagged frame on 1 mosaic panel was held back/))
+        .toBeInTheDocument());
+    expect(screen.queryByText(/rough session/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/review the night's data/)).not.toBeInTheDocument();
   });
 
   it("shows the pre-run output canvas + peak-memory estimate line", async () => {

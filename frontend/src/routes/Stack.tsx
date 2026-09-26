@@ -40,6 +40,7 @@ import { memoryFixAction } from "../stackMemoryFix";
 import { printBiggerAction } from "../stackPrintBigger";
 import { stackTimeLine } from "../stackTimeEstimate";
 import { minMaxIgnoresWeightingHint as minMaxIgnoresWeighting } from "../weightingHint";
+import { gradeCapNotice } from "../gradeCap";
 import {
   DRIZZLE_MIN_SAMPLES_PER_PIXEL, samplesPerPixel, samplesPerPixelPhrase,
 } from "../samplesPerPixel";
@@ -60,6 +61,15 @@ export function StackView() {
   const { safe = "" } = useParams();
   const [searchParams] = useSearchParams();
   const reuseRunId = searchParams.get("from");
+  // `?open=advanced` — a caller that has just named a switch living inside the
+  // collapsed Advanced disclosure can open it, so the reader lands on the
+  // control rather than on a long form with the answer folded away. The health
+  // card's sub-pixel-refine note is the first such caller. Uncontrolled and
+  // closed without the parameter, exactly as before; the value is a *default*,
+  // so the reader can still close it.
+  const [openSections, setOpenSections] = useState<string[]>(
+    () => (searchParams.get("open") === "advanced" ? ["advanced"] : []),
+  );
   const qc = useQueryClient();
   const [values, setValues] = useState<Record<string, unknown>>({});
   // True once `values` has been seeded from the loaded defaults (see the sync
@@ -939,12 +949,12 @@ export function StackView() {
     if (!rep || rep.recommendations.length === 0) return null;
     const n = rep.recommendations.length;
     const base = `Auto-grade thinks ${n} of your ${rep.n_accepted} accepted frame${n === 1 ? "" : "s"} look like quality outliers (clouds, poor focus or tracking).`;
-    // When a whole session is rough, the grader caps its recommendation at the
-    // worst 25% (MAX_REJECT_FRACTION) so it never nukes half a library — tell
-    // the user that here, since they may skip the Target page's fuller notice.
-    const capped = rep.capped
-      ? " This looks like a rough session — more were flagged than the 25% safety cap allows, so only the worst are recommended; review before stacking."
-      : "";
+    // The grader caps its recommendation at 25% so it never nukes half a
+    // library — tell the user that here, since they may skip the Target page's
+    // fuller notice. Which of the two rails did it is the same question that
+    // page asks, off the same helper, so the two cannot tell different stories.
+    const notice = gradeCapNotice(rep);
+    const capped = notice ? ` ${notice.text}` : "";
     return `${base}${capped} Drop ${n === 1 ? "it" : "them"} in one click, or review on the Target page.`;
   })();
 
@@ -1312,7 +1322,8 @@ export function StackView() {
             )}
           </Paper>
 
-          <Accordion variant="separated" mt="xs">
+          <Accordion variant="separated" mt="xs" multiple
+                     value={openSections} onChange={setOpenSections}>
             <Accordion.Item value="advanced">
               <Accordion.Control>Advanced options</Accordion.Control>
               <Accordion.Panel>
@@ -1641,8 +1652,10 @@ export function StackView() {
               {job.state === "done" && excludedFrames.length > 0 ? (
                 <Alert color="orange" mt="xs" p="xs">
                   <Text size="xs">
-                    Dropped {excludedFrames.length} frame(s) with a bad plate-solve (footprint far
-                    from the group) and flagged them rejected: {excludedFrames.join(", ")}
+                    Dropped {excludedFrames.length} frame(s) with a bad plate-solve — they landed
+                    away from the group, or came back at a scale the rest of the frames disagree
+                    with — and flagged them rejected: {excludedFrames.join(", ")}. Each frame's row
+                    in the Frames table says which.
                   </Text>
                 </Alert>
               ) : null}

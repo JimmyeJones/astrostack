@@ -4,6 +4,7 @@ import { IconCopyOff, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { api, type CleanupSuggestion } from "../api/client";
+import { WRAPPING_BADGE } from "../badgeFit";
 
 // Remember which cleanup nudges the user dismissed, keyed per group so declining
 // one (e.g. "these aren't real subs") doesn't also hide the other (e.g. "these
@@ -89,7 +90,8 @@ function CleanupAlert({
         <Text size="sm">{intro}</Text>
         <Group gap={6}>
           {items.map((t) => (
-            <Badge key={t.safe} variant="outline" color="gray" size="sm">
+            <Badge key={t.safe} variant="outline" color="gray" size="sm"
+              styles={WRAPPING_BADGE}>
               {t.name} · {reasonLabel(t.reason)}
             </Badge>
           ))}

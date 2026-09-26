@@ -43,6 +43,7 @@ FIELDS = {
     "eccentricity_median": lambda f: f.eccentricity_median,
     "exposure_s": lambda f: f.exposure_s,
     "gain": lambda f: f.gain,
+    "sky_adu_median": lambda f: f.sky_adu_median,
 }
 
 #: A solved sub's WCS: the bulk of the row, and the whole reason this method

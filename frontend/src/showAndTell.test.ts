@@ -148,6 +148,20 @@ describe("hasAnythingToShow", () => {
     expect(hasAnythingToShow([], [still({ capture_id: "c1" })])).toBe(true);
   });
 
+  it("says YES over a wall that self-hid a picture that exists", () => {
+    // The wall returns no items below two finished pictures, so `items` alone
+    // said "nothing to play" on a library holding one finished picture — and
+    // the page hid the only way in to the slideshow over it.
+    expect(hasAnythingToShow([], [], 1)).toBe(true);
+    expect(hasAnythingToShow([], undefined, 3)).toBe(true);
+  });
+
+  it("treats a missing or zero count as exactly the old answer", () => {
+    // An older backend sends no count; that must not turn into "yes".
+    expect(hasAnythingToShow([], [], undefined)).toBe(false);
+    expect(hasAnythingToShow([], [], 0)).toBe(false);
+  });
+
   it("says yes for a ranked wall with no video captures at all", () => {
     expect(hasAnythingToShow([pic({})], [])).toBe(true);
   });

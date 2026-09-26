@@ -1854,6 +1854,54 @@ describe("TargetView auto-grade", () => {
       expect(bulk).toHaveBeenCalledWith("M_42", { action: "accept", ids: [2] }));
   });
 
+  it("tells the panel story, not the night story, for the per-panel rail", async () => {
+    // Observer issue #968: the grader has two 25% rails and one flag carried
+    // both, so a mosaic that hit its *per-panel* rail — a count limit on one
+    // patch of sky — showed an orange "this looks like a rough session" banner
+    // advising a conservative pass, which cannot release a frame a count limit
+    // withheld. On the owner's library that was false on 7 of 21 capped targets.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "autoGradePreview").mockResolvedValue(mkReport({
+      recommendations: [{
+        frame_id: 2, name: "f2.fits",
+        reasons: [{ metric: "fwhm_px", value: 8.0, typical: 3.0, z: 6.1,
+                    label: "much softer than typical" }],
+      }],
+      capped: true, capped_overall: false, capped_panels: 4,
+      withheld_per_panel: 56, pointing_groups: 32,
+    }));
+
+    renderTarget();
+    (await screen.findByRole("button", { name: /Auto-grade/ })).click();
+
+    expect(await screen.findByText(
+      /56 flagged frames on 4 mosaic panels were held back/)).toBeInTheDocument();
+    expect(screen.queryByText(/rough session/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/review the night's data/)).not.toBeInTheDocument();
+  });
+
+  it("still names the 25% cap when the target-wide rail is what fired", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1), mkFrame(2)]);
+    vi.spyOn(client.api, "autoGradePreview").mockResolvedValue(mkReport({
+      recommendations: [{
+        frame_id: 2, name: "f2.fits",
+        reasons: [{ metric: "fwhm_px", value: 8.0, typical: 3.0, z: 6.1,
+                    label: "much softer than typical" }],
+      }],
+      capped: true, capped_overall: true,
+    }));
+
+    renderTarget();
+    (await screen.findByRole("button", { name: /Auto-grade/ })).click();
+
+    expect(await screen.findByText(/25% safety cap/)).toBeInTheDocument();
+    expect(screen.getByText(/Consider a conservative pass first/)).toBeInTheDocument();
+  });
+
   it("shows a quiet all-consistent state when nothing is flagged", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([]);
