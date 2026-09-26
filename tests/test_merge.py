@@ -304,3 +304,39 @@ def test_a_picture_that_cannot_be_copied_is_reported_lost_not_half_carried(
     out = dst.project_dir / "output"
     assert not out.exists() or list(out.iterdir()) == []
     dst.close()
+
+
+def test_merge_does_not_carry_the_sources_whole_series_reel(tmp_path):
+    """The deepening reel is a cache of the *source* target's whole history of
+    stacks, not of the run it happens to sit beside — so carrying it would land a
+    picture of the wrong history in the destination's output folder, under a
+    basename whose own reel is built from the merged series on the next request.
+
+    It is in ``RUN_ARTEFACT_SUFFIXES`` so that deleting a run reclaims it; this
+    pins the other half of that registration.
+    """
+    from seestack.stack.output import RUN_ARTEFACT_SUFFIXES, SERIES_ARTEFACTS
+
+    src = _make_project(tmp_path, "night_two", 3, base_seed=10)
+    _write_run(src, "master", note="night two")
+    out = src.project_dir / "output"
+    for kind in SERIES_ARTEFACTS:
+        (out / f"master{RUN_ARTEFACT_SUFFIXES[kind]}").write_bytes(b"REEL")
+    src.close()
+    src_again = Project.open(tmp_path / "night_two")
+
+    dst = _make_project(tmp_path, "night_one", 2, base_seed=20)
+    results = list(merge_projects(dst, [src_again.project_dir],
+                                  copy_stack_runs=True))
+    src_again.close()
+
+    # The picture itself still came across — this must not have become "carry
+    # nothing".
+    assert results[0].n_runs_copied == 1
+    landed = sorted(p.name for p in (dst.project_dir / "output").iterdir())
+    assert any(n.endswith(".fits") for n in landed), landed
+    for kind in sorted(SERIES_ARTEFACTS):
+        suffix = RUN_ARTEFACT_SUFFIXES[kind]
+        assert not any(n.endswith(suffix) for n in landed), (
+            f"{suffix} should not have been carried: {landed}")
+    dst.close()

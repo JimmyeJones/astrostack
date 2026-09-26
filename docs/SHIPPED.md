@@ -1,5 +1,83 @@
 # Shipped — the record
 
+## v0.478.2 — 2026-09-26 — the deepening reel was not a registered run artefact, so deleting a stack left it on disk for good
+
+**Pillar: disk hygiene / trust (PRIORITY 3, on a box where "reclaiming space is the entire point of the
+button"). The second drifted hand mirror found by the v0.478.1 lever — *which list has nothing checking
+it?*.**
+
+`seestack.stack.output.RUN_ARTEFACT_SUFFIXES` is the single list every operation on a run's whole file set
+reads: `_archive_existing_outputs` on a re-stack, `merge._carry_pictures` on a merge, and
+`webapp.routers.storage.delete_run_artifacts` on a delete. Its own docstring says so, and the `_share.png`
+entry's comment spells out the stake ("left behind by a delete it would be the single largest orphan the
+output tree can hold").
+
+`webapp.routers.stack._build_or_get_deepening_reel` — the cross-run "night after night" reel, cached at the
+**newest** run's basename — spelled its three filenames by hand instead:
+`{basename}_deepening.webp` / `.png` / `.sig`. None was registered.
+
+**Reproduced before fixing**, through the real delete path: a run with its full artefact set plus a reel and
+signature beside it, deleted with `delete_run_artifacts`, left
+
+    LEFT BEHIND: ['master_deepening.sig', 'master_deepening.webp'] (2000003 bytes)
+
+Nothing would ever look at those again: the resolver only ever reads the reel of the *current* newest run's
+basename. A real reel is a 1024 px animation of **every** stack a target has, which puts it second only to
+`_share.png` among the orphans this tree can hold, and it leaks once per deleted newest run — on a library
+of 104 targets that is reprocessed in library-wide batches.
+
+### The fix is two halves, and the second one is what keeps the first from being a regression
+
+**(a) Register them, and make the writer read the table.** `deepening_webp` / `deepening_apng` /
+`deepening_sig` are now entries in `RUN_ARTEFACT_SUFFIXES`, and `render.deepening.write_deepening_reel` plus
+`_build_or_get_deepening_reel` take their names *from* it rather than spelling them — so the file that is
+written and the file that is deleted cannot be two different strings again.
+
+**(b) `SERIES_ARTEFACTS`: registered for delete, excluded from archive and merge.** A reel describes the
+target's whole *series* of stacks and is merely cached beside the newest run, so there is no such thing as
+the superseded run's copy of it. Renaming it onto each archived basename — which is what registering it
+alone would have done — would leave **one stale reel of a different series behind per re-stack**, each
+waiting on that run's delete. That is strictly worse for disk than the pre-fix behaviour, where the
+signature mismatch made the rebuild simply overwrite the single copy. So the new frozenset makes an archive
+**remove** them (a cache: the next request rebuilds from the masters), a merge **skip** them (the
+destination target's series is a different series, and carrying one would land a picture of the wrong
+history), and a delete reclaim them. The "avoid clobbering an already-archived set" probe skips them too,
+since the function no longer writes them to the archived basename.
+
+### The durable half: a static scan for hand-spelled siblings
+
+`tests/webapp/test_run_purge.py` already had a guard of this kind — it runs the real `write_stack_outputs`
+and asserts everything *it* produces is registered. That is structurally blind to the caches, which are
+written later and elsewhere (the progress reel by the stacker, the zoom clip, the share render, this reel by
+a router). Which is exactly how this one got in.
+
+New `tests/test_run_artefact_coverage.py` closes that half statically: it finds every
+`f"{<basename>}_<name>.<ext>"` literal in `seestack/` and `webapp/` — matched on the *variable* name
+(`base` / `basename` / `stem`), because a run's siblings are the files named after its basename, which is
+what the delete path resolves from — and requires each suffix to be registered. One `_EXEMPT` entry, with
+its reason: `_fullres.png` is a `Content-Disposition` download filename, never a file on disk. Plus a test
+that a stale exemption cannot sit there excusing the next one, the same pairing
+`test_dogfood_route_coverage.py` uses.
+
+**Tests: +5 (2 drift, 1 the leak itself, 1 archive, 1 merge). Two fail before** — the drift test on exactly
+`{'_deepening.webp': …, '_deepening.png': …, '_deepening.sig': …}`, and the purge test on
+`['master_deepening.png', 'master_deepening.sig', 'master_deepening.webp']` left behind — each verified by
+restoring the pre-fix files from git in a scratch checkout. The purge test writes the reel with the reel's
+**own writer**, so it cannot be wrong about the filenames, and spells the signature literally on purpose, so
+it states the failure in the terms the bug had.
+
+**One existing assertion deliberately updated, not weakened:** `test_output_archive.py`'s
+`len(archived) == len(RUN_ARTEFACT_SUFFIXES)` became `- len(SERIES_ARTEFACTS)`. The rule it was pinning —
+nothing is left at the canonical name, and everything archived shares one new basename — is untouched and
+still asserted; the new rule (the series cache is removed rather than moved) is asserted beside it, and a
+second test states it in its own terms, including that the run's own artefacts *are* still archived so this
+cannot have become "clear everything".
+
+**Upgrade-safe (§9):** three additive entries in a lookup table, one new frozenset, no on-disk layout change
+(the reel's path is unchanged — only who cleans it up), no config, schema, API-shape or default change. An
+install carrying reels left behind by earlier deletes keeps them; nothing hunts for them, because that would
+be a destructive sweep over a tree on the strength of a name pattern.
+
 ## v0.478.1 — 2026-09-26 — two reject reasons reached the owner as their own internal identifier, and the list that translates them had nothing checking it
 
 **Pillar: friendliness (PRIORITY 3). Found by asking the question the v0.477.2 run wrote down —
