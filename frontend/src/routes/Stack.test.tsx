@@ -78,6 +78,44 @@ describe("StackView", () => {
     expect(screen.getByText("Start stacking")).toBeInTheDocument();
   });
 
+  it("opens the Advanced disclosure when the link asked it to", async () => {
+    // The health card's sub-pixel-refine note names a switch that lives in the
+    // collapsed Advanced group, so its link carries `?open=advanced`. Without
+    // the parameter the panel stays shut, which is the state every other caller
+    // (and a bare visit) gets — Mantine only mounts an open panel's content, so
+    // "is the advanced field on screen?" is the honest question to ask.
+    mockSchema([
+      { key: "subpixel_refine", label: "Sub-pixel alignment refine", type: "bool",
+        group: "advanced", default: false, min: null, max: null, step: null,
+        options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ subpixel_refine: false });
+
+    renderStackAt("/targets/M_42/stack?open=advanced");
+    await waitFor(() =>
+      expect(screen.getByText("Advanced options")).toBeInTheDocument());
+    // `aria-expanded` on the control is the definitive answer — jsdom lays
+    // nothing out, so a visibility assertion here would pass on a panel that is
+    // merely rendered.
+    expect(screen.getByRole("button", { name: /Advanced options/ }))
+      .toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Sub-pixel alignment refine")).toBeInTheDocument();
+  });
+
+  it("leaves the Advanced disclosure shut without the parameter", async () => {
+    mockSchema([
+      { key: "subpixel_refine", label: "Sub-pixel alignment refine", type: "bool",
+        group: "advanced", default: false, min: null, max: null, step: null,
+        options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ subpixel_refine: false });
+
+    renderStackAt("/targets/M_42/stack");
+    await waitFor(() => expect(screen.getByText("Advanced options")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /Advanced options/ }))
+      .toHaveAttribute("aria-expanded", "false");
+  });
+
   it("badges and applies the recommended calibration masters", async () => {
     mockSchema([]);
     vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({});
