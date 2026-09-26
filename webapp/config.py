@@ -45,6 +45,9 @@ def _is_within(child: Path, parent: Path) -> bool:
     return child == parent or parent in child.parents
 
 
+LIBRARY_MANAGED_SUBDIRS = ("targets", "calibration")
+
+
 def nested_incoming_conflict(incoming: Path, library: Path, data_root: Path) -> str | None:
     """The one folder layout the app must never be pointed at, in plain language.
 
@@ -59,9 +62,12 @@ def nested_incoming_conflict(incoming: Path, library: Path, data_root: Path) -> 
     raw folder, with no backup behind it.
 
     Returns a message to show the user, or ``None`` when the layout is safe.
-    Deliberately one-directional: ``incoming/`` living inside the library root is
-    the app's *own default* shape one level up (both are children of the data
-    root) and nothing deletes outside ``targets/``, so it is not flagged.
+    ``incoming/`` living elsewhere inside the library root is allowed — nothing
+    deletes outside the library's own ``targets/`` and ``calibration/`` trees —
+    but **inside one of those two trees** it is the same risk the other way round:
+    at or under ``targets/`` a scan adopts each raw folder as a target's own
+    project folder (``project.sqlite``, ``cache/`` and ``output/`` land beside the
+    subs), and deleting or merging that target ``rmtree``s it, raws and all.
     """
     for label, path in (("library folder", library), ("data folder", data_root)):
         if _is_within(path, incoming):
@@ -71,6 +77,20 @@ def nested_incoming_conflict(incoming: Path, library: Path, data_root: Path) -> 
                 f"tidies up old files inside the {label}, and your incoming "
                 f"folder holds the only copy of your raw frames — it must never "
                 f"be written to or cleaned up. Pick a folder outside it."
+            )
+    # The library subtrees the app creates, tidies and deletes folders inside.
+    # Literal names, not imports (this module is imported before either owner):
+    # ``seestack.io.library._TARGETS_SUBDIR`` and
+    # ``webapp.calibration.CALIBRATION_SUBDIR`` — a test pins that they agree.
+    for sub in LIBRARY_MANAGED_SUBDIRS:
+        managed = Path(library) / sub
+        if _is_within(incoming, managed):
+            return (
+                f"Your incoming folder would sit inside the library's own "
+                f"\"{sub}\" folder ({_abs(managed)}). The app creates, tidies and "
+                f"deletes folders in there, and your incoming folder holds the "
+                f"only copy of your raw frames — it must never be written to or "
+                f"cleaned up. Pick a folder outside it."
             )
     return None
 
