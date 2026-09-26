@@ -1,5 +1,101 @@
 # Shipped — the record
 
+## v0.475.3 — 2026-09-26 — the health card diagnosed registration smear and prescribed a set of subs that only exists once the cure is already on
+
+*(Builder, branch `agent/run-0002`. Found by reading `seestack/stackhealth.py` during a run whose four
+dogfood sweeps — `--big --editor`, `--empty`, `--deep`, `--calibration` — all came back clean; the sweep
+records are in [`PROCESS-NOTES.md`](PROCESS-NOTES.md). Not filed in the backlog beforehand: this is a bug the
+Builder verified itself in the code.)*
+
+### The defect
+
+`stack_health`'s **`soft_stars`** note is the one that fires when the finished stack's own star size is
+materially fatter than the median of its contributing subs — *"the combine, not the sky, softened them"*,
+i.e. accumulated sub-pixel registration error. It ended, on every run, with one cure:
+
+> …This is usually small alignment drift building up over the night; **a steadier mount, or re-solving the
+> roughly-aligned subs, keeps them tight.**
+
+"The roughly-aligned subs" is not a general phrase in this app — it is a specific population with its own
+column, its own FITS card and its own health note. And it only exists when **sub-pixel alignment refine**
+ran:
+
+* `n_roughly_aligned` counts the contributing subs *refine* had to leave unshifted because their measured
+  shift exceeded its cap (`stacker._pass` → `align.align_one`'s `roughly_aligned_ids`).
+* `stacker` stamps it — and persists it — only under
+  `eff.subpixel_refine and not eff.drizzle and refine_active`, deliberately, so that "absent" reads as
+  *"refine didn't run"* rather than a reassuring zero.
+* `StackOptions.subpixel_refine` defaults **`False`**, and nothing turns it on automatically: it is an
+  **advanced**, hand-set field on the Stack form (`schemas.py`, `group: "advanced"`).
+* So on a default install the column is NULL, and the sibling note that *would* have named those subs
+  (`kind="roughly_aligned"`) is silent by design in exactly that state.
+
+The card therefore diagnosed the problem and then sent the reader after a set of frames the app had never
+shown them and never would — while the app's own remedy for that diagnosis, *"a phase-correlation pass that
+nudges each frame by a fraction of a pixel after the plate-solve align, **for slightly tighter stars**"*,
+sat unnamed behind the Stack form's collapsed **Advanced options** disclosure.
+
+**Verified against the owner's own state, not assumed.** The backlog's open lead on observer issue
+[#965](https://github.com/JimmyeJones/astrostack/issues/965) carries a point (c) — *"`n_roughly_aligned` is
+NULL on all 690 of the owner's stack runs… it may simply never be written"*. It is written; it is NULL
+because `subpixel_refine` is off on every one of those runs, which is the default and the only way it can
+be. That is now recorded on the lead (see below), and it is also what makes this note's second clause dead
+on his install specifically.
+
+### What shipped
+
+`soft_stars`'s **diagnosis is unchanged**; only the cure is chosen by what the run actually did.
+
+* New pure `stackhealth.run_option_flag(options_json, key) -> bool | None` — a boolean the run was stacked
+  with, keeping **three** states apart. `True`/`False` are the run's answer; `None` is *"the record can't
+  say"* (absent, garbled, non-object, key missing, or a non-`bool` value). Deliberately unlike the
+  neighbouring `_run_sigma_kappa`, whose fallback to the app default is safe only because every shipped
+  default for κ has been the same number — an option's default can and does change between versions, so
+  guessing would put a claim about *this* run on screen that nothing in the record supports. Real runs
+  persist `asdict(eff)`, so both keys are always present on anything the stacker wrote.
+* New `_refine_is_the_open_lever(run)`: true only when the run says `subpixel_refine: false` **and**
+  `drizzle: false`. Three runs are never offered the switch, for three different reasons — it was already
+  on (the pass ran, and this is the one state where "the roughly-aligned subs" names something real); the
+  run **drizzled** (drizzle places samples through a pixmap and never runs the refine step, which is why
+  `stacker` stamps no `NROUGHAL` there, so the switch would change nothing); or the options can't be read.
+* New `_soft_stars_message(run)`. With the lever open the sentence becomes *"…small alignment drift building
+  up over the night. **Sub-pixel alignment refine** nudges each sub by a fraction of a pixel before
+  combining, which is what tightens them up — it was off for this stack, and it costs a little more time per
+  sub."* Honest about the cost, because it is not free on a 5,477-sub target. Otherwise the original
+  sentence is kept **byte for byte**.
+* `HealthNote.action` gains `"subpixel_refine"`. The key is free-form on the wire by design
+  (`schemas.HealthNoteOut`: *"an older frontend simply renders no link for a key it doesn't know"*), so this
+  is upgrade-safe in both directions.
+* `StackHealthCard.noteAction` wires it to `/targets/<safe>/stack?open=advanced`, labelled *"Re-stack with
+  sub-pixel alignment refine →"*.
+* `routes/Stack.tsx`'s Advanced accordion becomes **controlled**, seeded open from `?open=advanced`. This is
+  the same gap `printBiggerAction` exists for and says out loud — *"both knobs it names live inside the
+  collapsed advanced disclosure, so reading the sentence still left a beginner hunting"*. The value is a
+  *default*, so the reader can still close it, and without the parameter the form is unchanged.
+
+### Tests (+5 Python, +3 vitest)
+
+`test_soft_stars_names_the_refine_switch_when_the_run_did_not_use_it` is the regression test and **fails
+before** (verified by a scratch revert of `seestack/stackhealth.py`): it asserts the switch is named, the
+action key is set, the diagnosis sentence is intact, the cost is stated, and — the half that is the actual
+bug — that the message does **not** send the reader after "roughly-aligned" subs that cannot exist there.
+Beside it: the refine-on and drizzled runs keep the original sentence and no action; four shapes of
+unreadable options (`{}`, unparseable, and each key present without the other) fall back rather than guess;
+and `run_option_flag` is pinned across all three states including a non-`bool` value.
+`StackView > opens the Advanced disclosure when the link asked it to` **fails before** too (verified by a
+scratch revert of `Stack.tsx`), and asserts `aria-expanded` on the control rather than jsdom visibility —
+jsdom lays nothing out, so a visibility assertion there would pass on a panel that is merely rendered. The
+one existing assertion that pinned the pre-fix behaviour (`sf.action is None` on a `{}`-options fixture)
+still passes untouched, and gained a docstring line saying *why* it is the unreadable-options case.
+
+### Upgrade-safety (§9)
+
+Additive throughout: no config key, no schema change, no migration, no on-disk path, no default flipped, and
+no API shape changed (one new value for an already-free-form string field). An older frontend against this
+backend renders the new sentence with no link; this frontend against an older backend never sees the key.
+`subpixel_refine` itself is untouched — it stays off by default, and the note *names* it rather than setting
+it.
+
 ## v0.475.2 — 2026-09-25 — a recipe may carry an op twice, and its outcome notes could not
 
 *(Builder, branch `claude/nifty-pasteur-fspzqn`. The backlog entry — "Infra / maintainability", Builder
