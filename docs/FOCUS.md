@@ -1,7 +1,7 @@
 # Current focus — AstroStack
 
 *Last rewritten 2026-09-27 (front-of-queue item 1 struck by the Builder the same day it
-shipped). **The Scout rewrites this page** whenever the front of the
+shipped; two of item 2's four struck by the Builder the same evening — v0.482.1/.2 and v0.483.0). **The Scout rewrites this page** whenever the front of the
 queue changes; it stays short (≤ 60 lines) and dated. Live rules are in `AGENTS.md`;
 the backlog is `docs/IMPROVEMENTS.md`. If this page and the backlog disagree, the
 backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
@@ -13,8 +13,13 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
    v0.480.4 the swapped picture). The button is safe to use again; `merge.carry_stack_runs`
    is now the vehicle item 2's mosaic reconciliation can build on.
 2. **Owner-approved, buildable now** (answers of 2026-09-25, on `main` via PR #981):
-   - reconcile the 11 historical mosaic pairs (#878) through `merge.carry_stack_runs` —
-     **unblocked now item 1 has shipped**;
+   - ~~reconcile the 11 historical mosaic pairs (#878) through `merge.carry_stack_runs`~~ —
+     **offered in the app 2026-09-27 (v0.482.1 + v0.482.2).** The pairs were invisible to library
+     hygiene because the base target was looked up by a *computed* safe name the hash-suffixed base
+     does not have (v0.482.1, a bug found while costing this); with that fixed, each twin that carries
+     pictures is offered **Combine into `<T> (mosaic)`** on the Library's cleanup card, carrying runs,
+     recipes, notes, tags and preferences (v0.482.2). **What is left is the owner clicking it** — this
+     closes on the next observer reading that shows the pairs gone, not on more code;
    - ~~`astroalign` for the WCS-free registration fallback~~ — **shipped 2026-09-27 in two halves.**
      v0.481.0 built the similarity transform inside the bootstrap rescue, closing a silent mis-placement bug
      on the way (phase correlation never declines, so a night of alt-az field rotation was being propagated as
@@ -25,10 +30,17 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
      entry). The owner is a heavy mosaic user, so it is worth real thought;
    - auto-*apply* the classified object preset (with undo, a Settings switch, and never
      over a saved recipe);
-   - a progression reel ordered by **capture night**, cumulative (the existing reel orders
-     by stack time).
+   - ~~a progression reel ordered by **capture night**, cumulative~~ — **shipped 2026-09-27
+     (v0.483.0), for the price of one stack.** The `save_progress` clip's pass-1 snapshots now land on
+     capture-night boundaries instead of every Nth frame, so one ordinary stack yields "night 1;
+     nights 1–2; …", each frame captioned with its date range and sub count. Off by default, no new
+     option. **What is left of the entry** is the reel-*from-history* half: reusing existing runs whose
+     sub set matches a cumulative step, so a target gets the reel without being re-stacked at all.
    *(The noise-delta picture shipped as v0.479.0.)*
-3. **Open observer issues:** #878 (above), #880 (the Seestar's on-device mosaic output
+   *(After the two strikes above, the only unbuilt item here is the auto-apply preset — and two
+   Builders have now costed it and landed on "the honest next step is a measurement, not a build";
+   read the ⚠ notes on its backlog entry before picking it up.)*
+3. **Open observer issues:** #878 (above — the app now offers the fix), #880 (the Seestar's on-device mosaic output
    ingested as targets, and failing every reprocess), #903 (prevention by cover semantics
    still open; the existing damage now has a one-off repair, v0.479.3).
 
