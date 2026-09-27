@@ -619,3 +619,69 @@ def test_a_blob_with_no_wcs_keys_still_reads_as_an_unsolved_frame():
     assert wcs is not None
     assert not wcs.has_celestial
     assert not wcs_text_is_usable(blob)
+
+
+# ---- fits_has_celestial_wcs: "no solution" vs "no file" --------------------
+
+def _write_image(path, *, with_wcs: bool):
+    """A written image, with or without a celestial solution in its header."""
+    import numpy as np
+    from astropy.io import fits
+
+    hdu = fits.PrimaryHDU(data=np.zeros((4, 4), dtype=np.float32))
+    hdu.header["CREATOR"] = "Seestack"
+    if with_wcs:
+        hdu.header["CTYPE1"] = "RA---TAN"
+        hdu.header["CTYPE2"] = "DEC--TAN"
+        hdu.header["CRVAL1"] = 83.6
+        hdu.header["CRVAL2"] = -5.4
+        hdu.header["CRPIX1"] = 2.5
+        hdu.header["CRPIX2"] = 2.5
+        hdu.header["CDELT1"] = -0.001
+        hdu.header["CDELT2"] = 0.001
+    hdu.writeto(path, overwrite=True)
+    return path
+
+
+def test_a_master_with_a_solution_says_so(tmp_path):
+    from seestack.io.wcs_io import fits_has_celestial_wcs
+
+    p = _write_image(tmp_path / "solved.fits", with_wcs=True)
+    assert fits_has_celestial_wcs(p) is True
+
+
+def test_a_master_written_without_one_says_so_too(tmp_path):
+    """The state observer #989 is about. It must be ``False`` — a definite "this
+    picture has no place on the sky" — and not confusable with "cannot say"."""
+    from seestack.io.wcs_io import fits_has_celestial_wcs
+
+    p = _write_image(tmp_path / "flat.fits", with_wcs=False)
+    assert fits_has_celestial_wcs(p) is False
+
+
+def test_a_master_that_is_not_on_disk_cannot_say(tmp_path):
+    """A cleared cache or an offline NAS share is a storage problem, not a lost
+    solution, and must never be reported as one."""
+    from seestack.io.wcs_io import fits_has_celestial_wcs
+
+    assert fits_has_celestial_wcs(tmp_path / "gone.fits") is None
+    assert fits_has_celestial_wcs(None) is None
+    assert fits_has_celestial_wcs("") is None
+
+
+def test_a_file_that_is_not_a_fits_at_all_cannot_say(tmp_path):
+    from seestack.io.wcs_io import fits_has_celestial_wcs
+
+    p = tmp_path / "junk.fits"
+    p.write_bytes(b"not a FITS file")
+    assert fits_has_celestial_wcs(p) is None
+
+
+def test_it_agrees_with_the_function_every_reader_uses(tmp_path):
+    """One definition of "carries a celestial WCS": a note claiming the position
+    is missing must agree with the readers that would draw it."""
+    from seestack.io.wcs_io import celestial_wcs_from_fits, fits_has_celestial_wcs
+
+    for with_wcs in (True, False):
+        p = _write_image(tmp_path / f"m{int(with_wcs)}.fits", with_wcs=with_wcs)
+        assert fits_has_celestial_wcs(p) is (celestial_wcs_from_fits(p)[0] is not None)

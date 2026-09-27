@@ -1,5 +1,131 @@
 # Shipped — the record
 
+## v0.480.7 — 2026-09-27 — the other half of #989: a picture that lost its place on the sky now says so, and how to get it back
+
+*(Same PR as v0.480.6, which fixed the writer. This is what the six masters already on the owner's disk get.)*
+
+**Why a fix was not enough.** v0.480.6 stops any new master being written without its WCS, but a master already on disk
+does not heal until its target is stacked again — and nothing told its owner that. Observer #989's central point is that
+every consequence fails toward **silence**: the scale bar, the North arrow, the baked catalog labels, the framing advice,
+the annotations endpoint and that picture's share of the sky-coverage total are simply *absent*, with no wrong number to
+notice and no message. One of the six affected runs is a target's current picture. So the run that fixed the writer owed
+the owner a sentence too.
+
+**What ships.** A new `stackhealth` note on the card that already answers "how's my stack?" — no new card, no new banner
+(the UI rule):
+
+> This picture has no record of where it is on the sky, so the scale bar, the North arrow and the object labels can't be
+> drawn on it, and it won't line up in other astro tools. Your subs do know where they are — stacking this target again
+> writes it back in.
+
+`kind="no_sky_solution"`, `severity="info"`, priority 15 — above the coverage advice, below the plate-solve note — with a
+new action key `restack_for_wcs` → "Stack this target again →". Deliberately *not* the existing `restack` key: that one's
+label names a switch on the Stack form ("Re-stack with Auto outlier removal"), and here there is nothing to change —
+stacking again with the options the run already has is the whole fix, so the link must not send a beginner hunting for a
+control.
+
+**How it knows, and the three-way answer that matters.** New `seestack.io.wcs_io.fits_has_celestial_wcs` returns
+`True`/`False`/**`None`**, where `None` means *"cannot say"* — the file is not on disk, or its header is unreadable.
+"This picture has no place on the sky" and "this picture is not here" are different things to tell someone, and a cleared
+cache or an unmounted NAS share must never read as the first: it would prescribe a re-stack for a solution the file may
+well still carry. It is answered *through* `celestial_wcs_from_fits`, so the app keeps exactly one definition of "carries
+a celestial WCS" and the note cannot disagree with the readers that would draw the overlays (pinned by a test).
+
+`stack_health` takes it as an argument (`has_sky_solution`) rather than reading the file itself — the same division as
+`noise_ratio`: this module never opens a file, and `webapp/routers/targets.py` does the header-only read. `None`
+self-hides the note. The note is also guarded on the subs having actually been *located*: with no plate solve there is no
+solution to have lost, and the note at the top of that function is the one that should speak.
+
+**Upgrade-safety.** Additive: a new engine keyword with a default that reproduces today's output exactly, a new note kind,
+and a new action key — which `HealthNoteOut` already carries as free-form text, so an older frontend renders the note's
+sentence with no link rather than breaking. No config, schema, on-disk or default change, and no endpoint shape change.
+
+**Tests: +11 python (all red before), +1 frontend.** The predicate in all four states including the corrupt file; the note
+firing with its action and its wording, staying quiet on `True`, on `None`, and on a target with nothing located; its
+rank above the coverage note on a run that earns both; and the endpoint end-to-end on a master written without a WCS,
+one written with one, and one that is not on disk. Frontend: `noteAction("restack_for_wcs", …)` names no switch.
+
+
+## v0.480.6 — 2026-09-27 — 🐛 a single field stacked with drizzle off wrote its master with NO WCS (observer [#989](https://github.com/JimmyeJones/astrostack/issues/989))
+
+**The bug, verified in the code and reproduced before anything was changed.** `stack.output._write_fits` merges a WCS
+into the master it writes. It copied the header it was handed **wholesale**, inside *one* `try` around the whole loop:
+
+```python
+try:
+    ref = fits.Header.fromstring(wcs_text)
+    for k in list(ref):
+        if k.startswith("NAXIS") or k in {"SIMPLE", "BITPIX", "EXTEND", ""}:
+            continue
+        h[k] = (ref[k], ref.comments[k])
+except Exception:
+    log.warning("Could not merge WCS into output FITS")
+```
+
+Two of `run_stack`'s three canvas branches hand it a **WCS-only** header (`canvas.wcs_text` for a mosaic union,
+`wcs_to_text(drizzler.out_wcs)` for drizzle). The third — a **single field with drizzle off**, which keeps the
+reference-frame canvas — hands it `ref.wcs_json`, the reference sub's *entire stored header*. A stored frame header
+carries the two-card FITS-format `COMMENT` citation block near the top, and a commentary card cannot be *assigned* as
+a keyword value: its string form spans two cards, so it contains a newline and astropy raises
+`ValueError: FITS header values must contain standard printable ASCII characters`. One `try` around the loop meant the
+first `COMMENT` aborted the whole merge — and `COMMENT` sits at card 6 while `CTYPE1` sits far below it, so **nothing
+was copied** and the master was written with no celestial WCS at all. The only trace was one `log.warning`.
+
+**What the owner lost, per the observer's measurement on his library** (745 runs joined to their masters' headers):
+6 of 6 runs with that combination, **0 of the other 737** — the condition separates perfectly. One of the six is a
+target's current picture, a 521-sub single field written without a WCS on six consecutive stacks under five engine
+versions. Everything downstream reads a run's place on the sky off that header, so all of it failed **toward
+silence**: `/api/sky/coverage` counted 82 of 83 pictures, North-up was never recovered, the scale bar / North-East
+rose / baked catalog labels were absent (0 instead of 46 on the paired control), the annotations endpoint answered
+empty, framing advice answered `None`, and an editor export of that picture inherited no WCS either — so the file the
+owner shares would not plate-solve or overlay in Siril/PixInsight.
+
+**The fix is an allowlist, and the reason is §10.** The narrow alternative — make the loop *tolerant*, skip commentary
+cards and carry on — fixes the silence and opens something worse: it would start copying the **rest** of a sub's
+header into every master, and a Seestar stamps `SITELAT`/`SITELONG` into every frame it writes, which for a scope used
+at home is the owner's address to within a few metres, in the very files that get exported and shared. Today no master
+carries them (0 of 745) *precisely because* this merge always failed before reaching them. So `_write_fits` now copies
+only keywords that describe the sky geometry — `_WCS_EXACT_KEYS` + `_WCS_KEY_INDEXED_RE`, tested through
+`_is_wcs_keyword` — and does it **per card**, so one keyword astropy refuses costs itself and never the rest of the
+solution. Everything else is skipped by construction: commentary and structural cards, the site, and one frame's own
+acquisition cards.
+
+Two deliberate exclusions worth knowing, both with their own test:
+- **`DATE-OBS` / `DATE-END` / `MJD-OBS` / `MJD-AVG`.** The stacker stamps the master's capture window from *every* sub
+  it combined (`header_meta`), and this merge runs after that — carrying one reference frame's timestamp through here
+  would overwrite the whole stack's window with one sub's.
+- **`OBSGEO-X/Y/Z`.** The §10 concern above in a second costume, and it carries no celestial geometry. (`MJDREF` stays:
+  it is the WCS's own fiducial epoch, `wcs_to_text` emits it, and it has always travelled on the other two branches.)
+
+**Why the fix is in the writer, not in the stacker branch.** The observer suggested handing the reference-canvas branch
+a WCS-only header instead. The writer is where the WCS is actually lost, and it is the safer place: `dst_wcs_text` is
+*also* the reprojection target in that branch (`align_to_reference(dst_wcs_text=…)`), where `NAXIS1`/`NAXIS2` carry the
+canvas size — replacing it with a `to_header()` string would have dropped those. Fixing the writer also covers every
+other caller and every future one; the stacker is unchanged.
+
+**Upgrade-safety.** No config, schema, on-disk layout, default or API change; masters already on disk are untouched and
+old ones keep reading exactly as they do. The six affected runs heal on the target's **next stack** — no migration.
+Every master the other two branches write is byte-identical (every keyword `wcs_to_text` emits is in the allowlist,
+asserted directly).
+
+**A fixture that could not exhibit its bug, now fixed too.** Every stacker fixture set `frame.wcs_json` from
+`tests/synth.py::make_synth_wcs_text` — a *WCS-only* header — which is exactly the shape that never had the bug. That
+is why 6,707 green tests never saw this. New `synth.make_synth_frame_header_text` returns a realistic **whole stored
+frame header** (structural cards, the `COMMENT` pair, the camera and site cards, then the WCS, in that card order,
+because the order is what makes the merge die above `CTYPE1`), and is what anything asserting about output headers
+should use from now on.
+
+**Tests: +87 in `tests/test_output_wcs_merge.py`.** Both wrong directions are pinned, checked by reverting in a
+scratch copy and watching them fail:
+- Against the **old code**, 5 fail — including the end-to-end one, a default-options single-field drizzle-off
+  `run_stack` whose frames carry a realistic `wcs_json`, asserting `celestial_wcs_from_fits` on the master it writes.
+- Against the **tolerant-loop fix**, 4 different ones fail — the site leak, the rest of the sub's header travelling,
+  the overwritten capture window, and the no-WCS-handed case — so the wrong fix cannot be shipped by accident either.
+Plus a paired-geometry test (whole header and WCS-only header must describe the same sky to 1e-9 at all four corners),
+a "every keyword that used to travel still travels" test for the mosaic/drizzle branches, degradation tests (no WCS
+handed, unparseable blob), and the `_is_wcs_keyword` vocabulary in both directions.
+
+
 ## v0.480.5 — 2026-09-27 — 🐛 every `log.exception` was missing from `/api/logs` (found by running the app, not by reading it)
 
 *(Same PR as v0.480.2–.4. Not a Combine bug: it surfaced in the scratch app's own log while the running-app pass was

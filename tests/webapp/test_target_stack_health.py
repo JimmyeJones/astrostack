@@ -537,3 +537,60 @@ def test_the_card_reads_fields_not_whole_frames(client, solved_library,
     assert r.status_code == 200
     assert r.json()["notes"], "the card must still have graded the run"
     assert built == 0, f"built {built} FrameRow objects to grade one stack"
+
+
+# ---- the master's own sky solution (observer #989) -------------------------
+
+def _write_master(fits_path: Path, *, with_wcs: bool) -> Path:
+    """A master on disk, with or without a celestial solution in its header —
+    the two states the note turns on."""
+    import numpy as np
+    from astropy.io import fits as _fits
+
+    fits_path.parent.mkdir(parents=True, exist_ok=True)
+    hdu = _fits.PrimaryHDU(data=np.zeros((3, 8, 8), dtype=np.float32))
+    hdu.header["CREATOR"] = "Seestack"
+    if with_wcs:
+        hdu.header["CTYPE1"] = "RA---TAN"
+        hdu.header["CTYPE2"] = "DEC--TAN"
+        hdu.header["CRVAL1"] = 83.6
+        hdu.header["CRVAL2"] = -5.4
+        hdu.header["CRPIX1"] = 4.5
+        hdu.header["CRPIX2"] = 4.5
+        hdu.header["CDELT1"] = -0.001
+        hdu.header["CDELT2"] = 0.001
+    hdu.writeto(fits_path, overwrite=True)
+    return fits_path
+
+
+def test_a_run_whose_master_lost_its_sky_solution_is_told_so(
+        client, solved_library, data_root):
+    """End-to-end on the combination observer #989 measured. The subs are solved
+    (the ``solved_library`` fixture), so the picture's silence is the master's."""
+    fits_path = _write_master(data_root / "out" / "nowcs.fits", with_wcs=False)
+    rid = _add_run(data_root, "M_42", fits_path=str(fits_path))
+
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    note = next(n for n in body["notes"] if n["kind"] == "no_sky_solution")
+    assert note["action"] == "restack_for_wcs"
+    assert "scale bar" in note["message"]
+
+
+def test_a_run_whose_master_kept_it_is_not_told_anything(
+        client, solved_library, data_root):
+    fits_path = _write_master(data_root / "out" / "haswcs.fits", with_wcs=True)
+    rid = _add_run(data_root, "M_42", fits_path=str(fits_path))
+
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    assert [n for n in body["notes"] if n["kind"] == "no_sky_solution"] == []
+
+
+def test_a_master_that_is_not_on_disk_is_not_accused_of_losing_it(
+        client, solved_library, data_root):
+    """An unmounted share or a purged run is a storage problem. Telling its owner
+    to re-stack for a solution the file may well still carry would be a guess."""
+    rid = _add_run(data_root, "M_42",
+                   fits_path=str(data_root / "out" / "missing.fits"))
+
+    body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
+    assert [n for n in body["notes"] if n["kind"] == "no_sky_solution"] == []

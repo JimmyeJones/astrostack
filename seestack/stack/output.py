@@ -185,6 +185,85 @@ def write_stack_outputs(
     }
 
 
+
+#: Every FITS keyword that describes **where the picture is on the sky** — the
+#: only ones :func:`_write_fits` copies out of the header it is handed. Grouped as
+#: exact names plus :data:`_WCS_KEY_INDEXED_RE` for the axis-indexed families.
+#:
+#: The writer used to copy *everything* it was handed, inside one ``try`` around
+#: the whole loop, and that was wrong twice over:
+#:
+#: 1. ``stack.stacker``'s **reference-frame-canvas** branch (a single field with
+#:    drizzle off) hands it ``ref.wcs_json`` — the reference sub's *entire* stored
+#:    header, not a WCS-only one like the mosaic and drizzle branches'
+#:    ``wcs_to_text(...)``. A stored frame header carries ``COMMENT`` cards, and a
+#:    commentary card cannot be *assigned* as a keyword value (its string form
+#:    spans two cards, so it contains a newline and astropy raises ``ValueError``).
+#:    One ``try`` around the loop meant the first ``COMMENT`` aborted the whole
+#:    merge, and since ``COMMENT`` sits near the top of a frame header while
+#:    ``CTYPE1`` sits far below it, the master was written with **no WCS at all**.
+#:    Observer issue #989 measured it on the owner's library: 6 of 6 single-field
+#:    drizzle-off runs, 0 of the other 737 runs, one of them a target's current
+#:    picture across six consecutive stacks. Every surface that needs the WCS —
+#:    sky coverage, North-up, the scale bar and compass, the baked catalog labels,
+#:    framing advice, an editor export's own header — then failed toward silence.
+#: 2. Merely making that loop *tolerant* (skip commentary, carry on) would have
+#:    fixed the silence and opened something worse: it would start copying the
+#:    rest of a sub's header into every master, and a Seestar stamps
+#:    ``SITELAT``/``SITELONG`` into every frame it writes — which for a scope used
+#:    at home is the owner's address to within a few metres, in the very files that
+#:    get exported and shared (``AGENTS.md`` §10). Today no master carries them,
+#:    precisely because this merge always failed before reaching them.
+#:
+#: An allowlist closes the first without opening the second: a keyword either
+#: describes the sky geometry or it does not travel. It is also why the fix lives
+#: here rather than in the stacker branch — the writer is what loses the WCS, and
+#: the branch's whole-header string is *wanted* elsewhere (it is also the
+#: reprojection target, where ``NAXIS1``/``NAXIS2`` carry the canvas size).
+_WCS_EXACT_KEYS = frozenset({
+    "WCSAXES", "WCSNAME",
+    "LONPOLE", "LATPOLE",
+    "RADESYS", "RADECSYS", "EQUINOX", "EPOCH",
+    # MJDREF is the fiducial epoch the WCS's own time axis is measured from, not
+    # an observation time — `wcs_to_text` emits it, so it has always travelled on
+    # the mosaic and drizzle branches and stays in the list.
+    "MJDREF", "MJDREFI", "MJDREFF",
+    # SIP distortion: the orders and the polynomial coefficients (below).
+    "A_ORDER", "B_ORDER", "AP_ORDER", "BP_ORDER", "A_DMAX", "B_DMAX",
+})
+
+#: The axis-indexed WCS families: ``CTYPE1``, ``CD1_2``, ``PC2_1``, ``PV2_10``,
+#: SIP's ``A_1_2`` …, with the optional trailing letter of an alternate WCS
+#: description (``CTYPE1A``).
+_WCS_KEY_INDEXED_RE = re.compile(
+    r"^(?:CTYPE|CUNIT|CRPIX|CRVAL|CDELT|CROTA|CSYER|CRDER)\d[A-Z]?$"
+    r"|^(?:CD|PC)\d_\d[A-Z]?$"
+    r"|^(?:PV|PS)\d_\d+[A-Z]?$"
+    r"|^(?:A|B|AP|BP)_\d_\d$"
+)
+
+#: Deliberately **not** in the allowlist, and this is a choice rather than an
+#: omission: the observation-time keywords (``DATE-OBS``, ``DATE-END``,
+#: ``MJD-OBS``, ``MJD-AVG``). The stacker stamps the master's own capture window
+#: from *every* sub it combined (``header_meta``'s ``DATE-OBS``/``DATE-END``), and
+#: this merge runs after that — so carrying a single reference frame's timestamp
+#: through here would overwrite the window of the whole stack with one sub's.
+#: Likewise ``OBSGEO-X/Y/Z``: an observatory position is the §10 concern above in
+#: a second costume, and it carries no celestial geometry.
+
+
+def _is_wcs_keyword(key: str) -> bool:
+    """Whether ``key`` is a FITS keyword describing the image's sky geometry.
+
+    Commentary cards (``COMMENT``, ``HISTORY``, blank), structural cards
+    (``SIMPLE``, ``NAXISn``), and everything a camera stamps about the exposure
+    or the site answer ``False`` — see :data:`_WCS_EXACT_KEYS` for why the test is
+    an allowlist rather than a skip-list. Pure, so it is unit-tested directly.
+    """
+    k = (key or "").strip().upper()
+    return k in _WCS_EXACT_KEYS or bool(_WCS_KEY_INDEXED_RE.match(k))
+
+
 # ---- FITS ----------------------------------------------------------------
 
 def _write_fits(
@@ -219,16 +298,30 @@ def _write_fits(
     if header_meta:
         _merge_header_meta(h, header_meta)
     if wcs_text:
-        # Merge the reference WCS in. We strip NAXIS keys so they don't clash
-        # with the cube's own.
+        # Merge the sky geometry in — and *only* that (see _WCS_EXACT_KEYS for the
+        # two failure modes an allowlist closes here). NAXIS keys are excluded by
+        # the same test, so they can't clash with the cube's own.
         try:
             ref = fits.Header.fromstring(wcs_text)
-            for k in list(ref):
-                if k.startswith("NAXIS") or k in {"SIMPLE", "BITPIX", "EXTEND", ""}:
-                    continue
-                h[k] = (ref[k], ref.comments[k])
         except Exception:  # noqa: BLE001
-            log.warning("Could not merge WCS into output FITS")
+            ref = None
+            log.warning("Could not parse the WCS handed to the output FITS")
+        copied = 0
+        for k in list(ref or ()):
+            if not _is_wcs_keyword(k):
+                continue
+            # Per card, not per merge: one keyword astropy refuses must never
+            # cost the master the rest of its solution, which is exactly how the
+            # whole WCS used to go missing.
+            try:
+                h[k] = (ref[k], ref.comments[k])
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Skipped WCS card %s in the output FITS: %s", k, exc)
+                continue
+            copied += 1
+        if ref is not None and not copied:
+            log.warning("The header handed to the output FITS carried no WCS "
+                        "keywords; writing it without a solution")
     hdu.writeto(path, overwrite=True)
 
 

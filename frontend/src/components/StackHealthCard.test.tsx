@@ -69,6 +69,20 @@ describe("noteAction", () => {
     // It doesn't need a run to point at, unlike trim_border.
     expect(noteAction("restack", "M_42", null)?.href).toBe("/targets/M_42/stack");
   });
+  it("wires restack_for_wcs to the Stack form with nothing to change", () => {
+    // The picture lost the sky solution its subs still carry; stacking again with
+    // the options it already has is the whole fix, so the label must not name a
+    // switch (unlike the other two re-stack links).
+    expect(noteAction("restack_for_wcs", "M_42", 7)).toEqual({
+      label: "Stack this target again \u2192",
+      href: "/targets/M_42/stack",
+    });
+    // Off-page from the editor too, and it needs no run to point at.
+    expect(noteAction("restack_for_wcs", "M_42", 7, true)?.href)
+      .toBe("/targets/M_42/stack");
+    expect(noteAction("restack_for_wcs", "M_42", null)?.href)
+      .toBe("/targets/M_42/stack");
+  });
   it("wires subpixel_refine to the Stack form with Advanced already open", () => {
     // The switch it names lives inside the collapsed Advanced disclosure, so a
     // bare /stack link would leave the reader hunting for the phrase they just

@@ -1375,8 +1375,17 @@ def target_stack_health(
 
         noise_ratio, noise_crop_depth = stamped_noise_measurement(
             proj, run, frames)
+        # Does this run's master still say where it is on the sky? Read here
+        # rather than in the engine, which never opens a file — the same division
+        # as the noise stamp above. `None` when the master is not on disk, so a
+        # cleared cache or an offline share reads as "cannot say" instead of as a
+        # lost solution.
+        from seestack.io.wcs_io import fits_has_celestial_wcs
+
         notes = stack_health(run, frames, noise_ratio=noise_ratio,
-                             noise_crop_depth=noise_crop_depth)
+                             noise_crop_depth=noise_crop_depth,
+                             has_sky_solution=fits_has_celestial_wcs(
+                                 run.fits_path))
         spec = recommended_dark_spec(frames)
         # The same fact the calibration note's own wording turns on, served once
         # so the how-to guide rendered directly under that note cannot hold a

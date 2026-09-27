@@ -258,3 +258,75 @@ def make_synth_wcs_text(
     w.wcs.crpix = [width / 2 + 0.5 + dx, height / 2 + 0.5 + dy]
     w.wcs.cdelt = [-pixscale_arcsec / 3600.0, pixscale_arcsec / 3600.0]
     return str(w.to_header(relax=True))
+
+
+def make_synth_frame_header_text(
+    *,
+    width: int = 480,
+    height: int = 320,
+    ra_center_deg: float = 83.6,
+    dec_center_deg: float = -5.4,
+    pixscale_arcsec: float = 5.0,
+    site_lat: float | None = 12.3456,
+    site_lon: float | None = -65.4321,
+    date_obs: str = "2026-07-19T22:14:03",
+) -> str:
+    """A **whole stored frame header** usable as ``frame.wcs_json`` in tests.
+
+    :func:`make_synth_wcs_text` returns a *WCS-only* header (astropy's
+    ``to_header()``), which is what the mosaic and drizzle branches of
+    ``run_stack`` hand the output writer — but **not** what a solved frame's
+    ``wcs_json`` column actually holds on a real install. That is the frame's
+    entire header: the structural cards, the two-card FITS-format ``COMMENT``
+    citation block, the camera and **site** cards a Seestar stamps into every
+    sub, and only then the WCS.
+
+    Every stacker fixture using the WCS-only helper is therefore unable to
+    exhibit anything that goes wrong with the *rest* of a header — which is how
+    observer issue #989 (a single-field drizzle-off master written with no WCS at
+    all, because the whole-header merge aborted on the first ``COMMENT``) survived
+    every test the engine had. Use this helper for anything that asserts about
+    what does, or must not, reach an output file's header.
+
+    The card **order** is the realistic part and is load-bearing: the commentary
+    cards sit near the top, well above ``CTYPE1``, exactly as a FITS writer emits
+    them — so a merge that dies on the first one loses the WCS below it.
+    """
+    from astropy.io import fits
+
+    cards = [
+        fits.Card("SIMPLE", True, "conforms to FITS standard"),
+        fits.Card("BITPIX", 16),
+        fits.Card("NAXIS", 2),
+        fits.Card("NAXIS1", int(width)),
+        fits.Card("NAXIS2", int(height)),
+        fits.Card("COMMENT", "FITS (Flexible Image Transport System) format is "
+                             "defined in 'Astronomy"),
+        fits.Card("COMMENT", "and Astrophysics', volume 376, page 359; bibcode: "
+                             "2001A&A...376..359H"),
+        fits.Card("BAYERPAT", "RGGB"),
+        fits.Card("EXPTIME", 10.0),
+        fits.Card("GAIN", 80.0),
+        fits.Card("CCD-TEMP", -10.0),
+        fits.Card("DATE-OBS", date_obs),
+        fits.Card("INSTRUME", "Seestar S30"),
+        fits.Card("FOCALLEN", 150.0),
+        fits.Card("XPIXSZ", 2.9),
+        fits.Card("YPIXSZ", 2.9),
+    ]
+    if site_lat is not None:
+        cards.append(fits.Card("SITELAT", float(site_lat)))
+    if site_lon is not None:
+        cards.append(fits.Card("SITELONG", float(site_lon)))
+    cards += [
+        fits.Card("CTYPE1", "RA---TAN"),
+        fits.Card("CTYPE2", "DEC--TAN"),
+        fits.Card("CRVAL1", float(ra_center_deg)),
+        fits.Card("CRVAL2", float(dec_center_deg)),
+        fits.Card("CRPIX1", width / 2 + 0.5),
+        fits.Card("CRPIX2", height / 2 + 0.5),
+        fits.Card("CDELT1", -pixscale_arcsec / 3600.0),
+        fits.Card("CDELT2", pixscale_arcsec / 3600.0),
+        fits.Card("HISTORY", "plate solved"),
+    ]
+    return str(fits.Header(cards))
