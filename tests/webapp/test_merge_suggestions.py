@@ -296,3 +296,31 @@ def test_the_owners_m3_card_produces_no_suggestion_at_all(client, data_root: Pat
         "M 3_mosaic_sub": "duplicate_sub",
         "M 3_mosaic": "on_device_output",
     }
+
+
+def test_a_mosaic_sub_duplicate_is_dropped_when_its_base_is_hash_suffixed(
+    client, data_root: Path,
+):
+    """The owner's real #878 shape. The Seestar's own ``<T>_mosaic/`` output was
+    ingested first and owns the ``M_44_mosaic`` stem, so the convention's
+    ``"M 44 (mosaic)"`` target was allocated ``M_44_mosaic-<sha1[:8]>``. A base
+    lookup by safe name then found the *output* target — which holds different
+    files — so the duplicate was never confirmed, and the nudge offered the pair
+    and summed the same eight subs' hours twice."""
+    subs = data_root / "dump" / "M 44_mosaic_sub"
+    frames = [subs / f"Light_{i:03d}.fit" for i in range(8)]
+    output = data_root / "dump" / "M 44_mosaic"
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        out_safe = _make_target(lib, "M 44_mosaic", *M31,
+                                source_paths=[output / "Stacked.fit"])
+        base_safe = _make_target(lib, "M 44 (mosaic)", *M31, source_paths=frames)
+        _make_target(lib, "M 44_mosaic_sub", M31[0] + 0.001, M31[1],
+                     source_paths=frames)
+    finally:
+        lib.close()
+
+    assert out_safe == "M_44_mosaic"
+    assert base_safe.startswith("M_44_mosaic-")
+    assert client.get("/api/targets/merge-suggestions").json() == []

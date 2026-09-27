@@ -24,6 +24,11 @@ really owns *every* one of the duplicate's frames. That confirmation is what
 keeps a genuine two-folder pair — the owner's ``NGC 6888`` (4815 subs) and
 ``NGC 6888_SUB`` (3110 subs), which hold *different* frames — treated as the
 real merge candidate it is.
+
+Finding the base at all is :func:`find_duplicate_base`, and it is a two-step
+lookup for a reason: a base whose folder stem was already taken lives at a
+hash-suffixed ``safe_name`` and cannot be found by computing one. See that
+function — it is the shape the Seestar mints for every mosaic.
 """
 
 from __future__ import annotations
@@ -67,6 +72,52 @@ def duplicate_base_safe(target_name: str) -> str | None:
     return make_safe_name(base) if base else None
 
 
+def find_duplicate_base(target_name: str, by_name: dict, by_safe: dict):  # noqa: ANN001, ANN201
+    """The library target ``target_name`` would be a duplicate *of*, picked out of
+    the caller's own ``{name: entry}`` and ``{safe_name: entry}`` indexes — **by
+    display name first**, and only then by safe name.
+
+    Looking the base up by safe name alone is wrong whenever the base's own
+    folder stem was already taken: :meth:`Library._allocate_safe_name`
+    disambiguates a colliding display name with a ``-<sha1[:8]>`` suffix, so the
+    base does not live at ``make_safe_name(<its name>)`` at all. The Seestar
+    produces that collision routinely — a mosaic's raw-subs folder becomes the
+    target ``"<T> (mosaic)"``, whose safe stem ``<T>_mosaic`` is *identical* to
+    the stem of the device's own ``<T>_mosaic/`` output folder, so whichever of
+    the two is ingested second is hash-suffixed. The safe-name lookup then
+    returned the **on-device output** target: a different target holding
+    different files, whose frames of course do not include the duplicate's, so
+    :func:`confirm_duplicate_of_base` answered "not a duplicate" and both
+    features that share this module went blind on exactly that shape. Cleanup
+    offered nothing at all, and the merge nudge — which drops known duplicates
+    precisely so it can never invite you to combine a target with itself — went
+    on offering the pair and summing the same integration hours twice.
+
+    The safe-name lookup stays, as the fallback, because a *renamed* base no
+    longer answers to the name the convention derives from the duplicate: the
+    duplicate ``NGC 6888_sub`` still points at base name ``NGC 6888``, while the
+    base it belongs to has been renamed "Crescent Nebula" and keeps only its
+    ``NGC_6888`` folder."""
+    base_name = duplicate_sub_base_name_from_name(target_name)
+    if base_name is None:
+        return None
+    found = by_name.get(base_name)
+    if found is not None:
+        return found
+    return by_safe.get(make_safe_name(base_name))
+
+
+def _is_duplicate_base_of(target_name: str, base) -> bool:  # noqa: ANN001
+    """Whether ``base`` is the target ``target_name`` claims to duplicate — the
+    same two-step answer :func:`find_duplicate_base` gives, re-checked against a
+    single candidate so :func:`confirm_duplicate_of_base` cannot be handed an
+    unrelated target by a caller that indexed its own dictionary differently."""
+    base_name = duplicate_sub_base_name_from_name(target_name)
+    if base_name is None:
+        return False
+    return base.name == base_name or base.safe_name == make_safe_name(base_name)
+
+
 def confirm_duplicate_of_base(lib, entry, base) -> DuplicateOfBase | None:  # noqa: ANN001
     """Confirm that ``entry`` holds nothing but raw subs ``base`` already owns,
     by reading both targets' frame source paths. Returns ``None`` — meaning
@@ -82,7 +133,7 @@ def confirm_duplicate_of_base(lib, entry, base) -> DuplicateOfBase | None:  # no
     every Library poll."""
     if base is None or base.safe_name == entry.safe_name:
         return None
-    if duplicate_base_safe(entry.name) != base.safe_name:
+    if not _is_duplicate_base_of(entry.name, base):
         return None
 
     proj = lib.open_target(entry.safe_name)

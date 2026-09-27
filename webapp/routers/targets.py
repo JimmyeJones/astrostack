@@ -183,7 +183,7 @@ def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
     from seestack.objectinfo import identify_object
     from webapp.library_hygiene import (
         confirm_duplicate_of_base,
-        duplicate_base_safe,
+        find_duplicate_base,
         junk_verdict,
     )
 
@@ -192,11 +192,12 @@ def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
         groups = find_same_object_target_groups(lib.list_targets())
         survivors = []
         for g in groups:
-            in_group = {m.safe_name: m for m in g.members}
+            by_name = {m.name: m for m in g.members}
+            by_safe = {m.safe_name: m for m in g.members}
             survivors.extend(
                 m for m in g.members
                 if confirm_duplicate_of_base(
-                    lib, m, in_group.get(duplicate_base_safe(m.name) or ""),
+                    lib, m, find_duplicate_base(m.name, by_name, by_safe),
                 ) is None
                 and junk_verdict(lib, m) is None
             )
@@ -293,6 +294,16 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
     confirms via ``DELETE /api/targets/{safe}``), and never touches the real
     ``_sub`` data or the base target. Returns ``[]`` when the library is clean.
 
+    **A duplicate that carries the owner's own data gets the other offer.** A
+    confirmed duplicate holding a stack-run history or free-text notes is not
+    removable — deleting the target record would drop data that lives only there —
+    and until now it was simply dropped from this list, which left the owner's 11
+    historical mosaic twins with no path at all once they became visible
+    (``find_duplicate_base``, v0.482.1). Those get ``reason="duplicate_sub_merge"``
+    and a ``merge_into_safe`` naming the base, for the confirmed
+    ``POST /api/targets/merge`` that carries the pictures, recipes, notes, tags and
+    preferences across first. Still read-only: this endpoint merges nothing.
+
     A real light-frame stack has hundreds or thousands of subs, so skipping the
     big ones by frame count avoids opening their projects and scanning thousands
     of source paths on every poll; the ceiling is the engine's own
@@ -304,6 +315,7 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
     from webapp.library_hygiene import (
         confirm_duplicate_of_base,
         duplicate_base_safe,
+        find_duplicate_base,
         junk_verdict,
     )
 
@@ -312,6 +324,7 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
     try:
         targets = lib.list_targets()
         by_safe = {t.safe_name: t for t in targets}
+        by_name = {t.name: t for t in targets}
         for entry in targets:
             # --- (0) legacy whole-device / mixed-folder container drop ---------
             # Flagged at scan time (a registry column) when a container-expansion
@@ -352,10 +365,11 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
             # Cheap name-shape prefilter (pure, no I/O): only ``*_sub``-named
             # targets — including ``*_mosaic_sub``, whose base is the
             # ``<T> (mosaic)`` target — reach the project-opening confirmation.
-            base_safe = duplicate_base_safe(entry.name)
-            if base_safe is None:
+            if duplicate_base_safe(entry.name) is None:
                 continue
-            dup = confirm_duplicate_of_base(lib, entry, by_safe.get(base_safe))
+            dup = confirm_duplicate_of_base(
+                lib, entry, find_duplicate_base(entry.name, by_name, by_safe),
+            )
             if dup is None:
                 continue
             # The base owns *every* one of these subs, so nothing real is lost and
@@ -378,6 +392,38 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
                         "untouched."
                     ),
                 ))
+                continue
+            # It *does* carry data of its own, so removal is the wrong offer — but
+            # silence was the wrong answer too. ``POST /api/targets/merge`` carries
+            # the stack runs with their output files and saved recipes, the notes
+            # and tags and the target preferences into the base before the leftover
+            # goes (``Library.merge_targets_result``), and records the folder as
+            # combined so the next scan routes its subs to the base rather than
+            # re-minting the duplicate. Every frame here is already owned by the
+            # base, so the merge adds none: what travels is exactly the data that
+            # would otherwise have been the reason to leave two targets standing.
+            owned = (
+                "pictures you have already stacked from it, and notes you wrote"
+                if dup.has_own_runs and dup_has_notes
+                else "pictures you have already stacked from it"
+                if dup.has_own_runs
+                else "notes you wrote"
+            )
+            out.append(CleanupSuggestionOut(
+                safe=entry.safe_name,
+                name=entry.name,
+                n_frames=entry.n_frames,
+                reason="duplicate_sub_merge",
+                detail=(
+                    "A leftover from an older scan — these are the same raw subs, "
+                    f"now already in your “{dup.base_name}” target. This copy "
+                    f"also holds {owned}, so simply removing it would take those "
+                    f"with it. Combining moves them into “{dup.base_name}” "
+                    "first, so nothing is lost; your files on disk are untouched."
+                ),
+                merge_into_safe=dup.base_safe,
+                merge_into_name=dup.base_name,
+            ))
     finally:
         lib.close()
     return out

@@ -504,8 +504,15 @@ export interface CleanupSuggestion {
     | "on_device_output"
     | "temp_folder"
     | "duplicate_sub"
+    | "duplicate_sub_merge"
     | "legacy_mixed_drop";
   detail: string;
+  /** Only for `duplicate_sub_merge`: the base target this leftover should be
+   *  combined *into*. The leftover also holds the user's own pictures or notes,
+   *  so removing it would take them with it — `POST /api/targets/merge` carries
+   *  them across first. Null for every other reason. */
+  merge_into_safe?: string | null;
+  merge_into_name?: string | null;
 }
 
 /** A folder in `incoming/` the last scan walked past and could not fully account

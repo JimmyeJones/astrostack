@@ -1,6 +1,6 @@
 import { Alert, Badge, Button, Group, Stack, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconCopyOff, IconTrash } from "@tabler/icons-react";
+import { IconArrowMerge, IconCopyOff, IconTrash } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { api, type CleanupSuggestion } from "../api/client";
@@ -13,6 +13,7 @@ import { WRAPPING_BADGE } from "../badgeFit";
 const JUNK_LS_KEY = "astrostack.cleanupSuggestions.dismissed";
 const DUP_LS_KEY = "astrostack.cleanupSuggestions.duplicates.dismissed";
 const MIXED_LS_KEY = "astrostack.cleanupSuggestions.mixedDrop.dismissed";
+const COMBINE_LS_KEY = "astrostack.cleanupSuggestions.combine.dismissed";
 
 function loadDismissed(key: string): boolean {
   try {
@@ -35,12 +36,18 @@ function reasonLabel(reason: CleanupSuggestion["reason"]): string {
   if (reason === "photo") return "photo";
   if (reason === "temp_folder") return "temp folder";
   if (reason === "duplicate_sub") return "duplicate";
+  if (reason === "duplicate_sub_merge") return "duplicate with pictures";
   if (reason === "legacy_mixed_drop") return "mixed drop";
   return "on-device output";
 }
 
-/** One dismissible cleanup group (junk outputs/videos, or `_sub` duplicates).
- * Owns its own persisted dismissal so the two groups hide independently. */
+/** One dismissible cleanup group (junk outputs/videos, `_sub` duplicates, or the
+ * duplicates that hold pictures and are combined rather than removed).
+ * Owns its own persisted dismissal so the groups hide independently.
+ *
+ * `action` is what the group's button does. It defaults to the removal this card
+ * has always offered; the combine group passes its own wording and mutation,
+ * because deleting one of those targets would take the owner's pictures with it. */
 function CleanupAlert({
   items,
   lsKey,
@@ -49,6 +56,7 @@ function CleanupAlert({
   intro,
   onRemove,
   pending,
+  action,
 }: {
   items: CleanupSuggestion[];
   lsKey: string;
@@ -57,6 +65,11 @@ function CleanupAlert({
   intro: ReactNode;
   onRemove: (items: CleanupSuggestion[]) => void;
   pending: boolean;
+  action?: {
+    label: (items: CleanupSuggestion[]) => string;
+    confirm: (items: CleanupSuggestion[]) => string;
+    badge?: (item: CleanupSuggestion) => string;
+  };
 }) {
   const [dismissed, setDismissed] = useState<boolean>(() => loadDismissed(lsKey));
   if (dismissed || items.length === 0) return null;
@@ -71,8 +84,9 @@ function CleanupAlert({
     items.length === 1
       ? `Remove the leftover target “${items[0].name}”? This only deletes the target record — your raw sub folders on disk are not touched.`
       : `Remove these ${items.length} leftover targets? This only deletes the target records — your raw sub folders on disk are not touched.`;
+  const buttonLabel = action ? action.label(items) : `Remove ${removeNoun}`;
   const askRemove = () => {
-    if (window.confirm(confirmMsg)) onRemove(items);
+    if (window.confirm(action ? action.confirm(items) : confirmMsg)) onRemove(items);
   };
 
   return (
@@ -92,13 +106,13 @@ function CleanupAlert({
           {items.map((t) => (
             <Badge key={t.safe} variant="outline" color="gray" size="sm"
               styles={WRAPPING_BADGE}>
-              {t.name} · {reasonLabel(t.reason)}
+              {action?.badge ? action.badge(t) : `${t.name} · ${reasonLabel(t.reason)}`}
             </Badge>
           ))}
         </Group>
         <Group gap="xs">
           <Button size="xs" color="teal" loading={pending} onClick={askRemove}>
-            Remove {removeNoun}
+            {buttonLabel}
           </Button>
           <Button size="xs" variant="subtle" color="gray" onClick={dismiss}>
             Keep them
@@ -111,16 +125,19 @@ function CleanupAlert({
 
 /**
  * Friendly, dismissible Library cleanup nudges for the leftovers a pre-convention
- * scan produced. Two independent groups:
+ * scan produced. Independent groups:
  *   • outputs/videos/photos/temp folders — the Seestar's own finished images,
  *     video clips and single snapshots, plus another program's scratch folder
  *     sharing the astro share, ingested as if they were raw subs (can't be
  *     stacked into a good picture);
  *   • `<T>_sub` duplicates — the same raw subs the base target `<T>` now owns
- *     (harmless clutter + double compute, not corrupt data).
- * The backend detects both (read-only); this offers a one-confirmation
- * bulk-remove per group. It never touches the real `_sub` data on disk. Each
- * group self-hides when empty or dismissed.
+ *     (harmless clutter + double compute, not corrupt data);
+ *   • the duplicates that *also* hold pictures or notes of their own, which are
+ *     combined into the base rather than removed, so those travel instead of
+ *     being lost with the target record.
+ * The backend detects them all (read-only); this offers a one-confirmation bulk
+ * action per group. It never touches the real `_sub` data on disk. Each group
+ * self-hides when empty or dismissed.
  */
 export function CleanupSuggestionsCard() {
   const qc = useQueryClient();
@@ -155,6 +172,41 @@ export function CleanupSuggestionsCard() {
     },
   });
 
+  // The other half of the duplicate story. These leftovers hold the owner's own
+  // pictures or notes, so the backend refuses to offer a delete — combining
+  // carries the runs (with their output files and saved recipes), the notes, the
+  // tags and the target preferences into the base target first, then tidies the
+  // leftover away. Sequential rather than parallel: each merge rewrites the
+  // library registry, and one failure must not leave the rest half-applied.
+  const combine = useMutation({
+    mutationFn: async (targets: CleanupSuggestion[]) => {
+      let n = 0;
+      for (const t of targets) {
+        if (!t.merge_into_safe) continue;
+        await api.mergeTargets(t.merge_into_safe, [t.safe]);
+        n += 1;
+      }
+      return n;
+    },
+    onSuccess: (n) => {
+      notifications.show({
+        message: `Combined ${n} leftover ${n === 1 ? "target" : "targets"} into your main ${n === 1 ? "target" : "targets"}. Your pictures and notes moved across; your files on disk are untouched.`,
+        color: "teal",
+      });
+      qc.invalidateQueries({ queryKey: ["targets"] });
+      qc.invalidateQueries({ queryKey: ["cleanup-suggestions"] });
+      qc.invalidateQueries({ queryKey: ["merge-suggestions"] });
+    },
+    onError: (err) => {
+      notifications.show({
+        message: `Couldn't combine those targets: ${err instanceof Error ? err.message : String(err)}`,
+        color: "red",
+      });
+      qc.invalidateQueries({ queryKey: ["targets"] });
+      qc.invalidateQueries({ queryKey: ["cleanup-suggestions"] });
+    },
+  });
+
   const items = suggestions.data ?? [];
   const junk = items.filter(
     (t) =>
@@ -165,7 +217,11 @@ export function CleanupSuggestionsCard() {
   );
   const dupes = items.filter((t) => t.reason === "duplicate_sub");
   const mixed = items.filter((t) => t.reason === "legacy_mixed_drop");
+  const combinable = items.filter(
+    (t) => t.reason === "duplicate_sub_merge" && !!t.merge_into_safe,
+  );
   const onRemove = (targets: CleanupSuggestion[]) => remove.mutate(targets);
+  const onCombine = (targets: CleanupSuggestion[]) => combine.mutate(targets);
 
   return (
     <>
@@ -202,6 +258,36 @@ export function CleanupSuggestionsCard() {
         }
         onRemove={onRemove}
         pending={remove.isPending}
+      />
+      <CleanupAlert
+        items={combinable}
+        lsKey={COMBINE_LS_KEY}
+        icon={<IconArrowMerge size={18} />}
+        title="Some duplicate targets also hold pictures you've already made"
+        intro={
+          <>
+            An earlier scan added these before the app learned to fold each
+            Seestar raw-subs folder into its main target. They hold the same
+            frames your main target already has — but you've also stacked
+            pictures from them, or written notes on them, so simply removing them
+            would take those with them. Combining moves the pictures, notes and
+            tags across into the main target first, so nothing is lost. Your
+            files on disk are never touched.
+          </>
+        }
+        onRemove={onCombine}
+        pending={combine.isPending}
+        action={{
+          label: (list) =>
+            list.length === 1
+              ? "Combine it into the main target"
+              : `Combine these ${list.length} into their main targets`,
+          confirm: (list) =>
+            list.length === 1
+              ? `Combine “${list[0].name}” into “${list[0].merge_into_name}”? Its pictures, notes and tags move across first, then the leftover target is tidied away. Your raw sub folders on disk are not touched.`
+              : `Combine these ${list.length} leftover targets into their main targets? Their pictures, notes and tags move across first, then the leftovers are tidied away. Your raw sub folders on disk are not touched.`,
+          badge: (t) => `${t.name} → ${t.merge_into_name}`,
+        }}
       />
       <CleanupAlert
         items={mixed}

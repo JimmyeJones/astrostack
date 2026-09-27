@@ -241,8 +241,11 @@ def test_does_not_flag_a_sub_duplicate_that_carries_stack_run_history(
     """Data-safety: a ``_sub`` duplicate whose base owns every sub is normally
     offered for removal — but NOT when the duplicate carries the user's own
     stack-run history. One-click cleanup deletes the registry target (keeping
-    files on disk), which would silently drop that history from the UI, so the
-    target with real user data is left alone."""
+    files on disk), which would silently drop that history from the UI.
+
+    It is offered the *combine* instead (``duplicate_sub_merge``), which carries
+    the run and its output files into the base first — so the invariant this test
+    guards is unchanged: the removal offer must never appear for this target."""
     incoming = data_root / "dump"
     (incoming / "M 31_sub").mkdir(parents=True)
     subs = [incoming / "M 31_sub" / f"Light_{i:03d}.fit" for i in range(6)]
@@ -266,9 +269,13 @@ def test_does_not_flag_a_sub_duplicate_that_carries_stack_run_history(
         lib.close()
 
     # Without the guard this would be flagged ``duplicate_sub`` and deleting it
-    # would lose the run history; with it, the target is not offered at all.
-    assert client.get("/api/targets/cleanup-suggestions").json() == []
-    assert dup_safe == "M_31_sub"
+    # would lose the run history.
+    body = client.get("/api/targets/cleanup-suggestions").json()
+    assert [s["reason"] for s in body] == ["duplicate_sub_merge"]
+    assert body[0]["safe"] == dup_safe == "M_31_sub"
+    assert body[0]["merge_into_safe"] == "M_31"
+    assert body[0]["merge_into_name"] == "M 31"
+    assert "pictures you have already stacked" in body[0]["detail"]
 
 
 def test_does_not_flag_a_sub_duplicate_that_carries_user_notes(
@@ -276,7 +283,8 @@ def test_does_not_flag_a_sub_duplicate_that_carries_user_notes(
 ):
     """Data-safety (notes variant): a ``_sub`` duplicate the base fully owns is
     still NOT offered for removal when the user has written free-text notes on
-    it — those notes live only on this target and would vanish from the UI."""
+    it — those notes live only on this target and would vanish from the UI. The
+    combine offer carries them into the base instead."""
     incoming = data_root / "dump"
     (incoming / "M 31_sub").mkdir(parents=True)
     subs = [incoming / "M 31_sub" / f"Light_{i:03d}.fit" for i in range(6)]
@@ -289,7 +297,10 @@ def test_does_not_flag_a_sub_duplicate_that_carries_user_notes(
     finally:
         lib.close()
 
-    assert client.get("/api/targets/cleanup-suggestions").json() == []
+    body = client.get("/api/targets/cleanup-suggestions").json()
+    assert [s["reason"] for s in body] == ["duplicate_sub_merge"]
+    assert body[0]["merge_into_safe"] == "M_31"
+    assert "notes you wrote" in body[0]["detail"]
 
 
 def test_flagged_target_can_then_be_deleted(client, data_root: Path):
@@ -447,3 +458,142 @@ def test_does_not_open_a_huge_targets_project_to_read_its_filenames(
     monkeypatch.setattr(Library, "open_target", spy)
     assert client.get("/api/targets/cleanup-suggestions").json() == []
     assert "Huge" not in opened
+
+
+# --- the base target whose own folder stem was taken -------------------------
+# ``Library._allocate_safe_name`` hash-suffixes a display name whose safe stem is
+# already owned, and ``make_safe_name("<T> (mosaic)") == make_safe_name("<T>_mosaic")``
+# — so on any library where the Seestar's on-device ``<T>_mosaic/`` output was
+# ingested first, the convention's ``"<T> (mosaic)"`` target lives at
+# ``<T>_mosaic-<sha1[:8]>`` and a base lookup by safe name lands on the *output*
+# target instead. Eleven of the owner's mosaics are in exactly that state
+# (observer issue #878), and both features that share ``library_hygiene`` were
+# blind on all of them.
+
+
+def test_finds_a_mosaic_base_whose_safe_stem_was_taken_by_the_device_output(
+    client, data_root: Path,
+):
+    """The duplicate is still recognised when its base is hash-suffixed. The
+    base is resolved by *display* name ("M 44 (mosaic)"), not by the safe stem
+    ``M_44_mosaic`` — which here belongs to the Seestar's own output folder."""
+    incoming = data_root / "dump"
+    (incoming / "M 44_mosaic_sub").mkdir(parents=True)
+    subs = [incoming / "M 44_mosaic_sub" / f"Light_{i:03d}.fit" for i in range(6)]
+    (incoming / "M 44_mosaic").mkdir(parents=True)
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        # Ingested FIRST, so it takes the ``M_44_mosaic`` stem — the owner's order.
+        out_safe = _add_target(lib, "M 44_mosaic",
+                               [incoming / "M 44_mosaic" / "Stacked.fit"])
+        base_safe = _add_target(lib, "M 44 (mosaic)", subs)
+        dup_safe = _add_target(lib, "M 44_mosaic_sub", subs)
+    finally:
+        lib.close()
+
+    # The collision really happened: the base is not at its own safe stem.
+    assert out_safe == "M_44_mosaic"
+    assert base_safe.startswith("M_44_mosaic-")
+    assert dup_safe == "M_44_mosaic_sub"
+
+    by_safe = {s["safe"]: s for s in
+               client.get("/api/targets/cleanup-suggestions").json()}
+    assert by_safe[dup_safe]["reason"] == "duplicate_sub"
+    # Named after the target that really owns the subs, never the output folder.
+    assert "M 44 (mosaic)" in by_safe[dup_safe]["detail"]
+    assert "M 44_mosaic" not in by_safe[dup_safe]["detail"].replace(
+        "M 44 (mosaic)", "")
+
+
+def test_a_renamed_base_is_still_found_by_its_folder_stem(client, data_root: Path):
+    """The safe-name lookup stays as the fallback: a base the owner renamed no
+    longer answers to the name the convention derives from the duplicate, but it
+    keeps its folder, so ``NGC 6888_sub`` must still resolve to it."""
+    incoming = data_root / "dump"
+    (incoming / "NGC 6888_sub").mkdir(parents=True)
+    subs = [incoming / "NGC 6888_sub" / f"Light_{i:03d}.fit" for i in range(6)]
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "NGC 6888", subs)
+        _add_target(lib, "NGC 6888_sub", subs)
+        lib.rename_target("NGC_6888", "Crescent Nebula")
+    finally:
+        lib.close()
+
+    by_safe = {s["safe"]: s for s in
+               client.get("/api/targets/cleanup-suggestions").json()}
+    assert by_safe["NGC_6888_sub"]["reason"] == "duplicate_sub"
+    assert "Crescent Nebula" in by_safe["NGC_6888_sub"]["detail"]
+
+
+def test_the_mosaic_twin_that_carries_pictures_is_offered_the_combine(
+    client, data_root: Path,
+):
+    """The owner's #878 shape, end to end. The leftover ``<T>_mosaic_sub`` twin
+    holds the same subs as the hash-suffixed ``"<T> (mosaic)"`` base *and* a
+    picture stacked from them, so removal is the wrong offer and silence was the
+    old one. The combine is offered, the advertised endpoint accepts it, the
+    picture survives in the base, and the nudge clears."""
+    incoming = data_root / "dump"
+    (incoming / "M 44_mosaic_sub").mkdir(parents=True)
+    subs = [incoming / "M 44_mosaic_sub" / f"Light_{i:03d}.fit" for i in range(6)]
+    (incoming / "M 44_mosaic").mkdir(parents=True)
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "M 44_mosaic", [incoming / "M 44_mosaic" / "Stacked.fit"])
+        base_safe = _add_target(lib, "M 44 (mosaic)", subs)
+        dup_safe = _add_target(lib, "M 44_mosaic_sub", subs)
+        _, proj = lib.open_or_create_target("M 44_mosaic_sub")
+        try:
+            out = Path(proj.project_dir) / "output"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "m44_mosaic_stack.fits").write_bytes(b"the-twins-pixels")
+            (out / "m44_mosaic_stack_preview.png").write_bytes(b"the-twins-preview")
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-07-01T00:00:00Z",
+                output_basename="m44_mosaic_stack",
+                fits_path=str(out / "m44_mosaic_stack.fits"), tiff_path=None,
+                preview_path=str(out / "m44_mosaic_stack_preview.png"),
+                n_frames_used=6, canvas_h=480, canvas_w=320,
+                coverage_min=6, coverage_max=6, options_json="{}",
+            ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    by_safe = {s["safe"]: s for s in
+               client.get("/api/targets/cleanup-suggestions").json()}
+    offer = by_safe[dup_safe]
+    assert offer["reason"] == "duplicate_sub_merge"
+    assert offer["merge_into_safe"] == base_safe          # the hash-suffixed one
+    assert offer["merge_into_name"] == "M 44 (mosaic)"
+
+    # Actionable through exactly the endpoint the offer names.
+    r = client.post("/api/targets/merge",
+                    json={"into": offer["merge_into_safe"], "sources": [dup_safe]})
+    assert r.status_code == 200
+    # Every sub was already owned by the base, so the merge adds none — what it
+    # carries is the picture that was the reason not to delete the twin.
+    assert r.json()["frames_added"] == 0
+    assert r.json()["pictures_kept"] == 1
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        assert lib.find_target(dup_safe) is None
+        proj = lib.open_target(base_safe)
+        try:
+            runs = list(proj.iter_stack_runs())
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert [r.n_frames_used for r in runs] == [6]
+    assert Path(runs[0].fits_path).read_bytes() == b"the-twins-pixels"
+
+    # And the nudge clears: the on-device output junk offer is all that is left.
+    after = client.get("/api/targets/cleanup-suggestions").json()
+    assert [s["safe"] for s in after] == ["M_44_mosaic"]

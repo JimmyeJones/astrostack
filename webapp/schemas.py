@@ -1038,14 +1038,27 @@ class CleanupSuggestionOut(BaseModel):
     ``"legacy_mixed_drop"`` (a legacy giant target an old scan built from a
     whole-device / mixed-folder container drop, mixing several objects' subs with
     on-device outputs/videos — the correct per-target versions now exist, so it's a
-    stale duplicate that keeps auto-stacking gibberish; flagged at scan time);
-    ``detail`` is a plain-language explanation for the beginner."""
+    stale duplicate that keeps auto-stacking gibberish; flagged at scan time) or
+    ``"duplicate_sub_merge"`` (the same confirmed duplicate as ``"duplicate_sub"``,
+    except that this one also carries the owner's *own* data — a stack-run history
+    or free-text notes that live nowhere else — so the honest offer is to **combine**
+    it into its base rather than remove it; ``merge_into_safe`` / ``merge_into_name``
+    name the destination for ``POST /api/targets/merge``, which carries the frames,
+    the finished pictures and their recipes, and the notes/tags/preferences across
+    before the leftover goes);
+    ``detail`` is a plain-language explanation for the beginner.
+
+    ``merge_into_safe`` / ``merge_into_name`` are additive and ``null`` for every
+    other reason — a client that ignores them sees exactly the response it always
+    did."""
 
     safe: str
     name: str
     n_frames: int
     reason: str
     detail: str
+    merge_into_safe: str | None = None
+    merge_into_name: str | None = None
 
 
 class SkippedFolderOut(BaseModel):
