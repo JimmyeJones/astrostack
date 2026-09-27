@@ -16,6 +16,7 @@ import {
 } from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { compassPoint } from "../tonight";
+import { RefinishPicturesCard } from "../components/RefinishPicturesCard";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
 import { AmbientSettings } from "../components/AmbientSettings";
 import { SkylineEditor } from "../components/SkylineEditor";
@@ -1128,6 +1129,7 @@ export function SettingsView() {
     maintenance: (
       <Stack>
         <Maintenance />
+        <RefinishPicturesCard />
         <Paper withBorder p="lg">
           <Stack>
             <Text fw={600}>Job history</Text>

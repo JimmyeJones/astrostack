@@ -4180,6 +4180,17 @@ export const api = {
   // open every project a second time. Read-only; it never writes a recipe.
   // `thin`/`thin_count` are optional so an older backend reads as "nothing to
   // chip", which is what the wall did before they existed.
+  // The owner-requested #903 repair: which flat pictures the app had finished
+  // with Auto before a restack flattened them (and which it leaves alone), and
+  // the job that gives them back. See webapp/refinish.py.
+  refinishPreview: () =>
+    req<{
+      refinish: { safe_name: string; name: string }[];
+      left_alone: Record<string, { safe_name: string; name: string }[]>;
+    }>("/api/unstretched-pictures/refinish"),
+  startRefinish: () =>
+    req<{ job_id: string; already_running: boolean }>(
+      "/api/unstretched-pictures/refinish", { method: "POST" }),
   getUnstretchedPictures: () =>
     req<{
       count: number;

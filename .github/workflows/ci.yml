@@ -44,6 +44,33 @@ jobs:
             scripts/check-commit-identity.sh "$BASE..$HEAD_SHA"
           fi
 
+  version:
+    name: Version bump is sane
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: A changed version must go up, and must not already be taken
+        # A PR that ships code bumps __version__; one that only touches docs may
+        # leave it. Either way it may never go backwards or reuse a released
+        # number (v0.448.0 and v0.453.3 were each issued twice before this).
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          v() { git show "$1:webapp/__init__.py" | grep -oP '__version__\s*=\s*"\K[^"]+'; }
+          base="$(v "$BASE")"; head="$(v "$HEAD_SHA")"
+          echo "base $base -> PR $head"
+          [ "$base" = "$head" ] && { echo "unchanged"; exit 0; }
+          if [ "$(printf '%s\n%s\n' "$base" "$head" | sort -V | tail -1)" != "$head" ]; then
+            echo "::error::__version__ went backwards ($base -> $head)"; exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v$head" >/dev/null; then
+            echo "::error::v$head is already a released version — bump from the latest main"; exit 1
+          fi
+
   python:
     name: Python tests
     runs-on: ubuntu-latest
