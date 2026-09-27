@@ -1,5 +1,58 @@
 # Process notes & QA sweep records
 
+## 2026-09-27 (second Builder run) — the duplicate the app could not see, and a reel that was already paid for
+
+*(Builder, branches `agent/dup-base-hash-suffix` → PR #995 (v0.482.1 + v0.482.2) and `agent/night-progress-reel` →
+PR #996 (v0.483.0), both merged. Baseline green — **6,851 passed, 2 skipped**, 14m28s with the BLAS cap and
+`-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. End of the run: **6,865 passed, 2 skipped**, 13m59s
+(+14 tests); frontend **4,412 tests / 288 files**, `tsc` and `vite build` clean, all three from `frontend/`. CI green
+on `main` for PR #995; PR #996's run was still going when this was written.)*
+
+**Two tasks. The first was found while costing a third, which is the part worth recording.** The plan was to build
+the owner-approved reconciliation of the 11 historical mosaic pairs (#878, sign-off gate 16). Reading how the app
+*already* sees those pairs turned up the reason it does not: `webapp/library_hygiene.py` resolved a duplicate's base
+target by **computing** `make_safe_name(<derived base name>)`, which is only right while the base lives at its own
+folder stem — and `Library._allocate_safe_name` hash-suffixes any display name whose stem is taken. The Seestar mints
+exactly that collision for **every** mosaic. So the module written to stop two features contradicting each other about
+the same target was *silently inert* on the one shape the owner's library is full of, and the merge nudge went on
+offering each pair and summing the same hours twice — the very defect its docstring says it exists to prevent.
+**The generalisable bit: a lookup that RE-DERIVES a key is a claim that the key is derivable, and an allocator with a
+collision path is a standing counter-example.** Grep for the sibling shape (`make_safe_name(...)` used as a lookup key
+rather than as an allocator input) before assuming this was the only one.
+
+**And the reconciliation then built itself, in the shape the code already had.** With the base findable, a twin that
+carries its own stack runs is a *confirmed* duplicate whose removal would drop the owner's pictures — so the honest
+offer is **Combine**, not Remove, and `merge_targets_result` has carried runs, recipes, notes, tags and preferences
+since v0.480.2–.4. That is gate 16's answer ("merge each pair, keeping the more complete target") delivered as one
+click rather than as a migration, and the destination is the more complete twin *by construction*: it is the target
+that already owns every frame, so the merge adds none.
+
+**Task two: the owner's progression video cost nothing once the right place to put it was found.** The entry's own
+design note said the cost question was the whole question (a stack per night is hours on a 35,894-sub target) and
+that the answer is to snapshot the accumulator at night boundaries. `_QuickLook` has *been* snapshotting pass 1 into
+a reel since `save_progress` shipped — evenly spaced by frame count. Moving those snapshots onto capture-night
+boundaries turns an existing clip into the cumulative night-by-night reel he asked for, with no second pass, no new
+option and no new endpoint.
+
+**The one thing that needed a second try, recorded so the next run does not repeat it.** The first implementation
+snapshotted "when a sub from the next night turns up". It fired on the **first frame** of a six-sub fixture, because
+`_imap_bounded` yields each frame **as it completes, not in submission order** — the stacker's accumulation order is
+only *roughly* capture order, bounded by the in-flight window. The fix is to *count* rather than to watch: settled
+frames (contributed **or** failed) against the plan's own cumulative totals, which makes the step boundaries exact in
+number and leaves only which subs of the boundary night are in approximate. **The lesson is about fixtures again:
+this was caught by a six-sub test where the in-flight window is the whole stack. At the owner's scale — hundreds of
+subs a night — the broken version would have looked perfect.** A test small enough to run is a test where the
+concurrency window is the whole population; that is a feature, not a limitation, and it is worth reaching for
+deliberately when a change depends on ordering.
+
+**Running-app / visual pass.** The v0.482.1/.2 work was exercised on a real boot (`python -m webapp.main` over a
+scratch data root built with the hash-collided shape): the offer is served with the hash-suffixed destination,
+`POST /api/targets/merge` answers `frames_added: 0, pictures_kept: 1`, the base keeps its frames and both nudges
+clear. The v0.483.0 reel was rendered from a real 4-night `run_stack` and the frames were *looked at*: caption 2
+reads `14-15 Aug 2026 · 17 subs`, the closing frame `14 Aug - 2 Sep 2026 · 24 subs` — legible at 800 px, bottom-left,
+not competing with the picture. No `scripts/agent-dogfood.sh` pass this run; neither change alters a page whose height
+is baselined.
+
 ## 2026-09-27 — Builder: the WCS-free registration fallback, both halves, and the extractor cap that made it silent
 
 *(Builder, branch `agent/builder-run` → PR #992 (v0.481.0) and `agent/star-match-stack` → PR #993 (v0.482.0), both
