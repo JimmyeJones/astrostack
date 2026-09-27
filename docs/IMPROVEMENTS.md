@@ -82,6 +82,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **LEAD (Builder 2026-09-27, filed while shipping v0.480.2–.5) — `scripts/agent-dogfood.sh` has no shape that
+  exercises Combine, or anything else that starts in `incoming/` and ends in the library, so that pass had to be
+  hand-rolled.** *(Process/trust; size S. Verified this run; the step-by-step recipe is in `docs/PROCESS-NOTES.md`,
+  2026-09-27.)* `POST /api/sample` writes straight into the library, so the scratch `incoming/` is empty on every pass
+  unless `--incoming-lag` seeds a fault, and `--closing`'s two targets are a degree apart *so the merge nudge does not
+  fire*. **Shape:** a `--combine` flag — two same-object folders into `incoming/`, scan, stack both, merge, scan again,
+  printing what the app *says* each step. Carry two things from the hand-rolled version: no ASTAP in the container, so
+  frames need `make_synth_wcs_text()` in `wcs_json` before any stack runs; and print the log of the steps that are
+  *meant* to fail, because that is where v0.480.5 was sitting.
 - **LEAD, MEASURED (Builder 2026-09-25, filed while shipping v0.475.0 — the one thing that fix measured and
   deliberately did not change) — the reveal's two sides are not identically sampled when the master is
   drizzled, so part of the "stacking cut your noise ~N×" number is the drizzle kernel rather than the
