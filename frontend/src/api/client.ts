@@ -3868,6 +3868,9 @@ export const api = {
       last_subs?: number;
       first_utc?: string | null;
       last_utc?: string | null;
+      /** "capture" when the series is ordered/dated by when its subs were shot,
+       * "stack" when it falls back to when the stacks ran (see `deepeningReel`). */
+      dated_by?: "capture" | "stack" | null;
       format?: string;
     }>(`/api/targets/${safe}/deepening-reel/info`),
   deepeningReelUrl: (safe: string) => `/api/targets/${safe}/deepening-reel`,

@@ -2207,24 +2207,36 @@ def stack_progress_reel(
 # added/re-run/deleted. Purely additive + read-only (see seestack.render.deepening).
 
 
-def _deepening_runs(proj) -> list:
-    """A target's stack runs that still have a master FITS on disk, ordered
-    oldest → newest — the chronological deepening series."""
-    runs = [r for r in proj.iter_stack_runs()
-            if r.fits_path and Path(r.fits_path).exists()]
-    runs.sort(key=lambda r: (r.timestamp_utc or "", r.id or 0))
-    return runs
+def _deepening_runs(proj):
+    """A target's stack runs that still have a master FITS on disk, as the
+    deepening series the reel animates — ordered by **when their subs were shot**
+    when every one of them records that, else by stack time.
+
+    The ordering, the one-step-per-set-of-nights collapse and the
+    capture-vs-stack decision all live in
+    :func:`seestack.render.deepening.deepening_series`, which is pure and carries
+    the reasoning; this only supplies the candidates."""
+    from seestack.render.deepening import deepening_series
+
+    return deepening_series([r for r in proj.iter_stack_runs()
+                             if r.fits_path and Path(r.fits_path).exists()])
 
 
-def _deepening_signature(runs: list) -> str:
+def _deepening_signature(runs: list, dated_by: str) -> str:
     """Content signature of the ordered FITS series — a cached reel is reused
     until the series changes (a new/re-run/deleted stack), then rebuilt."""
     import hashlib
 
+    from seestack.render.deepening import DEEPENING_SERIES_VERSION
+
     # Version tag: bump when the *render output* changes for an unchanged series
     # (e.g. burned-in per-frame date/sub labels, v2) so existing cached reels are
-    # rebuilt in place rather than serving a stale label-less animation.
-    parts = ["v2-labels"]
+    # rebuilt in place rather than serving a stale label-less animation. The
+    # series tag does the same for a change in *which* runs appear and in what
+    # order, and `dated_by` is folded in so a library that gains a capture window
+    # (a re-stack on a newer schema) rebuilds rather than keeping a reel ordered
+    # by the clock it no longer uses.
+    parts = ["v2-labels", DEEPENING_SERIES_VERSION, dated_by]
     for r in runs:
         try:
             st = os.stat(r.fits_path)
@@ -2234,16 +2246,23 @@ def _deepening_signature(runs: list) -> str:
     return hashlib.sha1("|".join(parts).encode()).hexdigest()
 
 
-def _build_or_get_deepening_reel(runs: list) -> Path | None:
-    """Return the cached deepening reel for ``runs`` (oldest → newest), rebuilding
-    it when the series signature has changed. Blocking (loads + encodes FITS), so
-    callers dispatch it to a threadpool."""
+def _build_or_get_deepening_reel(series, lon_deg: float | None = None) -> Path | None:
+    """Return the cached deepening reel for ``series`` (oldest → newest),
+    rebuilding it when the series signature has changed. Blocking (loads + encodes
+    FITS), so callers dispatch it to a threadpool.
+
+    ``lon_deg`` is the observer's longitude, used only to name each frame's
+    **observing nights** through :func:`webapp.capture_nights.capture_night_range`
+    — the same noon-to-noon bucketing the Nights card and the session recap use,
+    so a reel frame and the rest of the app can never disagree about which night a
+    sub belongs to. It is consulted only for a ``dated_by == "capture"`` series."""
+    runs = series.runs
     if len(runs) < 2:
         return None
     newest = runs[-1]
     out_dir = Path(newest.fits_path).parent
     basename = newest.output_basename or "master"
-    sig = _deepening_signature(runs)
+    sig = _deepening_signature(runs, series.dated_by)
     # Named from `RUN_ARTEFACT_SUFFIXES`, the table the delete / archive / merge
     # paths act on, so a reel can never be a file nothing cleans up again.
     from seestack.stack.output import RUN_ARTEFACT_SUFFIXES
@@ -2266,8 +2285,18 @@ def _build_or_get_deepening_reel(runs: list) -> Path | None:
 
     # Per-frame provenance labels, so a downloaded/shared clip carries its own
     # "28 Jun · 120 subs" story frame by frame (each frame from the same run row
-    # the info endpoint already reads).
-    labels = [deepening_frame_label(r.timestamp_utc, r.n_frames_used) for r in runs]
+    # the info endpoint already reads). A capture-ordered series names the nights
+    # its subs were *shot* — the whole point of the ordering — and a multi-night
+    # step names the span, not one end of it; a stack-time series keeps the single
+    # date it always had.
+    if series.dated_by == "capture":
+        labels = []
+        for r in runs:
+            first, last = capture_night_range(
+                r.capture_start_utc, r.capture_end_utc, lon_deg)
+            labels.append(deepening_frame_label(first, r.n_frames_used, last))
+    else:
+        labels = [deepening_frame_label(r.timestamp_utc, r.n_frames_used) for r in runs]
     path = build_deepening_reel([r.fits_path for r in runs], out_dir, basename,
                                 labels=labels)
     if path is None:
@@ -2282,24 +2311,48 @@ def deepening_reel_info(safe: str, request: Request) -> dict[str, Any]:
     """Whether this target has a multi-stack "night after night" reel, plus the
     caption figures (how many stacks, first/last sub counts + dates). Lightweight
     (no render): ``available`` is false — not a 404 — when the target has fewer
-    than two stacks on disk, so the card simply self-hides."""
+    than two stacks on disk, so the card simply self-hides.
+
+    ``first_utc`` / ``last_utc`` are the dates the reel is actually ordered and
+    labelled by, and the additive ``dated_by`` says which clock they are on:
+    ``"capture"`` when every stack records when its subs were *shot* (the series
+    is then ordered by that — see
+    :func:`seestack.render.deepening.deepening_series`), ``"stack"`` when it falls
+    back to when the stacks *ran*. Without that field the caption could not tell a
+    beginner whether "28 Jun → 28 Jul" is a month of shooting or a month of
+    pressing a button."""
     lib, proj = deps.open_target_project(request, safe)
     try:
-        runs = _deepening_runs(proj)
+        series = _deepening_runs(proj)
+        # Resolved while the library is still open (and memoised on the app), so a
+        # reel frame and the Nights card name one session's subs the same date.
+        lon = resolve_site_lon(request, lib, deps.get_settings(request).site_lon)
     finally:
         proj.close()
         lib.close()
+    runs = series.runs
     if len(runs) < 2:
         return {"available": False, "n_stacks": len(runs)}
     from PIL import features
+
+    first_utc, last_utc = runs[0].timestamp_utc, runs[-1].timestamp_utc
+    if series.dated_by == "capture":
+        # The first night of the first step and the last night of the last one —
+        # the span the reel really covers, named through the same noon-to-noon
+        # bucketing every other night surface uses.
+        first_utc = capture_night_range(
+            runs[0].capture_start_utc, runs[0].capture_end_utc, lon)[0] or first_utc
+        last_utc = capture_night_range(
+            runs[-1].capture_start_utc, runs[-1].capture_end_utc, lon)[1] or last_utc
 
     return {
         "available": True,
         "n_stacks": len(runs),
         "first_subs": runs[0].n_frames_used,
         "last_subs": runs[-1].n_frames_used,
-        "first_utc": runs[0].timestamp_utc,
-        "last_utc": runs[-1].timestamp_utc,
+        "first_utc": first_utc,
+        "last_utc": last_utc,
+        "dated_by": series.dated_by,
         "format": "webp" if features.check("webp") else "png",
     }
 
@@ -2310,13 +2363,16 @@ async def deepening_reel(safe: str, request: Request) -> FileResponse:
     building/caching it on demand. 404 when the target has fewer than two stacks."""
     lib, proj = deps.open_target_project(request, safe)
     try:
-        runs = _deepening_runs(proj)
+        series = _deepening_runs(proj)
+        # Resolved while the library is still open (and memoised on the app), so a
+        # reel frame and the Nights card name one session's subs the same date.
+        lon = resolve_site_lon(request, lib, deps.get_settings(request).site_lon)
     finally:
         proj.close()
         lib.close()
-    if len(runs) < 2:
+    if len(series.runs) < 2:
         raise HTTPException(status_code=404, detail="Not enough stacks for a deepening reel")
-    reel = await run_in_threadpool(_build_or_get_deepening_reel, runs)
+    reel = await run_in_threadpool(_build_or_get_deepening_reel, series, lon)
     if reel is None:
         raise HTTPException(status_code=404, detail="Could not build a deepening reel")
     media = _PROGRESS_MEDIA.get(reel.suffix, "application/octet-stream")

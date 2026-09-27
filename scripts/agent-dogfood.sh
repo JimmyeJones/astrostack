@@ -877,6 +877,14 @@ import json, sys
 d = json.load(sys.stdin) or {}
 print("   [reel] available=%s over %s stack(s), %s -> %s subs"
       % (d.get("available"), d.get("n_stacks"), d.get("first_subs"), d.get("last_subs")))
+# WHICH CLOCK the reel is ordered and dated by. "capture" is the intended state
+# (every run records when its subs were shot); "stack" means it fell back to when
+# the stacks *ran*, which on a card titled "night after night" is the wrong story —
+# and it is invisible in the two lines above, so it is printed out loud, the way
+# the observing site reports location_source and --big reports proxy_scale.
+print("   [reel] dated_by=%s  [stack = ordered by when the stacks RAN, not shot]"
+      % d.get("dated_by"))
+print("   [reel] span %s -> %s" % (d.get("first_utc"), d.get("last_utc")))
 ' 2>/dev/null || echo "   [reel] could not read /deepening-reel/info"
     curl -sf "$BASE/api/targets/$SAFE/noise-delta/info?a=$RESTACK_NEW&b=$RESTACK_PREV" \
       | python -c '

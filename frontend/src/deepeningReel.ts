@@ -11,6 +11,11 @@ export interface DeepeningInfo {
   last_subs?: number;
   first_utc?: string | null;
   last_utc?: string | null;
+  /** Which clock `first_utc`/`last_utc` are on: "capture" when every stack in the
+   * series records when its subs were *shot* (and the reel is ordered by that),
+   * "stack" when it falls back to when the stacks *ran*. Absent on an older
+   * backend, where the range is left unqualified exactly as it always was. */
+  dated_by?: "capture" | "stack" | null;
   format?: string;
 }
 
@@ -28,9 +33,16 @@ function withThousands(n: number): string {
 
 /**
  * A one-line provenance caption for the reel, e.g.
- * "M31 · 3 stacks · 120 → 1,240 subs · 28 Jun → 28 Jul". Each clause is dropped
- * (rather than printed blank) when its data is missing, so an older run without
- * a sub count or date still gets a tidy caption.
+ * "M31 · 3 stacks · 120 → 1,240 subs · shot 28 Jun → 28 Jul". Each clause is
+ * dropped (rather than printed blank) when its data is missing, so an older run
+ * without a sub count or date still gets a tidy caption.
+ *
+ * The date range is **named by its clock** (`dated_by`): "shot …" when the series
+ * is ordered by when its subs were taken, "stacked …" when the app only knows
+ * when the stacks ran. Those two differ by years on a re-stacked back catalogue,
+ * and on a card called "night after night" an unqualified range reads as the
+ * first — so the caption says which it is rather than letting the reader assume.
+ * An older backend sends no `dated_by` and keeps the bare range it always had.
  */
 export function deepeningCaption(
   name: string | null | undefined,
@@ -51,8 +63,10 @@ export function deepeningCaption(
 
   const d1 = shortDate(info.first_utc);
   const d2 = shortDate(info.last_utc);
-  if (d1 && d2 && d1 !== d2) parts.push(`${d1} → ${d2}`);
-  else if (d2) parts.push(d2);
+  const when = info.dated_by === "capture" ? "shot "
+    : info.dated_by === "stack" ? "stacked " : "";
+  if (d1 && d2 && d1 !== d2) parts.push(`${when}${d1} → ${d2}`);
+  else if (d2) parts.push(`${when}${d2}`);
 
   return parts.join(" · ");
 }
