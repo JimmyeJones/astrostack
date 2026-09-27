@@ -39,8 +39,9 @@ describe("ProgressReelCard", () => {
     renderCard("M_42", 7);
     await waitFor(() =>
       expect(screen.getByText("Watch your picture appear")).toBeInTheDocument());
-    // The frame count is surfaced in the plain-language blurb.
-    expect(screen.getByText(/8 frames/)).toBeInTheDocument();
+    // The count is surfaced in the plain-language blurb — as *snapshots*, which
+    // is what it is: 8 peeks at a stack of however many subs, not 8 subs.
+    expect(screen.getByText(/8 snapshots taken as your subs stacked/)).toBeInTheDocument();
     // Collapsed: no image yet (History lists many runs — don't fetch each up front).
     expect(document.querySelector("img")).toBeNull();
 

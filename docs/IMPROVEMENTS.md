@@ -2841,6 +2841,13 @@ problems. Dogfood it every big-picture run and fix root causes.
   the design question is cost: a full stack per night per target is hours on his deepest targets — look first at
   a reduced-resolution cumulative pass, and reuse any existing run whose sub set already matches a cumulative
   step. Keep the current stack-history reel; this is a second mode, not a replacement.
+  **↳ THE CUMULATIVE-BY-NIGHT REEL SHIPPED AS v0.483.0 (Builder 2026-09-27), built on exactly the design note
+  below.** The snapshots `_QuickLook` already takes during pass 1 now land on capture-night boundaries, so a single
+  ordinary stack produces "night 1; nights 1–2; …" captioned with the date range and the sub count — no second
+  stack, no new option (it rides `save_progress`, still off by default). **What is left of this entry** is the
+  reel-*from-history* half it also names: reusing existing runs whose sub set matches a cumulative step, so a
+  target can get the reel without being re-stacked at all. That is a different mechanism (it reads
+  `deepening_series`' capture-window grouping against the runs on disk) and is worth its own sizing.
   **▶ ONE DESIGN NOTE from the v0.480.0 build, so it is not re-derived.** k cumulative stacks over N subs is
   **not** k passes: `seestack/stack/accumulator.py` already combines frame-by-frame, so a single pass that
   *snapshots* the accumulator at each night boundary yields all k results for the cost of one stack — which is
@@ -4001,6 +4008,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.483.0** — 🌟 NEW BEGINNER FEATURE (PRIORITY 2, autonomy/enjoy), the owner's 2026-09-25 request: **the
+  "watch it appear" clip becomes a night-by-night reel, and it costs no extra stacking.** `_QuickLook`'s
+  pass-1 snapshots now land on **capture-night boundaries** instead of every Nth frame, so one ordinary stack
+  yields "night 1; nights 1–2; …" cumulatively — the accumulator was already cumulative. New pure
+  `stacker.plan_capture_nights` decides, and declines (keeping today's evenly-spaced reel) without capture
+  stamps, on a lucky-imaging-reordered list, or under three nights. Boundaries are **counted** against the
+  plan's cumulative totals, not watched for, because `_imap_bounded` completes out of order. Every frame is
+  captioned now (`"14-19 Aug 2026 · 812 subs"`), both reels, so a shared clip still tells its story. Rides
+  the existing `save_progress` opt-in — **still off by default**; no new knob. Tests +9, three fail before.
+  Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.482.2** — 🌟 PRIORITY 2 (autonomy) — **the owner's answer to sign-off gate 16 (#878), delivered as a
   one-click offer rather than a migration.** A confirmed duplicate that carries its own stack runs or notes is
   never removable (deleting the record would drop them) and used to be dropped from the cleanup list entirely —
