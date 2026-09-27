@@ -833,8 +833,10 @@ class Library:
         destination project (cached files included, duplicates skipped via
         source_path), **every finished picture with it** — the ``stack_runs``
         row, its output file set and the per-run annotations the web layer hangs
-        off it, including a saved edit recipe — and then the source target is
-        removed from the registry and its folder deleted.
+        off it, including a saved edit recipe — **and what the owner said about the
+        folder**: its notes and tags (:meth:`_carry_target_user_data`) and its saved
+        target-level preferences (:func:`seestack.io.merge.carry_target_meta`).
+        Then the source target is removed from the registry and its folder deleted.
 
         **The pictures travel because the folder does not survive.** This method
         ends in ``delete_target(..., remove_files=True)``, i.e. an ``rmtree`` of
@@ -879,7 +881,8 @@ class Library:
         lost_by_source: list[int] = []
         try:
             for result in merge_projects(dest_proj, source_dirs,
-                                         copy_stack_runs=True):
+                                         copy_stack_runs=True,
+                                         copy_target_meta=True):
                 total_added += result.n_added
                 total_runs += result.n_runs_copied
                 lost_by_source.append(result.n_runs_lost)
@@ -897,15 +900,53 @@ class Library:
                     "not removing '%s' after merge: %d of its pictures could "
                     "not be carried over", se.safe_name, lost)
                 continue
-            # Where this folder's subs went, recorded *before* the row that names
-            # it goes away — the next scan reads this instead of minting the
-            # source target again. Only for a source we are actually removing: one
-            # we keep is still its own target and needs no redirect.
+            # What the owner said about this folder, and where its subs went —
+            # both read off the row that is about to go away. Only for a source we
+            # are actually removing: one we keep is still its own target, and
+            # copying its note into the destination would duplicate it.
+            self._carry_target_user_data(se, dest.safe_name)
             self.record_merged_folder(se, dest.safe_name)
             self.delete_target(se.safe_name, remove_files=True)
 
         self.refresh_target_stats(dest.safe_name)
         return MergeTargetsResult(total_added, total_runs)
+
+    def _carry_target_user_data(self, source: TargetEntry,
+                                into_safe_name: str) -> None:
+        """Move ``source``'s registry-level user data into the destination.
+
+        The notes and tags live on the registry row, so ``merge_projects`` (which
+        only ever sees two Projects) cannot carry them and the merge destroyed them
+        with the folder — under a nudge that says *"nothing is deleted"*. The
+        project-level half (goal, saved Stack defaults, auto-edit preference) is
+        :func:`seestack.io.merge.carry_target_meta`.
+
+        Two different rules, because the two mean different things:
+
+        * **Notes are appended**, under a heading naming the folder they came from.
+          Two notes about two nights are both worth keeping, and which night a
+          remark was about is most of its value ("thin cloud after 1am").
+        * **Tags are unioned**, in the destination's order, de-duplicated by
+          :meth:`update_target`.
+
+        The destination's own note stays first and its own tags keep their order,
+        which is the same "the destination's decision wins" rule the rest of the
+        merge follows.
+        """
+        dest = self.find_target(into_safe_name)
+        if dest is None:
+            return
+        notes: str | None = None
+        source_notes = (source.notes or "").strip()
+        if source_notes:
+            block = f'From "{source.name}":\n{source_notes}'
+            existing = (dest.notes or "").rstrip()
+            notes = f"{existing}\n\n{block}" if existing else block
+        tags: list[str] | None = None
+        if source.tags:
+            tags = [*dest.tags, *source.tags]
+        if notes is not None or tags is not None:
+            self.update_target(into_safe_name, notes=notes, tags=tags)
 
     # ---- folders that were combined away -------------------------------
     #

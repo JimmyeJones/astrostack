@@ -1,5 +1,58 @@
 # Shipped — the record
 
+## v0.480.3 — 2026-09-27 — 🐛 Combine kept the subs and the pictures, and threw away everything the owner had said
+
+*(Second of the three Combine bugs from the 2026-09-26 setup audit. Same PR as v0.480.2 and v0.480.4.)*
+
+**The bug.** v0.460.0 made the nudge's promise — *"keeps every sub — and every picture you've already made of it.
+Nothing is deleted"* — true of the pictures. The target itself still arrived empty-handed: the source's **notes,
+tags, saved Stack-form defaults, integration goal and per-target auto-edit preference** went into the `rmtree` with
+the folder, and every carried frame lost `restored_utc`, `source_size_bytes`, `source_mtime` and `streak_cx`/`cy`.
+
+**Registry half.** `Library._carry_target_user_data` runs off the source's row just before that row goes away, and
+only for a source the merge actually removes (one kept back because a picture could not be carried is still its own
+target, so copying its note would duplicate it). Two different rules, because the two mean different things: **notes
+are appended** under a `From "<folder>":` heading — two notes about two nights are both worth keeping, and which
+night a remark was about ("thin cloud after 1am") is most of its value — while **tags are unioned** in the
+destination's order. The destination's own note stays first.
+
+**Project half.** `merge.carry_target_meta` fills the destination's *unset* target-level preferences from the source
+(`copy_target_meta`, off by default like `copy_stack_runs`; `merge_targets_result` turns it on). The keys are listed
+by value in `_CARRIED_TARGET_META` because the engine may not import the web layer that owns them (§6), with a drift
+test pinning the tuple against `GOAL_META_KEY` / `STACK_DEFAULTS_META_KEY` / `AUTO_EDIT_META_KEY` and a pointer
+comment at each of those three definitions. The list is explicit rather than "everything the destination lacks" for
+one concrete reason: `web_auto_stack_*` is the machinery's own record of what it already tried at what frame count,
+and carrying one into a target that has none could **suppress the auto-stack of the deeper canvas the merge just
+created**. `suggested_bg_mode` is excluded too — it describes the source's pixels, not the destination's.
+
+**Frames.** `_frame_without_id` now returns `replace(frame, id=None, cached_path=None, aligned_cache_path=None)`.
+The hand-written field list it replaces was the bug: every column added to `FrameRow` after it was written was
+silently dropped. Only those three are per-project; everything else describes the sub and travels verbatim, and a
+column added tomorrow travels with no change here.
+
+The source's **cover pin** is deliberately *not* carried: its run ids are re-assigned by `carry_stack_runs`, and
+v0.480.4 pins the destination's own displayed picture, so a source pin has nothing right to point at.
+
+**Tests.** `tests/webapp/test_merge_carries_target_data.py` (8): notes appended with the heading and reaching an
+empty destination, tags unioned, a merge with nothing to carry inventing nothing, preferences filling blanks, the
+destination's own preferences winning, automation state and `suggested_bg_mode` staying behind, the drift guard, and
+a frame with every `FrameRow` column set arriving with all of them (driven off the dataclass's own fields). Five fail
+against the pre-fix code. No config, schema, on-disk layout or API change.
+
+### The entry as it was filed
+
+- **🟠 BUG (trust — PRIORITY 2–3; setup audit 2026-09-26, reproduced) — Combine drops the source target's user data,
+  under copy that says "nothing is deleted".** *(Size S–M. Confidence: reproduced.)* v0.460.0 made
+  `merge.carry_stack_runs` carry stack runs and per-run recipes, but target-level data is still lost: the source's
+  **notes, tags, saved Stack-form defaults (`web_stack_defaults`), integration goal (`integration_goal_s`),
+  per-target auto-edit preference and cover pin**; and every carried frame loses `restored_utc`,
+  `source_size_bytes`, `source_mtime` and `streak_cx/cy`. **Where:** `seestack/io/merge.py` (`_frame_without_id`;
+  `_per_run_meta` carries only `^prefix:<run_id>$` keys), `seestack/io/library.py::merge_targets` (never reads
+  `TargetEntry.notes/tags`). **Repro:** set a note and a tag on the source, Combine, read the destination: `None []`,
+  meta keys `['name','schema_version']`. **Fix shape:** carry each field with an explicit rule for conflicts (notes
+  concatenated with a source heading, tags unioned, destination's own defaults/goal/pin win when set), and carry
+  the frame columns verbatim; test each field.
+
 ## v0.480.2 — 2026-09-27 — 🐛 "Combine into one deep target" no longer comes undone on the next scan
 
 *(First of the three Combine bugs the 2026-09-26 setup audit filed at the owner's request. He had been told not to

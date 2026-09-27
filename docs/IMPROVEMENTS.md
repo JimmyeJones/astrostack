@@ -82,17 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟠 BUG (trust — PRIORITY 2–3; setup audit 2026-09-26, reproduced) — Combine drops the source target's user data,
-  under copy that says "nothing is deleted".** *(Size S–M. Confidence: reproduced.)* v0.460.0 made
-  `merge.carry_stack_runs` carry stack runs and per-run recipes, but target-level data is still lost: the source's
-  **notes, tags, saved Stack-form defaults (`web_stack_defaults`), integration goal (`integration_goal_s`),
-  per-target auto-edit preference and cover pin**; and every carried frame loses `restored_utc`,
-  `source_size_bytes`, `source_mtime` and `streak_cx/cy`. **Where:** `seestack/io/merge.py` (`_frame_without_id`;
-  `_per_run_meta` carries only `^prefix:<run_id>$` keys), `seestack/io/library.py::merge_targets` (never reads
-  `TargetEntry.notes/tags`). **Repro:** set a note and a tag on the source, Combine, read the destination: `None []`,
-  meta keys `['name','schema_version']`. **Fix shape:** carry each field with an explicit rule for conflicts (notes
-  concatenated with a source heading, tags unioned, destination's own defaults/goal/pin win when set), and carry
-  the frame columns verbatim; test each field.
 - **🟡 BUG (trust — PRIORITY 3; setup audit 2026-09-26, reproduced) — after Combine, the deep target's picture
   becomes the source's shallow one-night stack.** *(Size S. Confidence: reproduced.)* The carried run keeps its
   own `timestamp_utc`, the source is usually the most recent night, and `refresh_target_stats` /
@@ -3973,6 +3962,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.480.3** — 🐛 Combine no longer arrives empty-handed: the source's notes and tags
+  (`Library._carry_target_user_data` — notes appended under a "From …" heading, tags unioned) and its saved
+  goal / Stack defaults / auto-edit preference (`merge.carry_target_meta` + `_CARRIED_TARGET_META`, filling only
+  blanks) travel with the folder, and `_frame_without_id` now copies the row with `replace` so the five columns
+  its hand-written list had silently dropped (`restored_utc`, `source_size_bytes`, `source_mtime`,
+  `streak_cx/cy`) travel too. Automation state (`web_auto_stack_*`) deliberately does not. 8 tests, 5 red before.
 - **v0.480.2** — 🐛 a combine no longer comes undone on the next scan: `Library.record_merged_folder` /
   `merged_folder_destination` (new additive registry table `merged_folders`) + the redirect in
   `open_or_create_target`. `incoming/` is read-only, so the combined-away folders are all still there and every

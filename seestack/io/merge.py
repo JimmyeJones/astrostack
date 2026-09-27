@@ -19,9 +19,19 @@ Stack runs (the finished pictures) travel too, when the caller asks for it with
 app had already made of that object, under a nudge promising *"keeps every sub —
 nothing is deleted"*.
 
+The source's own **target-level preferences** travel the same way, when the caller
+asks with ``copy_target_meta`` — see :func:`carry_target_meta`. The registry half
+of that (the notes the owner typed and the tags he filed the folder under) is
+carried by :meth:`seestack.io.library.Library.merge_targets_result`, which is where
+those live.
+
 What does NOT get merged:
   - Stage-2 caches (aligned data — invalidated when the destination's
     reference frame changes anyway).
+  - The source's **cover pin**. Its run ids are re-assigned by
+    :func:`carry_stack_runs`, and the destination's own displayed picture is what
+    a merge must not change (``merge_targets_result`` pins *that* one), so a
+    source pin has nothing left to point at that would be right.
 """
 
 from __future__ import annotations
@@ -59,6 +69,10 @@ class MergeResult:
     #: afterwards must not, when this is non-zero: the whole point of carrying
     #: them is that the delete is about to make the originals unrecoverable.
     n_runs_lost: int = 0
+    #: Target-level preferences taken from this source because the destination had
+    #: none of its own (:func:`carry_target_meta`). Empty unless the caller passed
+    #: ``copy_target_meta=True``.
+    target_meta_carried: tuple[str, ...] = ()
 
 
 def merge_projects(
@@ -67,6 +81,7 @@ def merge_projects(
     *,
     copy_cached_files: bool = True,
     copy_stack_runs: bool = False,
+    copy_target_meta: bool = False,
 ) -> Iterator[MergeResult]:
     """
     Pull every frame from each source project into ``destination``.
@@ -79,6 +94,9 @@ def merge_projects(
     written for is unchanged; :meth:`seestack.io.library.Library.merge_targets`
     turns it on, because it deletes the source folder afterwards and would
     otherwise take the pictures with it.
+
+    ``copy_target_meta`` does the same for the source's target-level preferences
+    (:func:`carry_target_meta`), and defaults off for the same reason.
     """
     dest_cache = CacheManager(destination.project_dir)
     dest_cache.ensure_dirs()
@@ -125,48 +143,83 @@ def merge_projects(
                             missing += 1
             carried = (carry_stack_runs(destination, src_project)
                        if copy_stack_runs else CarryResult(0, 0))
+            meta_carried = (carry_target_meta(destination, src_project)
+                            if copy_target_meta else ())
             yield MergeResult(str(src_path), added, dup, missing,
-                              carried.copied, carried.lost)
+                              carried.copied, carried.lost, meta_carried)
         finally:
             src_project.close()
 
 
 def _frame_without_id(frame: FrameRow) -> FrameRow:
-    """Shallow copy without the id (destination assigns a new one)."""
-    return FrameRow(
-        source_path=frame.source_path,
-        cached_path=None,  # we rewrite this after insert if we copy the cache
-        aligned_cache_path=None,  # stage 2 not merged
-        timestamp_utc=frame.timestamp_utc,
-        exposure_s=frame.exposure_s,
-        gain=frame.gain,
-        sensor_temp_c=frame.sensor_temp_c,
-        width_px=frame.width_px,
-        height_px=frame.height_px,
-        bayer_pattern=frame.bayer_pattern,
-        # Telescope-target pointing hints (header-derived, not path-specific like
-        # the deliberately-reset caches) — kept so a frame merged *before* it's
-        # plate-solved still gets a localized ASTAP search around the mount's
-        # pointing instead of a slow, failure-prone blind all-sky solve.
-        ra_hint_deg=frame.ra_hint_deg,
-        dec_hint_deg=frame.dec_hint_deg,
-        wcs_json=frame.wcs_json,
-        ra_center_deg=frame.ra_center_deg,
-        dec_center_deg=frame.dec_center_deg,
-        pixscale_arcsec=frame.pixscale_arcsec,
-        rotation_deg=frame.rotation_deg,
-        fwhm_px=frame.fwhm_px,
-        star_count=frame.star_count,
-        sky_adu_median=frame.sky_adu_median,
-        eccentricity_median=frame.eccentricity_median,
-        transparency_score=frame.transparency_score,
-        streak_detected=frame.streak_detected,
-        streak_count=frame.streak_count,
-        mosaic_panel_id=frame.mosaic_panel_id,
-        accept=frame.accept,
-        reject_reason=frame.reject_reason,
-        user_override=frame.user_override,
-    )
+    """The row as it should land in the destination: everything about the *frame*,
+    nothing about the project it is leaving.
+
+    Only three fields are reset, and all three are per-project: the id (the
+    destination assigns its own), the Stage-1 ``cached_path`` (rewritten after
+    insert if the cache copy succeeds) and the Stage-2 ``aligned_cache_path``
+    (aligned data is invalidated by the destination's own reference frame anyway).
+    Everything else — the header-derived pointing hints, so a frame merged *before*
+    it is plate-solved still gets a localized ASTAP search instead of a slow blind
+    all-sky one; the QC measurements; the accept/reject decision — describes the
+    sub itself and travels verbatim.
+
+    **Copied with ``replace`` rather than re-listed field by field.** The
+    hand-written list this replaces silently dropped every column added to
+    :class:`~seestack.io.project.FrameRow` after it was written —
+    ``source_size_bytes``, ``source_mtime``, ``streak_cx``/``streak_cy`` and
+    ``restored_utc`` — so a merged sub lost the streak's position, the size/mtime
+    the "has this file changed?" check reads, and the record that automation had
+    put it back. A column added tomorrow travels with no change here.
+    """
+    return replace(frame, id=None, cached_path=None, aligned_cache_path=None)
+
+
+#: Target-level ``project_meta`` keys holding a **decision the owner made about
+#: this target**, carried by :func:`carry_target_meta`: the integration goal, the
+#: Stack form's saved defaults and the per-target auto-edit preference.
+#:
+#: Spelled by value because the engine may not import the web layer that owns them
+#: (AGENTS.md §6); ``tests/webapp/test_merge_carries_target_data.py`` pins this
+#: tuple against that layer's own constants, so a rename cannot quietly stop the
+#: merge carrying one.
+#:
+#: Deliberately **not** here, and this is the whole reason the list is explicit
+#: rather than "everything the destination lacks":
+#:   * automation *state* — the ``web_auto_stack_*`` fingerprints are the
+#:     machinery's record of what it already tried at what frame count, and one of
+#:     them landing in a target that has none could suppress the auto-stack of the
+#:     deeper canvas this merge just created;
+#:   * engine-derived hints (``suggested_bg_mode``), which describe the *source's*
+#:     pixels, not the destination's;
+#:   * identity and schema (``name``, ``safe_name``'s registry id ``target_id``,
+#:     ``schema_version``), which are the destination's own;
+#:   * per-run annotations (``editor_recipe:7``, …), which travel with their run
+#:     and re-keyed, in :func:`carry_stack_runs`.
+_CARRIED_TARGET_META: tuple[str, ...] = (
+    "integration_goal_s",
+    "web_stack_defaults",
+    "auto_edit_on_autostack",
+)
+
+
+def carry_target_meta(destination: Project, source: Project) -> tuple[str, ...]:
+    """Fill the destination's *unset* target-level preferences from ``source``.
+
+    Returns the keys actually carried. The conflict rule is "the destination's own
+    decision wins": a merge folds a thinner night into the target the owner has
+    been working on, so his goal and his saved Stack settings for *that* target are
+    the ones to keep — the source's only ever fill a blank left by a target he
+    never opened the forms for.
+    """
+    carried: list[str] = []
+    for key in _CARRIED_TARGET_META:
+        value = source.get_meta(key)
+        if value is None or destination.get_meta(key) is not None:
+            continue
+        destination.set_meta(key, value)
+        carried.append(key)
+    return tuple(carried)
 
 
 # A ``project_meta`` key the web layer hangs off one stack-run id —
