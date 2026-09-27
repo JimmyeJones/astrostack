@@ -1,5 +1,56 @@
 # Shipped — the record
 
+## v0.480.8 — 2026-09-27 — `scripts/agent-dogfood.sh --combine`: the journey that starts in `incoming/`
+
+**The gap.** Every shape this script could produce arrived through `POST /api/sample`, which writes straight into the
+library — so the scratch `incoming/` was empty on every pass and the whole *front* of the owner's journey had never been
+run by it: a folder appearing, a scan classifying it, a second night of the same object, the merge nudge, "Combine into
+one deep target", and the scan after it. That is why the three Combine bugs fixed in v0.480.2–.4 had to be verified with
+a hand-rolled server and four curls (recipe in `PROCESS-NOTES.md`, 2026-09-27), and `--closing` does not close it: its
+two targets are deliberately a degree apart *so the nudge does not fire*.
+
+**What the flag does**, on its own data root and port (8814), loading no sample, in about a minute:
+
+1. Two folders of one object appear in `incoming/` (`M 31_sub`, `M 31_night_2_sub`), named the way a Seestar names them
+   so the scanner's own convention pass classifies them, with an S30's optics in the headers. Every file is
+   **fingerprinted** (path, size, mtime) first.
+2. `POST /api/scan` → prints each target the scan minted and its frame count, and picks the deeper one as the merge
+   destination.
+3. `POST …/stack` **with no plate solve — meant to fail.** The endpoint answers 200 and the refusal happens inside the
+   job, so the flag waits for it and prints the job's own `error` and `error_kind`
+   (`no_solved_frames`) rather than the POST body, which would have read as success.
+4. Every frame gets `tests.synth.make_synth_wcs_text()` in its `wcs_json`, plus a centre and an fwhm, through
+   `Library`/`Project` — what the fixtures do — and both targets stack for real.
+5. `GET /api/targets/merge-suggestions` → names the group and its widest separation.
+6. Notes and tags are set on the folder being combined in, so the carry has something to carry.
+7. `POST /api/targets/merge` → prints its answer, then the combined target's frame count, `cover_stack_run_id`, notes
+   and tags: the three things v0.480.2, .3 and .4 are each about, on two lines.
+8. `POST /api/scan` again → does it stay one target?
+9. One more sub into the folder that was combined away, and a third scan → does it land in the deep target?
+
+Then **the §10 check**: the `incoming/` fingerprint is re-taken and compared. Anything missing or rewritten prints as a
+`VIOLATION`; the one sub added at step 9 prints as an addition, which §10 allows ("read and create-new"). This is the
+only place any of this tooling can measure the rule AGENTS.md calls the most important in the file.
+
+Then **the server log's error lines**, whether the journey worked or not — because the traceback of step 3's *expected*
+refusal is exactly where v0.480.5 was found, and a pass that only asks "did the feature work?" scrolls straight past it.
+
+**One correction the build itself produced, recorded so it is not re-derived.** The first version checked the merge
+nudge at step 3, before the solve, and printed its empty answer as a finding. It is not one:
+`merge_suggestions` clusters by each target's own **plate-solved centre**, so on unsolved frames `[]` is the documented
+behaviour. Moved after step 4, where a real install is, it answers *"Andromeda Galaxy, within 0.0 arcmin — M_31
+(4 frames), M_31_night_2 (3 frames)"*.
+
+**Result of the pass itself: no new bug.** All three v0.480.2–.4 signals are present on live data
+(`picture_pinned: true` and `cover_stack_run_id` = the destination's **own** run; the notes and tags carried, prefixed
+`From "M 31_night_2":`; one target and 7 frames after the rescan, 8 after the new sub), and `incoming/` came back with
+all seven original files unchanged. Recorded in `PROCESS-NOTES.md`.
+
+**No app code is touched** — this is test/agent tooling only, so there is nothing to migrate and nothing shipped in the
+Docker image changes. `wait_job()` moved earlier in the script (a pure helper over `$BASE`) so the new block, which runs
+before the sample step, can use it; no other pass's behaviour changes, and the sample gate simply also checks the flag.
+
+
 ## v0.480.7 — 2026-09-27 — the other half of #989: a picture that lost its place on the sky now says so, and how to get it back
 
 *(Same PR as v0.480.6, which fixed the writer. This is what the six masters already on the owner's disk get.)*

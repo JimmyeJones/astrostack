@@ -28,6 +28,8 @@
 #   scripts/agent-dogfood.sh --deep         # ALSO one field shot 1,200 times: the owner's SCALE,
 #   scripts/agent-dogfood.sh --restack        # ALSO stack the sample TWICE, thin then deep,
 #                                           #   so every same-target two-run surface exists
+#   scripts/agent-dogfood.sh --combine       # INSTEAD: the whole incoming/ -> library journey,
+#                                           #   two same-object folders, stacked, COMBINED, rescanned
 #   scripts/agent-dogfood.sh --closing       # ALSO a target whose SEASON is ending, so
 #                                          # /tonight's fourth card finally renders
 #                                           #   and the only pass that measures DOM node counts
@@ -55,6 +57,39 @@
 # with no console error and no failed request. It is off by default only because
 # it costs a few minutes on top of a pass that already stacks the sample — run it
 # on any run that touches the editor.
+#
+# --combine exists because nothing here reached the app the way the owner's data
+# does. Every other shape arrives through `POST /api/sample`, which writes
+# straight into the library, so the scratch `incoming/` is empty and the whole
+# front of the journey — a folder appearing, a scan classifying it, a second
+# night of the same object, the merge nudge, "Combine into one deep target", and
+# the scan *after* it — has never been run by this script. The three Combine bugs
+# fixed in v0.480.2-.4 had to be checked by a hand-rolled server and four curls
+# (docs/PROCESS-NOTES.md, 2026-09-27), and `--closing`'s two targets are
+# deliberately a degree apart *so the nudge does not fire*, so it is not this.
+#
+# Two things carried over from that hand-rolled pass, because both cost time to
+# rediscover:
+#
+#   * **There is no ASTAP in this container**, and synthetic subs carry no plate
+#     solution, so `POST /api/targets/<safe>/stack` answers *"No accepted frames
+#     are plate-solved yet"*. This flag deliberately lets that failure happen and
+#     prints it, then does what the test fixtures do — writes
+#     `tests.synth.make_synth_wcs_text()` into every frame's `wcs_json` (plus a
+#     centre and an fwhm) through `Library`/`Project` — and stacks for real.
+#   * **The log of the steps that are MEANT to fail is where the bugs are.** That
+#     pass found v0.480.5 (every `log.exception` missing from `/api/logs`) in the
+#     traceback of the expected stack refusal above, not in anything the feature
+#     did. A pass that only asks "did the feature work?" scrolls straight past
+#     it, so this flag prints the server log's error lines at the end whether the
+#     journey succeeded or not.
+#
+# It also checks the one rule AGENTS.md §10 calls the most important in the file:
+# it fingerprints every file it writes into `incoming/` (path, size, mtime) before
+# the journey and compares afterwards, so "nothing was moved, renamed, truncated
+# or removed" is measured rather than assumed. Like --empty it takes its own data
+# root and port, so it neither sees nor disturbs a normal pass, and it loads no
+# sample — the targets under test are the ones the scan minted.
 #
 # --incoming-lag exists because the scratch `incoming/` is EMPTY on every pass:
 # the sample arrives through `POST /api/sample`, which writes straight into the
@@ -223,11 +258,18 @@ REPO="$PWD"
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
 DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0; DO_MOSAIC=0
 DO_BIG=0; DO_DEEP=0
-DO_SITE=1; DO_LAG=0; DO_CAL=0; DO_CLOSING=0; DO_RESTACK=0
+DO_SITE=1; DO_LAG=0; DO_CAL=0; DO_CLOSING=0; DO_RESTACK=0; DO_COMBINE=0
 # How many aged subs --incoming-lag leaves in the scratch incoming/, and how old
 # it makes them. Eleven days is the observer's own measurement; the count is
 # small on purpose (this seeds a *state*, not a workload).
 DOGFOOD_LAG_SUBS="${DOGFOOD_LAG_SUBS:-7}"
+# How many subs each of --combine's two nights gets. Small on purpose, and
+# deliberately UNEQUAL: the deep folder must be the one with more frames and the
+# shallow one the more recent, because that is the shape v0.480.4 is about (a
+# carried run keeps its own newer timestamp, so the one-night picture wins every
+# "newest run" race unless the merge pins the destination's own).
+DOGFOOD_COMBINE_SUBS="${DOGFOOD_COMBINE_SUBS:-4}"
+DOGFOOD_COMBINE_SUBS_2="${DOGFOOD_COMBINE_SUBS_2:-3}"
 DOGFOOD_LAG_DAYS="${DOGFOOD_LAG_DAYS:-11}"
 # …and how many of the seeded files are ones the app CANNOT READ. A sub that
 # will not parse never becomes a frame row, so it waits for ever and the note has
@@ -259,6 +301,7 @@ for arg in "$@"; do
     --deep) DO_DEEP=1 ;;
     --closing) DO_CLOSING=1 ;;
     --restack) DO_RESTACK=1 ;;
+    --combine) DO_COMBINE=1 ;;
     # The whole header block, found rather than hard-coded: a fixed line count
     # silently truncates -h every time the header grows, which it has.
     -h|--help) sed -n '2,/^[^#]/p' "$0" | sed '$d'; exit 0 ;;
@@ -279,6 +322,19 @@ if [ "$DO_EMPTY" = 1 ]; then
   # A first-run app has no observing site, and the screens that say so are
   # exactly what this pass exists to photograph.
   DO_SITE=0
+elif [ "$DO_COMBINE" = 1 ]; then
+  # Same reasoning as --empty's own root: this pass writes into `incoming/` and
+  # runs whole-library scans, so it must not share a library with a normal pass
+  # (nor be confused by one). Wiped first — "a folder appears" means appears.
+  DEFAULT_PORT=8814
+  DATA="$DOGFOOD_DIR/combine/data"
+  SHOTS="$DOGFOOD_DIR/combine/shots"
+  SERVER_LOG="$DOGFOOD_DIR/server-combine.log"
+  rm -rf "$DOGFOOD_DIR/combine"
+  # The sample is skipped because the scan below mints the targets this pass is
+  # about; the stack step is skipped because this pass stacks them itself, in the
+  # order the journey needs.
+  DO_STACK=0
 else
   DEFAULT_PORT=8811
   DATA="$DOGFOOD_DIR/data"
@@ -289,8 +345,25 @@ PORT="${ASTROSTACK_PORT:-$DEFAULT_PORT}"
 BASE="http://127.0.0.1:${PORT}"
 mkdir -p "$DATA" "$SHOTS"
 echo "dogfood scratch: $DOGFOOD_DIR"
+
+wait_job() {  # wait_job <job_id> [tries] -> prints the final state
+  [ -n "${1:-}" ] || { echo "(no job)"; return 0; }
+  local state=""
+  for _ in $(seq 1 "${2:-90}"); do
+    state="$(curl -sf "$BASE/api/jobs/$1" \
+             | python -c 'import json,sys; print(json.load(sys.stdin).get("state",""))' \
+             2>/dev/null || true)"
+    case "$state" in done|error|cancelled|interrupted) break ;; esac
+    sleep 2
+  done
+  echo "${state:-unknown}"
+}
+
 if [ "$DO_EMPTY" = 1 ]; then
   echo "-- FIRST-RUN pass: no sample, no stack, no targets"
+fi
+if [ "$DO_COMBINE" = 1 ]; then
+  echo "-- COMBINE pass: incoming/ -> scan -> stack both -> merge -> scan again"
 fi
 
 # 1. The SPA. webapp/ serves whatever is in webapp/static, so a stale build
@@ -325,10 +398,265 @@ for _ in $(seq 1 60); do
 done
 curl -sf "$BASE/api/system" >/dev/null || { echo "server never answered" >&2; exit 1; }
 
+# 2b. The COMBINE journey (--combine): the only shape here that starts where the
+#     owner's data starts. Two folders of the same object appear in `incoming/`,
+#     a scan classifies them, both are stacked, they are combined into one deep
+#     target, and the library is scanned again. Every step prints what the app
+#     *says*, including the steps that are meant to fail.
+COMBINE_SAFE=""
+if [ "$DO_COMBINE" = 1 ]; then
+  echo "-- [combine 1/9] two same-object folders appear in incoming/"
+  # The watcher must not import them behind the scan's back, or "what did the
+  # scan say?" is a race. Same retune --incoming-lag uses.
+  curl -sf -X PUT "$BASE/api/settings" -H 'Content-Type: application/json' \
+       -d '{"watch_poll_interval_s": 5, "watch_quiet_period_s": 900}' >/dev/null \
+    || echo "   warn: could not retune the watcher — it may import the folders mid-pass"
+  COMBINE_INCOMING="$DATA/incoming" python - \
+      "$DOGFOOD_COMBINE_SUBS" "$DOGFOOD_COMBINE_SUBS_2" <<'PY'
+import hashlib, json, os, pathlib, sys
+
+sys.path.insert(0, "tests")
+from synth import write_seestar_fits  # noqa: E402 — the fixture writer, not sample_data
+
+n1, n2 = int(sys.argv[1]), int(sys.argv[2])
+root = pathlib.Path(os.environ["COMBINE_INCOMING"])
+# Two nights of ONE object, named the way a Seestar names them, so the scan's own
+# convention pass classifies them rather than a hand-made target row.
+# `_sub` is what makes each a raws folder; the object names differ only in the
+# night, which is exactly the pair the merge nudge exists to notice.
+nights = [("M 31_sub", n1, "2026-08-14T22:%02d:00"),
+          ("M 31_night_2_sub", n2, "2026-09-02T23:%02d:00")]
+for folder, n, when in nights:
+    d = root / folder
+    d.mkdir(parents=True, exist_ok=True)
+    for i in range(n):
+        write_seestar_fits(
+            d / f"Light_{i:03d}.fit", add_wcs=False, seed=1000 + i, n_stars=45,
+            date_obs=when % (i * 2),
+            # An S30's optics (AGENTS.md §1 Owner Facts), so anything deriving the
+            # model from the header sees the owner's camera and not an S50.
+            focal_len_mm=150.0, pixel_size_um=2.9,
+        )
+    print(f"   wrote {n} sub(s) into incoming/{folder}")
+
+# The §10 fingerprint: every path, its size and its mtime, BEFORE anything reads
+# them. The comparison at the end is the whole point — "the app never writes to
+# incoming/" is the most important rule in AGENTS.md and the only one this script
+# can actually measure.
+manifest = sorted(
+    (str(p.relative_to(root)), p.stat().st_size, int(p.stat().st_mtime))
+    for p in root.rglob("*") if p.is_file()
+)
+digest = hashlib.sha1(json.dumps(manifest).encode()).hexdigest()[:12]
+(root.parent / "incoming-manifest.json").write_text(json.dumps(manifest))
+print(f"   fingerprinted {len(manifest)} file(s) in incoming/ (sha1 {digest})")
+PY
+
+  echo "-- [combine 2/9] POST /api/scan — what does the app make of them?"
+  COMBINE_JOB="$(curl -sf -X POST "$BASE/api/scan" -H 'Content-Type: application/json' \
+                   -d '{}' \
+                 | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' \
+                 2>/dev/null || true)"
+  echo "   scan job: $(wait_job "$COMBINE_JOB" 120)"
+  curl -sf "$BASE/api/targets" | python -c '
+import json, sys
+for t in json.load(sys.stdin):
+    print("   [target] %-22s %s frames, %s" % (
+        t.get("safe_name"), t.get("n_frames"), t.get("name")))
+' 2>/dev/null || echo "   could not read /api/targets"
+  # Which target is which: the deeper one is the destination a merge should keep.
+  read -r COMBINE_SAFE COMBINE_SRC <<EOF2
+$(curl -sf "$BASE/api/targets" | python -c '
+import json, sys
+t = sorted(json.load(sys.stdin), key=lambda r: -(r.get("n_frames") or 0))
+print((t[0]["safe_name"] if t else ""), (t[1]["safe_name"] if len(t) > 1 else ""))
+' 2>/dev/null || echo " ")
+EOF2
+  echo "   deep target: ${COMBINE_SAFE:-<none>}   folder to combine in: ${COMBINE_SRC:-<none>}"
+
+  echo "-- [combine 3/9] stacking WITHOUT a plate solve — this is MEANT to fail"
+  echo "   (no ASTAP in this container; the point is what the app says, and what"
+  echo "    its own log says, on a step that cannot work)"
+  # The endpoint answers 200 with a job id and the refusal happens *inside* the
+  # job, so the owner-facing sentence is the job's `error` — reading the POST body
+  # alone would report this step as having worked.
+  COMBINE_FAILJOB="$(curl -sf -X POST "$BASE/api/targets/$COMBINE_SAFE/stack" \
+                       -H 'Content-Type: application/json' -d '{}' \
+                     | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' \
+                     2>/dev/null || true)"
+  echo "   stack job: $(wait_job "$COMBINE_FAILJOB" 60)"
+  curl -sf "$BASE/api/jobs/$COMBINE_FAILJOB" | python -c '
+import json, sys
+d = json.load(sys.stdin)
+print("   says: state=%s error_kind=%s" % (d.get("state"), d.get("error_kind")))
+print("   says: %s" % ((d.get("error") or d.get("detail") or "").strip()[:300]
+                       or "(nothing — a step that could not work said nothing)"))
+' 2>/dev/null || echo "   could not read the job back"
+
+  echo "-- [combine 4/9] giving the subs a solution the way the fixtures do, then stacking both"
+  COMBINE_DATA="$DATA" python - <<'PY'
+import os, pathlib, sys
+
+sys.path.insert(0, "tests")
+from synth import make_synth_wcs_text  # noqa: E402
+
+from seestack.io.library import Library
+
+lib = Library.open_or_create(pathlib.Path(os.environ["COMBINE_DATA"]) / "library")
+try:
+    for entry in lib.list_targets():
+        proj = lib.open_target(entry.safe_name)
+        try:
+            n = 0
+            for f in proj.iter_frames():
+                w, h = f.width_px or 480, f.height_px or 320
+                proj.update_frame(
+                    f.id,
+                    wcs_json=make_synth_wcs_text(width=w, height=h),
+                    ra_center_deg=83.6, dec_center_deg=-5.4,
+                    fwhm_px=3.4, star_count=180,
+                )
+                n += 1
+            print(f"   gave {n} sub(s) of {entry.safe_name} a synthetic solution")
+        finally:
+            proj.close()
+        lib.refresh_target_stats(entry.safe_name)
+finally:
+    lib.close()
+PY
+  for _cs in "$COMBINE_SAFE" "$COMBINE_SRC"; do
+    [ -n "$_cs" ] || continue
+    _cjob="$(curl -sf -X POST "$BASE/api/targets/$_cs/stack" \
+               -H 'Content-Type: application/json' -d '{}' \
+             | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' \
+             2>/dev/null || true)"
+    echo "   stack $_cs: $(wait_job "$_cjob" 180)"
+  done
+
+  echo "-- [combine 5/9] the merge nudge, now that the targets have a centre"
+  # `merge-suggestions` clusters by each target's own **plate-solved centre**, so
+  # it is correctly silent until step 4 has run — checking it before the solve would
+  # record an empty answer as a finding when it is the documented behaviour.
+  curl -sf "$BASE/api/targets/merge-suggestions" | python -c '
+import json, sys
+groups = json.load(sys.stdin) or []
+if not groups:
+    print("   [merge-suggestions] EMPTY — with both targets solved and at one")
+    print("   [merge-suggestions] position, this surface should be offering the")
+    print("   [merge-suggestions] group. Read it as a finding, not as quiet.")
+for g in groups:
+    print("   [merge-suggestions] %s, within %.1f arcmin — %s" % (
+        g.get("object_name") or "(no catalog match)", g.get("max_sep_arcmin", 0.0),
+        ", ".join("%s (%s frames)" % (m.get("safe"), m.get("n_frames_accepted"))
+                  for m in g.get("targets", []))))
+' 2>/dev/null || echo "   could not read /api/targets/merge-suggestions"
+
+  echo "-- [combine 6/9] what the owner said about the folder being combined in"
+  # Notes and tags exist so the merge has something to carry (v0.480.3). Without
+  # them the carry is unobservable and the step reads as passing when it is silent.
+  curl -sf -X PATCH "$BASE/api/targets/$COMBINE_SRC" -H 'Content-Type: application/json' \
+       -d '{"notes": "thin cloud after 1am", "tags": ["galaxy", "windy"]}' >/dev/null \
+    || echo "   warn: could not set notes/tags — the carry will have nothing to carry"
+
+  echo "-- [combine 7/9] POST /api/targets/merge — Combine into one deep target"
+  curl -sf -X POST "$BASE/api/targets/merge" -H 'Content-Type: application/json' \
+       -d "{\"into\": \"$COMBINE_SAFE\", \"sources\": [\"$COMBINE_SRC\"]}" \
+    | python -c '
+import json, sys
+d = json.load(sys.stdin)
+print("   [merge] %s" % json.dumps(d)[:600])
+' 2>/dev/null || echo "   could not POST /api/targets/merge"
+  curl -sf "$BASE/api/targets/$COMBINE_SAFE" | python -c '
+import json, sys
+d = json.load(sys.stdin)
+# The three things the v0.480.2-.4 fixes are each about, on one line: whose
+# picture is on show, what the owner had written down, and how deep it now is.
+print("   [after merge] %s frames, cover_stack_run_id=%s" % (
+    d.get("n_frames"), d.get("cover_stack_run_id")))
+print("   [after merge] notes=%r tags=%r" % (d.get("notes"), d.get("tags")))
+' 2>/dev/null || echo "   could not read the combined target"
+
+  echo "-- [combine 8/9] POST /api/scan again — does it STAY combined?"
+  COMBINE_JOB2="$(curl -sf -X POST "$BASE/api/scan" -H 'Content-Type: application/json' \
+                    -d '{}' \
+                  | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' \
+                  2>/dev/null || true)"
+  echo "   rescan job: $(wait_job "$COMBINE_JOB2" 120)"
+  curl -sf "$BASE/api/targets" | python -c '
+import json, sys
+t = json.load(sys.stdin)
+print("   [after rescan] %d target(s): %s" % (
+    len(t), ", ".join("%s (%s frames)" % (r.get("safe_name"), r.get("n_frames"))
+                      for r in t) or "none"))
+if len(t) > 1:
+    print("   [after rescan] the rescan UNDID the combine — that is v0.480.2 back.")
+' 2>/dev/null || echo "   could not read /api/targets"
+  echo "-- [combine 9/9] and one more night into the folder that was combined away:"
+  echo "   it must land in the DEEP target, not mint the old one again"
+  COMBINE_INCOMING="$DATA/incoming" python - <<'PY'
+import os, pathlib, sys
+
+sys.path.insert(0, "tests")
+from synth import write_seestar_fits  # noqa: E402
+
+d = pathlib.Path(os.environ["COMBINE_INCOMING"]) / "M 31_night_2_sub"
+write_seestar_fits(d / "Light_900.fit", add_wcs=False, seed=1900, n_stars=45,
+                   date_obs="2026-09-19T22:40:00",
+                   focal_len_mm=150.0, pixel_size_um=2.9)
+print("   dropped one more sub into the folder that was combined away")
+PY
+  COMBINE_JOB3="$(curl -sf -X POST "$BASE/api/scan" -H 'Content-Type: application/json' \
+                    -d '{}' \
+                  | python -c 'import json,sys; print(json.load(sys.stdin).get("job_id",""))' \
+                  2>/dev/null || true)"
+  echo "   third scan: $(wait_job "$COMBINE_JOB3" 120)"
+  curl -sf "$BASE/api/targets" | python -c '
+import json, sys
+t = json.load(sys.stdin)
+print("   [after the new sub] %d target(s): %s" % (
+    len(t), ", ".join("%s (%s frames)" % (r.get("safe_name"), r.get("n_frames"))
+                      for r in t) or "none"))
+' 2>/dev/null || echo "   could not read /api/targets"
+
+  echo "-- [combine] AGENTS.md §10: is incoming/ byte-for-byte as it was left?"
+  COMBINE_INCOMING="$DATA/incoming" python - <<'PY'
+import json, os, pathlib
+
+root = pathlib.Path(os.environ["COMBINE_INCOMING"])
+was = {tuple(r) for r in json.loads((root.parent / "incoming-manifest.json").read_text())}
+now = {(str(p.relative_to(root)), p.stat().st_size, int(p.stat().st_mtime))
+       for p in root.rglob("*") if p.is_file()}
+# The new sub dropped in at the end is an ADDITION, which §10 allows ("read and
+# create-new"); everything that was there must still be there, unchanged.
+missing = sorted(n for n, _s, _m in was - now)
+changed = sorted(n for n, _s, _m in (was - now) if n in {x[0] for x in now})
+added = sorted(n for n, _s, _m in now - was)
+if missing:
+    print("   [§10] VIOLATION — %d file(s) moved, renamed or removed: %s"
+          % (len(missing), ", ".join(missing[:8])))
+elif changed:
+    print("   [§10] VIOLATION — %d file(s) rewritten in place: %s"
+          % (len(changed), ", ".join(changed[:8])))
+else:
+    print("   [§10] CLEAN — all %d original file(s) still there, unchanged."
+          % len(was))
+print("   [§10] added since (allowed — create-new only): %s" % (", ".join(added) or "none"))
+PY
+
+  echo "-- [combine] the server's own log, INCLUDING the steps that were meant to fail"
+  echo "   (this is where v0.480.5 was sitting: a Python '--- Logging error ---'"
+  echo "    from the expected stack refusal, not from anything the feature did)"
+  grep -nE -- 'Logging error|Traceback|AttributeError|ERROR|Exception' "$SERVER_LOG" \
+    | tail -25 | sed 's/^/   log: /' \
+    || echo "   log: no error lines at all — read that as a result, not as silence"
+  COMBINE_SAFE="${COMBINE_SAFE:-}"
+fi
+
+# 3. Real data. The bundled sample is a genuine target with frames, so the app
 # 3. Real data. The bundled sample is a genuine target with frames, so the app
 #    is exercised the way a user's is rather than through empty states — except
 #    under --empty, where the empty states ARE the thing being measured.
-if [ "$DO_EMPTY" = 0 ] && \
+if [ "$DO_EMPTY" = 0 ] && [ "$DO_COMBINE" = 0 ] && \
    [ "$(curl -sf "$BASE/api/targets" | tr -d '[:space:]')" = "[]" ]; then
   echo "-- loading the bundled sample target"
   curl -sf -X POST "$BASE/api/sample" >/dev/null || echo "warn: sample load failed"
@@ -622,19 +950,6 @@ print("   [incoming-lag] %d of them cannot be read at all"
       % d.get("n_unreadable", 0))
 ' 2>/dev/null || echo "   [incoming-lag] could not read /api/incoming-lag"
 fi
-
-wait_job() {  # wait_job <job_id> [tries] -> prints the final state
-  [ -n "${1:-}" ] || { echo "(no job)"; return 0; }
-  local state=""
-  for _ in $(seq 1 "${2:-90}"); do
-    state="$(curl -sf "$BASE/api/jobs/$1" \
-             | python -c 'import json,sys; print(json.load(sys.stdin).get("state",""))' \
-             2>/dev/null || true)"
-    case "$state" in done|error|cancelled|interrupted) break ;; esac
-    sleep 2
-  done
-  echo "${state:-unknown}"
-}
 
 # 3d-bis. The deep sample (--deep): one ordinary field shot 1,200 times, so a
 #     pass finally holds the owner's *magnitude*. Every other sample here is six

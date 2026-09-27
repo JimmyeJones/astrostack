@@ -330,6 +330,54 @@ the repo.
 > which to read that column as one paragraph. Read that block on an ordinary or
 > `--mosaic` pass.
 >
+> **And nothing here had ever *arrived* the way his data arrives — `--combine`**
+> *(added 2026-09-27 with v0.480.8)*. Every other shape reaches the app through
+> `POST /api/sample`, which writes straight into the library, so the whole front of
+> the journey had never been run by this script: a folder appearing in `incoming/`,
+> a scan classifying it, a **second night of the same object**, the merge nudge,
+> "Combine into one deep target", and the scan *after* it. The three Combine bugs
+> fixed in v0.480.2–.4 therefore had to be checked with a hand-rolled server and
+> four curls, and `--closing` does not cover it — its two targets are deliberately
+> a degree apart *so the nudge does not fire*. `--combine` runs those nine steps
+> against a real app on its own root and port (8814), loading no sample, and prints
+> what the app **says** at each one: the scan's targets, the refused stack, the
+> nudge, `POST /api/targets/merge`'s answer, the combined target's cover / notes /
+> tags, and the two rescans.
+>
+> Four things about it are load-bearing, and each cost the hand-rolled pass time to
+> find:
+>
+> - **There is no ASTAP in this container**, so a stack of synthetic subs is refused
+>   (`error_kind=no_solved_frames`). The flag lets that happen *on purpose* at step
+>   3 and prints the job's own sentence, then does what the test fixtures do —
+>   writes `tests.synth.make_synth_wcs_text()` into every frame's `wcs_json`, plus a
+>   centre and an fwhm, through `Library`/`Project` — and stacks for real.
+> - **The log of the step that was meant to fail is where the bug was.** That is
+>   exactly where v0.480.5 was sitting (every `log.exception` missing from
+>   `/api/logs`, found in the traceback of this same refusal), so the flag prints
+>   the server log's error lines at the end whether the journey succeeded or not.
+>   *A pass that only asks "did the feature work?" scrolls straight past it.*
+> - **`/api/targets/merge-suggestions` is checked AFTER the solve, not before.**
+>   It clusters by each target's own **plate-solved centre**, so on unsolved frames
+>   it correctly answers `[]` — the first version of this flag checked it at step 3
+>   and printed that emptiness as a finding, which it is not. Solved, it names the
+>   group ("Andromeda Galaxy, within 0.0 arcmin — M_31 (4 frames), M_31_night_2 (3
+>   frames)").
+> - **It measures AGENTS.md §10.** It fingerprints every file it writes into
+>   `incoming/` (path, size, mtime) before the journey and compares afterwards, so
+>   "nothing was moved, renamed, truncated or removed" is a printed result rather
+>   than an assumption — and the one sub it drops in at the end is reported as an
+>   *addition*, which §10 allows. This is the only place any of this tooling can
+>   check the most important rule in the file.
+>
+> Run it on any change to the scanner's folder handling, `seestack/io/merge.py`,
+> `Library.merge_targets`, the merge nudge, or anything that reads or writes
+> `incoming/`. It costs about a minute (seven small subs, two short stacks) and the
+> page probe then runs against a **just-combined** library, which no other pass has.
+> Tune the two nights with `DOGFOOD_COMBINE_SUBS` / `DOGFOOD_COMBINE_SUBS_2`; keep
+> them unequal, because the deep folder being the one with more frames and the
+> shallow one the more recent is the shape v0.480.4 turns on.
+>
 > **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
 > installed): the same probe against an app with **no data at all**. Every
 > measurement this script took before 2026-09-07 was of the *sample-loaded* app, so
