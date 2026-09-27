@@ -1,5 +1,52 @@
 # Shipped — the record
 
+## v0.483.0 — 2026-09-27 — the "watch it appear" clip becomes a night-by-night reel, for free
+
+**The owner's own request, 2026-09-25:** *"a progression video per target, ordered by when the subs were SHOT, so I
+can see how my added frames affect targets."* v0.480.0 fixed the *clock* of the cross-run "night after night" reel
+(it was ordered by when Stack was pressed). What the backlog entry left open was the **shape**: he wants one frame
+per capture night, cumulative — night 1; nights 1–2; … — and a target stacked once has no reel at all, because a
+step there is "a stack he ran" rather than "a night". The entry's own design note said the cost question is the
+whole question: a full stack per night on a 35,894-sub target is hours.
+
+**It costs nothing, because the accumulator is already cumulative.** `seestack/stack/stacker.py`'s `_QuickLook`
+has snapshotted pass 1 into a small in-memory reel since the `save_progress` option shipped — evenly spaced by
+frame count. Those snapshots now land on **capture-night boundaries** instead, so one ordinary stack yields every
+cumulative step for the price of one pass. Nothing is stacked twice and no new option was added: the night reel
+rides the existing opt-in, which is still **off by default**.
+
+**What decides it, and when it declines.** New pure `stacker.plan_capture_nights(frames)` groups the run's frame
+list — *in the order it will be stacked* — into at most `_PROGRESS_MAX_FRAMES` (12) cumulative steps, and answers
+`None`, meaning "keep the evenly-spaced reel", in every case where a night-by-night story would be a lie: a frame
+with no readable capture stamp; a stacking order that is **not** non-decreasing by night (lucky imaging sorts by
+FWHM, which is exactly this); or fewer than three distinct nights, which is not a progression. A target with more
+nights than the reel has room for keeps the feature — consecutive nights are grouped and the caption names the
+range. The night boundary is UTC noon (`activity_calendar.night_date_of`, no longitude — the engine has none), so
+a dusk-to-dawn session is one night.
+
+**A boundary is *counted*, not watched for — and that is the one thing that needed care.** `_imap_bounded` yields
+each frame **as it completes**, not in submission order, so the accumulator absorbs the list in roughly, not
+exactly, capture order. The first implementation snapshotted when a sub from the next night turned up, and on a
+six-sub fixture it fired on the first frame. The shipped rule counts *settled* frames (contributed **or** failed —
+the count that reaches its boundary whatever the night's luck) against the plan's own cumulative totals, so the
+steps are **exact in number** and the caption's sub count is always the picture's true depth; only *which* subs of
+the boundary night are in is approximate, bounded by the in-flight window — a handful against the hundreds a real
+night holds. `_pass` gained one optional `on_settled(frame, contributed)` hook, called on the consumer's own lock
+right after the add, so the snapshot reads a consistent accumulator. The final step is closed by an explicit
+`close_series` with the accumulator still alive, so the reel always ends on the finished picture.
+
+**Every frame is captioned now, both reels.** The same corner label the cross-run reel uses
+(`render.deepening._draw_corner_label` + `deepening_frame_label`), so a *downloaded* clip — which travels without
+the card around it — still tells its story: `"14-19 Aug 2026 · 812 subs"` on the night reel, `"312 subs"` on the
+evenly-spaced one. The card's blurb was wrong about its own number while we were there: it said "coming together
+as 8 frames stacked" where 8 is the count of *snapshots*, not of subs.
+
+**Tests** +9 Python (six pure `plan_capture_nights` cases including the out-of-order decline, the dusk-to-dawn
+session and the past-the-cap grouping; three end to end through a real `run_stack` — the three-night reel, the
+single-night fallback, and a night whose last sub cannot be stacked) / +1 vitest amended. **Three fail before**
+under a scratch revert that only switches the night plan off. No config, schema, on-disk, API-shape or default
+change; `save_progress` stays off, and a run with it off allocates and writes exactly what it did before.
+
 ## v0.482.2 — 2026-09-27 — the duplicate that holds pictures is combined, not deleted (#878 gate 16)
 
 **The gap v0.482.1 uncovered.** A confirmed duplicate — a `<T>_sub` target whose base already owns every one of its

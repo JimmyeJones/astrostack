@@ -1322,7 +1322,10 @@ _DESCRIPTORS: list[dict[str, Any]] = [
     {"key": "save_progress", "label": "Save a “watch it appear” clip", "type": "bool",
      "group": "advanced",
      "help": "Keep a short looping animation of your picture coming together as frames "
-             "stack, shown on the result. A fun beginner extra; off by default."},
+             "stack, shown on the result. When the subs span several nights it becomes "
+             "a night-by-night reel instead \u2014 one frame per capture night, each "
+             "captioned with the date and how many subs are in by then, so you can see "
+             "what another night actually added. A fun beginner extra; off by default."},
     {"key": "record_rejection_map", "label": "Record what rejection removed",
      "type": "bool", "group": "advanced",
      "help": "Keep a map of where outlier rejection dropped samples, so the finished "

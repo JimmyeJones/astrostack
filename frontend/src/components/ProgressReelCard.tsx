@@ -50,8 +50,10 @@ export function ProgressReelCard({
         <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
           <Text size="sm" fw={500}>Watch your picture appear</Text>
           <Text size="xs" c="dimmed">
-            A short loop of your image coming together as {info.data.frames} frames
-            stacked — from a single noisy sub to the clean result.
+            A short loop of your image coming together — {info.data.frames}{" "}
+            snapshots taken as your subs stacked, from noisy start to clean
+            result. Each one is captioned with how deep the picture is at that
+            point, so the clip still tells its story once you've shared it.
           </Text>
           {playing ? (
             <>

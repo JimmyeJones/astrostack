@@ -28,7 +28,7 @@ import math
 import os
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from itertools import islice
@@ -3302,7 +3302,8 @@ def run_stack(
     # ``save_progress`` is on, the "watch it appear" reel. Wired into the
     # standard (non-drizzle) accumulator paths below; assembled after the
     # outputs are written (post-archive).
-    ql = _QuickLook(project.project_dir, options.output_name, options, n)
+    ql = _QuickLook(project.project_dir, options.output_name, options, n,
+                    frames=frames)
 
     # Honest-accounting: contributing frames that sub-pixel refine had to leave
     # unshifted because the measured shift exceeded its cap (only roughly
@@ -3474,7 +3475,9 @@ def run_stack(
             roughly_aligned_ids=roughly_ids,
             out_of_reach_ids=out_of_reach_ids,
             frame_log=_new_pass_log(),
+            on_settled=ql.settled,
         )
+        ql.close_series(mmr.result)
         if n_used == 0 and not cancel():
             raise ValueError("no frames could be aligned")
         result_image = mmr.result()
@@ -3514,7 +3517,9 @@ def run_stack(
             roughly_aligned_ids=roughly_ids,
             out_of_reach_ids=out_of_reach_ids,
             frame_log=p1_log,
+            on_settled=ql.settled,
         )
+        ql.close_series(wel.mean)
         if n_used_p1 == 0 and not cancel():
             raise ValueError("pass 1 produced no usable frames")
 
@@ -3651,7 +3656,9 @@ def run_stack(
             roughly_aligned_ids=roughly_ids,
             out_of_reach_ids=out_of_reach_ids,
             frame_log=_new_pass_log(),
+            on_settled=ql.settled,
         )
+        ql.close_series(wsum.result)
         if n_used == 0 and not cancel():
             raise ValueError("no frames could be aligned")
         result_image = wsum.result()
@@ -4175,12 +4182,20 @@ def _pass(
     roughly_aligned_ids: set[int] | None = None,
     out_of_reach_ids: set[int] | None = None,
     frame_log: _PassFrameLog | None = None,
+    on_settled: Callable[[FrameRow, bool], None] | None = None,
 ) -> int:
     """
     Run one pass over ``frames``, feeding each windowed aligned image plus its
     canvas offset and per-frame quality weight into
     ``consumer(window_rgb, y0, x0, weight)``. Returns the number of frames
     that contributed (post-error).
+
+    ``on_settled`` (optional) is called once per frame as soon as the pass has
+    decided its fate — ``(frame, True)`` immediately after the consumer absorbed
+    it, still holding the consumer's lock, and ``(frame, False)`` for one that
+    errored or missed the canvas. It exists so a caller can both *count* the
+    frames this pass got through and read the accumulator at a consistent moment
+    (:meth:`_QuickLook.settled`). It must not raise.
 
     ``roughly_aligned_ids`` (optional): a mutable set the pass adds a
     contributing frame's ``id`` to when sub-pixel refine measured a shift past
@@ -4253,11 +4268,15 @@ def _pass(
                 errors.append(f"{Path(f.source_path).name}: {type(exc).__name__}: {exc}")
                 if frame_log is not None and f.id is not None:
                     frame_log.error_slot[f.id] = len(errors) - 1
+                if on_settled is not None:
+                    on_settled(f, False)
                 progress(phase_label, done, total)
                 continue
             if aligned is None:
                 # Frame failed to load, or its footprint didn't intersect the
                 # canvas (e.g. a stray frame from a different target).
+                if on_settled is not None:
+                    on_settled(f, False)
                 progress(phase_label, done, total)
                 continue
             win_rgb, y0, x0, roughly, out_of_reach = aligned
@@ -4280,6 +4299,12 @@ def _pass(
             w = weights.get(f.id if f.id is not None else -1, 1.0)
             with consumer_lock:
                 consumer(win_rgb, y0, x0, w)
+                # Still inside the lock, so a hook that reads the accumulator
+                # sees exactly the frames that have gone in — which is what
+                # makes a cumulative "nights so far" snapshot honest
+                # (``_QuickLook.settled``).
+                if on_settled is not None:
+                    on_settled(f, True)
             used += 1
             if frame_log is not None and f.id is not None:
                 frame_log.used.add(f.id)
@@ -4494,6 +4519,120 @@ def _render_preview(rgb: np.ndarray, max_w: int):
     return Image.fromarray(u8, "RGB")
 
 
+@dataclass(frozen=True)
+class _NightPlan:
+    """How the progress reel's snapshots line up with the nights the subs were
+    shot on — the "one frame per capture night, cumulative" reel.
+
+    ``chunk_of_frame`` maps a frame id to its step index; a step is one or more
+    *consecutive* observing nights (several only when the target has more nights
+    than a reel has room for). ``end_ts`` holds each step's last capture stamp,
+    so a cumulative frame can be captioned with the range it covers.
+    """
+
+    #: Frame id → step index (0-based, in capture order).
+    chunk_of_frame: dict[int, int]
+    #: The first capture stamp in the whole series — every step starts here,
+    #: because every step is cumulative.
+    start_ts: str
+    #: Per step, the last capture stamp inside it.
+    end_ts: tuple[str, ...]
+    #: Per step, how many frames the whole series holds up to and including it.
+    #: This is what a boundary is *counted* against rather than watched for —
+    #: see :meth:`_QuickLook.settled`.
+    cumulative: tuple[int, ...]
+
+    @property
+    def n_steps(self) -> int:
+        return len(self.end_ts)
+
+
+def plan_capture_nights(frames: Sequence[FrameRow],
+                        max_steps: int = _PROGRESS_MAX_FRAMES,
+                        min_steps: int = _PROGRESS_MIN_FRAMES) -> _NightPlan | None:
+    """Group ``frames`` — **in the order they will be stacked** — into at most
+    ``max_steps`` cumulative capture-night steps, or ``None`` when they cannot
+    honestly be read that way.
+
+    Pure, so it is unit-tested directly. It answers ``None`` — meaning "keep the
+    evenly-spaced reel" — in every case where a night-by-night story would be a
+    lie rather than a picture:
+
+    * a frame with no readable capture stamp (nothing places it on a night);
+    * a stacking order that is **not** non-decreasing in capture night. The reel
+      snapshots a *cumulative* accumulator, so "nights 1–2" is only true if no
+      night-3 sub has already gone in. Lucky imaging re-orders the list by FWHM
+      (``options.lucky_fraction``), which is exactly this case;
+    * fewer than ``min_steps`` distinct nights — one or two nights is not a
+      progression, and :data:`_PROGRESS_MIN_FRAMES` already refuses to assemble
+      a reel that short.
+
+    A target with more nights than ``max_steps`` gets consecutive nights grouped
+    into that many steps rather than losing the feature: the caption then names
+    the range (``"11-14 Sep 2024 · 600 subs"``), which is what
+    :func:`seestack.render.deepening.deepening_frame_label` already writes for
+    the cross-run reel.
+
+    The night boundary is UTC noon (:func:`seestack.activity_calendar.night_date_of`
+    with no longitude), so a dusk-to-dawn session lands on one date. The engine
+    has no observer longitude — that is a webapp setting — so a session split
+    across UTC noon would read as two nights; for the Seestar's own timestamps
+    that costs at most a step boundary in the wrong place, never a wrong picture.
+    """
+    from seestack.activity_calendar import night_date_of
+
+    nights: list = []
+    for f in frames:
+        ts = getattr(f, "timestamp_utc", None)
+        night = night_date_of(ts) if ts else None
+        if night is None:
+            return None
+        nights.append(night)
+    if not nights or any(b < a for a, b in zip(nights, nights[1:], strict=False)):
+        return None
+
+    ordered: list = []
+    for night in nights:
+        if not ordered or night != ordered[-1]:
+            ordered.append(night)
+    if len(ordered) < min_steps:
+        return None
+
+    # Consecutive nights per step, front-loaded so any remainder lands on the
+    # earliest steps and the last step is never the fat one (the finished
+    # picture should be its own frame).
+    n_steps = min(len(ordered), max(1, int(max_steps)))
+    per, extra = divmod(len(ordered), n_steps)
+    step_of_night: dict = {}
+    at = 0
+    for step in range(n_steps):
+        take = per + (1 if step < extra else 0)
+        for night in ordered[at:at + take]:
+            step_of_night[night] = step
+        at += take
+
+    chunk_of_frame: dict[int, int] = {}
+    last_ts: list[str] = [""] * n_steps
+    per_step = [0] * n_steps
+    for f, night in zip(frames, nights, strict=True):
+        step = step_of_night[night]
+        if f.id is not None:
+            chunk_of_frame[f.id] = step
+        last_ts[step] = str(f.timestamp_utc)
+        per_step[step] += 1
+    cumulative: list[int] = []
+    running = 0
+    for count in per_step:
+        running += count
+        cumulative.append(running)
+    return _NightPlan(
+        chunk_of_frame=chunk_of_frame,
+        start_ts=str(frames[0].timestamp_utc),
+        end_ts=tuple(last_ts),
+        cumulative=tuple(cumulative),
+    )
+
+
 class _QuickLook:
     """Periodic previews of the accumulator during pass 1.
 
@@ -4503,15 +4642,41 @@ class _QuickLook:
     * the legacy single overwritten ``{base}_quicklook.png`` — a live peek for
       very long runs, every ``quick_look_interval`` frames (unchanged); and
     * the opt-in ``save_progress`` reel — up to ``_PROGRESS_MAX_FRAMES``
-      evenly-spaced snapshots held in memory and, once the stack finishes,
-      assembled by :func:`assemble_progress_reel` into a small looping
-      "watch your picture come together" animation beside the master.
+      snapshots held in memory and, once the stack finishes, assembled by
+      :func:`assemble_progress_reel` into a small looping "watch your picture
+      come together" animation beside the master.
 
-    Neither may ever fail the stack, so every save is guarded.
+    **The reel's snapshots land on capture-night boundaries when they can.**
+    Given the ordered frame list, :func:`plan_capture_nights` says whether the
+    stack can be read as "night 1; nights 1–2; …"; when it can, a snapshot is
+    taken as each step's last sub is *settled*. That is the owner's own request —
+    *"a progression video … ordered by when the subs were shot, so I can see how
+    my added frames affect targets"* — and it costs **no extra stacking**: the
+    accumulator is already cumulative, so snapshotting it at the boundaries
+    yields every step for the price of one pass. When the frames cannot be read
+    that way (no capture stamps, a reordered list, fewer than three nights) it
+    falls back to the evenly-spaced reel this class has always produced.
+
+    **A boundary is counted, not watched for, because the pass completes out of
+    order.** :func:`_imap_bounded` yields each frame *as it completes*, so the
+    accumulator absorbs the list in roughly — not exactly — capture order, with
+    the disorder bounded by the in-flight window. Snapshotting "when a sub from
+    the next night turns up" would therefore fire almost immediately on a small
+    stack. Counting settled frames against the plan's own cumulative totals
+    instead makes the step boundaries **exact in number** — the caption's sub
+    count is always the picture's true depth — and leaves only which specific
+    subs of the boundary night are in, off by at most the in-flight window
+    (a handful, against the hundreds of subs a real night holds).
+
+    Every snapshot carries the same corner caption the cross-run "night after
+    night" reel uses, so a downloaded clip still tells its story frame by frame.
+
+    Neither output may ever fail the stack, so every save is guarded.
     """
 
     def __init__(self, project_dir: Path, out_basename: str,
-                 options: "StackOptions", total_frames: int) -> None:
+                 options: "StackOptions", total_frames: int,
+                 frames: Sequence[FrameRow] | None = None) -> None:
         from seestack.stack.output import safe_basename
 
         self.project_dir = Path(project_dir)
@@ -4520,23 +4685,107 @@ class _QuickLook:
         self.out_basename = safe_basename(out_basename)
         self.counter = 0
         self.ql_interval = max(0, int(options.quick_look_interval))
-        # Aim for ~a dozen evenly-spaced snapshots regardless of stack size.
+        want_progress = bool(getattr(options, "save_progress", False))
+        self.night_plan = (
+            plan_capture_nights(frames)
+            if want_progress and frames else None
+        )
+        # Aim for ~a dozen evenly-spaced snapshots regardless of stack size —
+        # the fallback when the run has no readable night structure.
         self.progress_interval = (
             max(1, total_frames // _PROGRESS_MAX_FRAMES)
-            if getattr(options, "save_progress", False) and total_frames > 0
+            if want_progress and total_frames > 0 and self.night_plan is None
             else 0
         )
         self.progress_frames: list = []
+        #: The accumulator-result callable the consumer last handed us, so a
+        #: boundary snapshot can reach the same accumulator without having the
+        #: consumer's own closure.
+        self._result_fn = None
+        #: Frames whose fate this pass has decided, contributed or not — the
+        #: clock the plan's cumulative boundaries are read against.
+        self._settled = 0
+        #: The next step still waiting for its snapshot.
+        self._next_step = 0
+        self._any_contributed = False
 
     @property
     def enabled(self) -> bool:
-        return self.ql_interval > 0 or self.progress_interval > 0
+        return (self.ql_interval > 0 or self.progress_interval > 0
+                or self.night_plan is not None)
+
+    def _snapshot(self, rgb, end_ts: str | None) -> None:
+        """Keep one small captioned reel frame. Caller guards against failure."""
+        from seestack.render.deepening import (
+            _draw_corner_label,
+            deepening_frame_label,
+        )
+
+        img = _render_preview(rgb, _PROGRESS_FRAME_WIDTH)
+        if self.night_plan is not None and end_ts:
+            label = deepening_frame_label(
+                self.night_plan.start_ts, self.counter, end_ts)
+        else:
+            n = self.counter
+            label = f"{n} sub" if n == 1 else f"{n} subs"
+        self.progress_frames.append(_draw_corner_label(img, label))
+
+    def settled(self, frame: FrameRow, contributed: bool) -> None:
+        """Called once per frame, as soon as the pass has decided its fate.
+
+        ``contributed`` is False for a frame that errored or missed the canvas —
+        it still moves the clock, because the plan counts *frames offered*, which
+        is the only count that reaches its boundaries whatever the night's luck.
+        A snapshot is only ever taken on a contributed frame, where the caller
+        holds the consumer's lock and the accumulator is in a consistent state;
+        a boundary crossed on a failure is picked up by the next contributed
+        frame (or, for the final step, by :meth:`close_series`).
+
+        The last step is deliberately left to :meth:`close_series`, so the reel's
+        closing frame is always the finished picture rather than whatever the
+        count happened to land on. No-op unless the night reel is active.
+        """
+        plan = self.night_plan
+        if plan is None:
+            return
+        self._settled += 1
+        self._any_contributed = self._any_contributed or contributed
+        if not contributed or self._result_fn is None:
+            return
+        while (self._next_step < plan.n_steps - 1
+               and self._settled >= plan.cumulative[self._next_step]
+               and len(self.progress_frames) < _PROGRESS_MAX_FRAMES):
+            step, self._next_step = self._next_step, self._next_step + 1
+            try:
+                self._snapshot(self._result_fn(), plan.end_ts[step])
+            except Exception as exc:  # noqa: BLE001 — never fail the stack over a peek
+                log.warning("Progress reel night snapshot failed: %s", exc)
+
+    def close_series(self, result_fn) -> None:
+        """Close the last step, with the accumulator still alive.
+
+        Called right after the pass returns and before the accumulator is freed,
+        so the reel ends on the finished picture. No-op unless the night reel is
+        active and something actually went in.
+        """
+        plan = self.night_plan
+        if plan is None or not self._any_contributed:
+            return
+        if len(self.progress_frames) >= _PROGRESS_MAX_FRAMES:
+            return
+        try:
+            self._snapshot(result_fn(), plan.end_ts[-1])
+        except Exception as exc:  # noqa: BLE001 — never fail the stack over a peek
+            log.warning("Progress reel final snapshot failed: %s", exc)
 
     def on_frame(self, result_fn) -> None:
         """Called once per accumulated frame with a lazy accumulator-result fn."""
         if not self.enabled:
             return
         self.counter += 1
+        # Remembered for the night reel, whose snapshots are taken between
+        # frames (see :meth:`before_frame`) and so have no closure of their own.
+        self._result_fn = result_fn
         want_ql = self.ql_interval > 0 and self.counter % self.ql_interval == 0
         want_progress = (
             self.progress_interval > 0
@@ -4556,7 +4805,7 @@ class _QuickLook:
             if want_progress:
                 # Keep a small downscaled copy in memory; assembled after the
                 # stack so we never touch a stale on-disk reel mid-run.
-                self.progress_frames.append(_render_preview(rgb, _PROGRESS_FRAME_WIDTH))
+                self._snapshot(rgb, None)
         except Exception as exc:  # noqa: BLE001 — never fail the stack over a peek
             log.warning("Quick-look/progress save failed: %s", exc)
 
