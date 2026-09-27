@@ -447,3 +447,71 @@ def test_does_not_open_a_huge_targets_project_to_read_its_filenames(
     monkeypatch.setattr(Library, "open_target", spy)
     assert client.get("/api/targets/cleanup-suggestions").json() == []
     assert "Huge" not in opened
+
+
+# --- the base target whose own folder stem was taken -------------------------
+# ``Library._allocate_safe_name`` hash-suffixes a display name whose safe stem is
+# already owned, and ``make_safe_name("<T> (mosaic)") == make_safe_name("<T>_mosaic")``
+# — so on any library where the Seestar's on-device ``<T>_mosaic/`` output was
+# ingested first, the convention's ``"<T> (mosaic)"`` target lives at
+# ``<T>_mosaic-<sha1[:8]>`` and a base lookup by safe name lands on the *output*
+# target instead. Eleven of the owner's mosaics are in exactly that state
+# (observer issue #878), and both features that share ``library_hygiene`` were
+# blind on all of them.
+
+
+def test_finds_a_mosaic_base_whose_safe_stem_was_taken_by_the_device_output(
+    client, data_root: Path,
+):
+    """The duplicate is still recognised when its base is hash-suffixed. The
+    base is resolved by *display* name ("M 44 (mosaic)"), not by the safe stem
+    ``M_44_mosaic`` — which here belongs to the Seestar's own output folder."""
+    incoming = data_root / "dump"
+    (incoming / "M 44_mosaic_sub").mkdir(parents=True)
+    subs = [incoming / "M 44_mosaic_sub" / f"Light_{i:03d}.fit" for i in range(6)]
+    (incoming / "M 44_mosaic").mkdir(parents=True)
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        # Ingested FIRST, so it takes the ``M_44_mosaic`` stem — the owner's order.
+        out_safe = _add_target(lib, "M 44_mosaic",
+                               [incoming / "M 44_mosaic" / "Stacked.fit"])
+        base_safe = _add_target(lib, "M 44 (mosaic)", subs)
+        dup_safe = _add_target(lib, "M 44_mosaic_sub", subs)
+    finally:
+        lib.close()
+
+    # The collision really happened: the base is not at its own safe stem.
+    assert out_safe == "M_44_mosaic"
+    assert base_safe.startswith("M_44_mosaic-")
+    assert dup_safe == "M_44_mosaic_sub"
+
+    by_safe = {s["safe"]: s for s in
+               client.get("/api/targets/cleanup-suggestions").json()}
+    assert by_safe[dup_safe]["reason"] == "duplicate_sub"
+    # Named after the target that really owns the subs, never the output folder.
+    assert "M 44 (mosaic)" in by_safe[dup_safe]["detail"]
+    assert "M 44_mosaic" not in by_safe[dup_safe]["detail"].replace(
+        "M 44 (mosaic)", "")
+
+
+def test_a_renamed_base_is_still_found_by_its_folder_stem(client, data_root: Path):
+    """The safe-name lookup stays as the fallback: a base the owner renamed no
+    longer answers to the name the convention derives from the duplicate, but it
+    keeps its folder, so ``NGC 6888_sub`` must still resolve to it."""
+    incoming = data_root / "dump"
+    (incoming / "NGC 6888_sub").mkdir(parents=True)
+    subs = [incoming / "NGC 6888_sub" / f"Light_{i:03d}.fit" for i in range(6)]
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "NGC 6888", subs)
+        _add_target(lib, "NGC 6888_sub", subs)
+        lib.rename_target("NGC_6888", "Crescent Nebula")
+    finally:
+        lib.close()
+
+    by_safe = {s["safe"]: s for s in
+               client.get("/api/targets/cleanup-suggestions").json()}
+    assert by_safe["NGC_6888_sub"]["reason"] == "duplicate_sub"
+    assert "Crescent Nebula" in by_safe["NGC_6888_sub"]["detail"]

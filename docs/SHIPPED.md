@@ -1,5 +1,44 @@
 # Shipped — the record
 
+## v0.482.1 — 2026-09-27 — the duplicate whose base had been pushed off its own folder name
+
+**The bug, found while costing the owner-approved reconciliation of the historical mosaic pairs
+([#878](https://github.com/JimmyeJones/astrostack/issues/878), sign-off gate 16).** `webapp/library_hygiene.py` holds
+the one answer two Library features share — *is this target a duplicate of another one?* — and it resolved the base
+target **by safe name**: `make_safe_name(duplicate_sub_base_name_from_name(<the duplicate's name>))`. That computation
+is only right while the base actually lives at its own folder stem, and `Library._allocate_safe_name` guarantees it
+sometimes does not: a display name whose stem is already owned is disambiguated with a `-<sha1[:8]>` suffix.
+
+The Seestar mints that collision for **every mosaic**. A mosaic's raw-subs folder becomes the target `"<T> (mosaic)"`,
+and `make_safe_name("<T> (mosaic)")` collapses to `<T>_mosaic` — byte-identical to the safe stem of the device's own
+`<T>_mosaic/` output folder. Whichever of the two is ingested second is hash-suffixed, so on the owner's library the
+real base sits at `<T>_mosaic-<hex>` while the stem `<T>_mosaic` belongs to the **on-device output** target. The lookup
+therefore handed `confirm_duplicate_of_base` a different target holding different files; it read that target's frames,
+found none of the duplicate's among them, and answered *"not a duplicate"*.
+
+**What that cost, on the shape #878 measures (11 mosaic pairs, ~41.7k double-registered frames).**
+- **Cleanup suggestions** offered nothing at all for the leftover `<T>_mosaic_sub` twins — the one library-hygiene
+  feature written for exactly them.
+- **Merge suggestions** went on offering the pair. Dropping known duplicates from a cluster is the whole reason that
+  endpoint imports this module ("it must never invite you to combine a target with itself, summing the same hours
+  twice"), and on the hash-suffixed shape the guard was silently inert — which is the same "64 h total over ~31 h of
+  real data" headline it was built to kill.
+
+**The fix.** A new `library_hygiene.find_duplicate_base(target_name, by_name, by_safe)` resolves the base **by display
+name first**, falling back to the safe stem. The fallback is not vestigial: a base the owner *renamed* no longer answers
+to the name the convention derives from the duplicate (`NGC 6888_sub` → `NGC 6888`, renamed "Crescent Nebula") but does
+keep its folder, so both lookups are load-bearing and both are pinned by a test. `confirm_duplicate_of_base`'s own
+self-check — which was the same computed-safe-name comparison, and would have rejected the correct base — becomes
+`_is_duplicate_base_of`, the same two-step answer re-checked against a single candidate. Both call sites in
+`webapp/routers/targets.py` (cleanup-suggestions over the whole library, merge-suggestions within one sky cluster) index
+their own `{name: …}` beside the `{safe_name: …}` they already had, so the lookup stays O(1) per candidate and an
+ordinary library pays nothing new.
+
+**Tests** +3 (two fail before under a scratch revert: the cleanup detection and the merge-nudge drop, both built on the
+real ingest order — device output first, so the collision genuinely happens and the assertion `base_safe.startswith(
+"M_44_mosaic-")` proves it did). The third pins the renamed-base fallback. No config, schema, on-disk, API-shape or
+default change; detection only, and both features remain read-only.
+
 ## v0.482.0 — 2026-09-27 — the subs the sky could not be read in can join the stack, by their stars
 
 **The gap, and it is the owner's own "gibberish on faint targets" report.** `run_stack` combines only accepted **and**

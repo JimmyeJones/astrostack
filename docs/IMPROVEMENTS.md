@@ -3996,6 +3996,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.482.1** — 🐛 PRIORITY 2 (autonomy), Builder-verified while costing the #878 reconciliation: **a duplicate
+  whose base had been pushed off its own folder name was invisible to both features that share
+  `webapp/library_hygiene.py`.** The base was resolved by *computing* `make_safe_name(<base display name>)`,
+  which is wrong exactly when `Library._allocate_safe_name` has hash-suffixed it — and the Seestar mints that
+  collision for every mosaic, since `make_safe_name("<T> (mosaic)")` is byte-identical to the stem of the
+  device's own `<T>_mosaic/` output folder. The lookup returned the **output** target, so cleanup offered
+  nothing for the 11 leftover `<T>_mosaic_sub` twins and the merge nudge went on offering each pair and
+  summing the same hours twice. New `library_hygiene.find_duplicate_base` resolves by display name first,
+  safe stem as the fallback (a *renamed* base needs it). Tests +3, two fail before. Full entry in
+  [`SHIPPED.md`](SHIPPED.md).
 - **v0.482.0** — 🌟 + 🐛 the other half of the WCS-free fallback: new `StackOptions.star_match_unsolved` (**off by
   default**) lets `run_stack` stack the accepted subs no plate solve could place, from the reference sub's own stars —
   the direct answer to "gibberish on faint targets", where hundreds of good subs sat unused because only a handful
