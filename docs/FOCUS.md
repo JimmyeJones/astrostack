@@ -1,7 +1,8 @@
 # Current focus — AstroStack
 
 *Last rewritten 2026-09-27 (front-of-queue item 1 struck by the Builder the same day it
-shipped; two of item 2's four struck by the Builder the same evening — v0.482.1/.2 and v0.483.0). **The Scout rewrites this page** whenever the front of the
+shipped; two of item 2's four struck by the Builder the same evening — v0.482.1/.2 and v0.483.0; item 3's #880
+struck the same night — v0.483.1/.2). **The Scout rewrites this page** whenever the front of the
 queue changes; it stays short (≤ 60 lines) and dated. Live rules are in `AGENTS.md`;
 the backlog is `docs/IMPROVEMENTS.md`. If this page and the backlog disagree, the
 backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
@@ -40,9 +41,13 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
    *(After the two strikes above, the only unbuilt item here is the auto-apply preset — and two
    Builders have now costed it and landed on "the honest next step is a measurement, not a build";
    read the ⚠ notes on its backlog entry before picking it up.)*
-3. **Open observer issues:** #878 (above — the app now offers the fix), #880 (the Seestar's on-device mosaic output
-   ingested as targets, and failing every reprocess), #903 (prevention by cover semantics
-   still open; the existing damage now has a one-off repair, v0.479.3).
+3. **Open observer issues:** #878 (above — the app now offers the fix), ~~#880~~ (**its two live halves shipped
+   2026-09-27**: the accepted-but-unreadable frames that failed 61 batch reprocesses over seven weeks are set
+   aside by `qc/runner.reconcile_unreadable_frames`, v0.483.1, and the batch summary that would not say *why*
+   now groups its failures by cause, v0.483.2. What is left of #880 is (a) alone — the exception repr *stored*
+   as a reject reason, which no surface shows; it is storage hygiene, filed as ⚪ and explicitly **not** a
+   PRIORITY 3 item), #903 (prevention by cover semantics still open; the existing damage now has a one-off
+   repair, v0.479.3).
 
 ## Standing frontier (unchanged until a finding says otherwise)
 

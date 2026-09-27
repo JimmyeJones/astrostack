@@ -1,5 +1,38 @@
 # Shipped — the record
 
+## v0.483.2 — 2026-09-27 — a batch that ran for days says *why* its targets failed, not just which
+
+🟡 **BUG (friendliness — PRIORITY 3), the other half of what observer issue
+[#880](https://github.com/JimmyeJones/astrostack/issues/880) recorded about where the owner meets this.** Its
+2026-09-22 follow-up put it exactly: *"Where the owner sees it: only in the red `Failed: …` line on the Jobs page
+for a finished batch, once, when a five-day job ends."* And that line held **nothing but names** —
+`reprocessSummary` read `target` off each failed entry and dropped `error` on the floor. So a `reprocess_all`
+that walked 89 targets for five days ended on `Failed: 73_Leonis_mosaic-328c48ae, Alphecca_mosaic-c7bed385, …`:
+eleven safe names, no cause, no next step, and nothing to distinguish "these eleven can never work" from "your
+NAS went away for an hour".
+
+**Every other failure in this app already has a sentence — the batch just wasn't using it.** `friendlyJobError`
+turns a single job's failure into a plain explanation and a next step (*"None of the frames could be aligned into
+a stack." / "This usually means the frames don't overlap…"*). The batch's summary now groups its failures **by
+cause**, through that same function, so eleven targets that failed the same way read as one thing to do rather
+than eleven mysteries — and the card shows the cause, the next step and the names, instead of the names alone.
+No second vocabulary: reword the sentence once and both surfaces change together.
+
+**And the batch now stamps what a single job stamps.** `webapp/pipeline.py`'s reprocess loop adds `error_kind`
+(from `webapp.jobs.classify_job_error`, at the point the exception type is still in hand — so a reworded engine
+message cannot cost the beginner their sentence) and `name`, the display name the progress line was already
+using while the failure list showed the safe one. Both are **additive**: `target` and `error` are unchanged, and
+an older frontend reads exactly what it read before, while the new one falls back to its own string matcher
+against an older backend. A failure that arrives with no text at all is grouped as *"It failed without saying
+why."* rather than dropped from the list.
+
+**Nothing removed, no new card** (the standing UI rule): the same one line grows a cause and a next step, and
+only when something failed.
+
+**Tests +4 vitest / +1 Python**; the three `reprocessSummary` cases and the card's own render test extended to
+the shape they now return, none weakened. Frontend + one backend dict; no config, schema, on-disk, API-shape or
+default change.
+
 ## v0.483.1 — 2026-09-27 — the subs the app cannot read stop counting as subs it can stack
 
 🟠 **BUG (autonomy / trust), observer issue [#880](https://github.com/JimmyeJones/astrostack/issues/880) — the

@@ -154,9 +154,20 @@ export function friendlyJobError(
   return { message: raw };
 }
 
+/** One cause a batch's targets failed for, with the targets that hit it. */
+export interface BatchFailureGroup {
+  message: string;
+  next?: string;
+  targets: string[];
+}
+
+// Said once, for a failure that arrived with no text at all — so every failed
+// target lands in exactly one group and none is silently dropped from the list.
+const FAILED_WITHOUT_SAYING_WHY = "It failed without saying why.";
+
 /** Plain-language outcome of a finished reprocess-all batch (pure, tested). */
 export function reprocessSummary(r: Record<string, unknown>): {
-  line: string; failed: string[];
+  line: string; failed: string[]; failedGroups: BatchFailureGroup[];
 } {
   const total = Number(r.total ?? 0);
   const stacked = Number(r.stacked ?? 0);
@@ -165,10 +176,35 @@ export function reprocessSummary(r: Record<string, unknown>): {
   const autoEdited = Number(r.auto_edited ?? 0);
   const keptFinished = Number(r.kept_finished ?? 0);
   const failedArr = Array.isArray(r.failed) ? r.failed : [];
-  const failed = failedArr
-    .map((f) => (f && typeof f === "object"
-      ? String((f as Record<string, unknown>).target ?? "") : ""))
-    .filter(Boolean);
+  // ``name`` is the display name the backend now sends beside the safe one; an
+  // older backend sends only ``target``, and then that is what the list shows.
+  const failedEntries = failedArr
+    .map((f) => (f && typeof f === "object" ? f as Record<string, unknown> : null))
+    .map((f) => (f === null ? null : {
+      name: String(f.name ?? f.target ?? ""),
+      error: String(f.error ?? ""),
+      kind: f.error_kind == null ? null : String(f.error_kind),
+    }))
+    .filter((f): f is { name: string; error: string; kind: string | null } =>
+      f !== null && Boolean(f.name));
+  const failed = failedEntries.map((f) => f.name);
+  // One line per *cause*, not one list of names. This batch walks the whole
+  // library — on the owner's it runs for days — and the only sight he ever gets
+  // of what went wrong is this summary when it ends. Eleven targets that failed
+  // the same way are one thing to do, not eleven mysteries, so they are grouped
+  // by the very sentence a single failed job already gets from
+  // :func:`friendlyJobError` — same words on both surfaces, no second vocabulary.
+  const byCause = new Map<string, BatchFailureGroup>();
+  for (const f of failedEntries) {
+    const help = f.error
+      ? friendlyJobError(f.error, f.kind)
+      : { message: FAILED_WITHOUT_SAYING_WHY };
+    const group = byCause.get(help.message)
+      ?? { message: help.message, next: help.next, targets: [] };
+    group.targets.push(f.name);
+    byCause.set(help.message, group);
+  }
+  const failedGroups = [...byCause.values()];
   let line = `Restacked ${stacked}/${total} target${total === 1 ? "" : "s"}`;
   if (r.cancelled) line += " (cancelled early)";
   // The batch stood aside mid-way so a waiting import could have the single
@@ -194,7 +230,7 @@ export function reprocessSummary(r: Record<string, unknown>): {
   }
   if (skipped > 0) line += ` — ${skipped} already up to date`;
   if (failed.length) line += ` — ${failed.length} failed`;
-  return { line: `${line}.`, failed };
+  return { line: `${line}.`, failed, failedGroups };
 }
 
 /** Plain-language outcome of a finished one-click "Process target" job (pure,
@@ -1197,13 +1233,20 @@ function JobResultActions({ job }: { job: Job }) {
     );
   }
   if (job.kind === "reprocess_all") {
-    const { line, failed } = reprocessSummary(r);
+    const { line, failedGroups } = reprocessSummary(r);
     return (
       <Stack gap={2} mt="xs">
         <Text size="sm">{line}</Text>
-        {failed.length ? (
-          <Text size="xs" c="red">Failed: {failed.join(", ")}</Text>
-        ) : null}
+        {failedGroups.map((g) => (
+          <Stack key={g.message} gap={0}>
+            <Text size="xs" c="red">
+              Failed on {g.targets.length} target{g.targets.length === 1 ? "" : "s"}
+              {" — "}{g.message}
+            </Text>
+            {g.next ? <Text size="xs" c="dimmed">{g.next}</Text> : null}
+            <Text size="xs" c="dimmed">{g.targets.join(", ")}</Text>
+          </Stack>
+        ))}
       </Stack>
     );
   }
