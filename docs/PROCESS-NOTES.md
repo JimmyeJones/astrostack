@@ -1,5 +1,65 @@
 # Process notes & QA sweep records
 
+## 2026-09-27 — Builder: the fix's own ordering was wrong, and the flag that exists for this card caught it inside an hour
+
+*(Builder, branch `agent/deepening-capture-order`, shipping v0.480.0 and v0.480.1. Baseline green — **6,661
+passed, 2 skipped**, 12m23s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared
+first. End of run: **6,675 passed, 2 skipped**, 14m59s; frontend **4,388 tests / 287 files**, `tsc` and
+`vite build` clean, all three run from `frontend/`.)*
+
+**The lever, and it is the cheapest one in this file: read the module whose docstring states a rule, then
+grep for the surfaces that do not follow it.** `webapp/capture_nights.py` opens with *"Anything that says
+'shot on …' has to use the second pair"*, and six surfaces do. The seventh was the deepening reel — the one
+card whose **title** is "night after night" — still sorting and labelling on `timestamp_utc`. The sweep for
+this class had clearly been done before (`routers/stats.py`, `sky.py`, `gallery.py`, `schemas.py` all carry
+explicit comments distinguishing the two clocks, and `stats.py`'s imaging log even records that it *used* to
+sort on the processing stamp) — it had simply not reached `stack.py`'s reel helpers. So a swept class is not
+a closed one: grep the rule, not the memory of having grepped it.
+
+**And then the thing worth recording.** v0.480.0 was written, fully tested (+12, four verified fail-before
+against the pre-fix key) and committed — and a `--restack` dogfood pass an hour later printed
+`[reel] available=True over 2 stack(s), 6 -> 3 subs`. **The new ordering ran the reel deep to shallow**, the
+exact reverse of the card's own "cleaner and deeper" sentence. Both stacks end on the same sub (the thin one
+is the deep one's subs minus the set-aside half), so the window's *end* could not separate them, and the
+tie-break I had chosen — the window's *start* — puts the **wider** window first, which is always the
+**deeper** stack. Nothing in the unit tests could see it: every fixture I had written separated its steps by
+*night*, because that is how I was picturing the owner's library. The running app put two stacks of one
+night in front of me in the first thirty seconds.
+
+Two lessons, neither about dates:
+
+* **A tie-break is a design decision, not a detail**, and mine was reasoned about the case the tests
+  covered. The fix key is `(capture end, n_frames_used, id)`, with depth deliberately *only* the tie-break so
+  a genuinely non-monotone step stays where its subs put it.
+* **`--restack` earned its keep on the first card it was aimed at, one week after being added** (v0.479.1,
+  itself filed because "no dogfood pass had ever held two stacks of one target"). The flag's readout printed
+  `available` and the sub counts; it did **not** print which clock ordered them, and both clocks produce an
+  identical `available=True over 2 stack(s)` line — so this run added `dated_by` and the span to that
+  readout. Same trap as `location_source` and `proxy_scale`, in the one place that could have hidden the bug
+  it was about to find.
+
+**Bonus confirmation, unasked for.** The second pass ran against a scratch library that already held the
+first pass's two runs, so it had **four** — `#4/6 subs, #3/3 subs, #2/6 subs, #1/3 subs` — and the reel
+reported **2 stacks**. That is the "a reprocess of the same nights is not a deepening step" half of v0.480.0
+demonstrated on real data rather than a fixture: before it, that reel would have been four frames, two
+identical pairs.
+
+**Dogfood pass: CLEAN** (`--restack`, both passes — nothing overflowing, no console errors; tallest phone page
+`/tonight` 3,603 px, the Target page 3,287 px). The Target page's four-note paragraph and the Tonight column
+were read as one paragraph each and are coherent; the Dashboard's one note is the expected "Plate-solving
+isn't set up yet" (no ASTAP in the container).
+
+**One thing deliberately not built, with the reason, so a slot is not spent re-deriving it:** the
+owner-approved *auto-apply the classified object preset* entry was this run's first candidate and was
+declined after reading the code. Each of its shape (3)'s three named adjustments has a problem — the chip it
+proposes to replace already reaches the owner (`presetSuggestionSentence`), the galaxy `per_channel` gradient
+is largely already delivered by `final_gradient`'s `match_channels` default, `stars.reduce` carries a
+**measured** 0.63–1.58 preview↔export unfaithfulness onto the on-by-default path, and the asinh/fixed-curve
+halves replace data-driven parameters with hard-coded ones. What survives is two nebula taste numbers. The
+full write-up is on the entry itself in `IMPROVEMENTS.md`, together with the measurement that would settle it.
+
+---
+
 ## 2026-09-26 — Builder: the lever the last run wrote down paid twice, and the second mirror was a disk leak
 
 *(Builder, branch `claude/exciting-tesla-a4kwsq`, shipping v0.478.1 and v0.478.2. Baseline green — **6,623

@@ -362,3 +362,35 @@ def test_frame_label_names_the_span_a_multi_night_step_covers():
     assert deepening_frame_label("2024-09-11", 600, "2024-09-11") == \
         "11 Sep 2024 · 600 subs"
     assert deepening_frame_label("2024-09-11", 600) == "11 Sep 2024 · 600 subs"
+
+
+def test_two_stacks_of_one_night_run_shallow_to_deep():
+    """Found by a running-app `--restack` dogfood pass, which reported a reel
+    running **6 subs → 3 subs**. Both stacks end on the same sub, so the window's
+    end cannot separate them, and ordering on the *start* put the wider window —
+    i.e. the deeper stack — first. That is the exact reverse of the card's own
+    "cleaner and deeper" sentence."""
+    thin = _Run(id=1, timestamp_utc="2026-06-11T00:00:00Z", n_frames_used=3,
+                capture_start_utc="2024-11-15T22:13:00Z",
+                capture_end_utc="2024-11-15T22:15:00Z")
+    deep = _Run(id=2, timestamp_utc="2026-06-12T00:00:00Z", n_frames_used=6,
+                capture_start_utc="2024-11-15T22:10:00Z",
+                capture_end_utc="2024-11-15T22:15:00Z")
+    series = deepening_series([thin, deep])
+    assert series.dated_by == "capture"
+    assert [r.n_frames_used for r in series.runs] == [3, 6]
+
+
+def test_a_single_late_night_stacked_alone_still_lands_by_its_own_date():
+    """Depth is only the tie-break, never the axis: a shallow stack of a *later*
+    night belongs after a deeper stack of earlier ones, because that is when its
+    subs were shot — what the owner asked for. The reel then honestly shows a
+    step that is not deeper rather than reordering the library's history."""
+    deep_early = _Run(id=1, timestamp_utc="2026-06-11T00:00:00Z", n_frames_used=400,
+                      capture_start_utc="2026-06-10T21:00:00Z",
+                      capture_end_utc="2026-06-11T23:00:00Z")
+    thin_late = _Run(id=2, timestamp_utc="2026-07-11T00:00:00Z", n_frames_used=50,
+                     capture_start_utc="2026-07-10T21:00:00Z",
+                     capture_end_utc="2026-07-10T23:00:00Z")
+    series = deepening_series([thin_late, deep_early])
+    assert [r.id for r in series.runs] == [1, 2]

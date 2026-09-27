@@ -3947,6 +3947,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.480.1** — 🟠 BUG in v0.480.0's own ordering, **found by a running-app `--restack` dogfood pass an hour after
+  it was written**, which is what that flag is for: the reel it printed ran **6 subs → 3 subs**, the exact reverse of
+  the card's "cleaner and deeper" sentence. Both stacks end on the same sub (the thin one is the deep one's subs minus
+  the set-aside half), so the window's *end* cannot separate them — and the tie-break on the window's *start* puts the
+  **wider** window first, which is always the **deeper** stack. `deepening_series`' order key is now
+  `(capture end, n_frames_used, id)`: ties on the night go to the shallower stack. Depth is deliberately only the
+  tie-break — the owner asked for the series to be ordered by *when the subs were shot*, so a genuinely non-monotone
+  step (one late night stacked on its own after a deeper earlier run) stays where its subs put it rather than being
+  reordered out of sight. Tests +2, both with the real windows the pass printed; the pre-fix key was run against them
+  and gives `[6, 3]`.
 - **v0.480.0** — 🟠 BUG (trust + the owner's own 2026-09-25 request), verified by reproduction against the pre-fix
   ordering: **the "night after night" reel was ordered and dated by when the stacks *ran*, not by when the subs were
   *shot*.** `webapp/routers/stack._deepening_runs` sorted on `timestamp_utc` and labelled each burned-in frame caption

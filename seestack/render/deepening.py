@@ -215,11 +215,25 @@ def deepening_series(runs: Sequence[Any]) -> DeepeningSeries:
     reel runs deep → shallow, contradicting its own "cleaner and deeper" story.
 
     So when **every** candidate run carries a window, the series is ordered by it
-    (``end``, then ``start``, then id) and reported as ``dated_by="capture"``. If
-    even one run lacks one — a pre-schema-18 row, a channel combine — the whole
-    series keeps today's stack-time order and reports ``dated_by="stack"``.
-    All-or-nothing on purpose: a series half-ordered by one clock and half by the
-    other is ordered by neither.
+    and reported as ``dated_by="capture"``. If even one run lacks one — a
+    pre-schema-18 row, a channel combine — the whole series keeps today's
+    stack-time order and reports ``dated_by="stack"``. All-or-nothing on purpose:
+    a series half-ordered by one clock and half by the other is ordered by
+    neither.
+
+    **The window's *end* is the ordering axis, and depth breaks its ties.** A
+    cumulative series has growing windows, so the last sub's night normally
+    separates every step. When it does not — two stacks whose newest sub is the
+    same, which is what "I re-stacked with the frames I'd set aside" and "I
+    re-stacked just tonight's subs" both look like — ordering on the *start* of
+    the window puts the **wider** window first, and a wider window is the
+    *deeper* stack: a pass on the bundled sample ran a reel 6 subs → 3 subs, the
+    exact reverse of the card's own "cleaner and deeper" sentence. So ties on the
+    end go to the shallower stack, then to the older id. Depth is deliberately
+    only the tie-break: the owner asked for the series to be ordered by *when the
+    subs were shot*, and a genuinely non-monotone depth (a single late night
+    stacked on its own after a deeper earlier run) is then a fact about the
+    library rather than something the ordering should hide.
 
     **One step per distinct set of nights.** A reprocess of subs already in the
     series is not a deepening step — it is the same nights again — so runs sharing
@@ -252,7 +266,9 @@ def deepening_series(runs: Sequence[Any]) -> DeepeningSeries:
 
     def _order(pairs: list[tuple[tuple[str, str], Any]]) -> list[Any]:
         return [run for _w, run in
-                sorted(pairs, key=lambda p: (p[0][1], p[0][0], getattr(p[1], "id", 0) or 0))]
+                sorted(pairs, key=lambda p: (p[0][1],
+                                             p[1].n_frames_used or 0,
+                                             getattr(p[1], "id", 0) or 0))]
 
     collapsed = _order([(w, _best(g)) for w, g in by_window.items()])
     if len(collapsed) >= 2:
