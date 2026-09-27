@@ -1,5 +1,64 @@
 # Process notes & QA sweep records
 
+## 2026-09-27 — Builder: the WCS-free registration fallback, both halves, and the extractor cap that made it silent
+
+*(Builder, branch `agent/builder-run` → PR #992 (v0.481.0) and `agent/star-match-stack` → PR #993 (v0.482.0), both
+merged. Baseline green — **6,807 passed, 2 skipped**, 13m45s with the BLAS cap and `-n 4 --dist worksteal`,
+`/tmp/pytest-of-root` cleared first. End of the run: **6,851 passed, 2 skipped**, 13m51s (+44 tests); frontend
+**4,410 tests / 288 files**, `tsc` and `vite build` clean, all three from `frontend/`. CI green on `main` for v0.481.0;
+for v0.482.0 the **`Image contract`** and `Commit identity` jobs had passed and the two test jobs were still running
+when this was written — read the run if anything downstream looks odd. Image contract is §8's requirement and the one
+that matters here, because v0.481.0 adds a new module inside `seestack/` whose dependency (`astroalign`, and `sep`
+under it) reaches the image transitively.)*
+
+**Two tasks, and the second one found a bug in the first.** Recorded because the *shape* of that is the useful part:
+v0.481.0 gave the bootstrap rescue a star-pattern registrar and 35 tests, all green; v0.482.0 pointed the same
+registrar at the stacker's own un-located subs — on a **denser** synthetic field — and it matched **nothing at all**.
+The cause was `sep`'s default 1024-sub-object deblend cap, which astroalign re-raises as
+`TypeError("Input type for source not supported")`, i.e. the error you would get for handing it a string. So a matcher
+that cannot see stars and a matcher handed a non-image are *indistinguishable from the outside*, and the first
+fixture's field was sparse enough to stay under the cap. **Exactly AGENTS.md §5's fixture-that-cannot-exhibit-its-bug,
+one layer out:** the fixture was not wrong about the transform, it was unrepresentative about the *density*, and the
+only thing that surfaced it was running the same code against different data. The measurement, kept: 0 of 8 subs
+matched at sep's default, 8 of 8 at 8192, on 480×320 with 30 stars — sparser than a real Seestar sub.
+**The lesson for the next run: when a library swallows every failure into one exception type, a "returns None" path
+needs a fixture at the density the owner's data has, not merely one where the maths is checkable.**
+
+**The design question the measurement settled, so it is not re-litigated.** The first shape drafted for v0.481.0 was
+"star-match only the members phase correlation could not place" — the strictly-additive reading, and the one §9 would
+prefer. It is dead on arrival: `skimage`'s `phase_cross_correlation` **never declines**. It returns its best peak
+whatever the two frames differ by, with an error of 1.0 either way, so the None slots it was meant to fill are always
+empty and the feature would never have engaged. Measured through the real `register_members`/`propagate_wcs`: a 4°
+rotated member was placed a median 4.2 px from its stars (worst 10.7), an 8° one 16.1 px (worst 24.4). So the ordering
+had to become star-pattern-first with correlation as the fallback — which is a behaviour change to a working path,
+justified because one side has ≥6 identified stars at a sub-pixel residual behind it and the other has no residual at
+all.
+
+**A brittle-test note, cheap to repeat.** `tests/test_reject_reason_labels.py` keys its exemptions by
+`file:line`, so inserting a helper into `stacker.py` moved an exempted write site from `:2754` to `:2869` and turned
+**four** tests red at once, none of them about anything this change touched. It is deliberate brittleness (the point is
+to force a re-read whenever a site moves) and the fix is one key — but a run that sees four red
+`test_reject_reason_labels` cases should look at the line numbers before looking at its own diff.
+
+**DOGFOOD PASS — CLEAN** (`scripts/agent-dogfood.sh --mosaic`, run after the suite, never beside it). Both the field
+and mosaic samples loaded, stacked, probed and read back; nothing overflowing, no console errors, no new finding.
+**Page heights are byte-for-byte the standing baseline** — mosaic Target **3,673 px** on a phone, `/tonight`
+**3,655 px** — which is the point worth recording: v0.482.0 adds a Stack-form control and adds **zero** page height,
+because it went into the existing `advanced` group behind the accordion rather than onto a page. That is the UI rule
+(§1) satisfied by construction rather than by measurement-after-the-fact, and it is the cheap way to add an engine
+knob without spending the owner's attention.
+
+**Two leads filed, both with what to measure first** (in `docs/IMPROVEMENTS.md` under "Bugs"): a star-matched member
+is still stamped with the *reference's* `rotation_deg` (not fixed, because the column's convention is ASTAP's and
+composing a WCS does not tell you ASTAP's sign — solve two real frames of a rotated pair and read the `.ini`s), and
+the bootstrap's deep image is still integrated from rotated members, so the image it asks ASTAP to solve is partly
+smeared. Neither is a wrong picture; both are named so the next run costs them rather than re-deriving them.
+
+**And the one thing this run deliberately did not build:** the mosaic half of the stacker fallback. An unsolved sub has
+no pointing, so nothing says which panel to offer it, and astroalign re-extracts *both* sides on every call — so the
+obvious loop is (panels × an extraction of the same moving frame). The owner is a heavy mosaic user, so it is worth a
+design pass rather than a loop; the shape to cost is written into the backlog entry.
+
 ## 2026-09-27 — Builder: observer #989 (the master with no WCS), its silence, and the `--combine` shape
 
 *(Builder, branch `claude/exciting-tesla-2o6gdt`, shipping v0.480.6, v0.480.7 and v0.480.8 via PR #990 + the follow-up.
