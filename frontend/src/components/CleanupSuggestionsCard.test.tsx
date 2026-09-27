@@ -201,6 +201,63 @@ describe("CleanupSuggestionsCard", () => {
     await waitFor(() => expect(del).toHaveBeenCalledWith("myworks", false));
   });
 
+  it("offers the combine — not a remove — for a duplicate that holds pictures", async () => {
+    vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([
+      suggestion({
+        safe: "m_44_mosaic_sub",
+        name: "M 44_mosaic_sub",
+        n_frames: 812,
+        reason: "duplicate_sub_merge",
+        detail: "also holds pictures you have already stacked from it",
+        merge_into_safe: "m_44_mosaic-328c48ae",
+        merge_into_name: "M 44 (mosaic)",
+      }),
+    ]);
+    const merge = vi.spyOn(client.api, "mergeTargets").mockResolvedValue({} as never);
+    const del = vi.spyOn(client.api, "deleteTarget").mockResolvedValue({} as never);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderCard();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/also hold pictures you've already made/i),
+      ).toBeInTheDocument(),
+    );
+    // The chip names where it is going, not just what it is.
+    expect(
+      screen.getByText("M 44_mosaic_sub → M 44 (mosaic)"),
+    ).toBeInTheDocument();
+    // It is not lumped in with the removable duplicates.
+    expect(
+      screen.queryByText(/are duplicates left by an older scan/i),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Combine it into the main target"));
+    await waitFor(() =>
+      expect(merge).toHaveBeenCalledWith("m_44_mosaic-328c48ae", [
+        "m_44_mosaic_sub",
+      ]),
+    );
+    // The one thing this group must never do: delete the target that holds the
+    // only copy of those pictures.
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("does not offer a combine without a destination", async () => {
+    vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([
+      suggestion({
+        safe: "m_44_mosaic_sub",
+        name: "M 44_mosaic_sub",
+        reason: "duplicate_sub_merge",
+        merge_into_safe: null,
+        merge_into_name: null,
+      }),
+    ]);
+    const { container } = renderCard();
+    await waitFor(() => expect(client.api.cleanupSuggestions).toHaveBeenCalled());
+    expect(container.querySelector(".mantine-Alert-root")).toBeNull();
+  });
+
   it("self-hides when there is nothing to clean up", async () => {
     vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([]);
     const { container } = renderCard();

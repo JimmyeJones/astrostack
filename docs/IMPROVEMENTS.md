@@ -557,6 +557,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `_seestar_output_bases` really does skip mosaics is the **healing** companion, for output frames an old
   scan merged *into* a `_sub` target — a different population from these, which sit in their own bare
   targets.
+  **↳ THE RECONCILIATION IS NOW OFFERED IN THE APP, Builder 2026-09-27 (v0.482.1 + v0.482.2).** The pairs were
+  invisible to library hygiene because the base lookup computed a safe name the hash-suffixed base does not have
+  (v0.482.1, its own bug); with that fixed, each twin that carries pictures is offered **Combine into `<T> (mosaic)`**
+  on the Library's cleanup card, through `merge_targets_result` (v0.482.2). **What is left is the owner clicking it** —
+  so this entry closes on the next observer reading that shows the 11 pairs gone, not on more code.
   **↳ OBSERVER CONFIRMS RECURRENCE IS DORMANT ON LIVE DATA, Scout 2026-09-19** (from issue #878's
   2026-09-17 follow-up; the observer re-measured the whole library after ingestion resumed). The duplicated
   set is **41,732 frames, byte-identical across four readings**, while the denominator grew by 5,885 newly
@@ -3996,6 +4001,15 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.482.2** — 🌟 PRIORITY 2 (autonomy) — **the owner's answer to sign-off gate 16 (#878), delivered as a
+  one-click offer rather than a migration.** A confirmed duplicate that carries its own stack runs or notes is
+  never removable (deleting the record would drop them) and used to be dropped from the cleanup list entirely —
+  which, after v0.482.1, is where all 11 historical mosaic twins would have landed. They now get
+  `reason="duplicate_sub_merge"` + `merge_into_safe`, and the Library's cleanup card offers **Combine**: 
+  `POST /api/targets/merge` carries the pictures, recipes, notes, tags and preferences into the base first, and
+  the base is the more complete twin by construction (it already owns every frame, so the merge adds none).
+  Fourth group inside the existing card, self-hiding, own dismissal key, destination on the chip. Tests +2
+  Python / +2 vitest; two data-safety tests tightened. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.482.1** — 🐛 PRIORITY 2 (autonomy), Builder-verified while costing the #878 reconciliation: **a duplicate
   whose base had been pushed off its own folder name was invisible to both features that share
   `webapp/library_hygiene.py`.** The base was resolved by *computing* `make_safe_name(<base display name>)`,

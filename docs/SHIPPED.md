@@ -1,5 +1,41 @@
 # Shipped — the record
 
+## v0.482.2 — 2026-09-27 — the duplicate that holds pictures is combined, not deleted (#878 gate 16)
+
+**The gap v0.482.1 uncovered.** A confirmed duplicate — a `<T>_sub` target whose base already owns every one of its
+subs — is offered for removal only when it carries no data of its own. That guard is right: deleting the target record
+would drop a stack-run history or free-text notes that live nowhere else. But the *other* branch was silence, so a
+duplicate holding a picture had no path at all — and once v0.482.1 made the owner's 11 historical mosaic twins visible,
+silence is exactly where all eleven would have landed, because they were stacked before the convention re-minted them.
+
+**What shipped, and it is the owner's answer to sign-off gate 16** ("de-duplicate the 11 historical mosaic pairs →
+YES, merge each pair, keeping the more complete target", 2026-09-25). `GET /api/targets/cleanup-suggestions` gives
+those a new `reason="duplicate_sub_merge"` plus `merge_into_safe` / `merge_into_name` naming the base, and the Library's
+cleanup card offers **Combine**, not Remove. The destination is the base by construction — it is the target that already
+owns every frame — so it is the more complete twin without anything having to judge which is.
+
+**Why the combine is the safe offer and the delete is not.** `POST /api/targets/merge` →
+`Library.merge_targets_result` carries the stack runs *with their output files and saved edit recipes*
+(`merge.carry_stack_runs`, v0.480.0), the notes and tags (`Library._carry_target_user_data`, v0.480.3) and the target
+preferences (`merge.carry_target_meta`) into the base **before** the leftover's folder goes, and records the folder as
+combined so a later scan routes rather than re-mints (v0.480.2). Every frame is already owned by the base, so the merge
+adds **none**: what travels is precisely the data that was the reason not to delete. §10 is untouched — nothing under
+`incoming/` is read differently, written, moved or removed, and the raw subs are where they always were.
+
+**Kept small and reversible-by-not-happening.** The endpoint still merges nothing; it is detection plus a destination.
+The card gains no new surface — the fourth group lives in the existing `CleanupSuggestionsCard`, self-hides when empty
+(so an ordinary library sees nothing), has its own dismissal key, and names each destination on the chip
+(`<T>_mosaic_sub → <T> (mosaic)`) so the owner can read where each one is going before confirming. The merges run one at
+a time, because each rewrites the library registry.
+
+**Tests** +2 Python / +2 vitest, and two existing data-safety tests were tightened rather than relaxed: they asserted
+"not offered at all" for the runs and notes cases and now assert the combine offer *and* that no removal offer appears.
+The new Python test is end to end — it builds the real hash-collided shape, reads the offer, posts it to the endpoint
+the offer names, and checks `frames_added == 0`, `pictures_kept == 1`, the carried FITS bytes in the base and the nudge
+clearing. The new vitest pins that this group never calls `deleteTarget`, and that an offer with no destination renders
+nothing. Additive response fields (`null` everywhere else) and an additive `reason`; no config, schema, on-disk or
+default change.
+
 ## v0.482.1 — 2026-09-27 — the duplicate whose base had been pushed off its own folder name
 
 **The bug, found while costing the owner-approved reconciliation of the historical mosaic pairs
