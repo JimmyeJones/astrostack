@@ -83,6 +83,11 @@ def test_merging_keeps_the_picture_the_source_folder_had(client, solved_library)
     assert body["frames_added"] == 1
     # The field the confirmation reads, so it can say what survived.
     assert body["pictures_kept"] == 1
+    # Additive beside it: whether the merge pinned the destination's own picture as
+    # its cover so a carried (newer, thinner) stack could not take its place. The
+    # keeper here has no picture of its own, so there is nothing to protect — but
+    # the confirmation reads the key either way, so the endpoint always answers it.
+    assert body["picture_pinned"] is False
 
     # The folder really was deleted — the picture moved out ahead of it.
     assert not _target_dir(solved_library, doomed).exists()

@@ -82,16 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟡 BUG (trust — PRIORITY 3; setup audit 2026-09-26, reproduced) — after Combine, the deep target's picture
-  becomes the source's shallow one-night stack.** *(Size S. Confidence: reproduced.)* The carried run keeps its
-  own `timestamp_utc`, the source is usually the most recent night, and `refresh_target_stats` /
-  `finishedpicture.displayed_picture_run` pick the newest run — so the Library wall and the Target page show the
-  thinner picture until the next restack. **Where:** `seestack/io/merge.py` (carried run timestamps),
-  `seestack/io/project.py` (newest-run selection), `seestack/io/library.py` (`last_stack_preview` refresh),
-  `webapp/finishedpicture.py`. **Repro:** `last_stack_preview` goes `dst-preview` → `src-preview` on merge.
-  **Fix shape:** keep the destination's displayed picture across a merge (e.g. pin it as the cover when it had
-  none, via the existing cover mechanism) and say in the merge result which picture is shown.
-
 - **LEAD, MEASURED (Builder 2026-09-25, filed while shipping v0.475.0 — the one thing that fix measured and
   deliberately did not change) — the reveal's two sides are not identically sampled when the master is
   drizzled, so part of the "stacking cut your noise ~N×" number is the drizzle kernel rather than the
@@ -3962,6 +3952,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.480.4** — 🐛 Combine no longer hands the deep target a one-night picture: the carried run keeps its own
+  (usually newer) `timestamp_utc` and every surface takes the newest run when nothing is pinned, so
+  `merge_targets_result` now pins the destination's *own* displayed picture as its cover
+  (`Library._displayed_run_id`) when it had one and no cover, and says so in `MergeTargetsResult.picture_pinned`
+  → `POST /api/targets/merge` → the confirmation ("It still shows its own picture, kept as the cover.").
+  The nudge's fine print now also says a later scan keeps the folders combined (v0.480.2). 4 tests, all red before.
 - **v0.480.3** — 🐛 Combine no longer arrives empty-handed: the source's notes and tags
   (`Library._carry_target_user_data` — notes appended under a "From …" heading, tags unioned) and its saved
   goal / Stack defaults / auto-edit preference (`merge.carry_target_meta` + `_CARRIED_TARGET_META`, filling only

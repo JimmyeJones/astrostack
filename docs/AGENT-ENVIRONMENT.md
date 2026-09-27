@@ -65,6 +65,18 @@ cd frontend && npm install
 > project dependency, and installing it changes nothing in the repo). Sequential,
 > the same suite projects to about 75 minutes and nothing about that looks wrong
 > while it is happening. Details in `docs/PROCESS-NOTES.md`, 2026-09-13.
+> **⚠️ Don't interleave `tests/` and `tests/webapp/` paths on one pytest command
+> line** *(added 2026-09-27)*. Running a selection shaped
+> `tests/webapp/a.py tests/b.py tests/webapp/c.py` — a `tests/webapp/` file, then a
+> `tests/` file, then another `tests/webapp/` file — makes pytest report
+> **`fixture 'client' not found`** for the *last* file, listing only the builtin
+> fixtures: re-entering the directory does not re-apply
+> `tests/webapp/conftest.py`. It has nothing to do with your change (it reproduces
+> on unmodified `main` with two existing files), and it reads exactly like a broken
+> fixture you just wrote. **Group the paths by directory** —
+> `tests/a.py tests/b.py tests/webapp/c.py` — or run the whole suite. Cost: one
+> false "did my test break the webapp fixtures?" detour.
+
 If the Qt system libs above can't be installed in your environment (e.g. `apt`
 is blocked, so `libEGL.so.1` is missing), fall back to:
 `python -m pytest tests/ -p no:pytest-qt --ignore=tests/test_compare_dialog.py --ignore=tests/test_end_to_end.py --ignore=tests/test_footprint_view.py -q`

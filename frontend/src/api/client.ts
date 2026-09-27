@@ -474,13 +474,16 @@ export interface MergeSuggestionTarget {
 // ≥2 targets whose plate-solved centres agree. `targets` are ordered
 // deepest-integration first, so `targets[0].safe` is the natural merge `into`.
 /** What `POST /api/targets/merge` did. `pictures_kept` is the finished stacks
- *  carried out of the source folders the merge then deleted — optional because
- *  a backend older than it simply omits the key, which must read as "unknown",
- *  never as zero. */
+ *  carried out of the source folders the merge then deleted; `picture_pinned`
+ *  says the merge pinned the destination's own picture as its cover, so a carried
+ *  (newer, thinner) stack could not take its place. Both optional because a
+ *  backend older than them simply omits the key, which must read as "unknown",
+ *  never as zero or false. */
 export interface MergeOutcome {
   into: string;
   frames_added: number;
   pictures_kept?: number;
+  picture_pinned?: boolean;
 }
 
 export interface MergeSuggestion {

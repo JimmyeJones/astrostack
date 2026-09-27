@@ -1,5 +1,48 @@
 # Shipped — the record
 
+## v0.480.4 — 2026-09-27 — 🐛 after Combine, the deep target showed the shallow night's picture
+
+*(Last of the three Combine bugs from the 2026-09-26 setup audit. Same PR as v0.480.2 and v0.480.3, which together
+make the button safe to use again.)*
+
+**The bug.** A carried stack run keeps its source's `timestamp_utc`, and the folder being combined *in* is usually the
+most recent night. Everything that decides which picture a target shows takes the newest run when nothing is pinned —
+`refresh_target_stats`, `finishedpicture.displayed_picture_run`, `routers.targets.current_picture_path`,
+`gallery._representative_run` — so the Library wall and the Target page swapped the deep picture the owner had just
+made for a one-night stack, until he re-stacked it. Reproduced: the displayed preview went from the destination's own
+master to the source's.
+
+**The fix is the mechanism that already exists.** `merge_targets_result` reads the destination's displayed run
+*before* anything is carried in (`Library._displayed_run_id` — the pinned cover, else the newest run with a preview,
+the same precedence the web mirrors apply) and, when the merge carried at least one picture and the destination had a
+picture of its own and no cover pinned, pins that run as the cover. It only ever fills an empty pin, an owner's own
+pin is never touched, a destination with no picture of its own correctly shows the carried one, and a merge that
+carries no picture pins nothing. The owner can clear it from History like any other cover.
+
+**And it is said out loud.** A cover nobody pinned is not something to discover later, so
+`MergeTargetsResult.picture_pinned` (additive, defaulted) flows through `POST /api/targets/merge` (additive key) into
+`mergeOutcomeMessage`: *"It still shows its own picture, kept as the cover."* An older backend omitting the key reads
+as "say nothing", exactly like `pictures_kept`. The nudge's fine print gained the other half of this PR too — it now
+promises that *a later scan keeps them combined*.
+
+**Tests.** `tests/test_merge_keeps_the_displayed_picture.py` (4, all red before): the destination's own picture still
+shown and `picture_pinned` true; an owner's pin left alone; a destination with no picture of its own showing the
+carried one; a merge with no pictures pinning nothing. Plus the endpoint's key in
+`tests/webapp/test_merge_carries_pictures.py` and two `mergeSuggestions.test.ts` cases. No schema, on-disk layout,
+config or default change; the two new response/result fields are additive.
+
+### The entry as it was filed
+
+- **🟡 BUG (trust — PRIORITY 3; setup audit 2026-09-26, reproduced) — after Combine, the deep target's picture
+  becomes the source's shallow one-night stack.** *(Size S. Confidence: reproduced.)* The carried run keeps its
+  own `timestamp_utc`, the source is usually the most recent night, and `refresh_target_stats` /
+  `finishedpicture.displayed_picture_run` pick the newest run — so the Library wall and the Target page show the
+  thinner picture until the next restack. **Where:** `seestack/io/merge.py` (carried run timestamps),
+  `seestack/io/project.py` (newest-run selection), `seestack/io/library.py` (`last_stack_preview` refresh),
+  `webapp/finishedpicture.py`. **Repro:** `last_stack_preview` goes `dst-preview` → `src-preview` on merge.
+  **Fix shape:** keep the destination's displayed picture across a merge (e.g. pin it as the cover when it had
+  none, via the existing cover mechanism) and say in the merge result which picture is shown.
+
 ## v0.480.3 — 2026-09-27 — 🐛 Combine kept the subs and the pictures, and threw away everything the owner had said
 
 *(Second of the three Combine bugs from the 2026-09-26 setup audit. Same PR as v0.480.2 and v0.480.4.)*

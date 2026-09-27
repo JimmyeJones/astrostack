@@ -123,6 +123,12 @@ def merge_targets(body: MergeRequest, request: Request) -> dict:
     source folders this merge then deletes. It exists so the confirmation can
     say so — the nudge that fires this promises "nothing is deleted", and until
     :func:`seestack.io.merge.carry_stack_runs` that was not true of the pictures.
+
+    ``picture_pinned`` is additive for the same reason: a carried stack is usually
+    the *newest* one, so the merge pins the destination's own displayed picture as
+    its cover to stop it being replaced by a one-night stack. That is a visible
+    change to the target, so the confirmation says it rather than leaving the owner
+    to find a cover he did not pin.
     """
     lib = deps.open_library(request)
     try:
@@ -131,7 +137,8 @@ def merge_targets(body: MergeRequest, request: Request) -> dict:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"into": body.into, "frames_added": result.frames_added,
-                "pictures_kept": result.pictures_kept}
+                "pictures_kept": result.pictures_kept,
+                "picture_pinned": result.picture_pinned}
     finally:
         lib.close()
 

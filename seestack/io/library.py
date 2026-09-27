@@ -192,6 +192,13 @@ class MergeTargetsResult:
 
     frames_added: int
     pictures_kept: int
+    #: True when the merge pinned the destination's **own** displayed picture as
+    #: its cover so a carried (usually newer, usually thinner) stack could not take
+    #: its place — see :meth:`Library.merge_targets_result`. ``False`` when there
+    #: was nothing to protect: no picture of its own, no picture carried in, or a
+    #: cover the owner had already pinned. Additive, so a caller that never asked
+    #: reads exactly what it always did.
+    picture_pinned: bool = False
 
 
 @dataclass(frozen=True)
@@ -851,6 +858,13 @@ class Library:
         Use this for the "I have two folders that are really the same target"
         case the one-folder-per-target scan can't know about.
 
+        **The destination keeps showing its own picture.** A carried run keeps its
+        source's ``timestamp_utc`` and the folder being combined in is usually the
+        most recent night, so the newest-run rule would hand the deep target a
+        one-night picture; when it had a picture of its own and no cover pinned,
+        that one is pinned as the cover and :attr:`MergeTargetsResult.picture_pinned`
+        says so.
+
         **The combine also survives the next scan.** The source *folders* are
         under ``incoming/`` and are never touched, so a scan offers them again;
         each one is recorded here as combined into the destination
@@ -874,6 +888,8 @@ class Library:
         if not source_dirs:
             return MergeTargetsResult(0, 0)
 
+        # The picture this target shows *now*, read before anything is carried in.
+        shown_before = self._displayed_run_id(dest)
         dest_proj = Project.open(self.target_dir(dest))
         total_added = 0
         total_runs = 0
@@ -908,8 +924,46 @@ class Library:
             self.record_merged_folder(se, dest.safe_name)
             self.delete_target(se.safe_name, remove_files=True)
 
+        # Keep showing the picture the owner was looking at. A carried run keeps
+        # its own ``timestamp_utc``, the folder being combined in is usually the
+        # most recent night, and everything that picks a target's picture takes the
+        # newest run when nothing is pinned — so the deep target he just made
+        # deeper would start showing a one-night stack until he re-stacked it. The
+        # pin is the existing cover mechanism, it only ever fills an empty pin, and
+        # he can clear it from History like any other cover.
+        pinned = False
+        if (total_runs and shown_before is not None
+                and dest.cover_stack_run_id is None):
+            self.set_target_cover(dest.safe_name, shown_before)
+            pinned = True
+
         self.refresh_target_stats(dest.safe_name)
-        return MergeTargetsResult(total_added, total_runs)
+        return MergeTargetsResult(total_added, total_runs, pinned)
+
+    def _displayed_run_id(self, entry: TargetEntry) -> int | None:
+        """The run whose preview ``entry`` currently shows, or ``None``.
+
+        The same precedence every surface applies — the pinned cover first, then
+        the newest run that has a preview at all (``webapp.finishedpicture.
+        displayed_picture_run`` and ``routers.targets.current_picture_path`` are
+        the web-side mirrors of it). Deliberately does not stat the preview file:
+        a stamp whose file has gone is rarer than the question being asked, and a
+        merge must not fail over an unreadable one.
+        """
+        if entry.cover_stack_run_id is not None:
+            return entry.cover_stack_run_id
+        try:
+            proj = Project.open(self.target_dir(entry))
+        except Exception as exc:  # noqa: BLE001 — no project, no picture
+            log.warning("can't read %s's pictures: %s", entry.safe_name, exc)
+            return None
+        try:
+            for run in proj.iter_stack_runs():          # newest first
+                if run.preview_path:
+                    return run.id
+        finally:
+            proj.close()
+        return None
 
     def _carry_target_user_data(self, source: TargetEntry,
                                 into_safe_name: str) -> None:
