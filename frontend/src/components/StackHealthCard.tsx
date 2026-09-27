@@ -27,7 +27,9 @@ export function noteColor(severity: string): string {
  * returns `null` for a note with no wired action (e.g. a reassurance/positive
  * note). `trim_border` opens the non-destructive editor on this run (where Trim
  * border lives); `background` opens the same editor for the mosaic-seam note
- * (where the background ops live); `calibration` opens the Calibration page
+ * (where the background ops live); `restack_for_wcs` opens the Stack form with
+ * nothing to change on it (the picture lost the sky solution its subs still
+ * carry, and stacking again writes it back); `calibration` opens the Calibration page
  * (build master darks/flats); `solve_help` opens Settings (the ASTAP
  * star-database status); `subpixel_refine` opens the Stack form with its
  * Advanced disclosure already open, on the one switch that answers the note.
@@ -77,6 +79,16 @@ export function noteAction(
       // straight there rather than describing where it lives.
       return {
         label: "Re-stack with Auto outlier removal →",
+        href: `/targets/${safe}/stack`,
+      };
+    case "restack_for_wcs":
+      // The master was written without its sky solution, so the picture has no
+      // scale bar, compass or labels. Unlike every other re-stack link here,
+      // nothing on the form needs changing — stacking again with the options it
+      // already has is the whole fix — so the label says exactly that rather
+      // than naming a switch the user would then hunt for.
+      return {
+        label: "Stack this target again \u2192",
         href: `/targets/${safe}/stack`,
       };
     case "subpixel_refine":

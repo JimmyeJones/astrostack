@@ -1752,3 +1752,58 @@ def test_a_blank_plate_solution_is_unlocated_on_both_records():
     for fs in (frames, _as_health(frames)):
         [note] = [n for n in stack_health(_run(), fs) if n.kind == "unsolved"]
         assert "Only 8 of 20" in note.message
+
+
+# ---- "this picture has no place on the sky" (observer #989) ----------------
+#
+# The writer bug that made these masters is fixed (v0.480.6), but a master
+# already on disk does not heal until the target is stacked again — so the note
+# is what tells its owner why one picture has no scale bar, compass or labels,
+# and what to do about it. Everything downstream of a run's WCS fails toward
+# silence, which is what makes a note the fix rather than a nicety.
+
+
+def _solved_frames(n: int = 12):
+    return [_frame(wcs="CTYPE1  = 'RA---TAN'") for _ in range(n)]
+
+
+def test_a_master_with_no_sky_solution_earns_a_note_and_a_way_out():
+    notes = stack_health(_run(), _solved_frames(), has_sky_solution=False)
+    note = next(n for n in notes if n.kind == "no_sky_solution")
+    assert note.severity == "info"
+    assert note.action == "restack_for_wcs"
+    # It names what the owner can actually see is missing, and the remedy.
+    assert "scale bar" in note.message
+    assert "stacking this target again" in note.message.lower()
+
+
+def test_it_outranks_the_coverage_advice_it_shares_a_card_with():
+    """A picture that cannot be placed on the sky is a bigger thing to say than
+    a thin edge, and the card shows the top note or two."""
+    notes = stack_health(
+        _run(coverage_thin_frac=0.4, coverage_min=1, coverage_max=30),
+        _solved_frames(), has_sky_solution=False)
+    kinds = _kinds(notes)
+    assert "no_sky_solution" in kinds and "coverage" in kinds
+    assert kinds.index("no_sky_solution") < kinds.index("coverage")
+
+
+def test_a_master_that_has_its_solution_says_nothing():
+    notes = stack_health(_run(), _solved_frames(), has_sky_solution=True)
+    assert "no_sky_solution" not in _kinds(notes)
+
+
+def test_a_run_nobody_looked_at_says_nothing_either():
+    """``None`` is "not looked at" — which is also what the caller passes when the
+    master is not on disk. Neither is a lost solution."""
+    assert "no_sky_solution" not in _kinds(stack_health(_run(), _solved_frames()))
+    assert "no_sky_solution" not in _kinds(
+        stack_health(_run(), _solved_frames(), has_sky_solution=None))
+
+
+def test_a_target_with_no_located_subs_is_not_blamed_for_losing_it():
+    """With no sub located there is no solution the master could have carried, so
+    the note stands down rather than prescribing a re-stack that cannot help."""
+    frames = [_frame(reason="solve_failed:no match") for _ in range(12)]
+    assert "no_sky_solution" not in _kinds(
+        stack_health(_run(), frames, has_sky_solution=False))

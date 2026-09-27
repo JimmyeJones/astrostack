@@ -983,7 +983,8 @@ def _soft_stars_message(run: StackRunRow) -> str:
 
 def stack_health(run: StackRunRow, frames: Iterable[GradedFrame],
                  noise_ratio: float | None = None,
-                 noise_crop_depth: int | None = None) -> list[HealthNote]:
+                 noise_crop_depth: int | None = None,
+                 has_sky_solution: bool | None = None) -> list[HealthNote]:
     """Return a ranked list of plain-language health notes for ``run``.
 
     ``frames`` is the target's frame records (the run doesn't store which frames
@@ -999,7 +1000,13 @@ def stack_health(run: StackRunRow, frames: Iterable[GradedFrame],
 
     ``noise_crop_depth`` is the frame depth at the crop that ratio was measured
     over, stamped beside it. It is what lets a **mosaic** be graded at all (see
-    :func:`noise_yardstick_frames`); a single field ignores it."""
+    :func:`noise_yardstick_frames`); a single field ignores it.
+
+    ``has_sky_solution`` is whether the run's own master FITS still carries a
+    celestial WCS. Read by the caller and handed in, like ``noise_ratio``, because
+    this module never opens a file — and ``None`` ("not looked at", or the master
+    is not on disk) simply self-hides the note, so a cleared cache never reads as
+    a lost solution. See :func:`seestack.io.wcs_io.fits_has_celestial_wcs`."""
     frame_list = list(frames)
     accepted = [f for f in frame_list if f.accept]
     rejected = [f for f in frame_list if not f.accept]
@@ -1091,6 +1098,36 @@ def stack_health(run: StackRunRow, frames: Iterable[GradedFrame],
             severity="info",
             message=message,
             action="calibration",
+        )))
+
+    # --- The picture has no place on the sky ----------------------------------
+    # Everything that draws *where* a picture is reads the master's own WCS, so a
+    # master written without one silently loses the scale bar, the North arrow,
+    # the baked catalog labels, the framing advice, the annotations endpoint and
+    # its share of the sky-coverage total. Every one of those fails toward
+    # **silence**: the cards are simply not there, with no wrong number for
+    # anyone to notice. Observer #989 found six such runs on the owner's library
+    # — one of them a target's current picture, written that way on six
+    # consecutive stacks under five engine versions — and nothing anywhere said
+    # so.
+    # The writer bug behind them is fixed (v0.480.6, `stack.output._write_fits`),
+    # so no new master lands here. But a master already on disk does not heal
+    # until the target is stacked again, and this note is the only thing that
+    # tells its owner that — which is why the fix and the note are two halves of
+    # one answer rather than one being enough.
+    # Guarded on the subs having actually been *located*: with no plate solve
+    # there is no solution to have lost, and the note at the top of this function
+    # is the one that should speak.
+    if has_sky_solution is False and n_loc > 0:
+        scored.append((15, HealthNote(
+            kind="no_sky_solution",
+            severity="info",
+            message=("This picture has no record of where it is on the sky, so "
+                     "the scale bar, the North arrow and the object labels "
+                     "can't be drawn on it, and it won't line up in other astro "
+                     "tools. Your subs do know where they are — stacking this "
+                     "target again writes it back in."),
+            action="restack_for_wcs",
         )))
 
     # --- Ragged low-coverage border (dithered/mosaic edges) --------------------

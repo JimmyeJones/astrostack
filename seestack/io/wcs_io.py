@@ -324,6 +324,37 @@ def wcs_text_from_sidecar(wcs_path: str | Path) -> str | None:
         return None
 
 
+def fits_has_celestial_wcs(fits_path: str | Path | None) -> bool | None:
+    """Whether a written image still says **where it is on the sky**.
+
+    ``True``/``False`` when the file is there and its header does or does not
+    carry a celestial WCS, and ``None`` — *"cannot say"* — when the file is not on
+    disk or its header is unreadable. That third answer is the point of the
+    function: "this picture has no place on the sky" and "this picture is not
+    here" are different things to tell someone, and a cleared cache or an
+    unmounted share must never read as the former.
+
+    Deliberately answered *through* :func:`celestial_wcs_from_fits`, so the app
+    has exactly one definition of "carries a celestial WCS" — anything that reads
+    a run's position uses that function, and a note claiming the position is
+    missing must agree with them by construction, not by a copied condition.
+    Header-only, like it.
+    """
+    if not fits_path:
+        return None
+    p = Path(fits_path)
+    if not p.exists():
+        return None
+    from astropy.io import fits
+
+    try:
+        fits.getheader(p)
+    except Exception as exc:  # noqa: BLE001 — unreadable is "cannot say", not "no WCS"
+        log.warning("Could not read %s's header: %s", p, exc)
+        return None
+    return celestial_wcs_from_fits(p)[0] is not None
+
+
 def celestial_wcs_from_fits(fits_path: str | Path):  # noqa: ANN201 — returns (WCS|None, int, int)
     """Read a 2-D celestial WCS and pixel dims from a FITS file's header.
 

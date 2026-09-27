@@ -1,5 +1,51 @@
 # Shipped — the record
 
+## v0.480.7 — 2026-09-27 — the other half of #989: a picture that lost its place on the sky now says so, and how to get it back
+
+*(Same PR as v0.480.6, which fixed the writer. This is what the six masters already on the owner's disk get.)*
+
+**Why a fix was not enough.** v0.480.6 stops any new master being written without its WCS, but a master already on disk
+does not heal until its target is stacked again — and nothing told its owner that. Observer #989's central point is that
+every consequence fails toward **silence**: the scale bar, the North arrow, the baked catalog labels, the framing advice,
+the annotations endpoint and that picture's share of the sky-coverage total are simply *absent*, with no wrong number to
+notice and no message. One of the six affected runs is a target's current picture. So the run that fixed the writer owed
+the owner a sentence too.
+
+**What ships.** A new `stackhealth` note on the card that already answers "how's my stack?" — no new card, no new banner
+(the UI rule):
+
+> This picture has no record of where it is on the sky, so the scale bar, the North arrow and the object labels can't be
+> drawn on it, and it won't line up in other astro tools. Your subs do know where they are — stacking this target again
+> writes it back in.
+
+`kind="no_sky_solution"`, `severity="info"`, priority 15 — above the coverage advice, below the plate-solve note — with a
+new action key `restack_for_wcs` → "Stack this target again →". Deliberately *not* the existing `restack` key: that one's
+label names a switch on the Stack form ("Re-stack with Auto outlier removal"), and here there is nothing to change —
+stacking again with the options the run already has is the whole fix, so the link must not send a beginner hunting for a
+control.
+
+**How it knows, and the three-way answer that matters.** New `seestack.io.wcs_io.fits_has_celestial_wcs` returns
+`True`/`False`/**`None`**, where `None` means *"cannot say"* — the file is not on disk, or its header is unreadable.
+"This picture has no place on the sky" and "this picture is not here" are different things to tell someone, and a cleared
+cache or an unmounted NAS share must never read as the first: it would prescribe a re-stack for a solution the file may
+well still carry. It is answered *through* `celestial_wcs_from_fits`, so the app keeps exactly one definition of "carries
+a celestial WCS" and the note cannot disagree with the readers that would draw the overlays (pinned by a test).
+
+`stack_health` takes it as an argument (`has_sky_solution`) rather than reading the file itself — the same division as
+`noise_ratio`: this module never opens a file, and `webapp/routers/targets.py` does the header-only read. `None`
+self-hides the note. The note is also guarded on the subs having actually been *located*: with no plate solve there is no
+solution to have lost, and the note at the top of that function is the one that should speak.
+
+**Upgrade-safety.** Additive: a new engine keyword with a default that reproduces today's output exactly, a new note kind,
+and a new action key — which `HealthNoteOut` already carries as free-form text, so an older frontend renders the note's
+sentence with no link rather than breaking. No config, schema, on-disk or default change, and no endpoint shape change.
+
+**Tests: +11 python (all red before), +1 frontend.** The predicate in all four states including the corrupt file; the note
+firing with its action and its wording, staying quiet on `True`, on `None`, and on a target with nothing located; its
+rank above the coverage note on a run that earns both; and the endpoint end-to-end on a master written without a WCS,
+one written with one, and one that is not on disk. Frontend: `noteAction("restack_for_wcs", …)` names no switch.
+
+
 ## v0.480.6 — 2026-09-27 — 🐛 a single field stacked with drizzle off wrote its master with NO WCS (observer [#989](https://github.com/JimmyeJones/astrostack/issues/989))
 
 **The bug, verified in the code and reproduced before anything was changed.** `stack.output._write_fits` merges a WCS
