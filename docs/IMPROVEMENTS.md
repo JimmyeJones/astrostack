@@ -3961,6 +3961,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.480.6** — 🐛 **observer [#989](https://github.com/JimmyeJones/astrostack/issues/989), verified and fixed**: a
+  single field stacked with **drizzle off** wrote its `master.fits` with **no celestial WCS at all** (6 of 6 such runs
+  on the owner's library, 0 of the other 737; one is a target's current picture across six consecutive stacks). That
+  branch is the only one that hands `stack.output._write_fits` the reference sub's *whole* header, and the merge — one
+  `try` around the whole loop — raised on the frame header's `COMMENT` card at card 6 and never reached `CTYPE1`, so
+  sky coverage, North-up, the scale bar, the compass, the baked catalog labels, the annotations endpoint, framing
+  advice and an editor export's own header all went silently absent. Fixed with a **WCS-keyword allowlist**
+  (`_is_wcs_keyword`) copied **per card**, deliberately *not* a tolerant loop: the same header carries the
+  `SITELAT`/`SITELONG` cards a Seestar stamps into every sub, which for a scope used at home is the owner's address,
+  in the files that get exported and shared (§10). `DATE-OBS` is excluded too, so the stack's own capture window is not
+  overwritten by one sub's. Masters heal on the target's next stack; no migration, no schema/config/API change, and the
+  mosaic and drizzle branches' headers are byte-identical. +87 tests, and `synth.make_synth_frame_header_text` closes
+  the fixture blind spot that hid this from 6,707 green tests (every stacker fixture used a *WCS-only* `wcs_json`).
 - **v0.480.5** — 🐛 **found by the running-app pass that verified v0.480.2–.4**, not by a test: every
   `log.exception` in the app was missing from `/api/logs`. `RingBufferLogHandler.emit` formatted tracebacks with
   `self.formatException` — a `logging.Formatter` method, not a `Handler` one — so a record carrying `exc_info`
