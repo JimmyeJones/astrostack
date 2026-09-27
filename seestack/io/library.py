@@ -107,6 +107,12 @@ CREATE TABLE IF NOT EXISTS wishlist (
     dec_deg     REAL,
     added_utc   TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS merged_folders (
+    source_key      TEXT PRIMARY KEY,    -- a name a later scan can offer for a folder that was combined away
+    into_safe_name  TEXT NOT NULL,       -- the target its subs belong to now (folder name)
+    merged_utc      TEXT NOT NULL
+);
 """
 
 # The ``targets`` registry is the one evolving table (``library_meta`` is a
@@ -186,6 +192,13 @@ class MergeTargetsResult:
 
     frames_added: int
     pictures_kept: int
+    #: True when the merge pinned the destination's **own** displayed picture as
+    #: its cover so a carried (usually newer, usually thinner) stack could not take
+    #: its place — see :meth:`Library.merge_targets_result`. ``False`` when there
+    #: was nothing to protect: no picture of its own, no picture carried in, or a
+    #: cover the owner had already pinned. Additive, so a caller that never asked
+    #: reads exactly what it always did.
+    picture_pinned: bool = False
 
 
 @dataclass(frozen=True)
@@ -500,6 +513,14 @@ class Library:
         This is what the folder scanner uses: re-scanning a library is
         idempotent because an already-existing target is simply re-opened
         and added to, never duplicated.
+
+        **A folder the owner combined away resolves to the target it was combined
+        into** (:meth:`merged_folder_destination`) rather than being minted afresh.
+        ``incoming/`` is read-only (AGENTS.md §10), so every folder a merge pulled
+        together is still on disk and the next scan offers it again — which used to
+        re-create the source target with all its subs and split the library back in
+        two. The redirect is consulted **only** on the path that would otherwise
+        create a new target, so it can never shadow one that exists.
         """
         safe = self._allocate_safe_name(name)
         proj_dir = self.targets_dir / safe
@@ -510,6 +531,14 @@ class Library:
                 # Folder exists but isn't registered yet — register it.
                 entry = self._upsert_target(name=name, safe_name=safe, notes=notes)
             return entry, proj
+        combined_into = self.merged_folder_destination(name)
+        if combined_into is not None:
+            dest = self.find_target(combined_into)
+            if dest is not None and (self.target_dir(dest) / "project.sqlite").exists():
+                log.info(
+                    "%r was combined into target %r, so its subs go there rather "
+                    "than into a second target", name, dest.safe_name)
+                return dest, Project.open(self.target_dir(dest))
         return self.create_target(name, notes=notes)
 
     def open_target(self, name_or_safe: str) -> Project:
@@ -811,8 +840,10 @@ class Library:
         destination project (cached files included, duplicates skipped via
         source_path), **every finished picture with it** — the ``stack_runs``
         row, its output file set and the per-run annotations the web layer hangs
-        off it, including a saved edit recipe — and then the source target is
-        removed from the registry and its folder deleted.
+        off it, including a saved edit recipe — **and what the owner said about the
+        folder**: its notes and tags (:meth:`_carry_target_user_data`) and its saved
+        target-level preferences (:func:`seestack.io.merge.carry_target_meta`).
+        Then the source target is removed from the registry and its folder deleted.
 
         **The pictures travel because the folder does not survive.** This method
         ends in ``delete_target(..., remove_files=True)``, i.e. an ``rmtree`` of
@@ -826,6 +857,19 @@ class Library:
 
         Use this for the "I have two folders that are really the same target"
         case the one-folder-per-target scan can't know about.
+
+        **The destination keeps showing its own picture.** A carried run keeps its
+        source's ``timestamp_utc`` and the folder being combined in is usually the
+        most recent night, so the newest-run rule would hand the deep target a
+        one-night picture; when it had a picture of its own and no cover pinned,
+        that one is pinned as the cover and :attr:`MergeTargetsResult.picture_pinned`
+        says so.
+
+        **The combine also survives the next scan.** The source *folders* are
+        under ``incoming/`` and are never touched, so a scan offers them again;
+        each one is recorded here as combined into the destination
+        (:meth:`record_merged_folder`) and :meth:`open_or_create_target` routes
+        its subs there instead of re-creating the target the merge just removed.
         """
         from seestack.io.merge import merge_projects
 
@@ -844,6 +888,8 @@ class Library:
         if not source_dirs:
             return MergeTargetsResult(0, 0)
 
+        # The picture this target shows *now*, read before anything is carried in.
+        shown_before = self._displayed_run_id(dest)
         dest_proj = Project.open(self.target_dir(dest))
         total_added = 0
         total_runs = 0
@@ -851,7 +897,8 @@ class Library:
         lost_by_source: list[int] = []
         try:
             for result in merge_projects(dest_proj, source_dirs,
-                                         copy_stack_runs=True):
+                                         copy_stack_runs=True,
+                                         copy_target_meta=True):
                 total_added += result.n_added
                 total_runs += result.n_runs_copied
                 lost_by_source.append(result.n_runs_lost)
@@ -869,10 +916,183 @@ class Library:
                     "not removing '%s' after merge: %d of its pictures could "
                     "not be carried over", se.safe_name, lost)
                 continue
+            # What the owner said about this folder, and where its subs went —
+            # both read off the row that is about to go away. Only for a source we
+            # are actually removing: one we keep is still its own target, and
+            # copying its note into the destination would duplicate it.
+            self._carry_target_user_data(se, dest.safe_name)
+            self.record_merged_folder(se, dest.safe_name)
             self.delete_target(se.safe_name, remove_files=True)
 
+        # Keep showing the picture the owner was looking at. A carried run keeps
+        # its own ``timestamp_utc``, the folder being combined in is usually the
+        # most recent night, and everything that picks a target's picture takes the
+        # newest run when nothing is pinned — so the deep target he just made
+        # deeper would start showing a one-night stack until he re-stacked it. The
+        # pin is the existing cover mechanism, it only ever fills an empty pin, and
+        # he can clear it from History like any other cover.
+        pinned = False
+        if (total_runs and shown_before is not None
+                and dest.cover_stack_run_id is None):
+            self.set_target_cover(dest.safe_name, shown_before)
+            pinned = True
+
         self.refresh_target_stats(dest.safe_name)
-        return MergeTargetsResult(total_added, total_runs)
+        return MergeTargetsResult(total_added, total_runs, pinned)
+
+    def _displayed_run_id(self, entry: TargetEntry) -> int | None:
+        """The run whose preview ``entry`` currently shows, or ``None``.
+
+        The same precedence every surface applies — the pinned cover first, then
+        the newest run that has a preview at all (``webapp.finishedpicture.
+        displayed_picture_run`` and ``routers.targets.current_picture_path`` are
+        the web-side mirrors of it). Deliberately does not stat the preview file:
+        a stamp whose file has gone is rarer than the question being asked, and a
+        merge must not fail over an unreadable one.
+        """
+        if entry.cover_stack_run_id is not None:
+            return entry.cover_stack_run_id
+        try:
+            proj = Project.open(self.target_dir(entry))
+        except Exception as exc:  # noqa: BLE001 — no project, no picture
+            log.warning("can't read %s's pictures: %s", entry.safe_name, exc)
+            return None
+        try:
+            for run in proj.iter_stack_runs():          # newest first
+                if run.preview_path:
+                    return run.id
+        finally:
+            proj.close()
+        return None
+
+    def _carry_target_user_data(self, source: TargetEntry,
+                                into_safe_name: str) -> None:
+        """Move ``source``'s registry-level user data into the destination.
+
+        The notes and tags live on the registry row, so ``merge_projects`` (which
+        only ever sees two Projects) cannot carry them and the merge destroyed them
+        with the folder — under a nudge that says *"nothing is deleted"*. The
+        project-level half (goal, saved Stack defaults, auto-edit preference) is
+        :func:`seestack.io.merge.carry_target_meta`.
+
+        Two different rules, because the two mean different things:
+
+        * **Notes are appended**, under a heading naming the folder they came from.
+          Two notes about two nights are both worth keeping, and which night a
+          remark was about is most of its value ("thin cloud after 1am").
+        * **Tags are unioned**, in the destination's order, de-duplicated by
+          :meth:`update_target`.
+
+        The destination's own note stays first and its own tags keep their order,
+        which is the same "the destination's decision wins" rule the rest of the
+        merge follows.
+        """
+        dest = self.find_target(into_safe_name)
+        if dest is None:
+            return
+        notes: str | None = None
+        source_notes = (source.notes or "").strip()
+        if source_notes:
+            block = f'From "{source.name}":\n{source_notes}'
+            existing = (dest.notes or "").rstrip()
+            notes = f"{existing}\n\n{block}" if existing else block
+        tags: list[str] | None = None
+        if source.tags:
+            tags = [*dest.tags, *source.tags]
+        if notes is not None or tags is not None:
+            self.update_target(into_safe_name, notes=notes, tags=tags)
+
+    # ---- folders that were combined away -------------------------------
+    #
+    # A merge deletes the source *target*; it must never touch the source
+    # *folder*, which lives under ``incoming/`` and is read-only (AGENTS.md §10).
+    # So after a merge the folders are all still there, and the next whole-library
+    # scan offers every one of them again — the watcher runs one on any new file.
+    # Nothing recorded that they had been combined, so the scan re-created the
+    # source target from its folder with all its subs: the library split back in
+    # two, ``auto_stack`` re-stacked the shallow night, and the "same object?"
+    # nudge re-offered the identical group. These three methods are the note that
+    # says where a combined-away folder's subs went, kept in the registry because
+    # that is the one place this app is allowed to write.
+
+    def _merge_redirect_keys(self, entry: TargetEntry) -> tuple[str, ...]:
+        """Every name a later scan could offer for ``entry``'s folder.
+
+        The scanner names a unit from the *folder*
+        (:func:`seestack.io.scanner.target_name_for_folder`), so the display name
+        is only one of the answers: a renamed target answers to its
+        ``folder_name`` as well (the same reason :meth:`_names_owning_safe`
+        reads both), and the safe name is what every API path spells. Recording
+        all of them is what keeps a rename from re-opening the bug.
+        """
+        seen: set[str] = set()
+        keys: list[str] = []
+        for candidate in (entry.name, entry.folder_name, entry.safe_name,
+                          make_safe_name(entry.name or "")):
+            key = str(candidate or "").strip()
+            if key and key not in seen:
+                seen.add(key)
+                keys.append(key)
+        return tuple(keys)
+
+    def record_merged_folder(self, source: TargetEntry,
+                             into_safe_name: str) -> None:
+        """Remember that ``source``'s folder was combined into ``into_safe_name``.
+
+        Purely additive: one row per name the folder answers to, in a registry
+        table, and nothing on disk is moved or removed. Re-recording a key
+        repoints it, so a folder that is somehow combined twice has one answer.
+        """
+        assert self._conn is not None
+        now = _utc_iso()
+        for key in self._merge_redirect_keys(source):
+            self._conn.execute(
+                "INSERT INTO merged_folders(source_key, into_safe_name, merged_utc) "
+                "VALUES(?, ?, ?) "
+                "ON CONFLICT(source_key) DO UPDATE SET "
+                "  into_safe_name = excluded.into_safe_name,"
+                "  merged_utc = excluded.merged_utc",
+                (key, into_safe_name, now),
+            )
+
+    def merged_folder_destination(self, name: str) -> str | None:
+        """The safe name of the target a combined-away folder's subs belong to.
+
+        ``None`` when the folder was never combined — and also when the target it
+        was combined into has since been deleted: a redirect with nothing at the
+        end of it is no redirect at all, and the folder is free to become a target
+        again rather than have its subs routed at something that is gone. That
+        check is why no bookkeeping is needed on the delete side.
+
+        Chains are followed — A combined into B, B then combined into C resolves A
+        to C — with a visited set so a cycle can only ever cost a few reads.
+        """
+        assert self._conn is not None
+        wanted = str(name or "").strip()
+        if not wanted:
+            return None
+        pending = [wanted]
+        safe = make_safe_name(wanted)
+        if safe and safe != wanted:
+            pending.append(safe)
+        seen: set[str] = set()
+        dest: str | None = None
+        while pending:
+            key = pending.pop(0)
+            if key in seen:
+                continue
+            seen.add(key)
+            row = self._conn.execute(
+                "SELECT into_safe_name FROM merged_folders WHERE source_key = ?",
+                (key,),
+            ).fetchone()
+            if row is None:
+                continue
+            dest = str(row["into_safe_name"])
+            pending = [dest]        # follow this hop; the alternates are spent
+        if dest is None or self.find_target(dest) is None:
+            return None
+        return dest
 
     # ---- stats ---------------------------------------------------------
 

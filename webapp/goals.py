@@ -17,6 +17,9 @@ validates, and the parse deliberately treats a stale or hand-edited value as
 from __future__ import annotations
 
 # Project-meta key holding the goal (total accepted-sub exposure, seconds).
+# Carried across a "combine into one deep target" merge when the destination has
+# no goal of its own — the value is listed in ``seestack.io.merge._CARRIED_TARGET_META``
+# (the engine may not import this layer), and a drift test pins the two together.
 GOAL_META_KEY = "integration_goal_s"
 
 # Sanity bounds so a fat-fingered value can't poison the readiness card: 1 minute

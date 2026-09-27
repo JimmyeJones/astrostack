@@ -1326,6 +1326,8 @@ def _dataclass_defaults() -> dict[str, Any]:
 
 # Project meta key under which per-target stacking defaults are stored. Shared
 # by the stack router (read/write) and the pipeline (auto-stack reads it).
+# Carried across a merge when the destination has none of its own — listed by
+# value in ``seestack.io.merge._CARRIED_TARGET_META``, with a drift test.
 STACK_DEFAULTS_META_KEY = "web_stack_defaults"
 
 

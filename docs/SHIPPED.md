@@ -1,5 +1,173 @@
 # Shipped — the record
 
+## v0.480.5 — 2026-09-27 — 🐛 every `log.exception` was missing from `/api/logs` (found by running the app, not by reading it)
+
+*(Same PR as v0.480.2–.4. Not a Combine bug: it surfaced in the scratch app's own log while the running-app pass was
+verifying them, which is the case for that pass in one line.)*
+
+**The bug.** `RingBufferLogHandler.emit` built a record's text with `record.getMessage()` and, when the record carried
+`exc_info`, appended `self.formatException(record.exc_info)`. `formatException` is a `logging.Formatter` method; a
+`logging.Handler` has no such attribute. So every record with a traceback raised `AttributeError` **before**
+`self._buf.append(entry)` — and the `except Exception: self.handleError(record)` that guards `emit` (logging must
+never raise) swallowed it. The record did not lose its traceback; **the whole record was dropped**, and Python printed
+`--- Logging error ---` plus a meta-traceback to the container's stderr instead.
+
+So every `log.exception` / `exc_info=True` in the app — `webapp.jobs`' "job … failed" first among them — was absent
+from `/api/logs`. The Logs page, and the read-only observer that GETs `/api/logs` on the owner's box (v0.441.0), both
+read a walk-away night with failures in it as an install with no errors at all. Plain `warning`/`error` lines were
+unaffected, which is why it had gone unnoticed: the buffer looked like it worked.
+
+**The fix.** A module-level `_EXC_FORMATTER = logging.Formatter()` whose `formatException` renders the triple. One
+line, no API, schema or config change.
+
+**Test.** `tests/webapp/test_logs.py::test_a_failure_with_a_traceback_reaches_the_log` logs a real caught exception
+and asserts both that the record is in `/api/logs` and that the traceback came with it. Against the old code it fails
+on the first assertion — the record itself was never there.
+
+
+## v0.480.4 — 2026-09-27 — 🐛 after Combine, the deep target showed the shallow night's picture
+
+*(Last of the three Combine bugs from the 2026-09-26 setup audit. Same PR as v0.480.2 and v0.480.3, which together
+make the button safe to use again.)*
+
+**The bug.** A carried stack run keeps its source's `timestamp_utc`, and the folder being combined *in* is usually the
+most recent night. Everything that decides which picture a target shows takes the newest run when nothing is pinned —
+`refresh_target_stats`, `finishedpicture.displayed_picture_run`, `routers.targets.current_picture_path`,
+`gallery._representative_run` — so the Library wall and the Target page swapped the deep picture the owner had just
+made for a one-night stack, until he re-stacked it. Reproduced: the displayed preview went from the destination's own
+master to the source's.
+
+**The fix is the mechanism that already exists.** `merge_targets_result` reads the destination's displayed run
+*before* anything is carried in (`Library._displayed_run_id` — the pinned cover, else the newest run with a preview,
+the same precedence the web mirrors apply) and, when the merge carried at least one picture and the destination had a
+picture of its own and no cover pinned, pins that run as the cover. It only ever fills an empty pin, an owner's own
+pin is never touched, a destination with no picture of its own correctly shows the carried one, and a merge that
+carries no picture pins nothing. The owner can clear it from History like any other cover.
+
+**And it is said out loud.** A cover nobody pinned is not something to discover later, so
+`MergeTargetsResult.picture_pinned` (additive, defaulted) flows through `POST /api/targets/merge` (additive key) into
+`mergeOutcomeMessage`: *"It still shows its own picture, kept as the cover."* An older backend omitting the key reads
+as "say nothing", exactly like `pictures_kept`. The nudge's fine print gained the other half of this PR too — it now
+promises that *a later scan keeps them combined*.
+
+**Tests.** `tests/test_merge_keeps_the_displayed_picture.py` (4, all red before): the destination's own picture still
+shown and `picture_pinned` true; an owner's pin left alone; a destination with no picture of its own showing the
+carried one; a merge with no pictures pinning nothing. Plus the endpoint's key in
+`tests/webapp/test_merge_carries_pictures.py` and two `mergeSuggestions.test.ts` cases. No schema, on-disk layout,
+config or default change; the two new response/result fields are additive.
+
+### The entry as it was filed
+
+- **🟡 BUG (trust — PRIORITY 3; setup audit 2026-09-26, reproduced) — after Combine, the deep target's picture
+  becomes the source's shallow one-night stack.** *(Size S. Confidence: reproduced.)* The carried run keeps its
+  own `timestamp_utc`, the source is usually the most recent night, and `refresh_target_stats` /
+  `finishedpicture.displayed_picture_run` pick the newest run — so the Library wall and the Target page show the
+  thinner picture until the next restack. **Where:** `seestack/io/merge.py` (carried run timestamps),
+  `seestack/io/project.py` (newest-run selection), `seestack/io/library.py` (`last_stack_preview` refresh),
+  `webapp/finishedpicture.py`. **Repro:** `last_stack_preview` goes `dst-preview` → `src-preview` on merge.
+  **Fix shape:** keep the destination's displayed picture across a merge (e.g. pin it as the cover when it had
+  none, via the existing cover mechanism) and say in the merge result which picture is shown.
+
+## v0.480.3 — 2026-09-27 — 🐛 Combine kept the subs and the pictures, and threw away everything the owner had said
+
+*(Second of the three Combine bugs from the 2026-09-26 setup audit. Same PR as v0.480.2 and v0.480.4.)*
+
+**The bug.** v0.460.0 made the nudge's promise — *"keeps every sub — and every picture you've already made of it.
+Nothing is deleted"* — true of the pictures. The target itself still arrived empty-handed: the source's **notes,
+tags, saved Stack-form defaults, integration goal and per-target auto-edit preference** went into the `rmtree` with
+the folder, and every carried frame lost `restored_utc`, `source_size_bytes`, `source_mtime` and `streak_cx`/`cy`.
+
+**Registry half.** `Library._carry_target_user_data` runs off the source's row just before that row goes away, and
+only for a source the merge actually removes (one kept back because a picture could not be carried is still its own
+target, so copying its note would duplicate it). Two different rules, because the two mean different things: **notes
+are appended** under a `From "<folder>":` heading — two notes about two nights are both worth keeping, and which
+night a remark was about ("thin cloud after 1am") is most of its value — while **tags are unioned** in the
+destination's order. The destination's own note stays first.
+
+**Project half.** `merge.carry_target_meta` fills the destination's *unset* target-level preferences from the source
+(`copy_target_meta`, off by default like `copy_stack_runs`; `merge_targets_result` turns it on). The keys are listed
+by value in `_CARRIED_TARGET_META` because the engine may not import the web layer that owns them (§6), with a drift
+test pinning the tuple against `GOAL_META_KEY` / `STACK_DEFAULTS_META_KEY` / `AUTO_EDIT_META_KEY` and a pointer
+comment at each of those three definitions. The list is explicit rather than "everything the destination lacks" for
+one concrete reason: `web_auto_stack_*` is the machinery's own record of what it already tried at what frame count,
+and carrying one into a target that has none could **suppress the auto-stack of the deeper canvas the merge just
+created**. `suggested_bg_mode` is excluded too — it describes the source's pixels, not the destination's.
+
+**Frames.** `_frame_without_id` now returns `replace(frame, id=None, cached_path=None, aligned_cache_path=None)`.
+The hand-written field list it replaces was the bug: every column added to `FrameRow` after it was written was
+silently dropped. Only those three are per-project; everything else describes the sub and travels verbatim, and a
+column added tomorrow travels with no change here.
+
+The source's **cover pin** is deliberately *not* carried: its run ids are re-assigned by `carry_stack_runs`, and
+v0.480.4 pins the destination's own displayed picture, so a source pin has nothing right to point at.
+
+**Tests.** `tests/webapp/test_merge_carries_target_data.py` (8): notes appended with the heading and reaching an
+empty destination, tags unioned, a merge with nothing to carry inventing nothing, preferences filling blanks, the
+destination's own preferences winning, automation state and `suggested_bg_mode` staying behind, the drift guard, and
+a frame with every `FrameRow` column set arriving with all of them (driven off the dataclass's own fields). Five fail
+against the pre-fix code. No config, schema, on-disk layout or API change.
+
+### The entry as it was filed
+
+- **🟠 BUG (trust — PRIORITY 2–3; setup audit 2026-09-26, reproduced) — Combine drops the source target's user data,
+  under copy that says "nothing is deleted".** *(Size S–M. Confidence: reproduced.)* v0.460.0 made
+  `merge.carry_stack_runs` carry stack runs and per-run recipes, but target-level data is still lost: the source's
+  **notes, tags, saved Stack-form defaults (`web_stack_defaults`), integration goal (`integration_goal_s`),
+  per-target auto-edit preference and cover pin**; and every carried frame loses `restored_utc`,
+  `source_size_bytes`, `source_mtime` and `streak_cx/cy`. **Where:** `seestack/io/merge.py` (`_frame_without_id`;
+  `_per_run_meta` carries only `^prefix:<run_id>$` keys), `seestack/io/library.py::merge_targets` (never reads
+  `TargetEntry.notes/tags`). **Repro:** set a note and a tag on the source, Combine, read the destination: `None []`,
+  meta keys `['name','schema_version']`. **Fix shape:** carry each field with an explicit rule for conflicts (notes
+  concatenated with a source heading, tags unioned, destination's own defaults/goal/pin win when set), and carry
+  the frame columns verbatim; test each field.
+
+## v0.480.2 — 2026-09-27 — 🐛 "Combine into one deep target" no longer comes undone on the next scan
+
+*(First of the three Combine bugs the 2026-09-26 setup audit filed at the owner's request. He had been told not to
+use the button until they shipped.)*
+
+**The bug.** `incoming/` is strictly read-only (AGENTS.md §10), so a merge deletes the source *target* and must
+leave the source *folder* exactly where it is — which it did. Nothing recorded that the folder had been combined,
+so the next whole-incoming scan (the watcher runs one on any new file, and "Scan now" is one click) re-created the
+source target from that folder with all its subs. The library split back in two, `auto_stack` re-stacked the shallow
+night, and the "same object?" nudge re-offered the identical group.
+
+**The fix, in the one place the app is allowed to write.** A new additive registry table `merged_folders`
+(`source_key → into_safe_name`, in `_AUX_TABLES_SQL`, so an older build still opens the library and no
+`LIBRARY_SCHEMA_VERSION` bump is needed) records where a combined-away folder's subs went.
+`Library.merge_targets_result` writes it via `record_merged_folder` *before* deleting the source row — and only for a
+source it actually removes, since one kept back because a picture could not be carried is still its own target.
+`open_or_create_target` consults `merged_folder_destination` **only on the path that would otherwise mint a new
+target**, so the redirect can never shadow a target that exists.
+
+Three details that are the difference between a fix and a half-fix: the folder keeps *feeding* the deep target (a sub
+that lands after the merge is ingested there, rather than being skipped and waiting in `incoming/` forever); every
+name the folder answers to is recorded — display name, `folder_name` and safe name — so a renamed target does not
+re-open the bug; and a redirect whose destination has since been deleted resolves to `None`, which is what lets the
+folder become a target again and is why the delete side needs no bookkeeping at all. Chains (A into B, then B into C)
+are followed with a visited set.
+
+**Tests.** `tests/test_merge_survives_rescan.py` (8), driving the real `scan_and_organize` over a two-folder
+`incoming/`: rescan keeps one target and 5 subs; a late sub lands in the deep target; the A→B→C chain; a deleted
+destination lets both folders come back; a renamed source is still routed; a redirect never shadows a live target;
+plus the two §9 upgrade cases (an old registry gains the table on open; a current one missing it self-heals). Four of
+them fail against the pre-fix code. Nothing under `incoming/` is touched, no on-disk layout, config, default or API
+change.
+
+### The entry as it was filed
+
+- **🟠 BUG (trust / autonomy — PRIORITY 2; setup audit 2026-09-26, reproduced) — "Combine into one deep target" is
+  silently undone by the next scan.** *(Size M. Confidence: reproduced by script, twice. Filed at the owner's
+  request 2026-09-26.)* After Combine, the source folder in `incoming/` is untouched (correctly — §10) and nothing
+  records that it was merged, so the next whole-incoming scan (the watcher runs one on any new file, and "Scan now")
+  recreates the source target from it with all its subs; with `auto_stack` on it is re-stacked, and the merge
+  suggestion reappears with an identical signature. **Where:** `seestack/io/scanner.py` (`open_or_create_target`,
+  no tombstone check), `seestack/io/library.py::merge_targets`, `frontend/src/components/mergeSuggestions.ts`.
+  **Repro:** two `<T>_sub` folders of one object → scan → Combine → scan again → `targets == ['M_31', 'M_31_night_2']`.
+  **Fix shape:** record merged folder names (a library table or registry field, additive per §9) at merge time and
+  have the scanner route those folders to the destination target instead of minting a new one; test "merge then
+  rescan keeps one target". Never touch `incoming/` to achieve it.
+
 ## v0.479.3 — 2026-09-27 — the pictures a restack flattened can be given back (observer #903)
 
 *(Owner-requested, 2026-09-26, after the setup audit. Same PR as the recovered v0.479.2 and the deploy-pinning

@@ -1,19 +1,20 @@
 # Current focus — AstroStack
 
-*Last rewritten 2026-09-27. **The Scout rewrites this page** whenever the front of the
+*Last rewritten 2026-09-27 (front-of-queue item 1 struck by the Builder the same day it
+shipped). **The Scout rewrites this page** whenever the front of the
 queue changes; it stays short (≤ 60 lines) and dated. Live rules are in `AGENTS.md`;
 the backlog is `docs/IMPROVEMENTS.md`. If this page and the backlog disagree, the
 backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 
 ## Front of the queue
 
-1. **"Combine into one deep target" (three bugs, filed 2026-09-26, reproduced).** The next
-   scan silently undoes a merge; the merge drops the source target's notes, tags, saved
-   stack settings, goal and cover pin; and the deep target's picture becomes the shallow
-   carried one. The owner has been told not to use the button until these ship.
+1. ~~**"Combine into one deep target" (three bugs)**~~ — **all three shipped 2026-09-27**
+   (v0.480.2 the rescan undo, v0.480.3 the dropped notes/tags/preferences/frame columns,
+   v0.480.4 the swapped picture). The button is safe to use again; `merge.carry_stack_runs`
+   is now the vehicle item 2's mosaic reconciliation can build on.
 2. **Owner-approved, buildable now** (answers of 2026-09-25, on `main` via PR #981):
    - reconcile the 11 historical mosaic pairs (#878) through `merge.carry_stack_runs` —
-     after item 1, since it uses the same merge;
+     **unblocked now item 1 has shipped**;
    - `astroalign` for the WCS-free registration fallback;
    - auto-*apply* the classified object preset (with undo, a Settings switch, and never
      over a saved recipe);

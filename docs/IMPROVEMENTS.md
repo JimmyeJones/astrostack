@@ -82,38 +82,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟠 BUG (trust / autonomy — PRIORITY 2; setup audit 2026-09-26, reproduced) — "Combine into one deep target" is
-  silently undone by the next scan.** *(Size M. Confidence: reproduced by script, twice. Filed at the owner's
-  request 2026-09-26.)* After Combine, the source folder in `incoming/` is untouched (correctly — §10) and nothing
-  records that it was merged, so the next whole-incoming scan (the watcher runs one on any new file, and "Scan now")
-  recreates the source target from it with all its subs; with `auto_stack` on it is re-stacked, and the merge
-  suggestion reappears with an identical signature. **Where:** `seestack/io/scanner.py` (`open_or_create_target`,
-  no tombstone check), `seestack/io/library.py::merge_targets`, `frontend/src/components/mergeSuggestions.ts`.
-  **Repro:** two `<T>_sub` folders of one object → scan → Combine → scan again → `targets == ['M_31', 'M_31_night_2']`.
-  **Fix shape:** record merged folder names (a library table or registry field, additive per §9) at merge time and
-  have the scanner route those folders to the destination target instead of minting a new one; test "merge then
-  rescan keeps one target". Never touch `incoming/` to achieve it.
-- **🟠 BUG (trust — PRIORITY 2–3; setup audit 2026-09-26, reproduced) — Combine drops the source target's user data,
-  under copy that says "nothing is deleted".** *(Size S–M. Confidence: reproduced.)* v0.460.0 made
-  `merge.carry_stack_runs` carry stack runs and per-run recipes, but target-level data is still lost: the source's
-  **notes, tags, saved Stack-form defaults (`web_stack_defaults`), integration goal (`integration_goal_s`),
-  per-target auto-edit preference and cover pin**; and every carried frame loses `restored_utc`,
-  `source_size_bytes`, `source_mtime` and `streak_cx/cy`. **Where:** `seestack/io/merge.py` (`_frame_without_id`;
-  `_per_run_meta` carries only `^prefix:<run_id>$` keys), `seestack/io/library.py::merge_targets` (never reads
-  `TargetEntry.notes/tags`). **Repro:** set a note and a tag on the source, Combine, read the destination: `None []`,
-  meta keys `['name','schema_version']`. **Fix shape:** carry each field with an explicit rule for conflicts (notes
-  concatenated with a source heading, tags unioned, destination's own defaults/goal/pin win when set), and carry
-  the frame columns verbatim; test each field.
-- **🟡 BUG (trust — PRIORITY 3; setup audit 2026-09-26, reproduced) — after Combine, the deep target's picture
-  becomes the source's shallow one-night stack.** *(Size S. Confidence: reproduced.)* The carried run keeps its
-  own `timestamp_utc`, the source is usually the most recent night, and `refresh_target_stats` /
-  `finishedpicture.displayed_picture_run` pick the newest run — so the Library wall and the Target page show the
-  thinner picture until the next restack. **Where:** `seestack/io/merge.py` (carried run timestamps),
-  `seestack/io/project.py` (newest-run selection), `seestack/io/library.py` (`last_stack_preview` refresh),
-  `webapp/finishedpicture.py`. **Repro:** `last_stack_preview` goes `dst-preview` → `src-preview` on merge.
-  **Fix shape:** keep the destination's displayed picture across a merge (e.g. pin it as the cover when it had
-  none, via the existing cover mechanism) and say in the merge result which picture is shown.
-
+- **LEAD (Builder 2026-09-27, filed while shipping v0.480.2–.5) — `scripts/agent-dogfood.sh` has no shape that
+  exercises Combine, or anything else that starts in `incoming/` and ends in the library, so that pass had to be
+  hand-rolled.** *(Process/trust; size S. Verified this run; the step-by-step recipe is in `docs/PROCESS-NOTES.md`,
+  2026-09-27.)* `POST /api/sample` writes straight into the library, so the scratch `incoming/` is empty on every pass
+  unless `--incoming-lag` seeds a fault, and `--closing`'s two targets are a degree apart *so the merge nudge does not
+  fire*. **Shape:** a `--combine` flag — two same-object folders into `incoming/`, scan, stack both, merge, scan again,
+  printing what the app *says* each step. Carry two things from the hand-rolled version: no ASTAP in the container, so
+  frames need `make_synth_wcs_text()` in `wcs_json` before any stack runs; and print the log of the steps that are
+  *meant* to fail, because that is where v0.480.5 was sitting.
 - **LEAD, MEASURED (Builder 2026-09-25, filed while shipping v0.475.0 — the one thing that fix measured and
   deliberately did not change) — the reveal's two sides are not identically sampled when the master is
   drizzled, so part of the "stacking cut your noise ~N×" number is the drizzle kernel rather than the
@@ -3984,6 +3961,29 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.480.5** — 🐛 **found by the running-app pass that verified v0.480.2–.4**, not by a test: every
+  `log.exception` in the app was missing from `/api/logs`. `RingBufferLogHandler.emit` formatted tracebacks with
+  `self.formatException` — a `logging.Formatter` method, not a `Handler` one — so a record carrying `exc_info`
+  raised before it was appended and the handler's "logging must never raise" guard dropped **the whole record**.
+  A failed job printed a Python "--- Logging error ---" to the container's stderr and left the Logs page (and the
+  read-only observer, which GETs `/api/logs`) reading as an install with no errors. One-line fix + 1 test, red before.
+- **v0.480.4** — 🐛 Combine no longer hands the deep target a one-night picture: the carried run keeps its own
+  (usually newer) `timestamp_utc` and every surface takes the newest run when nothing is pinned, so
+  `merge_targets_result` now pins the destination's *own* displayed picture as its cover
+  (`Library._displayed_run_id`) when it had one and no cover, and says so in `MergeTargetsResult.picture_pinned`
+  → `POST /api/targets/merge` → the confirmation ("It still shows its own picture, kept as the cover.").
+  The nudge's fine print now also says a later scan keeps the folders combined (v0.480.2). 4 tests, all red before.
+- **v0.480.3** — 🐛 Combine no longer arrives empty-handed: the source's notes and tags
+  (`Library._carry_target_user_data` — notes appended under a "From …" heading, tags unioned) and its saved
+  goal / Stack defaults / auto-edit preference (`merge.carry_target_meta` + `_CARRIED_TARGET_META`, filling only
+  blanks) travel with the folder, and `_frame_without_id` now copies the row with `replace` so the five columns
+  its hand-written list had silently dropped (`restored_utc`, `source_size_bytes`, `source_mtime`,
+  `streak_cx/cy`) travel too. Automation state (`web_auto_stack_*`) deliberately does not. 8 tests, 5 red before.
+- **v0.480.2** — 🐛 a combine no longer comes undone on the next scan: `Library.record_merged_folder` /
+  `merged_folder_destination` (new additive registry table `merged_folders`) + the redirect in
+  `open_or_create_target`. `incoming/` is read-only, so the combined-away folders are all still there and every
+  scan re-offered them; their subs now land in the target they were combined into, chains and renames included.
+  8 tests (`tests/test_merge_survives_rescan.py`), 4 of which fail against the old code.
 - **v0.480.1** — 🟠 BUG in v0.480.0's own ordering, **found by a running-app `--restack` dogfood pass an hour after
   it was written**, which is what that flag is for: the reel it printed ran **6 subs → 3 subs**, the exact reverse of
   the card's "cleaner and deeper" sentence. Both stacks end on the same sub (the thin one is the deep one's subs minus

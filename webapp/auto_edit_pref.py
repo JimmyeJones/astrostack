@@ -32,6 +32,8 @@ from __future__ import annotations
 
 #: Project-meta key holding the per-target override. The name matches the
 #: library setting it overrides, so the two are recognisably one decision.
+#: Carried across a merge when the destination has no override of its own —
+#: listed by value in ``seestack.io.merge._CARRIED_TARGET_META``, with a drift test.
 AUTO_EDIT_META_KEY = "auto_edit_on_autostack"
 
 #: What is written for each state. Stored as "1"/"0" rather than "true"/"false"

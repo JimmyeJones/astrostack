@@ -1,5 +1,56 @@
 # Process notes & QA sweep records
 
+## 2026-09-27 — Builder: the three Combine bugs, and the log handler the running-app pass found on its way past
+
+*(Builder, branch `claude/exciting-tesla-m0noq6`, shipping v0.480.2, v0.480.3, v0.480.4 and v0.480.5. Baseline green
+— **6,686 passed, 2 skipped**, 11m57s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared
+first. End of run: **6,707 passed, 2 skipped**, 11m52s (+21 tests); frontend **4,402 tests / 288 files**, `tsc` and `vite build` clean,
+all three run from `frontend/`.)*
+
+**The run was the whole of `docs/FOCUS.md`'s front-of-queue item 1** — the three Combine bugs the 2026-09-26 setup
+audit filed at the owner's request, which he had been told not to use the button until. One subsystem, four
+independently-green commits, each with fail-before evidence. Nothing about the fixes needed a decision the backlog
+had not already framed; the three "fix shape" paragraphs in those entries were accurate enough to implement from.
+
+**Then the part worth recording: I ran it.** The fixes were green and committed, and the *running* app still had
+something to say. There is no dogfood shape for Combine — `POST /api/sample` writes straight into the library, so the
+scratch `incoming/` is empty on every pass, and `--closing`'s two targets are deliberately a degree apart *so the
+merge nudge does not fire*. So the pass was hand-rolled, and it is worth writing down because it is four steps:
+
+1. `ASTROSTACK_DATA=<scratch> ASTROSTACK_PORT=8813 python -m webapp.main`, with two folders written into
+   `<scratch>/incoming` by `tests.synth.write_seestar_fits` (`M 31_sub`, `M 31_night_2_sub`).
+2. `POST /api/scan` → two targets. Then **`POST /api/targets/<safe>/stack` fails**: *"No accepted frames are
+   plate-solved yet"* — there is no ASTAP in this container and the synthetic FITS carry no WCS. The unblock is the
+   one the test fixtures use: write `tests.synth.make_synth_wcs_text()` into every frame's `wcs_json` (plus a centre
+   and an fwhm) through `Library`/`Project` directly, then stack. Both stacks then ran for real.
+3. `POST /api/targets/merge` answered `{"frames_added":3,"pictures_kept":1,"picture_pinned":true}`; the deep target
+   came back with `cover_stack_run_id: 1` — its **own** 4-frame run, not the carried 3-frame one that is newer — and
+   notes reading `From "M 31_night_2":\nthin cloud after 1am`, tags `["galaxy","windy"]`, 7 frames.
+4. `POST /api/scan` again → **one** target, 7 frames, and `/api/targets/merge-suggestions` now empty (it had offered
+   the group before the merge). A new sub dropped into the combined-away folder and one more scan → 8 frames, in the
+   deep target. `incoming/` untouched throughout: all four files still in the source folder, none moved or renamed.
+
+**And the thing no test would have shown me.** The scratch server's log carried, from the two *expected* stack
+failures in step 2, a Python `--- Logging error ---` and `AttributeError: 'RingBufferLogHandler' object has no
+attribute 'formatException'`. `emit` was formatting tracebacks with a `logging.Formatter` method the handler does not
+have, so every record carrying `exc_info` raised **before** it was appended and the handler's own "logging must never
+raise" guard dropped the whole record. Every `log.exception` in the app was therefore missing from `/api/logs` — the
+Logs page and the read-only observer both read a walk-away night with failures in it as an install with no errors.
+That shipped as v0.480.5, one line plus a regression test. **A pass that only checks "did the feature work?" would
+have scrolled straight past it**: the evidence was in the log of a step that was *supposed* to fail.
+
+**Two smaller notes.**
+
+* **Don't interleave `tests/` and `tests/webapp/` paths on one pytest command line.** A selection shaped
+  `tests/webapp/a.py tests/b.py tests/webapp/c.py` reports `fixture 'client' not found` for the last file — pytest
+  does not re-apply `tests/webapp/conftest.py` when it re-enters the directory. It reproduces on unmodified `main`
+  with two existing files, and it reads exactly like a fixture you just broke. Now in
+  `docs/AGENT-ENVIRONMENT.md`; cost, one false detour.
+* **`npx vite build` is the same hazard as `scripts/agent-dogfood.sh`** and AGENTS.md §7 only names the script: the
+  build rewrites `webapp/static/`, so running it beside a suite can break `create_app()` tests mid-run. I did exactly
+  that this run (the suite passed anyway — the hazard produces false *failures*, not false passes — and was re-run
+  clean before merging). Run the frontend trio before or after pytest, never beside it.
+
 ## 2026-09-27 — Builder: the fix's own ordering was wrong, and the flag that exists for this card caught it inside an hour
 
 *(Builder, branch `agent/deepening-capture-order`, shipping v0.480.0 and v0.480.1. Baseline green — **6,661

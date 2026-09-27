@@ -20,6 +20,20 @@ DEFAULT_CAPACITY = 3000
 _LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
 
 
+#: Used only for its :meth:`logging.Formatter.formatException`, which renders an
+#: ``exc_info`` triple as the familiar traceback text.
+#:
+#: It has to be a Formatter, and that is the whole bug this constant exists to fix
+#: (v0.480.5): ``emit`` called ``self.formatException(...)``, which a
+#: :class:`logging.Handler` does not have. So **every** record carrying a traceback
+#: raised ``AttributeError`` *before* it was appended, the handler's own "logging
+#: must never raise" guard swallowed it, and the record vanished — not just its
+#: traceback. Every ``log.exception`` in the app (a failed job, a crashed stack)
+#: was therefore missing from ``/api/logs``, which read as an install with no
+#: errors. Stateless and thread-safe for this one call.
+_EXC_FORMATTER = logging.Formatter()
+
+
 class RingBufferLogHandler(logging.Handler):
     """A logging handler that keeps the most recent records in a deque."""
 
@@ -33,7 +47,7 @@ class RingBufferLogHandler(logging.Handler):
         try:
             message = record.getMessage()
             if record.exc_info:
-                message += "\n" + self.formatException(record.exc_info)
+                message += "\n" + _EXC_FORMATTER.formatException(record.exc_info)
             entry = {
                 "ts": datetime.fromtimestamp(record.created, UTC)
                 .strftime("%Y-%m-%dT%H:%M:%SZ"),

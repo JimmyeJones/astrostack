@@ -62,14 +62,22 @@ export function mergeOutcomeMessage(
   nFolders: number,
   label: string,
   picturesKept?: number | null,
+  picturePinned?: boolean | null,
 ): string {
   const kept =
     picturesKept != null && Number.isFinite(picturesKept) && picturesKept > 0
       ? ` Your ${picturesKept} existing picture${picturesKept === 1 ? "" : "s"} ` +
         `came with ${picturesKept === 1 ? "it" : "them"} — see History.`
       : "";
+  // A carried picture is usually the *newest* one, so the backend pins the deep
+  // target's own picture as its cover to stop a one-night stack replacing it.
+  // That is a visible change to the target, so say it rather than leave a cover
+  // nobody pinned to be discovered. Absent ⇒ an older backend ⇒ say nothing.
+  const pinned = picturePinned
+    ? " It still shows its own picture, kept as the cover."
+    : "";
   return (
     `Combined ${nFolders} folders of ${label} into one deep target.` +
-    `${kept} Re-stack it to get the deeper picture.`
+    `${kept}${pinned} Re-stack it to get the deeper picture.`
   );
 }

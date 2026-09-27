@@ -61,7 +61,8 @@ export function MergeSuggestionsCard() {
     onSuccess: (data, s) => {
       const label = s.object_name || s.targets[0]?.name || "target";
       notifications.show({
-        message: mergeOutcomeMessage(s.targets.length, label, data?.pictures_kept),
+        message: mergeOutcomeMessage(s.targets.length, label, data?.pictures_kept,
+                                     data?.picture_pinned),
         color: "grape",
       });
       // The merge removed the source targets and moved their frames — refresh the
@@ -127,7 +128,8 @@ export function MergeSuggestionsCard() {
             </Group>
             <Text size="10px" c="dimmed">
               Merges into “{s.targets[0]?.name}” (your deepest folder) and keeps every sub — and every
-              picture you’ve already made of it. Nothing is deleted.
+              picture you’ve already made of it. Nothing is deleted, and a later scan keeps them
+              combined.
             </Text>
           </Stack>
         </Alert>

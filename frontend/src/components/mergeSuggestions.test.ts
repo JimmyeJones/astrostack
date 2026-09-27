@@ -107,6 +107,23 @@ describe("mergeOutcomeMessage", () => {
     );
   });
 
+  it("says the deep target still shows its own picture when one was pinned", () => {
+    // The merge pins it so a carried one-night stack can't take its place; a
+    // cover the owner did not pin has to be said out loud.
+    expect(mergeOutcomeMessage(2, "M 31", 1, true)).toBe(
+      "Combined 2 folders of M 31 into one deep target. " +
+      "Your 1 existing picture came with it — see History. " +
+      "It still shows its own picture, kept as the cover. " +
+      "Re-stack it to get the deeper picture.",
+    );
+  });
+
+  it("says nothing about a cover when the merge pinned none", () => {
+    for (const pinned of [false, undefined, null]) {
+      expect(mergeOutcomeMessage(2, "M 31", 1, pinned)).not.toContain("cover");
+    }
+  });
+
   it("degrades to today's sentence on a backend that omits the count", () => {
     // Absent must read as "unknown", never as zero dressed up as a claim.
     const today = "Combined 3 folders of M 31 into one deep target. " +
