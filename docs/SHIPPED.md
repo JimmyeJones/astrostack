@@ -1,5 +1,34 @@
 # Shipped — the record
 
+## v0.479.3 — 2026-09-27 — the pictures a restack flattened can be given back (observer #903)
+
+*(Owner-requested, 2026-09-26, after the setup audit. Same PR as the recovered v0.479.2 and the deploy-pinning
+infrastructure.)*
+
+**What was left over.** v0.447.2 made a flattening restack loud, v0.448.1 stopped a future batch doing it
+(`pipeline._picture_is_auto_finished`), and v0.448.0's "Not stretched yet" chip names the state — but the 44 targets
+observer #903 found flattened stayed flat, and `webapp.routers.unstretched` deliberately "names; it never acts".
+
+**The repair is the v0.448.1 rule applied after the fact, and exactly as narrow.** `webapp/refinish.refinish_verdict`
+takes the displayed run (`finishedpicture.displayed_picture_run`); if it is not a finished picture, it looks at the
+newest *older* run that is. Only when that one carries our `editor_auto_baked_look` stamp is the answer `refinish`:
+re-applying Auto is then "re-do what this picture already had", through the same `_auto_edit_process_run` every other
+unattended finish uses (which independently refuses to write over a recipe it did not bake), with the owner's
+`auto_crop_border`. Every other flat target is left alone and named: `by_hand` (an editor export or a stamp-less
+finished picture — Auto's look is no evidence of what that person wanted), `never_finished` (a linear master may be
+deliberate), `cover_pinned`, `auto_edit_off`. A saved-but-never-rendered recipe does not count as a finished earlier
+picture (v0.449.0's rule), so it cannot trigger a refinish.
+
+**Surfaces.** `GET /api/unstretched-pictures/refinish` is a dry run; `POST` queues the `refinish_pictures` job (one at
+a time; cancellable between targets; one failure never stops the rest; a writer stand-down is reported, never counted
+as done). Settings → Maintenance shows `RefinishPicturesCard` under "Reprocess everything" only while there is
+something to give back, says how many hand-finished targets it will not touch, and confirms before starting.
+
+**Tests.** `tests/webapp/test_refinish.py` (11): each verdict, the saved-but-unrendered case, the job touching only
+the auto-finished target with the owner's crop setting, a writer stand-down, and both endpoints. Replacing the stamp
+check with `if False:` turns the two hand-edit tests red. `RefinishPicturesCard.test.tsx` (5). Full suite 6,665 passed;
+frontend 4,397 passed, build ok. No config, schema, on-disk or existing-API change.
+
 ## v0.479.2 — 2026-09-26 — 🐛 the readiness card quoted the ideal √t curve at a target its own stacks had already measured off it (recovered from a branch that never merged)
 
 *(Recovered 2026-09-26. This fix was built, tested and pushed on 2026-09-10 as v0.407.2 on

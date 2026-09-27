@@ -3951,6 +3951,13 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.479.3** — 🟠 PRIORITY 2 (trust), owner-requested repair for observer [#903](https://github.com/JimmyeJones/astrostack/issues/903):
+  **Settings → Maintenance → "Give back pictures a restack flattened"** re-applies Auto to a target's flat displayed
+  run only when the newest older finished picture carries our `editor_auto_baked_look` stamp (`webapp/refinish.py`,
+  `pipeline.submit_refinish_pictures`, `GET/POST /api/unstretched-pictures/refinish`). Hand-finished, never-finished,
+  cover-pinned and auto-edit-off targets are left alone and named. 11 backend + 5 frontend tests. Same PR, unversioned
+  infra: `release-tags.yml`, CI "Version bump is sane", `stable.yml`, `scripts/deploy.sh` / `rollback.sh`. Full entry
+  in [`SHIPPED.md`](SHIPPED.md).
 - **v0.479.2** — 🟠 PRIORITY 3 (trust / friendliness), **recovered from a branch that never merged**: the readiness
   card's "is more time worth it?" line projected along the ideal √t law even when the target's own stacks had measured
   a slower falloff — quoting "roughly 16 h more" where the measured rate implies ~750 h. `grainProjection` now projects
