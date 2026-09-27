@@ -1,5 +1,97 @@
 # Process notes & QA sweep records
 
+## 2026-09-27 — Scout: rotation item (4), the webapp routers + the newest Combine/merge code — CLEAN
+
+*(Scout, branch `claude/admiring-brahmagupta-xmsysl`. Baseline green — **6,707 passed, 2 skipped**, 13m32s with
+the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first.)*
+
+**Triage matched the last two runs, to the letter.** "Bugs (fix these first)" is the five gated/measured LEADs,
+the #903 remainder and the #878/#880 routing; `grep READY` returns only the banner saying the two starred items
+shipped; `docs/FOCUS.md` was rewritten today (front-of-queue item 1, the three Combine bugs, shipped as
+v0.480.2–.5) and is current. The three open GitHub issues (#878, #880, #903) are all already verified into the
+backlog with links, none new since 2026-09-25 — no issue action was owed this run. So, like the last two runs,
+this one had to *find* its work.
+
+### Rotation: item (4), the webapp routers (last run did item (3), ASTAP/ffmpeg filesystem)
+
+Led with the guardrail-sensitive routers, where a bug is high-severity (§10, server-side path resolution), and
+carried forward the previous two runs' levers: *"does the cure name something the reader can actually find?"* and
+*"a borrowed constant is cheap; a borrowed **sort key** is a borrowed judgement."*
+
+**`webapp/routers/storage.py` — the disk-space feature, read against §10 and against the pin.** CLEAN.
+- `cache/clear` only ever touches `CacheManager` stage dirs, `thumbs_dir`, `proxy_dir` — all under the *target*
+  tree; nothing resolves into `incoming/`. `get_storage` counts `incoming/` from the `frames` rows'
+  `source_size_bytes` (`source_frames_under`), never by walking or stat-ing the folder — it reads, never writes.
+- `prune_stack_runs` → `purge_stack_run` deletes a run's history row, its output file set
+  (`delete_run_artifacts`, basename-derived siblings included), its editor proxy and its `run_meta`. It operates
+  on the **project**, so it never clears the **library**-level `cover_stack_run_id`. I traced the consequence:
+  pruning the pinned cover run leaves a dangling pin, but every reader degrades gracefully —
+  `targets._cover_preview_path` returns `None` when the run is gone (falls back to the stamped/newest preview),
+  and `finishedpicture.displayed_picture_run` filters `r.id == cover and r.preview_path`. And the id cannot
+  *resurface* onto an unrelated future run, because `stack_runs.id` is `INTEGER PRIMARY KEY AUTOINCREMENT`
+  (project.py:49) — SQLite never reuses a deleted AUTOINCREMENT id. So "prune the cover" is safe by two
+  independent mechanisms, not one. No bug.
+- The `rows.sort(key=lambda r: r.total_bytes, reverse=True)` is the only sort key on the page and it is the
+  question the page asks ("where did the space go?"). The borrowed-sort-key lever finds nothing here.
+
+### The newest code, because newest code carries the most undiscovered bugs — Combine/merge — CLEAN
+
+`seestack/io/merge.py` and `seestack/io/library.py`'s merge path shipped v0.460.0 → v0.480.4 and are the
+least-swept surface in the tree. Read adversarially:
+- `carry_stack_runs` copies (never moves) oldest-first, disambiguates the destination basename against files
+  **already on disk** (`_free_basename`), rolls back a half-copied set rather than leaving orphans, and reports
+  an un-carryable picture as `lost` so the caller (`merge_targets_result`) keeps the source folder — the promise
+  "nothing is deleted" holds on the failure path. `_frame_without_id` uses `replace(...)` so a column added
+  tomorrow travels automatically.
+- `merge_targets_result` reads `shown_before = _displayed_run_id(dest)` **before** the merge and re-pins it only
+  when `dest.cover_stack_run_id is None` and runs were actually carried — so the deep target keeps its own
+  picture instead of flipping to the newer one-night carried run (v0.480.4's fix, verified correct here).
+- `record_merged_folder`/`merged_folder_destination` follow redirect chains with a `seen` cycle guard and return
+  `None` when the chain's end target is gone, so a combined-away folder becomes a target again rather than
+  routing subs at nothing. §10 holds throughout: `incoming/` is only ever read.
+
+### Adversarial reads that were also CLEAN (traced, no bug filed)
+
+`seestack/stack/mosaic.py` (footprint + plate-scale outlier rejection, RA-wrap, canvas px/MP caps),
+`seestack/stack/weighting.py` (per-panel vs target-wide medians — the `group_by_pointing` split is exactly the
+per-panel/whole-target distinction rotation item (2) hunts, and it is correct), `seestack/stack/overlapgain.py`,
+`seestack/stack/accumulator.py` (NaN/coverage semantics, `frame_coverage` vs weighted `coverage`, Welford
+n<2 → NaN std), `seestack/bg/coverage_leveling.py` (per-level detrend before thresholding). This is the
+single-field/mosaic engine core the standing focus has closed "until a new bug is found there" — none was.
+I re-touched `astap.py`/`ffmpeg.py` before realising the previous run had just swept item (3); confirmed still
+CLEAN (scratch-dir sandbox; read-only streaming) and moved on rather than re-sweeping.
+
+### Dogfood — `--mosaic`, CLEAN, and the advisory cluster reads coherently now
+
+`scripts/agent-dogfood.sh --mosaic`: EXIT 0, nothing overflowing, no console errors. The reason this sweep
+*counts* (AGENTS.md: "a sweep counts only if it ran the code on data shaped like the owner's"): reading the
+Target page's prescriptive cluster as one paragraph, the five "shoot more" surfaces (next-best-move, readiness,
+mosaic-map, stack-health, framing-verdict) now **defer to each other** rather than contradict — the
+framing-verdict carries the v0.465.2 `framingDepthFirstClause` ("until you're happy with the depth, more passes
+over the panels you already have do more for it than a wider grid"), which is exactly the reconciliation
+v0.465.2/v0.472.x shipped. This is the tallest page (3673px phone) but the tension the dogfood tool prompts for
+is already resolved; nothing to file. It also surfaced that the mosaic panel-by-panel coverage advisory
+(`mosaic-map-card`, "a little behind at the top-right") and the baked-in object labels (`objectlabels.py`,
+`annotate` v0.293.0) already exist — see below.
+
+### No new bug, no new idea — and why that is the right call (matching 2026-09-26 Scout)
+
+No verified bug found: the engine core, the newest Combine/merge code, and the storage router are all hardened,
+and the running app is clean on mosaic-shaped data. Per AGENTS.md §2 that is a successful run, not an empty one.
+
+The kickoff prompt asks for a new beginner feature every run; AGENTS.md §4 removed that quota ("supply was never
+the constraint; a Builder's hour is") — a genuine kickoff/AGENTS disagreement, logged here per the "this document
+wins, file the disagreement" rule. This document wins. I grep-checked several beginner-feature candidates before
+concluding, and **every one is already built end-to-end**: an in-frame object-labelling overlay (`annotate`
+screen + `objectlabels.py` baked-into-share), a "where to point next on my mosaic" advisory
+(`mosaic-map-card`, panel-by-panel coverage), a "discover new targets to try" ranking (`/api/plan/suggest`,
+"showpieces you haven't shot"), a plain-language "why were frames left out?" (`webapp/rejection_summary.py`),
+the deepening reel by shot-time, the noise-delta reveal, share cards / nameplate / scale bar. "Features that
+serve real workflows" already holds seven ready ideas, so the Builder is not starved. Manufacturing an eighth
+marginal, likely-duplicate idea against that is exactly the busywork §2/§4 warn against — so, like the previous
+Scout run, I filed none. The lever for the next Scout: the idea well being dry three runs running is itself worth
+noticing — the highest-value Scout work now is *bugs from adversarial reads of the newest code*, not more ideas.
+
 ## 2026-09-27 — Builder: the three Combine bugs, and the log handler the running-app pass found on its way past
 
 *(Builder, branch `claude/exciting-tesla-m0noq6`, shipping v0.480.2, v0.480.3, v0.480.4 and v0.480.5. Baseline green
