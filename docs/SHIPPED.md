@@ -1,5 +1,101 @@
 # Shipped — the record
 
+## v0.483.2 — 2026-09-27 — a batch that ran for days says *why* its targets failed, not just which
+
+🟡 **BUG (friendliness — PRIORITY 3), the other half of what observer issue
+[#880](https://github.com/JimmyeJones/astrostack/issues/880) recorded about where the owner meets this.** Its
+2026-09-22 follow-up put it exactly: *"Where the owner sees it: only in the red `Failed: …` line on the Jobs page
+for a finished batch, once, when a five-day job ends."* And that line held **nothing but names** —
+`reprocessSummary` read `target` off each failed entry and dropped `error` on the floor. So a `reprocess_all`
+that walked 89 targets for five days ended on `Failed: 73_Leonis_mosaic-328c48ae, Alphecca_mosaic-c7bed385, …`:
+eleven safe names, no cause, no next step, and nothing to distinguish "these eleven can never work" from "your
+NAS went away for an hour".
+
+**Every other failure in this app already has a sentence — the batch just wasn't using it.** `friendlyJobError`
+turns a single job's failure into a plain explanation and a next step (*"None of the frames could be aligned into
+a stack." / "This usually means the frames don't overlap…"*). The batch's summary now groups its failures **by
+cause**, through that same function, so eleven targets that failed the same way read as one thing to do rather
+than eleven mysteries — and the card shows the cause, the next step and the names, instead of the names alone.
+No second vocabulary: reword the sentence once and both surfaces change together.
+
+**And the batch now stamps what a single job stamps.** `webapp/pipeline.py`'s reprocess loop adds `error_kind`
+(from `webapp.jobs.classify_job_error`, at the point the exception type is still in hand — so a reworded engine
+message cannot cost the beginner their sentence) and `name`, the display name the progress line was already
+using while the failure list showed the safe one. Both are **additive**: `target` and `error` are unchanged, and
+an older frontend reads exactly what it read before, while the new one falls back to its own string matcher
+against an older backend. A failure that arrives with no text at all is grouped as *"It failed without saying
+why."* rather than dropped from the list.
+
+**Nothing removed, no new card** (the standing UI rule): the same one line grows a cause and a next step, and
+only when something failed.
+
+**Tests +4 vitest / +1 Python**; the three `reprocessSummary` cases and the card's own render test extended to
+the shape they now return, none weakened. Frontend + one backend dict; no config, schema, on-disk, API-shape or
+default change.
+
+## v0.483.1 — 2026-09-27 — the subs the app cannot read stop counting as subs it can stack
+
+🟠 **BUG (autonomy / trust), observer issue [#880](https://github.com/JimmyeJones/astrostack/issues/880) — the
+half of it that was costing the owner a failure on every batch.** Eleven of his targets hold nothing but the
+Seestar's own on-device colour pictures: three-plane RGB files ASTAP solves happily and
+`seestack/io/fits_loader.py::load_seestar_raw` refuses (`expected 2D Bayer array, got shape (3, …)`). QC stamps
+them `qc_error_final:` and `build_qc_arglist(only_new=True)` never offers them again — but it leaves `accept`
+alone, deliberately, so that one NAS blip can never un-accept a good sub. The consequence nobody had joined up:
+they stay **accepted**, so the stacker is handed frames it cannot read, errors on each in turn, and on a target
+that holds nothing else raises `ValueError: drizzle: no usable frames`. The observer's reading of the job history
+is the measurement: **seven `reprocess_all` batches between 2026-07-30 and 2026-09-15, the same eleven targets,
+61 failures, always that message** — and the owner's only sight of it is one red `Failed: …` line when a
+multi-day batch ends.
+
+**The fix is a verdict reached by reading the file, not by trusting the marker.** New
+`seestack/qc/runner.py::reconcile_unreadable_frames(project)` takes the frames carrying the terminal marker,
+actually opens each one through `load_seestar_raw` — the same call the stacker makes, so the two cannot drift —
+and sets aside only the ones the loader refuses. That distinction is the whole safety property: `compute_for_db_row`
+catches **every** exception, star detection included, so a terminal QC state can equally mean "the file reads fine
+and the *measurement* blew up", and that sub stacks perfectly well. Nothing is un-accepted on a guess about why QC
+failed, and the retryable-first-failure carve-out (`seestack/solve/runner.py:336`) is untouched end to end.
+
+**It undoes itself, which is what makes it safe to do unattended.** A frame set aside comes straight back — accepted,
+reason cleared, `restored_utc` stamped — the moment its file reads again, bounded to frames QC has **never**
+measured (`star_count is None`): the one shape that cannot be a sub some other rule had already rejected before a
+later QC failure overwrote its reason (an `auto:grade:` frame carries the metrics it was graded on). A frame the
+user graded by hand (`user_override`) is never touched, a frame whose file is simply *gone* stays with
+`Project.set_missing_frames_aside`, and the `qc_error_final:` reason itself is deliberately left in place — the QC
+re-offer skip, `_store_solve_failed_reason`'s carve-out and the rejection summary's "Couldn't be read or measured"
+bucket all read that prefix, so only `accept` moves. **Nothing on disk is touched** (AGENTS.md §10).
+
+**Wired where the verdict it reconciles is made:** `seestack/io/scanner.py::run_qc_and_solve` calls it at the end
+of the QC phase, beside `reconcile_streak_rejections` and deliberately not gated on `auto_reject_streaks` — a
+different verdict. It reports `unreadable_set_aside` / `unreadable_reaccepted` in the scan summary. On the owner's
+eleven targets that scan has **no QC work at all** (terminal frames are skipped), which is exactly why nothing else
+would ever have reconsidered them. New narrow `Project.frames_rejected_for(prefix)` queries the candidates with
+`substr` rather than building a `FrameRow` for all 35,894 rows of a deep target to keep three — this box has an OOM
+history — and named `REJECT_REASON_QC_ERROR_FINAL` so the writer and the reconciler agree on the prefix exactly.
+
+**What the owner sees after this:** those eleven targets report the stacker's own plain-language
+*"No accepted frames are plate-solved yet…"* instead of a drizzle traceback, and their frames move into the
+rejection summary's "Couldn't be read or measured" bucket, which already has the right words for them.
+
+**Tests +9** (`tests/test_unreadable_subs_set_aside.py`), the headline one fail-before end to end: two on-device
+colour files, accepted and solved, and `estimate_stack_basis` happily sizing a two-frame canvas before the fix. No
+config, schema, on-disk, API-shape or default change; no test weakened.
+
+**Still open in #880** is its half (a): the raw exception repr *stored* as the reject reason. That is storage
+hygiene — every surface maps the prefix to "QC error" before showing it — and costs a migration or a read-time
+normaliser for the existing rows. It is unchanged by this.
+
+**What the backlog entry carried before it was cut to (a) alone** (Scout 2026-09-14, from #880; kept here so the
+triage is not lost). The observer's split of every `qc_error*` frame in the library by accept state and target
+kind was **54 `qc_error_final` accept=1 on the 11 mosaic targets** — this entry's population, disjoint from the
+real `<T>_mosaic_sub` targets and holding zero stack runs, so no image was ever polluted — against **88
+`qc_error` accept=0** on 17 ordinary targets that hold thousands of real subs alongside a handful of these, and
+5 more `qc_error_final` accept=0. The entry named three separable defects: (a) the stored repr, above; (b) QC
+error leaving `accept` untouched, which is what this version acts on the *consequence* of; and (c) the
+mosaic-output classification gap, answered by the #878 note — `_apply_seestar_convention`'s sibling-skip rule
+(`(parent, low + "_sub") in sibling_names`) already skips a mosaic's device output, so recurrence has been closed
+all along and the 11 are pre-convention leftovers. The observer's own corroboration: the duplicating mechanism
+last fired 2026-07-03, and the 18 nights and 18,681 frames since carry zero double-registration.
+
 ## v0.483.0 — 2026-09-27 — the "watch it appear" clip becomes a night-by-night reel, for free
 
 **The owner's own request, 2026-09-25:** *"a progression video per target, ordered by when the subs were SHOT, so I

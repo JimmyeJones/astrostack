@@ -36,7 +36,7 @@ from webapp.finishedpicture import (
     displayed_picture_run as _displayed_picture_run,
     run_is_a_finished_picture as _run_is_a_finished_picture,
 )
-from webapp.jobs import Job, JobManager
+from webapp.jobs import Job, JobManager, classify_job_error
 from webapp.preview_orient import baked_north_up_deg
 from webapp.schemas import (
     STACK_DEFAULTS_META_KEY,
@@ -1734,7 +1734,15 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                         unattended=True)
                 except Exception as exc:  # noqa: BLE001 — isolate one bad target
                     log.exception("reprocess-all: target %s failed", safe)
-                    failed.append({"target": safe, "error": f"{type(exc).__name__}: {exc}"})
+                    # ``name`` and ``error_kind`` are additive beside the two keys
+                    # an older frontend reads. The kind is the same stable key a
+                    # single failed job is stamped with, classified here where the
+                    # exception *type* is still in hand — a batch that walks the
+                    # whole library over days ends on one red line, and until now
+                    # that line held nothing but safe names.
+                    failed.append({"target": safe, "name": name,
+                                   "error": f"{type(exc).__name__}: {exc}",
+                                   "error_kind": classify_job_error(exc) or ""})
                 else:
                     if res.get("cancelled"):
                         cancelled = True

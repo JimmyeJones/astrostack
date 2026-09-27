@@ -144,17 +144,27 @@ describe("JobsView", () => {
     expect(screen.queryByLabelText("Notify me when done")).not.toBeInTheDocument();
   });
 
-  it("summarises a reprocess-all batch, listing failed targets", async () => {
+  it("summarises a reprocess-all batch, saying why its targets failed", async () => {
     vi.spyOn(client.api, "listJobs").mockResolvedValue([
       mkJob({
         id: "rp-1", kind: "reprocess_all", target: null, state: "done",
-        result: { total: 3, stacked: 2, failed: [{ target: "NGC_7000" }], cancelled: false },
+        result: {
+          total: 3, stacked: 2, cancelled: false,
+          failed: [{ target: "NGC_7000_sub", name: "NGC 7000",
+                     error: "ValueError: drizzle: no usable frames",
+                     error_kind: "no_alignment" }],
+        },
       }),
     ]);
     renderJobs();
     await waitFor(() =>
       expect(screen.getByText("Restacked 2/3 targets — 1 failed.")).toBeInTheDocument());
-    expect(screen.getByText("Failed: NGC_7000")).toBeInTheDocument();
+    const help = friendlyJobError("", "no_alignment");
+    // The cause and the next step, not a bare name — and the *display* name.
+    expect(screen.getByText(`Failed on 1 target — ${help.message}`))
+      .toBeInTheDocument();
+    expect(screen.getByText(String(help.next))).toBeInTheDocument();
+    expect(screen.getByText("NGC 7000")).toBeInTheDocument();
   });
 
   it("shows a plain-language name (not the raw engine kind) for the first job a beginner sees", async () => {
@@ -1368,27 +1378,80 @@ describe("friendlyJobError", () => {
 describe("reprocessSummary", () => {
   it("reports a clean full run", () => {
     expect(reprocessSummary({ total: 5, stacked: 5, failed: [], cancelled: false }))
-      .toEqual({ line: "Restacked 5/5 targets.", failed: [] });
+      .toEqual({ line: "Restacked 5/5 targets.", failed: [], failedGroups: [] });
   });
   it("notes cancellation and failures", () => {
     expect(reprocessSummary({
       total: 4, stacked: 2, failed: [{ target: "A" }, { target: "B" }], cancelled: true,
-    })).toEqual({ line: "Restacked 2/4 targets (cancelled early) — 2 failed.", failed: ["A", "B"] });
+    })).toEqual({
+      line: "Restacked 2/4 targets (cancelled early) — 2 failed.",
+      failed: ["A", "B"],
+      // No error text at all: one honest group rather than two targets dropped
+      // out of the list the card renders from.
+      failedGroups: [{ message: "It failed without saying why.", targets: ["A", "B"] }],
+    });
   });
   it("singularises one target and tolerates missing/garbage fields", () => {
     expect(reprocessSummary({ total: 1, stacked: 1 }))
-      .toEqual({ line: "Restacked 1/1 target.", failed: [] });
+      .toEqual({ line: "Restacked 1/1 target.", failed: [], failedGroups: [] });
     expect(reprocessSummary({}))
-      .toEqual({ line: "Restacked 0/0 targets.", failed: [] });
+      .toEqual({ line: "Restacked 0/0 targets.", failed: [], failedGroups: [] });
     expect(reprocessSummary({ total: 2, stacked: 1, failed: [{ target: "X" }, {}, "junk"] }))
-      .toEqual({ line: "Restacked 1/2 targets — 1 failed.", failed: ["X"] });
+      .toEqual({
+        line: "Restacked 1/2 targets — 1 failed.",
+        failed: ["X"],
+        failedGroups: [{ message: "It failed without saying why.", targets: ["X"] }],
+      });
+  });
+  it("groups a batch's failures by cause, in the words a single job gets", () => {
+    // The owner's own shape (observer #880): a batch that walked the whole
+    // library for days, ending on one red line that held nothing but names.
+    const { failed, failedGroups } = reprocessSummary({
+      total: 20, stacked: 17,
+      failed: [
+        { target: "a", name: "73 Leonis (mosaic)",
+          error: "ValueError: drizzle: no usable frames" },
+        { target: "b", name: "Alphecca (mosaic)",
+          error: "ValueError: drizzle: no usable frames" },
+        { target: "c", name: "M 31",
+          error: "MemoryError: stack output canvas 8000x6000 exceeds the budget" },
+      ],
+    });
+    expect(failed).toEqual(["73 Leonis (mosaic)", "Alphecca (mosaic)", "M 31"]);
+    expect(failedGroups).toHaveLength(2);
+    expect(failedGroups[0].targets)
+      .toEqual(["73 Leonis (mosaic)", "Alphecca (mosaic)"]);
+    expect(failedGroups[0].message)
+      .toBe(friendlyJobError("ValueError: drizzle: no usable frames").message);
+    expect(failedGroups[0].next).toBeTruthy();
+    expect(failedGroups[1].targets).toEqual(["M 31"]);
+    expect(failedGroups[1].message)
+      .toBe(friendlyJobError("MemoryError: x").message);
+  });
+  it("prefers the backend's stable error_kind over the raw text", () => {
+    // Same contract as a single failed job: a reworded engine message must not
+    // cost the beginner their sentence.
+    const { failedGroups } = reprocessSummary({
+      total: 1, stacked: 0,
+      failed: [{ target: "M_42", error: "ValueError: something reworded",
+                 error_kind: "no_reference_wcs" }],
+    });
+    const help = friendlyJobError("", "no_reference_wcs");
+    expect(failedGroups).toHaveLength(1);
+    expect(failedGroups[0].message).toBe(help.message);
+    expect(failedGroups[0].next).toBe(help.next);
+    expect(failedGroups[0].targets).toEqual(["M_42"]);
   });
   it("reports how many targets were skipped as already up to date", () => {
     expect(reprocessSummary({ total: 5, stacked: 2, skipped: 3, failed: [] }))
-      .toEqual({ line: "Restacked 2/5 targets — 3 already up to date.", failed: [] });
+      .toEqual({ line: "Restacked 2/5 targets — 3 already up to date.", failed: [], failedGroups: [] });
     // Zero skipped is omitted; failures still appended after the skip note.
     expect(reprocessSummary({ total: 3, stacked: 1, skipped: 1, failed: [{ target: "Z" }] }))
-      .toEqual({ line: "Restacked 1/3 targets — 1 already up to date — 1 failed.", failed: ["Z"] });
+      .toEqual({
+        line: "Restacked 1/3 targets — 1 already up to date — 1 failed.",
+        failed: ["Z"],
+        failedGroups: [{ message: "It failed without saying why.", targets: ["Z"] }],
+      });
   });
   it("says a batch that stood aside for an import is paused, not stopped", () => {
     // A batch that handed the single worker back mid-way reads as one that
@@ -1399,42 +1462,48 @@ describe("reprocessSummary", () => {
         line: "Restacked 12/104 targets so far — paused to let an import "
           + "through, resuming after it.",
         failed: [],
+        failedGroups: [],
       });
     // A cancel is not a pause: the two never both apply, and cancel wins.
     expect(reprocessSummary({
       total: 4, stacked: 1, failed: [], cancelled: true, yielded: false,
-    })).toEqual({ line: "Restacked 1/4 targets (cancelled early).", failed: [] });
+    })).toEqual({ line: "Restacked 1/4 targets (cancelled early).", failed: [], failedGroups: [] });
     // An older backend sends no flag at all, which reads as the finished batch
     // it has always been.
     expect(reprocessSummary({ total: 3, stacked: 3, failed: [] }))
-      .toEqual({ line: "Restacked 3/3 targets.", failed: [] });
+      .toEqual({ line: "Restacked 3/3 targets.", failed: [], failedGroups: [] });
   });
   it("reports how many targets were deep-rescanned (QC/solve/grade) when the option was used", () => {
     expect(reprocessSummary({ total: 3, stacked: 3, rescanned: 3, failed: [] }))
-      .toEqual({ line: "Restacked 3/3 targets — re-ran QC/solve/grade on 3.", failed: [] });
+      .toEqual({
+        line: "Restacked 3/3 targets — re-ran QC/solve/grade on 3.",
+        failed: [], failedGroups: [],
+      });
     // Zero rescanned (the default plain restack) omits the clause entirely.
     expect(reprocessSummary({ total: 3, stacked: 3, rescanned: 0, failed: [] }))
-      .toEqual({ line: "Restacked 3/3 targets.", failed: [] });
+      .toEqual({ line: "Restacked 3/3 targets.", failed: [], failedGroups: [] });
     // Ordering: rescan note before the skip note before failures.
     expect(reprocessSummary({
       total: 4, stacked: 2, rescanned: 2, skipped: 1, failed: [{ target: "Q" }],
     })).toEqual({
       line: "Restacked 2/4 targets — re-ran QC/solve/grade on 2 — 1 already up to date — 1 failed.",
       failed: ["Q"],
+      failedGroups: [{ message: "It failed without saying why.", targets: ["Q"] }],
     });
   });
   it("reports how many results were auto-edited when the option was used", () => {
     expect(reprocessSummary({ total: 3, stacked: 3, auto_edited: 3, failed: [] }))
-      .toEqual({ line: "Restacked 3/3 targets — auto-edited 3.", failed: [] });
+      .toEqual({ line: "Restacked 3/3 targets — auto-edited 3.", failed: [], failedGroups: [] });
     // Zero auto-edited (the default) omits the clause entirely.
     expect(reprocessSummary({ total: 3, stacked: 3, auto_edited: 0, failed: [] }))
-      .toEqual({ line: "Restacked 3/3 targets.", failed: [] });
+      .toEqual({ line: "Restacked 3/3 targets.", failed: [], failedGroups: [] });
     // Ordering: rescan note before auto-edit note before the skip note.
     expect(reprocessSummary({
       total: 4, stacked: 3, rescanned: 3, auto_edited: 3, skipped: 1, failed: [],
     })).toEqual({
       line: "Restacked 3/4 targets — re-ran QC/solve/grade on 3 — auto-edited 3 — 1 already up to date.",
       failed: [],
+      failedGroups: [],
     });
   });
   it("says when an auto-edit was to keep an already-finished picture finished", () => {
@@ -1446,6 +1515,7 @@ describe("reprocessSummary", () => {
     })).toEqual({
       line: "Restacked 5/5 targets — auto-edited 2 to keep finished pictures finished.",
       failed: [],
+      failedGroups: [],
     });
     // Switch on *and* some carried forward: the count says how many of the
     // auto-edits were the carry-forward rather than the option.
@@ -1454,14 +1524,15 @@ describe("reprocessSummary", () => {
     })).toEqual({
       line: "Restacked 5/5 targets — auto-edited 5 (2 to keep a finished picture finished).",
       failed: [],
+      failedGroups: [],
     });
     // Nothing needed carrying forward, and an older backend that never sent the
     // key, both read as today's plain line.
     expect(reprocessSummary({
       total: 5, stacked: 5, auto_edited: 5, kept_finished: 0, failed: [],
-    })).toEqual({ line: "Restacked 5/5 targets — auto-edited 5.", failed: [] });
+    })).toEqual({ line: "Restacked 5/5 targets — auto-edited 5.", failed: [], failedGroups: [] });
     expect(reprocessSummary({ total: 5, stacked: 5, auto_edited: 5, failed: [] }))
-      .toEqual({ line: "Restacked 5/5 targets — auto-edited 5.", failed: [] });
+      .toEqual({ line: "Restacked 5/5 targets — auto-edited 5.", failed: [], failedGroups: [] });
   });
 });
 

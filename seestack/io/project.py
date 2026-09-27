@@ -433,6 +433,14 @@ REJECT_REASON_SEESTAR_OUTPUT = "auto:seestar_output"
 # ``"user"``, whose choice must never be undone by the app.
 REJECT_REASON_FILE_MISSING = "auto:file_missing"
 
+# Prefix of the reject reason :func:`seestack.qc.runner.apply_qc_result_to_db`
+# stamps on a sub QC has now failed to read **twice** — the terminal half of its
+# retry state machine (``qc_error:`` is the first, still-retryable failure). The
+# whole reason carries the read error's own text after a colon, so every consumer
+# matches it as a *prefix*; it is named here because the writer and
+# :func:`seestack.qc.runner.reconcile_unreadable_frames` must agree on it exactly.
+REJECT_REASON_QC_ERROR_FINAL = "qc_error_final"
+
 
 def restoration_stamp() -> str:
     """"Now", in the one format every ``restored_utc`` writer must use.
@@ -1265,6 +1273,30 @@ class Project:
             (REJECT_REASON_FILE_MISSING,),
         ).fetchone()
         return int(row[0]) if row else 0
+
+    def frames_rejected_for(self, reason_prefix: str) -> list[FrameRow]:
+        """Every frame whose ``reject_reason`` starts with ``reason_prefix``.
+
+        A *query*, not a walk: the callers of this are reconcilers that run once
+        per target per scan over a handful of rows, and the owner's deepest
+        target holds 35,894 — building a :class:`FrameRow` for every one of them
+        to keep three is the retaining cost this box has an OOM history over.
+        ``substr`` rather than ``LIKE`` because these reasons carry the failure's
+        own text after a colon, which would need escaping.
+
+        Returns the rows in id order, and an empty list when nothing carries the
+        prefix — which is every healthy install.
+        """
+        assert self._conn is not None
+        prefix = str(reason_prefix)
+        if not prefix:
+            return []
+        rows = self._conn.execute(
+            "SELECT * FROM frames WHERE substr(reject_reason, 1, ?) = ? "
+            "ORDER BY id",
+            (len(prefix), prefix),
+        ).fetchall()
+        return [_row_to_frame(r) for r in rows]
 
     def iter_frames(self, accepted_only: bool = False) -> Iterator[FrameRow]:
         assert self._conn is not None

@@ -1,5 +1,48 @@
 # Process notes & QA sweep records
 
+## 2026-09-27 (third Builder run) — the subs the app could not read, and the batch that would not say why
+
+*(Builder, branch `claude/exciting-tesla-xhn1xj` → v0.483.1 + v0.483.2. Baseline green — **6,865 passed,
+2 skipped**, 13m30s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first.)*
+
+**Both tasks came out of one observer comment nobody had mined: #880's 2026-09-22 follow-up.** The issue had been
+triaged twice and largely stood down — (a) "the stored repr is not user-facing", (b) "accept staying True on a QC
+error is deliberate design". Both of those readings are correct, and both stop one step short of the *consequence*,
+which the follow-up measured from a source earlier readings had not used (the `failed` list in each finished
+`reprocess_all`'s `result_json`): **the same eleven targets, 61 failures across seven weeks, always
+`ValueError: drizzle: no usable frames`.**
+
+**The generalisable bit: "this field is deliberate" answers why it was written, not what it now costs.** `accept`
+staying True through a QC error is right — one NAS blip must not un-accept a good sub. What nobody had asked is
+what an accepted-but-*terminal* frame does next: it is never offered to QC again, so nothing reconsiders it, and it
+is still handed to the stacker. On a target that holds nothing else, that is the whole stack. The fix did not have
+to touch the deliberate rule at all.
+
+**And the verdict had to be evidence, not the marker.** The obvious build — "un-accept on `qc_error_final`" — would
+have dropped real subs: `compute_for_db_row` catches *every* exception, star detection included, so a terminal
+marker can equally mean "the file reads fine and the measurement blew up". `reconcile_unreadable_frames` therefore
+opens each candidate through the stacker's own loader and sets aside only what the loader refuses. The rule of
+thumb worth keeping: **a state machine's marker records what happened, not what is true now** — when the difference
+matters, go and look.
+
+**Task two was the same issue's other half, and it was sitting in a function that already dropped the answer on the
+floor.** `reprocessSummary` read `target` off each failed entry and discarded `error`, so a five-day batch ended on
+a red line of safe names. Every single job in this app already gets a plain sentence and a next step from
+`friendlyJobError`; the batch just was not calling it. Grouping by that same sentence turns eleven mysteries into
+one thing to do, and cost no new surface.
+
+**One piece of harness friction worth knowing about before you touch a reject-reason writer.**
+`tests/test_reject_reason_labels.py`'s `_EXEMPT` registry is keyed by `file:line`, so *any* edit that shifts a
+line above an exempted write site turns four of its five tests red — here a one-line import growing to five moved
+`qc/runner.py:113` to `:117`. The failure text names the site and the fix is to re-key the entry (that is the
+registry's intended maintenance, not a weakening), but the four failures land nowhere near the change and read
+like a broken tree. Worth budgeting one confused minute for.
+
+**Suite timings.** Baseline **6,865 passed, 2 skipped**, 13m30s. End of run **6,875 passed, 2 skipped** (+10).
+Frontend **4,414 tests / 288 files**, `tsc` and `vite build` clean, all three run from `frontend/`.
+`/tmp/pytest-of-root` cleared before each full run.
+
+
 ## 2026-09-27 (second Builder run) — the duplicate the app could not see, and a reel that was already paid for
 
 *(Builder, branches `agent/dup-base-hash-suffix` → PR #995 (v0.482.1 + v0.482.2) and `agent/night-progress-reel` →

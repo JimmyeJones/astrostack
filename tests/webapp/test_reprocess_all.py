@@ -347,6 +347,27 @@ def test_reprocess_all_isolates_a_failing_target(solved_library, monkeypatch):
     assert summary["cancelled"] is False
 
 
+def test_a_failed_target_carries_its_display_name_and_a_stable_error_kind(solved_library,
+                                                                          monkeypatch):
+    """A batch that walks the library for days ends on one summary, and until
+    v0.483.2 that summary held nothing but safe names — no reason at all. The two
+    keys here are what let the Jobs card say *why*, in the same words a single
+    failed job already gets, without re-matching a reworded engine message.
+    Additive: ``target`` and ``error`` are unchanged for an older frontend."""
+    def fake(proj, opts, **kwargs):  # noqa: ANN001, ARG001
+        raise ValueError("no accepted, plate-solved frames to stack")
+    monkeypatch.setattr("seestack.stack.stacker.run_stack", fake)
+
+    job = Job(kind="reprocess_all")
+    summary = _run_body(pipeline.submit_reprocess_all, _settings(solved_library), job)
+
+    assert len(summary["failed"]) == 2
+    for row in summary["failed"]:
+        assert row["error_kind"] == "no_solved_frames"
+        assert row["name"]                      # a display name, not only the safe one
+        assert row["target"] and row["error"]   # the two older keys, untouched
+
+
 def test_reprocess_all_stale_only_skips_current_version_targets(solved_library, monkeypatch):
     """With stale_only, a target already stacked on the current app version is
     skipped; one whose latest genuine stack is on an older version is reprocessed."""
