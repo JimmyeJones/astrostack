@@ -82,17 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟠 BUG (trust / autonomy — PRIORITY 2; setup audit 2026-09-26, reproduced) — "Combine into one deep target" is
-  silently undone by the next scan.** *(Size M. Confidence: reproduced by script, twice. Filed at the owner's
-  request 2026-09-26.)* After Combine, the source folder in `incoming/` is untouched (correctly — §10) and nothing
-  records that it was merged, so the next whole-incoming scan (the watcher runs one on any new file, and "Scan now")
-  recreates the source target from it with all its subs; with `auto_stack` on it is re-stacked, and the merge
-  suggestion reappears with an identical signature. **Where:** `seestack/io/scanner.py` (`open_or_create_target`,
-  no tombstone check), `seestack/io/library.py::merge_targets`, `frontend/src/components/mergeSuggestions.ts`.
-  **Repro:** two `<T>_sub` folders of one object → scan → Combine → scan again → `targets == ['M_31', 'M_31_night_2']`.
-  **Fix shape:** record merged folder names (a library table or registry field, additive per §9) at merge time and
-  have the scanner route those folders to the destination target instead of minting a new one; test "merge then
-  rescan keeps one target". Never touch `incoming/` to achieve it.
 - **🟠 BUG (trust — PRIORITY 2–3; setup audit 2026-09-26, reproduced) — Combine drops the source target's user data,
   under copy that says "nothing is deleted".** *(Size S–M. Confidence: reproduced.)* v0.460.0 made
   `merge.carry_stack_runs` carry stack runs and per-run recipes, but target-level data is still lost: the source's
@@ -3984,6 +3973,11 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.480.2** — 🐛 a combine no longer comes undone on the next scan: `Library.record_merged_folder` /
+  `merged_folder_destination` (new additive registry table `merged_folders`) + the redirect in
+  `open_or_create_target`. `incoming/` is read-only, so the combined-away folders are all still there and every
+  scan re-offered them; their subs now land in the target they were combined into, chains and renames included.
+  8 tests (`tests/test_merge_survives_rescan.py`), 4 of which fail against the old code.
 - **v0.480.1** — 🟠 BUG in v0.480.0's own ordering, **found by a running-app `--restack` dogfood pass an hour after
   it was written**, which is what that flag is for: the reel it printed ran **6 subs → 3 subs**, the exact reverse of
   the card's "cleaner and deeper" sentence. Both stacks end on the same sub (the thin one is the deep one's subs minus

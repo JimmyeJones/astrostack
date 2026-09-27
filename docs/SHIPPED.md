@@ -1,5 +1,52 @@
 # Shipped — the record
 
+## v0.480.2 — 2026-09-27 — 🐛 "Combine into one deep target" no longer comes undone on the next scan
+
+*(First of the three Combine bugs the 2026-09-26 setup audit filed at the owner's request. He had been told not to
+use the button until they shipped.)*
+
+**The bug.** `incoming/` is strictly read-only (AGENTS.md §10), so a merge deletes the source *target* and must
+leave the source *folder* exactly where it is — which it did. Nothing recorded that the folder had been combined,
+so the next whole-incoming scan (the watcher runs one on any new file, and "Scan now" is one click) re-created the
+source target from that folder with all its subs. The library split back in two, `auto_stack` re-stacked the shallow
+night, and the "same object?" nudge re-offered the identical group.
+
+**The fix, in the one place the app is allowed to write.** A new additive registry table `merged_folders`
+(`source_key → into_safe_name`, in `_AUX_TABLES_SQL`, so an older build still opens the library and no
+`LIBRARY_SCHEMA_VERSION` bump is needed) records where a combined-away folder's subs went.
+`Library.merge_targets_result` writes it via `record_merged_folder` *before* deleting the source row — and only for a
+source it actually removes, since one kept back because a picture could not be carried is still its own target.
+`open_or_create_target` consults `merged_folder_destination` **only on the path that would otherwise mint a new
+target**, so the redirect can never shadow a target that exists.
+
+Three details that are the difference between a fix and a half-fix: the folder keeps *feeding* the deep target (a sub
+that lands after the merge is ingested there, rather than being skipped and waiting in `incoming/` forever); every
+name the folder answers to is recorded — display name, `folder_name` and safe name — so a renamed target does not
+re-open the bug; and a redirect whose destination has since been deleted resolves to `None`, which is what lets the
+folder become a target again and is why the delete side needs no bookkeeping at all. Chains (A into B, then B into C)
+are followed with a visited set.
+
+**Tests.** `tests/test_merge_survives_rescan.py` (8), driving the real `scan_and_organize` over a two-folder
+`incoming/`: rescan keeps one target and 5 subs; a late sub lands in the deep target; the A→B→C chain; a deleted
+destination lets both folders come back; a renamed source is still routed; a redirect never shadows a live target;
+plus the two §9 upgrade cases (an old registry gains the table on open; a current one missing it self-heals). Four of
+them fail against the pre-fix code. Nothing under `incoming/` is touched, no on-disk layout, config, default or API
+change.
+
+### The entry as it was filed
+
+- **🟠 BUG (trust / autonomy — PRIORITY 2; setup audit 2026-09-26, reproduced) — "Combine into one deep target" is
+  silently undone by the next scan.** *(Size M. Confidence: reproduced by script, twice. Filed at the owner's
+  request 2026-09-26.)* After Combine, the source folder in `incoming/` is untouched (correctly — §10) and nothing
+  records that it was merged, so the next whole-incoming scan (the watcher runs one on any new file, and "Scan now")
+  recreates the source target from it with all its subs; with `auto_stack` on it is re-stacked, and the merge
+  suggestion reappears with an identical signature. **Where:** `seestack/io/scanner.py` (`open_or_create_target`,
+  no tombstone check), `seestack/io/library.py::merge_targets`, `frontend/src/components/mergeSuggestions.ts`.
+  **Repro:** two `<T>_sub` folders of one object → scan → Combine → scan again → `targets == ['M_31', 'M_31_night_2']`.
+  **Fix shape:** record merged folder names (a library table or registry field, additive per §9) at merge time and
+  have the scanner route those folders to the destination target instead of minting a new one; test "merge then
+  rescan keeps one target". Never touch `incoming/` to achieve it.
+
 ## v0.479.3 — 2026-09-27 — the pictures a restack flattened can be given back (observer #903)
 
 *(Owner-requested, 2026-09-26, after the setup audit. Same PR as the recovered v0.479.2 and the deploy-pinning
