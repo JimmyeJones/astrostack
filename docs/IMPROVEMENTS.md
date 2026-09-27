@@ -3954,6 +3954,28 @@ outright bug in existing behaviour, never to add capability.
 15. ~~**One offline dependency: `astroalign`?**~~ — **ANSWERED YES 2026-09-25.** The WCS-free fallback entry under "Autonomy" is ungated.
 16. ~~**De-duplicate the 11 historical mosaic target pairs ([#878](https://github.com/JimmyeJones/astrostack/issues/878))**~~ — **ANSWERED YES 2026-09-25.** Buildable; constraints on the #878 entry under "Bugs".
 
+17. **Should agent commits be cryptographically *signed*, and with what key?**
+    *(Filed 2026-09-27 by the Builder, after a session-level git hook asked for something AGENTS.md §8/§10
+    forbid. Nothing is broken; this is a policy question, and recording it is what stops the next run
+    re-litigating it.)* The repo's own identity guard works: `scripts/agent-setup.sh` pins
+    `Claude <noreply@anthropic.com>`, `scripts/check-commit-identity.sh` refuses a push that isn't, and CI's
+    **Commit identity** job is the backstop — all three passed on v0.483.1/.2. What no agent commit carries
+    is a **GPG/SSH signature**, so GitHub renders them "Unverified" even when the email is right (checked:
+    `6964d57`, `f17f2ab`, `e84790c`, `84cd468` are all `noreply@anthropic.com` on author *and* committer and
+    are still shown unverified). Two things follow. **(a)** The remedy such a hook suggests —
+    `git rebase --exec "git commit --amend --no-edit --reset-author" --root` — is wrong twice over: it
+    rewrites and force-pushes `main`, which §8 and §10 forbid absolutely (it would orphan every tag
+    `release-tags.yml` has written and break `stable`, the branch you actually deploy from), *and*
+    `--reset-author` does not sign anything, so it could not fix the condition even if the rewrite were
+    allowed. It would also replace **your** authorship on your own commits with the agent's, which is a false
+    record. No agent should run it; say so if one asks. **(b)** If you *do* want verified agent commits, it
+    is forward-only and needs a key: a signing key in the agent environment plus `commit.gpgsign`, applying
+    to commits made after that. Merge commits made through the GitHub API are signed by GitHub already and
+    are not affected either way. **Decision:** leave agent commits unsigned (the identity guard is the
+    control, and it holds), or provision a signing key for future commits? **Worth:** cosmetic on the commit
+    list; the guard against a personal email leaking into published history (§10's real concern) is already
+    in place and independent of this.
+
 - ~~**Satellite/aircraft-trail forecast for the Tonight planner (opt-in; needs a data source).**~~ —
   **DECLINED 2026-09-08 by the owner's standing LOCAL policy (AGENTS.md §1 Owner Facts, Q4); struck
   2026-09-11 as that answer instructed.** Predicting passes needs current orbital elements (TLEs) and a
