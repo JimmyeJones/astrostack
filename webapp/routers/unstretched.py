@@ -41,7 +41,10 @@ contradicting each other about one run.
 call (a linear master is the honest data, and some people export exactly that),
 so nothing here writes a recipe and there is no "fix them all" button: the chip
 sits on the card, and the one-click Auto is where it has always been, in that
-target's own editor.
+target's own editor. *(One narrow, owner-requested exception, 2026-09-26: the
+#903 repair at the bottom of this module gives back only pictures the app itself
+had finished with Auto before a restack flattened them — see
+:mod:`webapp.refinish`.)*
 
 **And it answers a second question about the same card: is that picture deep
 enough?** *(v0.450.0.)* A different question from stretch — a stretch is a
@@ -242,3 +245,62 @@ def get_unstretched(request: Request) -> UnstretchedResponse:
     return UnstretchedResponse(
         count=len(found), items=found[:UNSTRETCHED_MAX],
         thin_count=len(thin), thin=thin[:UNSTRETCHED_MAX])
+
+
+# ---------------------------------------------------------------------------
+# The one exception to "names; it never acts" — asked for by the owner.
+#
+# On 2026-09-26 the owner asked for the pictures observer #903's restack
+# flattened to be given back. That is not a general "stretch everything"
+# button, and it is deliberately not offered as one: it touches only targets
+# whose *previous* picture the app itself had finished with Auto
+# (:mod:`webapp.refinish`), and the GET below says exactly which targets it
+# would and would not touch before anything is written.
+
+
+class RefinishTarget(BaseModel):
+    safe_name: str
+    name: str
+
+
+class RefinishPreview(BaseModel):
+    # Targets the job would re-finish with Auto.
+    refinish: list[RefinishTarget]
+    # Flat targets it leaves alone, by reason: "by_hand" (you finished the
+    # earlier picture yourself), "never_finished", "cover_pinned",
+    # "auto_edit_off".
+    left_alone: dict[str, list[RefinishTarget]]
+
+
+@router.get("/api/unstretched-pictures/refinish", response_model=RefinishPreview)
+def preview_refinish(request: Request) -> RefinishPreview:
+    """Dry run: which flat pictures the repair would give back, and which it
+    would leave alone and why. Writes nothing."""
+    from webapp.refinish import REFINISH, scan_refinish
+
+    lib = deps.open_library(request)
+    try:
+        verdicts = scan_refinish(lib)
+    finally:
+        lib.close()
+    left: dict[str, list[RefinishTarget]] = {}
+    for v in verdicts:
+        if v.verdict != REFINISH:
+            left.setdefault(v.verdict, []).append(RefinishTarget(safe_name=v.safe_name, name=v.name))
+    return RefinishPreview(
+        refinish=[RefinishTarget(safe_name=v.safe_name, name=v.name)
+                  for v in verdicts if v.verdict == REFINISH],
+        left_alone=left)
+
+
+@router.post("/api/unstretched-pictures/refinish")
+def start_refinish(request: Request) -> dict:
+    """Queue the repair job. Idempotent: an active one is returned, not doubled."""
+    from webapp import pipeline
+
+    jm = deps.get_job_manager(request)
+    existing = jm.active_of_kind("refinish_pictures")
+    if existing is not None:
+        return {"job_id": existing.id, "already_running": True}
+    job = pipeline.submit_refinish_pictures(deps.get_settings(request), jm)
+    return {"job_id": job.id, "already_running": False}

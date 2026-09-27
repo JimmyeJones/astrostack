@@ -403,6 +403,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   finished run, which is precisely what option (3) below is for. The displaced renders are all re-derivable Auto
   output, so the harm ceiling here is "the wall shows a linear stack instead of an Auto render until re-run",
   not "the owner's own editing is lost". Do not re-prioritise this up on the strength of the 21-target count.
+  **✅ THE EXISTING DAMAGE HAS A REPAIR — v0.479.3 (owner-requested 2026-09-26).** Settings → Maintenance →
+  "Give back pictures a restack flattened" (`webapp/refinish.py`, `pipeline.submit_refinish_pictures`) re-applies
+  Auto to a flat displayed run **only** where the newest older finished picture carries our `editor_auto_baked_look`
+  stamp; hand-finished, never-finished, cover-pinned and auto-edit-off targets are left alone and named. What
+  remains open below is prevention by cover semantics (option 3), unchanged.
   **The mechanism in one line:** `current_picture_path` resolves cover → newest-with-a-preview, and
   `cover_stack_run_id` is NULL on all 89 of the owner's targets — so a restack, being newest, becomes the
   picture, and with the batch's auto-edit switch off that picture is a flat linear stack. v0.447.2 made the
