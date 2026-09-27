@@ -1,5 +1,19 @@
 # Process notes & QA sweep records
 
+## 2026-09-27 — AGENTS.md cut to its live rules (owner-requested, after the 2026-09-26 audit)
+
+`AGENTS.md` went from 1,267 to ~510 lines. **No rule was removed.** The dated banners, incident write-ups and
+collision diaries moved **verbatim** to `docs/HISTORY.md`; all of §7 (setup, test traps, every dogfood flag) moved
+verbatim to `docs/AGENT-ENVIRONMENT.md`; `docs/FOCUS.md` (new, ≤60 lines, dated, rewritten by the Scout) now holds
+what is front-of-queue, so `AGENTS.md` never again carries a banner that goes stale. Checked mechanically: every
+old sentence stating a rule ("never / must / do not / always …") was listed if it did not appear word-for-word in
+the new `AGENTS.md` + `AGENT-ENVIRONMENT.md`; each of the 78 was reviewed by hand and is either condensed there or
+purely historical, and 14 clauses that still carried a live rule were restored. Also fixed while there: the
+cadence text (Builder every 4 h, Scout daily — not "once an hour"), the observer's read-only token (shipped
+v0.441.0, not "filed"), `astroalign` approved (2026-09-25), and "record any branch you leave unmerged" (a finished
+fix sat unmerged for two weeks). `docs/agent-prompt*.md` now hold the short pointer prompts the routines should
+use; the old ones contradicted `AGENTS.md` on the editor and the QA rotation.
+
 ## 2026-09-26 — Builder: the lever the last run wrote down paid twice, and the second mirror was a disk leak
 
 *(Builder, branch `claude/exciting-tesla-a4kwsq`, shipping v0.478.1 and v0.478.2. Baseline green — **6,623
