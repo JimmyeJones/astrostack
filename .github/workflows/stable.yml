@@ -1,0 +1,58 @@
+name: Advance stable
+
+# `stable` is what the owner deploys (scripts/deploy.sh with no argument). It
+# trails `main`: it only ever moves forward, and only to a commit on main's
+# merge line that is at least SOAK_DAYS old AND whose own CI run on main passed
+# (a cancelled or missing run does not count). The 2026-09-26 audit found that
+# the self-inflicted fix-the-fix chains on main closed within 3 days in every
+# case but one, so a 3-day-old green commit is one whose follow-ups have
+# usually already landed.
+#
+# Agents never push `stable` by hand; this workflow is its only writer.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: advance-stable
+  cancel-in-progress: false
+
+env:
+  SOAK_DAYS: "3"
+
+jobs:
+  advance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Pick the newest soaked, green commit on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --quiet origin '+refs/heads/*:refs/remotes/origin/*'
+          cutoff=$(date -u -d "$SOAK_DAYS days ago" +%s)
+          current=$(git rev-parse -q --verify origin/stable || true)
+          pick=""; checked=0
+          for c in $(git rev-list --first-parent origin/main); do
+            [ "$(git log -1 --format=%ct "$c")" -le "$cutoff" ] || continue
+            # Stop searching once we are at or behind the current stable.
+            if [ -n "$current" ] && git merge-base --is-ancestor "$c" "$current"; then break; fi
+            checked=$((checked+1)); [ "$checked" -le 60 ] || break
+            concl=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=$c&event=push&per_page=5" \
+                      --jq '[.workflow_runs[] | select(.status=="completed") | .conclusion] | first // ""')
+            if [ "$concl" = success ]; then pick="$c"; break; fi
+          done
+          if [ -z "$pick" ]; then echo "No newer commit is both ${SOAK_DAYS}+ days old and green on main; stable stays at ${current:-<none>}."; exit 0; fi
+          if [ -n "$current" ] && ! git merge-base --is-ancestor "$current" "$pick"; then
+            echo "::error::stable ($current) is not an ancestor of $pick — refusing to move it sideways."; exit 1
+          fi
+          git push origin "$pick:refs/heads/stable"
+          echo "stable → $(git log -1 --format='%h %s' "$pick" | cut -c1-100)"

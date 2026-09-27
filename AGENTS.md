@@ -1040,6 +1040,15 @@ reason a Dockerfile-context break is green: it is looking at something other tha
 what the owner has. Before claiming a fix is pinned, revert the fix in a scratch
 script and watch the test fail.
 
+**Tags and `stable` are written by workflows, never by an agent** *(2026-09-26)*.
+`.github/workflows/release-tags.yml` tags every version that reaches `main`
+(`v0.479.2` → the merge that shipped it) and goes red if a number is reused;
+CI's `Version bump is sane` job refuses a PR whose version goes backwards or is
+already released. `.github/workflows/stable.yml` advances the `stable` branch
+— what the owner deploys with `scripts/deploy.sh` — to the newest `main` commit
+at least three days old with a green CI run. Never create or move a tag, and
+never push `stable`.
+
 **Absolute rules for merging:**
 - Only ever merge a **fully green** branch. Green tests are the safety gate that
   replaces a human reviewer — treat §5 as mandatory before every merge.

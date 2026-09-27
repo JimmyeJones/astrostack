@@ -4018,6 +4018,70 @@ def _rendered_preview_crop(project_dir: Path, run_id: int, recipe,
     return preview_crop_json(crop)
 
 
+def submit_refinish_pictures(settings: Settings, jm: JobManager) -> Job:
+    """Give back the finished pictures a restack flattened (observer #903).
+
+    The owner-requested one-off repair: for every target
+    :func:`webapp.refinish.scan_refinish` answers ``"refinish"`` for — its
+    displayed picture is flat, and the picture it showed before was one the app
+    itself had finished with Auto — re-apply Auto to the displayed run, with the
+    owner's crop preference, through the same :func:`_auto_edit_process_run`
+    every other unattended finish uses (which itself refuses to write over a
+    recipe it did not bake). Every other flat target is left exactly as it is and
+    named in the summary, so the owner can see what was *not* touched and why.
+
+    Serial like every job here, cancellable between targets, one failure never
+    stops the rest. Re-running it is harmless: a target it finished is no longer
+    flat, so the next scan does not name it.
+    """
+    from webapp.refinish import REFINISH, scan_refinish
+
+    def body(job: Job) -> dict[str, Any]:
+        lib = Library.open_or_create(settings.resolved_library_root)
+        try:
+            verdicts = scan_refinish(lib)
+            todo = [v for v in verdicts if v.verdict == REFINISH]
+            left: dict[str, list[str]] = {}
+            for v in verdicts:
+                if v.verdict != REFINISH:
+                    left.setdefault(v.verdict, []).append(v.name)
+            refinished: list[str] = []
+            failed: list[dict[str, str]] = []
+            cancelled = False
+            job.set_progress("refinish", 0, len(todo), f"0/{len(todo)} pictures")
+            jm.maybe_flush(job)
+            for i, v in enumerate(todo):
+                if job.cancel_requested():
+                    cancelled = True
+                    break
+                try:
+                    n_ops = _auto_edit_process_run(
+                        lib, v.safe_name, v.run_id, auto_crop=settings.auto_crop_border)
+                except Exception as exc:  # noqa: BLE001 — isolate one target
+                    log.exception("refinish: %s failed", v.safe_name)
+                    failed.append({"target": v.name, "error": f"{type(exc).__name__}: {exc}"})
+                else:
+                    if n_ops is None:
+                        failed.append({"target": v.name,
+                                       "error": "skipped: no stacked file, or a recipe we did not bake"})
+                    else:
+                        refinished.append(v.name)
+                job.set_progress("refinish", i + 1, len(todo), f"{i + 1}/{len(todo)} pictures")
+                jm.maybe_flush(job)
+            return {
+                "refinished": refinished,
+                "failed": failed,
+                "cancelled": cancelled,
+                # Flat targets deliberately not touched, by reason — the owner
+                # redoes "by_hand" ones himself; the others are his choice.
+                "left_alone": left,
+            }
+        finally:
+            lib.close()
+
+    return jm.submit("refinish_pictures", body)
+
+
 def _wants_auto_edit_for(lib: Library, safe: str, library_default: bool) -> bool:
     """Should the unattended pass finish *this* target's fresh stack?
 

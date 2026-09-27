@@ -82,6 +82,38 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟠 BUG (trust / autonomy — PRIORITY 2; setup audit 2026-09-26, reproduced) — "Combine into one deep target" is
+  silently undone by the next scan.** *(Size M. Confidence: reproduced by script, twice. Filed at the owner's
+  request 2026-09-26.)* After Combine, the source folder in `incoming/` is untouched (correctly — §10) and nothing
+  records that it was merged, so the next whole-incoming scan (the watcher runs one on any new file, and "Scan now")
+  recreates the source target from it with all its subs; with `auto_stack` on it is re-stacked, and the merge
+  suggestion reappears with an identical signature. **Where:** `seestack/io/scanner.py` (`open_or_create_target`,
+  no tombstone check), `seestack/io/library.py::merge_targets`, `frontend/src/components/mergeSuggestions.ts`.
+  **Repro:** two `<T>_sub` folders of one object → scan → Combine → scan again → `targets == ['M_31', 'M_31_night_2']`.
+  **Fix shape:** record merged folder names (a library table or registry field, additive per §9) at merge time and
+  have the scanner route those folders to the destination target instead of minting a new one; test "merge then
+  rescan keeps one target". Never touch `incoming/` to achieve it.
+- **🟠 BUG (trust — PRIORITY 2–3; setup audit 2026-09-26, reproduced) — Combine drops the source target's user data,
+  under copy that says "nothing is deleted".** *(Size S–M. Confidence: reproduced.)* v0.460.0 made
+  `merge.carry_stack_runs` carry stack runs and per-run recipes, but target-level data is still lost: the source's
+  **notes, tags, saved Stack-form defaults (`web_stack_defaults`), integration goal (`integration_goal_s`),
+  per-target auto-edit preference and cover pin**; and every carried frame loses `restored_utc`,
+  `source_size_bytes`, `source_mtime` and `streak_cx/cy`. **Where:** `seestack/io/merge.py` (`_frame_without_id`;
+  `_per_run_meta` carries only `^prefix:<run_id>$` keys), `seestack/io/library.py::merge_targets` (never reads
+  `TargetEntry.notes/tags`). **Repro:** set a note and a tag on the source, Combine, read the destination: `None []`,
+  meta keys `['name','schema_version']`. **Fix shape:** carry each field with an explicit rule for conflicts (notes
+  concatenated with a source heading, tags unioned, destination's own defaults/goal/pin win when set), and carry
+  the frame columns verbatim; test each field.
+- **🟡 BUG (trust — PRIORITY 3; setup audit 2026-09-26, reproduced) — after Combine, the deep target's picture
+  becomes the source's shallow one-night stack.** *(Size S. Confidence: reproduced.)* The carried run keeps its
+  own `timestamp_utc`, the source is usually the most recent night, and `refresh_target_stats` /
+  `finishedpicture.displayed_picture_run` pick the newest run — so the Library wall and the Target page show the
+  thinner picture until the next restack. **Where:** `seestack/io/merge.py` (carried run timestamps),
+  `seestack/io/project.py` (newest-run selection), `seestack/io/library.py` (`last_stack_preview` refresh),
+  `webapp/finishedpicture.py`. **Repro:** `last_stack_preview` goes `dst-preview` → `src-preview` on merge.
+  **Fix shape:** keep the destination's displayed picture across a merge (e.g. pin it as the cover when it had
+  none, via the existing cover mechanism) and say in the merge result which picture is shown.
+
 - **LEAD, MEASURED (Builder 2026-09-25, filed while shipping v0.475.0 — the one thing that fix measured and
   deliberately did not change) — the reveal's two sides are not identically sampled when the master is
   drizzled, so part of the "stacking cut your noise ~N×" number is the drizzle kernel rather than the
@@ -371,6 +403,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   finished run, which is precisely what option (3) below is for. The displaced renders are all re-derivable Auto
   output, so the harm ceiling here is "the wall shows a linear stack instead of an Auto render until re-run",
   not "the owner's own editing is lost". Do not re-prioritise this up on the strength of the 21-target count.
+  **✅ THE EXISTING DAMAGE HAS A REPAIR — v0.479.3 (owner-requested 2026-09-26).** Settings → Maintenance →
+  "Give back pictures a restack flattened" (`webapp/refinish.py`, `pipeline.submit_refinish_pictures`) re-applies
+  Auto to a flat displayed run **only** where the newest older finished picture carries our `editor_auto_baked_look`
+  stamp; hand-finished, never-finished, cover-pinned and auto-edit-off targets are left alone and named. What
+  remains open below is prevention by cover semantics (option 3), unchanged.
   **The mechanism in one line:** `current_picture_path` resolves cover → newest-with-a-preview, and
   `cover_stack_run_id` is NULL on all 89 of the owner's targets — so a restack, being newest, becomes the
   picture, and with the batch's auto-edit switch off that picture is a flat linear stack. v0.447.2 made the
@@ -3914,6 +3951,19 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.479.3** — 🟠 PRIORITY 2 (trust), owner-requested repair for observer [#903](https://github.com/JimmyeJones/astrostack/issues/903):
+  **Settings → Maintenance → "Give back pictures a restack flattened"** re-applies Auto to a target's flat displayed
+  run only when the newest older finished picture carries our `editor_auto_baked_look` stamp (`webapp/refinish.py`,
+  `pipeline.submit_refinish_pictures`, `GET/POST /api/unstretched-pictures/refinish`). Hand-finished, never-finished,
+  cover-pinned and auto-edit-off targets are left alone and named. 11 backend + 5 frontend tests. Same PR, unversioned
+  infra: `release-tags.yml`, CI "Version bump is sane", `stable.yml`, `scripts/deploy.sh` / `rollback.sh`. Full entry
+  in [`SHIPPED.md`](SHIPPED.md).
+- **v0.479.2** — 🟠 PRIORITY 3 (trust / friendliness), **recovered from a branch that never merged**: the readiness
+  card's "is more time worth it?" line projected along the ideal √t law even when the target's own stacks had measured
+  a slower falloff — quoting "roughly 16 h more" where the measured rate implies ~750 h. `grainProjection` now projects
+  along `min(IDEAL_EXPONENT, integrationTrend.exponent)`, the same fit History's noise-trend card prints. Built as
+  v0.407.2 on 2026-09-10 (`claude/sweet-babbage-qz96hz`), never PR'd; re-applied onto current `main` alongside the later
+  lower-fence change. 7 tests fail before, pass after. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.479.1** — INFRA / tooling, found while shipping v0.479.0: **no dogfood pass had ever held two stacks of
   one target**, so every surface whose precondition is "this target has a previous picture" had only ever been
   photographed self-hidden — the "Did it get better?" card and its "How far you've come" link, the deepening

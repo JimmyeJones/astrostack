@@ -234,12 +234,26 @@ the app. It reads them and writes everything it makes into `library/`.
 
 ```bash
 cd astrostack
-git pull
-docker compose --env-file .env -f docker/docker-compose.yml up -d --build
+sudo scripts/deploy.sh
 ```
 
-Your data and settings are untouched — they live in your dataset, not in the
-code. Don't add `--no-cache`: it forces the whole ASTAP download to happen
+That deploys the **`stable`** version — a build that has been on `main` for at
+least three days with its tests passing, so you don't catch a change halfway
+through being fixed. It shows you what's running and what it's about to
+install, **stops the app, backs up your data** (a ZFS snapshot when your data
+folder is its own dataset, otherwise a copy of the databases and settings),
+builds, and waits until the app reports healthy.
+
+- **A specific version:** `sudo scripts/deploy.sh v0.479.2` (every release is a
+  git tag).
+- **Undo the last update:** `sudo scripts/rollback.sh`. If the older version
+  can't read the newer database format, it will say so and ask you to add
+  `--restore-data`, which puts back the backup taken before the update (and
+  loses anything the app wrote since). Your raw subs in `incoming/` are never
+  touched by either script.
+
+Your data and settings live in your dataset, not in the code. Don't add
+`--no-cache` to a manual build: it forces the whole ASTAP download to happen
 again for no benefit.
 
 ## If something goes wrong

@@ -1,0 +1,73 @@
+name: Release tags
+
+# One git tag per released version (`v0.479.2` → the merge that shipped it), so a
+# deploy or a rollback can name an exact build (`git checkout v0.455.7`), and a
+# version number can never be used twice without the run going red.
+#
+# - push to main: if this push changed `webapp/__init__.py`'s `__version__`, tag
+#   it. If that tag already exists, two changes shipped under one number
+#   (v0.448.0 and v0.453.3 each were) — fail loudly rather than move the tag.
+# - workflow_dispatch "backfill": tag the first commit on main's first-parent
+#   line that carried each past version. Safe to re-run: existing tags are kept.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: "Tag every past version on main (first use of each number)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-tags
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag this push's version
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          version_at() { git show "$1:webapp/__init__.py" 2>/dev/null | grep -oP '__version__\s*=\s*"\K[^"]+' || true; }
+          # Compare with main as it was before this push (a PR merge, or several commits).
+          prior="HEAD^1"
+          if [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then prior="$BEFORE"; fi
+          now="$(version_at HEAD)"; before="$(version_at "$prior")"
+          if [ -z "$now" ] || [ "$now" = "$before" ]; then
+            echo "Version unchanged by this push (${now:-none}); nothing to tag."; exit 0
+          fi
+          tag="v$now"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            if [ "$(git rev-parse "$tag^{commit}")" = "$(git rev-parse HEAD)" ]; then
+              echo "$tag is already on this commit."; exit 0
+            fi
+            echo "::error::$tag already exists at $(git rev-parse --short "$tag^{commit}") — this push shipped a second change under the same version number. Bump the version again on the next change; the existing tag is left where it is."
+            exit 1
+          fi
+          git tag "$tag" HEAD
+          git push origin "refs/tags/$tag"
+          echo "Tagged $tag at $(git rev-parse --short HEAD)"
+      - name: Backfill every past version
+        if: github.event_name == 'workflow_dispatch' && inputs.backfill
+        run: |
+          prev=""; made=0; kept=0
+          for c in $(git rev-list --first-parent --reverse HEAD); do
+            v="$(git show "$c:webapp/__init__.py" 2>/dev/null | grep -oP '__version__\s*=\s*"\K[^"]+' || true)"
+            [ -n "$v" ] && [ "$v" != "$prev" ] || continue
+            prev="$v"
+            if git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then kept=$((kept+1)); continue; fi
+            git tag "v$v" "$c"; made=$((made+1))
+          done
+          [ "$made" -eq 0 ] || git push origin --tags
+          echo "Created $made tags; $kept already existed."
