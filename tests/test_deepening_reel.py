@@ -8,6 +8,8 @@ degrades gracefully below two usable stacks.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from astropy.io import fits
 
@@ -16,6 +18,7 @@ from seestack.render.deepening import (
     _solve_stf_params,
     build_deepening_reel,
     deepening_frame_label,
+    deepening_series,
     render_deepening_frames,
 )
 from seestack.render.thumbnail import autostretch
@@ -235,3 +238,127 @@ def test_a_frame_label_follows_its_frame_through_a_skip(tmp_path):
     assert np.array_equal(f0[-24:, :64], b0[-24:, :64])
     # Survivor 1 (path g2) carries path-2's label → a backing bar appears.
     assert not np.array_equal(f1[-24:, :64], b1[-24:, :64])
+
+
+# --- the series' ordering clock ------------------------------------------------
+# `timestamp_utc` is when the stack *ran*; `capture_start_utc`/`capture_end_utc`
+# are when its subs were *shot*. `webapp.capture_nights` states the app's rule —
+# anything that says "shot on …" has to use the second pair — and the reel, whose
+# own title is "night after night", was the one surface still ordering and
+# labelling by the first.
+
+
+@dataclass
+class _Run:
+    """The handful of `StackRunRow` attributes `deepening_series` reads."""
+
+    id: int
+    timestamp_utc: str
+    n_frames_used: int = 100
+    capture_start_utc: str | None = None
+    capture_end_utc: str | None = None
+    options_json: str = "{}"
+
+
+def test_series_orders_by_when_the_subs_were_shot_not_when_the_stack_ran():
+    # A back catalogue reprocessed out of order: the June night was stacked last.
+    july = _Run(id=1, timestamp_utc="2026-08-01T00:00:00Z", n_frames_used=200,
+                capture_start_utc="2026-07-10T22:00:00Z",
+                capture_end_utc="2026-07-10T23:00:00Z")
+    june = _Run(id=2, timestamp_utc="2026-08-02T00:00:00Z", n_frames_used=100,
+                capture_start_utc="2026-06-10T22:00:00Z",
+                capture_end_utc="2026-06-10T23:00:00Z")
+    series = deepening_series([july, june])
+    assert series.dated_by == "capture"
+    assert [r.id for r in series.runs] == [2, 1]  # June's night first
+
+
+def test_series_falls_back_to_stack_time_when_one_run_has_no_window():
+    # All-or-nothing: a pre-schema-18 row (or a channel combine) keeps the whole
+    # series on the stack clock rather than interleaving two different ones.
+    a = _Run(id=1, timestamp_utc="2026-08-01T00:00:00Z",
+             capture_start_utc="2026-07-10T22:00:00Z",
+             capture_end_utc="2026-07-10T23:00:00Z")
+    b = _Run(id=2, timestamp_utc="2026-08-02T00:00:00Z")
+    series = deepening_series([b, a])
+    assert series.dated_by == "stack"
+    assert [r.id for r in series.runs] == [1, 2]
+
+
+def test_a_reprocess_of_the_same_nights_is_not_a_new_deepening_step():
+    n1 = _Run(id=1, timestamp_utc="2026-06-11T00:00:00Z", n_frames_used=100,
+              capture_start_utc="2026-06-10T22:00:00Z",
+              capture_end_utc="2026-06-10T23:00:00Z")
+    n2 = _Run(id=2, timestamp_utc="2026-07-11T00:00:00Z", n_frames_used=200,
+              capture_start_utc="2026-06-10T22:00:00Z",
+              capture_end_utc="2026-07-10T23:00:00Z")
+    # "Reprocess everything" re-stacks exactly the same two nights again.
+    redo = _Run(id=3, timestamp_utc="2026-09-01T00:00:00Z", n_frames_used=200,
+                capture_start_utc="2026-06-10T22:00:00Z",
+                capture_end_utc="2026-07-10T23:00:00Z")
+    series = deepening_series([n1, n2, redo])
+    assert series.dated_by == "capture"
+    # Two steps, not three — and the newest render of the deeper step wins.
+    assert [r.id for r in series.runs] == [1, 3]
+
+
+def test_a_linear_master_is_preferred_over_an_editor_export_of_the_same_nights():
+    linear = _Run(id=1, timestamp_utc="2026-06-11T00:00:00Z", n_frames_used=100,
+                  capture_start_utc="2026-06-10T22:00:00Z",
+                  capture_end_utc="2026-06-10T23:00:00Z")
+    export = _Run(id=2, timestamp_utc="2026-06-12T00:00:00Z", n_frames_used=100,
+                  capture_start_utc="2026-06-10T22:00:00Z",
+                  capture_end_utc="2026-06-10T23:00:00Z",
+                  options_json='{"display_space": true, "derived_from": 1}')
+    later = _Run(id=3, timestamp_utc="2026-07-11T00:00:00Z", n_frames_used=200,
+                 capture_start_utc="2026-06-10T22:00:00Z",
+                 capture_end_utc="2026-07-10T23:00:00Z")
+    series = deepening_series([linear, export, later])
+    # The export arrives already denoised/sharpened, so it would show the noise
+    # dropping for a reason other than more subs.
+    assert [r.id for r in series.runs] == [1, 3]
+
+
+def test_collapsing_never_dissolves_a_two_stack_card():
+    # Both stacks are of the one night, so the collapse would leave a single
+    # step — and the reel self-hides below two. Keep both instead.
+    a = _Run(id=1, timestamp_utc="2026-06-11T00:00:00Z", n_frames_used=100,
+             capture_start_utc="2026-06-10T22:00:00Z",
+             capture_end_utc="2026-06-10T23:00:00Z")
+    b = _Run(id=2, timestamp_utc="2026-06-12T00:00:00Z", n_frames_used=100,
+             capture_start_utc="2026-06-10T22:00:00Z",
+             capture_end_utc="2026-06-10T23:00:00Z")
+    series = deepening_series([a, b])
+    assert series.dated_by == "capture"
+    assert [r.id for r in series.runs] == [1, 2]
+
+
+def test_a_half_recorded_window_still_orders_by_capture():
+    # One usable DATE-OBS is an honest single night, treated as both ends — the
+    # same rule `capture_night_range` follows.
+    # Stack times deliberately run the *other* way, so agreeing with them would
+    # not produce this order.
+    a = _Run(id=1, timestamp_utc="2026-08-01T00:00:00Z",
+             capture_end_utc="2026-07-10T23:00:00Z")
+    b = _Run(id=2, timestamp_utc="2026-08-02T00:00:00Z",
+             capture_start_utc="2026-06-10T22:00:00Z")
+    series = deepening_series([a, b])
+    assert series.dated_by == "capture"
+    assert [r.id for r in series.runs] == [2, 1]
+
+
+def test_empty_series_is_stack_dated_and_empty():
+    series = deepening_series([])
+    assert series.runs == []
+    assert series.dated_by == "stack"
+
+
+def test_frame_label_names_the_span_a_multi_night_step_covers():
+    # A step made of four nights dated by one of them is the defect the capture
+    # ordering exists to fix, one layer down in the burned-in caption.
+    assert deepening_frame_label("2024-09-11", 600, "2024-09-14") == \
+        "11-14 Sep 2024 · 600 subs"
+    # One night, an equal end, or no end at all ⇒ exactly the old single date.
+    assert deepening_frame_label("2024-09-11", 600, "2024-09-11") == \
+        "11 Sep 2024 · 600 subs"
+    assert deepening_frame_label("2024-09-11", 600) == "11 Sep 2024 · 600 subs"

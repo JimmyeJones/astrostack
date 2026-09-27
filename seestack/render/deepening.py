@@ -24,9 +24,12 @@ stored pixels, schema, config, or default.
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -111,25 +114,153 @@ def _apply_stf_params(rgb: np.ndarray, params: _StfParams) -> np.ndarray:
     return np.clip(out, 0.0, 1.0)
 
 
-def deepening_frame_label(date_iso: str | None, n_frames: int | None) -> str:
+def deepening_frame_label(date_iso: str | None, n_frames: int | None,
+                          end_iso: str | None = None) -> str:
     """A compact provenance caption for one reel frame — e.g.
-    ``"19 Jul 2026 · 120 subs"`` — so a *downloaded/shared* clip (which travels
-    without the surrounding card) still tells its "night after night" story frame
-    by frame. Best-effort: a missing/garbage date or a non-positive sub count is
+    ``"19 Jul 2026 · 120 subs"``, or ``"11-14 Sep 2024 · 600 subs"`` when the step
+    spans several nights — so a *downloaded/shared* clip (which travels without
+    the surrounding card) still tells its "night after night" story frame by
+    frame. Best-effort: a missing/garbage date or a non-positive sub count is
     simply dropped (degrading to just the date, just the count, or ``""`` when
     neither is known, in which case the label is a clean no-op). Pure, so it's
     unit-tested. Reuses the nameplate's forgiving date parser for one date format
-    across the app."""
-    from seestack.nameplate import format_acq_date
+    across the app.
+
+    ``end_iso`` is the *other* end of a capture window (see
+    :func:`deepening_series`): a reel frame ordered by when its subs were shot is
+    a stack of the nights ``date_iso…end_iso``, and naming only one end of that
+    would date a four-night stack by a single night. Omitted, equal, or
+    unparseable ⇒ exactly the single-date label this function has always
+    produced, so the stack-time series is byte-for-byte unchanged."""
+    from seestack.nameplate import format_acq_date, format_acq_range
 
     parts: list[str] = []
-    date = format_acq_date(date_iso)
+    date = (format_acq_range(date_iso, end_iso) if end_iso
+            else format_acq_date(date_iso))
     if date:
         parts.append(date)
     if n_frames and n_frames > 0:
         n = int(n_frames)
         parts.append("1 sub" if n == 1 else f"{n} subs")
     return " · ".join(parts)
+
+
+#: Version tag folded into the reel's cache signature by the caller. Bumped when
+#: the *ordering or labelling* of an unchanged set of masters changes, so an
+#: install sitting on a cached reel rebuilds it rather than serving one ordered by
+#: the old clock. (The caller's own tag covers render-output changes.)
+DEEPENING_SERIES_VERSION = "capture-v1"
+
+
+def _run_display_space(run: Any) -> bool:
+    """Whether a run row is an **editor export** — a tone-mapped ``[0, 1]`` image
+    rather than a linear master (``options_json``'s ``display_space`` flag, set by
+    ``webapp.pipeline``'s edit-export path). Best-effort and pure: unreadable or
+    absent JSON reads as "linear", which is what every stacker output is."""
+    raw = getattr(run, "options_json", None)
+    if not raw:
+        return False
+    try:
+        opts = json.loads(raw)
+    except (TypeError, ValueError):
+        return False
+    return bool(isinstance(opts, dict) and opts.get("display_space"))
+
+
+def _capture_window(run: Any) -> tuple[str, str] | None:
+    """``(start, end)`` of a run's capture window, or ``None`` when it has none.
+
+    One end on its own is honest — it means a run whose frames only yielded a
+    single usable ``DATE-OBS`` — and is returned as both ends, exactly as
+    :func:`webapp.capture_nights.capture_night_range` treats it."""
+    start = (getattr(run, "capture_start_utc", None) or "").strip() or None
+    end = (getattr(run, "capture_end_utc", None) or "").strip() or None
+    if start is None and end is None:
+        return None
+    if start is None:
+        return end, end  # type: ignore[return-value]
+    if end is None:
+        return start, start
+    return (start, end) if start <= end else (end, start)
+
+
+@dataclass(frozen=True)
+class DeepeningSeries:
+    """The reel's steps, oldest → newest, and **which clock** ordered them.
+
+    ``dated_by`` is ``"capture"`` when every candidate run records when its subs
+    were *shot* and the series is ordered and labelled by that, or ``"stack"``
+    when at least one does not and the whole series falls back to
+    ``timestamp_utc`` (when the stack *ran*). Callers must not mix the two: a
+    caption that dated some frames by one clock and some by the other would be
+    describing two different things with one word.
+    """
+
+    runs: list[Any]
+    dated_by: str
+
+
+def deepening_series(runs: Sequence[Any]) -> DeepeningSeries:
+    """Order a target's stack runs into the deepening series the reel animates.
+
+    **Why this is not simply "sort by ``timestamp_utc``", which is what it used to
+    be.** ``timestamp_utc`` is when the stack *ran*; ``capture_start_utc`` /
+    ``capture_end_utc`` (schema 18+) are when its subs were *shot*, and
+    :mod:`webapp.capture_nights` already states the rule the rest of the app
+    follows — *anything that says "shot on …" has to use the second pair*. A reel
+    titled "night after night", labelling each frame with the day somebody pressed
+    Stack, was the one surface that didn't: re-stack a back catalogue and the
+    series is ordered by the order you happened to reprocess it in, each frame
+    dated years off; stack three nights and then re-stack night one alone and the
+    reel runs deep → shallow, contradicting its own "cleaner and deeper" story.
+
+    So when **every** candidate run carries a window, the series is ordered by it
+    (``end``, then ``start``, then id) and reported as ``dated_by="capture"``. If
+    even one run lacks one — a pre-schema-18 row, a channel combine — the whole
+    series keeps today's stack-time order and reports ``dated_by="stack"``.
+    All-or-nothing on purpose: a series half-ordered by one clock and half by the
+    other is ordered by neither.
+
+    **One step per distinct set of nights.** A reprocess of subs already in the
+    series is not a deepening step — it is the same nights again — so runs sharing
+    a capture window collapse to one, preferring the one built from the most
+    frames, then a **linear master over an editor export** (the reel tone-maps
+    every frame through one shared stretch, and an export arrives already
+    denoised/sharpened, so it would show noise dropping for a reason other than
+    more subs), then the newest. That is what stops a "Reprocess everything" run
+    landing as a final frame identical to the one before it. The collapse never
+    takes the series below two steps — the reel self-hides there, and a card that
+    exists today must not vanish because its two stacks turn out to be of one
+    night — so in that case the un-collapsed capture-ordered list is returned.
+
+    Pure; duck-typed over anything with the row's attributes (``StackRunRow``,
+    or a stub in a test), so the engine keeps no webapp import.
+    """
+    ordered = sorted(runs, key=lambda r: (r.timestamp_utc or "", getattr(r, "id", 0) or 0))
+    windows = [_capture_window(r) for r in ordered]
+    if not ordered or any(w is None for w in windows):
+        return DeepeningSeries(runs=ordered, dated_by="stack")
+
+    by_window: dict[tuple[str, str], list[Any]] = {}
+    for run, window in zip(ordered, windows, strict=True):
+        by_window.setdefault(window, []).append(run)  # type: ignore[arg-type]
+
+    def _best(group: list[Any]) -> Any:
+        return max(group, key=lambda r: ((r.n_frames_used or 0),
+                                         0 if _run_display_space(r) else 1,
+                                         getattr(r, "id", 0) or 0))
+
+    def _order(pairs: list[tuple[tuple[str, str], Any]]) -> list[Any]:
+        return [run for _w, run in
+                sorted(pairs, key=lambda p: (p[0][1], p[0][0], getattr(p[1], "id", 0) or 0))]
+
+    collapsed = _order([(w, _best(g)) for w, g in by_window.items()])
+    if len(collapsed) >= 2:
+        return DeepeningSeries(runs=collapsed, dated_by="capture")
+    # Two stacks of one night: keep both rather than dissolving the card.
+    return DeepeningSeries(
+        runs=_order(list(zip(windows, ordered, strict=True))),  # type: ignore[arg-type]
+        dated_by="capture")
 
 
 def _load_label_font(size: int):

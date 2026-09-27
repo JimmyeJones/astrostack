@@ -49,6 +49,43 @@ describe("deepeningCaption", () => {
     expect(cap).toContain("200 subs");
     expect(cap).not.toContain("→");
   });
+
+  // On a card titled "night after night", a bare date range reads as when the
+  // subs were shot. It only *is* that when the backend says so — the two differ
+  // by years on a re-stacked back catalogue — so the caption names its clock.
+  it("says the dates are when the subs were shot when the series is capture-dated", () => {
+    const cap = deepeningCaption("M31", {
+      available: true, n_stacks: 3, first_subs: 120, last_subs: 1240,
+      first_utc: "2026-06-28T00:00:00Z", last_utc: "2026-07-28T00:00:00Z",
+      dated_by: "capture",
+    });
+    expect(cap).toContain(`shot ${shortDate("2026-06-28T00:00:00Z")} → `
+      + `${shortDate("2026-07-28T00:00:00Z")}`);
+    expect(cap).not.toContain("stacked");
+  });
+
+  it("says the dates are stack dates when that is all the app knows", () => {
+    const cap = deepeningCaption("M31", {
+      available: true, n_stacks: 3, first_subs: 120, last_subs: 1240,
+      first_utc: "2026-06-28T00:00:00Z", last_utc: "2026-07-28T00:00:00Z",
+      dated_by: "stack",
+    });
+    expect(cap).toContain(`stacked ${shortDate("2026-06-28T00:00:00Z")} → `
+      + `${shortDate("2026-07-28T00:00:00Z")}`);
+  });
+
+  it("qualifies a single date too, and leaves an older backend's range bare", () => {
+    expect(deepeningCaption("M31", {
+      available: true, n_stacks: 2, last_subs: 200,
+      first_utc: "2026-07-10T00:00:00Z", last_utc: "2026-07-10T00:00:00Z",
+      dated_by: "capture",
+    })).toContain(`shot ${shortDate("2026-07-10T00:00:00Z")}`);
+    // No `dated_by` (an older backend) ⇒ exactly the caption it always produced.
+    expect(deepeningCaption("M31", {
+      available: true, n_stacks: 2, last_subs: 200,
+      first_utc: "2026-07-10T00:00:00Z", last_utc: "2026-07-10T00:00:00Z",
+    })).toBe(`M31 · 2 stacks · 200 subs · ${shortDate("2026-07-10T00:00:00Z")}`);
+  });
 });
 
 describe("deepeningBlurb", () => {

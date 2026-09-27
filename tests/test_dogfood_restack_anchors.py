@@ -82,3 +82,18 @@ def test_it_reports_the_two_ways_the_pair_can_fail_silently():
     src = _script()
     assert "FEWER THAN TWO RUNS" in src
     assert "is NOT deeper" in src
+
+
+def test_it_reports_which_clock_the_reel_is_ordered_by():
+    """A reel ordered by when the stacks *ran* rather than by when the subs were
+    *shot* is the v0.480.0 bug, and it is invisible in "available=… over N
+    stacks": both clocks print the same line. So the readout names
+    ``dated_by``, and the field has to still exist for it to name."""
+    src = _script()
+    assert "dated_by" in src, "the readout no longer reports which clock ordered the reel"
+
+    from webapp.routers.stack import deepening_reel_info
+
+    assert "dated_by" in (deepening_reel_info.__doc__ or ""), (
+        "/deepening-reel/info no longer documents the field the script reads"
+    )

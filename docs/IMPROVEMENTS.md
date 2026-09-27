@@ -2775,14 +2775,23 @@ problems. Dogfood it every big-picture run and fix root causes.
 - **OWNER-REQUESTED 2026-09-25 — a progression video per target, ordered by when the subs were SHOT, "so I can
   see how my added frames affect targets."** *(Pillar: enjoy/understand — beginner feature. Size L.)* **Most of
   this exists and is not what he asked for:** `seestack/render/deepening.py` builds a "night after night" reel
-  (`DeepeningReelCard` on the Target page), but `webapp/routers/stack.py::_deepening_runs` orders it by **stack
+  (`DeepeningReelCard` on the Target page), but `webapp/routers/stack.py::_deepening_runs` ~~orders it by **stack
   time** (`timestamp_utc`) and labels each frame with that date. So a frame means "the day he pressed Stack",
-  not "the night he shot"; a target he stacked once has no reel; and a reprocess-all restack of the same subs
-  lands as a new last frame showing no change. What he wants is **one frame per capture night, cumulative**
+  not "the night he shot"~~ — **✅ THE CLOCK HALF SHIPPED AS v0.480.0** (Builder 2026-09-27): the series is now
+  ordered and labelled by the runs' own `capture_start_utc`/`capture_end_utc` when every one of them records a
+  window (`render/deepening.deepening_series`), a reprocess of nights already in the series no longer lands as a
+  new frame, and the caption says which clock its dates are on. **Do not re-file those three points.** What is
+  still open is the *shape* of the reel — a target he stacked once has no reel, and a step is still "a stack he
+  ran" rather than "a night". What he wants is **one frame per capture night, cumulative**
   (night 1; nights 1–2; …), labelled with the capture date and sub count. That needs stacks nobody has run, so
   the design question is cost: a full stack per night per target is hours on his deepest targets — look first at
   a reduced-resolution cumulative pass, and reuse any existing run whose sub set already matches a cumulative
   step. Keep the current stack-history reel; this is a second mode, not a replacement.
+  **▶ ONE DESIGN NOTE from the v0.480.0 build, so it is not re-derived.** k cumulative stacks over N subs is
+  **not** k passes: `seestack/stack/accumulator.py` already combines frame-by-frame, so a single pass that
+  *snapshots* the accumulator at each night boundary yields all k results for the cost of one stack — which is
+  what makes this affordable on a 35,894-sub target at all, and is the shape to cost first. `deepening_series`'
+  capture-window grouping is also already the primitive for "does an existing run match a cumulative step?".
 - ~~**OWNER-APPROVED 2026-09-25 — a noise-delta *picture* beside the "Did it get better?" sentence.**~~ —
   **✅ SHIPPED v0.479.0** (Builder 2026-09-26). Entry cut to [`SHIPPED.md`](SHIPPED.md); one-liner under
   "Shipped" below. One finding came out of sizing its sibling: the third owner-approved item in this section
@@ -2817,6 +2826,30 @@ problems. Dogfood it every big-picture run and fix root causes.
   owner's scale — a dogfood pass with `--mosaic` and `--editor`, not a drive-by. **Do not blind-flip the seed
   to the preset** to close this entry; if a cheap version is wanted, the honest one is the *chip*, moved from
   the nudge nobody sees to beside Auto's own note, which is a copy change and not what he asked for.
+  **⚠ SECOND BUILDER SIZING, 2026-09-27 — read this before starting shape (3): each of its three named
+  adjustments was checked in the code and each has a problem, so shape (3) as written is mostly a taste change.**
+  Recorded so the next run costs it rather than re-deriving it. **(a) The chip already reaches the owner.** The
+  finding above says the classification never reaches him; `frontend/src/components/editor/autoSummary.ts`'s
+  `presetSuggestionSentence` exists for exactly that reason (its docstring: *"The content-classification chip …
+  only appears on an empty pipeline … this surfaces the same hint on the surface they do land on"*), so the copy
+  half is already built and is **not** a slice. **(b) galaxy → `per_channel` gradient buys much less than it
+  looks.** Auto already emits `background.final_gradient {mode: "luminance"}`, and that op's `match_channels`
+  **defaults True** — its own help text is *"also flatten each colour's own gradient — light pollution tints one
+  side of the frame differently"*. So the colour cast the galaxy preset's `per_channel` exists to remove is
+  already removed; what is left is how the fit is computed, not whether the cast survives. **(c) cluster →
+  `stars.reduce` puts a documented preview↔export unfaithfulness on the on-by-default path.**
+  `seestack/edit/ops/stars.py::star_reduce_differs_on_proxy` records a **measured** 0.63–1.58 preview÷export ratio
+  at proxy steps 2–5 with no clean fix (*"the number is not faithful in either direction"*), and the owner's own
+  canvases are always decimated — so Auto emitting it would put that advisory on every cluster picture.
+  **(d) cluster → asinh and galaxy → the fixed S-curve are the exact loss the finding above warns about**, one
+  level down: both are hard-coded parameters replacing a data-driven one (`tone.stretch`'s measured `target_bg`,
+  `tone.curves {auto: true}`'s midtone lift derived at apply time). **What survives is the nebula pair alone** —
+  SCNR 0.7 → 0.8 and the saturation ceiling 1.25 → 1.35, i.e. two taste numbers on the on-by-default hot path with
+  nothing measured behind them — which does not justify the setting, the note and the behaviour change on its own.
+  **So the honest next step is a measurement, not a build:** does a confident classification tell Auto anything its
+  own cues (`sky`, `sky_sigma`, `median_fwhm`, `is_mosaic`) do not already encode? `classify_target`'s cues
+  (`star_share`, `ext_frac`, `chroma`) are right there to answer it on the `--mosaic` and `--big` samples. If the
+  answer is "only the nebula colour lift", **close this entry with that number** rather than shipping it.
 - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-25) — "Was the moon out?": a retrospective moon note on a
   session.**~~ — **⚪ CLOSED: ALREADY BUILT, END TO END. Do not pick it up** *(Builder 2026-09-25, grepped and
   read before starting it — it was the freshest entry in this section and the run's first candidate).* The
@@ -3914,6 +3947,30 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.480.0** — 🟠 BUG (trust + the owner's own 2026-09-25 request), verified by reproduction against the pre-fix
+  ordering: **the "night after night" reel was ordered and dated by when the stacks *ran*, not by when the subs were
+  *shot*.** `webapp/routers/stack._deepening_runs` sorted on `timestamp_utc` and labelled each burned-in frame caption
+  with it — while `stack_runs` has carried `capture_start_utc`/`capture_end_utc` since schema 18 and
+  `webapp/capture_nights.py`'s own docstring states the rule six other surfaces follow (*"Anything that says 'shot
+  on …' has to use the second pair"*). The card whose title is "night after night" was the one that didn't. Measured
+  consequences, each pinned by a test that the pre-fix sort fails: a back catalogue reprocessed out of order runs in
+  *reprocessing* order with every frame dated years off; three nights stacked and then night one re-stacked alone runs
+  deep → shallow, contradicting the card's own "cleaner and deeper" sentence; and a "Reprocess everything" run lands as
+  a final frame identical to the one before it. New pure `render/deepening.deepening_series` + `DeepeningSeries` +
+  `DEEPENING_SERIES_VERSION` owns the decision: ordered by capture window (`end`, `start`, id) when **every**
+  candidate run records one, else today's stack-time order — all-or-nothing, because a series half on one clock is
+  ordered by neither — and **one step per distinct set of nights**, preferring the deepest, then a linear master over
+  an editor export (an export arrives already denoised, so it would show noise dropping for a reason other than more
+  subs), then the newest. The collapse never takes the series below two steps, so no existing card can vanish.
+  Labels now name the *span* a step covers (`deepening_frame_label`'s additive `end_iso` → `format_acq_range`,
+  "11-14 Sep 2024 · 600 subs") through `capture_night_range`, so a reel frame and the Nights card cannot name one
+  session two dates. The info endpoint gains an additive `dated_by`, and the caption qualifies its range with it
+  ("shot 28 Jun → 28 Jul" vs "stacked …") — a bare range on this card read as the first whichever it was.
+  **This is not the owner's whole request**: one cumulative frame per capture night still needs stacks nobody has
+  run, and that half stays filed. Additive only: no config, schema, on-disk, default or existing-response-shape
+  change; the cache signature carries the series tag so an install rebuilds rather than serving a reel on the old
+  clock. Tests +12 (9 engine, 3 webapp, 4 vitest); the pre-fix ordering was run against every new expectation and
+  fails four of them plus the label.
 - **v0.479.1** — INFRA / tooling, found while shipping v0.479.0: **no dogfood pass had ever held two stacks of
   one target**, so every surface whose precondition is "this target has a previous picture" had only ever been
   photographed self-hidden — the "Did it get better?" card and its "How far you've come" link, the deepening
