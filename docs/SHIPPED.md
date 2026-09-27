@@ -1,5 +1,30 @@
 # Shipped — the record
 
+## v0.480.5 — 2026-09-27 — 🐛 every `log.exception` was missing from `/api/logs` (found by running the app, not by reading it)
+
+*(Same PR as v0.480.2–.4. Not a Combine bug: it surfaced in the scratch app's own log while the running-app pass was
+verifying them, which is the case for that pass in one line.)*
+
+**The bug.** `RingBufferLogHandler.emit` built a record's text with `record.getMessage()` and, when the record carried
+`exc_info`, appended `self.formatException(record.exc_info)`. `formatException` is a `logging.Formatter` method; a
+`logging.Handler` has no such attribute. So every record with a traceback raised `AttributeError` **before**
+`self._buf.append(entry)` — and the `except Exception: self.handleError(record)` that guards `emit` (logging must
+never raise) swallowed it. The record did not lose its traceback; **the whole record was dropped**, and Python printed
+`--- Logging error ---` plus a meta-traceback to the container's stderr instead.
+
+So every `log.exception` / `exc_info=True` in the app — `webapp.jobs`' "job … failed" first among them — was absent
+from `/api/logs`. The Logs page, and the read-only observer that GETs `/api/logs` on the owner's box (v0.441.0), both
+read a walk-away night with failures in it as an install with no errors at all. Plain `warning`/`error` lines were
+unaffected, which is why it had gone unnoticed: the buffer looked like it worked.
+
+**The fix.** A module-level `_EXC_FORMATTER = logging.Formatter()` whose `formatException` renders the triple. One
+line, no API, schema or config change.
+
+**Test.** `tests/webapp/test_logs.py::test_a_failure_with_a_traceback_reaches_the_log` logs a real caught exception
+and asserts both that the record is in `/api/logs` and that the traceback came with it. Against the old code it fails
+on the first assertion — the record itself was never there.
+
+
 ## v0.480.4 — 2026-09-27 — 🐛 after Combine, the deep target showed the shallow night's picture
 
 *(Last of the three Combine bugs from the 2026-09-26 setup audit. Same PR as v0.480.2 and v0.480.3, which together

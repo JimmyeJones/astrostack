@@ -3952,6 +3952,12 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.480.5** — 🐛 **found by the running-app pass that verified v0.480.2–.4**, not by a test: every
+  `log.exception` in the app was missing from `/api/logs`. `RingBufferLogHandler.emit` formatted tracebacks with
+  `self.formatException` — a `logging.Formatter` method, not a `Handler` one — so a record carrying `exc_info`
+  raised before it was appended and the handler's "logging must never raise" guard dropped **the whole record**.
+  A failed job printed a Python "--- Logging error ---" to the container's stderr and left the Logs page (and the
+  read-only observer, which GETs `/api/logs`) reading as an install with no errors. One-line fix + 1 test, red before.
 - **v0.480.4** — 🐛 Combine no longer hands the deep target a one-night picture: the carried run keeps its own
   (usually newer) `timestamp_utc` and every surface takes the newest run when nothing is pinned, so
   `merge_targets_result` now pins the destination's *own* displayed picture as its cover
