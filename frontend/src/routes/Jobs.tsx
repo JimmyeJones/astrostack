@@ -205,6 +205,7 @@ export function processTargetSummary(r: Record<string, unknown>): {
   line: string; stacked: boolean; thin: ThinStackWarning | null;
   cleaned: string | null; storage: { title: string; message: string } | null;
   calMismatch: string | null;
+  starMatched: string | null;
 } {
   const stacked = Boolean(r.stacked);
   const solved = Number(r.solved_accepted ?? 0);
@@ -258,7 +259,15 @@ export function processTargetSummary(r: Record<string, unknown>): {
     // and written it to the server log — which is exactly the place a walk-away
     // user never looks — so say it where the finished picture lands.
     const calMismatch = calibrationMismatchNote(stack.calibration_warnings);
-    return { line: `${line}.`, stacked, thin, cleaned, storage, calMismatch };
+    // Where the extra depth came from, when "Include subs that aren't located
+    // yet" was on: those subs were positioned from a neighbour rather than found
+    // in the sky, and a picture that is suddenly twice as deep should say so.
+    const starMatched = starMatchedNote(
+      stack.n_star_matched, stack.n_frames_used,
+    );
+    return {
+      line: `${line}.`, stacked, thin, cleaned, storage, calMismatch, starMatched,
+    };
   }
   const reason = typeof r.stack_skipped_reason === "string"
     ? r.stack_skipped_reason : null;
@@ -273,7 +282,30 @@ export function processTargetSummary(r: Record<string, unknown>): {
   }
   return {
     line, stacked, thin: null, cleaned: null, storage: null, calMismatch: null,
+    starMatched: null,
   };
+}
+
+/** Plain-language credit when part of a stack's depth came from subs the app
+ * placed by recognising their stars, rather than by locating each one in the sky
+ * (pure, tested).
+ *
+ * `star_match_unsolved` is off by default, so this is silent on every ordinary
+ * run. When it is on it matters: the picture can be several times deeper than the
+ * user's last one, and the reason is that some of its subs were positioned from a
+ * neighbour rather than measured against the sky — which is an honest thing to
+ * know about a picture and a useless thing to have to go and find out. Returns
+ * null for 0, for junk, and for a backend that doesn't report the count. */
+export function starMatchedNote(n: unknown, used: unknown): string | null {
+  const matched = Math.max(0, Number(n ?? 0) || 0);
+  if (matched <= 0) return null;
+  const total = Math.max(matched, Number(used ?? 0) || 0);
+  const one = matched === 1;
+  return `${one ? "1 sub" : `${matched} subs`} of the ${total} in this picture `
+    + `${one ? "was" : "were"} lined up by recognising ${one ? "its" : "their"} `
+    + `stars, because the app couldn't read the sky in ${one ? "it" : "them"} — so `
+    + `${one ? "its" : "their"} position comes from a sub it could read, not from `
+    + "the sky itself.";
 }
 
 /** The run's master-vs-subs calibration mismatches as one sentence, or null when
@@ -1078,7 +1110,7 @@ function JobResultActions({ job }: { job: Job }) {
   if (job.state !== "done" || !job.result) return null;
   const r = job.result as Record<string, unknown>;
   if (job.kind === "process_target") {
-    const { line, stacked, thin, cleaned, storage, calMismatch } =
+    const { line, stacked, thin, cleaned, storage, calMismatch, starMatched } =
       processTargetSummary(r);
     // Deep-link straight to the finished run's editor when we know its id
     // (v0.85.3+ backend); fall back to the target's History on an older backend.
@@ -1128,6 +1160,11 @@ function JobResultActions({ job }: { job: Job }) {
           <Alert color="yellow" p="xs" title="Your master dark doesn't match these subs">
             <Text size="xs">{calMismatch}</Text>
           </Alert>
+        ) : null}
+        {/* Where the depth came from, when subs that were never located in the
+            sky were brought in by their star patterns. Silent by default. */}
+        {starMatched ? (
+          <Text size="xs" c="dimmed">{starMatched}</Text>
         ) : null}
         {/* The honest "we quietly removed the trails" trust cue — self-omits on a
             thin stack (warning wins) and when no rejection pass cleaned anything. */}

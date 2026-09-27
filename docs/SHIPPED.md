@@ -1,5 +1,69 @@
 # Shipped — the record
 
+## v0.482.0 — 2026-09-27 — the subs the sky could not be read in can join the stack, by their stars
+
+**The gap, and it is the owner's own "gibberish on faint targets" report.** `run_stack` combines only accepted **and**
+plate-solved frames. On a faint or star-poor field ASTAP fails on most subs, so hundreds of perfectly good frames sit
+unused and the "stack" is the handful that happened to solve — a single-frame-deep picture of per-pixel colour speckle.
+The stack-then-solve rescue (v0.210.0) only covers the band where *almost nothing* solved (`n_solved < min_frames`, 8);
+a target with 40 of 300 located has never had anything at all.
+
+**What shipped.** A new `StackOptions.star_match_unsolved` (**off by default**) has `run_stack` place its
+accepted-but-unsolved subs from the reference sub's own stars, through the machinery v0.481.0 built and tested:
+`starmatch.find_star_transform` for the similarity transform and `wcs_io.wcs_text_after_pixel_affine` for the exact
+composition onto each sub's own pixel grid. It is a Stack-form advanced toggle (descriptor-driven, so no new hand-written
+UI) with plain-language help, and the run reports `StackResult.n_star_matched`.
+
+**Five things it deliberately does *not* do.**
+1. **Nothing is written to the project DB.** The WCS lives only in the in-memory `FrameRow` copies the run stacks. A
+   star-matched position is derived from a neighbour rather than verified against the sky, so it must never pose as a
+   plate solve in a row a later reader trusts — and a frame left unsolved keeps being re-offered to the *real* solver on
+   every scan, which is where it should be rescued from for good. Pinned by a test that re-reads every row after the run.
+2. **It stands down on a mosaic canvas.** The reference sub's stars cover one panel, so an off-panel sub has nothing to
+   match against and a guess would put it on the wrong part of the sky. Mosaics are therefore still open work.
+3. **It cannot move the canvas.** The pass runs *after* the canvas decision and *before* lucky-imaging and the
+   readability preflight — so a rescued sub is filtered by exactly the same rules as a solved one, and can only ever add
+   depth inside a canvas the solved frames already chose.
+4. **It refuses rather than guesses**, via v0.481.0's gates (≥6 matched stars, sub-pixel residual, no mirror, scale
+   within 1 %, bounded centre shift). A sub it will not place is exactly as unused as it is today.
+5. **It is bounded.** `STAR_MATCH_MAX_UNSOLVED = 400` attempts, star-richest first, one gray held at a time, cancellable
+   per sub — so an unattended run on a 30,000-sub target cannot disappear into it.
+
+**🐛 And it found a real bug in v0.481.0, two days into its own soak.** `sep` — the source extractor astroalign detects
+stars with — caps the sub-objects one deblend may produce at **1024**, and a *rich* field overflows it. astroalign
+re-raises that as a generic `TypeError("Input type for source not supported")`, i.e. indistinguishable from having been
+handed something that is not an image, so the symptom is **a matcher that quietly never matches**. Measured on a 480×320
+synthetic field of 30 stars — *sparser* than a real Seestar sub: **0 of 8** subs matched at sep's default and **8 of 8**
+once the cap is lifted, with rotations recovered to 0.07° and sub-pixel residuals. `starmatch` now asserts
+`SEP_SUB_OBJECT_LIMIT = 65536` (that measurement scaled by a real frame's area; the limit only sizes an internal buffer,
+so a sparse field pays nothing) before every match, best-effort so a missing `sep` can never turn a working match into an
+exception. **v0.481.0's own bootstrap fix was exposed to this too** — its tests happened to use a field sparse enough to
+stay under the cap, which is precisely the fixture-cannot-exhibit-its-bug shape `docs/HISTORY.md` is full of. The
+regression test resets sep to its own default first, because the limit is process-global and any earlier match in the
+same worker would otherwise have lifted it and let the test pass on the bug.
+
+**Surfaced where the picture lands.** `n_star_matched` rides the job result
+(`pipeline._stack_target`) and `Jobs.tsx::starMatchedNote` turns it into one sentence — *"6 subs of the 8 in this
+picture were lined up by recognising their stars, because the app couldn't read the sky in them — so their position
+comes from a sub it could read, not from the sky itself."* Silent on 0, which is every run with the option off. A
+picture that is suddenly several times deeper than the user's last one should say where that depth came from; the
+History/`frame_accounting` surface reads FITS header keywords and is deliberately **not** extended, since nothing
+persists this and advertising a field the endpoint never returns would be worse than saying nothing.
+
+**Shared rather than re-spelled:** `bootstrap._registration_gray` moved to `starmatch.registration_gray`. Both sides of a
+registration have to be prepared the same way or their difference is in the preparation rather than in the sky, so the
+loader now lives beside the matcher and the bootstrap calls it.
+
+**Tests.** `tests/test_stack_star_match_unsolved.py` (5) runs the **real stacker** on synthetic subs drawn from one
+catalog at a ladder of rotations: the default leaves them out (2 frames, coverage 2), on it brings ≥6 of 8 in and the
+coverage really deepens, the DB rows are unchanged and still carry their `solve_failed:` mark, a starless sub is left
+out, and a mosaic canvas stands down with 0. Plus the sep-overflow regression in
+`tests/test_star_match_registration.py`, the job-result forwarding in
+`tests/webapp/test_stack_star_match_summary.py` (including a result object from before the field existed) and four
+frontend cases on the sentence. Fail-before verified by reverting each half separately: **3 red**. One unrelated
+maintenance edit rides along: `tests/test_reject_reason_labels.py` pins reject-reason write sites by `file:line`, and
+inserting this helper moved an exempted site from `stacker.py:2754` to `:2869` — same site, same reason, only the key.
+
 ## v0.481.0 — 2026-09-27 — a sub the night had *turned* is placed by its stars, not by a correlation peak
 
 **The bug this closes, and it was a silent mis-placement.** The stack-then-solve rescue

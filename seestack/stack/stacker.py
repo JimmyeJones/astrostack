@@ -547,6 +547,17 @@ class StackOptions:
     #   'union'     — always use the union-of-footprints canvas.
     #   'reference' — always crop to the reference frame's footprint.
     mosaic_canvas: str = "auto"
+    # Stack the accepted subs no plate solve could place, by matching their star
+    # patterns to the reference sub (:mod:`seestack.align.starmatch`). ``run_stack``
+    # combines only accepted **and** solved frames, so on a faint or star-poor
+    # field — where ASTAP fails on most subs — hundreds of good subs sit unused and
+    # the picture is the handful that happened to solve. **Off by default:** it is a
+    # new registration path, the position it gives a sub is derived from a
+    # neighbour rather than verified against the sky, and it costs one extra read
+    # per un-located sub. Stands down on a mosaic canvas (the reference's stars are
+    # only on one panel) and refuses any sub whose stars do not clearly match, which
+    # leaves it exactly as unused as it is today.
+    star_match_unsolved: bool = False
     # Mono stacking: treat each raw frame as a single-channel luminance image
     # (no debayer) and stack it into a grayscale result. For mono cameras and
     # filtered (L / R / G / B / narrowband) subs. Off = OSC debayer (default).
@@ -660,6 +671,12 @@ class StackResult:
     # frame stacked unshifted → possibly soft/doubled stars). 0 when refine was
     # off. Observational only — it never changes which frames contribute.
     n_roughly_aligned: int = 0
+    # How many contributing subs were placed by matching their **star patterns** to
+    # the reference sub, rather than by a plate solve of their own — the subs
+    # ``star_match_unsolved`` brought in. 0 whenever that option is off, which is
+    # every run by default. Reported because a stack whose depth came partly from
+    # derived positions should say so.
+    n_star_matched: int = 0
     # The new ``stack_runs`` row id for this run (None if history recording was
     # skipped — e.g. a cancelled run — or failed). Lets callers deep-link the
     # finished run's editor instead of just its target's History list.
@@ -2596,6 +2613,104 @@ def _build_refine_patch(
         return None
 
 
+# How many of a target's accepted-but-unsolved subs one run will try to place by
+# their star patterns. Each attempt is a load + debayer + source extraction —
+# roughly what the sub's own stack pass costs — so this is the bound on the extra
+# work an unattended run can take on, not a quality judgement. Generous, because
+# the point is to rescue a night rather than a handful; the star-richest subs are
+# tried first, so a target past the cap still spends its budget on its best ones.
+STAR_MATCH_MAX_UNSOLVED = 400
+
+
+def _star_matched_unsolved_frames(
+    project: Project,
+    ref: FrameRow,
+    *,
+    max_frames: int = STAR_MATCH_MAX_UNSOLVED,
+    progress: ProgressFn | None = None,
+    cancel: CancelFn | None = None,
+) -> tuple[list[FrameRow], int]:
+    """The accepted-but-unsolved subs, each carrying a WCS read off the reference's stars.
+
+    ``run_stack`` combines only accepted **and** plate-solved frames, so on a faint
+    or star-poor field — where ASTAP fails on most subs — hundreds of perfectly good
+    subs sit unused and the "stack" is the handful that happened to solve, which is
+    the per-pixel colour speckle the owner reported as gibberish. This places them
+    instead: match each one's star pattern to the reference sub
+    (:func:`seestack.align.starmatch.find_star_transform`, which refuses unless the
+    stars themselves agree sub-pixel over at least six of them) and compose the
+    reference's own solution onto that sub's pixel grid
+    (:func:`seestack.io.wcs_io.wcs_text_after_pixel_affine`, which is exact).
+
+    The WCS lives **in the returned copies only** — nothing is written to the
+    project DB — and that is deliberate twice over. A star-matched position is
+    derived from a neighbour rather than verified against the sky, so it must never
+    pose as a plate solve in the row a later reader trusts; and a frame left
+    unsolved in the DB keeps being re-offered to the real solver on every scan,
+    which is where it should be rescued from for good.
+
+    Returns ``(frames, n_attempted)``. A sub that will not load, will not match, or
+    whose composition stands down is simply absent from the list — exactly as unused
+    as it is today, and never mis-placed.
+    """
+    from seestack.align.starmatch import find_star_transform, registration_gray
+    from seestack.io.wcs_io import wcs_text_after_pixel_affine
+
+    progress = progress or (lambda *a: None)
+    cancel = cancel or (lambda: False)
+    if not ref.wcs_json:
+        return [], 0
+    candidates = [
+        f for f in project.iter_frames(accepted_only=True)
+        if not f.wcs_json and readable_frame_path(f) is not None
+    ]
+    if not candidates:
+        return [], 0
+    # Star-richest, then sharpest: the subs the triangle matcher has the most to
+    # work with. (The bootstrap rescue orders the same population the same way for
+    # the same reason — see ``bootstrap._order_members``; this is a best-effort
+    # ordering under a budget, not a rule the two have to agree on.)
+    candidates.sort(key=lambda f: (
+        -(f.star_count if f.star_count is not None else -1),
+        f.fwhm_px if f.fwhm_px is not None else 1e9,
+    ))
+    candidates = candidates[:max_frames]
+
+    ref_path = readable_frame_path(ref)
+    ref_gray = registration_gray(ref_path) if ref_path else None
+    if ref_gray is None:
+        log.warning(
+            "Star-match: the reference sub could not be read for registration, so "
+            "%d un-located sub(s) stay out of this stack", len(candidates))
+        return [], 0
+
+    out: list[FrameRow] = []
+    total = len(candidates)
+    for i, frame in enumerate(candidates):
+        if cancel():
+            break
+        progress("Locating un-solved subs by their stars", i, total)
+        gray = registration_gray(readable_frame_path(frame))
+        if gray is None:
+            continue
+        transform = find_star_transform(ref_gray, gray)
+        if transform is None:
+            continue
+        h, w = gray.shape[:2]
+        matrix, translation = transform.affine()
+        wcs_text = wcs_text_after_pixel_affine(
+            ref.wcs_json, matrix, translation, width=w, height=h)
+        if wcs_text is None:
+            # The reference's own header is one this rewrite stands down on (SIP,
+            # a legacy CROTA) — it will stand down on every sub, so stop asking.
+            log.info("Star-match: the reference sub's WCS cannot be re-expressed "
+                     "on another grid; leaving the un-located subs out")
+            break
+        out.append(replace(frame, wcs_json=wcs_text))
+    progress("Locating un-solved subs by their stars", total, total)
+    return out, total
+
+
 def run_stack(
     project: Project,
     options: StackOptions,
@@ -2777,6 +2892,27 @@ def run_stack(
                          dst_shape[1], dst_shape[0])
     log.info("Stack reference: id=%s ref_shape=%s span=%.3f° (%d candidates)",
              ref.id, ref_shape, choice.span_deg, choice.n_candidates)
+
+    # ---- 2a. The subs no plate solve could place (opt-in) ------------------
+    # Deliberately *after* the canvas decision, so a sub placed from a neighbour's
+    # stars can never move the canvas — and stood down on a mosaic, where the
+    # reference sub's stars cover only one panel, so an off-panel sub has nothing to
+    # match against and a guess would put it on the wrong part of the sky. Before
+    # the lucky-imaging and readability passes, so a rescued sub is filtered by
+    # exactly the same rules as a solved one.
+    n_star_matched = 0
+    if options.star_match_unsolved:
+        if is_mosaic_canvas:
+            log.info("Star-match: standing down — this is a mosaic canvas, where "
+                     "the reference sub's stars cover only one panel")
+        else:
+            matched, n_attempted = _star_matched_unsolved_frames(
+                project, ref, progress=progress, cancel=cancel,
+            )
+            frames.extend(matched)
+            n_star_matched = len(matched)
+            log.info("Star-match: %d of %d un-located sub(s) joined the stack by "
+                     "their star patterns", n_star_matched, n_attempted)
 
     # Lucky imaging: filter to the top fraction by FWHM (sharper = better).
     if options.lucky_fraction < 1.0:
@@ -3934,6 +4070,7 @@ def run_stack(
         n_read_errors=n_read_errors,
         n_read_recovered=n_read_recovered,
         n_roughly_aligned=n_roughly,
+        n_star_matched=n_star_matched,
         run_id=run_id,
         rejection_mode=rej_stats.mode if _rej_recorded else None,
         rejection_fraction=rej_stats.fraction if _rej_recorded else None,

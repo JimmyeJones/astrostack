@@ -1221,6 +1221,17 @@ _DESCRIPTORS: list[dict[str, Any]] = [
      "min": 2.0, "max": 10.0, "step": 0.5, "depends_on": "suppress_hot_pixels",
      "help": "How far above the local median a pixel must sit to count as hot. Lower = "
              "catches more (but can nibble faint stars); higher = only the worst."},
+    {"key": "star_match_unsolved", "glossary": "alignment",
+     "label": "Include subs that aren't located yet", "type": "bool",
+     "group": "advanced",
+     "help": "Only subs the app has found in the sky can normally be stacked, so on a "
+             "faint or star-poor target most of your night can be left out. With this "
+             "on, the app recognises the same stars in each un-located sub and lines it "
+             "up with one it did find — so they join the picture too. It never guesses: "
+             "a sub whose stars don't clearly match is simply left out, exactly as it is "
+             "now. Off by default, and it reads each un-located sub once more, so it "
+             "adds some time. Skipped on a mosaic, where the subs cover different parts "
+             "of the sky."},
     {"key": "subpixel_refine", "glossary": "alignment", "label": "Sub-pixel alignment refine", "type": "bool",
      "group": "advanced",
      "help": "Add a phase-correlation pass that nudges each frame by a fraction of a "

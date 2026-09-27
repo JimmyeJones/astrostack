@@ -159,6 +159,11 @@
     "group": "simple",
     "type": "float"
   },
+  "star_match_unsolved": {
+    "depends_on": null,
+    "group": "advanced",
+    "type": "bool"
+  },
   "subpixel_refine": {
     "depends_on": null,
     "group": "advanced",

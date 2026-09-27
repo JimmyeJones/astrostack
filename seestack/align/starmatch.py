@@ -75,6 +75,66 @@ DEFAULT_MAX_SCALE_DEVIATION = 0.01
 # impossible.
 DEFAULT_MAX_ROTATION_DEG = 90.0
 
+# ``sep``, the source extractor astroalign detects stars with, limits how many
+# sub-objects one deblend may produce — 1024 by default — and a **rich** field
+# overflows it. astroalign then re-raises that as a generic "Input type for source
+# not supported", i.e. indistinguishable from having been handed something that is
+# not an image at all, so the symptom is a matcher that quietly never matches.
+# Measured on a 480x320 synthetic field of 30 stars: **0 of 8** subs matched at
+# sep's default and **8 of 8** at 8192, with the rotations recovered to 0.07 deg
+# and sub-pixel residuals. This value is that measurement scaled by the area of a
+# real Seestar frame, which is ~16x larger. The limit only sizes an internal
+# buffer, so raising it costs a sparse field nothing — and a sparse field is the
+# one this module exists for.
+SEP_SUB_OBJECT_LIMIT = 65536
+
+
+# A star-matched frame whose own centre sits further than this from the reference's
+# is refused. One target is one pointing, with only dither and drift between its
+# subs, so a large displacement means the match locked onto the wrong stars —
+# which is the one failure a caller cannot see in the result. Shared rather than
+# re-spelled per caller so "how far may a sub have moved" has one answer; the
+# bootstrap rescue passes its own, because there the same number also bounds a
+# phase-correlation peak.
+DEFAULT_MAX_SHIFT_PX = 200.0
+
+
+def registration_gray(path: str) -> np.ndarray | None:
+    """Load a sub as a background-flattened luminance plane, ready to register.
+
+    Debayer to RGB, average to one luminance plane, then subtract a robust sky
+    level and clip the negatives away, so what a matcher sees is the **stars**
+    rather than the (frame-varying) sky pedestal or the Bayer checkerboard.
+    Returns ``None`` on any read or decode problem — a sub that cannot be read is
+    skipped, never fatal.
+
+    Both sides of a registration have to be prepared the same way or their
+    difference is in the preparation rather than in the sky, which is why this
+    lives beside the matcher and why the bootstrap rescue's phase-correlation pass
+    calls it too.
+    """
+    try:
+        from seestack.io.fits_loader import load_seestar_raw
+
+        rgb, _info = load_seestar_raw(path, debayer=True, out_dtype=np.float32)
+    except Exception as exc:  # noqa: BLE001 — a bad sub must never sink the batch
+        log.debug("registration gray: could not load %s: %s", path, exc)
+        return None
+    gray = np.asarray(rgb, dtype=np.float32)
+    if gray.ndim == 3:
+        gray = gray.mean(axis=2)
+    if gray.ndim != 2 or gray.size == 0:
+        return None
+    # Robust sky subtraction: the median is a stable pedestal estimate on a
+    # star-sparse field. Clip negatives so only star flux drives the match.
+    sky = float(np.nanmedian(gray))
+    flat = gray - sky
+    np.clip(flat, 0.0, None, out=flat)
+    # A frame that came back all-NaN or flat (no signal) can't register.
+    if not np.isfinite(flat).any() or float(np.nanmax(flat)) <= 0.0:
+        return None
+    return np.nan_to_num(flat, nan=0.0, posinf=0.0, neginf=0.0)
+
 
 @dataclass(frozen=True)
 class StarTransform:
@@ -117,6 +177,23 @@ class StarTransform:
         }
 
 
+def _raise_sep_deblend_limit() -> None:
+    """Lift ``sep``'s sub-object cap off its default — see :data:`SEP_SUB_OBJECT_LIMIT`.
+
+    Idempotent and process-global (it is a module setting in ``sep``), so it is
+    simply re-asserted before each match rather than tracked. A ``sep`` that cannot
+    be imported or does not offer the setter is left alone: astroalign would not be
+    working at all without it, and a failure *here* must never be the thing that
+    turns a match that would have succeeded into an exception.
+    """
+    try:
+        import sep
+
+        sep.set_sub_object_limit(SEP_SUB_OBJECT_LIMIT)
+    except Exception as exc:  # noqa: BLE001 — a best-effort widening, never fatal
+        log.debug("star match: could not raise sep's sub-object limit: %s", exc)
+
+
 def _similarity_parts(a: np.ndarray) -> tuple[float, float] | None:
     """``(scale, rotation_deg)`` of a 2×2 matrix that is a rotation times a scale.
 
@@ -143,7 +220,7 @@ def find_star_transform(
     reference: np.ndarray | None,
     moving: np.ndarray | None,
     *,
-    max_shift_px: float,
+    max_shift_px: float = DEFAULT_MAX_SHIFT_PX,
     max_rotation_deg: float = DEFAULT_MAX_ROTATION_DEG,
     max_scale_deviation: float = DEFAULT_MAX_SCALE_DEVIATION,
     min_control_points: int = DEFAULT_MIN_CONTROL_POINTS,
@@ -155,7 +232,7 @@ def find_star_transform(
     """Match ``moving``'s stars onto ``reference``'s, or return ``None``.
 
     Both are single-plane, sky-subtracted luminance images (what
-    :func:`seestack.solve.bootstrap._registration_gray` produces); they need not
+    :func:`registration_gray` produces); they need not
     be the same shape. ``max_shift_px`` bounds how far this frame's **own centre**
     may have moved on the reference's grid — the honest measure of "did the
     pointing change", since with a rotation the transform's raw translation is not
@@ -174,6 +251,7 @@ def find_star_transform(
     try:
         import astroalign
 
+        _raise_sep_deblend_limit()
         transform, (src_pos, dst_pos) = astroalign.find_transform(
             mov, ref,
             max_control_points=int(max_control_points),

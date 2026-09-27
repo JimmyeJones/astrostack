@@ -45,7 +45,7 @@ _EXEMPT: dict[str, str] = {
         "(`qc_error` retryable / `qc_error_final` terminal); both are covered by "
         "the `qc_error` entry in HANDLED_PREFIXES, which a vitest case exercises."
     ),
-    "seestack/stack/stacker.py:2754": (
+    "seestack/stack/stacker.py:2869": (
         "a plain-English sentence composed at stack time (\"bad plate-solve "
         "(footprint far from the group)\") — deliberately shown verbatim, which is "
         "what rejectReasonLabel's fall-through is for."

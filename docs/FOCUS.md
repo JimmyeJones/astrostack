@@ -15,11 +15,14 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 2. **Owner-approved, buildable now** (answers of 2026-09-25, on `main` via PR #981):
    - reconcile the 11 historical mosaic pairs (#878) through `merge.carry_stack_runs` —
      **unblocked now item 1 has shipped**;
-   - ~~`astroalign` for the WCS-free registration fallback~~ — **the similarity transform itself shipped
-     2026-09-27 as v0.481.0**, inside the bootstrap rescue, and it closed a silent mis-placement bug on the
-     way (phase correlation never declines, so a night of alt-az field rotation was being propagated as a
-     confident wrong answer). What is left of the entry is the *stacker-wide* half — registering every
-     accepted-but-unsolved sub, not just the opt-in rescue's members — now sized M;
+   - ~~`astroalign` for the WCS-free registration fallback~~ — **shipped 2026-09-27 in two halves.**
+     v0.481.0 built the similarity transform inside the bootstrap rescue, closing a silent mis-placement bug
+     on the way (phase correlation never declines, so a night of alt-az field rotation was being propagated as
+     a confident wrong answer). v0.482.0 took it stacker-wide for a **single field**: `star_match_unsolved`
+     (off by default) lets `run_stack` place its accepted-but-unsolved subs, so a target where 40 of 300
+     solved can stack all of them. **What is left is the mosaic**, where an unsolved sub has no pointing and so
+     nothing says which panel to offer it — a design question, not a slice (shape to cost is in the backlog
+     entry). The owner is a heavy mosaic user, so it is worth real thought;
    - auto-*apply* the classified object preset (with undo, a Settings switch, and never
      over a saved recipe);
    - a progression reel ordered by **capture night**, cumulative (the existing reel orders

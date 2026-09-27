@@ -67,7 +67,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from seestack.align.starmatch import DEFAULT_MAX_ROTATION_DEG
+from seestack.align.starmatch import DEFAULT_MAX_ROTATION_DEG, registration_gray
 from seestack.io.project import readable_frame_path
 
 log = logging.getLogger(__name__)
@@ -182,38 +182,6 @@ class BootstrapResult:
             "n_propagated": self.n_propagated,
             "n_star_matched": self.n_star_matched,
         }
-
-
-def _registration_gray(path: str) -> np.ndarray | None:
-    """Load a sub as a background-flattened luminance image for star registration.
-
-    Debayer to RGB, average to a single luminance plane, then subtract a robust
-    sky level and clip negatives so phase correlation locks onto the *stars*
-    rather than the (frame-varying) sky pedestal or the Bayer checkerboard.
-    Returns ``None`` on any read/decode problem — a member we can't read is just
-    skipped, never fatal.
-    """
-    try:
-        from seestack.io.fits_loader import load_seestar_raw
-
-        rgb, _info = load_seestar_raw(path, debayer=True, out_dtype=np.float32)
-    except Exception as exc:  # noqa: BLE001 — a bad sub must never sink the batch
-        log.debug("bootstrap: could not load %s: %s", path, exc)
-        return None
-    gray = np.asarray(rgb, dtype=np.float32)
-    if gray.ndim == 3:
-        gray = gray.mean(axis=2)
-    if gray.ndim != 2 or gray.size == 0:
-        return None
-    # Robust sky subtraction: the median is a stable pedestal estimate on a
-    # star-sparse field. Clip negatives so only star flux drives the correlation.
-    sky = float(np.nanmedian(gray))
-    flat = gray - sky
-    np.clip(flat, 0.0, None, out=flat)
-    # A frame that came back all-NaN or flat (no signal) can't register.
-    if not np.isfinite(flat).any() or float(np.nanmax(flat)) <= 0.0:
-        return None
-    return np.nan_to_num(flat, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def _phase_shift(reference: np.ndarray, moving: np.ndarray) -> tuple[float, float] | None:
@@ -475,7 +443,7 @@ def pick_solved_anchor(frames: list, shape: tuple[int, int]):
         if wcs_text_is_usable(f.wcs_json) and readable_frame_path(f) is not None
     ]
     for frame in _order_members(candidates)[:ANCHOR_LOAD_ATTEMPTS]:
-        gray = _registration_gray(readable_frame_path(frame))
+        gray = registration_gray(readable_frame_path(frame))
         if gray is not None and gray.shape[:2] == tuple(shape):
             return frame, gray
     return None
@@ -580,7 +548,7 @@ def bootstrap_solve(
     # Best-first, capped at max_frames — the richest subs make the deepest image.
     members = _order_members(unsolved)[:max_frames]
     paths = [readable_frame_path(f) for f in members]
-    grays = [_registration_gray(p) if p else None for p in paths]
+    grays = [registration_gray(p) if p else None for p in paths]
 
     valid = [i for i, g in enumerate(grays) if g is not None]
     if len(valid) < min_frames:
