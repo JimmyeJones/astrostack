@@ -1,5 +1,73 @@
 # Shipped — the record
 
+## v0.481.0 — 2026-09-27 — a sub the night had *turned* is placed by its stars, not by a correlation peak
+
+**The bug this closes, and it was a silent mis-placement.** The stack-then-solve rescue
+(`seestack/solve/bootstrap.py`, v0.210.0) placed every member with `register_members` → `propagate_wcs`: phase
+correlation measures a **translation**, and the member's WCS was the reference's with `CRPIX` slid by it. The Seestar is
+alt-az, so a long session **turns the field** — and `skimage`'s `phase_cross_correlation` never declines. It returns its
+best peak whatever the two frames really differ by, with a reported error of 1.0 either way, so nothing in the rescue
+could tell a 2 px dither from a 16° rotation. The module's own promise — *"a member that doesn't register confidently is
+left unsolved (honest — never silently mis-placed)"* — was therefore not kept for exactly the population the rescue
+exists for.
+
+**Measured, on a synthetic field at 5″/px, through the real `register_members`/`propagate_wcs`** (the fixture the
+regression test now runs):
+
+| field rotation | shift phase correlation returned | median placement error | worst |
+|---|---|---|---|
+| 2° | (−2, −2) | 12.6″ = **2.5 px** | 6.5 px |
+| 4° | (−2, 0) | 21.2″ = **4.2 px** | 10.7 px |
+| 8° | (9, −7) | 80.3″ = **16.1 px** | 24.4 px |
+| 15° | (−10, 4) | 79.1″ = **15.8 px** | 39.3 px |
+
+On the canvas that is a star drawn as an arc, on a picture whose whole reason for existing is that the rescue found more
+frames to stack.
+
+**The fix.** A new `seestack/align/starmatch.py` measures the **similarity** transform (rotation + shift + a small scale)
+between two subs from their star *patterns*, via the `astroalign` triangle matcher — the dependency the owner approved
+for this on 2026-09-25, already declared in `pyproject.toml` and until now imported by nothing. `bootstrap_solve` runs it
+on every member it has already loaded (`star_match_members`, no extra I/O, bounded by the existing `max_frames`), and
+`propagate_wcs` prefers a transform where there is one, falling back to the correlation shift where there is not. The
+composition that turns a pixel transform into a WCS is the new `wcs_io.wcs_text_after_pixel_affine`, which is the same
+algebra `_rotate_matrix_and_crpix` already documents (`CD′ = CD·A`, `CRPIX′ = A⁻¹(CRPIX − t¹)`) and is **exact** for the
+linear part of a WCS — a similarity of the pixel grid cannot touch anything else. Tested to sub-milliarcsecond against
+sky truth.
+
+**It refuses far more readily than it accepts,** because a wrongly-placed frame corrupts a stack while a refused one is
+merely as unplaced as it already was: ≥6 matched control points (3 is what a chance triangle coincidence looks like), a
+sub-pixel RMS residual under the fit, a matrix that really is a scaled rotation of **positive** determinant (no mirror —
+one camera cannot flip its field), a scale within 1 % of unity, and this frame's **own centre** inside the caller's shift
+cap. Where any of that fails the answer is `None`, which means "ask phase correlation instead", not "drop the frame".
+
+**Why star matching leads rather than fills gaps.** The first shape drafted was "star-match only the members correlation
+could not place" — and the measurement above kills it: correlation *always* places them, wrongly. So the honest ordering
+is star pattern first, correlation as the fallback for a field too faint or too sparse to match on. That also makes the
+ordinary dithered burst — the case v0.210.0 measured and shipped for — sub-pixel instead of integer-pixel, which the
+regression suite pins from both directions (`star_match=True/False`, same fixture, same assertions).
+
+**What it deliberately does not change.** `integrate_deep_image` still integrates the **correlation-registered** members
+only. The deep image exists to be *solvable* and it is built by integer-shifting members onto one grid; warping a rotated
+member onto it is a different piece of work, and the deep-image path's engagement gate therefore still counts shifts
+(the anchored path, which builds no deep image at all, counts a star match as fully as a correlation). Also unchanged:
+each rescued member is still stamped with the *reference's* `rotation_deg`, which is now knowably approximate for a
+star-matched one — filed as a lead rather than guessed at, because the column's convention is ASTAP's and composing a
+WCS does not tell you ASTAP's sign.
+
+**Honest surfacing.** `BootstrapResult.n_star_matched` counts what the star match really placed (not what it merely
+offered — a SIP or `CROTA` header makes the composition stand down, and the count follows the outcome via
+`propagate_wcs`'s `star_placed`), reaches a job result as `bootstrap_star_matched` from both the single-target scanner
+and the whole-library scan, and `Jobs.tsx::bootstrapRescueNote` names whichever mechanism did the work: "by matching
+their star patterns to a sub the app could already place", or the mixed form with the count. Calling a star match
+"combining your frames into a deeper image" would be describing something that did not happen.
+
+**Tests.** `tests/test_star_match_registration.py`, 35 new tests, nothing stubbed — astroalign really matches the
+synthetic patterns and every placement is checked against *sky* truth (a star's position under the reference sub's own
+WCS), never against the matcher's opinion of itself. New fixtures `synth.make_rotated_star_field` /
+`rotated_star_positions` render one catalog at a ladder of rotations, which is the alt-az case `make_star_field`'s
+`star_shift` cannot express. Fail-before verified by reverting the preference in `propagate_wcs`: **11 red**, including
+both end-to-end rescues and the scan summary.
+
 ## v0.480.8 — 2026-09-27 — `scripts/agent-dogfood.sh --combine`: the journey that starts in `incoming/`
 
 **The gap.** Every shape this script could produce arrived through `POST /api/sample`, which writes straight into the

@@ -1539,6 +1539,10 @@ def run_qc_and_solve(
                 # makes a job summary say *how* the rescue happened.
                 summary["bootstrap_anchored"] = bres.anchored_on_solved_sub
                 summary["bootstrap_propagated"] = bres.n_propagated
+                # How many of those were placed by star-pattern matching
+                # rather than a correlation shift — the rotated ones. What
+                # lets the finished job say *how* each sub was located.
+                summary["bootstrap_star_matched"] = bres.n_star_matched
                 if bres.n_propagated:
                     # ``Project`` has no ``.name`` attribute — the target's name
                     # lives in its meta table. Reading the attribute raised

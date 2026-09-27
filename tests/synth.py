@@ -330,3 +330,101 @@ def make_synth_frame_header_text(
         fits.Card("HISTORY", "plate solved"),
     ]
     return str(fits.Header(cards))
+
+
+def make_rotated_star_field(
+    *,
+    width: int = 480,
+    height: int = 320,
+    n_stars: int = 25,
+    seed: int = 42,
+    rotation_deg: float = 0.0,
+    shift: tuple[float, float] = (0.0, 0.0),
+    sky_level: float = 1000.0,
+    sky_noise: float = 50.0,
+    star_fwhm_px_full: float = 4.0,
+    noise_seed: int = 0,
+) -> np.ndarray:
+    """One sub of a field that has *rotated* about the frame centre, uint16 mosaic.
+
+    The alt-az case :func:`make_star_field`'s ``star_shift`` cannot express. A
+    Seestar is alt-az, so the field turns through a session: two subs of one
+    target differ by a **rotation**, and no translation lines them up. Every
+    rotation of one ``seed`` shows the *same* sky (the catalog is drawn once, by
+    :func:`star_catalog`), so a fixture can ask "where did this star go?" and have
+    a ground-truth answer.
+
+    ``rotation_deg`` turns the sky anticlockwise in pixel coordinates about the
+    frame centre ``((w−1)/2, (h−1)/2)``; ``shift`` is a ``(dx, dy)`` dither applied
+    after it. A star at catalog pixel ``s`` therefore lands at
+    ``R(rotation_deg)·(s − centre) + centre + shift``, which is what a test
+    comparing against a reference sub's WCS needs.
+    """
+    stars = star_catalog(
+        seed=seed, width=width, height=height, n_stars=n_stars,
+        star_fwhm_px_full=star_fwhm_px_full,
+    )
+    sigma = star_fwhm_px_full / 2.3548
+    box = max(7, int(np.ceil(sigma * 6)))
+    half = box // 2
+    img = np.random.default_rng(noise_seed).normal(
+        loc=sky_level, scale=sky_noise, size=(height, width)).astype(np.float32)
+    theta = np.radians(float(rotation_deg))
+    cos_t, sin_t = float(np.cos(theta)), float(np.sin(theta))
+    cx, cy = (width - 1) / 2.0, (height - 1) / 2.0
+    dx, dy = shift
+    yy, xx = np.indices((box, box))
+    for sx, sy, peak in stars:
+        ux, uy = sx - cx, sy - cy
+        px = cos_t * ux - sin_t * uy + cx + dx
+        py = sin_t * ux + cos_t * uy + cy + dy
+        # Integer paste plus a fractional kernel offset: a rotation puts stars at
+        # non-integer positions, and rounding them would add up to half a pixel of
+        # its own error to whatever a test is measuring.
+        ix, iy = int(np.floor(px + 0.5)), int(np.floor(py + 0.5))
+        fx, fy = px - ix, py - iy
+        kernel = peak * np.exp(
+            -((xx - half - fx) ** 2 + (yy - half - fy) ** 2) / (2 * sigma * sigma))
+        x0, y0 = ix - half, iy - half
+        xa, ya = max(0, x0), max(0, y0)
+        xb, yb = min(width, x0 + box), min(height, y0 + box)
+        if xb <= xa or yb <= ya:
+            continue
+        img[ya:yb, xa:xb] += kernel[ya - y0:yb - y0, xa - x0:xb - x0]
+    return np.clip(img, 0, 65535).astype(np.uint16)
+
+
+def rotated_star_positions(
+    *,
+    width: int = 480,
+    height: int = 320,
+    n_stars: int = 25,
+    seed: int = 42,
+    rotation_deg: float = 0.0,
+    shift: tuple[float, float] = (0.0, 0.0),
+    star_fwhm_px_full: float = 4.0,
+) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """``[(catalog_xy, frame_xy)]`` for :func:`make_rotated_star_field`'s stars.
+
+    The ground truth that makes a placement testable: ``catalog_xy`` is where a
+    star sits in the un-rotated reference sub (whose WCS a test solves), and
+    ``frame_xy`` is where the same star sits in the rotated sub. A correct WCS for
+    the rotated sub maps ``frame_xy`` to exactly the sky the reference's WCS gives
+    ``catalog_xy``.
+    """
+    stars = star_catalog(
+        seed=seed, width=width, height=height, n_stars=n_stars,
+        star_fwhm_px_full=star_fwhm_px_full,
+    )
+    theta = np.radians(float(rotation_deg))
+    cos_t, sin_t = float(np.cos(theta)), float(np.sin(theta))
+    cx, cy = (width - 1) / 2.0, (height - 1) / 2.0
+    dx, dy = shift
+    out = []
+    for sx, sy, _peak in stars:
+        ux, uy = sx - cx, sy - cy
+        out.append((
+            (float(sx), float(sy)),
+            (cos_t * ux - sin_t * uy + cx + dx, sin_t * ux + cos_t * uy + cy + dy),
+        ))
+    return out

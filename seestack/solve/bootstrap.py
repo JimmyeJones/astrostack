@@ -40,6 +40,21 @@ that call's risk of failing on the very field that already defeated it per-sub.
 The deep-image path stays exactly as it was for the zero-solved case (and for a
 target whose solved subs can't be read or don't share the members' shape).
 
+**Field rotation, and why star patterns register these subs now.** Phase
+correlation measures a *translation*, and ``skimage``'s never declines: it returns
+its best peak whatever the two frames really differ by, with an error of 1.0
+either way. The Seestar is alt-az, so a long session turns the field — and a
+rotated member was therefore given a confidently wrong place rather than being
+left alone. Measured on a synthetic field at 5 arcsec/px: a **4°** member landed
+a median 4.2 px (max 10.7 px) from where its stars are, a **8°** one 16 px
+(max 24 px) — which on the canvas is a star smeared into an arc. So each member is
+now registered by **star-pattern matching** first
+(:mod:`seestack.align.starmatch`), which measures the rotation as well as the
+shift and *refuses* unless ≥6 stars match at a sub-pixel residual; phase
+correlation stays as the fallback for a member too faint to match on, exactly as
+before. The deep image is still integrated on the correlation shifts alone — it
+is built to be *solvable*, and warping members onto one grid is not what it does.
+
 Safety: this is opt-in (off by default) and additive. A member that doesn't
 register confidently is left unsolved (honest — never silently mis-placed), and
 a deep image that doesn't solve leaves every sub exactly as it was.
@@ -52,6 +67,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from seestack.align.starmatch import DEFAULT_MAX_ROTATION_DEG
 from seestack.io.project import readable_frame_path
 
 log = logging.getLogger(__name__)
@@ -147,6 +163,12 @@ class BootstrapResult:
     #: image was never built, let alone solved.
     anchored_on_solved_sub: bool = False
     n_propagated: int = 0
+    #: How many of ``n_propagated`` were placed by **star-pattern matching**
+    #: rather than by a phase-correlation shift. Reported separately because it
+    #: is the honest answer to "how was this sub located", and the two answers
+    #: rest on different evidence: a similarity fitted to ≥6 identified stars at a
+    #: sub-pixel residual, against a correlation peak with no residual at all.
+    n_star_matched: int = 0
     propagated_frame_ids: list[int] = field(default_factory=list)
 
     def as_summary(self) -> dict:
@@ -158,6 +180,7 @@ class BootstrapResult:
             "deep_solved": self.deep_solved,
             "anchored_on_solved_sub": self.anchored_on_solved_sub,
             "n_propagated": self.n_propagated,
+            "n_star_matched": self.n_star_matched,
         }
 
 
@@ -243,6 +266,43 @@ def register_members(
     return out
 
 
+def star_match_members(
+    grays: list[np.ndarray | None],
+    ref_index: int,
+    *,
+    max_shift_px: float = DEFAULT_MAX_SHIFT_PX,
+    max_rotation_deg: float = DEFAULT_MAX_ROTATION_DEG,
+) -> list:
+    """Match each member's **star pattern** onto the reference's.
+
+    The companion to :func:`register_members`, and the one that can see a
+    rotation: it returns a
+    :class:`~seestack.align.starmatch.StarTransform` per member — rotation, shift
+    and scale together — where the stars matched and passed that module's checks,
+    and ``None`` everywhere else (the reference itself, a member that didn't load,
+    a field too faint or too sparse to match on). Bounded by the caller's member
+    cap, and it loads nothing: these are the frames already in memory for the
+    correlation pass.
+
+    ``None`` is not a failure to report, it is "ask phase correlation instead" —
+    :func:`propagate_wcs` prefers a transform and falls back to the shift, so a
+    member this can't place is exactly as placed as it was before this existed.
+    """
+    from seestack.align.starmatch import find_star_transform
+
+    out: list = [None] * len(grays)
+    ref = grays[ref_index] if 0 <= ref_index < len(grays) else None
+    if ref is None:
+        return out
+    for i, g in enumerate(grays):
+        if i == ref_index or g is None:
+            continue
+        out[i] = find_star_transform(
+            ref, g, max_shift_px=max_shift_px, max_rotation_deg=max_rotation_deg,
+        )
+    return out
+
+
 def _shift_int(img: np.ndarray, dr: int, dc: int) -> np.ndarray:
     """Integer shift with NaN fill: ``out[r, c] = img[r - dr, c - dc]``.
 
@@ -290,10 +350,33 @@ def integrate_deep_image(
     return np.nan_to_num(deep, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
 
+def _wcs_from_star_transform(ref_wcs_text: str, transform, shape) -> str | None:  # noqa: ANN001
+    """A member's own WCS from a star-pattern match, or ``None``.
+
+    The match maps this member's pixels onto the reference's, and the reference's
+    WCS belongs to that grid — so composing the two *is* this member's solution,
+    rotation included. The composition is exact for the linear part of a WCS,
+    which is all a similarity of the pixel grid can touch.
+    """
+    if transform is None:
+        return None
+    from seestack.io.wcs_io import wcs_text_after_pixel_affine
+
+    matrix, translation = transform.affine()
+    h, w = (None, None) if shape is None else (int(shape[0]), int(shape[1]))
+    return wcs_text_after_pixel_affine(
+        ref_wcs_text, matrix, translation, width=w, height=h,
+    )
+
+
 def propagate_wcs(
     deep_wcs_text: str,
     shifts: list[tuple[float, float] | None],
     ref_index: int,
+    *,
+    transforms: list | None = None,
+    shapes: list | None = None,
+    star_placed: list[bool] | None = None,
 ) -> list[str | None]:
     """Give each member its own WCS from the deep image's solved WCS.
 
@@ -303,6 +386,19 @@ def propagate_wcs(
     ``(dr, dc)`` (see :func:`_shift_int`), so the member's WCS is the reference's
     with the reference pixel offset: ``CRPIX_member = CRPIX_ref - (dc, dr)`` (the
     CD/scale/rotation are shared). Members with no shift get ``None``.
+
+    ``transforms`` is :func:`star_match_members`' answer, and where it has one
+    that member is placed by **it** instead: a shift can only slide the reference
+    pixel, so it cannot express the field rotation an alt-az session accumulates,
+    while a star match measures the rotation and is refused unless the stars
+    themselves agree sub-pixel. ``shapes`` gives ``(h, w)`` per member for the
+    ``NAXIS`` of those headers. A member with neither still gets ``None``.
+
+    ``star_placed``, when a list of the same length is passed, is filled with
+    which members the star match really placed — not merely which ones *had* one.
+    A header this rewrite stands down on (SIP, a legacy ``CROTA``) falls back to
+    the shift, and a caller reporting "located by star-pattern matching" has to
+    count what happened rather than what was available.
     """
     from seestack.io.wcs_io import wcs_from_text, wcs_to_text
 
@@ -311,11 +407,21 @@ def propagate_wcs(
         return [None] * len(shifts)
     out: list[str | None] = []
     for i, s in enumerate(shifts):
-        if s is None:
-            out.append(None)
-            continue
         if i == ref_index:
             out.append(deep_wcs_text)
+            continue
+        star = _wcs_from_star_transform(
+            deep_wcs_text,
+            None if transforms is None else transforms[i],
+            None if shapes is None else shapes[i],
+        )
+        if star is not None:
+            out.append(star)
+            if star_placed is not None and i < len(star_placed):
+                star_placed[i] = True
+            continue
+        if s is None:
+            out.append(None)
             continue
         dr, dc = s
         w = base.deepcopy()
@@ -423,6 +529,8 @@ def bootstrap_solve(
     min_frames: int = DEFAULT_MIN_FRAMES,
     max_frames: int = DEFAULT_MAX_FRAMES,
     max_shift_px: float = DEFAULT_MAX_SHIFT_PX,
+    star_match: bool = True,
+    max_rotation_deg: float = DEFAULT_MAX_ROTATION_DEG,
     deep_solver=None,
 ) -> BootstrapResult:
     """Attempt to rescue a target's un-plate-solvable faint subs.
@@ -440,6 +548,14 @@ def bootstrap_solve(
     is built or solved** — see the module docstring. ``deep_solver`` is injectable
     for testing and is used only on the deep-image path; production runs ASTAP on
     a temp FITS of the deep image.
+
+    ``star_match`` (on) registers each member by its **star pattern** where that
+    succeeds, so a member the session's field rotation has turned is placed by the
+    rotation it actually has rather than by a translation that cannot express it —
+    see the module docstring for the measurement. It is on inside this already
+    opt-in rescue because it is the difference between placing such a member
+    correctly and placing it confidently wrong; ``False`` restores the
+    correlation-only behaviour, and is what the regression test measures against.
     """
     from seestack.io.wcs_io import wcs_image_center_deg_from_text, wcs_text_is_usable
     from seestack.solve.astap import classify_solve_setup_error
@@ -493,13 +609,33 @@ def bootstrap_solve(
     # a star-rich one.
     ref_index = 0 if anchored else valid[0]
     shifts = register_members(grays, ref_index, max_shift_px=max_shift_px)
+    # Star-pattern matching, which measures the field rotation a translation
+    # cannot. Loads nothing — these frames are already in memory — and is bounded
+    # by ``max_frames``, so the cost is one source extraction per member.
+    transforms: list = [None] * len(grays)
+    if star_match:
+        transforms = star_match_members(
+            grays, ref_index,
+            max_shift_px=max_shift_px, max_rotation_deg=max_rotation_deg,
+        )
     registered = [
         i for i, s in enumerate(shifts)
-        if s is not None and grays[i] is not None and i >= first_unsolved
+        if (s is not None or transforms[i] is not None)
+        and grays[i] is not None and i >= first_unsolved
     ]
     result.n_members = len(members) - first_unsolved
     result.n_registered = len(registered)
-    if len(registered) < min_frames:
+    # The deep-image path has to *integrate* ``min_frames`` members, and only the
+    # correlation-registered ones are on one pixel grid to integrate — a rotated
+    # member would have to be warped, which ``integrate_deep_image`` deliberately
+    # does not do. So that path counts shifts only, exactly as it did; the anchored
+    # path builds no deep image at all, and there a star-matched member is worth
+    # every bit as much as a correlated one.
+    integrable = [
+        i for i, s in enumerate(shifts)
+        if s is not None and grays[i] is not None and i >= first_unsolved
+    ]
+    if (len(registered) if anchored else len(integrable)) < min_frames:
         result.reason = "too few subs registered to a common frame"
         return result
 
@@ -553,7 +689,13 @@ def bootstrap_solve(
         pixscale = getattr(solve_res, "pixscale_arcsec", None)
         rotation = getattr(solve_res, "rotation_deg", None)
 
-    member_wcs = propagate_wcs(wcs_text, shifts, ref_index)
+    star_placed = [False] * len(grays)
+    member_wcs = propagate_wcs(
+        wcs_text, shifts, ref_index,
+        transforms=transforms,
+        shapes=[None if g is None else g.shape[:2] for g in grays],
+        star_placed=star_placed,
+    )
 
     for i, wtext in enumerate(member_wcs):
         if wtext is None or grays[i] is None:
@@ -584,9 +726,13 @@ def bootstrap_solve(
             fields["reject_reason"] = None
         project.update_frame(frame.id, **fields)
         result.n_propagated += 1
+        if star_placed[i]:
+            result.n_star_matched += 1
         result.propagated_frame_ids.append(frame.id)
 
     how = ("by registering to an already-solved sub" if anchored
            else "via deep-image solve")
+    if result.n_star_matched:
+        how += f", {result.n_star_matched} of them by star-pattern matching"
     result.reason = f"rescued {result.n_propagated} sub(s) {how}"
     return result

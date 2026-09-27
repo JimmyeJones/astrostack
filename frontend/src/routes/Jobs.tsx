@@ -416,20 +416,45 @@ export function bootstrapRescuedCount(r: Record<string, unknown>): number {
   return Math.max(0, direct + perTarget);
 }
 
+/** How many of those subs were located by matching their *star patterns* rather
+ * than by sliding a deeper image over them (pure, tested).
+ *
+ * The two answers rest on different evidence and only one of them can follow a
+ * field that rotated overnight, so the credit below names whichever did the work.
+ * A single number on every surface: the single-target jobs carry the engine's own
+ * count, and the whole-library scan totals it across the batch. */
+export function bootstrapStarMatchedCount(r: Record<string, unknown>): number {
+  return Math.max(0, Number(r.bootstrap_star_matched ?? 0) || 0);
+}
+
 /** The plain-language credit for that rescue, or null when it didn't happen.
  *
  * Without this the beginner who turned the setting on (because their faint
  * targets came out noisy) just sees a suddenly-thicker stack with no idea why —
  * and the Target page's "N not located yet" badge silently drops instead of
- * saying what fixed it. Says what happened in one calm sentence, no jargon. */
+ * saying what fixed it. Says what happened in one calm sentence, no jargon.
+ *
+ * "Matching the star patterns" is the honest words for the second way a sub gets
+ * located: a scope on an alt-az mount turns the sky through a long session, and a
+ * sub that has turned can't be placed by sliding a deeper image over it — it is
+ * placed by recognising the same stars in a new arrangement. Saying "combined
+ * into a deeper image" for those would be describing something that didn't
+ * happen. */
 export function bootstrapRescueNote(r: Record<string, unknown>): string | null {
   const n = bootstrapRescuedCount(r);
   if (n <= 0) return null;
+  const starred = Math.min(bootstrapStarMatchedCount(r), n);
+  const pattern = n === 1 ? "its star pattern" : "their star patterns";
+  const how = starred >= n
+    ? `by matching ${pattern} to a sub the app could already place`
+    : starred > 0
+      ? `by combining your un-located frames into a deeper image (${starred} of `
+        + "them by matching star patterns, for the part of the night the sky had "
+        + "turned)"
+      : "by combining your un-located frames into a deeper image";
   return n === 1
-    ? "Located 1 more sub by combining your un-located frames into a deeper "
-      + "image — it's in your stack now."
-    : `Located ${n} more subs by combining your un-located frames into a `
-      + "deeper image — they're in your stack now.";
+    ? `Located 1 more sub ${how} — it's in your stack now.`
+    : `Located ${n} more subs ${how} — they're in your stack now.`;
 }
 
 /** Plain-language outcome of a finished "Try harder to locate these" job, or

@@ -15,7 +15,11 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 2. **Owner-approved, buildable now** (answers of 2026-09-25, on `main` via PR #981):
    - reconcile the 11 historical mosaic pairs (#878) through `merge.carry_stack_runs` —
      **unblocked now item 1 has shipped**;
-   - `astroalign` for the WCS-free registration fallback;
+   - ~~`astroalign` for the WCS-free registration fallback~~ — **the similarity transform itself shipped
+     2026-09-27 as v0.481.0**, inside the bootstrap rescue, and it closed a silent mis-placement bug on the
+     way (phase correlation never declines, so a night of alt-az field rotation was being propagated as a
+     confident wrong answer). What is left of the entry is the *stacker-wide* half — registering every
+     accepted-but-unsolved sub, not just the opt-in rescue's members — now sized M;
    - auto-*apply* the classified object preset (with undo, a Settings switch, and never
      over a saved recipe);
    - a progression reel ordered by **capture night**, cumulative (the existing reel orders

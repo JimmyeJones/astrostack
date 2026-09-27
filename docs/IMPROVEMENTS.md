@@ -82,6 +82,35 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **LEAD ×2 (Builder 2026-09-27, filed while shipping v0.481.0 — the two things that fix measured and deliberately did
+  not change).** *(Both small; neither is a wrong picture. Read [`SHIPPED.md`](SHIPPED.md) under v0.481.0 first.)*
+  **(a) A star-matched member is still stamped with the *reference's* `rotation_deg`, which is now knowably wrong for
+  it.** *(Pillar: trust — PRIORITY 3; size **S to write, M to be sure of**; severity very low — the column has exactly
+  one reader, `webapp/routers/sky.py::_representative_pixscale_rotation`, which takes the **first** solved frame's value
+  as representative of the whole target, so on the rescue path that is usually the anchor's own ASTAP value and the
+  member rows are not consulted.)* `bootstrap_solve` writes one `rotation` to every rescued member, which was true when
+  every member was a pure translation of the reference and is not once a member carries a measured rotation. The delta is
+  right there in `StarTransform.rotation_deg`. **Why it was not just added:** the column's convention is **ASTAP's**
+  (`solve/astap._parse_astap_ini`), and a sign derived from the composed WCS would not necessarily agree with it — so
+  writing `ref_rotation ± θ` is a guess about a convention, and a wrong sign is worse than today's honest approximation.
+  **Settle it cheaply first:** solve two real frames of one target that a night has rotated between and read the two
+  `.ini` values against the transform's own sign. Then fix it, or write `None` and make the one reader say "unknown"
+  rather than `0.0`. *(The same "a representative value is a claim the set is uniform" class as v0.456.0 — see AGENTS.md
+  history.)*
+  **(b) The deep image is still integrated from rotated members, so the image the rescue asks ASTAP to solve is
+  partly smeared.** *(Pillar: autonomy — PRIORITY 2; size **M**; severity low-to-unknown — it makes the deep solve
+  *harder*, never a wrong placement, since each member's own WCS now comes from its star match.)* `integrate_deep_image`
+  integer-shifts every correlation-registered member onto the reference grid, and a member the field has turned lands
+  with its stars on arcs rather than on the reference's stars — adding noise to the one image whose entire job is to clear
+  ASTAP's detection floor. Two shapes, and the cheap one is not obviously right: **(i)** exclude a member whose star match
+  reports a rotation over some floor (even 0.2° moves a frame corner ~4 px, so almost any rotation qualifies — and the
+  exclusion can drop the count below `min_frames` and make the rescue decline where it previously, wrongly, succeeded);
+  **(ii)** warp each member by its star transform before integrating, which is the *correct* answer, costs one
+  interpolation per member and is a real change to the integration maths. **Measure before building:** how much does a
+  rotated population actually cost the deep solve? The harness is in `tests/test_star_match_registration.py`
+  (`make_rotated_star_field` at a rotation ladder) plus a real ASTAP call, and if the answer is "it solves anyway" this
+  should be **closed with the number**.
+
 - **LEAD, MEASURED (Builder 2026-09-25, filed while shipping v0.475.0 — the one thing that fix measured and
   deliberately did not change) — the reveal's two sides are not identically sampled when the master is
   drizzled, so part of the "stacking cut your noise ~N×" number is the drizzle kernel rather than the
@@ -1630,12 +1659,24 @@ problems. Dogfood it every big-picture run and fix root causes.
   **▶ PARTIALLY DELIVERED by the stack-then-solve bootstrap (v0.210.0).** The shipped bootstrap
   (`seestack/solve/bootstrap.py`) already recovers the common tracked-burst case with **translation-only** integer
   registration (phase correlation) — enough for the short sharpest-N window it integrates, per the ±2 px jitter
-  measurement. This idea (a full **similarity** transform tolerant of accumulated alt-az **field rotation** across a
-  whole night, and/or registering *every* unsolved sub rather than just bootstrapping the deep image) remains the
-  more general L attack for long sessions where rotation between the first and last sub exceeds what a translation can
-  absorb. The dependency call is answered (owner: yes to `astroalign`, 2026-09-25). Reassess after the bootstrap has
-  been validated on real faint-field data — the bootstrap may cover enough of the owner's cases that the full-rotation
-  path isn't needed.
+  measurement.
+  **▶ THE SIMILARITY TRANSFORM ITSELF SHIPPED AS v0.481.0 — read this before re-picking anything here.**
+  `seestack/align/starmatch.py` measures rotation + shift + scale from the subs' own star patterns via `astroalign`
+  (the approved dependency, which until then was declared and imported by nothing), and the bootstrap's members are
+  placed by it in preference to a correlation shift — so **alt-az field rotation across a whole night is handled**, and
+  the reason it had to be was a *bug*, not a gap: `phase_cross_correlation` never declines, so a rotated member was
+  being propagated to a confident wrong place (4° → 4.2 px median error, 8° → 16 px; full numbers in
+  [`SHIPPED.md`](SHIPPED.md)). `wcs_io.wcs_text_after_pixel_affine` is the exact pixel-transform→WCS composition, reusable
+  by anything else that needs one.
+  **What is still open of this entry, and it is the bigger half:** the fallback lives inside the **opt-in bootstrap**
+  (`astap_bootstrap_solve`, off by default), which engages only on the `n_solved < min_frames` band. It does **not**
+  register *every* accepted-but-unsolved sub of a target where, say, 40 of 300 solved — `run_stack` still combines only
+  accepted **and** solved frames, so those 260 are still dropped. That slice is now much cheaper than when this entry was
+  written (the matcher, its refusal gates and the WCS composition all exist and are tested), but it is still a new
+  population on the stacker's hot path and wants its own engagement rule, its own honest surfacing on the stack result,
+  and a memory-bounded shape. Size M now rather than L. Reassess against real faint-field data first — and note the
+  matcher needs ≥6 detectable stars per sub, so the *deepest*-faint case (0–2 stars, which is what the deep-image
+  integration exists for) is out of its reach by construction.
 
 - ~~**IMPROVEMENT IDEA (Builder 2026-07-25) — let the bootstrap anchor on an already-solved sub when a few
   (but < min_frames) subs did solve, instead of always re-solving the deep image.**~~ — **✅ SHIPPED v0.412.0**
@@ -3952,6 +3993,14 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.481.0** — 🐛 + 🌟 the stack-then-solve rescue placed a sub by a **translation**, and `phase_cross_correlation`
+  never declines — so a night of alt-az **field rotation** was propagated as a confident wrong answer (measured: 4° → a
+  median 4.2 px placement error, 8° → 16 px, i.e. stars drawn as arcs). New `seestack/align/starmatch.py` measures the
+  **similarity** transform from the subs' star patterns (`astroalign`, the owner's 2026-09-25 approval, previously
+  imported by nothing) and `propagate_wcs` prefers it, with correlation as the fallback; the pixel→WCS composition is the
+  new exact `wcs_io.wcs_text_after_pixel_affine`. It refuses unless ≥6 stars match at a sub-pixel residual with a
+  scale within 1 % and no mirror. `bootstrap_star_matched` reaches the job result and `bootstrapRescueNote` says which
+  mechanism located them. +35 python tests (11 red before), +3 frontend. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.480.8** — `scripts/agent-dogfood.sh --combine`: the journey that starts in `incoming/` — two same-object folders,
   scan, a stack deliberately refused, solve, stack both, the merge nudge, Combine, two rescans — is a flag instead of a
   hand-rolled server. It prints what the app says at each step *and* the server log's error lines, and it **measures
