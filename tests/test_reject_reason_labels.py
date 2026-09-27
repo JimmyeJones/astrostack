@@ -40,7 +40,7 @@ _PY_DIRS = ("seestack", "webapp")
 #: reason. Keep this tiny, and say what the reason *is* — that sentence is what
 #: the next reader needs.
 _EXEMPT: dict[str, str] = {
-    "seestack/qc/runner.py:113": (
+    "seestack/qc/runner.py:117": (
         "f\"{reason}:…\" — the namespace is a local chosen one line above "
         "(`qc_error` retryable / `qc_error_final` terminal); both are covered by "
         "the `qc_error` entry in HANDLED_PREFIXES, which a vitest case exercises."

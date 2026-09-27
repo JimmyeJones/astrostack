@@ -576,44 +576,23 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   targets / rewrites on-disk layout, §9, and must never touch `incoming/`, §10) — now filed as **gate 16** in
   "Needs owner sign-off" so the owner can see where the decision lives. No urgency from accumulation.
 
-- **🟡 BUG (friendliness + autonomy, Scout 2026-09-14 — verified from observer issue
-  [#880](https://github.com/JimmyeJones/astrostack/issues/880)) — a raw Python exception repr is stored as a
-  user-facing `reject_reason`, and QC-error frames stay `accept=1`, so 11 mosaic-output-only targets sit in
-  the library as accepted-but-unstackable.** *(Pillar: friendliness — PRIORITY 3; size S–M. Severity: low —
-  no image damaged, no stack polluted (observer ruled out pollution: the 54 frames are in bare `<T>_mosaic`
-  targets with zero stack_runs, disjoint from the real `<T>_mosaic_sub` targets). Confidence: **traced** to
-  the exact lines.)* Three distinct, separable defects: **(a)** `qc/runner.py:113` stores
-  `reject_reason = f"{reason}:{result.error or 'unknown'}"`, and `result.error` is the raw exception string
-  from `fits_loader.py:219` (`ValueError: expected 2D Bayer array, got shape (3, 3840, 2160)`) — a Python
-  repr shown wherever a reject reason surfaces, against a namespaced vocabulary everywhere else
-  (`auto:grade:fwhm_px`, `auto:seestar_output`). The cheap, independently-correct fix: store a namespaced
-  code (`qc_error:unsupported_layout`) and keep the exception text in a detail column, so no surface ever
-  shows a repr. **Care:** `reject_reason.startswith("qc_error")` is matched in `rejection_summary.py:82`,
-  `session_recap.py:91`, `stackhealth.py:520`, `solve/runner.py`, `project.py:1319` — the prefix must be
-  preserved, and the 135 existing rows carrying the old format must still bucket correctly (add a migration
-  or a read-time normaliser; do not rewrite rows in place without a test). **(b)** QC error leaves `accept`
-  untouched (`apply_qc_result_to_db` sets only `reject_reason` when `metrics is None`) — combined with the
-  mosaic-output classification gap (`scanner.py:377` skips mosaics in `_seestar_output_bases`), the 54
-  device-output frames stay `accept=1` and count as accepted for 11 targets no stack can ever use. **(c)**
-  the classification gap itself is the same one #878 turns on — fixing it (recognise `<T>_mosaic/` device
-  output and reject/skip it like single-field output) closes both the accepted-clutter here and #878's hash
-  collision. (a) is the safe small win; (b)/(c) are the shared mosaic-output work.
-  **⚠ BUILDER VERIFICATION 2026-09-14 (branch `claude/sweet-babbage-f0hdap`) — (a) is NOT user-facing and
-  (b) is deliberate; read this before spending a slot here.**
-  **(a):** the exception repr is *stored*, never *shown*. Every surface that renders a reject reason maps
-  it first — `frontend/src/routes/Target.tsx::rejectReasonLabel` answers `"QC error"` for anything
-  `startsWith("qc_error")` (pinned by `Target.test.tsx:1990`), `webapp/rejection_summary._bucket_for`
-  buckets it as `"error"`, and `seestack/session_recap.py:91` says `"unreadable"`. The observer sees the
-  repr because it reads `project.sqlite` directly, which is not a UI. So this is **storage hygiene, not a
-  friendliness bug**: real, and worth doing if the file is touched, but it costs a migration or a read-time
-  normaliser for the 135 existing rows plus five `startswith("qc_error")` consumers and buys the owner
-  nothing visible. Do not carry it as PRIORITY 3.
-  **(b):** `accept` staying True on a QC error is **documented, deliberate design**, not an oversight —
-  `seestack/solve/runner.py:336-342` spells out the carve-out and why it exists. Flipping it is not a
-  one-liner: the recovery branch (`qc/runner.py:135-140`) clears only `reject_reason` when a later QC
-  succeeds, so setting `accept=False` on the *retryable* first failure would let one transient NAS blip
-  permanently un-accept a good frame. Any change here must restore `accept` in that branch too, and needs a
-  test for the blip-then-recover path. **(c)** is answered by the #878 note above.
+- **⚪ REMAINDER of observer issue [#880](https://github.com/JimmyeJones/astrostack/issues/880) — the raw Python
+  exception repr is *stored* as a `reject_reason`.** *(Pillar: friendliness — size S–M, but **do not carry it as
+  PRIORITY 3**.)* `qc/runner.py:113` stores `reject_reason = f"{reason}:{result.error or 'unknown'}"`, and
+  `result.error` is the raw exception from `fits_loader.py:219`. **It is storage hygiene, not a user-facing bug,
+  and that was checked rather than assumed** (Builder 2026-09-14): every surface maps the prefix first —
+  `Target.tsx::rejectReasonLabel` answers "QC error" for anything `startsWith("qc_error")` (pinned by
+  `Target.test.tsx:1990`), `rejection_summary._bucket_for` buckets it as `"error"`, `session_recap.py:91` says
+  "unreadable". The observer sees the repr because it reads `project.sqlite` directly, which is not a UI. Fixing
+  it costs a migration or a read-time normaliser for the ~147 existing rows plus five `startswith("qc_error")`
+  consumers (`rejection_summary.py:82`, `session_recap.py:91`, `stackhealth.py:520`, `solve/runner.py`,
+  `project.py:1319`) and buys the owner nothing visible — worth doing only if one of those files is open anyway.
+  **The rest of #880 is shipped and is not this entry's business:** its (b) consequence — accepted-but-unreadable
+  frames failing 61 batch reprocesses — as **v0.483.1**, and the batch summary that would not say why as
+  **v0.483.2**; (c) was answered by the #878 note above (the sibling-skip rule already closes recurrence). Full
+  history of all three in [`SHIPPED.md`](SHIPPED.md). **`accept` staying True on the *retryable* first QC failure
+  is deliberate and stays** (`solve/runner.py:336-342` spells out the carve-out): one transient NAS blip must
+  never un-accept a good sub, and v0.483.1 deliberately did not change it.
 
 - **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
   question is closed unanswerable. Read before prioritising the audit's items.**
@@ -4008,6 +3987,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.483.1** — 🟠 BUG FIX (autonomy / trust), observer issue [#880](https://github.com/JimmyeJones/astrostack/issues/880): **the subs the app cannot read stop counting as subs it can stack.** The 11 targets that hold only the Seestar's own three-plane colour output were accepted-but-unreadable, so every `reprocess_all` handed them to the stacker and died on `drizzle: no usable frames` — 61 times across seven weeks. New `seestack/qc/runner.py::reconcile_unreadable_frames` (called by `scanner.run_qc_and_solve`) sets aside only the terminal-QC frames the **loader itself refuses**, reversing itself when a file reads again; `Project.frames_rejected_for` queries the candidates instead of walking a 35,894-row target. Tests +9, four fail-before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.483.0** — 🌟 NEW BEGINNER FEATURE (PRIORITY 2, autonomy/enjoy), the owner's 2026-09-25 request: **the
   "watch it appear" clip becomes a night-by-night reel, and it costs no extra stacking.** `_QuickLook`'s
   pass-1 snapshots now land on **capture-night boundaries** instead of every Nth frame, so one ordinary stack

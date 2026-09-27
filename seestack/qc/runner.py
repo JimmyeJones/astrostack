@@ -15,7 +15,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from seestack.io.project import readable_frame_path, restoration_stamp
+from seestack.io.project import (
+    REJECT_REASON_QC_ERROR_FINAL,
+    readable_frame_path,
+    restoration_stamp,
+)
 from seestack.qc.metrics import FrameMetrics, compute_frame_metrics
 
 log = logging.getLogger(__name__)
@@ -382,6 +386,93 @@ def stationary_streak_frames(
     # Back in the order the caller handed them over, so the verdict reads the
     # same way whichever cluster was found first.
     return [usable[j][0] for j in sorted(keep)]
+
+
+def _frame_reads(path: str) -> bool:
+    """Can the stacker's own loader read this file at all?
+
+    The one question that decides :func:`reconcile_unreadable_frames`, asked of
+    the same call the stacker and QC both make
+    (:func:`~seestack.io.fits_loader.load_seestar_raw`) so the answer cannot
+    drift from what the stack will do with the frame. ``debayer=False`` because
+    nothing here looks at the pixels — only at whether there are any.
+    """
+    from seestack.io.fits_loader import load_seestar_raw
+
+    try:
+        load_seestar_raw(path, debayer=False, out_dtype=np.float32)
+    except Exception:  # noqa: BLE001 — any failure is the answer "no"
+        return False
+    return True
+
+
+def reconcile_unreadable_frames(project) -> tuple[list[int], list[int]]:
+    """Set aside the accepted subs QC has proved it cannot read — and only those.
+
+    Observer issue #880. Eleven of the owner's targets hold nothing but the
+    Seestar's own on-device colour pictures: three-plane RGB files ASTAP solves
+    happily and :func:`~seestack.io.fits_loader.load_seestar_raw` refuses
+    (``expected 2D Bayer array, got shape (3, …)``). QC stamps them
+    :data:`~seestack.io.project.REJECT_REASON_QC_ERROR_FINAL` and never offers
+    them again, but leaves ``accept`` alone — deliberately, so one NAS blip can
+    never un-accept a good sub. So they stay *accepted*: the stacker is handed
+    frames it cannot read, errors on each in turn, and on a target that holds
+    nothing else raises ``drizzle: no usable frames``. Seven weeks of
+    ``reprocess_all`` batches failed on exactly those eleven targets, 61 times,
+    with that message and no other word to the owner.
+
+    **The verdict is evidence, not the marker.** A terminal QC state can also
+    mean "the file reads fine and the *measurement* blew up" — QC catches every
+    exception, star detection included — and such a sub stacks perfectly well.
+    So each candidate is actually read (:func:`_frame_reads`), and only a frame
+    the loader refuses is set aside. That keeps the retryable-failure carve-out
+    intact end to end: nothing is un-accepted on a *guess* about why QC failed.
+
+    Reversible, and it reverses itself: a frame set aside here comes straight
+    back the moment its file reads again — bounded to frames QC has **never**
+    measured (``star_count is None``), which is the one shape that cannot be a
+    sub some other rule had already rejected before QC overwrote its reason (an
+    ``auto:grade:`` frame carries the metrics it was graded on). Nothing on disk
+    is touched (``AGENTS.md`` §10), a frame the user graded by hand
+    (``user_override``) is left alone, and a frame whose file is simply *gone*
+    belongs to :meth:`~seestack.io.project.Project.set_missing_frames_aside`, not
+    here.
+
+    Cost is one frame read per *terminal* QC error on the target, which is the
+    population nothing else ever looks at again: the owner's whole library
+    carries 147 of them across 89 targets. Returns ``(set_aside_ids,
+    restored_ids)``; both empty — and no file read at all — on any install with
+    no terminal QC errors, which is most of them.
+    """
+    candidates = [
+        f for f in project.frames_rejected_for(REJECT_REASON_QC_ERROR_FINAL)
+        if f.id is not None and not f.user_override
+    ]
+    set_aside: list[int] = []
+    restored: list[int] = []
+    for f in candidates:
+        path = readable_frame_path(f)
+        if path is None:
+            # Its file is not on disk at all: a different verdict with its own
+            # owner and its own user-facing sentence. Leave it be.
+            continue
+        reads = _frame_reads(path)
+        if f.accept and not reads:
+            project.update_frame(f.id, accept=False)
+            set_aside.append(f.id)
+        elif not f.accept and reads and f.star_count is None:
+            project.update_frame(f.id, accept=True, reject_reason=None,
+                                 restored_utc=restoration_stamp())
+            restored.append(f.id)
+    if set_aside:
+        log.info(
+            "Set aside %d accepted sub(s) the loader cannot read — they stay in "
+            "the library and come back if the file ever reads again.",
+            len(set_aside),
+        )
+    if restored:
+        log.info("Re-accepted %d sub(s) that read again.", len(restored))
+    return set_aside, restored
 
 
 def reconcile_streak_rejections(project) -> list[int]:

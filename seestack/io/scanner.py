@@ -1376,6 +1376,7 @@ def run_qc_and_solve(
         build_qc_arglist,
         compute_for_db_row,
         reconcile_streak_rejections,
+        reconcile_unreadable_frames,
     )
     from seestack.solve.runner import (
         apply_solve_result_to_db,
@@ -1413,6 +1414,16 @@ def run_qc_and_solve(
             restored = reconcile_streak_rejections(project)
             if restored:
                 summary["streak_reaccepted"] = len(restored)
+        # A sub QC has twice failed to read is never offered to QC again, so an
+        # *accepted* one is a promise no stack can keep — and on a target that
+        # holds nothing else it is the whole failure (#880). Not gated on
+        # ``auto_reject_streaks``: it is a different verdict, reached by actually
+        # reading the file rather than by trusting the marker.
+        unreadable, readable_again = reconcile_unreadable_frames(project)
+        if unreadable:
+            summary["unreadable_set_aside"] = len(unreadable)
+        if readable_again:
+            summary["unreadable_reaccepted"] = len(readable_again)
 
     if run_solve and not _stopped(should_stop):
         solve_args = build_solve_arglist(project, use_hint=use_solve_hints)
