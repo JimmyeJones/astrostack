@@ -1,5 +1,61 @@
 # Process notes & QA sweep records
 
+## 2026-09-27 — Builder: observer #989 (the master with no WCS), its silence, and the `--combine` shape
+
+*(Builder, branch `claude/exciting-tesla-2o6gdt`, shipping v0.480.6, v0.480.7 and v0.480.8 via PR #990 + the follow-up.
+Baseline green — **6,707 passed, 2 skipped**, 11m37s with the BLAS cap and `-n 4 --dist worksteal`,
+`/tmp/pytest-of-root` cleared first. End of the first two tasks: **6,807 passed, 2 skipped**, 10m49s (+100 tests);
+frontend **4,403 tests / 288 files**, `tsc` and `vite build` clean, all three from `frontend/`.)*
+
+**`pytest-xdist` is not in the venv `scripts/agent-setup.sh` builds**, and the first thing that happened this run was the
+trap AGENTS.md §7 warns about, in its exact costume: `-n 4 --dist worksteal` made pytest exit **4** with an
+`unrecognized arguments` block and no summary line. The redirect-don't-pipe rule is what caught it in one command
+(`EXIT=4`, and a tail that does not end in `passed`). `pip install pytest-xdist` and carry on — it is deliberately not a
+project dependency.
+
+**The run's first task came from the issue inbox, not the backlog.** Observer [#989](https://github.com/JimmyeJones/astrostack/issues/989)
+was filed at 07:20 the same morning and had not been triaged; "Bugs (fix these first)" held only leads asking for a
+measurement. An observer report is a *lead*, so it was reproduced before anything was changed — and the reproduction is
+worth recording because the naive version does **not** show the bug: on astropy 8, building a header in memory and
+writing it out does not add the `COMMENT` citation block, so a fixture that round-trips through `writeto` reads back
+clean and the merge succeeds. The bug needs the cards in **file order**, with `COMMENT` above `CTYPE1`, which is what a
+real writer emits. Building the header from raw 80-column cards reproduced it exactly: `MERGE FAILED: ValueError`,
+`CTYPE1 in out: False`, `has_celestial: False`.
+
+**The fixture blind spot behind it is the same class as the "fixtures that cannot exhibit their bug" entry**, and it is
+worth naming for the next run: every stacker fixture in `tests/` set `frame.wcs_json` from `synth.make_synth_wcs_text`,
+which returns a **WCS-only** header — the one shape that never had this bug. 6,707 green tests could not have caught it.
+New `synth.make_synth_frame_header_text` returns a realistic whole stored frame header instead; use it for anything that
+asserts about what does, or must not, reach an output file's header.
+
+**The observer asked for the fix not to be a tolerant loop, and it was right, and that shaped the tests.** Both wrong
+directions are now pinned: 5 tests fail against the old writer, and **4 different ones** fail against the tolerant-loop
+fix (the `SITELAT`/`SITELONG` leak, the rest of a sub's header travelling, the capture window overwritten by one frame's
+`DATE-OBS`). Writing the second set was worth more than writing the first — the bug can only be reintroduced once, but
+the *wrong fix* is the tempting one.
+
+**One place the report's own suggestion was not followed**, deliberately: it proposed handing the reference-canvas
+branch a WCS-only header. That branch's `dst_wcs_text` is also its **reprojection target**, where `NAXIS1`/`NAXIS2`
+carry the canvas size, so a `to_header()` string would have dropped them. The writer is where the WCS is lost and where
+the fix belongs.
+
+**And the running-app pass mattered again.** `scripts/agent-dogfood.sh --mosaic`'s single-field run records
+`is_mosaic=0, drizzle=False, mosaic_canvas=auto` — exactly the broken combination — so reading its master back off disk
+(`has_wcs=True`, `CRVAL=(83.82, -5.39)`, no `SITELAT`) is the fix confirmed on the real path, not in a fixture. The
+v0.480.7 note stayed silent on both samples' health cards, which is what a healthy stack must produce.
+
+**`--combine` (v0.480.8) — the dogfood pass's own result: CLEAN.** Building the flag *is* running the journey, and it
+found no new bug: all three v0.480.2–.4 signals are present on live data, and `incoming/` came back with all seven
+original files unchanged (the one sub dropped in at the end is an addition, which §10 allows). Two things the build
+itself corrected, so neither is re-derived:
+
+* **`/api/targets/merge-suggestions` is *meant* to be empty before the solve.** It clusters by each target's own
+  plate-solved centre. The flag's first version checked it at step 3 and printed the empty answer as a finding; moved
+  after the solve it names the group. If a future pass sees it empty *with both targets solved and co-located*, that is
+  the finding.
+* **`POST …/stack` answers 200 and fails inside the job.** Reading the POST body reports the step as having worked; the
+  owner-facing sentence is the job's `error` (`error_kind=no_solved_frames`). The flag waits for the job.
+
 ## 2026-09-27 — Scout: rotation item (4), the webapp routers + the newest Combine/merge code — CLEAN
 
 *(Scout, branch `claude/admiring-brahmagupta-xmsysl`. Baseline green — **6,707 passed, 2 skipped**, 13m32s with

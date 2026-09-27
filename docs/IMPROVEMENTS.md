@@ -82,15 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **LEAD (Builder 2026-09-27, filed while shipping v0.480.2–.5) — `scripts/agent-dogfood.sh` has no shape that
-  exercises Combine, or anything else that starts in `incoming/` and ends in the library, so that pass had to be
-  hand-rolled.** *(Process/trust; size S. Verified this run; the step-by-step recipe is in `docs/PROCESS-NOTES.md`,
-  2026-09-27.)* `POST /api/sample` writes straight into the library, so the scratch `incoming/` is empty on every pass
-  unless `--incoming-lag` seeds a fault, and `--closing`'s two targets are a degree apart *so the merge nudge does not
-  fire*. **Shape:** a `--combine` flag — two same-object folders into `incoming/`, scan, stack both, merge, scan again,
-  printing what the app *says* each step. Carry two things from the hand-rolled version: no ASTAP in the container, so
-  frames need `make_synth_wcs_text()` in `wcs_json` before any stack runs; and print the log of the steps that are
-  *meant* to fail, because that is where v0.480.5 was sitting.
 - **LEAD, MEASURED (Builder 2026-09-25, filed while shipping v0.475.0 — the one thing that fix measured and
   deliberately did not change) — the reveal's two sides are not identically sampled when the master is
   drizzled, so part of the "stacking cut your noise ~N×" number is the drizzle kernel rather than the
@@ -3961,29 +3952,20 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.480.8** — `scripts/agent-dogfood.sh --combine`: the journey that starts in `incoming/` — two same-object folders,
+  scan, a stack deliberately refused, solve, stack both, the merge nudge, Combine, two rescans — is a flag instead of a
+  hand-rolled server. It prints what the app says at each step *and* the server log's error lines, and it **measures
+  AGENTS.md §10** by fingerprinting `incoming/` before and after. Flags: [`AGENT-ENVIRONMENT.md`](AGENT-ENVIRONMENT.md).
 - **v0.480.7** — the other half of [#989](https://github.com/JimmyeJones/astrostack/issues/989): a picture whose master
-  lost its sky solution now **says so** instead of just quietly having no scale bar, no compass, no object labels and no
-  share of the sky-coverage total. New `stackhealth` note (`kind="no_sky_solution"`, priority 15) on the existing
-  "How's my stack?" card, with a new `restack_for_wcs` action — "Stack this target again →", naming no switch, because
-  there is nothing to change. New `wcs_io.fits_has_celestial_wcs` answers `True`/`False`/**`None`**, where `None` is
-  "cannot say" (file not on disk or unreadable), so a cleared cache or an offline share is never accused of losing a
-  solution; it is answered *through* `celestial_wcs_from_fits` so the note cannot disagree with the readers that draw
-  the overlays. The engine takes the answer as an argument (`stack_health(has_sky_solution=…)`) rather than opening a
-  file, like `noise_ratio`. Additive and upgrade-safe: the default reproduces today's output, and an older frontend
-  renders the sentence without the link. +11 python tests (all red before), +1 frontend.
-- **v0.480.6** — 🐛 **observer [#989](https://github.com/JimmyeJones/astrostack/issues/989), verified and fixed**: a
-  single field stacked with **drizzle off** wrote its `master.fits` with **no celestial WCS at all** (6 of 6 such runs
-  on the owner's library, 0 of the other 737; one is a target's current picture across six consecutive stacks). That
-  branch is the only one that hands `stack.output._write_fits` the reference sub's *whole* header, and the merge — one
-  `try` around the whole loop — raised on the frame header's `COMMENT` card at card 6 and never reached `CTYPE1`, so
-  sky coverage, North-up, the scale bar, the compass, the baked catalog labels, the annotations endpoint, framing
-  advice and an editor export's own header all went silently absent. Fixed with a **WCS-keyword allowlist**
-  (`_is_wcs_keyword`) copied **per card**, deliberately *not* a tolerant loop: the same header carries the
-  `SITELAT`/`SITELONG` cards a Seestar stamps into every sub, which for a scope used at home is the owner's address,
-  in the files that get exported and shared (§10). `DATE-OBS` is excluded too, so the stack's own capture window is not
-  overwritten by one sub's. Masters heal on the target's next stack; no migration, no schema/config/API change, and the
-  mosaic and drizzle branches' headers are byte-identical. +87 tests, and `synth.make_synth_frame_header_text` closes
-  the fixture blind spot that hid this from 6,707 green tests (every stacker fixture used a *WCS-only* `wcs_json`).
+  lost its sky solution now **says so** (new `stackhealth` `no_sky_solution` note + `restack_for_wcs` action) instead of
+  quietly having no scale bar, compass or labels. New `wcs_io.fits_has_celestial_wcs` answers True/False/**None**, so a
+  file that is not on disk is never accused of losing a solution. +11 python tests (red before), +1 frontend.
+- **v0.480.6** — 🐛 [#989](https://github.com/JimmyeJones/astrostack/issues/989): a single field stacked with **drizzle
+  off** wrote its `master.fits` with **no celestial WCS** (6 of 6 such runs on the owner's library, 0 of the other 737).
+  That branch hands `_write_fits` the reference sub's *whole* header and the one-`try` merge raised on its `COMMENT`
+  card before reaching `CTYPE1`. Fixed with a WCS-keyword **allowlist** copied per card — deliberately not a tolerant
+  loop, which would have started copying the `SITELAT`/`SITELONG` cards into every shared master (§10). Masters heal on
+  the next stack. +87 tests, and `synth.make_synth_frame_header_text` closes the fixture blind spot that hid it.
 - **v0.480.5** — 🐛 **found by the running-app pass that verified v0.480.2–.4**, not by a test: every
   `log.exception` in the app was missing from `/api/logs`. `RingBufferLogHandler.emit` formatted tracebacks with
   `self.formatException` — a `logging.Formatter` method, not a `Handler` one — so a record carrying `exc_info`

@@ -32,6 +32,15 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 - **Mosaic-scale and walk-away behaviour is the open frontier.** The single-field engine
   core (`seestack/stack`, `seestack/calibrate`) has passed twenty clean sweeps and is
   closed to re-sweeps until a new bug is found there.
+  **↳ One has been (Builder 2026-09-27, observer [#989](https://github.com/JimmyeJones/astrostack/issues/989),
+  fixed as v0.480.6): `stack/output.py::_write_fits` wrote every single-field drizzle-off
+  master with no WCS at all.** The Scout decides what that reopens; the Builder's finding
+  is narrower than "the core is unsafe" and is about *fixtures*, not about the combine
+  maths — every stacker fixture set `wcs_json` from the **WCS-only**
+  `synth.make_synth_wcs_text`, i.e. the one header shape that could not exhibit it. The
+  realistic whole-header fixture now exists (`synth.make_synth_frame_header_text`), and
+  the cheap sweep it enables is "what else does this engine write out, and what does it
+  put in the file?" rather than another pass over the combine path.
 - **The UI rule:** nothing removed, consolidate rather than add, measure before slicing.
   Current tallest pages and their baselines: `docs/PROCESS-NOTES.md`, "DOGFOOD BASELINE".
 - **A beginner feature on a regular cadence** from "Features that serve real workflows".
