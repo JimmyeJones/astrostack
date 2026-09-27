@@ -3979,6 +3979,14 @@ def _stack_target(
         # those a two-pass run read fine on its other pass and combined anyway.
         "n_read_errors": getattr(result, "n_read_errors", 0),
         "n_read_recovered": getattr(result, "n_read_recovered", 0),
+        # How many contributing subs were placed by matching their **star
+        # patterns** to the reference sub rather than by a plate solve of their own
+        # (``star_match_unsolved``, off by default). A picture that is suddenly
+        # several times deeper than the user's last one should say where that depth
+        # came from, and those subs' positions are derived from a neighbour rather
+        # than measured against the sky — which is an honest thing to know and a
+        # useless thing to have to go looking for. 0 on every run with it off.
+        "n_star_matched": getattr(result, "n_star_matched", 0),
         # The outlier-rejection tally, so the Jobs "Process target" result can
         # name the invisible clean-up (e.g. a lone satellite/plane trail that a
         # walk-away small-stack auto-picked min/max removed) right where the

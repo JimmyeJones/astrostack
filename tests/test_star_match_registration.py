@@ -23,6 +23,7 @@ pytest.importorskip("astroalign")
 
 from seestack.align.starmatch import (  # noqa: E402
     DEFAULT_MAX_ROTATION_DEG,
+    SEP_SUB_OBJECT_LIMIT,
     find_star_transform,
 )
 from seestack.io.project import FrameRow, Project  # noqa: E402
@@ -57,16 +58,19 @@ ROTATIONS = [2.0, 4.0, 7.0, 11.0, 16.0, 22.0, -5.0, -13.0]
 DITHER = (2.0, -1.0)
 
 
-def _gray(rotation_deg: float, *, shift=DITHER, noise_seed: int = 1) -> np.ndarray:
+def _gray(rotation_deg: float, *, shift=DITHER, noise_seed: int = 1,
+          width: int = W, height: int = H, n_stars: int = N_STARS) -> np.ndarray:
     """A background-flattened luminance frame of the field, rotated by ``rotation_deg``.
 
-    Mirrors ``bootstrap._registration_gray``'s preparation (debayer → luminance →
+    Mirrors ``starmatch.registration_gray``'s preparation (debayer → luminance →
     robust sky subtraction → clip) so these tests see the pixels the rescue sees.
+    ``width``/``height``/``n_stars`` default to this module's small field; the
+    extractor-overflow test needs a denser one.
     """
     from seestack.io.fits_loader import bilinear_debayer
 
     mosaic = make_rotated_star_field(
-        width=W, height=H, n_stars=N_STARS, seed=SEED,
+        width=width, height=height, n_stars=n_stars, seed=SEED,
         rotation_deg=rotation_deg, shift=shift, noise_seed=noise_seed,
     )
     rgb = bilinear_debayer(mosaic.astype(np.float32))
@@ -178,6 +182,31 @@ def test_find_star_transform_declines_a_rescaled_field():
     loose = find_star_transform(
         ref, mov, max_shift_px=400.0, max_scale_deviation=0.10)
     assert loose is not None and loose.scale == pytest.approx(1 / 1.04, abs=0.01)
+
+
+def test_a_rich_field_matches_instead_of_overflowing_the_extractor():
+    """sep's **default** sub-object cap overflows on a dense field, and astroalign
+    re-raises that as a generic "Input type for source not supported" — so the
+    symptom is a matcher that quietly never matches, indistinguishable from having
+    been handed something that is not an image.
+
+    Measured on this fixture's shape (480x320, 30 stars, which is *sparser* than a
+    real Seestar sub): 0 of 8 subs matched at sep's default and 8 of 8 once the cap
+    is lifted. sep's limit is process-global, so this test puts it back to sep's own
+    default first — otherwise any earlier match in the same worker has already
+    lifted it and the test passes on the bug.
+    """
+    sep = pytest.importorskip("sep")
+    dense_ref = _gray(0.0, shift=(0.0, 0.0), noise_seed=31, width=480, height=320,
+                      n_stars=30)
+    dense_mov = _gray(9.0, noise_seed=32, width=480, height=320, n_stars=30)
+    sep.set_sub_object_limit(1024)  # sep's own default
+    try:
+        t = find_star_transform(dense_ref, dense_mov, max_shift_px=200.0)
+    finally:
+        sep.set_sub_object_limit(SEP_SUB_OBJECT_LIMIT)
+    assert t is not None, "the rich field was not matched"
+    assert t.rotation_deg == pytest.approx(-9.0, abs=0.25)
 
 
 def test_star_transform_summary_is_json_safe():

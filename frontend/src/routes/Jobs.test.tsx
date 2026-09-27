@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
   bootstrapRescuedCount,
-  bootstrapStarMatchedCount, buildMasterSummary, friendlyJobError, jobHeaderNote,
+  bootstrapStarMatchedCount,
+  starMatchedNote, buildMasterSummary, friendlyJobError, jobHeaderNote,
   jobTempNote,
   jobKindLabel,
   calibrationMismatchNote, heldForFilesLine, heldForSubsLine, missingSubsNote,
@@ -678,6 +679,39 @@ describe("pipelineSummary", () => {
     const { line, healed } = pipelineSummary({ scanned: 3, auto_stacked: [] });
     expect(healed).toEqual([]);
     expect(line).not.toMatch(/came out thin/);
+  });
+});
+
+describe("starMatchedNote", () => {
+  it("says how much of the depth came from star-matched subs", () => {
+    expect(starMatchedNote(6, 8)).toBe(
+      "6 subs of the 8 in this picture were lined up by recognising their stars, "
+      + "because the app couldn't read the sky in them — so their position comes "
+      + "from a sub it could read, not from the sky itself.",
+    );
+  });
+
+  it("singularises one", () => {
+    expect(starMatchedNote(1, 3)).toBe(
+      "1 sub of the 3 in this picture was lined up by recognising its stars, "
+      + "because the app couldn't read the sky in it — so its position comes from "
+      + "a sub it could read, not from the sky itself.",
+    );
+  });
+
+  it("stays silent on every ordinary run", () => {
+    // The option is off by default, so this is the case that matters most.
+    expect(starMatchedNote(0, 40)).toBeNull();
+    expect(starMatchedNote(undefined, 40)).toBeNull();
+    expect(starMatchedNote(null, 40)).toBeNull();
+    expect(starMatchedNote("lots", 40)).toBeNull();
+    expect(starMatchedNote(-3, 40)).toBeNull();
+  });
+
+  it("never prints a count larger than the picture it describes", () => {
+    // A garbled or older result must not produce "9 subs of the 2".
+    expect(starMatchedNote(9, 2)).toContain("9 subs of the 9");
+    expect(starMatchedNote(4, undefined)).toContain("4 subs of the 4");
   });
 });
 
@@ -1437,7 +1471,7 @@ describe("processTargetSummary", () => {
       stacked: true, solved_accepted: 8, stack: { n_frames_used: 8 },
     })).toEqual({
       line: "Stacked 8 frames into a new master.", stacked: true, thin: null,
-      cleaned: null, storage: null, calMismatch: null,
+      cleaned: null, storage: null, calMismatch: null, starMatched: null,
     });
   });
   it("names the outlier clean-up a small auto-stack made with min/max", () => {
@@ -1523,7 +1557,7 @@ describe("processTargetSummary", () => {
     expect(processTargetSummary({ stacked: true, solved_accepted: 5 }))
       .toEqual({
         line: "Stacked 5 frames into a new master.", stacked: true, thin: null,
-        cleaned: null, storage: null, calMismatch: null,
+        cleaned: null, storage: null, calMismatch: null, starMatched: null,
       });
   });
   it("flags a thin stack (very few frames combined) so it isn't shown as a clean result", () => {
@@ -1569,18 +1603,19 @@ describe("processTargetSummary", () => {
       cleaned: null,
       storage: null,
       calMismatch: null,
+      starMatched: null,
     });
   });
   it("explains a cancellation and an unknown non-stacked outcome", () => {
     expect(processTargetSummary({ stacked: false, stack_skipped_reason: "cancelled" }))
       .toEqual({
         line: "Cancelled before stacking.", stacked: false, thin: null,
-        cleaned: null, storage: null, calMismatch: null,
+        cleaned: null, storage: null, calMismatch: null, starMatched: null,
       });
     expect(processTargetSummary({ stacked: false }))
       .toEqual({
         line: "Finished, but no stack was produced.", stacked: false, thin: null,
-        cleaned: null, storage: null, calMismatch: null,
+        cleaned: null, storage: null, calMismatch: null, starMatched: null,
       });
   });
 });

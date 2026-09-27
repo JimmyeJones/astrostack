@@ -1668,15 +1668,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   being propagated to a confident wrong place (4° → 4.2 px median error, 8° → 16 px; full numbers in
   [`SHIPPED.md`](SHIPPED.md)). `wcs_io.wcs_text_after_pixel_affine` is the exact pixel-transform→WCS composition, reusable
   by anything else that needs one.
-  **What is still open of this entry, and it is the bigger half:** the fallback lives inside the **opt-in bootstrap**
-  (`astap_bootstrap_solve`, off by default), which engages only on the `n_solved < min_frames` band. It does **not**
-  register *every* accepted-but-unsolved sub of a target where, say, 40 of 300 solved — `run_stack` still combines only
-  accepted **and** solved frames, so those 260 are still dropped. That slice is now much cheaper than when this entry was
-  written (the matcher, its refusal gates and the WCS composition all exist and are tested), but it is still a new
-  population on the stacker's hot path and wants its own engagement rule, its own honest surfacing on the stack result,
-  and a memory-bounded shape. Size M now rather than L. Reassess against real faint-field data first — and note the
-  matcher needs ≥6 detectable stars per sub, so the *deepest*-faint case (0–2 stars, which is what the deep-image
-  integration exists for) is out of its reach by construction.
+  **▶ THE STACKER-WIDE HALF SHIPPED AS v0.482.0, for a single field.** `StackOptions.star_match_unsolved` (off by
+  default) has `run_stack` place its accepted-but-unsolved subs from the reference sub's stars — so a target where 40 of
+  300 solved can stack all of them, which is what this entry was always about. In-memory only (nothing is written to the
+  project DB), after the canvas decision so it cannot move the canvas, bounded at 400 attempts star-richest-first.
+  **What is left open is the mosaic, and it is a design question rather than a slice:** the pass stands down on a mosaic
+  canvas because the reference sub's stars cover one panel, so an off-panel unsolved sub has nothing to match against —
+  and an unsolved sub has no pointing, so nothing says *which* panel to offer it. The shape worth costing is trying one
+  solved anchor per `pointing_group` and taking the first that matches, whose cost is (panels × an extraction of the same
+  moving frame) because astroalign re-extracts both sides per call; a caller that wants this should look at whether the
+  matcher can be handed pre-extracted control points instead. The owner is a heavy mosaic user, so this is worth real
+  thought rather than a loop. **Also still true:** the matcher needs ≥6 detectable stars per sub, so the *deepest*-faint
+  case (0–2 stars, which is what the deep-image integration exists for) is out of its reach by construction.
 
 - ~~**IMPROVEMENT IDEA (Builder 2026-07-25) — let the bootstrap anchor on an already-solved sub when a few
   (but < min_frames) subs did solve, instead of always re-solving the deep image.**~~ — **✅ SHIPPED v0.412.0**
@@ -3993,6 +3996,16 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.482.0** — 🌟 + 🐛 the other half of the WCS-free fallback: new `StackOptions.star_match_unsolved` (**off by
+  default**) lets `run_stack` stack the accepted subs no plate solve could place, from the reference sub's own stars —
+  the direct answer to "gibberish on faint targets", where hundreds of good subs sat unused because only a handful
+  solved. Nothing is written to the project DB (a derived position must not pose as a plate solve, and the frame stays
+  re-offered to the real solver), it stands down on a mosaic canvas, it runs after the canvas decision so it cannot move
+  it, and it is bounded at 400 attempts star-richest-first. **It also found a bug in v0.481.0:** `sep` caps deblend
+  sub-objects at 1024 and a rich field overflows it, which astroalign reports as "input type not supported" — so the
+  matcher quietly never matched (0 of 8 at the default, 8 of 8 at the new `SEP_SUB_OBJECT_LIMIT`). The count rides the
+  job result and `Jobs.tsx::starMatchedNote` says in one sentence where the extra depth came from. +13 tests (3 red
+  before). Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.481.0** — 🐛 + 🌟 the stack-then-solve rescue placed a sub by a **translation**, and `phase_cross_correlation`
   never declines — so a night of alt-az **field rotation** was propagated as a confident wrong answer (measured: 4° → a
   median 4.2 px placement error, 8° → 16 px, i.e. stars drawn as arcs). New `seestack/align/starmatch.py` measures the
