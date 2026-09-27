@@ -386,6 +386,10 @@ def _pipeline_body(
             # scan loop discarded it — so the walk-away path, which is exactly
             # where the rescue happens unattended, had no way to say so.
             rescued: dict[str, int] = {}
+            # Of those, how many were located by their **star pattern** rather
+            # than by a correlation shift — a batch total, not per target, because
+            # it answers "how were they located" rather than "which target".
+            star_matched_total = 0
             # Subs put back because their file reappeared, after the owner had
             # set them aside as missing (see ``Project.restore_missing_frames``).
             # Reported so a scan that quietly un-does a manual decision says so.
@@ -419,6 +423,8 @@ def _pipeline_body(
                         n_rescued = int((qc_summary or {}).get("bootstrap_propagated") or 0)
                         if n_rescued > 0:
                             rescued[safe] = n_rescued
+                        star_matched_total += int(
+                            (qc_summary or {}).get("bootstrap_star_matched") or 0)
                         if settings.auto_grade_frames and settings.auto_qc:
                             counts = _auto_grade_target(proj, settings)
                             if counts.rejected:
@@ -457,6 +463,8 @@ def _pipeline_body(
                 summary["auto_regraded_back"] = regraded_back
             if rescued:
                 summary["bootstrap_rescued"] = rescued
+            if star_matched_total:
+                summary["bootstrap_star_matched"] = star_matched_total
             if missing_restored:
                 summary["missing_files_restored"] = missing_restored
             if qc_errors:

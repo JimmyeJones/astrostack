@@ -6,7 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   JobRow, JobsView, autoRegradedBackCount, autoRegradedBackNote, bootstrapRescueNote,
-  bootstrapRescuedCount, buildMasterSummary, friendlyJobError, jobHeaderNote,
+  bootstrapRescuedCount,
+  bootstrapStarMatchedCount, buildMasterSummary, friendlyJobError, jobHeaderNote,
   jobTempNote,
   jobKindLabel,
   calibrationMismatchNote, heldForFilesLine, heldForSubsLine, missingSubsNote,
@@ -716,6 +717,46 @@ describe("bootstrapRescueNote", () => {
     expect(bootstrapRescuedCount({ bootstrap_rescued: "nope" })).toBe(0);
     expect(bootstrapRescuedCount({ bootstrap_rescued: { "M 42": "x", "M 31": 2 } }))
       .toBe(2);
+  });
+
+  it("credits star-pattern matching when that is what located them", () => {
+    expect(bootstrapStarMatchedCount({ bootstrap_star_matched: 9 })).toBe(9);
+    expect(bootstrapRescueNote(
+      { bootstrap_propagated: 9, bootstrap_star_matched: 9 },
+    )).toBe(
+      "Located 9 more subs by matching their star patterns to a sub the app "
+      + "could already place — they're in your stack now.",
+    );
+    expect(bootstrapRescueNote(
+      { bootstrap_propagated: 1, bootstrap_star_matched: 1 },
+    )).toBe(
+      "Located 1 more sub by matching its star pattern to a sub the app could "
+      + "already place — it's in your stack now.",
+    );
+  });
+
+  it("says which part of a mixed rescue the star patterns did", () => {
+    expect(bootstrapRescueNote(
+      { bootstrap_propagated: 12, bootstrap_star_matched: 5 },
+    )).toBe(
+      "Located 12 more subs by combining your un-located frames into a deeper "
+      + "image (5 of them by matching star patterns, for the part of the night "
+      + "the sky had turned) — they're in your stack now.",
+    );
+  });
+
+  it("never claims more star matches than subs, or prints NaN for junk", () => {
+    expect(bootstrapStarMatchedCount({})).toBe(0);
+    expect(bootstrapStarMatchedCount({ bootstrap_star_matched: "many" })).toBe(0);
+    expect(bootstrapStarMatchedCount({ bootstrap_star_matched: -4 })).toBe(0);
+    // A count larger than the rescue itself (an older engine, a garbled result)
+    // must not produce a sentence that contradicts its own first number.
+    expect(bootstrapRescueNote(
+      { bootstrap_propagated: 3, bootstrap_star_matched: 99 },
+    )).toBe(
+      "Located 3 more subs by matching their star patterns to a sub the app "
+      + "could already place — they're in your stack now.",
+    );
   });
 });
 

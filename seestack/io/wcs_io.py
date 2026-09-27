@@ -464,6 +464,85 @@ def wcs_text_after_pixel_steps(wcs_text: str | None, steps) -> str | None:  # no
     return text if wcs_text_is_usable(text) else None
 
 
+def wcs_text_after_pixel_affine(
+    wcs_text: str | None,
+    matrix,  # noqa: ANN001 — a 2x2 array-like
+    translation,  # noqa: ANN001 — a length-2 array-like
+    *,
+    width: int | None = None,
+    height: int | None = None,
+) -> str | None:
+    """Re-express a WCS on a *second image's* pixel grid.
+
+    ``matrix``/``translation`` are ``(A, b)`` with ``p_this = A · p_other + b`` in
+    **0-based** ``(x, y)`` pixel coordinates: the affine that maps the other
+    image's pixels onto the grid this WCS belongs to. That is the same "maps the
+    new grid back onto the WCS's own grid" convention as
+    :func:`_rotate_matrix_and_crpix`, and the algebra is the same one: in 1-based
+    FITS terms ``p¹_this = A · p¹_other + t¹`` with ``t¹ = b + (1,1) − A·(1,1)``,
+    so substituting into ``world = CD · (p¹ − CRPIX)`` gives ``CD′ = CD · A`` and
+    ``CRPIX′ = A⁻¹ · (CRPIX − t¹)``. Exact for the linear part of the WCS, which
+    is all an affine of the pixel grid can touch — ``CRVAL``/``CTYPE`` are
+    untouched, so the tangent point stays where it is.
+
+    The caller is what makes this mean something: hand it a reference sub's solved
+    WCS and the transform that carries an *unsolved* sub's pixels onto that sub's
+    (:mod:`seestack.align.starmatch`), and out comes the unsolved sub's own WCS.
+
+    ``width``/``height`` set the returned header's ``NAXIS`` — the other image's
+    dimensions, which need not match this one's.
+
+    Returns ``None`` — "no WCS", never a guess — when the input carries no usable
+    solution, when the matrix is degenerate or non-finite, or when the header is
+    one this rewrite cannot be trusted on: SIP distortion (polynomials in *source*
+    pixels, which a rotation invalidates) or a legacy ``CROTA``.
+    """
+    if not wcs_text or not wcs_text_is_usable(wcs_text):
+        return None
+    import warnings
+
+    import numpy as np
+    from astropy.io.fits import Header
+    from astropy.wcs import WCS, FITSFixedWarning
+
+    try:
+        a = np.asarray(matrix, dtype=float)
+        b = np.asarray(translation, dtype=float)
+        if a.shape != (2, 2) or b.shape != (2,):
+            return None
+        if not (np.isfinite(a).all() and np.isfinite(b).all()):
+            return None
+        # A singular matrix has no inverse, so there is no CRPIX to move to.
+        if abs(float(np.linalg.det(a))) < 1e-12:
+            return None
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FITSFixedWarning)
+            wcs = WCS(Header.fromstring(wcs_text)).celestial
+        if not wcs.has_celestial or wcs.naxis != 2:
+            return None
+        if wcs.sip is not None or wcs.wcs.has_crota():
+            return None
+        one = np.array([1.0, 1.0])
+        t1 = b + one - a @ one
+        crpix = np.array([float(v) for v in wcs.wcs.crpix], dtype=float)
+        crpix_new = np.linalg.solve(a, crpix - t1)
+        if wcs.wcs.has_cd():
+            wcs.wcs.cd = np.asarray(wcs.wcs.cd, dtype=float) @ a
+        else:
+            # PC/CDELT form: ``world = CDELT · PC · (p¹ − CRPIX)``, so folding A
+            # into PC from the right is the same composition CD gets (CDELT scales
+            # the world rows and is untouched).
+            wcs.wcs.pc = np.asarray(wcs.wcs.get_pc(), dtype=float) @ a
+        wcs.wcs.crpix = crpix_new
+        if width is not None and height is not None:
+            wcs.pixel_shape = (int(width), int(height))
+        text = str(wcs.to_header(relax=True))
+    except Exception as exc:  # noqa: BLE001 — a WCS we can't rewrite is dropped, not guessed
+        log.warning("WCS affine rewrite failed: %s", exc)
+        return None
+    return text if wcs_text_is_usable(text) else None
+
+
 def _rotate_matrix_and_crpix(m, crpix, width: int, height: int, north_up_deg: float):  # noqa: ANN001,ANN202
     """Re-express a canvas's ``(CD, CRPIX, NAXIS)`` on the grid that
     :func:`seestack.render.orient.rotate_image_north_up` produces from it.
