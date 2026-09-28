@@ -1,5 +1,87 @@
 # Process notes & QA sweep records
 
+## 2026-09-28 (Builder run, midday) — the verdict three surfaces share and the depth they did not, and a CLEAN `--mosaic --editor` pass
+
+*(Builder, branch `agent/rejection-reach-half` → **v0.484.6**, PR [#1006](https://github.com/JimmyeJones/astrostack/pull/1006),
+merged. Baseline green — **6,895 passed, 2 skipped**, 20m50s with the BLAS cap and `-n 4 --dist worksteal`,
+`/tmp/pytest-of-root` cleared first. After the task, same tree: **6,904 passed, 2 skipped**, 20m55s. Frontend
+288 files / 4,420 tests, `tsc` and `vite build` clean. Full entry in [`SHIPPED.md`](SHIPPED.md).)*
+
+**Triage, and why the run's one task was not a backlog item.** "Bugs (fix these first)" opens with the LEAD ×2 the
+previous run filed; **both halves need a real ASTAP call and there is no ASTAP binary in this container** — the same
+wall the last run recorded, re-checked rather than assumed (`which astap astap_cli`, `/opt/astap`,
+`grep -i astap scripts/agent-setup.sh`: nothing). Every other entry in the section is owner-data-gated, a recorded
+stand-down carrying numbers, or explicitly filed as not-a-priority (#880's stored-repr remainder). `grep READY`
+returns no open entry. The "Features that serve real workflows" section reads as seven-plus ideas and is not: the
+three I costed are struck, declined or measured-and-closed, and the one live remainder (the reel *from history*) is
+mostly delivered — `deepening_series` already orders and captions an existing-runs reel by capture window
+(v0.480.0), so what is genuinely left of it is "say whether the steps are really cumulative", which is XS trust
+polish rather than the owner-requested feature it reads as. **↳ Worth carrying forward: FOCUS's "the section holds
+seven-plus ready ideas, so it is stocked" no longer matches the section.**
+
+**So the run went looking, and the method that found something was the one FOCUS names as still open** — *"what else
+does the engine write out, and what does it put in the file?"*, the cheap sweep v0.480.6's WCS finding suggested.
+The FITS writers themselves came back clean (`calibrate/masters.save_master` is an explicit card allowlist; the
+coverage / frame-coverage / rejection sidecars carry no WCS and nothing reads one off them; `_archive_existing_outputs`
+and `_edit_export_wcs_text` are both thorough). What the sweep actually turned up is one card whose **value** is a
+claim the file cannot support: `REJREACH`.
+
+### The finding, and the shape worth reusing
+
+`stacker.lone_outlier_min_depth`'s docstring names three answers to *"could this pass drop a lone satellite trail?"*
+that **must never disagree** — and they all read the same *bound* from that one function, which is what made them
+look coordinated. They were not, because a bound is only half of it: **each one asked about a different depth.**
+
+| surface | depth |
+|---|---|
+| Stack form, pre-run (`rejection_reach`) | the panel depth (`auto_reject_depth`) |
+| `stackhealth`'s `rejection_blind` note | `coverage_median_depth` |
+| the master's `REJREACH` card → History | `coverage_max`, the deepest single pixel |
+
+**The generalisation:** a "these must agree" contract that shares a *threshold* is not the same as one that shares a
+*measurement*. Every test in `tests/test_rejection_reach.py` pinning the agreement set `coverage_max ==
+coverage_median_depth`, so twenty-odd of them held while the third surface answered a different question — the
+AGENTS.md §8 "a regression test whose fixture cannot show the bug is green for the same reason" case, arrived at
+through the fixture's *inputs* rather than its shape. The fix makes both numbers come out of one function
+(`stackhealth.rejection_sample_depths`), which is the only thing that stops it recurring.
+
+**Reproduced before anything was changed, through the real `run_stack`** — a 2×2 at the 82 % step the bundled mosaic
+sample uses, six subs a panel: peak 12 against κ=3's bound of 11 → `REJREACH` True, median depth 6 → the note firing,
+and History printing *"Rejection clipped ~0% of samples (data was already clean)"* two cards above it. **The first
+repro attempt did not exhibit it** — a 0.22° step on a 0.667° × 0.444° field overlaps ~50 % on both axes, so the
+median depth was 12 and cleared the bound. The geometry that matters is the owner's own: thin strips, most of the
+canvas one panel deep. Worth knowing before building any mosaic fixture.
+
+**And the fix went in the reader, not the writer, on purpose.** The stacker now stamps `REJHALF` so the *file* is
+honest, but a card only ever reaches runs stacked after it and the owner's library is thousands that already exist —
+so the router prefers the card and falls back to the run record's `coverage_median_depth`, which is the same figure
+and is lazily healed by the stack-health read the same page makes. That is the opposite call to v0.480.6's ("fix the
+writer, it covers every caller") and for the opposite reason: there the bug was *in* the writer, here the writer is
+fine and the population that needs the answer is already on disk.
+
+### QA sweep record — `scripts/agent-dogfood.sh --mosaic --editor`: CLEAN
+
+Run on `main` at v0.484.6, after the suite (never alongside it — §7). Both editor drives added all 21 ops with a
+live re-render each, plus Undo/Redo; no console error, nothing overflowing, no failed request. **Mosaic trim: Auto
+would cut 7.9 %** of the canvas, well inside the ~15 % D1 bar. Tallest pages, phone:
+`/targets/Sample_M42_mosaic_2_2` **3673 px**, `/tonight` 3617 px, `/targets/Sample_M42_mosaic_2_2/edit/1` 3419 px,
+`/glossary` 3364 px.
+
+**The one-paragraph read produced no finding, and checking *why* is the part worth recording.** On the mosaic target
+the coaching card and the readiness card say nearly the same sentence — "add more time", "a typical part has 1 min",
+"the thinner part evens out", both inline and adjacent — which reads like the v0.345.8 "two adjacent surfaces saying
+one thing twice" class. It is not: `nextBestMove.ts`'s `readinessCanvasScope` and `DEPTH_FIRST_COACH_KINDS` exist
+precisely to make those two cards, plus the framing note, land on **one** prescription, and the repetition is that
+coordination working. **So: read the deference helpers before filing a "these two agree too loudly" finding** — the
+page has already been through this, and a consolidation here would break the thing that makes it coherent.
+
+**One repeat observation, already filed:** the framing verdict still prices the 3×3 from scratch on a target that is
+*already* a 2×2 (*"Giving all 9 panels the depth you'd give one field (~2 h each) is about 18 h"*). That is the open
+LEAD under "Autonomy & friendliness", unchanged and still real-data-gated — noted here rather than re-filed.
+
+**Process:** the branch was claimed by nothing, because the item was a Builder finding rather than a backlog entry;
+it was pushed within ~20 minutes of the first commit, per §11's "claim even the XS ones". No collision.
+
 ## 2026-09-28 (Builder run, evening) — the top lead's one line, the guard whose *key* was the fragile part, and the copy three runs of work was hiding behind
 
 *(Builder, branch `claude/awesome-fermat-ybne2s` → v0.484.2, v0.484.3, v0.484.4. Baseline green — **6,888 passed,
