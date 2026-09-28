@@ -1,5 +1,68 @@
 # Process notes & QA sweep records
 
+## 2026-09-28 (Scout run) — the pixel-threshold sweep the two Builder findings asked for (CLEAN), a whole-journey dogfood, and a phone-width clip
+
+*(Scout, branch `agent/live-status-badge-clip` → v0.484.1. Baseline green — **6,888 passed, 2 skipped**, 13m09s
+with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first.)*
+
+**Triage.** "Bugs (fix these first)" is the five gated/measured LEADs, the #903 remainder and the #878/#880
+routing — nothing pickable without owner data or a measurement. The three open GitHub issues (#878, #880, #903)
+are each already verified into the backlog and carry a recent shipped-status comment (#878 v0.482.1/.2 offered
+in-app, #880 v0.483.1/.2 with only its ⚪ storage-hygiene half left, #903 damage-repaired v0.479.3 with the
+cover-semantics prevention still open); **none new since 2026-09-25**, so no issue action was owed — I confirmed
+the state rather than posting duplicate comments. `docs/FOCUS.md` had run 25 lines over its own ≤60 budget after a
+fortnight of same-day strikes, so I **re-cut it fresh** (57 lines) rather than editing.
+
+### QA audit: the "pixel-unit threshold tested only on a small fixture" class (the Builder's own suggested sweep) — CLEAN
+
+The two 2026-09-28 Builder findings (v0.480.6 WCS-less master; v0.483.3 star matcher inert on a real-sized sub)
+reopened the single-field core **narrowly**, and named the class to sweep: *a threshold, buffer or limit whose
+units are pixels, only ever tested on a frame an eighth of the real size.* I swept it across
+`stack`/`calibrate`/`edit`/`render`/`qc`. Every one is guarded, and the *how* is worth recording so the next run
+does not re-sweep it:
+
+- **`stack/overlapgain.py`** — `MIN_SHARED_CELLS=40` / `MIN_SIGNAL_CELLS=12` are counted on a coarse grid that
+  `_downsample_factor` folds to a **~400 px long edge** regardless of canvas, so cells-per-overlap is roughly
+  canvas-size-invariant; a large raster only ever *fails safe* (stands down to scale 1.0), never mis-corrects.
+  (The last Scout, 2026-09-27, also read this module clean.)
+- **`stack/stacker.py`** — `_PANEL_DEPTH_SAMPLE_PX=2_000_000` strides the coverage map down before
+  `panel_coverage_level`; the comment's arithmetic (8 % of the sample still four orders above
+  `PANEL_LEVEL_MIN_PIXELS`) holds.
+- **`edit/coverage_trim.py`** — `PANEL_LEVEL_MIN_PIXELS=256` is `max(256, ceil(0.08·n))`; the fraction term
+  dominates on any real canvas, so 256 is only a floor for tiny inputs.
+- **`bg/coverage_leveling.py`** — `_GRAIN_MIN_SKY_PIXELS=500` is explicitly **scaled by the read's stride**
+  (`grain_sky_min` in `_level_context`), the exact bug its own comment records fixing.
+- **`edit/ops/background.py`** — every full-res pixel measure (`box_size`, `dilate_px`, the object detector's
+  internal min-area/extended-structure block) goes through `_scaled_box(ctx, …)` / `proxy_scale`, so the
+  live-preview proxy and the export fit at the same physical scale. This is the canonical preview↔export parity
+  surface and it is thoroughly handled.
+- **`qc/noise_ratio.py`** / **`render/noisedelta.py`** — both guard the trust numbers with an explicit
+  identical-sampling / native-shape check before comparing, so neither box-averages one side and strides the
+  other.
+
+So the class the Builder flagged is, in the engine core, consistently either normalised to the canvas, dominated
+by a fraction term, or identical-sampling-guarded. **The cheap sweep still open** is the *other* one the WCS
+finding suggested — "what else does the engine write out, and what does it put in the file?" (the whole-header
+fixture `synth.make_synth_frame_header_text` now exists for it) — left for a run with a clear slot.
+
+### Whole-journey dogfood (`--mosaic --editor --big`) — one real find
+
+Traced drop → ingest → QC → stack → editor → result on the single-field, 2×2 mosaic and full-size mosaic samples.
+The stack→result narrative reads well: the readiness card, next-best-move and stack-health notes are all clear,
+plain-language and consistent across scales; `editor drive clean` on every op on both the field and the mosaic
+run. **One defect, on both targets:** the `scripts/dogfood_probe.mjs` clipped-label probe caught the `/live`
+status Badge clipped to "Finishe…" at phone width (50 px box vs 53 px word, unscrollable). Fixed and shipped as
+**v0.484.1** — see `SHIPPED.md`. This is the value of `--mosaic --editor --big`: the field sample alone would
+have shown it too here, but a real-length target name is what makes the badge lose the race, and that is a
+mosaic-name shape.
+
+### One idea considered and NOT filed (checked before writing, per §4)
+
+A "how done is this target? / more subs won't help much" retrospective verdict — already built: `Target.tsx`'s
+`NextBestMoveBadge` + `integrationTrend.ts` say exactly that (sky-limited → "more subs won't help it much"),
+driven by `nightplan.noise_gain_from_more_time`. The "Features that serve real workflows" section already holds
+seven-plus ready ideas (the 2026-09-27 Scout counted them), so per §4 I did **not** manufacture a marginal eighth.
+
 ## 2026-09-28 (Builder run) — the fixture that was too small, and the measurement that moved a design
 
 *(Builder, branch `claude/awesome-fermat-80wbok` → v0.483.3 + v0.484.0. Baseline green — **6,875 passed, 2 skipped**,

@@ -184,8 +184,14 @@ function LiveCard({ safe, name, live }: {
           </Text>
           {/* The one-glance answer: is it still going? A finished session says so
               rather than pretending, so nobody stands outside watching a page
-              that stopped updating hours ago. */}
-          <Badge color={live.active ? "teal" : "gray"} variant="light">
+              that stopped updating hours ago.
+              flexShrink: 0 keeps this whole word intact at phone width: the row is
+              nowrap and the name Text alongside it has minWidth: 0, so without this
+              the flex squeeze eats the badge's own label ("Finishe…") instead of
+              the name — and a Badge clips with no scroll to recover it. Let the
+              name absorb the shrink; the status word is the point of the row. */}
+          <Badge color={live.active ? "teal" : "gray"} variant="light"
+                 style={{ flexShrink: 0 }}>
             {live.active ? "Capturing" : "Finished"}
           </Badge>
         </Group>

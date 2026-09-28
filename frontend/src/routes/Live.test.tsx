@@ -112,6 +112,23 @@ describe("LiveView", () => {
     expect(screen.getByText(/this session looks finished/)).toBeInTheDocument();
   });
 
+  it("keeps the status word from being squeezed away at phone width", async () => {
+    // The header row is nowrap and the target-name Text beside the badge has
+    // minWidth: 0, so a long name would otherwise let the flex squeeze eat the
+    // badge's own label ("Finishe…") — and a Badge clips with no scroll to
+    // recover it (the dogfood clipped-label probe caught exactly this on /live).
+    // Pin the non-shrink so the name absorbs the squeeze instead.
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([
+      target({ name: "V772 Herculis (mosaic)" }),
+    ]);
+    vi.spyOn(client.api, "liveSession").mockResolvedValue(live());
+    renderLive();
+    const badge = (await screen.findByText("Capturing"))
+      .closest('[class*="mantine-Badge-root"]');
+    expect(badge).not.toBeNull();
+    expect(badge).toHaveStyle({ flexShrink: "0" });
+  });
+
   it("names the cause when a stretch goes wrong", async () => {
     vi.spyOn(client.api, "listTargets").mockResolvedValue([target()]);
     vi.spyOn(client.api, "liveSession").mockResolvedValue(live({

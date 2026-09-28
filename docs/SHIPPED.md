@@ -1,5 +1,36 @@
 # Shipped — the record
 
+## v0.484.1 — 2026-09-28 — the /live status word no longer clips to "Finishe…" at phone width
+
+🟡 **BUG FIX (friendliness — PRIORITY 3). Scout dogfood-found, `scripts/dogfood_probe.mjs` clipped-label
+probe reproduced it.** The run was a whole-journey dogfood (`--mosaic --editor --big`, stack → editor →
+result). The probe reported, at phone width, on both the single-field and mosaic `/live` targets:
+
+    [phone] /live: CLIPPED LABEL 50px box vs 53px word — "Finished" (scrolling cannot reveal it)
+
+**Mechanism.** `Live.tsx`'s header is a `<Group justify="space-between" wrap="nowrap">` holding the
+target-name `<Text style={{ minWidth: 0 }}>` (a `<Link>`) and the status `<Badge>`
+(`live.active ? "Capturing" : "Finished"`). A Mantine `Badge` renders its content inside a
+`.mantine-Badge-label` with `overflow: hidden`, which collapses the badge's flex `min-width` to 0 — so in a
+tight nowrap row the badge is free to shrink below its own label, and the name Text (already `minWidth: 0`)
+does not shield it. With a real-length target name (`V772 Herculis (mosaic)`) at ~360–420 px the badge is
+squeezed to a 50 px box against its 53 px word, and because it is a badge with `overflow:hidden` the missing
+characters cannot be reached by scrolling — the class the probe's own docstring names ("survives any amount
+of scrolling — unlike a table that is merely too wide"). The one-glance *"is it still going?"* answer, which
+is the entire point of that row, is the thing that gets eaten.
+
+**Fix.** `style={{ flexShrink: 0 }}` on the `Badge`, so the status word keeps its intrinsic width and the
+name Text absorbs the squeeze instead. This is the codebase's established idiom for exactly this (e.g.
+`StackNoiseBadge.tsx`, and a dozen `flexShrink: 0` icon/badge guards across `frontend/src/components/`), and
+matches the probe's documented cure (let the label keep `max-content`, don't eat the word).
+
+**Scope and safety.** One frontend file (`frontend/src/routes/Live.tsx`); CSS-only, purely additive, no
+behaviour, config, schema, API or on-disk change — trivially upgrade-safe (§9). **Test:** +1 in
+`Live.test.tsx` ("keeps the status word from being squeezed away at phone width") rendering a long target
+name and asserting the badge carries `flexShrink: 0`; **fail-before shown** by reverting the style in a
+scratch copy (1 failed, 13 passed) and restoring it (14 passed). Full frontend gate green: `tsc --noEmit`,
+`vitest run` (4,415 passed), `vite build`.
+
 ## v0.484.0 — 2026-09-28 — a mosaic's un-located subs are placed too: one star anchor per panel
 
 🌟 **The half of the WCS-free registration fallback that was left open (front of the queue,
