@@ -58,6 +58,20 @@ cd frontend && npm install
 > there first (see the container note about the fixed per-session allowance —
 > `df`'s "Used" will look small while "Avail" is zero).
 >
+> **⚠️ The runner is not this container's interpreter, and `python-version: "3.12"`
+> does not pin the patch release** *(added 2026-09-28, after it took `main` red).*
+> `.venv` here is **3.12.3**; CI's `actions/setup-python` resolves `"3.12"` to the
+> newest available, which was **3.12.14**. They differ in observable behaviour: for
+> an f-string containing a quoted literal, `ast.unparse` on 3.12.3 reuses the quote
+> (PEP 701) — `f'…or 'unknown'…'` — while 3.11, 3.12.14 and 3.13 switch to
+> `f"…or 'unknown'…"`. v0.484.2 keyed a test's exemption list on that string, passed
+> **6,894 tests locally** and failed four assertions on the runner (fixed in
+> v0.484.5). **So: a test whose assertions are computed from source text, from a
+> `repr()`, or from any other interpreter-formatted string is not proven by one local
+> run.** Recompute its key under the other interpreters this container already has —
+> `/usr/bin/python3.11`, `/usr/bin/python3.12`, `/usr/bin/python3.13` — or, better,
+> make the test itself assert every rendering (which is what v0.484.5's does).
+>
 > **And the suite is ~11 minutes, not ~75 — cap the BLAS threads before the first
 > run, not after the third.** `OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 > MKL_NUM_THREADS=1 … python -m pytest -q -n 4 --dist worksteal`, after

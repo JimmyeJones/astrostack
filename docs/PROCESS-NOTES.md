@@ -13,6 +13,43 @@ so it was the run's whole first task. Everything else in the section is a LEAD w
 (the rotation convention needs two real ASTAP `.ini` values — **there is no ASTAP binary in this container**, so it
 cannot be settled here), or a remainder explicitly filed as not-a-priority.
 
+### ⚠️ THE RUN'S REAL LESSON, ADDED AFTER IT TOOK `main` RED — "green locally" is a claim about *this interpreter*
+
+**v0.484.2 — the commit whose entire purpose was to remove brittleness — shipped a worse brittleness, and the
+full local suite could not see it.** It re-keyed `test_reject_reason_labels`' `_EXEMPT` from `<file>:<line>` to
+`<file>::<def>::<ast.unparse(value)>`. `ast.unparse` is **not stable across CPython patch releases** in one thing:
+which quote it puts *outside* an f-string containing a quoted literal.
+
+| interpreter | the one real f-string write, unparsed |
+|---|---|
+| 3.12.3 — this container's `.venv` | `f'{reason}:{result.error or 'unknown'}'` (PEP 701 quote reuse) |
+| 3.11.15, **3.12.14 — the CI runner**, 3.13.12 | `f"{reason}:{result.error or 'unknown'}"` |
+
+6,894 passed locally; four assertions failed on the runner 35 minutes later. Fixed forward as **v0.484.5**
+(`_write_source` normalises quote characters out of the key; +1 test that parses both renderings and asserts one
+key; verified under 3.11.15 / 3.12.3 / 3.13.12).
+
+**Three things to carry forward, in order of how cheap they are:**
+
+1. **A line number fails the same way everywhere. An environment-dependent key does not.** The replacement was
+   better on the axis I was measuring (survives unrelated edits) and *worse* on an axis I never considered
+   (survives a different interpreter). When hardening a guard, ask what the new key depends on that the old one
+   did not — not only what it no longer depends on.
+2. **`ast.unparse`, `repr()`, `dict` iteration order of anything version-sensitive, and `ast.dump` field sets are
+   all unsuitable as identity keys in a test.** If a test key must be derived from source, derive it from
+   something the *language* guarantees (identifiers, structure) and normalise away the formatting. This
+   container's `.venv` is **3.12.3** and CI's runner is **3.12.14**; they are not the same interpreter, and
+   `docs/AGENT-ENVIRONMENT.md` does not say so anywhere.
+3. **The cheap check I skipped costs ten seconds.** `/usr/bin/python3.11`, `/usr/bin/python3.12` and
+   `/usr/bin/python3.13` all exist in this container. Any test whose assertions are computed *from source text or
+   from a runtime repr* should be run — or at least have its key recomputed — under more than one of them before
+   merging. That is now what v0.484.5's own test does, from inside the suite, on whichever interpreter is running.
+
+**And the reason it reached `main` at all:** AGENTS.md §8's "green means the checkout passed, not that the owner's
+install works" has a sibling this run discovered the hard way — *green means it passed on the interpreter you ran
+it with*. The `Image contract` job exists for the first half of that sentence. Nothing covers the second, which is
+why the fix's test had to assert both renderings rather than whichever one the runner happens to produce.
+
 ### The three notes worth keeping
 
 **1. `pointing_groups` is the engine's one panel gate, so "carries a WCS" and "has a pointing" are two different
