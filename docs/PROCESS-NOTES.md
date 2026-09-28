@@ -47,6 +47,14 @@ rule was extracted into pure `_anchor_order` and tested directly. **Every behavi
 in a scratch copy and watched to fail** (three for v0.483.3, two for v0.484.0); the one that did not fail is the
 reason that discipline is not optional.
 
+**One infra tripwire for the next run that touches `seestack/stack/stacker.py`.**
+`tests/test_reject_reason_labels.py`'s `_EXEMPT` map is keyed on **`file:line`**, so *any* edit that shifts a line
+above one of its two write sites turns four tests red with a message about an exempted site that "no longer exists".
+This run moved `stacker.py:2869` → `:3044` and paid one full suite for it. It is doing its job (an exemption that
+has drifted off its site really is a comment pretending to be a rule), but the key could be the surrounding
+statement's text rather than its line number. Not worth a slot on its own; worth knowing before you spend 18
+minutes deciding you broke something.
+
 ## 2026-09-27 (third Builder run) — the subs the app could not read, and the batch that would not say why
 
 *(Builder, branch `claude/exciting-tesla-xhn1xj` → v0.483.1 + v0.483.2. Baseline green — **6,865 passed,
