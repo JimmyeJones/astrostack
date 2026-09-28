@@ -2561,9 +2561,22 @@ problems. Dogfood it every big-picture run and fix root causes.
   settings change — so a historical baseline needs either a gain/exposure guard or a fallback to today's
   within-session levelling. Fail back to the current behaviour whenever it can't be established; never guess.
 
-- **LEAD (Builder 2026-09-08, filed with v0.387.0 because it is the one thing that shipped unmeasured) — how
-  long does the overlap gain pre-pass actually add to the owner's mosaic stack?** *(Pillar: performance —
-  size XS to measure, and **do not "optimise" it before measuring**.)* `overlapgain` runs up to
+- ~~**LEAD (Builder 2026-09-08, filed with v0.387.0 because it is the one thing that shipped unmeasured) — how
+  long does the overlap gain pre-pass actually add to the owner's mosaic stack?**~~ — **⚪ CLOSED WITH THE
+  NUMBER, measured 2026-09-28 at the owner's frame size; do not build the parallelisation.** Full write-up in
+  [`SHIPPED.md`](SHIPPED.md) (search `overlap gain pre-pass timing`). **The headline: 285 s (4.8 min)** for a
+  3×3 of 1920×1080 subs at 3.94″/px (S30: 150 mm, 2.1° field) onto a 3656×2816 union canvas, 4 cores, defaults
+  (`background_flatten` and `suppress_hot_pixels` both on) — so the lead's own guess of "plausibly 1–3 minutes"
+  was **low**, and it is ~all `align_one` (6.3 s per sub, flat). **Why it is still fine, and the one case where
+  it is not:** the cost is 5 subs a panel, i.e. *one extra pass over ≤45 subs*, so on a mosaic of N subs the
+  overhead is ≈ `5×panels ÷ N` — 1.3 % on a 3,600-sub raster, but **50 % on a 90-sub one**, i.e. night one on a
+  fresh mosaic. The lever is exactly linear and available if that ever matters (`max_frames_per_panel=3` →
+  **170 s**, 2.8 min, same 6.3 s per sub), and it is the right one: threads multiply this pass's peak memory on
+  the path §6 names for its OOM history. **One thing the measurement showed that the lead did not predict:** the
+  pre-pass pays the whole cost *before* it can decline — on the fixture it declined (unrelated stars across the
+  overlaps, which is `MIN_OVERLAP_CORRELATION` working as designed) after spending all 285 s. So a night-one
+  mosaic can pay 50 % overhead for nothing. Re-open only with a shape that decides *cheaply* whether to look.
+  *(Original spec, kept for the reasoning:)* `overlapgain` runs up to
   `MAX_FRAMES_PER_PANEL = 5` subs per panel through `align.align_one` **sequentially** at stack setup — nine
   panels is 45 loads, each paying a debayer plus the per-frame `Background2D` fit, which is the expensive
   half. On this repo's fixtures it is seconds; on the owner's 1080×1920 subs it is plausibly 1–3 minutes,

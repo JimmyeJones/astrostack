@@ -79,6 +79,21 @@ page has already been through this, and a consolidation here would break the thi
 *already* a 2×2 (*"Giving all 9 panels the depth you'd give one field (~2 h each) is about 18 h"*). That is the open
 LEAD under "Autonomy & friendliness", unchanged and still real-data-gated — noted here rather than re-filed.
 
+### One lead closed with a number, while CI ran the merged fix
+
+CI runs pytest **sequentially** (no `-n` in `ci.yml`), so the Python job is ~35 min against the 21 min this box
+takes with `-n 4`. That window was spent on the one open lead whose gate is a measurement this container *can*
+make — the **overlap gain pre-pass timing** (filed with v0.387.0, "measure on real subs; the synthetic ones are
+480×320 and prove nothing"). Answered and closed: **285 s (4.8 min)** for 5 subs a panel over a 3×3 of real
+1920×1080 / 3.94″ subs, 170 s at the lever's 3, 6.3 s per sub either way. Numbers and both conclusions in
+[`SHIPPED.md`](SHIPPED.md); the formula worth remembering is that the overhead is `5 × panels ÷ N`, so it is 1.3 %
+on a deep raster and **50 % on night one** — and the pass pays all of it *before* it can decline.
+
+**Worth reusing:** when the suite or CI is blocking, the productive thing is a lead whose gate is a *measurement*,
+not a lead whose gate is the owner's data — and the way to tell them apart quickly is whether the missing input is
+a number or a file. Three of "Bugs (fix these first)"'s leads need real ASTAP output or the owner's library; this
+one needed a clock.
+
 **Process:** the branch was claimed by nothing, because the item was a Builder finding rather than a backlog entry;
 it was pushed within ~20 minutes of the first commit, per §11's "claim even the XS ones". No collision.
 
