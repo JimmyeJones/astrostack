@@ -1,5 +1,63 @@
 # Shipped — the record
 
+## 2026-09-28 (Builder, evening) — two surfaces that describe one run, and the populations they were describing
+
+### v0.484.7 — 🟡 BUG FIX (trust + friendliness, PRIORITY 3), Builder-found by re-sweeping the wrong-denominator class **in TypeScript**: **History's roughly-aligned note divided a count of *contributing* subs by the count of *offered* subs, so it quoted a denominator the numerator never came from — and went quiet about the fix the Target page was already prescribing for the same run.**
+
+**The contract that was claimed and not kept.** `seestack/stackhealth.py`'s comment on
+`_ROUGHLY_ALIGNED_MIN_USED` / `_ROUGHLY_ALIGNED_NOTE_FRACTION` said the note shares "the SAME ≥20 %-of-≥10
+gate the frontend `roughlyAlignedNote` uses, so the two surfaces never disagree", and went on to state the
+denominator correctly: *"`n_frames_used` (contributing subs) is the honest denominator: only a sub that made
+it into the stack can be roughly aligned."* The card divided by `n_offered`. Both spelled the same bar and
+then read it against different populations — **the v0.484.6 `REJREACH` shape exactly: sharing a threshold is
+not sharing a measurement.**
+
+**What the owner saw.** `n_offered - n_align_failed == n_frames_used` by construction (`StackResult`, and
+`NALIGNFL` is stamped as `offered - used` in the same breath as `NOFFERED`), so on any run with align failures
+— mixed pointings, an unreadable share, a bad solve — the card's denominator is the larger number and its
+share the smaller one. On a 2,000-sub run where 1,800 could not be aligned and 90 of the surviving 200 were
+left roughly aligned, the Info panel read *"90 of 2,000 subs were only roughly aligned"* (4.5 %, no guidance)
+two lines under its own *"200 of 2,000 subs combined"*, while `stackhealth`'s `roughly_aligned` note on the
+Target page said *"90 of 200 stacked subs …"* and prescribed the steadier mount. One run, two numbers, and the
+fix on only one page. One-sided by construction: offered ≥ used, so the card could only ever be *less*
+concerned than the engine, never more.
+
+**It is the fifth instance of a class this repo has swept four times** — *"does this compare a
+cleanliness/depth quantity against a whole-target total?"* (`docs/PROCESS-NOTES.md`, 2026-09-03). That sweep
+read `stackhealth.roughly_aligned` and cleared it, correctly; it never walked the TypeScript twin. Recorded in
+PROCESS-NOTES so the next sweep of the class crosses the language boundary.
+
+**The fix makes the population one answer on each side, rather than one number twice.** New pure
+`contributingSubs(fa)` in `History.tsx` is now the only place the card works out how many subs are *in* this
+picture — `frameAccountingNote` (which had the arithmetic inline) and `roughlyAlignedNote` both read it, so
+they cannot print two denominators again — and new pure `stackhealth.roughly_aligned_is_material(n_rough,
+n_used)` is the engine's single spelling of the gate, which the health note now calls instead of re-stating.
+The card's sentence says **"stacked subs"** like the engine's does, so the two agree in words as well as in
+arithmetic. `n_align_failed` absent (a master stacked before the cards existed) falls back to `n_offered`,
+which is what the card has always shown.
+
+**And the agreement is now structural, not asserted.** `frontend/src/roughlyAligned.cases.json` is one case
+table driven from both sides — `tests/test_roughly_aligned_mirror.py` checks every row against
+`roughly_aligned_is_material`, `History.test.tsx` checks the same rows through `roughlyAlignedNote` *fed real
+align failures*, and two source-reading guards pin what a table cannot see: that the card's denominator comes
+from `contributingSubs` and never mentions `n_offered` again, and that its two literals are the engine's two
+constants. (The `kappaMinFrames` / `test_kappa_min_frames_mirror.py` arrangement, because a TS module cannot
+import a Python function.)
+
+**Why the suite was green on the bug, stated because it is the reusable part:** every existing
+`roughlyAlignedNote` test omitted `n_align_failed`, so offered and combined were the same number in all five
+fixtures — AGENTS.md §8's "a regression test whose fixture cannot show the bug is green for the same reason",
+arrived at through the fixture's *inputs*. The new cases say so in a comment.
+
+**Upgrade-safe (§9):** frontend copy and one new pure engine function; no config, schema, on-disk, API-shape or
+default change, and no response field added or removed.
+
+**Tests (+4 Python / +5 vitest).** Fail-before verified by restoring the original `roughlyAlignedNote` from
+`origin/main`: **7 vitest failures** (both pure-function cases, the three re-pinned wordings, the
+no-sub-combined case, and the Info-panel render) and **2 Python failures** (both source guards). No test
+weakened; three existing expectations were re-pinned on the new wording deliberately, and the view test now
+carries align failures so it exercises the denominator end to end.
+
 ## 2026-09-28 — ⚪ CLOSED WITH A NUMBER — the **overlap gain pre-pass timing**, measured at the owner's frame size
 
 *(No code change. The open LEAD filed with v0.387.0 asked one question and forbade acting before it was answered:
