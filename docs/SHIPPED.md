@@ -1,5 +1,160 @@
 # Shipped — the record
 
+## v0.484.0 — 2026-09-28 — a mosaic's un-located subs are placed too: one star anchor per panel
+
+🌟 **The half of the WCS-free registration fallback that was left open (front of the queue,
+`docs/FOCUS.md` item 2; owner-approved dependency, 2026-09-25).** v0.482.0 gave `run_stack` the ability to place
+its accepted-but-unsolved subs from the reference sub's stars — and **declined a mosaic canvas outright**, because
+the reference sub's stars cover one panel, so an off-panel sub has nothing to match against and an unsolved sub
+has no pointing to say which panel it is on. The owner is a heavy mosaic user, so "single field only" meant most
+of his library got none of it.
+
+**What replaces the decline: every solved panel offers its own anchor.** New `stacker._panel_anchors` clusters the
+solved subs with the engine's shared `pointing_groups`, at its shared link distance, and takes each panel's
+star-richest (then sharpest, then lowest-id) sub. A sub is then tried against each anchor and placed by the
+**first whose stars it measurably matches** — which is the point: `find_star_transform` refuses far more readily
+than it accepts (≥6 mutually-consistent control points, sub-pixel RMS, an exact similarity, scale within 1 %,
+a bounded centre shift), so "the first that matches" is a *measurement* of where the sub is, not the guess the
+decline existed to avoid. `pointing_groups` is asked with `min_members=1`, unlike the QC / photometric / weighting
+callers that ask for five: those estimate a statistic per panel and a thin panel's median is untrustworthy,
+whereas one solved sub is a perfectly good anchor — nothing is being averaged.
+
+**The cost, measured rather than assumed — and it moved the design.** The backlog entry's own suggestion was to
+look at handing the matcher pre-extracted control points, since astroalign re-extracts *both* sides per call. That
+is now possible (`starmatch.StarField` + `extract_star_field`, using astroalign's own extractor so a pre-extracted
+field detects exactly what handing the image over detects). But on a real-sized sub at 50 control points a side:
+
+| | cost |
+|---|---|
+| extract one side's stars | **62 ms** |
+| match, image to image | **285 ms** |
+| match, from control points | **236 ms** |
+
+So the extraction is *not* the expensive half — astroalign's triangle match is, and a pool of anchors multiplies
+it. Pre-extraction is a real but modest ~20 % per extra anchor, and the lever that actually matters is **trying
+the right anchor first**. Hence new pure `stacker._anchor_order`: anchors are tried **nearest-in-time** to the
+sub's own `DATE-OBS`, because a mosaic is shot panel by panel, so the panel being shot around the time of an
+un-located sub is almost always the panel it is on. Correctness never depends on it (every match is validated, so
+the order only decides which valid answer is found first); the cost does. A sub with no capture time, and anchors
+with none, keep the pool's own biggest-panel-first order — `sorted` is stable.
+
+**Two ceilings, both about the walk-away box rather than about quality.** `STAR_MATCH_MAX_ANCHORS = 24` bounds the
+setup (one load plus one extraction per panel) and takes panels biggest-first, since the cap can only ever leave a
+panel's subs exactly as unused as they are today. `STAR_MATCH_MAX_MATCH_ATTEMPTS = 2000` bounds the matching
+itself — a sub that matches its own panel stops at the first hit, so this is really a bound on time spent on subs
+that match **nothing** (≈ 8 minutes, against a mosaic stack at this owner's scale that runs for hours). Reaching
+it ends the pass exactly the way a cancel does: the subs not reached are left as unused as they are today, never
+half-placed.
+
+**What is still out of reach, and why, so it is not re-derived.** A panel where **nothing** solved has no anchor.
+Its subs could only be matched through a neighbour panel's ~18 % overlap strip, which rarely carries the six
+mutually-consistent stars the matcher demands — and a centre-shift cap wide enough to admit a whole panel step
+would also admit a wrong lock, which is the one failure a caller cannot see in the result. So the centre-shift cap
+is **unchanged** at its single-field value: the gain here is having an anchor per panel, not a weaker guard.
+
+**Tests +8 across two files; the two that pin behaviour changes fail before** (verified by scratch reverts — the
+mosaic stand-down restored, and the attempt budget removed):
+- `test_a_mosaic_stack_takes_the_subs_the_solver_could_not_place` — the real `run_stack` on a two-panel mosaic
+  built from **one shared catalog** (panels are windows onto it, stepping 75 %, so two panels really do show
+  different stars and their overlap really does show the same ones): 4 of 4 rescued, against **0** before.
+- `test_a_mosaic_places_each_sub_on_the_panel_its_own_stars_are_on` — the claim the decline was protecting, met by
+  measurement: each rescued sub's composed WCS puts its frame centre on **its own** panel's sky to within the
+  dither, and unambiguously not on the other panel's.
+- `test_a_sub_of_another_sky_is_left_out_rather_than_put_on_a_panel` — a sub as star-rich and as unsolved as the
+  rest, tried **first**, whose stars simply are not either panel's: refused, and nothing written for it.
+- `test_the_pass_stops_when_it_has_spent_its_match_attempts`, `test_one_anchor_is_offered_per_panel_and_none_on_a_single_field`,
+  `test_a_mosaic_whose_pointings_do_not_separate_keeps_the_reference_anchor`,
+  `test_the_anchor_shot_nearest_in_time_is_tried_first`, `test_a_subs_capture_time_is_read_the_way_the_rest_of_the_engine_reads_it`,
+  plus `test_a_pre_extracted_star_field_matches_exactly_like_the_image` and
+  `test_a_malformed_star_field_declines_rather_than_matching_anything`.
+- `tests/synth.py` is untouched; the mosaic fixture is built from the **existing** `star_catalog` +
+  `make_shared_sky_field` pair, which is what those exist for.
+- `test_it_stands_down_on_a_mosaic_canvas` is **deliberately replaced**: it pinned exactly the behaviour this
+  changes, so it could not be kept — its fixture and its reasoning live on in the three mosaic tests above. That is
+  a rewrite, not a weakening; nothing was skipped, loosened or `xfail`ed.
+
+**⚠ One thing this build deliberately did not change, filed as a lead.** A rescued sub's returned copy carries a
+`wcs_json` but still no `ra_center_deg` / `dec_center_deg` (unchanged from v0.482.0), so on a mosaic it is label
+`-1` to every per-panel population — photometric normalisation, quality weighting, overlap gain and the refine
+patch all treat it as "in no substantial group" and leave it neutral, which is the case each of them already
+documents and handles. That is the conservative answer and it is what shipped; filling the centres in from the
+composed WCS would let a rescued sub join its panel's photometry, and would also reach the two pointing-grouped
+paths that run on a **single-field** canvas. Separate change, separate measurement.
+
+**Upgrade-safe:** engine-only, and reached only through `StackOptions.star_match_unsolved`, which is **still off by
+default**. No config, schema, on-disk layout, API shape or default change; the single-field path is unchanged
+(one anchor, the same reference, the same caps), and a mosaic whose pointings do not separate falls back to exactly
+that.
+
+## v0.483.3 — 2026-09-28 — the star matcher was inert on a real Seestar sub, and every fixture was too small to say so
+
+🟠 **BUG (image quality + autonomy + trust — PRIORITY 2/4; engine; Builder-verified by reproduction before the
+fix and by a scratch revert after it).** `seestack/align/starmatch.py::registration_gray` — the one preparation
+both star-matching callers share — subtracted the sky median and then **clipped the negative half of the sky
+noise away**. That clip is what made the whole star-match path place nothing on a frame the size of a real
+Seestar sub.
+
+**The mechanism, measured rather than reasoned.** Every star extractor sets its detection threshold from a noise
+estimate. Clipping the negatives parks half the frame's pixels on exactly `0.0`, and a sigma-clipped estimator
+converges onto that spike, so the estimate collapses. Measured on a 1920×1080 synthetic sub of 120 stars,
+through the production function:
+
+| the pixels handed to `sep` | its global RMS | pixels over its 5σ threshold | sources found |
+|---|---|---|---|
+| raw luminance | 21.63 | 11,527 (0.6 %) | 118 |
+| median-subtracted, negatives **kept** (now) | 21.63 | 11,527 (0.6 %) | **118 of 120** |
+| median-subtracted, **clipped** (before) | **0.0006** | **1,305,502 (63.0 %)** | **refused** |
+
+At 0.0006 the 5σ threshold is *inside* the noise, so 63 % of the frame reads as star pixels — past `sep`'s
+300,000-pixel extraction buffer. `sep` refuses, astroalign re-raises the refusal as its generic *"Input type for
+source not supported"*, and `find_star_transform` returns `None`. So on the owner's own frames:
+
+- **`StackOptions.star_match_unsolved` (v0.482.0) placed nothing.** A target where 40 of 300 subs solved still
+  stacked 40.
+- **The bootstrap rescue's star matching (v0.481.0) never engaged** — and that one is worse than a no-op,
+  because `propagate_wcs` *prefers* a star transform and falls back to a phase-correlation shift. Falling back is
+  precisely the confident mis-placement of a rotated alt-az night that v0.481.0 was built to stop, so the fix
+  shipped and the bug it fixed stayed live on real data.
+
+**Why it survived its own tests, which is the part worth remembering.** `sep`'s buffer holds 300,000 pixels.
+`tests/test_star_match_registration.py` works at **240×160** (38,400 pixels) and its densest fixture at
+**480×320** (153,600) — neither can reach a 300,000-slot buffer *however wrong the threshold is*. And below the
+refusal the small fixtures pass for a second wrong reason: `sep` sorts detections by flux, so even with 52 % of a
+480×320 frame "detected", the top 50 control points are still the real stars and the match succeeds. The bug is a
+property of **frame size**, and no fixture had one. (Exactly the class `docs/FOCUS.md` flags: a regression test
+whose fixture cannot show the bug is green for the same reason a broken feature is.)
+
+**The fix is the subtraction without the clip.** Median-subtracted-with-negatives is bit-for-bit as good for
+detection as the raw luminance (see the table) and still removes the frame-varying pedestal and the Bayer
+checkerboard, which is all the docstring ever claimed the preparation was for. The negatives are the lower half
+of the sky noise and are now kept deliberately, with the measurement in the code beside them.
+
+**One thing this corrects about v0.482.0.** `SEP_SUB_OBJECT_LIMIT` (sep's *deblend* cap, raised from 1024 to
+65536) was measured as "0 of 8 subs matched at sep's default, 8 of 8 at 8192" on a 480×320 field of **30 stars** —
+a field far too sparse to deblend 1024 sub-objects out of. It was deblending *noise*, for the same reason. With
+the negatives kept, that fixture matches **8 of 8 at sep's own default**, and so do 1,200 stars on 480×320 and
+3,000 on 1920×1080. The cap is **kept** — it only sizes an internal buffer, so a sparse field pays nothing, and a
+real crowded sky is not a synthetic one — but its comment and its test now say what they actually cover, rather
+than standing as evidence that a rich field overflows.
+
+**Tests: +3, all three fail before** (verified by re-adding the clip in a scratch revert and watching them go
+red, then restoring):
+- `test_the_prepared_frame_keeps_the_sky_noise_its_threshold_is_derived_from` — on the production function at
+  1920×1080: the noise straddles zero (before: 0.0 % of pixels negative), `sep`'s global RMS agrees with a
+  MAD-scaled robust sigma within 2× (before: 0.0022 against ~21), and the fixture asserts its **own** claim, that
+  it has more pixels than `sep`'s buffer has slots.
+- `test_a_real_sized_night_is_placed_by_its_stars[4.0, -13.0]` — the rescue's real path at 1920×1080, checked
+  against **sky truth** (a star's position under the reference's own WCS), sub-pixel, the same way its 240×160
+  sibling is.
+The existing `test_a_rich_field_matches_instead_of_overflowing_the_extractor` keeps both assertions and is
+relabelled as coverage of the raised cap rather than of a bug — the same move v0.417.1 made for its `very-deep`
+rung. Nothing was weakened, skipped or deleted; the module's `_gray` helper, which exists to mirror
+`registration_gray`, was updated in lockstep because that is what keeping a mirror in sync means.
+
+**Upgrade-safe:** engine-only, one function's arithmetic. No config, schema, on-disk layout, API shape or default
+changed; both callers (`astap_bootstrap_solve`, `star_match_unsolved`) remain **off by default**, so this can only
+change a run that has already opted in.
+
 ## v0.483.2 — 2026-09-27 — a batch that ran for days says *why* its targets failed, not just which
 
 🟡 **BUG (friendliness — PRIORITY 3), the other half of what observer issue

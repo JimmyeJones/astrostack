@@ -2,7 +2,9 @@
 
 *Last rewritten 2026-09-27 (front-of-queue item 1 struck by the Builder the same day it
 shipped; two of item 2's four struck by the Builder the same evening — v0.482.1/.2 and v0.483.0; item 3's #880
-struck the same night — v0.483.1/.2). **The Scout rewrites this page** whenever the front of the
+struck the same night — v0.483.1/.2; item 2's last unshipped half struck 2026-09-28 — v0.484.0 — and a second
+Builder finding added to the frontier, kept to four lines because **this page is 22 lines over its own budget and
+the next Scout run should re-cut it**). **The Scout rewrites this page** whenever the front of the
 queue changes; it stays short (≤ 60 lines) and dated. Live rules are in `AGENTS.md`;
 the backlog is `docs/IMPROVEMENTS.md`. If this page and the backlog disagree, the
 backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
@@ -26,9 +28,10 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
      on the way (phase correlation never declines, so a night of alt-az field rotation was being propagated as
      a confident wrong answer). v0.482.0 took it stacker-wide for a **single field**: `star_match_unsolved`
      (off by default) lets `run_stack` place its accepted-but-unsolved subs, so a target where 40 of 300
-     solved can stack all of them. **What is left is the mosaic**, where an unsolved sub has no pointing and so
-     nothing says which panel to offer it — a design question, not a slice (shape to cost is in the backlog
-     entry). The owner is a heavy mosaic user, so it is worth real thought;
+     solved can stack all of them. ~~**What is left is the mosaic**~~ — **shipped 2026-09-28 (v0.484.0):** one star anchor per
+     solved panel (`stacker._panel_anchors`), a sub placed by the first anchor whose stars it *measurably* matches,
+     anchors tried nearest-in-time to the sub's own `DATE-OBS`. A panel where *nothing* solved is still out of
+     reach, deliberately — see the backlog entry before re-opening it;
    - auto-*apply* the classified object preset (with undo, a Settings switch, and never
      over a saved recipe);
    - ~~a progression reel ordered by **capture night**, cumulative~~ — **shipped 2026-09-27
@@ -65,6 +68,10 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
   realistic whole-header fixture now exists (`synth.make_synth_frame_header_text`), and
   the cheap sweep it enables is "what else does this engine write out, and what does it
   put in the file?" rather than another pass over the combine path.
+- **↳ A SECOND Builder finding, 2026-09-28 (v0.483.3): the star matcher placed nothing on a frame the size of a
+  real Seestar sub.** The class, which is what the Scout should decide about: **a threshold, buffer or limit whose
+  units are *pixels*, tested only on a fixture an eighth of the real frame's size.** Mechanism, numbers and the
+  cheap sweep it suggests: `docs/PROCESS-NOTES.md`, 2026-09-28.
 - **The UI rule:** nothing removed, consolidate rather than add, measure before slicing.
   Current tallest pages and their baselines: `docs/PROCESS-NOTES.md`, "DOGFOOD BASELINE".
 - **A beginner feature on a regular cadence** from "Features that serve real workflows".

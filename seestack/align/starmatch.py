@@ -80,12 +80,19 @@ DEFAULT_MAX_ROTATION_DEG = 90.0
 # overflows it. astroalign then re-raises that as a generic "Input type for source
 # not supported", i.e. indistinguishable from having been handed something that is
 # not an image at all, so the symptom is a matcher that quietly never matches.
-# Measured on a 480x320 synthetic field of 30 stars: **0 of 8** subs matched at
-# sep's default and **8 of 8** at 8192, with the rotations recovered to 0.07 deg
-# and sub-pixel residuals. This value is that measurement scaled by the area of a
-# real Seestar frame, which is ~16x larger. The limit only sizes an internal
-# buffer, so raising it costs a sparse field nothing — and a sparse field is the
-# one this module exists for.
+#
+# **What the original measurement behind this number was really measuring, found
+# 2026-09-28.** It was "0 of 8 subs matched at sep's default, 8 of 8 at 8192" on a
+# 480x320 field of 30 stars — a field far too sparse to deblend 1024 sub-objects
+# out of. It did so because :func:`registration_gray` clipped the sky noise's
+# negative half away, which collapsed the noise estimate sep sets its detection
+# threshold from, so *noise* was being deblended. With the negatives kept, the same
+# fixture matches 8 of 8 at sep's own default, and so do 1,200 stars on 480x320 and
+# 3,000 on 1920x1080 — all measured. So nothing synthetic needs this any more.
+# It is kept, not removed: the limit only sizes an internal buffer, so a sparse
+# field pays nothing for it, and a real crowded sky (a globular, the galactic
+# plane) is not a synthetic one. What it must not be read as any more is evidence
+# that a rich field overflows at sep's default.
 SEP_SUB_OBJECT_LIMIT = 65536
 
 
@@ -103,15 +110,18 @@ def registration_gray(path: str) -> np.ndarray | None:
     """Load a sub as a background-flattened luminance plane, ready to register.
 
     Debayer to RGB, average to one luminance plane, then subtract a robust sky
-    level and clip the negatives away, so what a matcher sees is the **stars**
-    rather than the (frame-varying) sky pedestal or the Bayer checkerboard.
-    Returns ``None`` on any read or decode problem — a sub that cannot be read is
-    skipped, never fatal.
+    level, so what a matcher sees is the **stars** rather than the (frame-varying)
+    sky pedestal or the Bayer checkerboard. Returns ``None`` on any read or decode
+    problem — a sub that cannot be read is skipped, never fatal.
 
     Both sides of a registration have to be prepared the same way or their
     difference is in the preparation rather than in the sky, which is why this
     lives beside the matcher and why the bootstrap rescue's phase-correlation pass
     calls it too.
+
+    **The sky noise's negative half is kept, deliberately** — see the comment on
+    the subtraction below. Clipping it away, which this used to do, made the star
+    matcher inert on a real Seestar sub while every 480x320 fixture passed.
     """
     try:
         from seestack.io.fits_loader import load_seestar_raw
@@ -126,10 +136,24 @@ def registration_gray(path: str) -> np.ndarray | None:
     if gray.ndim != 2 or gray.size == 0:
         return None
     # Robust sky subtraction: the median is a stable pedestal estimate on a
-    # star-sparse field. Clip negatives so only star flux drives the match.
+    # star-sparse field, and subtracting it is the whole of what a matcher needs.
+    # The negatives it leaves behind are the lower half of the sky noise and are
+    # **kept**: clipping them away (which this used to do) parks half the frame's
+    # pixels at exactly 0.0, and that spike at zero collapses the noise estimate
+    # every star extractor derives its detection threshold from. Measured on a
+    # real-sized sub (1920x1080, 120 stars): ``sep`` — the extractor astroalign
+    # detects with — reported a global RMS of **0.0006** clipped against **21.6**
+    # unclipped, put its 5-sigma threshold inside the noise, and read **63 % of
+    # the frame** as star pixels instead of 0.6 %. That is past sep's 300,000-pixel
+    # extraction buffer, so it refused outright, astroalign re-raised the refusal
+    # as its generic "input type not supported", and ``find_star_transform``
+    # returned ``None`` for every sub — the whole star-match path silently placed
+    # nothing on a real frame. Unclipped, the same frame yields 118 of its 120
+    # stars. A 480x320 fixture cannot exhibit it: it has 153,600 pixels in total,
+    # so it can never reach a 300,000-pixel buffer however wrong the threshold is,
+    # and its top-50-by-flux control points are the real stars anyway.
     sky = float(np.nanmedian(gray))
     flat = gray - sky
-    np.clip(flat, 0.0, None, out=flat)
     # A frame that came back all-NaN or flat (no signal) can't register.
     if not np.isfinite(flat).any() or float(np.nanmax(flat)) <= 0.0:
         return None
@@ -177,6 +201,103 @@ class StarTransform:
         }
 
 
+@dataclass(frozen=True)
+class StarField:
+    """One frame's star positions, extracted **once** so it can be matched against
+    several references for the price of one extraction.
+
+    astroalign re-extracts *both* sides of every :func:`find_star_transform` call,
+    so asking "does this sub match any of these twelve mosaic panels?" by handing
+    over the image twelve times pays for twelve extractions of the *same* sub. This
+    is how a caller pays for one.
+
+    **How much that is worth, measured on a real-sized sub (1920x1080, 50 control
+    points a side): one extraction 62 ms, an image-to-image match 285 ms, the same
+    match from control points 236 ms.** So the saving is a real ~20 % per extra
+    reference and not the order-of-magnitude it looks like from the outside — the
+    expensive half is astroalign's *triangle match*, not the source pass. A caller
+    trying several references should therefore spend its effort on trying the right
+    one first, not only on this (see
+    ``seestack.stack.stacker._star_matched_unsolved_frames``).
+
+    ``points`` is ``(N, 2)`` float ``(x, y)``, brightest first — astroalign's own
+    ordering, because these come from astroalign's own extractor. ``shape`` is the
+    ``(h, w)`` of the frame they were found in, which :func:`find_star_transform`
+    needs in order to say how far the frame's own centre moved.
+    """
+
+    points: np.ndarray
+    shape: tuple[int, int]
+
+    @property
+    def n_stars(self) -> int:
+        return int(np.asarray(self.points).shape[0])
+
+
+def extract_star_field(
+    image: np.ndarray | None,
+    *,
+    detection_sigma: float = DEFAULT_DETECTION_SIGMA,
+    min_area: int = DEFAULT_MIN_AREA,
+    max_control_points: int = DEFAULT_MAX_CONTROL_POINTS,
+) -> StarField | None:
+    """Extract ``image``'s brightest stars once, for reuse across several matches.
+
+    Deliberately astroalign's **own** extractor, with the arguments
+    :func:`find_star_transform` would have passed it: a :class:`StarField` has to
+    detect exactly what handing the image over detects, or the two paths would
+    disagree about what a star is and a caller's choice between them would change
+    the answer rather than only the cost.
+
+    ``None`` — meaning "pay for the extractions, pass the image" — when astroalign
+    or its extractor is not there, when the frame is not a single plane, or when
+    fewer than three stars were found (astroalign's own floor). Never raises: a
+    frame that will not extract is one that would not have matched either.
+    """
+    if image is None:
+        return None
+    img = np.asarray(image, dtype=np.float32)
+    if img.ndim != 2 or img.size == 0:
+        return None
+    try:
+        import astroalign
+
+        # Private, and guarded for it: a future astroalign that renames it leaves
+        # every caller on the image path, which still works and only costs more.
+        finder = getattr(astroalign, "_find_sources", None)
+        if finder is None:
+            return None
+        _raise_sep_deblend_limit()
+        found = finder(img, detection_sigma=detection_sigma, min_area=int(min_area))
+    except Exception as exc:  # noqa: BLE001 — a frame that won't extract is skipped
+        log.debug("star field: no sources (%s: %s)", type(exc).__name__, exc)
+        return None
+    pts = np.asarray(found, dtype=float)
+    if pts.ndim != 2 or pts.shape[0] < 3 or pts.shape[1] != 2:
+        return None
+    return StarField(points=pts[:int(max_control_points)],
+                     shape=(int(img.shape[0]), int(img.shape[1])))
+
+
+def _match_side(side: np.ndarray | StarField) -> tuple | None:
+    """``(what to hand astroalign, (h, w))`` for one side of a match, or ``None``.
+
+    The two accepted shapes are a single-plane image and a pre-extracted
+    :class:`StarField`; both carry the frame's own ``(h, w)``, which is what the
+    centre-shift check is measured against.
+    """
+    if isinstance(side, StarField):
+        pts = np.asarray(side.points, dtype=float)
+        if pts.ndim != 2 or pts.shape[0] < 3 or pts.shape[1] != 2:
+            return None
+        h, w = side.shape
+        return pts, (int(h), int(w))
+    img = np.asarray(side, dtype=np.float32)
+    if img.ndim != 2 or img.size == 0:
+        return None
+    return img, (int(img.shape[0]), int(img.shape[1]))
+
+
 def _raise_sep_deblend_limit() -> None:
     """Lift ``sep``'s sub-object cap off its default — see :data:`SEP_SUB_OBJECT_LIMIT`.
 
@@ -217,8 +338,8 @@ def _similarity_parts(a: np.ndarray) -> tuple[float, float] | None:
 
 
 def find_star_transform(
-    reference: np.ndarray | None,
-    moving: np.ndarray | None,
+    reference: np.ndarray | StarField | None,
+    moving: np.ndarray | StarField | None,
     *,
     max_shift_px: float = DEFAULT_MAX_SHIFT_PX,
     max_rotation_deg: float = DEFAULT_MAX_ROTATION_DEG,
@@ -231,12 +352,14 @@ def find_star_transform(
 ) -> StarTransform | None:
     """Match ``moving``'s stars onto ``reference``'s, or return ``None``.
 
-    Both are single-plane, sky-subtracted luminance images (what
-    :func:`registration_gray` produces); they need not
-    be the same shape. ``max_shift_px`` bounds how far this frame's **own centre**
-    may have moved on the reference's grid — the honest measure of "did the
-    pointing change", since with a rotation the transform's raw translation is not
-    a displacement of anything in particular.
+    Either side is a single-plane, sky-subtracted luminance image (what
+    :func:`registration_gray` produces) **or** a :class:`StarField` already
+    extracted from one — the same match either way, since a ``StarField`` comes
+    from the extractor this would otherwise call. They need not be the same shape.
+    ``max_shift_px`` bounds how far this frame's **own centre** may have moved on
+    the reference's grid — the honest measure of "did the pointing change", since
+    with a rotation the transform's raw translation is not a displacement of
+    anything in particular.
 
     ``None`` means "this frame was not placed", for every reason: no astroalign,
     too few stars, no match, a match that does not survive the checks above. The
@@ -244,10 +367,12 @@ def find_star_transform(
     """
     if reference is None or moving is None:
         return None
-    ref = np.asarray(reference, dtype=np.float32)
-    mov = np.asarray(moving, dtype=np.float32)
-    if ref.ndim != 2 or mov.ndim != 2 or ref.size == 0 or mov.size == 0:
+    ref_side = _match_side(reference)
+    mov_side = _match_side(moving)
+    if ref_side is None or mov_side is None:
         return None
+    ref, _ref_shape = ref_side
+    mov, (mov_h, mov_w) = mov_side
     try:
         import astroalign
 
@@ -293,8 +418,7 @@ def find_star_transform(
         log.debug("star match: residual %.3f px over %.3f, refusing", rms, max_residual_px)
         return None
 
-    h, w = mov.shape
-    centre = np.array([(w - 1) / 2.0, (h - 1) / 2.0], dtype=float)
+    centre = np.array([(mov_w - 1) / 2.0, (mov_h - 1) / 2.0], dtype=float)
     moved = a @ centre + b - centre
     if abs(float(moved[0])) > max_shift_px or abs(float(moved[1])) > max_shift_px:
         log.debug("star match: centre moved %s px, over the cap, refusing", moved)
