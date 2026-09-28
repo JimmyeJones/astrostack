@@ -1,5 +1,52 @@
 # Shipped — the record
 
+## 2026-09-28 — ⚪ CLOSED WITH A NUMBER — the **overlap gain pre-pass timing**, measured at the owner's frame size
+
+*(No code change. The open LEAD filed with v0.387.0 asked one question and forbade acting before it was answered:
+"how long does the overlap gain pre-pass actually add to the owner's mosaic stack? **Measure on real subs; the
+synthetic ones are 480×320 and prove nothing about this.**" Answered.)*
+
+**The harness.** A 3×3 mosaic — the grid the app's own framing advice recommends for the sample object — of
+**1920×1080** subs at **3.94″/px**, which is a Seestar S30's frame (150 mm, 2.1° field; derived from the frame size
+rather than assumed, per AGENTS.md §1). Panels stepped 0.95°, ~82 % of the 1.18° short axis, so the overlaps are the
+thin strips a real mosaic has. Union canvas **3656×2816 px (10.3 MP)**. Five subs a panel — what
+`MAX_FRAMES_PER_PANEL` actually reads — through the *same* `align_one` closure the stacker binds, with
+`StackOptions()` defaults, i.e. `background_flatten` **on** (the `Background2D` fit the lead names as the expensive
+half) and `suppress_hot_pixels` on. Four cores, `OMP_NUM_THREADS=2`.
+
+| `max_frames_per_panel` | loads | wall | per sub |
+|---|---|---|---|
+| **5** (shipped) | 45 | **285 s / 4.8 min** | 6.34 s |
+| 3 (the lead's lever) | 27 | **170 s / 2.8 min** | 6.29 s |
+
+A single `align_one` on the same canvas: **7.4 s** cold. So the pass *is* `align_one`, 45 times, and the lever is
+exactly linear — there is no per-pass overhead worth attacking.
+
+**The lead's own guess was low** (it said "plausibly 1–3 minutes"), and the verdict it expected still holds, for a
+reason that is now a formula rather than an intuition. The cost is five subs a panel — **one extra pass over at most
+45 subs** — and the stack itself aligns every sub it combines, so the overhead is `5 × panels ÷ N`:
+
+- a deep raster (9 panels, 400 subs each = 3,600) → **1.3 %**. Invisible.
+- **night one on a fresh mosaic** (9 panels, 10 subs each = 90) → **50 %**. Not invisible.
+
+**So: do not parallelise it** — the lead's reasoning stands and is now backed by a number that says the pass is not
+the problem on the stacks that take hours. The cheap lever (`MAX_FRAMES_PER_PANEL = 3`) is there, halves it, and
+costs little accuracy (the ratio is a median over thousands of coarse cells); threads would multiply this pass's peak
+memory by the worker count on the one path §6 calls out for its OOM history.
+
+**One thing the measurement showed that the lead did not predict, and it is the only reason to re-open this.** The
+pre-pass pays its **whole** cost before it can decide whether it has anything to say: on this fixture it returned
+`None` — correctly, because `write_seestar_fits` draws each frame's stars independently, so the overlaps hold
+unrelated stars and `MIN_OVERLAP_CORRELATION` refuses them, which is exactly the guard v0.387.0 was built with —
+after spending all 285 s. A night-one mosaic can therefore pay that 50 % for nothing at all. Re-open only with a
+shape that decides **cheaply** whether to look (a coarse read of far fewer subs, or a gate on the panels' own
+`transparency_score` spread), never with threads.
+
+**A note on what this measurement is and is not.** It is an order of magnitude at the owner's *frame size* on this
+container's CPU, reading local disk. His TrueNAS box reads over its own storage and may be slower, so treat 4.8 min
+as a floor rather than a figure. That does not change either conclusion: the ratio above is per-sub-cost-independent,
+because both the pass and the stack pay the same per-sub cost.
+
 ## v0.484.6 — 2026-09-28 — 🐛 the outlier pass's verdict was read off the *deepest* pixel, so a mosaic six subs a panel was praised as "already clean"
 
 **The bug, reproduced through the real `run_stack` before anything was changed.** Three surfaces answer *"could this

@@ -42,12 +42,17 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
   `docs/PROCESS-NOTES.md`): every such threshold is either normalised to the canvas (overlapgain's
   ~400-px fold, coverage-leveling's stride scaling, the editor ops' `proxy_scale`), dominated by a
   fraction term (`max(256, 8 % × n)`), or guarded by an identical-sampling check (noise-ratio,
-  noise-delta). The remaining cheap sweep the WCS finding suggested — "what else does the engine
-  write out, and what does it put in the file?" — is still open.
+  noise-delta). ↳ **The sweep that one suggested — "what else does the engine write out, and what does
+  it put in the file?" — ran 2026-09-28 and is CLOSED with a finding; do not re-run it.** The FITS
+  *writers* are clean; one card's **value** was not — `REJREACH` stamped from `coverage_max`, the
+  deepest pixel, which on a mosaic is the corner where panels meet (v0.484.6; the class it generalises
+  to is in `docs/PROCESS-NOTES.md`).
 - **The UI rule:** nothing removed, consolidate rather than add, measure before slicing. Tallest
   pages and baselines: `docs/PROCESS-NOTES.md`, "DOGFOOD BASELINE".
-- **A beginner feature on a regular cadence** from "Features that serve real workflows" — the section
-  holds seven-plus ready ideas, so it is stocked; do not manufacture a marginal eighth (§4).
+- **A beginner feature on a regular cadence** from "Features that serve real workflows" — ⚠️ **thinner
+  than this line claimed** (Builder, 2026-09-28): what was costed is struck, declined or closed, and
+  the reel-*from-history* remainder is largely delivered by v0.480.0. **Scout: re-stock it** — and
+  still do not manufacture a marginal one (§4).
 
 ## How the owner gets builds now
 
