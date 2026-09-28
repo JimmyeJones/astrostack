@@ -1134,6 +1134,122 @@ def test_stack_info_surfaces_the_rejection_reach_verdict(client, solved_library)
     assert rej["min_depth"] == 11
 
 
+def _stamp_rejection(data_root, safe, run_id, *, cards, median_depth=None):
+    """Write rejection cards onto a run's master, and optionally give the run row
+    the coverage median depth the engine records at stack time."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                for key, value in cards.items():
+                    hdul[0].header[key] = value
+            if median_depth is not None:
+                proj.set_stack_coverage_median_depth(int(run_id), median_depth)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_stack_info_says_the_pass_reached_only_the_deepest_pixels(
+        client, solved_library):
+    """``reaches`` is a claim about the DEEPEST pixel of the canvas, which on a
+    mosaic is the corner where four panels meet — so on its own it reads as
+    "protected" on a 2x2 six subs a panel (peak 12 against κ=3's bound of 11)
+    while over most of that canvas six samples provably cannot clip anything.
+    ``REJHALF`` is the depth half the picture is at or below, i.e. the number
+    ``stackhealth``'s own ``rejection_blind`` note is measured on, so the panel
+    can stop praising a pass that note calls blind."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    _stamp_rejection(solved_library, safe, run_id, cards={
+        "REJMODE": "sigma-clip", "REJFRAC": 0.0,
+        "REJDEPTH": 12, "REJNEED": 11, "REJREACH": True, "REJHALF": 6,
+    })
+
+    rej = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["rejection"]
+    assert rej["reaches"] is True            # the peak really does clear it
+    assert rej["peak_depth"] == 12
+    assert rej["half_depth"] == 6
+    assert rej["reaches_half"] is False      # …and the picture it is about does not
+
+
+def _register_mosaic_run(data_root, safe, fits_path, preview_path, *,
+                         n_used, peak, median):
+    """A second run row over the same master, with a mosaic's own coverage
+    figures: 24 subs over four panels of six, deepest at the seam."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-09-28T00:00:00Z",
+                output_basename="master", fits_path=str(fits_path),
+                tiff_path=None, preview_path=str(preview_path),
+                n_frames_used=n_used, canvas_h=64, canvas_w=64,
+                coverage_min=1, coverage_max=peak,
+                coverage_median_depth=median, options_json="{}",
+                is_mosaic=True))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_stack_info_reads_the_half_depth_off_the_run_when_the_card_predates_it(
+        client, solved_library):
+    """The retro half, and the one that matters on a real install: every run
+    already on disk was stacked before ``REJHALF`` existed, but the same figure
+    is in its run record (``coverage_median_depth``, lazily healed by the
+    stack-health read the same page makes). The verdict has to come out
+    identical, or the fix only ever reaches runs stacked after it."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    preview, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            fits_path = next(r for r in proj.iter_stack_runs()
+                             if r.id == int(run_id)).fits_path
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    mosaic_id = _register_mosaic_run(solved_library, safe, fits_path, preview,
+                                     n_used=24, peak=12, median=6.0)
+    _stamp_rejection(solved_library, safe, mosaic_id, cards={
+        "REJMODE": "sigma-clip", "REJFRAC": 0.0,
+        "REJDEPTH": 12, "REJNEED": 11, "REJREACH": True,
+    })
+
+    rej = client.get(
+        f"/api/targets/{safe}/stack-runs/{mosaic_id}/info").json()["rejection"]
+    assert "REJHALF" not in rej
+    assert rej["half_depth"] == 6
+    assert rej["reaches_half"] is False
+
+
+def test_stack_info_confirms_the_pass_reached_when_half_the_picture_is_deep(
+        client, solved_library):
+    """The other side, so the pair cannot just always withhold: a canvas whose
+    median depth clears the bound gets both verdicts positive, which is what lets
+    the panel keep saying "your data was already clean"."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    _stamp_rejection(solved_library, safe, run_id, cards={
+        "REJMODE": "sigma-clip", "REJFRAC": 0.0,
+        "REJDEPTH": 40, "REJNEED": 11, "REJREACH": True, "REJHALF": 38,
+    })
+
+    rej = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["rejection"]
+    assert rej["reaches"] is True and rej["reaches_half"] is True
+    assert rej["half_depth"] == 38
+
+
 def test_stack_info_omits_the_reach_verdict_on_a_run_that_predates_it(
         client, solved_library):
     """Upgrade safety, at the response shape: a run stacked before the engine
@@ -1157,7 +1273,8 @@ def test_stack_info_omits_the_reach_verdict_on_a_run_that_predates_it(
     rej = client.get(
         f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["rejection"]
     assert rej["mode"] == "sigma-clip"
-    for key in ("reaches", "peak_depth", "min_depth"):
+    for key in ("reaches", "peak_depth", "min_depth",
+                "reaches_half", "half_depth"):
         assert key not in rej
 
 

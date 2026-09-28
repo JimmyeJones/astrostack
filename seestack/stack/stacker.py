@@ -1938,6 +1938,7 @@ def _build_output_header_meta(
     min_max_reject_count_requested: int | None = None,
     rejection_map_written: bool | None = None,
     peak_depth: int | None = None,
+    half_depth: int | None = None,
 ) -> dict[str, Any]:
     """Collect provenance for the output FITS header.
 
@@ -2165,7 +2166,21 @@ def _build_output_header_meta(
             meta["REJDEPTH"] = (int(peak_depth), "samples on the deepest pixel")
             meta["REJNEED"] = (int(need), "samples needed to clip a lone outlier")
             meta["REJREACH"] = (bool(int(peak_depth) >= int(need)),
-                                "rejection could clip a lone outlier")
+                                "could clip a lone outlier on the deepest px")
+            # …and the same question asked of the depth at least **half** the
+            # picture is at or below, because the peak is the weakest place to
+            # ask it on a mosaic: it is the corner where four panels meet, so a
+            # 2x2 six subs a panel stamps a peak of 12 against a κ=3 bound of 11
+            # and reads as protected, while over most of that canvas six samples
+            # provably cannot clip anything. ``stackhealth``'s own
+            # ``rejection_blind`` note has been measured on this number since it
+            # existed; stamping it here is what lets the file — and the run-info
+            # panel reading it — agree with that note instead of contradicting it
+            # on the same page. Omitted when the caller has no median to hand,
+            # which is what every run recorded before this card looks like.
+            if half_depth is not None and half_depth > 0:
+                meta["REJHALF"] = (int(half_depth),
+                                   "samples half the picture is at or below")
     # …and the other half of that story: an auto-enabled drizzle rejection the
     # memory budget couldn't afford, which the run deliberately skipped rather
     # than refusing outright (see :func:`_afford_drizzle_reject`). Stamped so the
@@ -4053,10 +4068,18 @@ def run_stack(
     _peak_cov = frame_cov if frame_cov is not None else (
         coverage[..., 0] if coverage.ndim == 3 else coverage)
     peak_depth: int | None = None
+    half_depth: int | None = None
     if _peak_cov is not None and _peak_cov.size:
         _cov_hi = float(np.nanmax(_peak_cov))
         if np.isfinite(_cov_hi):
             peak_depth = min(int(n_used), int(_cov_hi))
+        # …and the depth at least half the picture is at or below, for REJHALF.
+        # The same map and the same cap, off the same expression the run record's
+        # ``coverage_median_depth`` is computed from below, so the card and the
+        # column cannot describe one canvas two ways.
+        _cov_mid = coverage_median_depth(_peak_cov)
+        if _cov_mid is not None and np.isfinite(_cov_mid):
+            half_depth = min(int(n_used), int(_cov_mid))
     header_meta = _build_output_header_meta(project, frames, eff, n_used, wstats,
                                             calibration=calibration, pstats=pstats,
                                             photometric_auto=photometric_auto,
@@ -4079,7 +4102,8 @@ def run_stack(
                                                 min_max_reject_count_requested),
                                             rejection_map_written=(
                                                 rejection_map_written),
-                                            peak_depth=peak_depth)
+                                            peak_depth=peak_depth,
+                                            half_depth=half_depth)
     if noise_sigma is not None:
         header_meta["BKGSIGMA"] = (noise_sigma, "normalized background noise sigma")
     if stack_fwhm is not None:

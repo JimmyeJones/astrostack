@@ -298,3 +298,87 @@ def test_rejection_reach_reports_exactly_the_shared_bound(kappa):
         reach = rejection_reach(opts, 50)
         assert reach.method == mode
         assert reach.lone_outlier_min_frames == lone_outlier_min_depth(mode, kappa)
+
+
+# --- the *deepest* pixel is the weakest place to ask on a mosaic ---------------
+#
+# The three answers above share the *bound* (`lone_outlier_min_depth`). They did
+# not share the *depth*: `rejection_reach` sizes a mosaic by its panel depth
+# (`auto_reject_depth`), `stackhealth`'s note by the depth half the picture is at
+# or below, and the master's own `REJREACH` card by the **deepest pixel** — which
+# on a mosaic is the corner where four panels meet. So a 2x2 mosaic six subs a
+# panel warned on the Stack form, stamped `REJREACH = T`, and then had History
+# call it clean two cards above the note saying it was blind. Every fixture in
+# this file until here sets `coverage_max == coverage_median_depth`, which is
+# exactly why none of them could exhibit it.
+
+def _mosaic_run(*, n_used: int, peak: int, half: float | None,
+                mode: str = "sigma-clip", options_json: str = "{}"):
+    from seestack.io.project import StackRunRow
+
+    return StackRunRow(
+        id=1, timestamp_utc="2026-09-28T00:00:00+00:00", output_basename="m42",
+        fits_path="m42.fits", tiff_path=None, preview_path=None,
+        n_frames_used=n_used, canvas_h=1080, canvas_w=1920,
+        coverage_min=1, coverage_max=peak, coverage_thin_frac=0.0,
+        coverage_median_depth=half, options_json=options_json,
+        rejection_mode=mode, calstat="dark+flat", is_mosaic=True,
+    )
+
+
+def test_the_two_depths_a_finished_run_can_be_judged_on():
+    """``rejection_sample_depths`` is the one place either number is spelled, so
+    the note and the run-info panel cannot drift apart."""
+    from seestack.stackhealth import rejection_sample_depths
+
+    # The mosaic case: 24 subs over four panels of six, peak at the four-panel
+    # corner. The peak clears κ=3's bound of 11; the half-depth does not.
+    assert rejection_sample_depths(
+        _mosaic_run(n_used=24, peak=12, half=6.0)) == (12, 6)
+    # Both are capped at the frames that actually contributed — a weighted
+    # coverage map can round above the sub count, and overstating the depth is
+    # the direction that would hide a blind pass.
+    assert rejection_sample_depths(
+        _mosaic_run(n_used=6, peak=9, half=8.0)) == (6, 6)
+    # A run recorded before the column existed makes no claim at all, rather
+    # than claiming zero.
+    assert rejection_sample_depths(
+        _mosaic_run(n_used=24, peak=12, half=None)) == (12, None)
+    assert rejection_sample_depths(
+        _mosaic_run(n_used=24, peak=12, half=0.0)) == (12, None)
+    # No peak recorded either → the frame count, exactly as before.
+    assert rejection_sample_depths(
+        _mosaic_run(n_used=24, peak=0, half=None)) == (24, None)
+
+
+def test_the_note_and_the_two_verdicts_agree_on_a_mosaic_whose_corner_is_deep():
+    """The defect, stated as the contract it broke: on a run whose *peak* clears
+    the bound and whose *half* does not, ``stackhealth`` fires ``rejection_blind``
+    — so the pair of verdicts the run-info panel publishes has to say the same
+    thing, or one page carries both answers."""
+    from seestack.stack.stacker import lone_outlier_min_depth
+    from seestack.stackhealth import rejection_sample_depths, stack_health
+
+    need = kappa_min_frames(3.0)
+    assert need == 11
+    for half in (1, 3, 6, 10, 11, 12, 24):
+        run = _mosaic_run(n_used=24, peak=24, half=float(half))
+        peak_depth, half_depth = rejection_sample_depths(run)
+        assert lone_outlier_min_depth(run.rejection_mode, 3.0) == need
+        reaches = peak_depth >= need
+        reaches_half = half_depth >= need
+        blind = any(n.kind == "rejection_blind" for n in stack_health(run, []))
+        # `reaches and not reaches_half` is exactly the note's "half blind" arm.
+        assert blind is not (reaches and reaches_half), f"disagreed at half={half}"
+        assert reaches is True   # the peak alone always reads as protected here
+
+
+def test_a_single_field_is_untouched_because_its_peak_is_its_median():
+    """The whole no-regression guarantee: on a single field the interior plateau
+    is the majority of the canvas, so the two depths are one number and the
+    half verdict can never differ from the peak one."""
+    from seestack.stackhealth import rejection_sample_depths
+
+    for n in (5, 8, 11, 20, 500):
+        run = _mosaic_run(n_used=n, peak=n, half=float(n))
+        assert rejection_sample_depths(run) == (n, n)

@@ -1,5 +1,76 @@
 # Shipped — the record
 
+## v0.484.6 — 2026-09-28 — 🐛 the outlier pass's verdict was read off the *deepest* pixel, so a mosaic six subs a panel was praised as "already clean"
+
+**The bug, reproduced through the real `run_stack` before anything was changed.** Three surfaces answer *"could this
+run's rejection pass actually drop a lone satellite trail?"*, and `stacker.lone_outlier_min_depth`'s docstring says in
+so many words that they **must never disagree**: the Stack form's pre-run outlook (`rejection_reach`), `stackhealth`'s
+`rejection_blind` note on the finished picture, and the `REJDEPTH`/`REJNEED`/`REJREACH` cards stamped into the master's
+own header (which the History Info panel reads). They share the *bound*. They did not share the **depth**:
+
+| surface | depth it asks about |
+|---|---|
+| Stack form, pre-run | the **panel** depth (`auto_reject_depth`) |
+| `stackhealth`'s note, post-run | `coverage_median_depth` — the depth half the picture is at or below |
+| the master's `REJREACH` card | `coverage_max` — the **deepest single pixel** |
+
+On a mosaic the deepest pixel is the corner where panels meet, so the card is the weakest place to ask. Measured on a
+real 2×2 stacked at the 82 % step the app's own bundled mosaic sample uses, six subs a panel:
+
+```
+coverage_max 12   coverage_median_depth 6   REJNEED 11 (κ=3)   REJFRAC 2e-06
+pre-run  rejection_reach(depth=6).reaches  = False   <- "this won't reach"
+header   REJREACH                          = True    <- "it could clip a lone outlier"
+stackhealth 'rejection_blind' note present = True    <- "blind over half this picture"
+History  "Rejection clipped ~0% of samples (data was already clean)"
+```
+
+So the app warned before the night, then told the owner the data was clean, and said it was blind two cards further
+down **the same page**. `REJFRAC` being 0.0 — the common case, since a four-panel corner is a sliver and most nights
+have no satellite crossing it — is what selects the "already clean" reassurance; a couple of samples clipped in the
+seam selects "transient outliers", which reads as a statement about the whole picture just as wrongly. The owner is a
+heavy mosaic user with `auto_reject` off by default, so this is his ordinary case, not an edge one.
+
+**The fix is one datum in one place, and it is the number the note already used.** New pure
+`stackhealth.rejection_sample_depths(run)` returns `(peak, half)` — the two depths a finished run can honestly be
+judged on, both capped at the frames that contributed — and is now the *only* spelling of either; `stack_health` reads
+it instead of its own pair of expressions, so the note and the panel cannot drift (AGENTS.md history: three
+hand-mirrored "is this a genuine run" predicates, which **did** disagree). `stack_run_info` publishes
+`half_depth` + `reaches_half` beside `peak_depth`/`reaches`, and History's qualifier stands aside for the
+half-blind case in all three of its wordings — the same rule `stackhealth` already follows internally, where
+`rejection_was_blind` stops the praise further down from contradicting the note. `reaches && !reaches_half` is
+*exactly* the note's own half-blind arm, asserted directly rather than assumed.
+
+**It reaches the runs already on disk, which is why the fix is in the reader.** The stacker also stamps the figure as a
+new `REJHALF` card (off the same `cov_2d` expression the run record's `coverage_median_depth` comes from, so the card
+and the column cannot describe one canvas two ways) — but a card only ever reaches runs stacked *after* it, and the
+owner's library is thousands of runs that already exist. So the router prefers `REJHALF` and falls back to the run
+record's `coverage_median_depth`, which is the same number and is lazily healed by the stack-health read the very same
+page makes. `REJREACH`'s own comment now says *"could clip a lone outlier on the deepest px"* rather than the
+unqualified claim, so a file opened in Siril says what it measured.
+
+**Single-field runs are untouched, to the digit.** The interior plateau is the majority of a dithered single field's
+canvas, so its peak *is* its median and the half verdict can never differ from the peak one — asserted through a real
+12-sub single-field stack (`REJHALF == REJDEPTH == 12`) and over a ladder of frame counts on the helper.
+
+**Upgrade-safety (§9).** No config, schema, on-disk layout, default or API-*shape* change: two additive response
+fields with no default claim, one additive FITS card, masters already on disk untouched and read exactly as before. A
+run with neither the card nor the column publishes no verdict at all, which every consumer reads as "nothing to say"
+rather than as a reassurance — pinned by the existing upgrade test, extended to the new keys.
+
+**Tests +9 Python / +5 vitest.** Fail-before verified by reverting each of the three production files against
+`origin/main` in place and re-running: `KeyError: 'REJHALF'` in the engine, `KeyError: 'reaches_half'` at the
+endpoint, and the frontend printing the untruth itself (*expected* "most of this picture is too thin for it to
+reach", *received* "data was already clean"). **The fixtures that could not exhibit it are named in the new tests'
+own comments:** every agreement test in `tests/test_rejection_reach.py` set `coverage_max == coverage_median_depth`,
+which is precisely why twenty-odd of them held while this was live — the same "fixture that cannot exhibit its bug"
+class as v0.417.1.
+
+**What was deliberately not done.** The `pct ≥ 8` branch ("high — check that κ isn't clipping real signal") keeps its
+wording: a half-blind canvas that clipped over 8 % is not reachable in practice, and the κ caution is the more useful
+sentence if it ever were. And History still carries only the *qualifier* — the explanation and the cure stay
+`stackhealth`'s `rejection_blind` note, which `StackHealthCard` renders for the same run further down the same page.
+
 ## v0.484.5 — 2026-09-28 — the site key stops depending on the interpreter's quote choice: `test_reject_reason_labels._write_source`
 
 🔴 **CI FIX, and the previous commit's own bug. `main`'s CI went red on run 1947 and this is the fix.**

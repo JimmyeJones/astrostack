@@ -1722,6 +1722,15 @@ export interface StackRejectionSummary {
   reaches?: boolean;
   peak_depth?: number;
   min_depth?: number;
+  // The same verdict asked of the depth at least *half* the picture is at or
+  // below (`half_depth`), because `reaches` above is a claim about the DEEPEST
+  // pixel — which on a mosaic is the corner where four panels meet. A 2×2 mosaic
+  // six subs a panel has a peak of 12 against the κ=3 bound of 11, so it reads
+  // as protected while over most of that canvas six samples provably cannot clip
+  // anything, and "How's my stack?" says so on the same page. Absent on runs
+  // whose canvas depth isn't recorded, which reads as "no verdict".
+  reaches_half?: boolean;
+  half_depth?: number;
 }
 
 export interface PrintSize {

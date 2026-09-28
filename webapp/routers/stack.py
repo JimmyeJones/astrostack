@@ -4134,6 +4134,33 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
                 rejection[k] = int(header[hk])
         with contextlib.suppress(KeyError, TypeError, ValueError):
             rejection["reaches"] = bool(header["REJREACH"])
+        # …and the same verdict against the depth at least **half** the picture is
+        # at or below, because ``reaches`` above is a claim about the *deepest*
+        # pixel — which on a mosaic is the corner where four panels meet. A 2x2
+        # mosaic six subs a panel stamps a peak of 12 against a κ=3 bound of 11,
+        # so it reads as protected while over most of that canvas six samples
+        # provably cannot clip anything: measured on a real ``run_stack`` of that
+        # shape, ``REJREACH`` True with ``stackhealth``'s ``rejection_blind`` note
+        # firing on the same run, on the same page. This is the number that note
+        # is measured on (:func:`seestack.stackhealth.rejection_sample_depths`),
+        # so the two now agree by construction rather than by coincidence.
+        # Prefers the master's own ``REJHALF`` card and falls back to the run
+        # record's ``coverage_median_depth`` — which is the same figure, and is
+        # what gives every run stacked *before* the card existed the honest
+        # answer too (it is lazily backfilled by the stack-health read the same
+        # page makes). Absent — no card and a NULL column — leaves the pair
+        # exactly as it was, which reads as "no verdict", never as a reassurance.
+        half_depth: int | None = None
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            half_depth = int(header["REJHALF"])
+        if half_depth is None:
+            from seestack.stackhealth import rejection_sample_depths
+            half_depth = rejection_sample_depths(run)[1]
+        if half_depth is not None and half_depth > 0:
+            rejection["half_depth"] = int(half_depth)
+            if "min_depth" in rejection:
+                rejection["reaches_half"] = bool(
+                    int(half_depth) >= int(rejection["min_depth"]))
 
     # "Your picture came out slightly less zoomed-in" — an unattended run whose
     # drizzle canvas didn't fit the memory budget and was stepped down to the

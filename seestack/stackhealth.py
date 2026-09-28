@@ -668,6 +668,46 @@ def _run_sigma_kappa(options_json: str | None) -> float:
     return _DEFAULT_SIGMA_KAPPA
 
 
+def rejection_sample_depths(run: StackRunRow) -> tuple[int, int | None]:
+    """The two per-pixel sample depths a rejection verdict has to be judged
+    against — ``(peak, half)`` — read off a finished run's own coverage figures.
+
+    Every rejection threshold is a statement about how many samples land on **one
+    pixel** (:func:`seestack.stack.stacker.lone_outlier_min_depth`), so a
+    finished run's verdict needs a *depth*, and there are two honest ones:
+
+    * **peak** — ``coverage_max``, the deepest pixel on the canvas. When even
+      that is under the bound, no pixel anywhere could be clipped, so "this pass
+      removed nothing" is provable. On a **mosaic** it is the corner where four
+      panels meet, so it is the *weakest* claim there: a 2x2 mosaic six subs a
+      panel presents a peak of 12 to a question whose answer over most of the
+      canvas is 6.
+    * **half** — ``coverage_median_depth``, the depth at least half the picture
+      is at or below. This one cannot overstate the picture either, by
+      construction, and it is the number that catches the mosaic case. ``None``
+      on a run recorded before the column existed and not yet backfilled
+      (:func:`seestack.coverage_backfill.backfill_coverage_shares`), which every
+      caller must read as "no claim", never as zero.
+
+    Both are capped at the frames that actually contributed: a weighted coverage
+    map can round above the sub count, and overstating the depth is the direction
+    that would *hide* a blind pass.
+
+    One function because the two numbers now answer in two places — this module's
+    ``rejection_blind`` note and the run-info endpoint's ``reaches``/
+    ``reaches_half`` pair that History's own qualifier reads — and a hand-mirrored
+    pair of expressions is how those two would come to describe one picture
+    differently. Pure, so it is unit-tested directly.
+    """
+    n_combined = run.n_frames_used
+    peak = (min(n_combined, run.coverage_max)
+            if run.coverage_max and run.coverage_max > 0 else n_combined)
+    half = (min(n_combined, int(run.coverage_median_depth))
+            if run.coverage_median_depth and run.coverage_median_depth > 0
+            else None)
+    return peak, half
+
+
 def run_option_flag(options_json: str | None, key: str) -> bool | None:
     """A boolean option a run was stacked with, or ``None`` when it can't be read.
 
@@ -1277,11 +1317,7 @@ def stack_health(run: StackRunRow, frames: Iterable[GradedFrame],
     # same ``cov_2d`` whichever accumulator produced it, which is exactly why the
     # half-of-the-picture claim below can be made for min/max too.)
     n_combined = run.n_frames_used
-    peak_depth = (min(n_combined, run.coverage_max)
-                  if run.coverage_max and run.coverage_max > 0 else n_combined)
-    half_depth = (min(n_combined, int(run.coverage_median_depth))
-                  if run.coverage_median_depth and run.coverage_median_depth > 0
-                  else None)
+    peak_depth, half_depth = rejection_sample_depths(run)
     blind_mode = (run.rejection_mode or "").strip()
     #: Set when the note below fires, so the reassurance further down cannot
     #: praise the very pass this one has just said did nothing. One picture, one

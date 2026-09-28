@@ -287,6 +287,66 @@ def test_a_deep_enough_single_field_records_that_it_could(tmp_path):
     assert bool(header["REJREACH"]) is True
 
 
+def test_a_mosaic_whose_only_deep_pixel_is_a_seam_records_both_depths(tmp_path):
+    """The case the peak card alone gets wrong, through the real stacker.
+
+    Step the same 2×2 up to **six** subs a panel and the seam — two panels' worth
+    — reads 12, which clears κ=3's bound of 11. So ``REJREACH`` says "this pass
+    could clip a lone outlier" about a canvas that is six subs deep nearly
+    everywhere, and History used to turn that into *"data was already clean"*
+    two cards above ``stackhealth``'s note saying it was blind over half the
+    picture. ``REJHALF`` is the number that note is measured on, so the file now
+    carries both and the two surfaces answer together.
+    """
+    from seestack.stackhealth import rejection_sample_depths, stack_health
+
+    proj = _build(tmp_path / "seam", _panels(2), 6, streak_at=0)
+    try:
+        _img, header = _stack(proj, sigma_clip=True)
+        run = next(iter(proj.iter_stack_runs()))
+    finally:
+        proj.close()
+    need = kappa_min_frames(StackOptions().sigma_kappa)
+    assert header["REJMODE"] == "sigma-clip"
+    assert int(header["REJNEED"]) == need == 11
+    # The seam is the deepest pixel, and it clears the bound on its own.
+    assert int(header["REJDEPTH"]) == 12
+    assert bool(header["REJREACH"]) is True
+    # …and half the picture is a single panel's six subs, which does not.
+    assert int(header["REJHALF"]) == 6
+    assert int(header["REJHALF"]) < need
+    # The card and the run record are one measurement, not two.
+    assert rejection_sample_depths(run) == (int(header["REJDEPTH"]),
+                                            int(header["REJHALF"]))
+    # And the note on this very run agrees, which is the contract that broke.
+    assert any(n.kind == "rejection_blind" for n in stack_health(run, []))
+
+
+def test_the_half_depth_card_never_exceeds_the_peak_or_the_frames(tmp_path):
+    """``REJHALF`` is a sample count off the same map as ``REJDEPTH``: it can
+    never claim more samples than the deepest pixel had, nor more than went in."""
+    proj = _build(tmp_path / "halfcap", _panels(2), 6, streak_at=-1)
+    try:
+        _img, header = _stack(proj, sigma_clip=True)
+    finally:
+        proj.close()
+    assert 0 < int(header["REJHALF"]) <= int(header["REJDEPTH"])
+    assert int(header["REJDEPTH"]) <= int(header["NFRAMES"])
+
+
+def test_a_single_fields_two_depth_cards_are_the_same_number(tmp_path):
+    """The no-regression half: one pointing puts the interior plateau over most
+    of the canvas, so the half-depth card cannot withhold a verdict the peak card
+    gives — every single-field run reads exactly as it did before the card."""
+    proj = _build(tmp_path / "field", [_BASE], 12, streak_at=0)
+    try:
+        _img, header = _stack(proj, sigma_clip=True)
+    finally:
+        proj.close()
+    assert int(header["REJHALF"]) == int(header["REJDEPTH"]) == 12
+    assert bool(header["REJREACH"]) is True
+
+
 def test_the_depth_card_never_exceeds_the_frames_that_contributed(tmp_path):
     """``REJDEPTH`` is a sample count, so it can never claim more samples than
     subs went in — overstating it is the one direction that would *hide* a blind
