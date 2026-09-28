@@ -249,8 +249,9 @@ export function sensorDefectsSummaryText(
 //
 //  * κ-σ ("sigma-clip") — the fraction is *data-driven*: a small share means it
 //    removed satellites/planes/cosmic rays without eating real signal, ~0% means
-//    the data was already clean, and an unusually large one (≳ 8%) hints a
-//    too-tight κ eating signal → "Rejection clipped ~0.4% of samples (…)".
+//    the data was already clean *where the pass could reach*, and an unusually
+//    large one (≳ 8%) hints a too-tight κ eating signal → "Rejection clipped
+//    ~0.4% of samples (…)".
 //  * min/max reject ("min-max-reject") — it *always* drops the per-pixel extremes
 //    by design, so the fraction is *structural* (≈ 2k / frames): small at high
 //    frame counts, large-by-design at low ones. No over-clipping caution — a big
@@ -277,6 +278,18 @@ export function rejectionSummaryText(
   else if (pct < 10) pctText = `${pct.toFixed(1)}%`;
   else pctText = `${Math.round(pct)}%`;
   const noun = isMinMax ? "most-extreme samples" : "of samples";
+  // The pass reached the deepest pixel but not the depth half the picture sits
+  // at or below — i.e. on a mosaic it could only ever have bitten in the panel
+  // overlaps. `reaches` alone cannot say this: the deepest pixel of a 2×2 mosaic
+  // is the corner where four panels meet, so six subs a panel presents 12 to the
+  // κ=3 bound of 11 and reads as protected while most of that canvas provably
+  // could not be clipped. Exactly the state `stackhealth`'s `rejection_blind`
+  // note calls half-blind — one datum, so the two cannot describe one picture
+  // differently — and the reason the reassurance below must stand aside for it,
+  // the same rule "even coverage" praise already follows. `undefined` on a run
+  // whose canvas depth isn't recorded, which keeps every wording below as it was.
+  const halfBlind = rejection.reaches !== false && rejection.reaches_half === false;
+  const tooThin = "most of this picture is too thin for it to reach";
   let note: string;
   if (isMinMax) {
     // Structural, by design — never a caution; just name the method. With one
@@ -291,15 +304,17 @@ export function rejectionSummaryText(
     // it carries no `reaches` and keeps the plain label.
     note = pct === 0 && rejection.reaches === false
       ? `${label} — not enough subs on a pixel for it to reach`
-      : label;
+      : halfBlind ? `${label} — ${tooThin}` : label;
   } else if (pct === 0) {
     // "Clean" is only one of the two ways a κ·σ clip records 0 %, and the other
     // one is a picture that still has a satellite in it: the test is against
     // statistics that still contain the outlier, so it is blind to a lone trail
     // until `kappa_min_frames` samples land on ONE pixel — 11 at the default
     // κ=3, which a mosaic panel rarely has. The run's own header now records the
-    // depth it had against the depth it needed (`REJDEPTH`/`REJNEED`/
-    // `REJREACH`), so claim the reassurance only when that verdict is positive.
+    // depth it had against the depth it needed (`REJDEPTH`/`REJNEED`/`REJHALF`/
+    // `REJREACH`), so claim the reassurance only when *both* verdicts are
+    // positive — the peak one says it could clip somewhere, and only the half one
+    // says it could clip over the picture the reassurance is about.
     // A run stacked before the engine stamped it carries no `reaches` and keeps
     // the original wording. Deliberately just the qualifier and no more: the
     // explanation and the cure are `stackhealth`'s `rejection_blind` note, which
@@ -307,9 +322,12 @@ export function rejectionSummaryText(
     // page — a second copy here would be the same fact said twice.
     note = rejection.reaches === false
       ? "not enough subs on a pixel for it to reach"
-      : "data was already clean";
+      : halfBlind ? tooThin : "data was already clean";
   } else if (pct < 8) {
-    note = "transient outliers";
+    // It did remove something — truthfully — but on a half-blind canvas that
+    // something came only out of the deep overlaps, and "transient outliers" on
+    // its own reads as a statement about the whole picture.
+    note = halfBlind ? `transient outliers; ${tooThin}` : "transient outliers";
   } else {
     note = "high — check that κ isn't clipping real signal";
   }

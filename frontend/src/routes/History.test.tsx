@@ -1879,6 +1879,77 @@ describe("rejectionSummaryText", () => {
       }),
     ).toBe("Rejection clipped ~0% of samples (data was already clean)");
   });
+  it("does NOT call a 0% pass clean when it only reached the deepest pixels", () => {
+    // The regression this test file could not previously exhibit: every case
+    // above has peak == median, so `reaches` was the whole answer. A real 2×2
+    // mosaic six subs a panel is 12 deep only at the seam where two panels meet
+    // — that clears κ=3's bound of 11, so `reaches` is TRUE — while half the
+    // canvas is one panel's six subs and provably cannot be clipped. Measured on
+    // a real `run_stack` of that shape, where `stackhealth` fires its
+    // `rejection_blind` note on the very same run.
+    expect(
+      rejectionSummaryText({
+        mode: "sigma-clip", fraction: 0, n_rejected: 0, n_contributed: 500,
+        reaches: true, peak_depth: 12, min_depth: 11,
+        reaches_half: false, half_depth: 6,
+      }),
+    ).toBe("Rejection clipped ~0% of samples "
+           + "(most of this picture is too thin for it to reach)");
+  });
+  it("qualifies a tiny nonzero drop that only came out of the deep seams", () => {
+    // The same canvas with a couple of samples actually clipped in the seam:
+    // "transient outliers" on its own reads as a statement about the whole
+    // picture, which this one is not.
+    expect(
+      rejectionSummaryText({
+        mode: "sigma-clip", fraction: 0.000002,
+        reaches: true, peak_depth: 12, min_depth: 11,
+        reaches_half: false, half_depth: 6,
+      }),
+    ).toBe("Rejection clipped ~<0.1% of samples "
+           + "(transient outliers; most of this picture is too thin for it to reach)");
+  });
+  it("keeps every wording when half the picture is deep enough too", () => {
+    // Both verdicts positive — a single field, or a mosaic deep per panel — is
+    // the case the reassurance is actually about.
+    expect(
+      rejectionSummaryText({
+        mode: "sigma-clip", fraction: 0, reaches: true, peak_depth: 40,
+        min_depth: 11, reaches_half: true, half_depth: 38,
+      }),
+    ).toBe("Rejection clipped ~0% of samples (data was already clean)");
+    expect(
+      rejectionSummaryText({
+        mode: "sigma-clip", fraction: 0.004, reaches: true, peak_depth: 40,
+        min_depth: 11, reaches_half: true, half_depth: 38,
+      }),
+    ).toBe("Rejection clipped ~0.4% of samples (transient outliers)");
+  });
+  it("makes no half-depth claim on a run whose canvas depth was never recorded", () => {
+    // Upgrade safety at the wording: `reaches_half` absent is "no verdict", so
+    // every run stacked before the pair existed reads exactly as it did.
+    expect(
+      rejectionSummaryText({
+        mode: "sigma-clip", fraction: 0, reaches: true, peak_depth: 40,
+        min_depth: 11,
+      }),
+    ).toBe("Rejection clipped ~0% of samples (data was already clean)");
+    expect(
+      rejectionSummaryText({ mode: "sigma-clip", fraction: 0.004 }),
+    ).toBe("Rejection clipped ~0.4% of samples (transient outliers)");
+  });
+  it("carries the same qualifier onto a half-blind min/max drop", () => {
+    // Said in the same words as the κ-σ branch, because it is the same fact —
+    // the rule the reach qualifier already follows for its other arm.
+    expect(
+      rejectionSummaryText({
+        mode: "min-max-reject", fraction: 0, n_rejected: 0, n_contributed: 40,
+        reaches: true, peak_depth: 4, min_depth: 3,
+        reaches_half: false, half_depth: 2,
+      }),
+    ).toBe("Rejection dropped the ~0% most-extreme samples "
+           + "(min/max reject — most of this picture is too thin for it to reach)");
+  });
   it("uses <0.1% for a tiny but nonzero fraction", () => {
     expect(
       rejectionSummaryText({ mode: "sigma-clip", fraction: 0.0003 }),
