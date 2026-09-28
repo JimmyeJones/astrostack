@@ -2621,26 +2621,157 @@ def _build_refine_patch(
 # tried first, so a target past the cap still spends its budget on its best ones.
 STAR_MATCH_MAX_UNSOLVED = 400
 
+# How many of a mosaic's panels are offered an anchor. Each one costs one load and
+# one star extraction at setup, and one cheap triangle match per un-located sub
+# thereafter, so this bounds both halves of the mosaic path's extra work. Panels are
+# taken **biggest first**: the cap can only ever leave a panel's subs exactly as
+# unused as they are today, so spending it on the panels holding the most subs is
+# the version that rescues the most. Generous enough for any raster the Seestar's
+# own mosaic mode shoots in one go.
+STAR_MATCH_MAX_ANCHORS = 24
+
+# The star-matching one run will attempt in total, across every sub and every anchor.
+# **Measured on a real-sized sub (50 control points a side): astroalign's triangle
+# match costs ~236 ms, while extracting one side's stars costs ~62 ms.** So on a
+# mosaic the cost is the *matching*, and a pool of anchors multiplies it — which is
+# why the anchors are tried nearest-in-time first (see below) and why there is a
+# ceiling at all. A sub that matches its own panel stops at the first hit, so this is
+# really a bound on how long a run spends on subs that match **nothing**: 2,000
+# attempts is about eight minutes, against a mosaic stack at this owner's scale that
+# runs for hours. Reaching it ends the pass exactly the way a cancel does — the subs
+# not reached are left as unused as they are today, never mis-placed.
+STAR_MATCH_MAX_MATCH_ATTEMPTS = 2000
+
+
+def _anchor_order(epochs: Sequence[float | None], when: float | None) -> list[int]:
+    """Indices of the anchors to try, **nearest-in-time to ``when`` first**.
+
+    Pure, and separate from the loop that uses it so the rule can be stated and
+    tested on its own. A mosaic is shot panel by panel, so the panel being shot
+    around the time an un-located sub was taken is almost always the panel it is on —
+    and one triangle match costs ~236 ms, so on a big raster the *order* is worth far
+    more than anything else about the pass's cost. Correctness never depends on it:
+    every match is validated before it is used, so this only decides which valid
+    answer is found first.
+
+    ``when`` of ``None`` (a sub with no ``DATE-OBS``) keeps the order it was given,
+    and an anchor with no time of its own sorts last — stably, so anchors this cannot
+    separate keep their incoming biggest-panel-first order.
+    """
+    order = list(range(len(epochs)))
+    if when is None:
+        return order
+    return sorted(order, key=lambda i: (abs(when - epochs[i])
+                                        if epochs[i] is not None else float("inf")))
+
+
+def _capture_epoch(frame: FrameRow) -> float | None:
+    """When a sub was shot, as epoch seconds, or ``None`` if it does not say.
+
+    Only ever used to *order* candidate anchors, never to choose one: a mosaic is
+    shot panel by panel, so the panel being shot closest in time to an un-located sub
+    is almost always the panel it is on. Shares
+    ``fits_loader._normalise_iso_datetime`` rather than re-parsing ``DATE-OBS`` a
+    second way, so "when was this shot" keeps one answer in the engine.
+    """
+    raw = (getattr(frame, "timestamp_utc", None) or "").strip()
+    if not raw:
+        return None
+    from seestack.io.fits_loader import _normalise_iso_datetime
+
+    dt = _normalise_iso_datetime(raw)
+    return dt.timestamp() if dt is not None else None
+
+
+def _panel_anchors(
+    frames: list[FrameRow],
+    *,
+    max_anchors: int = STAR_MATCH_MAX_ANCHORS,
+) -> list[FrameRow]:
+    """One solved sub per distinct pointing — the anchors a mosaic's un-located subs
+    are offered, or ``[]`` when this target has only one pointing.
+
+    On a single field the reference sub's stars are the whole target's stars, so one
+    anchor is all there is. On a **mosaic** they are one panel's, and an off-panel
+    sub has nothing to match against — which is why the star-match pass used to
+    stand down on a mosaic canvas altogether, leaving a heavy mosaic user with none
+    of the feature. Every solved panel offering its own star-richest sub is what
+    replaces that: a sub is then placed by the first panel whose stars it *measurably*
+    matches, which is a measurement rather than a guess about which panel it belongs
+    to (an unsolved sub has no pointing, so a guess is all the alternative was).
+
+    The clustering is the engine's shared :func:`pointing_groups`, at its shared link
+    distance, so "where are this target's distinct pointings?" keeps one answer. It
+    is asked with ``min_members=1``, unlike the QC / photometric / weighting callers
+    that ask for five: those are estimating a *statistic* per panel and a thin panel's
+    median is not trustworthy, whereas one solved sub is a perfectly good anchor —
+    there is nothing being averaged. The parameter exists so each caller can say what
+    it actually needs.
+
+    Anchors are ordered biggest-panel-first (see :data:`STAR_MATCH_MAX_ANCHORS`), and
+    within a panel the star-richest, then sharpest, then lowest-id sub wins — the same
+    "most for the triangle matcher to work with" ordering the candidates use. Pure
+    apart from the one ``stat()`` per frame that ``readable_frame_path`` costs.
+    """
+    labels = pointing_groups(
+        [(f.ra_center_deg, f.dec_center_deg) for f in frames],
+        min_members=1,
+    )
+    if labels is None:
+        return []
+    groups: dict[int, list[FrameRow]] = {}
+    for label, frame in zip(labels, frames, strict=True):
+        if label < 0 or not frame.wcs_json:
+            continue
+        if readable_frame_path(frame) is None:
+            continue
+        groups.setdefault(label, []).append(frame)
+
+    def _best(members: list[FrameRow]) -> FrameRow:
+        return max(members, key=lambda f: (
+            (f.star_count if f.star_count is not None else -1),
+            -(f.fwhm_px if f.fwhm_px is not None else 1e9),
+            -(f.id if f.id is not None else 0),
+        ))
+
+    ranked = sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+    return [_best(members) for _label, members in ranked[:max_anchors]]
+
 
 def _star_matched_unsolved_frames(
     project: Project,
-    ref: FrameRow,
+    anchors: Sequence[FrameRow],
     *,
     max_frames: int = STAR_MATCH_MAX_UNSOLVED,
+    max_match_attempts: int = STAR_MATCH_MAX_MATCH_ATTEMPTS,
     progress: ProgressFn | None = None,
     cancel: CancelFn | None = None,
 ) -> tuple[list[FrameRow], int]:
-    """The accepted-but-unsolved subs, each carrying a WCS read off the reference's stars.
+    """The accepted-but-unsolved subs, each carrying a WCS read off an anchor's stars.
 
     ``run_stack`` combines only accepted **and** plate-solved frames, so on a faint
     or star-poor field — where ASTAP fails on most subs — hundreds of perfectly good
     subs sit unused and the "stack" is the handful that happened to solve, which is
     the per-pixel colour speckle the owner reported as gibberish. This places them
-    instead: match each one's star pattern to the reference sub
+    instead: match each one's star pattern to an anchor
     (:func:`seestack.align.starmatch.find_star_transform`, which refuses unless the
-    stars themselves agree sub-pixel over at least six of them) and compose the
-    reference's own solution onto that sub's pixel grid
+    stars themselves agree sub-pixel over at least six of them) and compose that
+    anchor's own solution onto the sub's pixel grid
     (:func:`seestack.io.wcs_io.wcs_text_after_pixel_affine`, which is exact).
+
+    ``anchors`` is one solved sub on a single field — the reference — and one **per
+    panel** on a mosaic (:func:`_panel_anchors`). A sub is tried against each in turn
+    and placed by the first whose stars it matches; since the matcher refuses far
+    more readily than it accepts, "the first that matches" is a measurement of where
+    the sub is, not a guess. Each sub's own stars are extracted **once**
+    (:class:`~seestack.align.starmatch.StarField`) and reused against every anchor:
+    astroalign re-extracts both sides per call, so without that a twelve-panel mosaic
+    would pay for twelve extractions of every sub. What actually dominates, measured,
+    is the triangle match rather than the extraction (~236 ms against ~62 ms), so the
+    anchors are tried **nearest-in-time first** — a mosaic is shot panel by panel, so
+    the panel being shot around the time of an un-located sub is almost always the
+    panel it is on — and the whole pass is bounded by
+    :data:`STAR_MATCH_MAX_MATCH_ATTEMPTS`.
 
     The WCS lives **in the returned copies only** — nothing is written to the
     project DB — and that is deliberate twice over. A star-matched position is
@@ -2649,16 +2780,21 @@ def _star_matched_unsolved_frames(
     unsolved in the DB keeps being re-offered to the real solver on every scan,
     which is where it should be rescued from for good.
 
-    Returns ``(frames, n_attempted)``. A sub that will not load, will not match, or
-    whose composition stands down is simply absent from the list — exactly as unused
-    as it is today, and never mis-placed.
+    Returns ``(frames, n_attempted)``. A sub that will not load, matches no anchor,
+    or whose composition stands down is simply absent from the list — exactly as
+    unused as it is today, and never mis-placed.
     """
-    from seestack.align.starmatch import find_star_transform, registration_gray
+    from seestack.align.starmatch import (
+        extract_star_field,
+        find_star_transform,
+        registration_gray,
+    )
     from seestack.io.wcs_io import wcs_text_after_pixel_affine
 
     progress = progress or (lambda *a: None)
     cancel = cancel or (lambda: False)
-    if not ref.wcs_json:
+    anchor_rows = [a for a in anchors if a.wcs_json]
+    if not anchor_rows:
         return [], 0
     candidates = [
         f for f in project.iter_frames(accepted_only=True)
@@ -2676,38 +2812,77 @@ def _star_matched_unsolved_frames(
     ))
     candidates = candidates[:max_frames]
 
-    ref_path = readable_frame_path(ref)
-    ref_gray = registration_gray(ref_path) if ref_path else None
-    if ref_gray is None:
+    # Each anchor's stars, extracted once up front: on a mosaic every panel is
+    # normally asked about, and loading them eagerly keeps "no anchor could be read"
+    # a single honest answer rather than one discovered after a sub has been loaded
+    # for nothing.
+    live: list[tuple[FrameRow, object, float | None]] = []
+    for anchor in anchor_rows:
+        path = readable_frame_path(anchor)
+        gray = registration_gray(path) if path else None
+        if gray is None:
+            continue
+        # A StarField when the extraction works, the image itself when it does not
+        # (then astroalign extracts per call, which only costs more).
+        live.append((anchor, extract_star_field(gray) or gray, _capture_epoch(anchor)))
+    if not live:
         log.warning(
-            "Star-match: the reference sub could not be read for registration, so "
+            "Star-match: no anchor sub could be read for registration, so "
             "%d un-located sub(s) stay out of this stack", len(candidates))
         return [], 0
 
     out: list[FrameRow] = []
     total = len(candidates)
+    placed_per_anchor: dict[int, int] = {}
+    attempts = 0
     for i, frame in enumerate(candidates):
-        if cancel():
+        if cancel() or attempts >= max_match_attempts:
+            if attempts >= max_match_attempts:
+                log.info("Star-match: spent this run's %d match attempts; the "
+                         "remaining un-located subs stay out", max_match_attempts)
             break
         progress("Locating un-solved subs by their stars", i, total)
         gray = registration_gray(readable_frame_path(frame))
         if gray is None:
             continue
-        transform = find_star_transform(ref_gray, gray)
-        if transform is None:
-            continue
         h, w = gray.shape[:2]
-        matrix, translation = transform.affine()
-        wcs_text = wcs_text_after_pixel_affine(
-            ref.wcs_json, matrix, translation, width=w, height=h)
-        if wcs_text is None:
-            # The reference's own header is one this rewrite stands down on (SIP,
-            # a legacy CROTA) — it will stand down on every sub, so stop asking.
-            log.info("Star-match: the reference sub's WCS cannot be re-expressed "
-                     "on another grid; leaving the un-located subs out")
+        side = extract_star_field(gray) or gray
+        # Nearest-in-time anchor first (:func:`_anchor_order`). Snapshotted, because
+        # retiring an anchor below rebuilds ``live`` for the *next* sub rather than
+        # renumbering this sub's pool underneath it.
+        pool = list(live)
+        for pool_i in _anchor_order([entry[2] for entry in pool],
+                                    _capture_epoch(frame)):
+            anchor, anchor_side, _at = pool[pool_i]
+            attempts += 1
+            transform = find_star_transform(anchor_side, side)
+            if transform is None:
+                continue
+            matrix, translation = transform.affine()
+            wcs_text = wcs_text_after_pixel_affine(
+                anchor.wcs_json, matrix, translation, width=w, height=h)
+            if wcs_text is None:
+                # This anchor's own header is one the rewrite stands down on (SIP, a
+                # legacy CROTA). It will stand down for every sub, so retire the
+                # anchor rather than re-asking — another panel's header may be fine.
+                log.info("Star-match: anchor sub %s has a WCS that cannot be "
+                         "re-expressed on another grid; retiring it", anchor.id)
+                live = [entry for entry in live if entry[0] is not anchor]
+                continue
+            out.append(replace(frame, wcs_json=wcs_text))
+            key = anchor.id if anchor.id is not None else -1
+            placed_per_anchor[key] = placed_per_anchor.get(key, 0) + 1
             break
-        out.append(replace(frame, wcs_json=wcs_text))
+        if not live:
+            log.info("Star-match: no anchor is left to place against; leaving the "
+                     "remaining un-located subs out")
+            break
     progress("Locating un-solved subs by their stars", total, total)
+    if len(anchor_rows) > 1:
+        log.info("Star-match: placed from %d of %d anchor(s) — %s",
+                 len(placed_per_anchor), len(anchor_rows),
+                 ", ".join(f"sub {k}: {v}" for k, v in sorted(placed_per_anchor.items()))
+                 or "none matched")
     return out, total
 
 
@@ -2895,24 +3070,36 @@ def run_stack(
 
     # ---- 2a. The subs no plate solve could place (opt-in) ------------------
     # Deliberately *after* the canvas decision, so a sub placed from a neighbour's
-    # stars can never move the canvas — and stood down on a mosaic, where the
-    # reference sub's stars cover only one panel, so an off-panel sub has nothing to
-    # match against and a guess would put it on the wrong part of the sky. Before
-    # the lucky-imaging and readability passes, so a rescued sub is filtered by
-    # exactly the same rules as a solved one.
+    # stars can never move the canvas. Before the lucky-imaging and readability
+    # passes, so a rescued sub is filtered by exactly the same rules as a solved one.
     n_star_matched = 0
     if options.star_match_unsolved:
+        anchors: list[FrameRow] = [ref]
         if is_mosaic_canvas:
-            log.info("Star-match: standing down — this is a mosaic canvas, where "
-                     "the reference sub's stars cover only one panel")
-        else:
-            matched, n_attempted = _star_matched_unsolved_frames(
-                project, ref, progress=progress, cancel=cancel,
-            )
-            frames.extend(matched)
-            n_star_matched = len(matched)
-            log.info("Star-match: %d of %d un-located sub(s) joined the stack by "
-                     "their star patterns", n_star_matched, n_attempted)
+            # A mosaic used to be declined outright here, because the reference sub's
+            # stars cover one panel and an off-panel sub has nothing to match against.
+            # One anchor per panel is the answer to that, and it keeps the property the
+            # decline was protecting: a sub is placed by the panel whose stars it
+            # measurably matches, never by a guess about which panel it belongs to.
+            # A panel where *nothing* solved still has no anchor and stays out of
+            # reach — its subs could only be matched through a neighbour's ~18 %
+            # overlap strip, which rarely carries the six mutually-consistent stars
+            # the matcher demands, and a centre-shift cap wide enough to admit a whole
+            # panel step would also admit a wrong lock.
+            panels = _panel_anchors(frames)
+            if panels:
+                anchors = panels
+                log.info("Star-match: %d mosaic panel(s) offer an anchor", len(panels))
+            else:
+                log.info("Star-match: a mosaic canvas whose pointings do not "
+                         "separate, so the reference sub is the only anchor")
+        matched, n_attempted = _star_matched_unsolved_frames(
+            project, anchors, progress=progress, cancel=cancel,
+        )
+        frames.extend(matched)
+        n_star_matched = len(matched)
+        log.info("Star-match: %d of %d un-located sub(s) joined the stack by "
+                 "their star patterns", n_star_matched, n_attempted)
 
     # Lucky imaging: filter to the top fraction by FWHM (sharper = better).
     if options.lucky_fraction < 1.0:

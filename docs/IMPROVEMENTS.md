@@ -82,6 +82,21 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **LEAD (Builder 2026-09-28, filed while shipping v0.484.0 — the one thing that fix deliberately did not change).**
+  *(Pillar: image quality — PRIORITY 4; size **S to write, M to be sure of**; severity low. Read
+  [`SHIPPED.md`](SHIPPED.md) under v0.484.0 first.)* **A star-matched sub carries a `wcs_json` but no
+  `ra_center_deg`/`dec_center_deg`, so on a mosaic it is in *no* panel population.**
+  `stacker._star_matched_unsolved_frames` returns `replace(frame, wcs_json=…)` and nothing else (unchanged since
+  v0.482.0), so `pointing_groups` labels every rescued sub `-1` and the four per-panel paths —
+  `photometric.compute_photometric_scales`, `weighting.compute_frame_weights`, `overlapgain` and the refine patch —
+  all treat it as "in no substantial group" and leave it neutral. That is the case each of them already documents and
+  handles, which is why it was left: a rescued sub on a hazy panel is combined without that panel's gain, exactly as
+  it would have been had it stayed out. **The fix is one line** (derive the centre from the composed WCS, in the
+  in-memory copy only — never written to the DB, §9). **What has to be checked first, because it is not confined to
+  the mosaic path:** `_transparency_panels` and the refine patch run `pointing_groups` on a **single-field** canvas
+  too, so filling the centres in could change a single-field run whose pointings happen to split. Measure that
+  direction before shipping it.
+
 - **LEAD ×2 (Builder 2026-09-27, filed while shipping v0.481.0 — the two things that fix measured and deliberately did
   not change).** *(Both small; neither is a wrong picture. Read [`SHIPPED.md`](SHIPPED.md) under v0.481.0 first.)*
   **(a) A star-matched member is still stamped with the *reference's* `rotation_deg`, which is now knowably wrong for
@@ -1656,13 +1671,18 @@ problems. Dogfood it every big-picture run and fix root causes.
   default) has `run_stack` place its accepted-but-unsolved subs from the reference sub's stars — so a target where 40 of
   300 solved can stack all of them, which is what this entry was always about. In-memory only (nothing is written to the
   project DB), after the canvas decision so it cannot move the canvas, bounded at 400 attempts star-richest-first.
-  **What is left open is the mosaic, and it is a design question rather than a slice:** the pass stands down on a mosaic
-  canvas because the reference sub's stars cover one panel, so an off-panel unsolved sub has nothing to match against —
-  and an unsolved sub has no pointing, so nothing says *which* panel to offer it. The shape worth costing is trying one
-  solved anchor per `pointing_group` and taking the first that matches, whose cost is (panels × an extraction of the same
-  moving frame) because astroalign re-extracts both sides per call; a caller that wants this should look at whether the
-  matcher can be handed pre-extracted control points instead. The owner is a heavy mosaic user, so this is worth real
-  thought rather than a loop. **Also still true:** the matcher needs ≥6 detectable stars per sub, so the *deepest*-faint
+  **▶ THE MOSAIC HALF SHIPPED AS v0.484.0, built as this entry's own shape described** (Builder 2026-09-28):
+  `stacker._panel_anchors` offers each solved panel's star-richest sub via the shared `pointing_groups`, and a sub is
+  placed by the first anchor whose stars it *measurably* matches. The entry's cost note was right that astroalign
+  re-extracts both sides per call — `starmatch.StarField` / `extract_star_field` fix that — but **wrong about which
+  half is expensive**: measured at 50 control points a side, one extraction is **62 ms** and one triangle match is
+  **236 ms**, so the real lever is *order*, and new pure `stacker._anchor_order` tries anchors nearest-in-time to the
+  sub's own `DATE-OBS` (a mosaic is shot panel by panel). Bounded by `STAR_MATCH_MAX_ANCHORS` and
+  `STAR_MATCH_MAX_MATCH_ATTEMPTS`. Full entry in [`SHIPPED.md`](SHIPPED.md).
+  **What is still out of reach, deliberately:** a panel where *nothing* solved has no anchor, and its subs could only
+  be matched through a neighbour's ~18 % overlap strip — which rarely carries six mutually-consistent stars, and a
+  centre-shift cap wide enough to admit a whole panel step would also admit a wrong lock. Do not widen that cap.
+  **Also still true:** the matcher needs ≥6 detectable stars per sub, so the *deepest*-faint
   case (0–2 stars, which is what the deep-image integration exists for) is out of its reach by construction.
 
 - ~~**IMPROVEMENT IDEA (Builder 2026-07-25) — let the bootstrap anchor on an already-solved sub when a few
@@ -4009,6 +4029,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.484.0** — 🌟 the half of the WCS-free registration fallback v0.482.0 left open (front of the queue): **a mosaic's un-located subs are placed too, from one star anchor per panel.** The pass used to decline a mosaic canvas outright — the reference sub's stars cover one panel — which left a heavy mosaic user with none of it. New `stacker._panel_anchors` takes each solved panel's star-richest sub via the shared `pointing_groups` (at `min_members=1`: one solved sub is a perfectly good anchor, nothing is being averaged), and a sub is placed by the **first anchor whose stars it measurably matches** — a measurement, not the guess the decline avoided. The backlog's own cost suggestion was pre-extracted control points, now available as `starmatch.StarField`/`extract_star_field` — but **measured, the extraction is 62 ms against a 236 ms triangle match**, so the real lever is order: new pure `stacker._anchor_order` tries anchors **nearest-in-time** to the sub's own `DATE-OBS`, a mosaic being shot panel by panel. Bounded by `STAR_MATCH_MAX_ANCHORS` (24, biggest panels first) and `STAR_MATCH_MAX_MATCH_ATTEMPTS` (2,000 ≈ 8 min, spent on subs that match nothing). The centre-shift cap is **unchanged** — a panel where *nothing* solved stays out of reach, deliberately, because a cap wide enough for a panel step would also admit a wrong lock. Tests +8, two fail-before (scratch reverts); `test_it_stands_down_on_a_mosaic_canvas` deliberately replaced, it pinned the behaviour this changes. Engine-only; still off by default. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.483.3** — 🟠 BUG FIX (image quality + autonomy + trust), Builder-found and reproduced 2026-09-28: **the star matcher placed nothing on a frame the size of a real Seestar sub, and every fixture was too small to say so.** `starmatch.registration_gray` clipped the sky noise's negative half away, which collapsed the noise estimate `sep` sets its detection threshold from — global RMS **0.0006** instead of **21.6**, so 5σ landed inside the noise and **63 % of a 1920×1080 frame** read as star pixels, past sep's 300,000-pixel extraction buffer. sep refused, astroalign re-raised it as its generic "input type not supported", and `find_star_transform` returned `None` for every sub: `star_match_unsolved` (v0.482.0) placed nothing, and the bootstrap rescue (v0.481.0) silently fell back to the phase-correlation shift it exists to replace — i.e. to the confident mis-placement of a rotated night. Invisible to the tests because they are 240×160 and 480×320: **fewer total pixels than the buffer has slots**, so the refusal is unreachable at fixture size. Fixed by keeping the negatives (identical detection to raw luminance: 118 of 120 stars, 0.6 % of pixels over threshold). Also corrects v0.482.0's `SEP_SUB_OBJECT_LIMIT` measurement, which was deblending noise for the same reason — the cap is kept, its test relabelled as coverage. Tests +3, all three fail before (scratch revert run). Engine-only; both callers stay off by default. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.483.2** — 🟡 BUG FIX (friendliness), the other half of observer issue [#880](https://github.com/JimmyeJones/astrostack/issues/880)'s own note about where the owner meets it: **a batch that ran for days says *why* its targets failed, not just which.** `reprocessSummary` read `target` off each failed entry and dropped `error` on the floor, so a five-day `reprocess_all` across 89 targets ended on one red line of safe names. It now groups the failures **by cause** through the very `friendlyJobError` a single failed job already uses — cause, next step, names — and `webapp/pipeline.py` stamps `error_kind` (from `classify_job_error`, where the exception type is still in hand) and the display `name` beside the two keys an older frontend reads. Nothing removed, no new card. Tests +4 vitest / +1 Python, both halves fail-before. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.483.1** — 🟠 BUG FIX (autonomy / trust), observer issue [#880](https://github.com/JimmyeJones/astrostack/issues/880): **the subs the app cannot read stop counting as subs it can stack.** The 11 targets that hold only the Seestar's own three-plane colour output were accepted-but-unreadable, so every `reprocess_all` handed them to the stacker and died on `drizzle: no usable frames` — 61 times across seven weeks. New `seestack/qc/runner.py::reconcile_unreadable_frames` (called by `scanner.run_qc_and_solve`) sets aside only the terminal-QC frames the **loader itself refuses**, reversing itself when a file reads again; `Project.frames_rejected_for` queries the candidates instead of walking a 35,894-row target. Tests +9, four fail-before. Full entry in [`SHIPPED.md`](SHIPPED.md).

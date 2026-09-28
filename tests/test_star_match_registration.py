@@ -24,6 +24,8 @@ pytest.importorskip("astroalign")
 from seestack.align.starmatch import (  # noqa: E402
     DEFAULT_MAX_ROTATION_DEG,
     SEP_SUB_OBJECT_LIMIT,
+    StarField,
+    extract_star_field,
     find_star_transform,
     registration_gray,
 )
@@ -231,6 +233,45 @@ def test_a_rich_field_matches_instead_of_overflowing_the_extractor():
         sep.set_sub_object_limit(SEP_SUB_OBJECT_LIMIT)
     assert t is not None, "the rich field was not matched"
     assert t.rotation_deg == pytest.approx(-9.0, abs=0.25)
+
+
+# --- stars extracted once, matched many times ------------------------------
+
+def test_a_pre_extracted_star_field_matches_exactly_like_the_image():
+    """A ``StarField`` must be a cost saving and nothing else.
+
+    It exists so one sub can be offered to several mosaic panels for the price of one
+    extraction — so it has to detect exactly what handing the image over detects, or
+    the caller's choice between them would change the *answer*.
+    """
+    ref = _gray(0.0, shift=(0.0, 0.0), noise_seed=1)
+    mov = _gray(9.0, noise_seed=2)
+    from_images = find_star_transform(ref, mov, max_shift_px=200.0)
+    ref_field, mov_field = extract_star_field(ref), extract_star_field(mov)
+    assert ref_field is not None and mov_field is not None
+    assert ref_field.n_stars >= 6 and ref_field.shape == ref.shape
+    from_fields = find_star_transform(ref_field, mov_field, max_shift_px=200.0)
+    assert from_images is not None and from_fields is not None
+    assert from_fields == from_images
+    # And the two may be mixed, which is what a caller falling back for one side does.
+    mixed = find_star_transform(ref_field, mov, max_shift_px=200.0)
+    assert mixed == from_images
+
+
+def test_a_malformed_star_field_declines_rather_than_matching_anything():
+    ref = _gray(0.0, shift=(0.0, 0.0), noise_seed=1)
+    field = extract_star_field(ref)
+    assert field is not None
+    empty = StarField(points=np.zeros((0, 2)), shape=ref.shape)
+    two = StarField(points=field.points[:2], shape=ref.shape)
+    wrong = StarField(points=field.points[:, :1], shape=ref.shape)
+    for bad in (empty, two, wrong):
+        assert find_star_transform(bad, field, max_shift_px=200.0) is None
+        assert find_star_transform(field, bad, max_shift_px=200.0) is None
+    assert extract_star_field(None) is None
+    assert extract_star_field(np.zeros((4, 4, 3), dtype=np.float32)) is None
+    # A starless frame has nothing to extract.
+    assert extract_star_field(np.zeros((64, 64), dtype=np.float32)) is None
 
 
 # --- the frame size and the noise the threshold is derived from ------------

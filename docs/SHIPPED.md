@@ -1,5 +1,91 @@
 # Shipped — the record
 
+## v0.484.0 — 2026-09-28 — a mosaic's un-located subs are placed too: one star anchor per panel
+
+🌟 **The half of the WCS-free registration fallback that was left open (front of the queue,
+`docs/FOCUS.md` item 2; owner-approved dependency, 2026-09-25).** v0.482.0 gave `run_stack` the ability to place
+its accepted-but-unsolved subs from the reference sub's stars — and **declined a mosaic canvas outright**, because
+the reference sub's stars cover one panel, so an off-panel sub has nothing to match against and an unsolved sub
+has no pointing to say which panel it is on. The owner is a heavy mosaic user, so "single field only" meant most
+of his library got none of it.
+
+**What replaces the decline: every solved panel offers its own anchor.** New `stacker._panel_anchors` clusters the
+solved subs with the engine's shared `pointing_groups`, at its shared link distance, and takes each panel's
+star-richest (then sharpest, then lowest-id) sub. A sub is then tried against each anchor and placed by the
+**first whose stars it measurably matches** — which is the point: `find_star_transform` refuses far more readily
+than it accepts (≥6 mutually-consistent control points, sub-pixel RMS, an exact similarity, scale within 1 %,
+a bounded centre shift), so "the first that matches" is a *measurement* of where the sub is, not the guess the
+decline existed to avoid. `pointing_groups` is asked with `min_members=1`, unlike the QC / photometric / weighting
+callers that ask for five: those estimate a statistic per panel and a thin panel's median is untrustworthy,
+whereas one solved sub is a perfectly good anchor — nothing is being averaged.
+
+**The cost, measured rather than assumed — and it moved the design.** The backlog entry's own suggestion was to
+look at handing the matcher pre-extracted control points, since astroalign re-extracts *both* sides per call. That
+is now possible (`starmatch.StarField` + `extract_star_field`, using astroalign's own extractor so a pre-extracted
+field detects exactly what handing the image over detects). But on a real-sized sub at 50 control points a side:
+
+| | cost |
+|---|---|
+| extract one side's stars | **62 ms** |
+| match, image to image | **285 ms** |
+| match, from control points | **236 ms** |
+
+So the extraction is *not* the expensive half — astroalign's triangle match is, and a pool of anchors multiplies
+it. Pre-extraction is a real but modest ~20 % per extra anchor, and the lever that actually matters is **trying
+the right anchor first**. Hence new pure `stacker._anchor_order`: anchors are tried **nearest-in-time** to the
+sub's own `DATE-OBS`, because a mosaic is shot panel by panel, so the panel being shot around the time of an
+un-located sub is almost always the panel it is on. Correctness never depends on it (every match is validated, so
+the order only decides which valid answer is found first); the cost does. A sub with no capture time, and anchors
+with none, keep the pool's own biggest-panel-first order — `sorted` is stable.
+
+**Two ceilings, both about the walk-away box rather than about quality.** `STAR_MATCH_MAX_ANCHORS = 24` bounds the
+setup (one load plus one extraction per panel) and takes panels biggest-first, since the cap can only ever leave a
+panel's subs exactly as unused as they are today. `STAR_MATCH_MAX_MATCH_ATTEMPTS = 2000` bounds the matching
+itself — a sub that matches its own panel stops at the first hit, so this is really a bound on time spent on subs
+that match **nothing** (≈ 8 minutes, against a mosaic stack at this owner's scale that runs for hours). Reaching
+it ends the pass exactly the way a cancel does: the subs not reached are left as unused as they are today, never
+half-placed.
+
+**What is still out of reach, and why, so it is not re-derived.** A panel where **nothing** solved has no anchor.
+Its subs could only be matched through a neighbour panel's ~18 % overlap strip, which rarely carries the six
+mutually-consistent stars the matcher demands — and a centre-shift cap wide enough to admit a whole panel step
+would also admit a wrong lock, which is the one failure a caller cannot see in the result. So the centre-shift cap
+is **unchanged** at its single-field value: the gain here is having an anchor per panel, not a weaker guard.
+
+**Tests +8 across two files; the two that pin behaviour changes fail before** (verified by scratch reverts — the
+mosaic stand-down restored, and the attempt budget removed):
+- `test_a_mosaic_stack_takes_the_subs_the_solver_could_not_place` — the real `run_stack` on a two-panel mosaic
+  built from **one shared catalog** (panels are windows onto it, stepping 75 %, so two panels really do show
+  different stars and their overlap really does show the same ones): 4 of 4 rescued, against **0** before.
+- `test_a_mosaic_places_each_sub_on_the_panel_its_own_stars_are_on` — the claim the decline was protecting, met by
+  measurement: each rescued sub's composed WCS puts its frame centre on **its own** panel's sky to within the
+  dither, and unambiguously not on the other panel's.
+- `test_a_sub_of_another_sky_is_left_out_rather_than_put_on_a_panel` — a sub as star-rich and as unsolved as the
+  rest, tried **first**, whose stars simply are not either panel's: refused, and nothing written for it.
+- `test_the_pass_stops_when_it_has_spent_its_match_attempts`, `test_one_anchor_is_offered_per_panel_and_none_on_a_single_field`,
+  `test_a_mosaic_whose_pointings_do_not_separate_keeps_the_reference_anchor`,
+  `test_the_anchor_shot_nearest_in_time_is_tried_first`, `test_a_subs_capture_time_is_read_the_way_the_rest_of_the_engine_reads_it`,
+  plus `test_a_pre_extracted_star_field_matches_exactly_like_the_image` and
+  `test_a_malformed_star_field_declines_rather_than_matching_anything`.
+- `tests/synth.py` is untouched; the mosaic fixture is built from the **existing** `star_catalog` +
+  `make_shared_sky_field` pair, which is what those exist for.
+- `test_it_stands_down_on_a_mosaic_canvas` is **deliberately replaced**: it pinned exactly the behaviour this
+  changes, so it could not be kept — its fixture and its reasoning live on in the three mosaic tests above. That is
+  a rewrite, not a weakening; nothing was skipped, loosened or `xfail`ed.
+
+**⚠ One thing this build deliberately did not change, filed as a lead.** A rescued sub's returned copy carries a
+`wcs_json` but still no `ra_center_deg` / `dec_center_deg` (unchanged from v0.482.0), so on a mosaic it is label
+`-1` to every per-panel population — photometric normalisation, quality weighting, overlap gain and the refine
+patch all treat it as "in no substantial group" and leave it neutral, which is the case each of them already
+documents and handles. That is the conservative answer and it is what shipped; filling the centres in from the
+composed WCS would let a rescued sub join its panel's photometry, and would also reach the two pointing-grouped
+paths that run on a **single-field** canvas. Separate change, separate measurement.
+
+**Upgrade-safe:** engine-only, and reached only through `StackOptions.star_match_unsolved`, which is **still off by
+default**. No config, schema, on-disk layout, API shape or default change; the single-field path is unchanged
+(one anchor, the same reference, the same caps), and a mosaic whose pointings do not separate falls back to exactly
+that.
+
 ## v0.483.3 — 2026-09-28 — the star matcher was inert on a real Seestar sub, and every fixture was too small to say so
 
 🟠 **BUG (image quality + autonomy + trust — PRIORITY 2/4; engine; Builder-verified by reproduction before the
