@@ -24,6 +24,8 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
      so a target gets the night-by-night reel without being re-stacked. Its own sizing; the primitive
      (`deepening_series`' capture-window grouping) already exists.
 
+   - **NEW, owner-requested 2026-09-28: the night-sky theme** — `READY`, M; spec under "UX & polish".
+
 3. **Open observer issues (all verified, filed, and awaiting the last mile — no new issue since
    2026-09-25):** #878 (the app now offers the reconcile; closes on a reading that shows the 11 pairs
    gone — a click, not code), #880 (both live halves shipped v0.483.1/.2; only (a), the exception repr
