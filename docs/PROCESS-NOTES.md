@@ -1,5 +1,49 @@
 # Process notes & QA sweep records
 
+## 2026-09-28 (Builder run, evening) — the wrong-denominator class re-swept in TypeScript, and a card that argued with its own caption
+
+*(Builder, branch `agent/agreement-denominators` → **v0.484.7** + **v0.484.8**. Baseline green on
+`origin/main` at 5fa7386 — **6,904 passed, 2 skipped**, 13m15s with the BLAS cap and `-n 4 --dist worksteal`,
+`/tmp/pytest-of-root` cleared first. Full entries in [`SHIPPED.md`](SHIPPED.md).)*
+
+**Triage.** "Bugs (fix these first)" is where the previous run left it: the LEAD ×2 at the top still needs a
+real ASTAP call and this container still has no ASTAP binary; every other entry is owner-data-gated, a recorded
+stand-down carrying numbers, or filed as deliberately-not-a-priority. `grep READY` returns no open entry, and
+the feature section is the one the midday run re-measured as thinner than it reads. So this run went looking,
+with **the lens the midday run's own finding left behind** — *a "these must agree" contract that shares a
+**threshold** is not the same as one that shares a **measurement*** — and applied it to every agreement claim
+in the tree (`grep "must agree\|cannot disagree\|one answer\|never disagree"`).
+
+### Finding 1 — the class was swept four times in Python and never in TypeScript
+
+`stackhealth`'s comment claimed the `roughly_aligned` note and the frontend's `roughlyAlignedNote` share one
+≥20 %-of-≥10 gate "so the two surfaces never disagree", and in the same breath stated the right denominator
+(`n_frames_used`, because only a contributing sub can be roughly aligned). The card divided by `n_offered`. So
+it is also **the fifth instance of the wrong-denominator class** — and the 2026-09-03 sweep of that class
+(recorded above in this file) *read this very note and correctly cleared it*, because the sweep's subject was
+the Python consumers of `n_frames_used`. **Carry forward: when a class is swept, the mirror in the other
+language is part of the class.** Every remaining frontend denominator was read the same way in this run and is
+correct (`frameAccountingNote`'s and `readErrorNote`'s offered-based shares are offered-based populations;
+`liveSession.conditionsCause` sums its own buckets) — one hit, recorded so the sweep is not re-walked.
+
+### Finding 2 — the ordering told the truth and the copy did not
+
+`deepening_series` (v0.480.0) orders the reel by the capture clock and says in its docstring that the result
+may step back in depth. Downstream, `deepeningBlurb` promised "cleaner and deeper … more subs each time"
+unconditionally, and on a 100 → 200 → 30 series it took its **generic** branch, i.e. the strongest claim, while
+`deepeningCaption` printed "100 → 30 subs" one line below. Reproduced on the real function before anything was
+changed. The fix is one additive fact (`series_depth_is_monotone`) and a sentence, not a re-sort: hiding the
+shallow step would hide exactly what the ordering exists to show.
+
+### Worth knowing
+
+- **Both fixtures could not have shown their bug.** All five existing `roughlyAlignedNote` tests omitted
+  `n_align_failed`, so offered *was* combined in every one of them; the reel's tests never built a
+  non-monotone series. Neither case needed a subtle assertion — the inputs alone kept the bug invisible.
+- **No dogfood pass this run** (the Scout ran a clean `--mosaic --editor` sweep earlier the same day and
+  neither change is on the Auto/editor path); the History Info panel's sentence is pinned at render level in
+  vitest instead.
+
 ## 2026-09-28 (Builder run, midday) — the verdict three surfaces share and the depth they did not, and a CLEAN `--mosaic --editor` pass
 
 *(Builder, branch `agent/rejection-reach-half` → **v0.484.6**, PR [#1006](https://github.com/JimmyeJones/astrostack/pull/1006),

@@ -3890,6 +3890,10 @@ export const api = {
       /** "capture" when the series is ordered/dated by when its subs were shot,
        * "stack" when it falls back to when the stacks ran (see `deepeningReel`). */
       dated_by?: "capture" | "stack" | null;
+      /** False when some step of the reel holds fewer subs than the one before
+       * it — the series is ordered by when the subs were shot, not by depth, so
+       * a single night stacked on its own can land last (see `deepeningReel`). */
+      depth_monotone?: boolean | null;
       format?: string;
     }>(`/api/targets/${safe}/deepening-reel/info`),
   deepeningReelUrl: (safe: string) => `/api/targets/${safe}/deepening-reel`,

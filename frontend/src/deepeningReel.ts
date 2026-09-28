@@ -16,6 +16,12 @@ export interface DeepeningInfo {
    * "stack" when it falls back to when the stacks *ran*. Absent on an older
    * backend, where the range is left unqualified exactly as it always was. */
   dated_by?: "capture" | "stack" | null;
+  /** Whether every step of the reel is at least as deep as the one before it.
+   * The series is ordered by **when the subs were shot**, not by depth, so a
+   * night stacked on its own after a deeper run lands last while holding fewer
+   * subs — the reel then visibly gets grainier at that step. Absent on an older
+   * backend, where the blurb keeps the wording it always had. */
+  depth_monotone?: boolean | null;
   format?: string;
 }
 
@@ -75,6 +81,17 @@ export function deepeningCaption(
  * The reassuring lead sentence: how much deeper the newest stack is than the
  * first, in plain language. Falls back to a generic line when sub counts are
  * missing.
+ *
+ * **Except when the reel does not in fact get steadily deeper**, which the
+ * engine allows on purpose: `deepening_series` orders the steps by *when their
+ * subs were shot* and lets depth break ties only, so "I stacked just tonight's
+ * subs" after a deep run lands last with far fewer subs in it (100 → 200 → 30 is
+ * a real shape). The old wording promised "cleaner and deeper … more subs each
+ * time" over exactly that reel, while the caption underneath printed
+ * "100 → 30 subs" — two claims about one card. So when the backend says the
+ * depth steps back somewhere, this says so instead, in the beginner's terms:
+ * grain at one step, not a broken picture. `depth_monotone` absent (older
+ * backend) keeps the sentence byte for byte.
  */
 export function deepeningBlurb(
   name: string | null | undefined,
@@ -83,6 +100,17 @@ export function deepeningBlurb(
   const clean = (name ?? "").trim() || "your target";
   const first = info.first_subs;
   const last = info.last_subs;
+  const counts = typeof first === "number" && typeof last === "number"
+    ? `${withThousands(first)} → ${withThousands(last)} subs`
+    : null;
+  if (info.depth_monotone === false) {
+    const range = counts ? ` (${counts})` : "";
+    return `Watch ${clean} across your ${info.n_stacks} stacks${range}, in the ` +
+      `order you shot them. Not every stack here has more subs than the one ` +
+      `before, so the picture gets grainier at one step instead of steadily ` +
+      `cleaner — that step is a night stacked on its own, not a problem with ` +
+      `your data.`;
+  }
   if (typeof first === "number" && typeof last === "number" && first > 0 && last > first) {
     const times = last / first;
     const factor = times >= 2 ? ` — that's about ${times.toFixed(times >= 10 ? 0 : 1)}× the subs` : "";

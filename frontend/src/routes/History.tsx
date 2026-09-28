@@ -464,16 +464,41 @@ export function drizzleDegradedNote(
   );
 }
 
-export function frameAccountingNote(
+/** How many subs are actually **in** this picture, from the run's own frame
+ *  accounting — `n_offered` minus the ones that could not be aligned.
+ *
+ *  It exists as one function because two notes on this card divide by two
+ *  different populations and both are right to: a sub that was never combined
+ *  can still have been unreadable or mis-solved (those come out of *offered*),
+ *  but it cannot have been left "only roughly aligned" or star-matched — the
+ *  engine counts those over the **contributing** subs only (`StackResult`:
+ *  "how many *contributing* subs sub-pixel refine had to leave only roughly
+ *  aligned"). Reading that numerator against `n_offered` names a share of a
+ *  population the numerator never came from.
+ *
+ *  Returns null when the run records no usable accounting. `n_align_failed` is
+ *  stamped in the same breath as `n_offered` (`NALIGNFL` beside `NOFFERED`), so
+ *  its absence means an older master rather than "none failed" — there we fall
+ *  back to `n_offered`, which is what this card has always shown. */
+export function contributingSubs(
   fa: StackFrameAccounting | null | undefined,
-): FrameAccountingNote | null {
+): number | null {
   if (!fa || typeof fa.n_offered !== "number" || fa.n_offered <= 0) return null;
   const offered = fa.n_offered;
   const failed = typeof fa.n_align_failed === "number" && fa.n_align_failed > 0
     ? Math.min(fa.n_align_failed, offered)
     : 0;
+  return offered - failed;
+}
+
+export function frameAccountingNote(
+  fa: StackFrameAccounting | null | undefined,
+): FrameAccountingNote | null {
+  if (!fa || typeof fa.n_offered !== "number" || fa.n_offered <= 0) return null;
+  const offered = fa.n_offered;
+  const used = contributingSubs(fa) ?? offered;
+  const failed = offered - used;
   if (failed <= 0) return null;
-  const used = offered - failed;
   const nf = (n: number) => n.toLocaleString();
   // Split the gap into the two causes that need *different* fixes. A sub whose
   // file simply wasn't on disk (cleared Stage-1 cache while the originals sit on
@@ -562,23 +587,36 @@ export function readErrorNote(
 // (older master / refine off), or every sub landed within the cap (the happy
 // case needs no note). Only fires on a non-trivial share, so one stray sub out
 // of thousands stays quiet.
+//
+// **The denominator is the subs that were combined, not the subs that were
+// offered** — `contributingSubs`, the same figure the note above prints as
+// "1,850 of 2,000 subs combined". Only a contributing sub can be left roughly
+// aligned, so offered is a population this count never came from; and the
+// engine's own note about the same fact
+// (`seestack/stackhealth.py`'s `roughly_aligned`, whose comment says it shares
+// this ≥20 %-of-≥10 gate "so the two surfaces never disagree") divides by
+// `n_frames_used`. Dividing by `n_offered` here made the two disagree on both
+// halves at once on any run with align failures: this card quoted a larger
+// denominator and a smaller share, and stayed silent about the fix on runs
+// where the Target page's health note was already prescribing one.
 export function roughlyAlignedNote(
   fa: StackFrameAccounting | null | undefined,
 ): FrameAccountingNote | null {
-  if (!fa || typeof fa.n_offered !== "number" || fa.n_offered <= 0) return null;
-  if (typeof fa.n_roughly_aligned !== "number" || fa.n_roughly_aligned <= 0) {
+  const used = contributingSubs(fa);
+  if (used === null || used <= 0) return null;
+  if (!fa || typeof fa.n_roughly_aligned !== "number"
+      || fa.n_roughly_aligned <= 0) {
     return null;
   }
-  const offered = fa.n_offered;
-  const rough = Math.min(fa.n_roughly_aligned, offered);
+  const rough = Math.min(fa.n_roughly_aligned, used);
   const nf = (n: number) => n.toLocaleString();
   const text =
-    `${nf(rough)} of ${nf(offered)} subs were only roughly aligned · ` +
+    `${nf(rough)} of ${nf(used)} stacked subs were only roughly aligned · ` +
     `your stars may look a little soft`;
   // Guide a fix only when it's a materially large share and not a tiny stack
   // (one soft sub out of five isn't worth a scary nudge).
-  const fraction = rough / offered;
-  const concern = offered >= 10 && fraction >= 0.2;
+  const fraction = rough / used;
+  const concern = used >= 10 && fraction >= 0.2;
   const guidance = concern
     ? "Many subs didn't quite line up to the reference, so the stacker used " +
       "them as-is — stars can end up a little soft or doubled. A steadier " +

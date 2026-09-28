@@ -123,10 +123,15 @@ _REJECTION_NOTE_MAX_FRACTION = 0.08    # 8% — matches the History "high, check
 # When sub-pixel refine can't lock a sub within its shift cap it stacks the frame
 # unshifted (only *roughly* aligned) — soft/doubled stars with nothing pointing at
 # alignment. Surface it only once it's a materially large share of the contributing
-# subs, on a stack big enough for the fraction to mean something — the SAME
-# ≥20%-of-≥10 gate the frontend ``roughlyAlignedNote`` uses, so the two surfaces
-# never disagree. ``n_frames_used`` (contributing subs) is the honest denominator:
-# only a sub that made it into the stack can be roughly aligned.
+# subs, on a stack big enough for the fraction to mean something.
+# ``n_frames_used`` (contributing subs) is the honest denominator: only a sub that
+# made it into the stack can be roughly aligned.
+#
+# Read these through :func:`roughly_aligned_is_material` rather than here — the
+# frontend's ``roughlyAlignedNote`` mirrors that function, bar *and* population,
+# and this comment used to claim the two surfaces shared "the SAME ≥20%-of-≥10
+# gate" while the card divided by ``n_offered``. Sharing a threshold is not
+# sharing a measurement.
 _ROUGHLY_ALIGNED_MIN_USED = 10
 _ROUGHLY_ALIGNED_NOTE_FRACTION = 0.20
 
@@ -706,6 +711,32 @@ def rejection_sample_depths(run: StackRunRow) -> tuple[int, int | None]:
             if run.coverage_median_depth and run.coverage_median_depth > 0
             else None)
     return peak, half
+
+
+def roughly_aligned_is_material(n_rough: int | None, n_used: int | None) -> bool:
+    """Is this run's roughly-aligned share worth guiding a fix about?
+
+    ``n_used`` is the run's **contributing** count (``n_frames_used``), which is
+    the only population ``n_rough`` can come from: sub-pixel refine flags a frame
+    it stacked unshifted, and a frame that never contributed was never stacked at
+    all. Reading the share against the *offered* count instead names a fraction of
+    a population the numerator never came from — which is what the History card
+    did until v0.484.7 (see ``tests/test_roughly_aligned_mirror.py``).
+
+    Public and pure because two surfaces answer this about one run — this module's
+    ``roughly_aligned`` health note on the Target page and ``roughlyAlignedNote``
+    on History's Info panel — and they must agree. The bar was shared before; the
+    *measurement* was not, and sharing only the bar is what let them differ (the
+    same shape as ``REJREACH``, v0.484.6). A TS module cannot import this, so it
+    is mirrored by hand and pinned against one shared case table.
+
+    A zero (or absent) count is never material: nothing was rough, so there is
+    nothing to prescribe.
+    """
+    if not n_rough or n_rough <= 0 or not n_used or n_used <= 0:
+        return False
+    return (n_used >= _ROUGHLY_ALIGNED_MIN_USED
+            and n_rough >= _ROUGHLY_ALIGNED_NOTE_FRACTION * n_used)
 
 
 def run_option_flag(options_json: str | None, key: str) -> bool | None:
@@ -1414,9 +1445,7 @@ def stack_health(run: StackRunRow, frames: Iterable[GradedFrame],
     # contributing count, the only population a roughly-aligned frame comes from.
     n_rough = run.n_roughly_aligned
     n_used = run.n_frames_used
-    if (n_rough is not None and n_rough > 0
-            and n_used >= _ROUGHLY_ALIGNED_MIN_USED
-            and n_rough >= _ROUGHLY_ALIGNED_NOTE_FRACTION * n_used):
+    if roughly_aligned_is_material(n_rough, n_used):
         n_rough = min(n_rough, n_used)
         scored.append((35, HealthNote(
             kind="roughly_aligned",

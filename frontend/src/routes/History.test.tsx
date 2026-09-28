@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, panelGainSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, calibrationSummaryText, drizzleDegradedNote, removedOverlayCaption, derivedFromNote } from "./History";
+import roughCases from "../roughlyAligned.cases.json";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, panelGainSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, contributingSubs, calibrationSummaryText, drizzleDegradedNote, removedOverlayCaption, derivedFromNote } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import { FULL_RES_PNG_MAX_LONG_EDGE } from "../fullres";
@@ -2223,14 +2224,14 @@ describe("roughlyAlignedNote", () => {
     const ra = roughlyAlignedNote({ n_offered: 2000, n_roughly_aligned: 8 });
     expect(ra).not.toBeNull();
     expect(ra!.text).toBe(
-      "8 of 2,000 subs were only roughly aligned · your stars may look a little soft");
+      "8 of 2,000 stacked subs were only roughly aligned · your stars may look a little soft");
     expect(ra!.concern).toBe(false);
     expect(ra!.guidance).toBeNull();
   });
   it("guides a fix when a large share only roughly aligned", () => {
     const ra = roughlyAlignedNote({ n_offered: 200, n_roughly_aligned: 90 });
     expect(ra!.text).toBe(
-      "90 of 200 subs were only roughly aligned · your stars may look a little soft");
+      "90 of 200 stacked subs were only roughly aligned · your stars may look a little soft");
     expect(ra!.concern).toBe(true);
     expect(ra!.guidance).toContain("steadier");
     expect(ra!.guidance).toContain("re-solving");
@@ -2240,10 +2241,86 @@ describe("roughlyAlignedNote", () => {
     expect(ra!.concern).toBe(false);
     expect(ra!.guidance).toBeNull();
   });
-  it("clamps a rough count that exceeds the offered total", () => {
+  it("clamps a rough count that exceeds the stacked total", () => {
     const ra = roughlyAlignedNote({ n_offered: 10, n_roughly_aligned: 99 });
     expect(ra!.text).toBe(
-      "10 of 10 subs were only roughly aligned · your stars may look a little soft");
+      "10 of 10 stacked subs were only roughly aligned · your stars may look a little soft");
+  });
+  // A roughly-aligned sub is by definition one that *contributed*, so the share
+  // has to be read against the subs that were combined — not against everything
+  // the stacker was handed. These three pin that, and they are the cases the
+  // suite could not see before: every test above leaves `n_align_failed` out, so
+  // offered and combined are the same number and the bug is invisible.
+  it("divides by the subs that were combined, not the subs that were offered", () => {
+    // 2,000 offered, 1,800 of them unalignable → 200 in the picture, 90 rough.
+    const ra = roughlyAlignedNote(
+      { n_offered: 2000, n_align_failed: 1800, n_roughly_aligned: 90 });
+    expect(ra!.text).toBe(
+      "90 of 200 stacked subs were only roughly aligned · your stars may look a little soft");
+    // 45 % of the picture's subs, so the fix guidance belongs here — against
+    // `n_offered` it read as 4.5 % and this card said nothing while the Target
+    // page's health note was already prescribing the same fix.
+    expect(ra!.concern).toBe(true);
+    expect(ra!.guidance).toContain("steadier");
+  });
+  it("agrees with the engine's own note on the same run", () => {
+    // seestack/stackhealth.py fires `roughly_aligned` on
+    // n_rough >= 0.20 * n_frames_used with n_frames_used >= 10, and prints
+    // "N of <used> stacked subs". n_frames_used == n_offered - n_align_failed by
+    // construction (NALIGNFL is stamped as offered - used), so both halves of
+    // the gate have to land on the same side here.
+    const ra = roughlyAlignedNote(
+      { n_offered: 500, n_align_failed: 480, n_roughly_aligned: 4 });
+    expect(ra!.text).toBe(
+      "4 of 20 stacked subs were only roughly aligned · your stars may look a little soft");
+    expect(ra!.concern).toBe(true);
+    // …and the tiny-stack floor is read on the same population too: 9 combined
+    // subs is not a stack worth a scary nudge, however it was arrived at.
+    const tiny = roughlyAlignedNote(
+      { n_offered: 500, n_align_failed: 491, n_roughly_aligned: 4 });
+    expect(tiny!.text).toBe(
+      "4 of 9 stacked subs were only roughly aligned · your stars may look a little soft");
+    expect(tiny!.concern).toBe(false);
+  });
+  it("says nothing when no sub was combined at all", () => {
+    // Nothing aligned → there is no picture for soft stars to be in.
+    expect(roughlyAlignedNote(
+      { n_offered: 40, n_align_failed: 40, n_roughly_aligned: 3 })).toBeNull();
+  });
+});
+
+describe("roughlyAlignedNote vs the engine's own gate", () => {
+  it("guides a fix on exactly the cases the engine calls material", () => {
+    // The other half of `tests/test_roughly_aligned_mirror.py`: the table is
+    // checked against `seestack.stackhealth.roughly_aligned_is_material` there
+    // and read here, so the two surfaces can only drift together. Each row is
+    // [stacked subs, roughly-aligned subs, does the app guide a fix?].
+    for (const [used, rough, want] of roughCases.cases as [number, number, boolean][]) {
+      // Feed it through the accounting the card really gets, align failures and
+      // all — which is what makes this a test of the denominator too.
+      const note = roughlyAlignedNote({
+        n_offered: used + 137, n_align_failed: 137, n_roughly_aligned: rough,
+      });
+      expect(note?.concern ?? false).toBe(want);
+    }
+  });
+});
+
+describe("contributingSubs", () => {
+  it("is null without usable accounting, and offered-minus-failed with it", () => {
+    expect(contributingSubs(null)).toBeNull();
+    expect(contributingSubs(undefined)).toBeNull();
+    expect(contributingSubs({ n_offered: 0 })).toBeNull();
+    expect(contributingSubs({ n_offered: 2000 })).toBe(2000);
+    expect(contributingSubs({ n_offered: 2000, n_align_failed: 150 })).toBe(1850);
+  });
+  it("is the same figure frameAccountingNote prints, by construction", () => {
+    const fa = { n_offered: 2000, n_align_failed: 150, n_unreadable: 40 };
+    const used = contributingSubs(fa)!;
+    expect(frameAccountingNote(fa)!.text).toContain(`${used.toLocaleString()} of 2,000 subs combined`);
+  });
+  it("clamps a failure count that exceeds the offered total", () => {
+    expect(contributingSubs({ n_offered: 10, n_align_failed: 99 })).toBe(0);
   });
 });
 
@@ -2312,7 +2389,10 @@ describe("HistoryView frame accounting", () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
     vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
       run_id: 1, integration_s: 2520, n_frames: 2000, weighting: null,
-      frame_accounting: { n_offered: 2000, n_align_failed: 0, n_roughly_aligned: 90 },
+      // 840 of the offered subs never made it in, so the roughly-aligned share
+      // is 90 of the 1,160 that did — the same denominator the panel's own
+      // "subs combined" line prints, and the one the engine's health note uses.
+      frame_accounting: { n_offered: 2000, n_align_failed: 840, n_roughly_aligned: 90 },
       cards: [{ key: "STACKER", value: "sigma-clip", comment: "stacking method" }],
     });
 
@@ -2322,7 +2402,7 @@ describe("HistoryView frame accounting", () => {
     fireEvent.click(await menuItem("Info"));
 
     await waitFor(() =>
-      expect(screen.getByText(/90 of 2,000 subs were only roughly aligned/))
+      expect(screen.getByText(/90 of 1,160 stacked subs were only roughly aligned/))
         .toBeInTheDocument());
   });
 });

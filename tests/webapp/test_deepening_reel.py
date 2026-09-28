@@ -182,3 +182,37 @@ def test_a_reprocess_of_the_same_nights_does_not_become_a_new_reel_frame(
     # times they are re-stacked.
     assert after["n_stacks"] == 2
     assert after["last_subs"] == 505
+
+
+def test_reel_info_says_when_the_series_steps_back_in_depth(client, solved_library):
+    """Ordered by the subs' own clock, a night stacked on its own lands last with
+    the fewest subs in it — so the card must not promise "more subs each time".
+
+    `depth_monotone` is that one fact, additive: an older frontend ignores it and
+    an older backend omits it, which keeps the sentence the card always had."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack(solved_library, safe, "n1", subs=100, when="2026-06-11T00:00:00Z",
+               noise=0.04, seed=2,
+               shot_from="2026-06-10T21:00:00Z", shot_to="2026-06-10T23:00:00Z")
+    _add_stack(solved_library, safe, "n1_2", subs=200, when="2026-07-11T00:00:00Z",
+               noise=0.02, seed=3,
+               shot_from="2026-06-10T21:00:00Z", shot_to="2026-07-10T23:00:00Z")
+    _add_stack(solved_library, safe, "tonight", subs=30, when="2026-08-11T00:00:00Z",
+               noise=0.07, seed=4,
+               shot_from="2026-08-10T21:00:00Z", shot_to="2026-08-10T23:00:00Z")
+    body = client.get(f"/api/targets/{safe}/deepening-reel/info").json()
+    assert body["dated_by"] == "capture"
+    assert (body["first_subs"], body["last_subs"]) == (100, 30)
+    assert body["depth_monotone"] is False
+
+
+def test_reel_info_reports_a_series_that_only_deepens(client, solved_library):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack(solved_library, safe, "n1", subs=100, when="2026-06-11T00:00:00Z",
+               noise=0.04, seed=2,
+               shot_from="2026-06-10T21:00:00Z", shot_to="2026-06-10T23:00:00Z")
+    _add_stack(solved_library, safe, "n1_2", subs=200, when="2026-07-11T00:00:00Z",
+               noise=0.02, seed=3,
+               shot_from="2026-06-10T21:00:00Z", shot_to="2026-07-10T23:00:00Z")
+    body = client.get(f"/api/targets/{safe}/deepening-reel/info").json()
+    assert body["depth_monotone"] is True

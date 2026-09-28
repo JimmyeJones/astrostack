@@ -1,0 +1,16 @@
+{
+  "_comment": "Shared by tests/test_roughly_aligned_mirror.py and frontend/src/routes/History.test.tsx. Each row is [stacked subs, roughly-aligned subs, does the app guide a fix?]. The engine's seestack.stackhealth.roughly_aligned_is_material is the definition; the History card's roughlyAlignedNote mirrors it by hand because TS cannot import it. Both halves of the gate (a >=20% share, on a stack of >=10 contributing subs) and both sides of each are covered on purpose.",
+  "cases": [
+    [2000, 8, false],
+    [1160, 90, false],
+    [200, 90, true],
+    [20, 4, true],
+    [10, 2, true],
+    [10, 1, false],
+    [10, 99, true],
+    [9, 4, false],
+    [5, 2, false],
+    [2000, 0, false],
+    [0, 3, false]
+  ]
+}

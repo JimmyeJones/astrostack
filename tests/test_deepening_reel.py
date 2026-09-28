@@ -19,6 +19,7 @@ from seestack.render.deepening import (
     build_deepening_reel,
     deepening_frame_label,
     deepening_series,
+    series_depth_is_monotone,
     render_deepening_frames,
 )
 from seestack.render.thumbnail import autostretch
@@ -258,6 +259,55 @@ class _Run:
     capture_start_utc: str | None = None
     capture_end_utc: str | None = None
     options_json: str = "{}"
+
+
+def test_a_night_stacked_on_its_own_makes_the_series_step_back_in_depth():
+    """The shape the card's lead sentence could not describe.
+
+    Stack night 1, then nights 1-2, then *just tonight's* subs on their own: the
+    third run has the newest capture window, so it lands last while holding the
+    fewest subs, and the reel really does get grainier at that step. The ordering
+    is right (the owner asked for the subs' own clock, and depth only breaks
+    ties) — what was wrong was promising "more subs each time" over it.
+    """
+    n1 = _Run(id=1, timestamp_utc="2026-06-11T00:00:00Z", n_frames_used=100,
+              capture_start_utc="2026-06-10T22:00:00Z",
+              capture_end_utc="2026-06-10T23:00:00Z")
+    n12 = _Run(id=2, timestamp_utc="2026-07-11T00:00:00Z", n_frames_used=200,
+               capture_start_utc="2026-06-10T22:00:00Z",
+               capture_end_utc="2026-07-10T23:00:00Z")
+    tonight = _Run(id=3, timestamp_utc="2026-08-11T00:00:00Z", n_frames_used=30,
+                   capture_start_utc="2026-08-10T22:00:00Z",
+                   capture_end_utc="2026-08-10T23:00:00Z")
+    series = deepening_series([n1, n12, tonight])
+    assert [r.n_frames_used for r in series.runs] == [100, 200, 30]
+    assert series_depth_is_monotone(series.runs) is False
+
+
+def test_a_series_that_only_deepens_says_so():
+    a = _Run(id=1, timestamp_utc="2026-06-11T00:00:00Z", n_frames_used=100,
+             capture_start_utc="2026-06-10T22:00:00Z",
+             capture_end_utc="2026-06-10T23:00:00Z")
+    b = _Run(id=2, timestamp_utc="2026-07-11T00:00:00Z", n_frames_used=200,
+             capture_start_utc="2026-06-10T22:00:00Z",
+             capture_end_utc="2026-07-10T23:00:00Z")
+    series = deepening_series([a, b])
+    assert series_depth_is_monotone(series.runs) is True
+    # Equal depth is not a step back — two stacks of one night's subs still read
+    # as "no worse than before", which is what the wording claims.
+    assert series_depth_is_monotone([_Run(id=1, timestamp_utc="x", n_frames_used=50),
+                                     _Run(id=2, timestamp_utc="y", n_frames_used=50)])
+    # Nothing to measure reads as "no step back": the reassuring sentence is the
+    # right one for a series whose depths cannot be read.
+    assert series_depth_is_monotone([]) is True
+    assert series_depth_is_monotone([_Run(id=1, timestamp_utc="x", n_frames_used=0),
+                                     _Run(id=2, timestamp_utc="y", n_frames_used=0)])
+    # …and an unreadable step is skipped rather than counted as a drop to zero.
+    class _NoCount:
+        n_frames_used = None
+    assert series_depth_is_monotone(
+        [_Run(id=1, timestamp_utc="x", n_frames_used=100), _NoCount(),
+         _Run(id=2, timestamp_utc="y", n_frames_used=200)]) is True
 
 
 def test_series_orders_by_when_the_subs_were_shot_not_when_the_stack_ran():
