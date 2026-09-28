@@ -2531,6 +2531,34 @@ def _apply_overlap_panel_gain(
     return out, gstats
 
 
+def _panel_refine_centre(
+    group: Sequence[FrameRow], star_matched_ids: set[int],
+) -> FrameRow | None:
+    """Which sub of a mosaic panel becomes that panel's sub-pixel refine patch.
+
+    Only a *placed* frame can be aligned onto the canvas, so the choice is made
+    among those — an unsolved sub sitting nearest the panel's median would
+    otherwise cost the whole panel its patch, since ``align_one`` raises on a
+    missing WCS. Among those, prefer one the **solver** placed.
+
+    A star-matched sub (``_star_matched_unsolved_frames``) is placed by
+    measurement rather than by a guess, and it belongs in every per-panel
+    *population* — its gain, its weight, its share of the overlap ratio. This is
+    the one path that instead makes a single sub the fixed target the whole panel
+    is phase-correlated against, and a sub ASTAP could not solve is usually the
+    panel's softest: fewer and fuzzier stars, a trail, thin cloud.
+    :func:`~seestack.stack.reference.pick_central_frame` sorts by distance to the
+    panel median first and only tie-breaks on FWHM, so it would happily pick one.
+
+    The fallback keeps a panel holding *only* rescued subs — possible when they
+    cluster clear of every solved sub — refining against its own patch rather
+    than losing it.
+    """
+    placed = [f for f in group if f.wcs_json]
+    solved = [f for f in placed if f.id not in star_matched_ids]
+    return pick_central_frame(solved or placed)
+
+
 def _build_refine_patch(
     frame: FrameRow,
     *,
@@ -2773,6 +2801,15 @@ def _star_matched_unsolved_frames(
     panel it is on — and the whole pass is bounded by
     :data:`STAR_MATCH_MAX_MATCH_ATTEMPTS`.
 
+    Each copy also carries the ``ra_center_deg``/``dec_center_deg`` that WCS puts
+    its own centre pixel at, because a position and a pointing are not the same
+    fact to this engine: ``pointing_groups`` reads the centre, so a sub with a WCS
+    and no centre is labelled ``-1`` — "in no substantial group" — and the four
+    per-panel paths behind that gate (:mod:`~seestack.stack.photometric`,
+    :mod:`~seestack.stack.weighting`, :mod:`~seestack.stack.overlapgain` and the
+    sub-pixel refine patch) all leave it neutral. It would be *placed* on a panel
+    and then combined without that panel's gain.
+
     The WCS lives **in the returned copies only** — nothing is written to the
     project DB — and that is deliberate twice over. A star-matched position is
     derived from a neighbour rather than verified against the sky, so it must never
@@ -2789,7 +2826,10 @@ def _star_matched_unsolved_frames(
         find_star_transform,
         registration_gray,
     )
-    from seestack.io.wcs_io import wcs_text_after_pixel_affine
+    from seestack.io.wcs_io import (
+        wcs_image_center_deg_from_text,
+        wcs_text_after_pixel_affine,
+    )
 
     progress = progress or (lambda *a: None)
     cancel = cancel or (lambda: False)
@@ -2869,7 +2909,19 @@ def _star_matched_unsolved_frames(
                          "re-expressed on another grid; retiring it", anchor.id)
                 live = [entry for entry in live if entry[0] is not anchor]
                 continue
-            out.append(replace(frame, wcs_json=wcs_text))
+            # The centre too, not only the WCS: ``pointing_groups`` — the engine's
+            # single "which panel is this sub on?" answer, behind the photometric
+            # references, the quality weighting, the overlap gains and the refine
+            # patch — reads ``ra_center_deg``/``dec_center_deg``, so a sub carrying a
+            # WCS and no centre came back ``-1`` from it and was combined without its
+            # own panel's gain. Read at the sub's **own centre pixel** rather than from
+            # CRVAL, because ``wcs_text_after_pixel_affine`` keeps the anchor's CRVAL
+            # and moves CRPIX (the trap ``bootstrap.propagate_wcs`` documents): CRVAL
+            # is the *anchor's* pointing, which would clump every rescued sub onto it.
+            centre = wcs_image_center_deg_from_text(wcs_text, width=w, height=h)
+            ra_c, dec_c = centre if centre is not None else (None, None)
+            out.append(replace(frame, wcs_json=wcs_text,
+                               ra_center_deg=ra_c, dec_center_deg=dec_c))
             key = anchor.id if anchor.id is not None else -1
             placed_per_anchor[key] = placed_per_anchor.get(key, 0) + 1
             break
@@ -3073,6 +3125,9 @@ def run_stack(
     # stars can never move the canvas. Before the lucky-imaging and readability
     # passes, so a rescued sub is filtered by exactly the same rules as a solved one.
     n_star_matched = 0
+    #: The rescued subs' ids, so a path that picks one sub to *represent* a panel can
+    #: still prefer one the solver itself placed — see the refine patch below.
+    star_matched_ids: set[int] = set()
     if options.star_match_unsolved:
         anchors: list[FrameRow] = [ref]
         if is_mosaic_canvas:
@@ -3098,6 +3153,7 @@ def run_stack(
         )
         frames.extend(matched)
         n_star_matched = len(matched)
+        star_matched_ids = {f.id for f in matched if f.id is not None}
         log.info("Star-match: %d of %d un-located sub(s) joined the stack by "
                  "their star patterns", n_star_matched, n_attempted)
 
@@ -3275,12 +3331,7 @@ def run_stack(
             for label, group in sorted(by_label.items()):
                 if label == ref_label:
                     continue
-                # Only a *solved* frame can be aligned onto the canvas, so pick
-                # this panel's centre from those: an unsolved sub sitting nearest
-                # the panel's median would otherwise cost the whole panel its
-                # patch (align_one raises on a missing WCS).
-                centre_frame = pick_central_frame(
-                    [f for f in group if f.wcs_json])
+                centre_frame = _panel_refine_centre(group, star_matched_ids)
                 if centre_frame is None:
                     continue
                 panel_patch = _build_refine_patch(

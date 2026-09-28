@@ -1,5 +1,53 @@
 # Shipped — the record
 
+## v0.484.3 — 2026-09-28 — a star-matched sub joins its panel's population too: `stacker._star_matched_unsolved_frames` centres + `_panel_refine_centre`
+
+**The one thing v0.484.0 deliberately did not change, filed as the top "Bugs" lead the same night, now fixed
+with the measurement it was gated on.** `_star_matched_unsolved_frames` returned `replace(frame, wcs_json=…)`
+and nothing else — a *position* but not a *pointing*. Every per-panel decision in the engine goes through
+`pointings.pointing_groups`, which reads `ra_center_deg`/`dec_center_deg`, so a rescued sub came back labelled
+**`-1`** from it: "in no substantial group". That is the case the four readers behind that gate each already
+document and stand down on, so a sub the matcher had just *placed on a panel* was then combined **without that
+panel's gain** — `photometric.compute_photometric_scales` gave it the neutral 1.0 instead of its panel's
+transparency reference, `weighting.compute_frame_weights` gave it the target-wide medians instead of its
+panel's, `overlapgain` left it out of the panel's overlap sample, and the sub-pixel refine patch treated it as
+belonging to no panel. On a mosaic where one panel was shot through haze that is exactly the correction the
+rescued subs miss.
+
+**The fix is the centre, read at the sub's own centre pixel.** `wcs_image_center_deg_from_text(wcs_text,
+width=w, height=h)` — *not* `wcs_center_deg_from_text`, because `wcs_text_after_pixel_affine` keeps the anchor's
+CRVAL and moves CRPIX, so CRVAL is the **anchor's** pointing and reading it back would clump every rescued sub
+onto its anchor. That is the same trap, and the same helper, as `solve/bootstrap.propagate_wcs`, which documents
+it. **Still nothing is written to the project DB** (the in-memory copies only), so a star-matched position still
+never poses as a plate solve and every rescued sub is still offered to the real solver on the next scan — the
+three existing tests that pin that are unchanged and still pass.
+
+**The direction the lead said to measure before shipping, measured.** `_transparency_panels` and the refine
+patch run `pointing_groups` on a **single-field** canvas too, so filling the centres in could in principle turn
+a single field into a target that "splits". It cannot, and that is now a test rather than an argument: on the
+single-field fixture every rescued sub's centre lands within **0.4 %** of the 0.25° panel link distance of the
+reference's (it *is* its own pointing, and on a single field that is the reference's to within the dither), and
+`pointing_groups` returns `None` at `min_members` 2 and 3 alike. Single-linkage clustering also cannot be made
+to *split* by adding points — only to merge — so the change has no direction in which it can manufacture a
+panel.
+
+**One reader did need a guard, and it is the only behaviour change beyond the label.** Three of the four take
+the rescued sub as one more member of a *population*, which is the whole point. The sub-pixel refine patch
+instead makes a **single** sub the fixed target the whole panel is phase-correlated against, and
+`pick_central_frame` sorts by distance to the panel median first (tie-breaking on FWHM only) — measured on the
+two-panel fixture, it picked a rescued sub for panel 0. A sub ASTAP could not solve is usually the panel's
+softest: fewer and fuzzier stars, a trail, thin cloud. New `stacker._panel_refine_centre` therefore prefers a
+sub the **solver** placed, falling back to a rescued one only for a panel that holds nothing else (possible when
+the rescued subs cluster clear of every solved sub) so such a panel refines against its own patch rather than
+losing it. `overlapgain._panel_frames` is deliberately left alone: it takes the clearest *few* subs and medians
+a ratio, so a rescued sub there adds honest signal from the same patch of sky.
+
+**Tests +5** in `tests/test_stack_star_match_unsolved.py`, **all five fail before** (the four centre/label/gain
+ones on the missing centres; the refine one verified by reverting just the preference in a scratch copy and
+watching it name frame 3, the rescued sub). Engine-only: no config, schema, on-disk, API-shape or default
+change, and `star_match_unsolved` is still off by default, so an install that has not opted in is bit-for-bit
+unaffected.
+
 ## v0.484.2 — 2026-09-28 — the reject-reason exemption stops being keyed on a line number: `test_reject_reason_labels._write_sites`
 
 **Infra / maintainability — a guard whose *key* went stale on every unrelated edit, which it did twice in two
