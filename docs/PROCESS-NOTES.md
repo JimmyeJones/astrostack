@@ -1,5 +1,71 @@
 # Process notes & QA sweep records
 
+## 2026-09-28 (Builder run, evening) — the top lead's one line, the guard whose *key* was the fragile part, and the copy three runs of work was hiding behind
+
+*(Builder, branch `claude/awesome-fermat-ybne2s` → v0.484.2, v0.484.3, v0.484.4. Baseline green — **6,888 passed,
+2 skipped**, 15m33s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. `main`'s CI
+green at start. Full entries in [`SHIPPED.md`](SHIPPED.md).)*
+
+**Triage.** "Bugs (fix these first)" opened with the LEAD the previous run filed while shipping v0.484.0 — filed
+~5 h earlier, so past §11's 2-hour claimed-in-spirit window. It is the only entry in that section that is neither
+owner-data-gated nor a recorded stand-down, and its own "measure this direction first" is measurable in this repo,
+so it was the run's whole first task. Everything else in the section is a LEAD whose gate is the owner's library
+(the rotation convention needs two real ASTAP `.ini` values — **there is no ASTAP binary in this container**, so it
+cannot be settled here), or a remainder explicitly filed as not-a-priority.
+
+### The three notes worth keeping
+
+**1. `pointing_groups` is the engine's one panel gate, so "carries a WCS" and "has a pointing" are two different
+facts.** The fix itself is one line — read the composed WCS's own centre pixel — but the reason it matters is
+structural: four independent per-panel paths (`photometric`, `weighting`, `overlapgain`, the refine patch) each
+already document and correctly handle "a frame in no substantial group", so a sub with a position and no pointing
+was *silently* handled by all four rather than erroring anywhere. Nothing was wrong; everything stood down. That is
+the hardest shape of bug to see in this engine, and the general lesson is: **when you synthesise a `FrameRow`
+field, ask which other fields a reader derives from the same fact.** `solve/bootstrap.propagate_wcs` had already
+been bitten by the *sibling* of this (CRVAL vs the image centre) and documents it in
+`wcs_image_center_deg_from_text`'s own docstring, which is how the right helper was found in one grep.
+
+**2. One reader of a panel label is not like the other three, and it took a measurement to see it.** Three take the
+rescued sub as one more member of a population — its gain, its weight, its share of an overlap ratio — which is the
+whole point of the fix. The sub-pixel refine patch instead makes a **single** sub the fixed target the whole panel
+is correlated against, and `pick_central_frame` sorts by distance to the panel median *first*. Measured on the
+two-panel fixture, filling the centres in made it pick a **rescued** sub for panel 0 — i.e. a sub ASTAP could not
+solve, which is usually the panel's softest, would have become the panel's reference. New `_panel_refine_centre`
+prefers a solver-placed sub. **The general rule this is an instance of:** widening a population is safe; widening
+the pool a *representative* is drawn from is a different change, and worth separating even when it rides the same
+one-line fix.
+
+**3. A guard can be sound and still have a fragile key — `test_reject_reason_labels` cost two consecutive runs.**
+Its `_EXEMPT` list is keyed on `<file>:<line>`, so any edit *above* an opaque `reject_reason` write fails four
+tests naming a file you just touched for an unrelated reason. v0.484.0 paid it (commit `17314e9`) and this run paid
+it again, on an edit ~50 lines above the write. The line key is also *weaker* where it counts: rewrite the
+expression in place and the exemption — a sentence explaining why that specific write is safe — silently survives.
+Re-keyed on `<file>::<enclosing def>::<expression source>`, which is stricter on the stale-sentence case and
+immune to unrelated edits. **Shipped as its own commit, before the change that tripped it**, so the commit that
+tripped it is green as committed; verified green against clean `origin/main`'s `stacker.py` too. Worth generalising:
+**any `file:line` in a test fixture or exemption list is a tripwire for the next unrelated edit** — grep for the
+pattern if a run ever needs a cheap, real cleanup.
+
+### The copy bug, which is the one a user would actually have met
+
+Found by reading the option's own form descriptor while writing the SHIPPED entry for task 1. `star_match_unsolved`'s
+help ended *"Skipped on a mosaic, where the subs cover different parts of the sky"* — false since v0.484.0 the
+previous night, and false **to the owner specifically**, who is a heavy mosaic user. Three runs (v0.482.0,
+v0.483.3, v0.484.0) built and fixed this feature *for* mosaics; the one sentence he would read told him it would
+not run. Nothing in the suite touched the copy, so nothing caught it.
+
+The note for the next run is the shape of the miss, not the string: **a behaviour change that removes a
+limitation has to be grepped for in the copy that states the limitation.** The three candidate greps are cheap —
+the option key, the words "skipped"/"only"/"ignored" near a feature name, and the descriptor's own `help` — and the
+test that now pins it is worded as *the claim it must not make*, because a snapshot of the current sentence is a
+test that gets updated without being read.
+
+**Not done, deliberately.** No dogfood pass: the Scout ran a whole-journey `--mosaic --editor --big` pass earlier
+the same day and its finding (the `/live` phone-width clip) shipped as v0.484.1, so a second pass on the same
+build would have measured nothing new. No fourth task: the remaining pickable work is the auto-apply preset (two
+Builders have costed it to "measure, don't build") and the reel-from-history half (wants its own sizing), and
+§2 says stop rather than manufacture a fourth.
+
 ## 2026-09-28 (Scout run) — the pixel-threshold sweep the two Builder findings asked for (CLEAN), a whole-journey dogfood, and a phone-width clip
 
 *(Scout, branch `agent/live-status-badge-clip` → v0.484.1. Baseline green — **6,888 passed, 2 skipped**, 13m09s

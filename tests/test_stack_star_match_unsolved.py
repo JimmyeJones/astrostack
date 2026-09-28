@@ -12,6 +12,7 @@ separate things: that the subs reach the picture, that the picture is genuinely
 deeper for it, and that nothing was written into the project DB to make it happen.
 """
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -462,5 +463,184 @@ def test_the_pass_stops_when_it_has_spent_its_match_attempts(tmp_path):
         # Nothing is written for any of them, reached or not.
         for fid in stranger_ids:
             assert proj.get_frame(fid).wcs_json is None
+    finally:
+        proj.close()
+
+
+# --- the panel a rescued sub belongs to, and the populations keyed on it -----
+#
+# A sub placed by its stars carries a WCS but, until v0.484.1, no
+# ``ra_center_deg``/``dec_center_deg`` — so ``pointing_groups`` labelled it ``-1`` and
+# every per-panel population in the stack (photometric references, quality weighting,
+# the overlap gains, the sub-pixel refine patch) treated it as "in no substantial
+# group" and left it neutral. It was combined without its own panel's gain.
+
+def _placed(proj):
+    """``(solved_rows, placed_rows)`` for the two-panel mosaic fixture."""
+    solved = _solved(proj)
+    placed, _attempted = _star_matched_unsolved_frames(proj, _panel_anchors(solved))
+    return solved, placed
+
+
+def test_a_star_matched_sub_carries_its_own_centre_not_just_a_wcs(tmp_path):
+    """FAIL-BEFORE: the centres were ``None``, so the sub was in no panel.
+
+    Read off the composed WCS at the sub's **own centre pixel** rather than from
+    CRVAL, because ``wcs_text_after_pixel_affine`` keeps the anchor's CRVAL and moves
+    CRPIX — the same trap ``bootstrap.propagate_wcs`` documents.
+    """
+    proj, _stars, unsolved = _two_panel_mosaic(tmp_path)
+    try:
+        _solved_rows, placed = _placed(proj)
+        assert len(placed) == 4
+        by_id = {f.id: f for f in placed}
+        for panel, ids in unsolved.items():
+            for fid in ids:
+                f = by_id[fid]
+                assert f.ra_center_deg is not None and f.dec_center_deg is not None
+                # Its own panel's sky, to within the dither (2 px = 10 arcsec) — and
+                # the same answer the WCS itself gives, since that is where it is from.
+                ra, dec = _centre_sky(f.wcs_json)
+                assert f.ra_center_deg == pytest.approx(ra, abs=1e-9)
+                assert f.dec_center_deg == pytest.approx(dec, abs=1e-9)
+                assert abs(f.ra_center_deg - _panel_ra(panel)) < 20.0 / 3600.0
+                assert abs(f.dec_center_deg - DEC0) < 20.0 / 3600.0
+    finally:
+        proj.close()
+
+
+def test_a_rescued_sub_is_labelled_onto_the_panel_it_was_placed_from(tmp_path):
+    """FAIL-BEFORE: the shared panel gate itself, which is what the four readers read.
+
+    ``pointing_groups`` is the engine's single answer to "does this target split into
+    panels, and which one is this sub on?". A rescued sub used to come back ``-1``
+    from it — the "in no substantial group" case every per-panel path stands down on.
+    """
+    from seestack.stack.pointings import pointing_groups
+
+    proj, _stars, unsolved = _two_panel_mosaic(tmp_path, n_solved=3, n_unsolved=1)
+    try:
+        solved, placed = _placed(proj)
+        frames = solved + placed
+        labels = pointing_groups(
+            [(f.ra_center_deg, f.dec_center_deg) for f in frames], min_members=3)
+        assert labels is not None, "the two panels must split for this to mean anything"
+        by_id = dict(zip([f.id for f in frames], labels, strict=True))
+        # Every rescued sub carries its own panel's label — the same one that panel's
+        # solved subs carry — and none is left at -1.
+        for panel, ids in unsolved.items():
+            own = {by_id[f.id] for f in solved
+                   if abs(f.ra_center_deg - _panel_ra(panel)) < 0.1}
+            assert len(own) == 1 and own != {-1}, (panel, own)
+            want = own.pop()
+            for fid in ids:
+                assert by_id[fid] == want, (panel, fid, by_id[fid], want)
+    finally:
+        proj.close()
+
+
+def test_a_rescued_sub_is_gain_matched_against_its_own_panel(tmp_path):
+    """FAIL-BEFORE, through a real reader: the consequence the label change buys.
+
+    ``compute_photometric_scales(group_by_pointing=True)`` is one of the four paths
+    that key on the panel label. A rescued sub used to get the neutral 1.0 — combined
+    with none of its panel's measured gain — where a solved sub beside it on the same
+    panel got the panel's own reference.
+    """
+    from dataclasses import replace as _replace
+
+    from seestack.stack.photometric import compute_photometric_scales
+
+    proj, _stars, unsolved = _two_panel_mosaic(tmp_path, n_solved=3, n_unsolved=1)
+    try:
+        solved, placed = _placed(proj)
+        assert len(placed) == 2
+        # Two panels shot through visibly different sky, so a panel's own median and
+        # the target-wide median are different numbers and the test can tell them
+        # apart. The rescued sub of each panel sits off its panel's median by 1.25×.
+        panel_transp = {0: 1.0, 1: 0.5}
+        rescued_transp = {0: 0.8, 1: 0.4}
+
+        def panel_of(f) -> int:
+            return 0 if abs(f.ra_center_deg - _panel_ra(0)) < 0.1 else 1
+
+        rows = [_replace(f, transparency_score=panel_transp[panel_of(f)])
+                for f in solved]
+        rescued_ids: dict[int, int] = {}
+        for f in placed:
+            panel = next(p for p, ids in unsolved.items() if f.id in ids)
+            rescued_ids[panel] = f.id
+            rows.append(_replace(f, transparency_score=rescued_transp[panel]))
+        scales, stats = compute_photometric_scales(rows, group_by_pointing=True)
+        assert stats.n_pointing_groups == 2, stats
+        for panel, fid in rescued_ids.items():
+            # Its panel's median over its own score — 1.25 on both panels, which the
+            # one target-wide median could not produce for either.
+            assert scales[fid] == pytest.approx(
+                panel_transp[panel] / rescued_transp[panel], rel=1e-6), (panel, fid)
+    finally:
+        proj.close()
+
+
+def test_a_single_field_still_does_not_split_once_the_centres_are_filled_in(tmp_path):
+    """The direction this fix had to be measured in before it could ship.
+
+    ``_transparency_panels`` and the sub-pixel refine patch run ``pointing_groups`` on
+    a **single-field** canvas too, so filling the centres in could in principle turn a
+    single field into a target that "splits". It cannot: a rescued sub's centre is its
+    own pointing, which on a single field is the reference's to within the dither —
+    two orders of magnitude inside the 0.25° panel link distance.
+    """
+    from seestack.stack.pointings import PANEL_LINK_DIST_DEG, pointing_groups
+
+    proj, _unsolved = _faint_field(tmp_path, n_solved=3)
+    try:
+        solved = _solved(proj)
+        placed, _attempted = _star_matched_unsolved_frames(proj, [solved[0]])
+        assert len(placed) >= 6, len(placed)
+        frames = solved + placed
+        for f in placed:
+            assert f.ra_center_deg is not None
+            sep = math.hypot(
+                (f.ra_center_deg - 83.6) * math.cos(math.radians(DEC0)),
+                f.dec_center_deg - (-5.4))
+            assert sep < 0.02 * PANEL_LINK_DIST_DEG, (f.id, sep)
+        for min_members in (2, 3):
+            assert pointing_groups(
+                [(f.ra_center_deg, f.dec_center_deg) for f in frames],
+                min_members=min_members) is None, min_members
+    finally:
+        proj.close()
+
+
+def test_a_panels_refine_patch_prefers_a_sub_the_solver_placed(tmp_path):
+    """The one per-panel path that makes a single sub *represent* the panel.
+
+    Every other reader of the panel label takes the rescued sub as one more member
+    of a population. The sub-pixel refine patch instead correlates the whole panel
+    against one sub's pixels — and a sub ASTAP could not solve is usually the
+    panel's softest, so it must not become that sub merely by sitting nearest the
+    panel's median.
+    """
+    from seestack.stack.stacker import _panel_refine_centre
+
+    proj, _stars, unsolved = _two_panel_mosaic(tmp_path, n_solved=2, n_unsolved=2)
+    try:
+        solved, placed = _placed(proj)
+        panel0 = [f for f in solved + placed
+                  if abs((f.ra_center_deg or 0.0) - _panel_ra(0)) < 0.1]
+        rescued = {f.id for f in placed}
+        assert rescued and len(panel0) > len(rescued & {f.id for f in panel0})
+        chosen = _panel_refine_centre(panel0, rescued)
+        assert chosen is not None
+        assert chosen.id not in rescued, chosen.id
+        # Not because the rescued subs are unplaceable — with no solved sub left,
+        # the panel refines against one of them rather than losing its patch.
+        only_rescued = [f for f in panel0 if f.id in rescued]
+        fallback = _panel_refine_centre(only_rescued, rescued)
+        assert fallback is not None and fallback.id in rescued
+        # And a sub with no WCS at all is never the patch.
+        assert _panel_refine_centre(
+            [f for f in proj.iter_frames() if not f.wcs_json], set()) is None
     finally:
         proj.close()

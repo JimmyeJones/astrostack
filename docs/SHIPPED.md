@@ -1,5 +1,109 @@
 # Shipped — the record
 
+## v0.484.4 — 2026-09-28 — the Stack form stops telling a mosaic user this switch is not for them: `star_match_unsolved` help
+
+🟡 **BUG FIX (friendliness — PRIORITY 3). Builder-found while shipping v0.484.3, in the copy of the very feature
+that run was deepening.** "Include subs that aren't located yet" ended:
+
+> *"Off by default, and it reads each un-located sub once more, so it adds some time. **Skipped on a mosaic, where
+> the subs cover different parts of the sky.**"*
+
+v0.484.0 made that false the previous night — the pass now takes one star anchor per solved panel and places each
+sub on the panel its stars measurably match, which
+`tests/test_stack_star_match_unsolved.py::test_a_mosaic_stack_takes_the_subs_the_solver_could_not_place` asserts
+against real pixels. The sentence stayed. **The owner is a heavy mosaic user** (Owner Facts: `<T>_mosaic_sub/`,
+26 mosaics), so on the one surface where he learns what this switch does, the feature built for him said it would
+not run. It is the whole cost of the last three runs' work on this option, spent on one stale clause, and nothing
+in the suite touched the copy.
+
+**What it says now** names both halves, because "mosaics are included" on its own would over-promise: *"Mosaics
+are included: every panel that has at least one located sub can place its own, and each sub goes on the panel its
+stars actually match — but a panel where nothing at all was located stays out."* That last clause is v0.484.0's
+own deliberate limit — a centre-shift cap wide enough to admit a whole panel step would also admit a wrong lock —
+so the help now states the limitation instead of overstating it.
+
+**The test is worded as the claim it must not make**, not as a snapshot of today's sentence: this help text is
+rewritten regularly, and a test pinning the exact wording is one that gets updated without being read. It asserts
+the copy mentions mosaics, mentions panels, and makes none of five "it will not run on a mosaic" claims — and it
+lives beside the wiring tests for the same feature, citing the behaviour test by name so the next reader can see
+what the copy is answerable to. Fail-before shown against `HEAD`'s own `schemas.py`.
+
+Also corrected, for accuracy rather than as a user-facing fix: `webapp/pipeline.py`'s comment on `n_star_matched`
+still said the subs were matched "to the reference sub", which on a mosaic is now the sub's own panel's anchor.
+
+Help text and one comment: no engine, frontend, config, schema, on-disk, API-shape or default change — the
+`stackOptionPlacement.json` snapshot carries `type`/`group`/`depends_on` only, so it is untouched.
+
+## v0.484.3 — 2026-09-28 — a star-matched sub joins its panel's population too: `stacker._star_matched_unsolved_frames` centres + `_panel_refine_centre`
+
+**The one thing v0.484.0 deliberately did not change, filed as the top "Bugs" lead the same night, now fixed
+with the measurement it was gated on.** `_star_matched_unsolved_frames` returned `replace(frame, wcs_json=…)`
+and nothing else — a *position* but not a *pointing*. Every per-panel decision in the engine goes through
+`pointings.pointing_groups`, which reads `ra_center_deg`/`dec_center_deg`, so a rescued sub came back labelled
+**`-1`** from it: "in no substantial group". That is the case the four readers behind that gate each already
+document and stand down on, so a sub the matcher had just *placed on a panel* was then combined **without that
+panel's gain** — `photometric.compute_photometric_scales` gave it the neutral 1.0 instead of its panel's
+transparency reference, `weighting.compute_frame_weights` gave it the target-wide medians instead of its
+panel's, `overlapgain` left it out of the panel's overlap sample, and the sub-pixel refine patch treated it as
+belonging to no panel. On a mosaic where one panel was shot through haze that is exactly the correction the
+rescued subs miss.
+
+**The fix is the centre, read at the sub's own centre pixel.** `wcs_image_center_deg_from_text(wcs_text,
+width=w, height=h)` — *not* `wcs_center_deg_from_text`, because `wcs_text_after_pixel_affine` keeps the anchor's
+CRVAL and moves CRPIX, so CRVAL is the **anchor's** pointing and reading it back would clump every rescued sub
+onto its anchor. That is the same trap, and the same helper, as `solve/bootstrap.propagate_wcs`, which documents
+it. **Still nothing is written to the project DB** (the in-memory copies only), so a star-matched position still
+never poses as a plate solve and every rescued sub is still offered to the real solver on the next scan — the
+three existing tests that pin that are unchanged and still pass.
+
+**The direction the lead said to measure before shipping, measured.** `_transparency_panels` and the refine
+patch run `pointing_groups` on a **single-field** canvas too, so filling the centres in could in principle turn
+a single field into a target that "splits". It cannot, and that is now a test rather than an argument: on the
+single-field fixture every rescued sub's centre lands within **0.4 %** of the 0.25° panel link distance of the
+reference's (it *is* its own pointing, and on a single field that is the reference's to within the dither), and
+`pointing_groups` returns `None` at `min_members` 2 and 3 alike. Single-linkage clustering also cannot be made
+to *split* by adding points — only to merge — so the change has no direction in which it can manufacture a
+panel.
+
+**One reader did need a guard, and it is the only behaviour change beyond the label.** Three of the four take
+the rescued sub as one more member of a *population*, which is the whole point. The sub-pixel refine patch
+instead makes a **single** sub the fixed target the whole panel is phase-correlated against, and
+`pick_central_frame` sorts by distance to the panel median first (tie-breaking on FWHM only) — measured on the
+two-panel fixture, it picked a rescued sub for panel 0. A sub ASTAP could not solve is usually the panel's
+softest: fewer and fuzzier stars, a trail, thin cloud. New `stacker._panel_refine_centre` therefore prefers a
+sub the **solver** placed, falling back to a rescued one only for a panel that holds nothing else (possible when
+the rescued subs cluster clear of every solved sub) so such a panel refines against its own patch rather than
+losing it. `overlapgain._panel_frames` is deliberately left alone: it takes the clearest *few* subs and medians
+a ratio, so a rescued sub there adds honest signal from the same patch of sky.
+
+**Tests +5** in `tests/test_stack_star_match_unsolved.py`, **all five fail before** (the four centre/label/gain
+ones on the missing centres; the refine one verified by reverting just the preference in a scratch copy and
+watching it name frame 3, the rescued sub). Engine-only: no config, schema, on-disk, API-shape or default
+change, and `star_match_unsolved` is still off by default, so an install that has not opted in is bit-for-bit
+unaffected.
+
+## v0.484.2 — 2026-09-28 — the reject-reason exemption stops being keyed on a line number: `test_reject_reason_labels._write_sites`
+
+**Infra / maintainability — a guard whose *key* went stale on every unrelated edit, which it did twice in two
+days.** `tests/test_reject_reason_labels.py` derives the reject-reason vocabulary from the code that writes it and
+requires any write it cannot read a literal out of to be listed in `_EXEMPT` **with the reason why** — a good rule,
+keyed on `<file>:<line>`. A line number is wrong in both directions. Edit anything *above* such a write and four
+tests fail naming a file you touched for reasons that have nothing to do with reject reasons: v0.484.0 paid that
+(commit `17314e9`, "re-point test_reject_reason_labels' file:line exemption at the write site v0.484.0 moved") and
+v0.484.3 paid it again in the next run. Meanwhile a write whose *expression is rewritten in place* keeps its
+exemption and its now-wrong sentence — the failure the rule exists to prevent, silently excused.
+
+The site key is now `<file>::<enclosing function>::<expression source>` (`ast.unparse` of the assigned value, with
+the narrowest enclosing `def` from new pure `_enclosing_scopes`/`_scope_of`). That is **stricter** on what matters:
+rewriting the write, or moving it to another function, invalidates the exemption and
+`test_the_exempt_list_names_only_sites_that_still_exist` says so — which the line key could not do. And it is
+immune to every edit that does not touch the write. The assertion message still prints the line, so a real new
+opaque write is still a copy-paste fix rather than an archaeology exercise.
+
+Nothing is loosened: both existing exemptions keep their sentences verbatim, and all four derived-vocabulary
+assertions are unchanged. Verified green against **clean `origin/main`**'s `stacker.py` as well as the edited one,
+which is the property the old key lacked. Test-only; no engine, webapp, frontend, config, schema, on-disk or API
+change.
 ## v0.484.1 — 2026-09-28 — the /live status word no longer clips to "Finishe…" at phone width
 
 🟡 **BUG FIX (friendliness — PRIORITY 3). Scout dogfood-found, `scripts/dogfood_probe.mjs` clipped-label

@@ -1242,9 +1242,11 @@ _DESCRIPTORS: list[dict[str, Any]] = [
              "on, the app recognises the same stars in each un-located sub and lines it "
              "up with one it did find — so they join the picture too. It never guesses: "
              "a sub whose stars don't clearly match is simply left out, exactly as it is "
-             "now. Off by default, and it reads each un-located sub once more, so it "
-             "adds some time. Skipped on a mosaic, where the subs cover different parts "
-             "of the sky."},
+             "now. Mosaics are included: every panel that has at least one located sub "
+             "can place its own, and each sub goes on the panel its stars actually "
+             "match — but a panel where nothing at all was located stays out. Off by "
+             "default, and it reads each un-located sub once more, so it adds some "
+             "time."},
     {"key": "subpixel_refine", "glossary": "alignment", "label": "Sub-pixel alignment refine", "type": "bool",
      "group": "advanced",
      "help": "Add a phase-correlation pass that nudges each frame by a fraction of a "
