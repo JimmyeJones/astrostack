@@ -103,6 +103,47 @@ describe("deepeningBlurb", () => {
     expect(b).toContain("2 stacks");
     expect(b).toContain("M31");
   });
+
+  // The reel is ordered by when the subs were shot, not by depth, so a night
+  // stacked on its own after a deeper run lands *last* with fewer subs in it
+  // (100 → 200 → 30 is a real shape off `deepening_series`). Promising "cleaner
+  // and deeper … more subs each time" over that reel is an untruth the caption
+  // underneath already contradicts.
+  it("stops promising a steady deepening when a step holds fewer subs", () => {
+    const b = deepeningBlurb("M31", {
+      available: true, n_stacks: 3, first_subs: 100, last_subs: 30,
+      depth_monotone: false,
+    });
+    expect(b).not.toContain("cleaner and deeper");
+    expect(b).not.toContain("more subs each time");
+    expect(b).toContain("grainier");
+    expect(b).toContain("M31");
+    // The figures are still there — the reader can see which way it went.
+    expect(b).toContain("100");
+    expect(b).toContain("30");
+  });
+
+  it("still says it plainly when the counts are missing", () => {
+    const b = deepeningBlurb("M31", {
+      available: true, n_stacks: 3, depth_monotone: false,
+    });
+    expect(b).toContain("grainier");
+    expect(b).not.toContain("undefined");
+    expect(b).not.toContain("()");
+  });
+
+  it("keeps today's wording when the depth really does only grow", () => {
+    const grows = deepeningBlurb("M31", {
+      available: true, n_stacks: 3, first_subs: 120, last_subs: 1240,
+      depth_monotone: true,
+    });
+    expect(grows).toContain("cleaner and deeper");
+    // …and on an older backend, which sends no verdict at all.
+    const older = deepeningBlurb("M31", {
+      available: true, n_stacks: 3, first_subs: 120, last_subs: 1240,
+    });
+    expect(older).toBe(grows);
+  });
 });
 
 describe("deepeningClip", () => {

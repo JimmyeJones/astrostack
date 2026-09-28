@@ -279,6 +279,37 @@ def deepening_series(runs: Sequence[Any]) -> DeepeningSeries:
         dated_by="capture")
 
 
+def series_depth_is_monotone(runs: Sequence[Any]) -> bool:
+    """Does every step of this series hold at least as many subs as the one before?
+
+    :func:`deepening_series` orders the reel by **when its subs were shot** and
+    uses depth only to break a tie, which is the owner's own ask — so a series is
+    allowed to step *back* in depth, and on a real library it does: stack three
+    nights, then stack just tonight's subs on their own, and that shallow run has
+    the newest window and lands **last**. The reel then visibly gets grainier at
+    that step.
+
+    The card's lead sentence promised the opposite ("cleaner and deeper … more
+    subs each time") while the caption under it printed the counts that
+    contradicted it, so the reel needs this one fact to say which story it is
+    telling. It is *not* an ordering rule: hiding the shallow step would hide a
+    fact about the library, which the ordering deliberately does not do.
+
+    Pure and duck-typed like the rest of this module. A missing or unreadable
+    count cannot show a step back, so it reads as "no step back here" — the
+    reassuring wording is the one an unmeasurable series should keep.
+    """
+    prev: int | None = None
+    for run in runs:
+        n = getattr(run, "n_frames_used", None)
+        if not isinstance(n, int) or n <= 0:
+            continue
+        if prev is not None and n < prev:
+            return False
+        prev = n
+    return True
+
+
 def _load_label_font(size: int):
     """Pillow's built-in scalable font at ``size`` px — no bundled asset (mirrors
     :func:`seestack.nameplate._load_font`)."""

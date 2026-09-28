@@ -2320,7 +2320,15 @@ def deepening_reel_info(safe: str, request: Request) -> dict[str, Any]:
     :func:`seestack.render.deepening.deepening_series`), ``"stack"`` when it falls
     back to when the stacks *ran*. Without that field the caption could not tell a
     beginner whether "28 Jun → 28 Jul" is a month of shooting or a month of
-    pressing a button."""
+    pressing a button.
+
+    ``depth_monotone`` is the other thing the card cannot assume: because the
+    series is ordered by that capture clock and *not* by depth, a night stacked on
+    its own after a deeper run is the newest step while holding the fewest subs.
+    False says the reel steps back in depth somewhere, so the blurb can say
+    "grainier at one step" instead of "more subs each time"."""
+    from seestack.render.deepening import series_depth_is_monotone
+
     lib, proj = deps.open_target_project(request, safe)
     try:
         series = _deepening_runs(proj)
@@ -2353,6 +2361,13 @@ def deepening_reel_info(safe: str, request: Request) -> dict[str, Any]:
         "first_utc": first_utc,
         "last_utc": last_utc,
         "dated_by": series.dated_by,
+        # Whether the reel really does only get deeper. The series is ordered by
+        # when the subs were shot, not by depth (`deepening_series` uses depth as
+        # a tie-break only), so a night stacked on its own after a deeper run
+        # lands last with fewer subs in it — and the card's lead sentence was
+        # promising "more subs each time" over exactly that reel. Additive: an
+        # older frontend ignores it, and its absence keeps the old wording.
+        "depth_monotone": series_depth_is_monotone(runs),
         "format": "webp" if features.check("webp") else "png",
     }
 

@@ -2,6 +2,42 @@
 
 ## 2026-09-28 (Builder, evening) — two surfaces that describe one run, and the populations they were describing
 
+### v0.484.8 — 🟡 BUG FIX (trust, PRIORITY 3), Builder-found and reproduced through `deepening_series` itself: **the "night after night" card promised a picture that gets "cleaner and deeper … more subs each time" over a reel that visibly gets grainier, and its own caption printed the numbers that said so.**
+
+**The reel is ordered by when the subs were *shot*, and that is right.** v0.480.0 moved
+`render/deepening.deepening_series` onto the capture clock at the owner's request, with depth as a tie-break
+only, and its docstring is explicit that the result may be non-monotone: *"a genuinely non-monotone depth (a
+single late night stacked on its own after a deeper earlier run) is then a fact about the library rather than
+something the ordering should hide."* Nothing downstream had heard that.
+
+**Reproduced on the real function, not reasoned:** three runs — night 1 (100 subs), nights 1–2 (200), then
+*just tonight's* subs on their own (30) — order **100 → 200 → 30**, because the third has the newest capture
+window. `deepeningCaption` then printed *"3 stacks · 100 → 30 subs · shot 10 Jun → 10 Aug"* directly beneath
+`deepeningBlurb`'s *"Watch M31 get cleaner and deeper across your 3 stacks — the same picture, more subs each
+time."* (The blurb's `last > first` branch fails, so the reel that steps back gets the **generic** sentence,
+which is the one that claims the most.) That shape is the owner's own: he reprocesses targets and stacks
+single nights.
+
+**One additive fact, and the copy tells the truth from it.** New pure
+`deepening.series_depth_is_monotone(runs)` — the module that decides the order now also answers "does it only
+get deeper?" — is served by `GET …/deepening-reel/info` as `depth_monotone`, and `deepeningBlurb` says
+*"…in the order you shot them. Not every stack here has more subs than the one before, so the picture gets
+grainier at one step instead of steadily cleaner — that step is a night stacked on its own, not a problem with
+your data."* Deliberately **not** an ordering change: dropping or re-sorting the shallow step would hide the
+fact the ordering exists to show.
+
+**Upgrade-safe (§9):** one additive response field with a default the old wording keeps — `depth_monotone`
+absent (older backend) or `true` leaves the sentence byte for byte what it was, and an older frontend ignores
+it. No config, schema, on-disk, default or existing-response-shape change; nothing removed from the card, no
+new card, no new page height (the blurb is one line either way).
+
+**Tests (+2 Python engine / +2 Python webapp / +3 vitest).** The engine pair pins the reproduced 100 → 200 → 30
+shape and the cases that must stay reassuring (monotone, equal depth, an empty series, an unreadable count —
+which is skipped rather than counted as a drop to zero). The endpoint pair pins the field both ways through a
+real library. The vitest trio pins that the promise is withdrawn, that the figures survive, and that a
+monotone series and an older backend get **identical** text. Fail-before verified by scratch-reverting each
+side.
+
 ### v0.484.7 — 🟡 BUG FIX (trust + friendliness, PRIORITY 3), Builder-found by re-sweeping the wrong-denominator class **in TypeScript**: **History's roughly-aligned note divided a count of *contributing* subs by the count of *offered* subs, so it quoted a denominator the numerator never came from — and went quiet about the fix the Target page was already prescribing for the same run.**
 
 **The contract that was claimed and not kept.** `seestack/stackhealth.py`'s comment on
