@@ -1,5 +1,52 @@
 # Process notes & QA sweep records
 
+## 2026-09-28 (Builder run) — the fixture that was too small, and the measurement that moved a design
+
+*(Builder, branch `claude/awesome-fermat-80wbok` → v0.483.3 + v0.484.0. Baseline green — **6,875 passed, 2 skipped**,
+18m42s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first.)*
+
+**Both tasks came out of a benchmark that crashed.** The run started intending to build the mosaic half of
+`star_match_unsolved` (front of the queue), and the first thing it did was measure the backlog entry's own cost
+claim — astroalign re-extracts both sides per call, so how much is one extraction worth? The benchmark, at a **real
+Seestar frame's size** rather than the test suite's 240×160, died inside `sep` with *"internal pixel buffer full:
+the limit of 300000 active object pixels over the detection threshold was reached"*. That is not a benchmark bug: it
+is the shipped star matcher, refusing every sub on every real frame. Details in `SHIPPED.md` under v0.483.3; the
+short version is that `registration_gray` clipped the sky noise's negative half away, which collapses the noise
+estimate `sep` derives its threshold from, so 63 % of a real frame read as star pixels.
+
+**Two lessons worth keeping, and the first is not "test at real size".**
+
+1. **A fixture's *size* is a claim, and nothing in this repo was asserting it.** The bug is unreachable below
+   300,000 pixels, and every fixture in `tests/test_star_match_registration.py` has 38,400 or 153,600. The suite was
+   not weak about star matching — it has a rotation ladder checked against sky truth in arcseconds — it was just
+   answering a different question from the one a real frame asks. The new test therefore asserts the fixture's own
+   claim (`assert flat.size > SEP_EXTRACT_PIXSTACK_DEFAULT`), in the `tests/shapes.py` idiom, so the next reader can
+   see at a glance which tests can exhibit a size-dependent failure and which cannot. **Worth a sweep by whoever
+   next has time:** what else in this engine has a threshold, buffer or limit whose units are *pixels*, and is only
+   ever tested on a frame an eighth of the real size?
+2. **A guard that "fixed" something can be a symptom's fix.** v0.482.0 raised `sep`'s deblend cap from 1,024 to
+   65,536 on a measurement — "0 of 8 subs matched at the default, 8 of 8 raised" — taken on a **30-star** 480×320
+   field. Thirty stars cannot deblend into 1,024 sub-objects. It was deblending *noise*, for the same reason. With
+   the clip gone, that fixture matches 8 of 8 at `sep`'s own default, and so do 1,200 stars on 480×320 and 3,000 on
+   1920×1080. The cap stays (it only sizes a buffer, and a real crowded sky is not a synthetic one) but its comment
+   and its test now say they cover the raise rather than demonstrate its necessity. The tell to look for: **a fix
+   whose measurement was taken through the thing that was actually broken.**
+
+**Then the mosaic half, where the same instinct — measure the premise — changed the build.** The backlog entry's
+costing was "P anchors cost P extractions of the same moving frame; look at whether the matcher can be handed
+pre-extracted control points instead". Pre-extraction was built (`starmatch.StarField`), and then measured: at 50
+control points a side, **one extraction is 62 ms and one triangle match is 236 ms**. The extraction was never the
+expensive half. So the saving is ~20 %, and the lever that matters is *which anchor you try first* — hence
+`_anchor_order`, trying anchors nearest-in-time to the sub's own `DATE-OBS`, because a mosaic is shot panel by
+panel. Both the `StarField` docstring and the backlog entry now carry the number rather than the assumption.
+
+**One test in this run passed on the bug, and was caught only by reverting.** The first version of the
+anchor-ordering test drove it through `_star_matched_unsolved_frames` with a one-match budget — and passed with the
+ordering deleted, because the budget is checked once per *sub*, not per anchor, so a sub gets placed either way. The
+rule was extracted into pure `_anchor_order` and tested directly. **Every behaviour claim in this run was reverted
+in a scratch copy and watched to fail** (three for v0.483.3, two for v0.484.0); the one that did not fail is the
+reason that discipline is not optional.
+
 ## 2026-09-27 (third Builder run) — the subs the app could not read, and the batch that would not say why
 
 *(Builder, branch `claude/exciting-tesla-xhn1xj` → v0.483.1 + v0.483.2. Baseline green — **6,865 passed,
