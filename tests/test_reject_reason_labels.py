@@ -50,7 +50,7 @@ _PY_DIRS = ("seestack", "webapp")
 #: the write, and any edit that does touch it goes through
 #: ``test_the_exempt_list_names_only_sites_that_still_exist``.
 _EXEMPT: dict[str, str] = {
-    "seestack/qc/runner.py::apply_qc_result_to_db::f'{reason}:{result.error or 'unknown'}'": (
+    "seestack/qc/runner.py::apply_qc_result_to_db::f{reason}:{result.error or unknown}": (
         "f\"{reason}:…\" — the namespace is a local chosen one line above "
         "(`qc_error` retryable / `qc_error_final` terminal); both are covered by "
         "the `qc_error` entry in HANDLED_PREFIXES, which a vitest case exercises."
@@ -108,6 +108,23 @@ def _literals(node: ast.expr) -> tuple[set[str], set[str], bool]:
     return exact, prefixes, opaque
 
 
+#: ``ast.unparse`` is not stable across CPython **patch** releases in the one thing a
+#: site key must not depend on: which quote character it puts *outside* an f-string
+#: that contains a quoted literal. 3.12.3 emits ``f'…or 'unknown'…'`` (PEP 701 lets it
+#: reuse the same quote); 3.12.14 and 3.11 emit ``f"…or 'unknown'…"``. Keying on the
+#: raw unparse therefore made the exemption **environment-dependent** — it passed here
+#: and took `main` red on the runner, which is worse than the line number it replaced.
+#: Quote characters are exactly the part of the source that does not identify a write,
+#: so they are dropped: the identifiers, operators and literal *contents* remain.
+_QUOTES = re.compile(r"['\"]")
+
+
+def _write_source(node: ast.expr) -> str:
+    """The write's expression source, normalised so a site key cannot depend on the
+    interpreter's choice of quote character (see :data:`_QUOTES`)."""
+    return _QUOTES.sub("", ast.unparse(node))
+
+
 def _enclosing_scopes(tree: ast.AST) -> list[tuple[int, int, str]]:
     """``(first_line, last_line, name)`` for every def in ``tree``, innermost last
     when sorted by span — so :func:`_scope_of` can name a write's own function."""
@@ -158,7 +175,7 @@ def _write_sites() -> list[tuple[str, ast.expr]]:
                             values.append(node.value)
                 for value in values:
                     scope = _scope_of(scopes, value.lineno)
-                    out.append((f"{rel}::{scope}::{ast.unparse(value)}", value))
+                    out.append((f"{rel}::{scope}::{_write_source(value)}", value))
     return out
 
 
@@ -226,6 +243,27 @@ def test_the_exempt_list_names_only_sites_that_still_exist():
     sites = {site for site, _ in _write_sites()}
     stale = sorted(s for s in _EXEMPT if s not in sites)
     assert not stale, f"these exempted write sites no longer exist: {stale}"
+
+
+def test_a_site_key_does_not_depend_on_the_interpreters_quote_choice():
+    """FAIL-BEFORE (v0.484.5): the key must be the *same string* on every CPython.
+
+    ``ast.unparse`` picks a different outer quote for an f-string containing a quoted
+    literal depending on the patch release — 3.12.3 reuses the single quote (PEP 701),
+    3.11 and 3.12.14 switch to a double one. Keying the exemption on the raw unparse
+    made it environment-dependent: v0.484.2 passed locally on 3.12.3 and took `main`
+    red on the runner's 3.12.14, which is a worse failure than the line number it
+    replaced. Both renderings of the one real f-string write must normalise to one key.
+    """
+    both = [
+        '''x = f"{reason}:{result.error or 'unknown'}"''',
+        """x = f'{reason}:{result.error or "unknown"}'""",
+    ]
+    keys = {_write_source(ast.parse(src).body[0].value) for src in both}
+    assert len(keys) == 1, keys
+    # And the key the real write produces on *this* interpreter is the one _EXEMPT
+    # holds — the assertion CI made and this container did not.
+    assert keys.pop() == "f{reason}:{result.error or unknown}"
 
 
 def test_the_metric_labels_say_what_the_engine_says():
