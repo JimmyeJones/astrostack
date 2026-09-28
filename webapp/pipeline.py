@@ -3988,8 +3988,9 @@ def _stack_target(
         "n_read_errors": getattr(result, "n_read_errors", 0),
         "n_read_recovered": getattr(result, "n_read_recovered", 0),
         # How many contributing subs were placed by matching their **star
-        # patterns** to the reference sub rather than by a plate solve of their own
-        # (``star_match_unsolved``, off by default). A picture that is suddenly
+        # patterns** to a sub that *did* solve — the reference on a single field, the
+        # sub's own panel's anchor on a mosaic (v0.484.0) — rather than by a plate
+        # solve of their own (``star_match_unsolved``, off by default). A picture that is suddenly
         # several times deeper than the user's last one should say where that depth
         # came from, and those subs' positions are derived from a neighbour rather
         # than measured against the sky — which is an honest thing to know and a

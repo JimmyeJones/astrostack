@@ -73,3 +73,35 @@ def test_a_result_from_before_the_field_existed_degrades_to_zero(
     raise mid-job."""
     _stack_returning(monkeypatch)
     assert _run(solved_library)["n_star_matched"] == 0
+
+
+def test_the_forms_copy_does_not_tell_a_mosaic_user_the_pass_is_skipped():
+    """The other half of "it leaves the engine": the sentence beside the switch.
+
+    v0.484.0 taught this pass to place a **mosaic's** subs — one star anchor per
+    solved panel, asserted by
+    ``tests/test_stack_star_match_unsolved.py::test_a_mosaic_stack_takes_the_subs_the_solver_could_not_place``
+    — and left the Stack form still ending *"Skipped on a mosaic, where the subs
+    cover different parts of the sky."* The owner is a heavy mosaic user, so on the
+    one surface where he learns what the switch does, the feature built for him said
+    it was not for him. Nothing tested the copy, so nothing caught it.
+
+    Worded as "the claim it must not make" rather than as a snapshot of the current
+    sentence: this help text is rewritten regularly, and a test that pins the exact
+    wording is one that gets updated without being read.
+    """
+    from webapp.schemas import stack_option_fields
+
+    field = next(f for f in stack_option_fields()
+                 if f.key == "star_match_unsolved")
+    text = (field.help or "")
+    lowered = text.lower()
+    assert "mosaic" in lowered, text
+    for claim in ("skipped on a mosaic", "not on a mosaic", "mosaics are skipped",
+                  "single field only", "single-field only"):
+        assert claim not in lowered, (claim, text)
+    # And it still names the case that genuinely is out of reach, so "mosaics are
+    # included" cannot be read as "every panel": a panel where *nothing* solved has
+    # no anchor, deliberately (v0.484.0 — a centre-shift cap wide enough to admit a
+    # whole panel step would also admit a wrong lock).
+    assert "panel" in lowered, text

@@ -1,5 +1,39 @@
 # Shipped — the record
 
+## v0.484.4 — 2026-09-28 — the Stack form stops telling a mosaic user this switch is not for them: `star_match_unsolved` help
+
+🟡 **BUG FIX (friendliness — PRIORITY 3). Builder-found while shipping v0.484.3, in the copy of the very feature
+that run was deepening.** "Include subs that aren't located yet" ended:
+
+> *"Off by default, and it reads each un-located sub once more, so it adds some time. **Skipped on a mosaic, where
+> the subs cover different parts of the sky.**"*
+
+v0.484.0 made that false the previous night — the pass now takes one star anchor per solved panel and places each
+sub on the panel its stars measurably match, which
+`tests/test_stack_star_match_unsolved.py::test_a_mosaic_stack_takes_the_subs_the_solver_could_not_place` asserts
+against real pixels. The sentence stayed. **The owner is a heavy mosaic user** (Owner Facts: `<T>_mosaic_sub/`,
+26 mosaics), so on the one surface where he learns what this switch does, the feature built for him said it would
+not run. It is the whole cost of the last three runs' work on this option, spent on one stale clause, and nothing
+in the suite touched the copy.
+
+**What it says now** names both halves, because "mosaics are included" on its own would over-promise: *"Mosaics
+are included: every panel that has at least one located sub can place its own, and each sub goes on the panel its
+stars actually match — but a panel where nothing at all was located stays out."* That last clause is v0.484.0's
+own deliberate limit — a centre-shift cap wide enough to admit a whole panel step would also admit a wrong lock —
+so the help now states the limitation instead of overstating it.
+
+**The test is worded as the claim it must not make**, not as a snapshot of today's sentence: this help text is
+rewritten regularly, and a test pinning the exact wording is one that gets updated without being read. It asserts
+the copy mentions mosaics, mentions panels, and makes none of five "it will not run on a mosaic" claims — and it
+lives beside the wiring tests for the same feature, citing the behaviour test by name so the next reader can see
+what the copy is answerable to. Fail-before shown against `HEAD`'s own `schemas.py`.
+
+Also corrected, for accuracy rather than as a user-facing fix: `webapp/pipeline.py`'s comment on `n_star_matched`
+still said the subs were matched "to the reference sub", which on a mosaic is now the sub's own panel's anchor.
+
+Help text and one comment: no engine, frontend, config, schema, on-disk, API-shape or default change — the
+`stackOptionPlacement.json` snapshot carries `type`/`group`/`depends_on` only, so it is untouched.
+
 ## v0.484.3 — 2026-09-28 — a star-matched sub joins its panel's population too: `stacker._star_matched_unsolved_frames` centres + `_panel_refine_centre`
 
 **The one thing v0.484.0 deliberately did not change, filed as the top "Bugs" lead the same night, now fixed
