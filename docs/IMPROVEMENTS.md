@@ -3228,6 +3228,35 @@ off by default. Don't re-file it.)*
   the card is on the page).
 
 ### UX & polish
+- **OWNER-REQUESTED 2026-09-28 — READY — give the app a real night-sky look: a darker sky background and a
+  gentle parallax starfield behind the pages.** *(The owner asked for this directly in a session; he set the §1
+  priority order, so this request is his call to make and outranks the "cosmetic last" rule for this one item.
+  Do not re-ask whether it is worth doing.)* Today the shell is Mantine's stock dark theme with a violet accent
+  and no custom styling (`frontend/src/main.tsx` `createTheme`, `frontend/src/App.tsx` `AppShell`). **Size M.**
+  **What he asked for:** a darker, deep-navy/near-black sky instead of flat grey; parallax stars (2–3 layers
+  drifting at different speeds, optionally a faint Milky Way haze); "etc." — so cards and the navbar can go
+  slightly translucent so the sky shows at the edges, with a soft glow on the accent colour.
+  **Constraints, each load-bearing:**
+  1. **The editor and compare surfaces keep a neutral surround** (`routes/Editor.tsx`, `Compare`, the
+     lightbox and `FullSizeCheck`, which already paint `#000` behind the image). A tinted or starry surround
+     shifts how colour and background level are perceived — the reason PixInsight/Photoshop use neutral grey —
+     and the editor is PRIORITY 1. No starfield behind or beside the picture being judged; a plain dark
+     neutral there. Check the preview area on a `--mosaic --editor --big` dogfood pass.
+  2. **Motion is gentle and optional.** Stars sit still under `prefers-reduced-motion`, the animation pauses
+     when `document.hidden`, and there is a per-device switch in Settings → *This device*, next to
+     `AmbientSettings`. Follow the ambient soundbed's precedent exactly: client-side `localStorage` prefs
+     (`frontend/src/ambient/prefs.ts` pattern, every access in try/catch), **no server setting, no config
+     migration** (§9). Default: the dark sky palette and starfield **on** (it is what the owner asked the app
+     to look like), the switch turns the starfield off and falls back to the plain dark sky.
+  3. **Cheap.** Pure CSS layers or one small `<canvas>` behind the `AppShell` at `z-index` below content,
+     `pointer-events: none`, no new dependency, no per-frame React re-renders. Must not cost the Sky/Universe
+     three.js routes frame rate (consider hiding it there — they draw their own sky).
+  4. **Readable.** Text contrast on translucent cards stays at least what it is today; check the busiest pages
+     (Dashboard, Target, Settings) at phone width. Nothing removed or moved (the UI rule) — this is paint, not
+     layout.
+  **Done when:** tsc/vitest/vite build green, a test for the prefs (default on, off persists, storage throwing
+  → default) and for reduced-motion/hidden pausing, the editor route rendering without the starfield, and a
+  before/after note in the commit from a dogfood pass.
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
 - Better empty-states and error messages on long-running jobs. (S)
 
