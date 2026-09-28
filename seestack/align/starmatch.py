@@ -80,12 +80,19 @@ DEFAULT_MAX_ROTATION_DEG = 90.0
 # overflows it. astroalign then re-raises that as a generic "Input type for source
 # not supported", i.e. indistinguishable from having been handed something that is
 # not an image at all, so the symptom is a matcher that quietly never matches.
-# Measured on a 480x320 synthetic field of 30 stars: **0 of 8** subs matched at
-# sep's default and **8 of 8** at 8192, with the rotations recovered to 0.07 deg
-# and sub-pixel residuals. This value is that measurement scaled by the area of a
-# real Seestar frame, which is ~16x larger. The limit only sizes an internal
-# buffer, so raising it costs a sparse field nothing — and a sparse field is the
-# one this module exists for.
+#
+# **What the original measurement behind this number was really measuring, found
+# 2026-09-28.** It was "0 of 8 subs matched at sep's default, 8 of 8 at 8192" on a
+# 480x320 field of 30 stars — a field far too sparse to deblend 1024 sub-objects
+# out of. It did so because :func:`registration_gray` clipped the sky noise's
+# negative half away, which collapsed the noise estimate sep sets its detection
+# threshold from, so *noise* was being deblended. With the negatives kept, the same
+# fixture matches 8 of 8 at sep's own default, and so do 1,200 stars on 480x320 and
+# 3,000 on 1920x1080 — all measured. So nothing synthetic needs this any more.
+# It is kept, not removed: the limit only sizes an internal buffer, so a sparse
+# field pays nothing for it, and a real crowded sky (a globular, the galactic
+# plane) is not a synthetic one. What it must not be read as any more is evidence
+# that a rich field overflows at sep's default.
 SEP_SUB_OBJECT_LIMIT = 65536
 
 
@@ -103,15 +110,18 @@ def registration_gray(path: str) -> np.ndarray | None:
     """Load a sub as a background-flattened luminance plane, ready to register.
 
     Debayer to RGB, average to one luminance plane, then subtract a robust sky
-    level and clip the negatives away, so what a matcher sees is the **stars**
-    rather than the (frame-varying) sky pedestal or the Bayer checkerboard.
-    Returns ``None`` on any read or decode problem — a sub that cannot be read is
-    skipped, never fatal.
+    level, so what a matcher sees is the **stars** rather than the (frame-varying)
+    sky pedestal or the Bayer checkerboard. Returns ``None`` on any read or decode
+    problem — a sub that cannot be read is skipped, never fatal.
 
     Both sides of a registration have to be prepared the same way or their
     difference is in the preparation rather than in the sky, which is why this
     lives beside the matcher and why the bootstrap rescue's phase-correlation pass
     calls it too.
+
+    **The sky noise's negative half is kept, deliberately** — see the comment on
+    the subtraction below. Clipping it away, which this used to do, made the star
+    matcher inert on a real Seestar sub while every 480x320 fixture passed.
     """
     try:
         from seestack.io.fits_loader import load_seestar_raw
@@ -126,10 +136,24 @@ def registration_gray(path: str) -> np.ndarray | None:
     if gray.ndim != 2 or gray.size == 0:
         return None
     # Robust sky subtraction: the median is a stable pedestal estimate on a
-    # star-sparse field. Clip negatives so only star flux drives the match.
+    # star-sparse field, and subtracting it is the whole of what a matcher needs.
+    # The negatives it leaves behind are the lower half of the sky noise and are
+    # **kept**: clipping them away (which this used to do) parks half the frame's
+    # pixels at exactly 0.0, and that spike at zero collapses the noise estimate
+    # every star extractor derives its detection threshold from. Measured on a
+    # real-sized sub (1920x1080, 120 stars): ``sep`` — the extractor astroalign
+    # detects with — reported a global RMS of **0.0006** clipped against **21.6**
+    # unclipped, put its 5-sigma threshold inside the noise, and read **63 % of
+    # the frame** as star pixels instead of 0.6 %. That is past sep's 300,000-pixel
+    # extraction buffer, so it refused outright, astroalign re-raised the refusal
+    # as its generic "input type not supported", and ``find_star_transform``
+    # returned ``None`` for every sub — the whole star-match path silently placed
+    # nothing on a real frame. Unclipped, the same frame yields 118 of its 120
+    # stars. A 480x320 fixture cannot exhibit it: it has 153,600 pixels in total,
+    # so it can never reach a 300,000-pixel buffer however wrong the threshold is,
+    # and its top-50-by-flux control points are the real stars anyway.
     sky = float(np.nanmedian(gray))
     flat = gray - sky
-    np.clip(flat, 0.0, None, out=flat)
     # A frame that came back all-NaN or flat (no signal) can't register.
     if not np.isfinite(flat).any() or float(np.nanmax(flat)) <= 0.0:
         return None

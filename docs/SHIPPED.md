@@ -1,5 +1,74 @@
 # Shipped — the record
 
+## v0.483.3 — 2026-09-28 — the star matcher was inert on a real Seestar sub, and every fixture was too small to say so
+
+🟠 **BUG (image quality + autonomy + trust — PRIORITY 2/4; engine; Builder-verified by reproduction before the
+fix and by a scratch revert after it).** `seestack/align/starmatch.py::registration_gray` — the one preparation
+both star-matching callers share — subtracted the sky median and then **clipped the negative half of the sky
+noise away**. That clip is what made the whole star-match path place nothing on a frame the size of a real
+Seestar sub.
+
+**The mechanism, measured rather than reasoned.** Every star extractor sets its detection threshold from a noise
+estimate. Clipping the negatives parks half the frame's pixels on exactly `0.0`, and a sigma-clipped estimator
+converges onto that spike, so the estimate collapses. Measured on a 1920×1080 synthetic sub of 120 stars,
+through the production function:
+
+| the pixels handed to `sep` | its global RMS | pixels over its 5σ threshold | sources found |
+|---|---|---|---|
+| raw luminance | 21.63 | 11,527 (0.6 %) | 118 |
+| median-subtracted, negatives **kept** (now) | 21.63 | 11,527 (0.6 %) | **118 of 120** |
+| median-subtracted, **clipped** (before) | **0.0006** | **1,305,502 (63.0 %)** | **refused** |
+
+At 0.0006 the 5σ threshold is *inside* the noise, so 63 % of the frame reads as star pixels — past `sep`'s
+300,000-pixel extraction buffer. `sep` refuses, astroalign re-raises the refusal as its generic *"Input type for
+source not supported"*, and `find_star_transform` returns `None`. So on the owner's own frames:
+
+- **`StackOptions.star_match_unsolved` (v0.482.0) placed nothing.** A target where 40 of 300 subs solved still
+  stacked 40.
+- **The bootstrap rescue's star matching (v0.481.0) never engaged** — and that one is worse than a no-op,
+  because `propagate_wcs` *prefers* a star transform and falls back to a phase-correlation shift. Falling back is
+  precisely the confident mis-placement of a rotated alt-az night that v0.481.0 was built to stop, so the fix
+  shipped and the bug it fixed stayed live on real data.
+
+**Why it survived its own tests, which is the part worth remembering.** `sep`'s buffer holds 300,000 pixels.
+`tests/test_star_match_registration.py` works at **240×160** (38,400 pixels) and its densest fixture at
+**480×320** (153,600) — neither can reach a 300,000-slot buffer *however wrong the threshold is*. And below the
+refusal the small fixtures pass for a second wrong reason: `sep` sorts detections by flux, so even with 52 % of a
+480×320 frame "detected", the top 50 control points are still the real stars and the match succeeds. The bug is a
+property of **frame size**, and no fixture had one. (Exactly the class `docs/FOCUS.md` flags: a regression test
+whose fixture cannot show the bug is green for the same reason a broken feature is.)
+
+**The fix is the subtraction without the clip.** Median-subtracted-with-negatives is bit-for-bit as good for
+detection as the raw luminance (see the table) and still removes the frame-varying pedestal and the Bayer
+checkerboard, which is all the docstring ever claimed the preparation was for. The negatives are the lower half
+of the sky noise and are now kept deliberately, with the measurement in the code beside them.
+
+**One thing this corrects about v0.482.0.** `SEP_SUB_OBJECT_LIMIT` (sep's *deblend* cap, raised from 1024 to
+65536) was measured as "0 of 8 subs matched at sep's default, 8 of 8 at 8192" on a 480×320 field of **30 stars** —
+a field far too sparse to deblend 1024 sub-objects out of. It was deblending *noise*, for the same reason. With
+the negatives kept, that fixture matches **8 of 8 at sep's own default**, and so do 1,200 stars on 480×320 and
+3,000 on 1920×1080. The cap is **kept** — it only sizes an internal buffer, so a sparse field pays nothing, and a
+real crowded sky is not a synthetic one — but its comment and its test now say what they actually cover, rather
+than standing as evidence that a rich field overflows.
+
+**Tests: +3, all three fail before** (verified by re-adding the clip in a scratch revert and watching them go
+red, then restoring):
+- `test_the_prepared_frame_keeps_the_sky_noise_its_threshold_is_derived_from` — on the production function at
+  1920×1080: the noise straddles zero (before: 0.0 % of pixels negative), `sep`'s global RMS agrees with a
+  MAD-scaled robust sigma within 2× (before: 0.0022 against ~21), and the fixture asserts its **own** claim, that
+  it has more pixels than `sep`'s buffer has slots.
+- `test_a_real_sized_night_is_placed_by_its_stars[4.0, -13.0]` — the rescue's real path at 1920×1080, checked
+  against **sky truth** (a star's position under the reference's own WCS), sub-pixel, the same way its 240×160
+  sibling is.
+The existing `test_a_rich_field_matches_instead_of_overflowing_the_extractor` keeps both assertions and is
+relabelled as coverage of the raised cap rather than of a bug — the same move v0.417.1 made for its `very-deep`
+rung. Nothing was weakened, skipped or deleted; the module's `_gray` helper, which exists to mirror
+`registration_gray`, was updated in lockstep because that is what keeping a mirror in sync means.
+
+**Upgrade-safe:** engine-only, one function's arithmetic. No config, schema, on-disk layout, API shape or default
+changed; both callers (`astap_bootstrap_solve`, `star_match_unsolved`) remain **off by default**, so this can only
+change a run that has already opted in.
+
 ## v0.483.2 — 2026-09-27 — a batch that ran for days says *why* its targets failed, not just which
 
 🟡 **BUG (friendliness — PRIORITY 3), the other half of what observer issue

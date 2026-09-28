@@ -25,6 +25,7 @@ from seestack.align.starmatch import (  # noqa: E402
     DEFAULT_MAX_ROTATION_DEG,
     SEP_SUB_OBJECT_LIMIT,
     find_star_transform,
+    registration_gray,
 )
 from seestack.io.project import FrameRow, Project  # noqa: E402
 from seestack.io.wcs_io import (  # noqa: E402
@@ -57,15 +58,28 @@ SEED = 7
 ROTATIONS = [2.0, 4.0, 7.0, 11.0, 16.0, 22.0, -5.0, -13.0]
 DITHER = (2.0, -1.0)
 
+# A **real** Seestar sub's shape, for the tests that cannot be written at this
+# module's 240x160. ``sep`` — the extractor astroalign detects stars with —
+# refuses once more than this many pixels sit over its detection threshold, and
+# re-raises that as a generic error astroalign reports as "input type not
+# supported", i.e. indistinguishable from never having matched. A 240x160 frame
+# holds 38,400 pixels in total, so it cannot reach the buffer however wrong the
+# threshold is: the whole class of "the threshold is in the noise" bug is
+# invisible at this module's size and needs a fixture with more pixels than the
+# buffer has slots. (v0.483.3 was exactly that bug.)
+SEP_EXTRACT_PIXSTACK_DEFAULT = 300_000
+REAL_W, REAL_H = 1920, 1080
+REAL_N_STARS = 120
+
 
 def _gray(rotation_deg: float, *, shift=DITHER, noise_seed: int = 1,
           width: int = W, height: int = H, n_stars: int = N_STARS) -> np.ndarray:
     """A background-flattened luminance frame of the field, rotated by ``rotation_deg``.
 
     Mirrors ``starmatch.registration_gray``'s preparation (debayer → luminance →
-    robust sky subtraction → clip) so these tests see the pixels the rescue sees.
-    ``width``/``height``/``n_stars`` default to this module's small field; the
-    extractor-overflow test needs a denser one.
+    robust sky subtraction, **negatives kept**) so these tests see the pixels the
+    rescue sees. ``width``/``height``/``n_stars`` default to this module's small
+    field; the extractor tests need a denser or a bigger one.
     """
     from seestack.io.fits_loader import bilinear_debayer
 
@@ -75,18 +89,19 @@ def _gray(rotation_deg: float, *, shift=DITHER, noise_seed: int = 1,
     )
     rgb = bilinear_debayer(mosaic.astype(np.float32))
     gray = rgb.mean(axis=2)
-    return np.clip(gray - float(np.median(gray)), 0.0, None).astype(np.float32)
+    return (gray - float(np.median(gray))).astype(np.float32)
 
 
-def _ref_wcs_text() -> str:
+def _ref_wcs_text(*, width: int = W, height: int = H) -> str:
     return make_synth_wcs_text(
-        width=W, height=H, ra_center_deg=RA0, dec_center_deg=DEC0,
+        width=width, height=height, ra_center_deg=RA0, dec_center_deg=DEC0,
         pixscale_arcsec=PIXSCALE, crpix_shift=(0.0, 0.0),
     )
 
 
 def _placement_errors_arcsec(frame_wcs_text: str, rotation_deg: float,
-                             *, shift=DITHER) -> np.ndarray:
+                             *, shift=DITHER, width: int = W, height: int = H,
+                             n_stars: int = N_STARS) -> np.ndarray:
     """How far each star lands from where the reference's WCS says it is, in arcsec.
 
     The only honest measure of a propagated solution: take a star's true position
@@ -94,12 +109,12 @@ def _placement_errors_arcsec(frame_wcs_text: str, rotation_deg: float,
     the sky the *reference* sub's WCS gives the same star. A correct placement is
     sub-pixel; a translation fitted to a rotated field is not.
     """
-    ref = wcs_from_text(_ref_wcs_text())
+    ref = wcs_from_text(_ref_wcs_text(width=width, height=height))
     frame = wcs_from_text(frame_wcs_text)
     assert ref is not None and frame is not None
     out = []
     for cat_xy, frame_xy in rotated_star_positions(
-        width=W, height=H, n_stars=N_STARS, seed=SEED,
+        width=width, height=height, n_stars=n_stars, seed=SEED,
         rotation_deg=rotation_deg, shift=shift,
     ):
         claimed = np.asarray(frame.all_pix2world([list(frame_xy)], 0)[0], dtype=float)
@@ -185,16 +200,25 @@ def test_find_star_transform_declines_a_rescaled_field():
 
 
 def test_a_rich_field_matches_instead_of_overflowing_the_extractor():
-    """sep's **default** sub-object cap overflows on a dense field, and astroalign
-    re-raises that as a generic "Input type for source not supported" — so the
-    symptom is a matcher that quietly never matches, indistinguishable from having
-    been handed something that is not an image.
+    """A dense field matches — and, since v0.483.3, it does so whether or not sep's
+    sub-object cap is raised. **Coverage of the raise, not of a bug.**
 
-    Measured on this fixture's shape (480x320, 30 stars, which is *sparser* than a
-    real Seestar sub): 0 of 8 subs matched at sep's default and 8 of 8 once the cap
-    is lifted. sep's limit is process-global, so this test puts it back to sep's own
-    default first — otherwise any earlier match in the same worker has already
-    lifted it and the test passes on the bug.
+    This test was written for v0.482.0's :data:`SEP_SUB_OBJECT_LIMIT`, whose
+    measurement was "0 of 8 subs matched at sep's default, 8 of 8 once the cap is
+    lifted" on this fixture. That overflow turned out to be downstream of something
+    else: :func:`registration_gray` used to clip the sky noise's negative half
+    away, which collapsed sep's own noise estimate and put its detection threshold
+    *inside* the noise, so a sparse 30-star field deblended like a crowded one.
+    With the negatives kept (v0.483.3) this fixture matches **8 of 8 at sep's own
+    default**, and so do 1,200 stars on 480x320 and 3,000 on 1920x1080 — all
+    measured. So the fail-before this test once had is gone, and it is kept as
+    coverage that the raised cap changes nothing rather than as a demonstration of
+    the cap's necessity; the cap stays because it only sizes an internal buffer and
+    a real crowded sky is not a synthetic one.
+
+    sep's limit is process-global, so the default is re-asserted here — which is
+    now the interesting half: it is what makes the test say "the raise is not what
+    makes this work".
     """
     sep = pytest.importorskip("sep")
     dense_ref = _gray(0.0, shift=(0.0, 0.0), noise_seed=31, width=480, height=320,
@@ -207,6 +231,86 @@ def test_a_rich_field_matches_instead_of_overflowing_the_extractor():
         sep.set_sub_object_limit(SEP_SUB_OBJECT_LIMIT)
     assert t is not None, "the rich field was not matched"
     assert t.rotation_deg == pytest.approx(-9.0, abs=0.25)
+
+
+# --- the frame size and the noise the threshold is derived from ------------
+#
+# Every fixture above is 240x160 or 480x320. A real Seestar sub is 1920x1080, and
+# the two tests below are the ones that shape can carry and this module's cannot.
+
+def test_the_prepared_frame_keeps_the_sky_noise_its_threshold_is_derived_from(tmp_path):
+    """FAIL-BEFORE: ``registration_gray`` used to clip the sky noise's negative half.
+
+    Every star extractor sets its detection threshold from a noise estimate, and a
+    frame whose negatives have been clipped to exactly 0.0 has half its pixels
+    parked on one value — a spike a sigma-clipped estimator converges onto, so the
+    estimate collapses and the threshold lands *inside* the noise. This asserts the
+    property that stops happening, on the production function, at a real sub's size:
+    the negative half of the sky noise is still there, and the noise ``sep``
+    measures agrees with a robust estimate of the frame's own.
+    """
+    sep = pytest.importorskip("sep")
+    path = write_seestar_fits(
+        tmp_path / "real.fit", width=REAL_W, height=REAL_H,
+        data=make_rotated_star_field(width=REAL_W, height=REAL_H,
+                                     n_stars=REAL_N_STARS, seed=SEED,
+                                     rotation_deg=0.0, noise_seed=1),
+    )
+    flat = registration_gray(str(path))
+    assert flat is not None
+    # The sky noise straddles zero, roughly half either side. Before: 0.0.
+    below = float((flat < 0.0).mean())
+    assert 0.25 < below < 0.75, below
+    # And sep's own global RMS agrees with a robust sigma of the same pixels
+    # (MAD-scaled, so the stars don't inflate it). Before: 0.0022 against ~21.
+    mad = float(np.median(np.abs(flat - np.median(flat))))
+    robust_sigma = 1.4826 * mad
+    rms = float(sep.Background(np.ascontiguousarray(flat, dtype=np.float32)).globalrms)
+    assert 0.5 < rms / robust_sigma < 2.0, (rms, robust_sigma)
+    # The fixture's own claim: it has more pixels than sep's buffer has slots, so
+    # it *can* exhibit the refusal. The small fixtures above cannot.
+    assert flat.size > SEP_EXTRACT_PIXSTACK_DEFAULT
+
+
+@pytest.mark.parametrize("rotation_deg", [4.0, -13.0])
+def test_a_real_sized_night_is_placed_by_its_stars(tmp_path, rotation_deg):
+    """FAIL-BEFORE at this size only: on a 1920x1080 sub the matcher placed nothing.
+
+    The bootstrap rescue prefers a star transform and falls back to a phase
+    correlation shift, so a matcher that silently never matches did not read as
+    broken — it read as the *old* behaviour, which is the confident mis-placement of
+    a rotated night v0.481.0 exists to prevent. Checked against sky truth, not
+    against the matcher's opinion of itself, exactly like its 240x160 sibling.
+    """
+    def gray(rot: float, *, shift, noise_seed: int) -> np.ndarray:
+        path = write_seestar_fits(
+            tmp_path / f"s{noise_seed}.fit", width=REAL_W, height=REAL_H,
+            data=make_rotated_star_field(width=REAL_W, height=REAL_H,
+                                         n_stars=REAL_N_STARS, seed=SEED,
+                                         rotation_deg=rot, shift=shift,
+                                         noise_seed=noise_seed),
+        )
+        out = registration_gray(str(path))
+        assert out is not None
+        return out
+
+    ref = gray(0.0, shift=(0.0, 0.0), noise_seed=1)
+    mov = gray(rotation_deg, shift=DITHER, noise_seed=2)
+    transforms = star_match_members([ref, mov], 0)
+    assert transforms[1] is not None, "a real-sized sub was not placed by its stars"
+    # The transform maps the moving sub onto the reference, so it *undoes* the
+    # field's rotation — the same sign convention the ladder above asserts.
+    assert transforms[1].rotation_deg == pytest.approx(-rotation_deg, abs=0.25)
+    text = propagate_wcs(
+        _ref_wcs_text(width=REAL_W, height=REAL_H),
+        register_members([ref, mov], 0), 0,
+        transforms=transforms, shapes=[(REAL_H, REAL_W), (REAL_H, REAL_W)],
+    )[1]
+    assert text is not None
+    errs = _placement_errors_arcsec(
+        text, rotation_deg, width=REAL_W, height=REAL_H, n_stars=REAL_N_STARS)
+    assert float(np.median(errs)) < PIXSCALE, float(np.median(errs))
+    assert float(errs.max()) < 2.0 * PIXSCALE, float(errs.max())
 
 
 def test_star_transform_summary_is_json_safe():
