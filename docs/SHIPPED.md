@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## v0.484.2 — 2026-09-28 — the reject-reason exemption stops being keyed on a line number: `test_reject_reason_labels._write_sites`
+
+**Infra / maintainability — a guard whose *key* went stale on every unrelated edit, which it did twice in two
+days.** `tests/test_reject_reason_labels.py` derives the reject-reason vocabulary from the code that writes it and
+requires any write it cannot read a literal out of to be listed in `_EXEMPT` **with the reason why** — a good rule,
+keyed on `<file>:<line>`. A line number is wrong in both directions. Edit anything *above* such a write and four
+tests fail naming a file you touched for reasons that have nothing to do with reject reasons: v0.484.0 paid that
+(commit `17314e9`, "re-point test_reject_reason_labels' file:line exemption at the write site v0.484.0 moved") and
+v0.484.3 paid it again in the next run. Meanwhile a write whose *expression is rewritten in place* keeps its
+exemption and its now-wrong sentence — the failure the rule exists to prevent, silently excused.
+
+The site key is now `<file>::<enclosing function>::<expression source>` (`ast.unparse` of the assigned value, with
+the narrowest enclosing `def` from new pure `_enclosing_scopes`/`_scope_of`). That is **stricter** on what matters:
+rewriting the write, or moving it to another function, invalidates the exemption and
+`test_the_exempt_list_names_only_sites_that_still_exist` says so — which the line key could not do. And it is
+immune to every edit that does not touch the write. The assertion message still prints the line, so a real new
+opaque write is still a copy-paste fix rather than an archaeology exercise.
+
+Nothing is loosened: both existing exemptions keep their sentences verbatim, and all four derived-vocabulary
+assertions are unchanged. Verified green against **clean `origin/main`**'s `stacker.py` as well as the edited one,
+which is the property the old key lacked. Test-only; no engine, webapp, frontend, config, schema, on-disk or API
+change.
 ## v0.484.1 — 2026-09-28 — the /live status word no longer clips to "Finishe…" at phone width
 
 🟡 **BUG FIX (friendliness — PRIORITY 3). Scout dogfood-found, `scripts/dogfood_probe.mjs` clipped-label

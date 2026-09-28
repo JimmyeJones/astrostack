@@ -39,13 +39,23 @@ _PY_DIRS = ("seestack", "webapp")
 #: Write sites whose stored string cannot be derived from the source, with the
 #: reason. Keep this tiny, and say what the reason *is* — that sentence is what
 #: the next reader needs.
+#:
+#: **Keyed on the write itself — file, enclosing function, expression source —
+#: and deliberately not on a line number.** A line number is wrong in both
+#: directions: an edit *anywhere above* the write re-points the key and fails
+#: these four tests for a change that has nothing to do with reject reasons (it
+#: cost two consecutive runs, 2026-09-27 and 2026-09-28), while a write whose
+#: expression is *rewritten in place* keeps its exemption and its stale sentence.
+#: Keying on the expression fixes both: it survives every edit that does not touch
+#: the write, and any edit that does touch it goes through
+#: ``test_the_exempt_list_names_only_sites_that_still_exist``.
 _EXEMPT: dict[str, str] = {
-    "seestack/qc/runner.py:117": (
+    "seestack/qc/runner.py::apply_qc_result_to_db::f'{reason}:{result.error or 'unknown'}'": (
         "f\"{reason}:…\" — the namespace is a local chosen one line above "
         "(`qc_error` retryable / `qc_error_final` terminal); both are covered by "
         "the `qc_error` entry in HANDLED_PREFIXES, which a vitest case exercises."
     ),
-    "seestack/stack/stacker.py:3044": (
+    "seestack/stack/stacker.py::run_stack::reason": (
         "a plain-English sentence composed at stack time (\"bad plate-solve "
         "(footprint far from the group)\") — deliberately shown verbatim, which is "
         "what rejectReasonLabel's fall-through is for."
@@ -98,13 +108,41 @@ def _literals(node: ast.expr) -> tuple[set[str], set[str], bool]:
     return exact, prefixes, opaque
 
 
+def _enclosing_scopes(tree: ast.AST) -> list[tuple[int, int, str]]:
+    """``(first_line, last_line, name)`` for every def in ``tree``, innermost last
+    when sorted by span — so :func:`_scope_of` can name a write's own function."""
+    out: list[tuple[int, int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out.append((node.lineno, node.end_lineno or node.lineno, node.name))
+    return out
+
+
+def _scope_of(scopes: list[tuple[int, int, str]], lineno: int) -> str:
+    """The name of the narrowest def containing ``lineno``, or ``"<module>"``.
+
+    The *name*, not the line, is what makes a site key stable: renaming or moving
+    the function is a change to the write's own context and should invalidate its
+    exemption; editing something else in the file should not.
+    """
+    inner = [s for s in scopes if s[0] <= lineno <= s[1]]
+    if not inner:
+        return "<module>"
+    return min(inner, key=lambda s: s[1] - s[0])[2]
+
+
 def _write_sites() -> list[tuple[str, ast.expr]]:
-    """Every place the Python side assigns a ``reject_reason``, as (site, value)."""
+    """Every place the Python side assigns a ``reject_reason``, as (site, value).
+
+    ``site`` is ``<file>::<function>::<expression source>`` — see ``_EXEMPT`` for
+    why it is not a line number.
+    """
     out: list[tuple[str, ast.expr]] = []
     for directory in _PY_DIRS:
         for path in sorted((_ROOT / directory).rglob("*.py")):
             tree = ast.parse(path.read_text(), filename=str(path))
             rel = path.relative_to(_ROOT).as_posix()
+            scopes = _enclosing_scopes(tree)
             for node in ast.walk(tree):
                 values: list[ast.expr] = []
                 if isinstance(node, ast.keyword) and node.arg == "reject_reason":
@@ -119,7 +157,8 @@ def _write_sites() -> list[tuple[str, ast.expr]]:
                                 and target.attr == "reject_reason"):
                             values.append(node.value)
                 for value in values:
-                    out.append((f"{rel}:{value.lineno}", value))
+                    scope = _scope_of(scopes, value.lineno)
+                    out.append((f"{rel}::{scope}::{ast.unparse(value)}", value))
     return out
 
 
@@ -153,8 +192,9 @@ def _vocabulary() -> tuple[set[str], set[str]]:
         prefixes |= p
         if opaque:
             assert site in _EXEMPT, (
-                f"{site} stores a reject_reason this test cannot derive. Either "
-                "give it a literal, or exempt it here with the reason why."
+                f"{site} (line {value.lineno}) stores a reject_reason this test "
+                "cannot derive. Either give it a literal, or exempt it in _EXEMPT "
+                "with the reason why."
             )
     return exact, prefixes
 
