@@ -1,5 +1,35 @@
 # Shipped — the record
 
+## v0.484.5 — 2026-09-28 — the site key stops depending on the interpreter's quote choice: `test_reject_reason_labels._write_source`
+
+🔴 **CI FIX, and the previous commit's own bug. `main`'s CI went red on run 1947 and this is the fix.**
+v0.484.2 re-keyed `_EXEMPT` from `<file>:<line>` to `<file>::<def>::<ast.unparse(value)>` to stop unrelated edits
+breaking it. `ast.unparse` turns out not to be stable across CPython **patch** releases in exactly the part a key
+must not depend on — which quote it puts *outside* an f-string that contains a quoted literal:
+
+| interpreter | `ast.unparse` of the one real f-string write |
+|---|---|
+| 3.12.3 (this container's venv) | `f'{reason}:{result.error or 'unknown'}'` — PEP 701 lets it reuse the quote |
+| 3.11.15, 3.12.14 (the CI runner), 3.13.12 | `f"{reason}:{result.error or 'unknown'}"` |
+
+So the exemption was **environment-dependent**: it passed the full local suite (6,894 passed) and failed all four
+derived-vocabulary assertions on the runner. That is a *worse* failure than the line number it replaced — a line
+number at least fails the same way everywhere — and it shipped because the change was verified against clean
+`origin/main`'s source but on only one interpreter.
+
+**The fix:** the key is normalised through new pure `_write_source`, which drops quote characters
+(`_QUOTES`) from the unparse. Quote characters are precisely the part of the source that does not identify a
+write; every identifier, operator and literal *content* survives, so the key still goes stale when the write is
+rewritten or moved — the property v0.484.2 was for — and two writes differing only in `"a"` versus `'a'`
+correctly collapse to one. The real write's key is now `…::apply_qc_result_to_db::f{reason}:{result.error or
+unknown}`.
+
+**Tests +1, and it is the assertion CI made that this container could not.** It parses *both* renderings of that
+f-string and asserts they normalise to one key, then asserts that key is the one `_EXEMPT` holds — so the check no
+longer depends on which quote the running interpreter happens to prefer. Verified by computing the key under
+**3.11.15, 3.12.3 and 3.13.12**, both renderings each: one identical key every time. Test-only; nothing loosened,
+both exemption sentences verbatim.
+
 ## v0.484.4 — 2026-09-28 — the Stack form stops telling a mosaic user this switch is not for them: `star_match_unsolved` help
 
 🟡 **BUG FIX (friendliness — PRIORITY 3). Builder-found while shipping v0.484.3, in the copy of the very feature
