@@ -70,6 +70,13 @@ export function StackView() {
   const [openSections, setOpenSections] = useState<string[]>(
     () => (searchParams.get("open") === "advanced" ? ["advanced"] : []),
   );
+  // `?reel=1` — arrived from the "night after night" card's offer to build the
+  // night-by-night clip this target already has the subs for. It defaults the
+  // advanced `save_progress` switch **on** (and the offer's own `?open=advanced`
+  // puts it on screen rather than folded away), so the one thing the offer is
+  // about is already set when the form lands. A *default*, not a lock: untick it
+  // and this is an ordinary re-stack. See `frontend/src/nightReelOffer.ts`.
+  const wantReel = searchParams.get("reel") === "1";
   const qc = useQueryClient();
   const [values, setValues] = useState<Record<string, unknown>>({});
   // True once `values` has been seeded from the loaded defaults (see the sync
@@ -234,9 +241,15 @@ export function StackView() {
     // the loader gates on `initialized`, hang the form on the spinner.
     if (reuseRunId && reuse.isLoading) return;
     const reused = reuseRunId && reuse.data ? reuse.data.options : {};
-    setValues({ ...defaults.data, ...reused });
+    // The reel offer overlays *last* — the run it pre-fills from is precisely a
+    // run that was stacked without the clip, so its own stored `save_progress`
+    // would otherwise turn the switch back off.
+    setValues({
+      ...defaults.data, ...reused,
+      ...(wantReel ? { save_progress: true } : {}),
+    });
     setInitialized(true);
-  }, [defaults.data, reuseRunId, reuse.data, reuse.isLoading]);
+  }, [defaults.data, reuseRunId, reuse.data, reuse.isLoading, wantReel]);
 
   // When a stack finishes it may have auto-rejected outlier frames — refresh
   // the frame list so the solved/accepted counts (and this page's guard) update.
@@ -1065,10 +1078,16 @@ export function StackView() {
 
       <SampleTourNote step="stack" safe={safe} />
 
-      {reuseRunId && reuse.data ? (
+      {(reuseRunId && reuse.data) || wantReel ? (
         <Alert color="blue" variant="light" py={6} px="sm">
           <Text size="xs">
-            Settings pre-filled from run #{reuseRunId}. Adjust anything, then start a fresh stack.
+            {reuseRunId && reuse.data
+              ? `Settings pre-filled from run #${reuseRunId}. Adjust anything, then start a fresh stack.`
+              : "Adjust anything, then start a fresh stack."}
+            {wantReel
+              ? " “Save a ‘watch it appear’ clip” is switched on under Advanced options,"
+                + " so this run builds your night-by-night clip."
+              : ""}
           </Text>
         </Alert>
       ) : null}

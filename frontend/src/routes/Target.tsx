@@ -1924,7 +1924,11 @@ export function TargetView() {
                   nothing to say. */}
               <CompareWithLastCard safe={safe} runs={runs.data} />
               {/* "Night after night" — the same target getting deeper across
-                  re-stacks (self-hides until there are ≥2 stacks to compare). */}
+                  re-stacks (self-hides until there are ≥2 stacks to compare).
+                  On a target stacked *once* across several nights it instead
+                  offers to build the night-by-night clip those subs already
+                  hold, since that target is otherwise the one the reel has
+                  nothing to say to — see `webapp/reeloffer.py` for the gates. */}
               <DeepeningReelCard safe={safe} name={target.data?.name} />
             </>
           ) },

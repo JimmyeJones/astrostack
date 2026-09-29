@@ -4,6 +4,8 @@
  * Kept free of React/DOM so the caption/label logic is unit-tested directly.
  */
 
+import type { NightReelOffer } from "./nightReelOffer";
+
 export interface DeepeningInfo {
   available: boolean;
   n_stacks: number;
@@ -29,6 +31,12 @@ export interface DeepeningInfo {
    * reprocess of the same nights, a re-stack of a subset), and on an older
    * backend, in which case the card keeps its "N stacks" wording. */
   night_steps?: number[] | null;
+  /** When the card has no reel to show, what it would take to get one: a target
+   * stacked *once* across several nights holds every sub the reel needs and has
+   * no reel, because the switch that snapshots them is advanced and off by
+   * default. `null`/absent means say nothing (see `webapp/reeloffer.py` and
+   * `nightReelOffer.ts`), which is also what an older backend reads as. */
+  reel_offer?: NightReelOffer | null;
   format?: string;
 }
 

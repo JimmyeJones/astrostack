@@ -3894,6 +3894,15 @@ export const api = {
        * it — the series is ordered by when the subs were shot, not by depth, so
        * a single night stacked on its own can land last (see `deepeningReel`). */
       depth_monotone?: boolean | null;
+      /** Running night count per step when the existing stacks already nest
+       * ("night 1; nights 1–2; …"); null when they cannot be shown to. */
+      night_steps?: number[] | null;
+      /** Only on the unavailable branch: a target stacked once across several
+       * nights, and what a re-stack with the clip switch on would give it. */
+      reel_offer?: {
+        run_id: number; nights: number; subs: number;
+        last_duration_s?: number | null;
+      } | null;
       format?: string;
     }>(`/api/targets/${safe}/deepening-reel/info`),
   deepeningReelUrl: (safe: string) => `/api/targets/${safe}/deepening-reel`,
