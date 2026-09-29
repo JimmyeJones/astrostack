@@ -1,5 +1,65 @@
 # Process notes & QA sweep records
 
+## 2026-09-29 (Builder run, third of the day) — two beginner features, and what "check first" turned out to mean in each
+
+*(Builder, branches `agent/night-reel-offer` → v0.487.0 (PR #1014) and `agent/reject-examples` → v0.488.0
+(PR #1016). Baseline green on `origin/main` at 8b56471 — **6,927 passed, 2 skipped**, 13m28s with the BLAS
+cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Both merges re-tested after syncing:
+6,939 and 6,953 passed. Frontend `tsc` / `vitest` (4,476 → 4,485) / `vite build` clean on both.)*
+
+### Environment note worth the next run's minute
+
+`source scripts/agent-setup.sh` leaves the venv usable but **`pytest-xdist` is not in it** — it is
+deliberately not a declared dependency (`docs/AGENT-ENVIRONMENT.md` says so), so the first `-n 4` run of a
+session needs `.venv/bin/pip install pytest-xdist`. And the shell state from `source` does not survive to the
+next tool call in this harness: the suite must be launched as `.venv/bin/python -m pytest`, or the bare
+`python` answers `No module named pytest` — which looks exactly like the install failure AGENTS.md §7
+describes and is not one. Cost this run: one 13-minute wasted slot.
+
+### Both tasks were "check first" items, and both checks changed the build rather than blocking it
+
+Neither entry could be taken literally, and in both cases the honest answer was a *smaller, differently
+shaped* build rather than a stand-down.
+
+**v0.487.0 — the once-stacked reel.** The lead asked: *"what that pass costs on his 35,894-sub target,
+because an offer that takes six hours is not an offer."* The answer is that **the offer should say the
+number**, and it does not need an estimator to: the run being repeated recorded its own `duration_s`, and it
+is the same subs on the same canvas with the same options, with the snapshots free (the accumulator is
+already cumulative). So the card states a measurement of the very work it proposes, and the reader decides.
+That also settled the shape question in the entry (*"S if it is an offer, M if it is a job"*): it is an
+**offer** — a link to the Stack form with `?from=&open=advanced&reel=1` — because a heavy job started from a
+card about a fun clip is exactly the kind of surprise a beginner feature must not be.
+↳ **One thing the entry did not name and the build had to:** a fresh run is the newest run, and the newest
+run with a preview is the target's picture — so pressing this flattens an app-baked Auto render on the wall
+(the class tracked as observer issue #903). The card says so in a clause. **Worth knowing, not filed as its
+own entry:** the *ordinary* Stack form is silent about the same thing (only the library-wide reprocess dialog
+warns, v0.447.2), but #903's own severity bound already covers it — the displaced renders are re-derivable
+Auto output, the wall chips them (v0.448.0) and Settings → Maintenance repairs them (v0.479.3) — so a second
+entry would have been noise on an entry that has already cost two runs.
+
+**v0.488.0 — "See what got thrown away".** The entry's shape note (1) said to confirm the frames grid does
+not already reach an example in one click. **It does not:** the grid previews the *selected* row and has sort
+controls but **no filter on `accept`/`reject_reason`**, so reaching a cloudy sub means scrolling a table of
+thousands reading a reason column. New surface, confirmed, not a copy nudge.
+↳ **Where the build departed from the entry, deliberately.** The entry said *"where a bucket has no metric
+(unreadable/error), any example is fine."* It is not: a `qc_error` frame is one that **could not be read**,
+so a thumbnail of it is a broken image by construction, and "you removed these" / "not located yet" subs look
+entirely ordinary — a strip there teaches nothing. So examples are confined to the three buckets whose cause
+is *visible in the frame* (`EXAMPLE_BUCKETS` = trailed / clouds / soft), and the gate is stated independently
+on both sides (server sends only those; client has copy only for those), so a bucket added on one side alone
+renders nothing rather than a puzzle.
+↳ `trailed` genuinely has **no** score — a satellite crossing is detected, not measured — so it keeps id
+order and says why, rather than being ranked by a metric it is not about. That is the same class as
+v0.456.0's "a representative value is a claim the set is uniform": ranking by the wrong number is a claim
+about the frames that nothing in the data supports.
+
+### Backlog arithmetic
+
+Two entries cut, two one-liners added, so `IMPROVEMENTS.md` is net shorter. **"Features that serve real
+workflows" is empty of buildable entries again** — the Scout re-stocked it at 02:22 UTC and both entries were
+shipped by 07:15 — which is recorded in `FOCUS.md` as a re-stock ask rather than as a reason to manufacture
+one (§4).
+
 ## 2026-09-29 (Scout run) — rotation item (1), scale-dependent preview↔export parity on a mosaic canvas — CLEAN; a re-stocked feature; and a kickoff-vs-AGENTS disagreement
 
 *(Scout, branch `claude/admiring-brahmagupta-wug5ut`. Baseline green on `origin/main` at 8b56471 —

@@ -23,9 +23,11 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
    - ~~**the reel-*from-history* half**~~ — **✅ SHIPPED v0.486.0** (Builder 2026-09-29). A history that
      already nests night-wise is reported and labelled as "night 1; nights 1–2; …"
      (`capture_nights.cumulative_night_steps`, `night_steps` on `/deepening-reel/info`), with `None` for
-     every series that cannot be *shown* to nest. **The progression-video entry is now closed** bar one
-     shape code cannot reach from history — a target stacked *once* across several nights — filed as a
-     sized lead under "Features that serve real workflows".
+     every series that cannot be *shown* to nest. ↳ **The progression-video entry is now CLOSED outright**:
+     the one shape history could not reach — a target stacked *once* across several nights — shipped as
+     **v0.487.0** (Builder 2026-09-29), as an *offer* on the same card, priced from that run's own recorded
+     `duration_s` and landing on the Stack form with `save_progress` pre-ticked (`?reel=1`). Nothing of the
+     owner's 2026-09-25 progression ask is open.
 
    - ~~**NEW, owner-requested 2026-09-28: the night-sky theme**~~ — **✅ SHIPPED v0.485.0** (Builder
      2026-09-29). Deep-navy sky + three drifting star layers, `prefers-reduced-motion`/hidden-tab still, a
@@ -58,14 +60,13 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
   to is in `docs/PROCESS-NOTES.md`).
 - **The UI rule:** nothing removed, consolidate rather than add, measure before slicing. Tallest
   pages and baselines: `docs/PROCESS-NOTES.md`, "DOGFOOD BASELINE".
-- **A beginner feature on a regular cadence** from "Features that serve real workflows". The Scout re-stocked
-  it 2026-09-29 with **"See what got thrown away"** (🌟, S–M): a few representative *rejected* subs, grouped by
-  cause, beside the reject summary a beginner already reads — a new *educational* surface built on the existing
-  `frame_preview` endpoint and reject buckets. The other buildable entry is the reel-*from-history* remainder
-  (a **once**-stacked multi-night target has no reel — an offer that re-runs that one stack with
-  `save_progress`, gated on what that pass costs on a 35,894-sub target). The mature app makes obvious beginner
-  features scarce — the annotation overlay, share caption, print sizes, framing/mosaic advice and moon notes are
-  all already shipped — so **do not manufacture a marginal one (§4)**; grep `SHIPPED.md` before proposing.
+- **A beginner feature on a regular cadence** from "Features that serve real workflows". ⚠️ **That section is
+  empty again** (Builder, 2026-09-29): the Scout's two buildable entries both shipped the same day —
+  **"See what got thrown away"** as **v0.488.0** (up to three of a bucket's own rejected subs, behind one
+  collapsed toggle, only for the causes you can *see*) and the once-stacked reel offer as **v0.487.0**. The
+  mature app makes obvious beginner features scarce — the annotation overlay, share caption, print sizes,
+  framing/mosaic advice and moon notes are all already shipped — so **do not manufacture a marginal one (§4)**;
+  grep `SHIPPED.md` before proposing. **Scout: re-stock.**
 
 ## How the owner gets builds now
 
