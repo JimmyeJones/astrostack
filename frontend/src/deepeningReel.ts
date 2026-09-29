@@ -22,6 +22,13 @@ export interface DeepeningInfo {
    * subs — the reel then visibly gets grainier at that step. Absent on an older
    * backend, where the blurb keeps the wording it always had. */
   depth_monotone?: boolean | null;
+  /** The running count of observing nights at each step, when the stacks that
+   * already exist form "night 1; nights 1–2; …" — the reel-*from-history* half
+   * of the owner's progression ask. `null`/absent whenever the series cannot be
+   * *shown* to be nested (a run from before the app recorded capture hours, a
+   * reprocess of the same nights, a re-stack of a subset), and on an older
+   * backend, in which case the card keeps its "N stacks" wording. */
+  night_steps?: number[] | null;
   format?: string;
 }
 
@@ -67,6 +74,11 @@ export function deepeningCaption(
     parts.push(`${withThousands(last)} subs`);
   }
 
+  const nights = cumulativeNights(info);
+  if (nights !== null) {
+    parts.push(`${nights} nights, cumulative`);
+  }
+
   const d1 = shortDate(info.first_utc);
   const d2 = shortDate(info.last_utc);
   const when = info.dated_by === "capture" ? "shot "
@@ -75,6 +87,24 @@ export function deepeningCaption(
   else if (d2) parts.push(`${when}${d2}`);
 
   return parts.join(" · ");
+}
+
+/**
+ * How many nights the last step of a genuinely cumulative reel holds, or `null`.
+ *
+ * The backend answers the hard half (`night_steps`, from
+ * `webapp.capture_nights.cumulative_night_steps`) and returns `null` for
+ * anything it cannot *show* is nested, so this only guards against the shapes a
+ * wire value can still take: absent on an older backend, and a series so short
+ * it has nothing to describe. A one-night reel is `null` too — "night 1 → all 1
+ * nights" is not a progression.
+ */
+export function cumulativeNights(info: DeepeningInfo): number | null {
+  const steps = info.night_steps;
+  if (!Array.isArray(steps) || steps.length < 2) return null;
+  const last = steps[steps.length - 1];
+  if (typeof last !== "number" || !Number.isFinite(last) || last < 2) return null;
+  return Math.round(last);
 }
 
 /**
@@ -103,6 +133,16 @@ export function deepeningBlurb(
   const counts = typeof first === "number" && typeof last === "number"
     ? `${withThousands(first)} → ${withThousands(last)} subs`
     : null;
+  const nights = cumulativeNights(info);
+  if (nights !== null && info.depth_monotone !== false) {
+    // The reel the owner actually asked for, found in stacks he already had:
+    // each step keeps every night the one before it had and adds more, so it can
+    // be described by its nights rather than by the number of times he stacked.
+    const range = counts ? ` (${counts})` : "";
+    return `Watch ${clean} fill in night by night${range} — your first night, ` +
+      `then that night plus the next, and so on up to all ${nights} nights. ` +
+      `Every step is a stack you already have.`;
+  }
   if (info.depth_monotone === false) {
     const range = counts ? ` (${counts})` : "";
     return `Watch ${clean} across your ${info.n_stacks} stacks${range}, in the ` +

@@ -444,3 +444,31 @@ def test_a_single_late_night_stacked_alone_still_lands_by_its_own_date():
                      capture_end_utc="2026-07-10T23:00:00Z")
     series = deepening_series([thin_late, deep_early])
     assert [r.id for r in series.runs] == [1, 2]
+
+
+def test_a_cumulative_step_names_its_place_in_the_progression():
+    """The reel-from-history half of the owner's ask: "night 1; nights 1-2; …".
+    The date says *when* the newest subs were shot; the prefix says *where in the
+    series* this frame is, which is the thing he asked the reel to show."""
+    assert deepening_frame_label("2024-09-11", 120, None, 1) == \
+        "Night 1 · 11 Sep 2024 · 120 subs"
+    assert deepening_frame_label("2024-09-11", 600, "2024-09-14", 4) == \
+        "Nights 1-4 · 11-14 Sep 2024 · 600 subs"
+
+
+def test_a_label_without_a_night_count_is_byte_for_byte_what_it_was():
+    """The prefix only ever appears on a series the caller has *shown* to be
+    cumulative, so every other reel — and every reel built before this existed —
+    keeps the caption it had."""
+    for nights in (None, 0):
+        assert deepening_frame_label("2024-09-11", 600, "2024-09-14", nights) == \
+            "11-14 Sep 2024 · 600 subs"
+        assert deepening_frame_label("2024-09-11", 600, None, nights) == \
+            "11 Sep 2024 · 600 subs"
+        assert deepening_frame_label(None, None, None, nights) == ""
+
+
+def test_the_night_prefix_stands_alone_when_nothing_else_is_known():
+    """A step whose date and sub count are both unreadable still has a true
+    thing to say about where it sits in the series."""
+    assert deepening_frame_label(None, None, None, 3) == "Nights 1-3"

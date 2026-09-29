@@ -1,5 +1,101 @@
 # Shipped — the record
 
+## 2026-09-29 (Builder, later) — the reel he asked for, already in the stacks he has
+
+### v0.486.0 — 🎞️ PRIORITY 2-adjacent (enjoy / understand), the **reel-*from-history*** half of the owner's progression-video ask: **a target he re-stacked as the nights came in is already "night 1; nights 1–2; …", and nothing had ever checked.**
+
+**What the entry asked for, and which part this is.** The owner asked (2026-09-25) for *"a progression video per
+target, ordered by when the subs were SHOT, so I can see how my added frames affect targets"*, and said what he
+wanted it to be: **one frame per capture night, cumulative** — night 1; nights 1–2; … — labelled with the
+capture date and the sub count. v0.480.0 put the reel on the capture clock; v0.483.0 made an ordinary stack
+*emit* those frames from its own accumulator snapshots. The half left over was the one the entry called
+"reusing existing runs whose sub set matches a cumulative step, so a target can get the reel without being
+re-stacked at all". That is this.
+
+**The observation.** On this owner's library the reel is largely already there. He re-stacks a target as the
+nights come in, so his stack history for such a target *is* the progression — night 1, then nights 1–2, then
+nights 1–4. The card was calling those steps "3 stacks" and dating them one at a time, because nobody had asked
+the question.
+
+**The question, and where it is answered.** New pure `webapp.capture_nights.cumulative_night_steps(night_sets)`
+takes each step's observing nights, oldest step first, and returns the running night count — `[1, 2, 4]` for a
+reel whose third step brought in two nights at once — **only when every step keeps every night the one before
+it had and adds at least one.** The nights themselves come from the existing `capture_night_dates`, i.e. the
+run's `capture_hours_json` bucketed noon-to-noon through `activity_calendar.night_date_of`, which is the same
+helper the Nights card, the imaging calendar and the session recap use — so the reel and the rest of the app
+can never disagree about which night a sub belongs to, and the numbering follows the owner's longitude rather
+than freezing a UTC guess.
+
+**`None` is the answer to every doubt, and that is the design.** It returns `None` — never a guess and never a
+zero — for: fewer than two steps; **any** step with no nights recorded (a run from before schema 19, or
+unreadable hours), because a series with a hole in it cannot be *shown* to be nested and "nights 1–3" over a
+step that might be nights 2–4 is worse than the date the frame carries today; a step that drops a night the
+previous one had (*"I re-stacked just tonight's subs"* — which `deepening_series` deliberately keeps in the
+reel as a fact about the library, and which this must not renumber); and a reprocess of the identical nights.
+The router adds one more gate: a `dated_by == "stack"` series is ordered by when somebody pressed Stack, so
+numbering it "night 1, nights 1–2" would be a claim about an order the series is not in.
+
+**Three surfaces, all additive.** `GET …/deepening-reel/info` gains `night_steps`. The burned-in frame label
+gains a `"Nights 1-3 · "` prefix — deliberately in the *label*, because the clip is what gets shared and it
+travels without the card (an ASCII hyphen, since Pillow's built-in font draws it through
+`render.glyphs.safe_for_default_font` anyway). And `deepeningBlurb` says *"Watch M31 fill in night by night
+(120 → 300 subs) — your first night, then that night plus the next, and so on up to all 3 nights. Every step is
+a stack you already have."* It **stands aside for `depth_monotone: false`**: a reel that gets grainier at one
+step has a stronger thing to say, and the cheerful night-by-night sentence must not replace it just because the
+nights happen to nest.
+
+**Caching.** `DEEPENING_SERIES_VERSION` → `capture-v2`, and the steps are folded into the reel's own signature
+— because the prefixes are a function of the observer's longitude, so setting a site has to rebuild the reel
+rather than leave it labelled from the old noon-to-noon buckets.
+
+**Tests +15 Python / +6 vitest, fail-before verified on all four layers** by reverting each production file
+against `origin/main` and watching them go red: `capture_nights.py` (the pure tests cannot even import), the
+router (5 endpoint tests), `deepening.py` (3 label tests) and `deepeningReel.ts` (4 of 6). The endpoint tests
+are built on real run rows with real `capture_hours_json`, including the three shapes that must stay silent.
+One of the pure tests pins that the longitude is load-bearing rather than decorative: the same hours nest under
+a +150° site and collapse to one identical set under UTC, where the series is correctly reported as not
+cumulative.
+
+**Upgrade-safe (§9):** one additive response field with `null` for everything that cannot be shown; no config,
+schema, on-disk, default or API-shape change, and an older frontend ignoring `night_steps` keeps today's
+wording exactly.
+
+**What this cannot reach, filed rather than glossed.** A target stacked **once**, across six nights, still has
+no night-by-night reel: there is nothing in its history to reuse, and the frames would have to be stacked.
+v0.483.0 makes an ordinary stack produce them, but only with `save_progress` on — an advanced field that is off
+by default. That gap is a lead under "Features that serve real workflows", sized and with its measurement named.
+
+**The entry this closes, as filed:**
+
+- **OWNER-REQUESTED 2026-09-25 — a progression video per target, ordered by when the subs were SHOT, "so I can
+  see how my added frames affect targets."** *(Pillar: enjoy/understand — beginner feature. Size L.)* **Most of
+  this exists and is not what he asked for:** `seestack/render/deepening.py` builds a "night after night" reel
+  (`DeepeningReelCard` on the Target page), but `webapp/routers/stack.py::_deepening_runs` ~~orders it by **stack
+  time** (`timestamp_utc`) and labels each frame with that date. So a frame means "the day he pressed Stack",
+  not "the night he shot"~~ — **✅ THE CLOCK HALF SHIPPED AS v0.480.0** (Builder 2026-09-27): the series is now
+  ordered and labelled by the runs' own `capture_start_utc`/`capture_end_utc` when every one of them records a
+  window (`render/deepening.deepening_series`), a reprocess of nights already in the series no longer lands as a
+  new frame, and the caption says which clock its dates are on. **Do not re-file those three points.** What is
+  still open is the *shape* of the reel — a target he stacked once has no reel, and a step is still "a stack he
+  ran" rather than "a night". What he wants is **one frame per capture night, cumulative**
+  (night 1; nights 1–2; …), labelled with the capture date and sub count. That needs stacks nobody has run, so
+  the design question is cost: a full stack per night per target is hours on his deepest targets — look first at
+  a reduced-resolution cumulative pass, and reuse any existing run whose sub set already matches a cumulative
+  step. Keep the current stack-history reel; this is a second mode, not a replacement.
+  **↳ THE CUMULATIVE-BY-NIGHT REEL SHIPPED AS v0.483.0 (Builder 2026-09-27), built on exactly the design note
+  below.** The snapshots `_QuickLook` already takes during pass 1 now land on capture-night boundaries, so a single
+  ordinary stack produces "night 1; nights 1–2; …" captioned with the date range and the sub count — no second
+  stack, no new option (it rides `save_progress`, still off by default). **What is left of this entry** is the
+  reel-*from-history* half it also names: reusing existing runs whose sub set matches a cumulative step, so a
+  target can get the reel without being re-stacked at all. That is a different mechanism (it reads
+  `deepening_series`' capture-window grouping against the runs on disk) and is worth its own sizing.
+  **▶ ONE DESIGN NOTE from the v0.480.0 build, so it is not re-derived.** k cumulative stacks over N subs is
+  **not** k passes: `seestack/stack/accumulator.py` already combines frame-by-frame, so a single pass that
+  *snapshots* the accumulator at each night boundary yields all k results for the cost of one stack — which is
+  what makes this affordable on a 35,894-sub target at all, and is the shape to cost first. `deepening_series`'
+  capture-window grouping is also already the primitive for "does an existing run match a cumulative step?".
+
+
 ## 2026-09-29 (Builder) — the night sky the owner asked for
 
 ### v0.485.0 — 🌌 UX & polish (owner-requested, `READY` 2026-09-28): **a deep-navy sky and a gentle parallax starfield behind the pages — and a plain neutral surround everywhere a picture is being judged.**

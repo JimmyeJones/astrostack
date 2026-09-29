@@ -115,7 +115,8 @@ def _apply_stf_params(rgb: np.ndarray, params: _StfParams) -> np.ndarray:
 
 
 def deepening_frame_label(date_iso: str | None, n_frames: int | None,
-                          end_iso: str | None = None) -> str:
+                          end_iso: str | None = None,
+                          nights_through: int | None = None) -> str:
     """A compact provenance caption for one reel frame — e.g.
     ``"19 Jul 2026 · 120 subs"``, or ``"11-14 Sep 2024 · 600 subs"`` when the step
     spans several nights — so a *downloaded/shared* clip (which travels without
@@ -131,10 +132,25 @@ def deepening_frame_label(date_iso: str | None, n_frames: int | None,
     a stack of the nights ``date_iso…end_iso``, and naming only one end of that
     would date a four-night stack by a single night. Omitted, equal, or
     unparseable ⇒ exactly the single-date label this function has always
-    produced, so the stack-time series is byte-for-byte unchanged."""
+    produced, so the stack-time series is byte-for-byte unchanged.
+
+    ``nights_through`` is how many observing nights this step has accumulated,
+    and it is only ever supplied for a series the caller has *shown* to be
+    cumulative (``webapp.capture_nights.cumulative_night_steps``). It prefixes
+    the label with ``"Night 1"`` / ``"Nights 1-3"``, which is the owner's own
+    wording for what he asked the reel to be — the step's place in the
+    progression, where the date says only when the newest subs were shot. Absent
+    (the ordinary case, and every series that could not be shown to be nested)
+    ⇒ the label is byte-for-byte what it was."""
     from seestack.nameplate import format_acq_date, format_acq_range
 
     parts: list[str] = []
+    if nights_through and nights_through > 0:
+        n = int(nights_through)
+        # An ASCII hyphen, not an en dash: the reel's label is drawn with
+        # Pillow's built-in font, and `render.glyphs.safe_for_default_font`
+        # would have to transliterate it anyway.
+        parts.append("Night 1" if n == 1 else f"Nights 1-{n}")
     date = (format_acq_range(date_iso, end_iso) if end_iso
             else format_acq_date(date_iso))
     if date:
@@ -149,7 +165,7 @@ def deepening_frame_label(date_iso: str | None, n_frames: int | None,
 #: the *ordering or labelling* of an unchanged set of masters changes, so an
 #: install sitting on a cached reel rebuilds it rather than serving one ordered by
 #: the old clock. (The caller's own tag covers render-output changes.)
-DEEPENING_SERIES_VERSION = "capture-v1"
+DEEPENING_SERIES_VERSION = "capture-v2"
 
 
 def _run_display_space(run: Any) -> bool:
