@@ -1,5 +1,101 @@
 # Shipped — the record
 
+## 2026-09-29 (Builder) — the night sky the owner asked for
+
+### v0.485.0 — 🌌 UX & polish (owner-requested, `READY` 2026-09-28): **a deep-navy sky and a gentle parallax starfield behind the pages — and a plain neutral surround everywhere a picture is being judged.**
+
+**What shipped.** The shell was Mantine's stock dark theme with a violet accent and no custom styling at all.
+It now sits in front of a night sky: a navy re-tint of the dark surfaces, a page gradient that is a little
+lighter towards the top, one broad faint band of haze, and **three star layers** tiled at 340/260/200 px
+drifting in three different directions over 300 s / 180 s / 110 s — which is where the parallax comes from.
+The header and navbar go translucent (with a 6 px backdrop blur where it is supported) so the sky reads as
+continuous behind the navigation, and cards go *slightly* translucent (0.92) so it does not stop dead at their
+edges.
+
+**It costs nothing per frame.** The layers are CSS animations on three elements, so the compositor moves them
+and React is not involved once they are mounted. `NightSky` only decides *which* of the states the page is in
+and writes two attributes on `<html>` — `data-astro-surround` (`sky` | `neutral`) and `data-astro-motion`
+(`drifting` | `still`) — which `nightsky/nightsky.css` styles. Every rule in that file hangs off one of those
+attributes, so with neither present (the component unmounted, or a test rendering a card on its own) the app
+looks exactly as it did before. No new dependency, no canvas, no `requestAnimationFrame`.
+
+**The constraint that shaped it: the editor keeps a neutral surround.** A tint shifts how colour and
+background level are *perceived* — the reason PixInsight and Photoshop surround an image with neutral grey —
+and the editor is PRIORITY 1. So `surround.ts::surroundForPath` refuses the sky on the editor
+(`/targets/<safe>/edit/<run>`) and on `/compare`, and on `/sky` and `/universe`, which draw their own sky with
+three.js and should not pay for ours behind it. It is a pure function with its own tests, including that
+`/sky-so-far` — a gallery of the owner's own pictures — is **not** `/sky`, which a bare `startsWith` would get
+wrong. Turning the stars *on* cannot put them behind the editor's picture: `starfieldShown` needs the sky
+surround as well as the preference.
+
+**Motion is gentle and optional.** Stars sit still under `prefers-reduced-motion` (in the component *and* as a
+media query, so the CSS is correct even if the JS never runs) and pause while the tab is hidden. The per-device
+switch is in Settings → *This device*, next to `AmbientSettings` and following its precedent exactly:
+`localStorage`, every access in a `try`/`catch`, **no server setting and no config migration** (§9). One
+difference from the soundbed, deliberately: the owner asked the app to *look* like this, so the default is
+**on** and the stored value records the *opt-out* — absent or unreadable reads as on, and turning it back on
+clears the key rather than storing a second spelling of "yes". The switch dispatches a window event so the sky
+clears while you are still looking at it, with no reload and no shared store.
+
+**Readability went up, not down** (constraint 4, checked rather than assumed). Each re-tinted step keeps its
+luminance roughly where it was, so on the body the default text colour goes from ~9.2:1 against #242424 to
+~10.3:1 against #141a30. The first dogfood pass ran the star layers at 0.55/0.75/0.95 over 0.88 cards, and the
+dots read through a dense paragraph of body text on the Target page at phone width — visible rather than
+unreadable, but more than "slightly". The shipped numbers are 0.40/0.55/0.78 over 0.92, re-shot on the same
+pages: stars still clearly present in the gutters, essentially absent under running text.
+
+**Nothing removed and nothing moved** (the UI rule): no page changed height, no control changed place, one
+card was added inside the existing *This device* grouping rather than as a new banner. Frontend-only — no
+endpoint, config, schema, on-disk, API-shape or backend default change, so an in-place upgrade is a no-op on
+everything but the paint.
+
+**Tests +27 vitest** — `nightsky/prefs.test.ts` (default on, the opt-out round-trip storing only "0", a
+throwing `getItem` reading as on, a throwing `setItem` that still announces, a hand-edited value), 
+`nightsky/surround.test.ts` (the ordinary routes, the four neutral ones, the `/sky-so-far` and `/compare-notes`
+near-misses, trailing slashes, and the motion table), `NightSky.test.tsx` (three layers by default, decorative
+and unreachable, stands down on the editor *and* reports the neutral surround, hidden-tab and reduced-motion
+pausing, the preference clearing the stars without a reload, a clean teardown, and a device whose `matchMedia`
+throws) and `NightSkySettings.test.tsx` (default on, the opt-out persisting across a remount, turning it back
+on, and the copy that says what stays neutral). `tsc`, the full 4,457-test `vitest` run and `vite build` clean.
+
+**Dogfood, `--mosaic --editor --big`:** *nothing overflowing, no console errors* on all three targets, all
+three editor drives clean, Auto's mosaic trim unchanged at **7.9 %**, and page heights within a few pixels of
+the standing baselines. The editor screenshot is the old neutral grey, unchanged — which is the check that
+constraint 1 is real rather than intended.
+
+**The spec this was built from, as filed:**
+
+- **OWNER-REQUESTED 2026-09-28 — READY — give the app a real night-sky look: a darker sky background and a
+  gentle parallax starfield behind the pages.** *(The owner asked for this directly in a session; he set the §1
+  priority order, so this request is his call to make and outranks the "cosmetic last" rule for this one item.
+  Do not re-ask whether it is worth doing.)* Today the shell is Mantine's stock dark theme with a violet accent
+  and no custom styling (`frontend/src/main.tsx` `createTheme`, `frontend/src/App.tsx` `AppShell`). **Size M.**
+  **What he asked for:** a darker, deep-navy/near-black sky instead of flat grey; parallax stars (2–3 layers
+  drifting at different speeds, optionally a faint Milky Way haze); "etc." — so cards and the navbar can go
+  slightly translucent so the sky shows at the edges, with a soft glow on the accent colour.
+  **Constraints, each load-bearing:**
+  1. **The editor and compare surfaces keep a neutral surround** (`routes/Editor.tsx`, `Compare`, the
+     lightbox and `FullSizeCheck`, which already paint `#000` behind the image). A tinted or starry surround
+     shifts how colour and background level are perceived — the reason PixInsight/Photoshop use neutral grey —
+     and the editor is PRIORITY 1. No starfield behind or beside the picture being judged; a plain dark
+     neutral there. Check the preview area on a `--mosaic --editor --big` dogfood pass.
+  2. **Motion is gentle and optional.** Stars sit still under `prefers-reduced-motion`, the animation pauses
+     when `document.hidden`, and there is a per-device switch in Settings → *This device*, next to
+     `AmbientSettings`. Follow the ambient soundbed's precedent exactly: client-side `localStorage` prefs
+     (`frontend/src/ambient/prefs.ts` pattern, every access in try/catch), **no server setting, no config
+     migration** (§9). Default: the dark sky palette and starfield **on** (it is what the owner asked the app
+     to look like), the switch turns the starfield off and falls back to the plain dark sky.
+  3. **Cheap.** Pure CSS layers or one small `<canvas>` behind the `AppShell` at `z-index` below content,
+     `pointer-events: none`, no new dependency, no per-frame React re-renders. Must not cost the Sky/Universe
+     three.js routes frame rate (consider hiding it there — they draw their own sky).
+  4. **Readable.** Text contrast on translucent cards stays at least what it is today; check the busiest pages
+     (Dashboard, Target, Settings) at phone width. Nothing removed or moved (the UI rule) — this is paint, not
+     layout.
+  **Done when:** tsc/vitest/vite build green, a test for the prefs (default on, off persists, storage throwing
+  → default) and for reduced-motion/hidden pausing, the editor route rendering without the starfield, and a
+  before/after note in the commit from a dogfood pass.
+
+
 ## 2026-09-28 (Builder, evening) — two surfaces that describe one run, and the populations they were describing
 
 ### v0.484.8 — 🟡 BUG FIX (trust, PRIORITY 3), Builder-found and reproduced through `deepening_series` itself: **the "night after night" card promised a picture that gets "cleaner and deeper … more subs each time" over a reel that visibly gets grainier, and its own caption printed the numbers that said so.**

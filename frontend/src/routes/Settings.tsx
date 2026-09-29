@@ -19,6 +19,7 @@ import { compassPoint } from "../tonight";
 import { RefinishPicturesCard } from "../components/RefinishPicturesCard";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
 import { AmbientSettings } from "../components/AmbientSettings";
+import { NightSkySettings } from "../components/NightSkySettings";
 import { SkylineEditor } from "../components/SkylineEditor";
 import { SectionTabs, type PageSection } from "../components/SectionTabs";
 import type { SettingsSection } from "../settingsSections";
@@ -1124,6 +1125,7 @@ export function SettingsView() {
         </Paper>
 
         <AmbientSettings />
+        <NightSkySettings />
       </Stack>
     ),
     maintenance: (

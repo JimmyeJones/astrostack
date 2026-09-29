@@ -14,6 +14,7 @@ import { isNavActive } from "./navActive";
 import { NAV_SECTIONS } from "./nav";
 import { jobKindLabel } from "./routes/Jobs";
 import { AmbientToggle } from "./components/AmbientToggle";
+import { NightSky } from "./components/NightSky";
 
 // Shows the running backend build, so you can confirm a rebuild actually took
 // effect (the version bumps with each shipped change).
@@ -153,11 +154,11 @@ export function App() {
       navbar={{ width: 240, breakpoint: "sm", collapsed: { mobile: !navOpened, desktop: false } }}
       padding={{ base: "sm", sm: "md" }}
     >
-      <AppShell.Header>
+      <AppShell.Header className="astro-nightsky-header">
         <Group h="100%" px={{ base: "sm", sm: "md" }} justify="space-between" wrap="nowrap" gap="xs">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
             <Burger opened={navOpened} onClick={toggleNav} hiddenFrom="sm" size="sm" aria-label="Toggle navigation" />
-            <IconPhoto size={26} color="var(--mantine-color-violet-4)" style={{ flexShrink: 0 }} />
+            <IconPhoto size={26} color="var(--mantine-color-violet-4)" className="astro-nightsky-mark" style={{ flexShrink: 0 }} />
             <Title order={3} style={{ whiteSpace: "nowrap" }}>AstroStack</Title>
           </Group>
           <Group gap="xs" wrap="nowrap">
@@ -177,7 +178,7 @@ export function App() {
         </Group>
       </AppShell.Header>
 
-      <AppShell.Navbar p="xs">
+      <AppShell.Navbar p="xs" className="astro-nightsky-navbar">
         <ScrollArea>
           {/* IA slice (d): the same 15 destinations, under plain-language headings.
               Nothing collapses — the headings only make the list scannable. */}
@@ -214,6 +215,11 @@ export function App() {
       </AppShell.Navbar>
 
       <AppShell.Main>
+        {/* Deep-navy sky + parallax starfield behind every page, and the plain
+            neutral surround the editor/compare/three.js routes ask for instead.
+            Mounted here so it lives for the whole session and is torn down with
+            the shell; it renders nothing inside the content flow. */}
+        <NightSky />
         <GlobalJobNotifier />
         <Outlet />
       </AppShell.Main>
