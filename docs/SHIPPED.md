@@ -1,5 +1,42 @@
 # Shipped — the record
 
+## 2026-09-29 (Builder, fourth) — the harness's patience, said once
+
+### v0.488.1 — 🔧 INFRA / green baseline (AGENTS.md §2: a red suite is the run's first task): **a second scan suite was carrying the 60 s job deadline that already flaked once, and it flaked.**
+
+This run's baseline on unmodified `origin/main` (8f18355) came back **1 failed, 6952 passed** on
+`tests/webapp/test_scoped_scan.py::test_bringing_a_skipped_folder_in_reports_its_path_and_then_ingests_it`,
+failing on **`job c17639fd39b2 did not finish in 60s`** — a wall-clock deadline in that file's own
+`_wait_job`, not an assertion, with the captured log showing the scan had run and emitted its warning. The
+same file passes alone in **28 s** (`5 passed`), so the tree is fine and the deadline is not: under
+`-n 4 --dist worksteal` on a 4-core box — the setup AGENTS.md §7 prescribes — a scan sharing the machine with
+three numpy-heavy stacking workers takes longer than a minute.
+
+**This is the same failure `test_skipped_folders.py` hit on 2026-09-17**, which was fixed by raising *that
+file's* copy of the number to 180 s. Its note recorded the reasoning and then said the file "was the only one
+in `tests/webapp` waiting on a scan that short" — which was true of the files that existed then.
+`test_scoped_scan.py` and `test_scan_root_confined.py` were both written afterwards, each with its own
+hand-rolled 60 s `_wait_job`, so fixing one copy of a number and leaving its twins is exactly how it came
+back.
+
+**So the number and the loop now live in one place.** New `tests/webapp/jobwait.py` holds
+`JOB_TIMEOUT_S = 180` — the longest wait already in this directory (`test_incoming_readonly_guard.py`), so
+the shared value is the repo's own convention rather than a new one — and `wait_job(client, job_id)`, the
+identical poll-until-terminal loop the three scan suites each had a copy of. All three now import it, and
+three hand-rolled copies are gone.
+
+**Nothing is loosened.** Not one assertion changed: every check in those files is about what the scan
+*remembered*, and a job that genuinely never finishes still fails the test, three minutes later instead of
+one. Deliberately **not** a sweep of every `_wait_job` under `tests/webapp` — the suites that wait on a
+stack, an export or an archive already pass 120–180 s of their own, and rewriting correct files buys nothing;
+this covers the scan-job population the two measured failures came from.
+
+**Tests.** New `tests/webapp/test_jobwait.py` pins the helper's contract rather than leaving it to whatever
+three call sites tolerate: it keeps asking until the job is terminal, **every** terminal state ends the wait
+(`error` and `interrupted` are results a caller asserts *about*, not states to sit on until the deadline), a
+job that never finishes fails by name, and the shared deadline is the generous one. Test-only change — no
+product code, no config, schema, on-disk, API-shape or default change.
+
 ## 2026-09-29 (Builder, third) — the frames it threw away, shown rather than counted
 
 ### v0.488.0 — 🌟 NEW BEGINNER FEATURE (understand + trust): **"we set aside 18 for cloud" is a verdict you can now look at.**
