@@ -2823,6 +2823,44 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **🌟 NEW BEGINNER FEATURE (Scout 2026-09-29) — "See what got thrown away": a few representative *rejected*
+  subs, grouped by cause, beside the reject summary the beginner already reads.** *(Pillar: understand + trust
+  — PRIORITY 3-adjacent, a beginner feature; size **S–M**; severity: none, it is a missing affordance.)*
+  **The gap.** The app already tells a beginner *how many* subs it dropped and *why* in plain language
+  (`webapp/rejection_summary.py`, `session_recap` → the "Last night" / reject-summary card: "we set aside 42 of
+  180 — 18 clouds, 12 trailing, 10 satellites"). What it never does is let them *see* one: a first-time Seestar
+  owner has no mental model of what "trailing stars" or "a satellite trail" actually looks like in their own
+  data, so the count is a number they have to trust rather than a thing they learn to recognise. Seeing three
+  thumbnails — "these are the frames we called cloudy" — turns the reject summary from a verdict into a lesson,
+  and is exactly the kind of trust-building a non-expert needs before they believe the app threw away the right
+  frames (and not, say, their best one).
+  **The feature.** Beside each named reject cause on the summary card, offer up to ~3 example thumbnails of subs
+  rejected for that cause (the *worst* by the relevant metric where one exists — highest eccentricity for
+  trailing, lowest star count for cloud — else any). Each is a small, self-hiding strip; a cause with no
+  examples (or a target with nothing rejected) shows nothing. One plain-language line per cause: *"These are the
+  frames we set aside as trailed — the stars are streaks, not points."*
+  **Why it clears the bar and the guardrails.** The plumbing already exists and this is why it is S–M rather
+  than L: `webapp/routers/frames.py::frame_preview` already renders any sub to a cached PNG by `frame_id` (debayer
+  + stretch, `size` capped), and `reject_reason` is already the namespaced vocabulary the summary buckets from
+  (`_bucket_for`), so the feature is a picker (worst-N accepted-false frames per bucket) + a strip component,
+  not a new render path. Offline (no network, no dependency), additive (one computed field on the existing
+  recap/summary response + one UI strip; nothing else changes), upgrade-safe (§9: no config/schema/on-disk/default
+  change — it reads existing `frames` rows and renders through an existing endpoint), read-only against
+  `incoming/` (§10: `frame_preview` reads the raw and writes only its own thumb cache under `cache/`, never the
+  source — confirm the picker never widens that), and testable on the pure picker (given a bucketed frame set,
+  it returns the right ids) plus the endpoint.
+  **Shape notes / check first, before building.** (1) **Grep + click the frames table first** — `Target.tsx`'s
+  frames grid already filters and previews subs, so confirm the reject-summary / session-recap card does *not*
+  already link examples and that this is a *new* educational surface (beside the summary a beginner reads), not
+  a second door onto the technical grid. If the grid already reaches it in one click, this becomes a copy/entry
+  nudge rather than a feature — file that instead. (2) Reuse the existing bucket vocabulary
+  (`rejection_summary._bucket_for`) so "cause" here means exactly what the count beside it means — do not grow a
+  second definition of the cause set. (3) Cap the strip hard (~3 per cause) and lazy-load the thumbs: on a
+  walk-away night a target can have thousands of rejects, and the point is a lesson, not a contact sheet. (4)
+  Pick the worst by the metric the bucket is *about* (ecc for trailing, star_count for cloud) so the example is
+  a clear teaching case, not a borderline one; where a bucket has no metric (unreadable/error), any example is
+  fine.
+
 - **LEAD (Builder 2026-09-29, filed while shipping v0.486.0 — the one part of the progression-video ask that
   code cannot reach from history) — a target stacked *once* still has no night-by-night reel, and the thing
   that would give it one is a switch nobody finds.** *(Pillar: enjoy/understand — beginner feature; size **S**
