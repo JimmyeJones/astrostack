@@ -16,13 +16,16 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 2. **Owner-approved, buildable now** (answers of 2026-09-25). All but two of this group have shipped
    (astroalign single-field + mosaic → v0.482.0/v0.484.0; the cumulative-by-night reel → v0.483.0; the
    noise-delta picture → v0.479.0; the 11 mosaic pairs are now *offered* in the Library → v0.482.1/.2).
-   **Two remainders:**
+   **One remainder, plus one that is closed below:**
    - **auto-*apply* the classified object preset** — two Builders have costed it and both landed on
      "the honest next step is a **measurement**, not a build". Read the two ⚠ notes on its backlog
      entry before touching it; the literal build is an image-quality downgrade.
-   - **the reel-*from-history* half** — reuse existing runs whose sub set matches a cumulative step,
-     so a target gets the night-by-night reel without being re-stacked. Its own sizing; the primitive
-     (`deepening_series`' capture-window grouping) already exists.
+   - ~~**the reel-*from-history* half**~~ — **✅ SHIPPED v0.486.0** (Builder 2026-09-29). A history that
+     already nests night-wise is reported and labelled as "night 1; nights 1–2; …"
+     (`capture_nights.cumulative_night_steps`, `night_steps` on `/deepening-reel/info`), with `None` for
+     every series that cannot be *shown* to nest. **The progression-video entry is now closed** bar one
+     shape code cannot reach from history — a target stacked *once* across several nights — filed as a
+     sized lead under "Features that serve real workflows".
 
    - ~~**NEW, owner-requested 2026-09-28: the night-sky theme**~~ — **✅ SHIPPED v0.485.0** (Builder
      2026-09-29). Deep-navy sky + three drifting star layers, `prefers-reduced-motion`/hidden-tab still, a

@@ -26,7 +26,12 @@ from seestack.stackhealth import (
     stored_seam_verdict_for,
 )
 from webapp import deps, estimate_cache, pipeline
-from webapp.capture_nights import capture_night_count, capture_night_range
+from webapp.capture_nights import (
+    capture_night_count,
+    capture_night_dates,
+    capture_night_range,
+    cumulative_night_steps,
+)
 from webapp.derived_light import stacking_field_fulls, with_inherited_light_facts
 from webapp.field_fulls import native_frame_shape
 from webapp.preview_orient import (
@@ -2222,7 +2227,32 @@ def _deepening_runs(proj):
                              if r.fits_path and Path(r.fits_path).exists()])
 
 
-def _deepening_signature(runs: list, dated_by: str) -> str:
+def _deepening_night_steps(series, lon_deg: float | None) -> list[int] | None:
+    """The reel's cumulative night counts (``[1, 2, 4]``), or ``None``.
+
+    The *reel from history* half of the owner's progression-video ask: he wants
+    "night 1; nights 1–2; …", and a target he has re-stacked as the nights came
+    in is already that series — it was simply never checked, so the card called
+    its steps "stacks". This asks each step for the observing nights it holds
+    (:func:`webapp.capture_nights.capture_night_dates`, bucketed through the same
+    noon-to-noon helper the Nights card uses, so the reel and the rest of the app
+    cannot disagree about which night a sub belongs to) and hands them to the
+    pure :func:`webapp.capture_nights.cumulative_night_steps`, which returns
+    ``None`` for anything it cannot *show* is nested.
+
+    Gated on a capture-dated series as well: a ``dated_by == "stack"`` series is
+    ordered by when somebody pressed Stack, and numbering those "night 1, nights
+    1–2" would be a claim about an order the series is not in."""
+    if series.dated_by != "capture":
+        return None
+    return cumulative_night_steps([
+        capture_night_dates(getattr(r, "capture_hours_json", None), lon_deg)
+        for r in series.runs
+    ])
+
+
+def _deepening_signature(runs: list, dated_by: str,
+                         night_steps: list[int] | None = None) -> str:
     """Content signature of the ordered FITS series — a cached reel is reused
     until the series changes (a new/re-run/deleted stack), then rebuilt."""
     import hashlib
@@ -2235,8 +2265,12 @@ def _deepening_signature(runs: list, dated_by: str) -> str:
     # series tag does the same for a change in *which* runs appear and in what
     # order, and `dated_by` is folded in so a library that gains a capture window
     # (a re-stack on a newer schema) rebuilds rather than keeping a reel ordered
-    # by the clock it no longer uses.
-    parts = ["v2-labels", DEEPENING_SERIES_VERSION, dated_by]
+    # by the clock it no longer uses. `night_steps` is folded in for the same
+    # reason one step lower: the cumulative "Nights 1-3" prefixes are a function
+    # of the observer's longitude, so setting a site has to rebuild the reel
+    # rather than leave it labelled from the old noon-to-noon buckets.
+    parts = ["v2-labels", DEEPENING_SERIES_VERSION, dated_by,
+             ",".join(str(n) for n in night_steps) if night_steps else "-"]
     for r in runs:
         try:
             st = os.stat(r.fits_path)
@@ -2262,7 +2296,8 @@ def _build_or_get_deepening_reel(series, lon_deg: float | None = None) -> Path |
     newest = runs[-1]
     out_dir = Path(newest.fits_path).parent
     basename = newest.output_basename or "master"
-    sig = _deepening_signature(runs, series.dated_by)
+    night_steps = _deepening_night_steps(series, lon_deg)
+    sig = _deepening_signature(runs, series.dated_by, night_steps)
     # Named from `RUN_ARTEFACT_SUFFIXES`, the table the delete / archive / merge
     # paths act on, so a reel can never be a file nothing cleans up again.
     from seestack.stack.output import RUN_ARTEFACT_SUFFIXES
@@ -2291,10 +2326,12 @@ def _build_or_get_deepening_reel(series, lon_deg: float | None = None) -> Path |
     # date it always had.
     if series.dated_by == "capture":
         labels = []
-        for r in runs:
+        for i, r in enumerate(runs):
             first, last = capture_night_range(
                 r.capture_start_utc, r.capture_end_utc, lon_deg)
-            labels.append(deepening_frame_label(first, r.n_frames_used, last))
+            labels.append(deepening_frame_label(
+                first, r.n_frames_used, last,
+                night_steps[i] if night_steps else None))
     else:
         labels = [deepening_frame_label(r.timestamp_utc, r.n_frames_used) for r in runs]
     path = build_deepening_reel([r.fits_path for r in runs], out_dir, basename,
@@ -2326,7 +2363,15 @@ def deepening_reel_info(safe: str, request: Request) -> dict[str, Any]:
     series is ordered by that capture clock and *not* by depth, a night stacked on
     its own after a deeper run is the newest step while holding the fewest subs.
     False says the reel steps back in depth somewhere, so the blurb can say
-    "grainier at one step" instead of "more subs each time"."""
+    "grainier at one step" instead of "more subs each time".
+
+    ``night_steps`` is the reel-*from-history* half of the owner's progression
+    ask: when the stacks he already has form "night 1; nights 1-2; ...", this is
+    the running night count at each step and the card can name the reel by its
+    nights rather than by the number of times he pressed Stack. ``null`` when the
+    series cannot be shown to be nested — see
+    :func:`webapp.capture_nights.cumulative_night_steps` for every doubt that
+    answers ``null``."""
     from seestack.render.deepening import series_depth_is_monotone
 
     lib, proj = deps.open_target_project(request, safe)
@@ -2341,6 +2386,7 @@ def deepening_reel_info(safe: str, request: Request) -> dict[str, Any]:
     runs = series.runs
     if len(runs) < 2:
         return {"available": False, "n_stacks": len(runs)}
+    night_steps = _deepening_night_steps(series, lon)
     from PIL import features
 
     first_utc, last_utc = runs[0].timestamp_utc, runs[-1].timestamp_utc
@@ -2368,6 +2414,13 @@ def deepening_reel_info(safe: str, request: Request) -> dict[str, Any]:
         # promising "more subs each time" over exactly that reel. Additive: an
         # older frontend ignores it, and its absence keeps the old wording.
         "depth_monotone": series_depth_is_monotone(runs),
+        # The reel-from-history half of the owner's progression-video ask: when
+        # his existing stacks already form "night 1; nights 1-2; ...", say so —
+        # the running night count per step, or null when the series cannot be
+        # *shown* to be nested (a run recorded before schema 19, a reprocess of
+        # the same nights, a re-stack of a subset). Additive: an older frontend
+        # ignores it, and its absence keeps today's "N stacks" wording.
+        "night_steps": night_steps,
         "format": "webp" if features.check("webp") else "png",
     }
 

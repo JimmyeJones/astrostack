@@ -33,6 +33,7 @@ missing/unparseable stamp simply drops the clause rather than guessing.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 
 from seestack.activity_calendar import night_date_of
 
@@ -108,6 +109,52 @@ def capture_night_count(
     """
     nights = capture_night_dates(capture_hours_json, lon_deg)
     return len(nights) or None
+
+
+def cumulative_night_steps(
+    night_sets: Sequence[Sequence[str]],
+) -> list[int] | None:
+    """How many nights each step of a series has accumulated, when the series
+    really is **cumulative by night** — else ``None``.
+
+    This is the "reel from history" question, asked of stacks that already exist:
+    the owner asked for a progression *"night 1; nights 1–2; …"*, and a target he
+    has re-stacked as the nights came in already **is** that progression — nobody
+    had checked, so the reel called its steps "stacks" and dated them one at a
+    time. Given each step's observing nights (from :func:`capture_night_dates`,
+    oldest step first) this answers whether every step keeps every night the one
+    before it had and adds at least one, and if so returns the running night
+    count — ``[1, 2, 4, 5]`` for a reel whose third step brought in two nights at
+    once.
+
+    ``None`` — not an empty list — is the "this is not a cumulative series"
+    answer, and it is deliberately the answer to every doubt as well:
+
+    * fewer than two steps (there is no progression to describe);
+    * **any** step with no nights recorded — a run from before schema 19, or one
+      whose hours were unreadable — because a series with a hole in it cannot be
+      shown to be nested, and "nights 1–3" over a step that might be nights 2–4
+      is worse than the date the frame carries today;
+    * a step that *drops* a night the one before it had (re-stacking a subset),
+      or repeats the same nights (a reprocess), since neither is a step *deeper*
+      into the same growing pile.
+
+    So this only ever fires on the shape the owner described, and everything else
+    keeps the labelling it has always had. Pure and offline.
+    """
+    if len(night_sets) < 2:
+        return None
+    steps: list[int] = []
+    previous: set[str] = set()
+    for nights in night_sets:
+        current = set(nights)
+        if not current:
+            return None
+        if not (current > previous):
+            return None
+        steps.append(len(current))
+        previous = current
+    return steps
 
 
 def _night(stamp: str | None, lon_deg: float | None) -> str | None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 from astropy.io import fits
 
@@ -11,7 +13,8 @@ from seestack.io.project import StackRunRow
 
 def _add_stack(root, safe: str, name: str, *, subs: int, when: str,
                noise: float, seed: int,
-               shot_from: str | None = None, shot_to: str | None = None) -> int:
+               shot_from: str | None = None, shot_to: str | None = None,
+               hours: list[str] | None = None) -> int:
     """Write a synthetic linear stack FITS and register a run for it."""
     lib = Library.open_or_create(root / "library")
     try:
@@ -33,6 +36,7 @@ def _add_stack(root, safe: str, name: str, *, subs: int, when: str,
                 n_frames_used=subs, canvas_h=h, canvas_w=w,
                 coverage_min=1, coverage_max=3, options_json="{}",
                 capture_start_utc=shot_from, capture_end_utc=shot_to,
+                capture_hours_json=(json.dumps(hours) if hours else None),
             ))
         finally:
             proj.close()
@@ -216,3 +220,121 @@ def test_reel_info_reports_a_series_that_only_deepens(client, solved_library):
                shot_from="2026-06-10T21:00:00Z", shot_to="2026-07-10T23:00:00Z")
     body = client.get(f"/api/targets/{safe}/deepening-reel/info").json()
     assert body["depth_monotone"] is True
+
+
+# --- the reel from history: night 1; nights 1-2; ... -------------------------
+
+
+def _night_of(day: str, *hours: str) -> list[str]:
+    """On-the-hour UTC stamps in one evening, as `capture_hours_json` records
+    them (see `seestack.stack.stacker._capture_hours`)."""
+    return [f"{day}T{h}:00:00Z" for h in hours]
+
+
+def test_a_cumulative_history_is_reported_as_nights_not_stacks(
+        client, solved_library):
+    """The owner asked for "night 1; nights 1-2; ..." and re-stacks as the nights
+    come in — so on his own library the reel he asked for is *already there*, in
+    stacks that exist. The endpoint now says so, and nothing is re-stacked to
+    find out."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    n1 = _night_of("2026-05-01", "21", "22")
+    n2 = _night_of("2026-05-02", "21", "22")
+    n3 = _night_of("2026-05-03", "21")
+    _add_stack(solved_library, safe, "s1", subs=120, when="2026-05-02T09:00:00Z",
+               noise=0.04, seed=2,
+               shot_from=n1[0], shot_to=n1[-1], hours=n1)
+    _add_stack(solved_library, safe, "s2", subs=240, when="2026-05-03T09:00:00Z",
+               noise=0.02, seed=3,
+               shot_from=n1[0], shot_to=n2[-1], hours=n1 + n2)
+    _add_stack(solved_library, safe, "s3", subs=300, when="2026-05-04T09:00:00Z",
+               noise=0.01, seed=4,
+               shot_from=n1[0], shot_to=n3[-1], hours=n1 + n2 + n3)
+    body = client.get(f"/api/targets/{safe}/deepening-reel/info").json()
+    assert body["available"] is True
+    assert body["dated_by"] == "capture"
+    assert body["night_steps"] == [1, 2, 3]
+    # The animation builds, and its frames carry the progression in their labels.
+    assert client.get(f"/api/targets/{safe}/deepening-reel").status_code == 200
+
+
+def test_a_history_that_is_not_cumulative_says_nothing_about_nights(
+        client, solved_library):
+    """"I re-stacked just tonight's subs" is a step the reel deliberately keeps
+    (it is a fact about the library) and one this must not number: its nights are
+    not a superset of the step before it."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    n1 = _night_of("2026-05-01", "21", "22")
+    n2 = _night_of("2026-05-02", "21", "22")
+    _add_stack(solved_library, safe, "s1", subs=240, when="2026-05-02T09:00:00Z",
+               noise=0.04, seed=2,
+               shot_from=n1[0], shot_to=n1[-1], hours=n1)
+    _add_stack(solved_library, safe, "s2", subs=30, when="2026-05-03T09:00:00Z",
+               noise=0.02, seed=3,
+               shot_from=n2[0], shot_to=n2[-1], hours=n2)
+    body = client.get(f"/api/targets/{safe}/deepening-reel/info").json()
+    assert body["dated_by"] == "capture"
+    assert body["night_steps"] is None
+
+
+def test_a_run_from_before_capture_hours_silences_the_night_count(
+        client, solved_library):
+    """The owner's library holds hundreds of runs recorded before schema 19. A
+    series with a hole in it cannot be *shown* to be nested, so it keeps the
+    labelling it has always had rather than guessing at a step's nights."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    n1 = _night_of("2026-05-01", "21", "22")
+    n2 = _night_of("2026-05-02", "21")
+    _add_stack(solved_library, safe, "s1", subs=120, when="2026-05-02T09:00:00Z",
+               noise=0.04, seed=2,
+               shot_from=n1[0], shot_to=n1[-1])            # no hours recorded
+    _add_stack(solved_library, safe, "s2", subs=240, when="2026-05-03T09:00:00Z",
+               noise=0.02, seed=3,
+               shot_from=n1[0], shot_to=n2[-1], hours=n1 + n2)
+    body = client.get(f"/api/targets/{safe}/deepening-reel/info").json()
+    assert body["night_steps"] is None
+
+
+def test_a_stack_dated_series_is_never_numbered_by_nights(
+        client, solved_library):
+    """A `dated_by == "stack"` series is ordered by when somebody pressed Stack.
+    Numbering those "night 1, nights 1-2" would be a claim about an order the
+    series is not in — even when the hours themselves happen to nest."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    n1 = _night_of("2026-05-01", "21", "22")
+    n2 = _night_of("2026-05-02", "21")
+    # The first run records hours but no window, so `deepening_series` falls back
+    # to the stack clock for the whole series (all-or-nothing, by design).
+    _add_stack(solved_library, safe, "s1", subs=120, when="2026-05-02T09:00:00Z",
+               noise=0.04, seed=2, hours=n1)
+    _add_stack(solved_library, safe, "s2", subs=240, when="2026-05-03T09:00:00Z",
+               noise=0.02, seed=3,
+               shot_from=n1[0], shot_to=n2[-1], hours=n1 + n2)
+    body = client.get(f"/api/targets/{safe}/deepening-reel/info").json()
+    assert body["dated_by"] == "stack"
+    assert body["night_steps"] is None
+
+
+def test_the_reel_rebuilds_when_the_night_numbering_changes(
+        client, solved_library):
+    """The "Nights 1-3" prefixes are a function of the observer's longitude, so a
+    cached reel built before a site was set must not keep the labels it got from
+    the old noon-to-noon buckets. The signature folds the steps in, which is what
+    makes that a rebuild rather than a stale file."""
+    from webapp.routers.stack import _deepening_signature
+
+    runs = [_StubRun(1), _StubRun(2)]
+    bare = _deepening_signature(runs, "capture")
+    assert _deepening_signature(runs, "capture", None) == bare
+    assert _deepening_signature(runs, "capture", [1, 2]) != bare
+    assert _deepening_signature(runs, "capture", [1, 3]) != \
+        _deepening_signature(runs, "capture", [1, 2])
+
+
+class _StubRun:
+    """Just enough of a run row for the signature: an id and a missing file
+    (which the signature handles as `0:0` rather than raising)."""
+
+    def __init__(self, run_id: int) -> None:
+        self.id = run_id
+        self.fits_path = f"/nonexistent/{run_id}.fits"

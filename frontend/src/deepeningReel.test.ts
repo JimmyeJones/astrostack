@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cumulativeNights,
   deepeningBlurb,
   deepeningCaption,
   deepeningClip,
@@ -151,5 +152,71 @@ describe("deepeningClip", () => {
     expect(deepeningClip("NGC 7000", "webp").filename).toBe("ngc-7000-deepening.webp");
     expect(deepeningClip("NGC 7000", "png").filename).toBe("ngc-7000-deepening.png");
     expect(deepeningClip("", null).filename).toBe("my-astrophoto-deepening.webp");
+  });
+});
+
+
+describe("the reel found in stacks you already have", () => {
+  const cumulative = {
+    available: true, n_stacks: 3, first_subs: 120, last_subs: 300,
+    first_utc: "2026-05-01T21:00:00Z", last_utc: "2026-05-03T21:00:00Z",
+    dated_by: "capture" as const, depth_monotone: true,
+    night_steps: [1, 2, 3],
+  };
+
+  it("reads the last step as how many nights the reel ends on", () => {
+    expect(cumulativeNights(cumulative)).toBe(3);
+  });
+
+  it("says nothing on an older backend, or on a series with nothing to describe", () => {
+    // No field at all — the wire shape before this existed.
+    expect(cumulativeNights({ available: true, n_stacks: 3 })).toBeNull();
+    expect(cumulativeNights({ ...cumulative, night_steps: null })).toBeNull();
+    // One step is not a progression, and neither is a reel that ends on night 1.
+    expect(cumulativeNights({ ...cumulative, night_steps: [1] })).toBeNull();
+    expect(cumulativeNights({ ...cumulative, night_steps: [1, 1] })).toBeNull();
+    // ...and a value that is not a list of numbers is not trusted into the copy.
+    expect(cumulativeNights({
+      ...cumulative,
+      night_steps: ["1", "3"] as unknown as number[],
+    })).toBeNull();
+  });
+
+  it("tells the beginner what the reel is, in nights rather than in stacks", () => {
+    const b = deepeningBlurb("M31", cumulative);
+    expect(b).toContain("night by night");
+    expect(b).toContain("all 3 nights");
+    // The point of this half: it is built from stacks that already exist.
+    expect(b).toContain("already have");
+    expect(b).not.toContain("undefined");
+  });
+
+  it("names the nights in the caption without losing what was already there", () => {
+    const c = deepeningCaption("M31", cumulative);
+    expect(c).toContain("3 nights, cumulative");
+    // Nothing removed: the target, the step count, the depth and the clock all
+    // still read as they did.
+    expect(c).toContain("M31");
+    expect(c).toContain("3 stacks");
+    expect(c).toContain("120 → 300 subs");
+    expect(c).toContain("shot ");
+  });
+
+  it("leaves a series that is not cumulative exactly as it was", () => {
+    const plain = { ...cumulative, night_steps: null };
+    expect(deepeningCaption("M31", plain)).toBe(
+      deepeningCaption("M31", { available: true, n_stacks: 3, first_subs: 120,
+        last_subs: 300, first_utc: "2026-05-01T21:00:00Z",
+        last_utc: "2026-05-03T21:00:00Z", dated_by: "capture" }));
+    expect(deepeningBlurb("M31", plain)).toContain("cleaner and deeper");
+  });
+
+  it("stands aside for the reel that steps back in depth", () => {
+    // `depth_monotone: false` is the stronger warning — a step that gets
+    // grainier — and it must not be replaced by the cheerful night-by-night
+    // sentence just because the nights happen to nest.
+    const b = deepeningBlurb("M31", { ...cumulative, depth_monotone: false });
+    expect(b).toContain("grainier");
+    expect(b).not.toContain("night by night");
   });
 });

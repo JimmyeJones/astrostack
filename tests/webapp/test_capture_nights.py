@@ -15,6 +15,7 @@ from webapp.capture_nights import (
     capture_night_count,
     capture_night_dates,
     capture_night_range,
+    cumulative_night_steps,
 )
 
 
@@ -115,3 +116,91 @@ def test_an_unrecorded_or_unreadable_count_is_none_not_zero():
 def test_a_junk_entry_does_not_take_the_rest_with_it():
     hours = json.dumps(["2024-11-15T22:00:00Z", None, 7, "not-a-date"])
     assert capture_night_count(hours) == 1
+
+
+# --- cumulative_night_steps: "is the history he already has the reel he asked
+#     for?" ------------------------------------------------------------------
+
+
+def test_a_nested_history_is_the_reel_the_owner_asked_for():
+    """Night 1, then nights 1-2, then nights 1-2-3-4: the running night count is
+    what lets the card say "up to all 4 nights" instead of "4 stacks"."""
+    assert cumulative_night_steps([
+        ["2026-05-01"],
+        ["2026-05-01", "2026-05-02"],
+        ["2026-05-01", "2026-05-02", "2026-05-03", "2026-05-04"],
+    ]) == [1, 2, 4]
+
+
+def test_the_order_the_nights_are_listed_in_does_not_matter():
+    """They are sets, not sequences — ``capture_night_dates`` sorts them, but a
+    caller that did not must get the same answer."""
+    assert cumulative_night_steps([
+        ["2026-05-02"],
+        ["2026-05-02", "2026-05-01"],
+    ]) == [1, 2]
+
+
+def test_a_reprocess_of_the_same_nights_is_not_a_step():
+    """Re-stacking the nights you already had is not a step deeper into the pile,
+    so the series is not the cumulative one and nothing is claimed about it."""
+    assert cumulative_night_steps([
+        ["2026-05-01", "2026-05-02"],
+        ["2026-05-01", "2026-05-02"],
+    ]) is None
+
+
+def test_a_restack_of_a_subset_is_not_a_step_either():
+    """"I re-stacked just tonight's subs" drops nights the previous step had —
+    which `deepening_series` deliberately keeps in the reel, and which this must
+    not describe as "nights 1-2"."""
+    assert cumulative_night_steps([
+        ["2026-05-01", "2026-05-02"],
+        ["2026-05-03"],
+    ]) is None
+    # Adding one night while dropping another is not nesting either.
+    assert cumulative_night_steps([
+        ["2026-05-01", "2026-05-02"],
+        ["2026-05-02", "2026-05-03"],
+    ]) is None
+
+
+def test_one_step_with_no_nights_recorded_silences_the_whole_series():
+    """A run from before the app recorded capture hours leaves a hole, and a
+    series with a hole in it cannot be *shown* to be nested — "nights 1-3" over a
+    step that might be nights 2-4 is worse than the date it carries today."""
+    assert cumulative_night_steps([
+        ["2026-05-01"],
+        [],
+        ["2026-05-01", "2026-05-02", "2026-05-03"],
+    ]) is None
+    assert cumulative_night_steps([[], ["2026-05-01"]]) is None
+
+
+def test_a_series_too_short_to_be_a_progression_says_nothing():
+    assert cumulative_night_steps([]) is None
+    assert cumulative_night_steps([["2026-05-01"]]) is None
+
+
+def test_the_nights_come_from_the_same_bucketing_as_the_dates():
+    """End to end through `capture_night_dates`, so the counts this returns and
+    the dates the caption names can never be computed two different ways —
+    including under a longitude, where the New Zealand evening above is one night
+    rather than two."""
+    night_one = _hours("2024-11-15T10:00:00Z", "2024-11-15T18:00:00Z")
+    both = _hours("2024-11-15T10:00:00Z", "2024-11-15T18:00:00Z",
+                  "2024-11-16T10:00:00Z")
+    assert cumulative_night_steps([
+        capture_night_dates(night_one, 150.0),
+        capture_night_dates(both, 150.0),
+    ]) == [1, 2]
+    # And the longitude is load-bearing rather than decorative: with no location
+    # the very same hours bucket noon-to-noon in UTC, which puts the 16th's
+    # pre-noon hour back into a night the first step already had — so the two
+    # steps hold the identical set, the series is not nested, and the card says
+    # nothing rather than counting a night twice.
+    assert capture_night_dates(both) == capture_night_dates(night_one)
+    assert cumulative_night_steps([
+        capture_night_dates(night_one),
+        capture_night_dates(both),
+    ]) is None
