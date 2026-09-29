@@ -1,5 +1,63 @@
 # Process notes & QA sweep records
 
+## 2026-09-29 (Builder run) — the one READY entry, the last reachable half of an owner ask, and a clean sweep
+
+*(Builder, branch `claude/awesome-fermat-juugz1` → **v0.485.0** + **v0.486.0**. Baseline green on
+`origin/main` at ff4c4c1 — **6,912 passed, 2 skipped**, 12m11s with the BLAS cap and `-n 4 --dist worksteal`,
+`/tmp/pytest-of-root` cleared first. Full entries in [`SHIPPED.md`](SHIPPED.md).)*
+
+**Triage.** "Bugs (fix these first)" holds no entry a run in this container can take: the LEAD ×2 at the top
+still needs a real ASTAP call and there is still no ASTAP binary here, and every other entry is
+owner-data-gated, a recorded stand-down carrying numbers, or filed as deliberately-not-a-priority.
+`grep READY` returned **one** open entry — the owner's night-sky theme, filed the previous evening — and
+`docs/FOCUS.md` named exactly one other buildable remainder (the reel-*from-history* half). Both were taken;
+nothing was invented around them.
+
+### Note 1 — a paint change is still verified on pixels, and the first cut was wrong
+
+v0.485.0 is the first custom styling this app has ever had, and the thing that can only be checked by looking
+is whether the sky is *behind* the words. The first cut (star layers at 0.55/0.75/0.95 over 0.88 cards)
+passed every test and read badly: on the Target page at **phone** width, the dots came through a dense
+paragraph of body text. Not unreadable, and not something a contrast ratio would have caught — the ratio
+**improved**, because the navy body is darker than the grey it replaced. The shipped numbers
+(0.40/0.55/0.78 over 0.92) came from re-shooting the same two pages against the dogfood scratch install with
+the app booted by hand. **Carry forward: for a theme change, the check is a screenshot of the busiest page at
+the narrowest width, and "contrast went up" does not answer it.**
+
+The second half of that entry is the one worth remembering structurally: `nightsky/surround.ts` is a **pure
+function** deciding which routes refuse the sky, so "the editor keeps a neutral surround" is a line in a table
+with its own test rather than a property of where a component happens to be mounted. A future
+picture-judging route is one entry.
+
+### Note 2 — the answer to an owner's feature ask was already in his data
+
+v0.486.0 added no reel, no job and no option. The owner asked for "night 1; nights 1–2; …", and a target he
+re-stacks as the nights come in **already has that series** — the app was calling its steps "3 stacks" because
+nobody had asked whether they nest. The whole feature is one pure function over
+`capture_hours_json` and three additive surfaces. **Carry forward: before costing the machinery a feature
+seems to need, check whether the records already answer it** — the same shape as v0.484.6's "one datum, one
+place", pointed at a feature rather than at a bug.
+
+Its other half is the part that is *not* reachable that way, and it is filed rather than glossed: a target
+stacked **once** across several nights has nothing in its history to reuse. The lead under "Features that
+serve real workflows" names the shape (an offer that re-runs that one stack with `save_progress` on) and the
+measurement it is gated on (what that pass costs on a 35,894-sub target).
+
+### Dogfood sweep — `--mosaic --editor --big`, CLEAN
+
+Run on the v0.485.0 tree. *Nothing overflowing, no console errors* on the field, mosaic and full-size targets;
+**all three editor drives clean** (21 ops each, every preview re-rendered, undo/redo); Auto's mosaic trim
+**7.9 %**, unchanged and well under the ~15 % D1 bar. Page heights within a few pixels of the standing
+baselines — the theme is paint, and the numbers say so.
+
+Read as one paragraph, per §7, the prescriptive cards agree with each other on both targets. On the mosaic,
+*"another pass or two over the same mosaic evens out the thinner part"* (next best move), *"more passes over
+the panels you already have do more for it than a wider grid"* (framing) and *"about 30 s behind at the
+top-right"* (panel map) are three statements of one thing. On the single field, the readiness card's goal is
+scoped *"for this single field"* while the coaching card sends the reader to mosaic mode — which is v0.444.2's
+clause doing its job, observed firing rather than assumed.
+
+
 ## 2026-09-28 (Builder run, evening) — the wrong-denominator class re-swept in TypeScript, and a card that argued with its own caption
 
 *(Builder, branch `agent/agreement-denominators` → **v0.484.7** + **v0.484.8**. Baseline green on
