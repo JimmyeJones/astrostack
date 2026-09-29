@@ -1,5 +1,73 @@
 # Process notes & QA sweep records
 
+## 2026-09-29 (Builder run, fourth of the day) — a flake that was `main`'s, the version an unattended reader can see, and the measurement that closed the last owner-approved item
+
+*(Builder, branch `claude/awesome-fermat-378cir` → **v0.488.1** + **v0.488.2** + one docs closure. Baseline on
+`origin/main` at 8f18355: **1 failed, 6952 passed, 2 skipped**, 15m07s with the BLAS cap and
+`-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first.)*
+
+### The red baseline was `main`'s, and it was a number this repo had already fixed once
+
+The failure was `tests/webapp/test_scoped_scan.py::test_bringing_a_skipped_folder_in_reports_its_path_and_then_ingests_it`
+on **`job … did not finish in 60s`** — that file's own `_wait_job` deadline, not an assertion, with the captured
+log showing the scan had run and emitted its warning. The same file passes **alone in 28 s** (`5 passed`), so the
+tree was fine. This is the identical failure `test_skipped_folders.py` hit on 2026-09-17, whose fix raised *that
+file's* copy of the number to 180 and whose note recorded that it "was the only one in `tests/webapp` waiting on a
+scan that short" — true of the files that existed then. `test_scoped_scan.py` and `test_scan_root_confined.py` were
+written afterwards, each with its own 60 s copy.
+
+**The generalisation worth carrying: fixing one copy of a shared number is not fixing it.** The September note is
+careful, correct and completely local, and the bug came back in the file next door within twelve days. v0.488.1
+puts the number and the loop in `tests/webapp/jobwait.py` and has all three scan suites import it. Deliberately
+**not** a sweep of the other seven `_wait_job` copies: the stack/export/archive suites already pass 120–180 s of
+their own, and rewriting correct files buys nothing — this covers the scan-job population both measured failures
+came from.
+
+### Environment note (a second run has now lost time to it)
+
+`pytest-xdist` is still not in the venv after `source scripts/agent-setup.sh` — the same trap the third run of the
+day recorded. It is deliberate (`docs/AGENT-ENVIRONMENT.md`), but the failure mode is silent-looking: `-n 4` on a
+venv without it exits **4** with an `inifile:`/`rootdir:` block and no summary line, which is exactly the shape
+AGENTS.md §7 warns reads as a clean pass. Cost this run: one wasted launch. Install it first, then start the suite.
+
+### Dogfood — `--mosaic --editor`, CLEAN
+
+EXIT=0. Auto's trim on the 2×2 is **7.9 %** (a trim above ~15 % is D1-shaped — AGENTS.md §1); both editor drives
+added all 21 ops with every preview re-rendering, plus Undo/Redo; nothing overflowing, no console errors on either
+target. Read as one paragraph, the two prescribing columns agree on both targets: on the mosaic the panel map
+("a little behind at the top-right: about 30 s there against 1 min on a typical panel"), the grain note ("about
+23 % of the picture has 3 subs where most has 6 … about 1.4× grainier … only about 30 s behind") and next-best-move
+("another pass or two over the same mosaic evens out the thinner part") all point the same way, and the readiness
+card's `goal ~7.3 h (about 4 fields of sky)` is `goalHoursForType × field-fulls` against the framing verdict's
+`panels × goalHoursForType`, i.e. two questions off one constant rather than two opinions.
+
+**Page heights, phone, for the baseline block below** (which was measured at v0.352.1 on the field sample):
+`/targets/<mosaic>` **3,673 px**, `/tonight` 3,549 px, `/targets/<mosaic>/edit/1` 3,419 px, `/glossary` 3,364 px,
+`/targets/<field>` 3,287 px. The mosaic Target page is now the tallest page in the app and is +659 px on the
+v0.352.1 field-sample reading of 3,014 px — recorded as a measurement, **not** acted on: the two cards the probe
+flags as folded there (`mosaic-map-card`, `stack-health-card`) are folded because they live in `InsightTabs`
+groups below the frames table, which is IA slices (b)/(c) working as designed, not clutter to slice again.
+
+### The measurement that closed the last owner-approved item
+
+"Auto-*apply* the classified object preset" had been costed by two Builders, both of whom stopped at "the honest
+next step is a measurement, not a build" — so a fourth run was going to re-cost it. It ran instead: both bundled
+masters rendered through the real `auto_recipe`/`apply_recipe`, Auto as it ships against Auto carrying only the
+nebula preset's two surviving numbers. Three things came out of it and the entry is closed on them (full working
+and the table in `SHIPPED.md`):
+
+1. **The mechanism the ask wants is already wired.** `auto_recipe` already calls `classify_target` and hands the
+   archetype to `auto_prefs.apply_profile(..., object_type=…)`, whose per-type biases move exactly the parameters
+   a preset would. The app's answer to "apply the classification" is *your* taste for this archetype, not a fixed
+   preset's — inert until the taste profile has something in it, which is the correct default.
+2. **The surviving delta is not free.** +3–4 % sky chroma noise on both canvases, for a saturation of 1.35 that is
+   **above the ceiling of a rule Auto measures from the image** (`clip(1.25 - sky_sigma × 6.0, 1.05, 1.25)`).
+3. **Both samples classify `galaxy` at confidence 1.0** — the archetype whose adjustments the sizings had already
+   shown buy nothing. So the one archetype with a surviving delta is one no canvas here produces.
+
+**The method note:** an entry whose gate is "measure X" and whose third sizing is still prose has stopped being
+gated and started being deferred. Running the measurement cost about as long as re-reading the entry did.
+
 ## 2026-09-29 (Builder run, third of the day) — two beginner features, and what "check first" turned out to mean in each
 
 *(Builder, branches `agent/night-reel-offer` → v0.487.0 (PR #1014) and `agent/reject-examples` → v0.488.0

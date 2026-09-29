@@ -2826,61 +2826,8 @@ problems. Dogfood it every big-picture run and fix root causes.
 - ~~**OWNER-APPROVED 2026-09-25 — a noise-delta *picture* beside the "Did it get better?" sentence.**~~ —
   **✅ SHIPPED v0.479.0** (Builder 2026-09-26). Entry cut to [`SHIPPED.md`](SHIPPED.md); one-liner under
   "Shipped" below. One finding came out of sizing its sibling: the third owner-approved item in this section
-  (auto-*apply* the classified preset) cannot be built the way it reads — the ⚠ note is on that entry.
-- **OWNER-APPROVED 2026-09-25 — auto-*apply* the classified object preset instead of offering it as a chip.**
-  *(Pillar: autonomy — size S/M as filed; **M/L as it actually is**, see the finding.)*
-  `seestack/edit/presets.py` (content classification, ~line 420) feeds the "try this preset?" chip in
-  `frontend/src/routes/Editor.tsx` (~line 2429). The owner asked for it to be applied, not offered. Conditions,
-  per §9: never over a saved or hand-edited recipe; say what was applied and offer one-click undo; and a Settings
-  switch to turn it off.
-  **⚠ BUILDER FINDING 2026-09-26, read before starting: the literal build is an image-quality DOWNGRADE, and
-  the chip is not where the owner saw this.** Read in the code while sizing it, not reasoned from the entry.
-  **(1) Where the sentence he reacted to actually is.** The chip at ~2510 renders inside the *empty-pipeline*
-  nudge, and since the auto-seed (v0.390.0) a run with no saved recipe opens with Auto **already applied** — so
-  on the owner's own install (nothing saved, `auto_edit_on_autostack` off) that nudge is not what he sees. What
-  he sees is the dimmed informational line at ~2434, inside "What Auto-process did". So "instead of offering it
-  as a chip" means *instead of Auto*, not *instead of an empty pipeline*.
-  **(2) Why swapping Auto for the preset loses picture quality.** The four `BUILTIN_PRESETS` are fixed op
-  lists (`presets.py:43`): a gradient pass, colour calibration, a stretch at a hard-coded `target_bg`, a fixed
-  curve, a fixed saturation, sometimes a fixed sharpen. `auto_recipe` (`presets.py:668`) is the data-driven
-  one: `detail.denoise` and `detail.chroma_denoise` sized by the *measured* `sky_sigma` crossfade,
-  `detail.sharpen` radius from the target's own median FWHM, `tone.curves {auto: true}` deriving its midtone
-  lift from the stretched data, `background.level_coverage` on a mosaic canvas, the ragged-border trim, and the
-  owner's stored taste profile. `applySuggestedPreset`'s `applyDataDrivenDefaults` + `prependCoverageLeveling`
-  recover only the sizing and the mosaic levelling of ops the preset already carries — **a preset with no
-  denoise op stays with no denoise op**, on the noisy stacks Auto's crossfade exists for.
-  **(3) The shape that honours the ask without the loss** — and the reason this is not S/M: make **Auto**
-  archetype-aware, i.e. fold each preset's *distinguishing* choices (galaxy: `per_channel` gradient + its
-  S-curve; nebula: the stronger SCNR/saturation; cluster: the asinh stretch + `stars.reduce`) into the
-  data-driven recipe when `classify_target` is confident, so the classification is *applied* and nothing is
-  given up. That changes the on-by-default Auto hot path, which AGENTS.md §1 judges on a tiled mosaic at the
-  owner's scale — a dogfood pass with `--mosaic` and `--editor`, not a drive-by. **Do not blind-flip the seed
-  to the preset** to close this entry; if a cheap version is wanted, the honest one is the *chip*, moved from
-  the nudge nobody sees to beside Auto's own note, which is a copy change and not what he asked for.
-  **⚠ SECOND BUILDER SIZING, 2026-09-27 — read this before starting shape (3): each of its three named
-  adjustments was checked in the code and each has a problem, so shape (3) as written is mostly a taste change.**
-  Recorded so the next run costs it rather than re-deriving it. **(a) The chip already reaches the owner.** The
-  finding above says the classification never reaches him; `frontend/src/components/editor/autoSummary.ts`'s
-  `presetSuggestionSentence` exists for exactly that reason (its docstring: *"The content-classification chip …
-  only appears on an empty pipeline … this surfaces the same hint on the surface they do land on"*), so the copy
-  half is already built and is **not** a slice. **(b) galaxy → `per_channel` gradient buys much less than it
-  looks.** Auto already emits `background.final_gradient {mode: "luminance"}`, and that op's `match_channels`
-  **defaults True** — its own help text is *"also flatten each colour's own gradient — light pollution tints one
-  side of the frame differently"*. So the colour cast the galaxy preset's `per_channel` exists to remove is
-  already removed; what is left is how the fit is computed, not whether the cast survives. **(c) cluster →
-  `stars.reduce` puts a documented preview↔export unfaithfulness on the on-by-default path.**
-  `seestack/edit/ops/stars.py::star_reduce_differs_on_proxy` records a **measured** 0.63–1.58 preview÷export ratio
-  at proxy steps 2–5 with no clean fix (*"the number is not faithful in either direction"*), and the owner's own
-  canvases are always decimated — so Auto emitting it would put that advisory on every cluster picture.
-  **(d) cluster → asinh and galaxy → the fixed S-curve are the exact loss the finding above warns about**, one
-  level down: both are hard-coded parameters replacing a data-driven one (`tone.stretch`'s measured `target_bg`,
-  `tone.curves {auto: true}`'s midtone lift derived at apply time). **What survives is the nebula pair alone** —
-  SCNR 0.7 → 0.8 and the saturation ceiling 1.25 → 1.35, i.e. two taste numbers on the on-by-default hot path with
-  nothing measured behind them — which does not justify the setting, the note and the behaviour change on its own.
-  **So the honest next step is a measurement, not a build:** does a confident classification tell Auto anything its
-  own cues (`sky`, `sky_sigma`, `median_fwhm`, `is_mosaic`) do not already encode? `classify_target`'s cues
-  (`star_share`, `ext_frac`, `chroma`) are right there to answer it on the `--mosaic` and `--big` samples. If the
-  answer is "only the nebula colour lift", **close this entry with that number** rather than shipping it.
+  (auto-*apply* the classified preset) cannot be built the way it reads — that entry is now **closed with the
+  measurement** it was gated on (Builder 2026-09-29), in [`SHIPPED.md`](SHIPPED.md).
 - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-25) — "Was the moon out?": a retrospective moon note on a
   session.**~~ — **⚪ CLOSED: ALREADY BUILT, END TO END. Do not pick it up** *(Builder 2026-09-25, grepped and
   read before starting it — it was the freshest entry in this section and the run's first candidate).* The
@@ -4000,6 +3947,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **⚪ CLOSED (no code) 2026-09-29** — **auto-*apply* the classified object preset** (the last open owner-approved item of 2026-09-25) is **closed with the measurement its own last line asked for**, not deferred a fourth time. `auto_recipe` **already** calls `classify_target` and already applies the archetype — to `auto_prefs.apply_profile(..., object_type=…)`, whose per-type biases move exactly the parameters a preset would — so the app's answer to "apply the classification" is *your* taste for this archetype rather than a fixed preset's. The only delta the two earlier sizings left standing (nebula SCNR 0.7→0.8, saturation 1.25→1.35) was rendered through the real pipeline on both bundled masters: mean |Δ| 0.0070/0.0073, p99 0.033/0.035 — **and +3–4 % sky chroma noise**, which is exactly what Auto's measured `clip(1.25 - sky_sigma×6.0, …)` ceiling exists to hold down. Both samples also classify **`galaxy` at confidence 1.0**, the archetype with no surviving delta. Full working, cues and table in [`SHIPPED.md`](SHIPPED.md); **re-open only** with a rule that is data-driven per archetype, never by copying a `BUILTIN_PRESETS` parameter onto the on-by-default Auto path.
 - **v0.488.2** — 🔎 TRUST / operability, observer issue [#1015](https://github.com/JimmyeJones/astrostack/issues/1015)'s suggested fix (2): **`/api/health` now says which build answered it.** It is the only path `_AUTH_OPEN_PATHS` leaves open, so on a password-protected install it is the one thing an unattended reader can ask without a credential — and it answered exactly `{"ok": true}`, leaving the running version to be *inferred* from the newest `stack_runs.engine_version`. The observer reported it had spent its whole life reading a checked-out tree the deployed app had never run (36 versions ahead, then 18 behind) with nothing it may read able to say so. One additive field, the **same key and value** `/api/system` already serves, so the two can never give one number two names; the probe stays a dict literal (no disk, no lock, no subprocess), and `_READONLY_GET_PATHS` is untouched. Tests +4, all fail-before by scratch revert — including that a password-protected install still answers it while `/api/system` 401s. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.488.1** — 🔧 INFRA / green baseline: **the 60 s scan-job deadline that flaked `test_skipped_folders.py` in September was still in `test_scoped_scan.py` and `test_scan_root_confined.py`, and took this run's baseline red** (`1 failed, 6952 passed` on unmodified `origin/main`; the same file passes alone in 28 s). New shared `tests/webapp/jobwait.py` (`JOB_TIMEOUT_S = 180` + `wait_job`) replaces three hand-rolled copies, so the number has one home instead of being re-fixed per file. **Nothing loosened** — no assertion changed, and a job that never finishes still fails, three minutes later instead of one. Test-only; +6 tests pinning the helper. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.488.0** — 🌟 NEW BEGINNER FEATURE (understand + trust), the Scout's 2026-09-29 entry: **"See what got thrown away" — the reject breakdown can now be *looked at*, not only believed.** New pure `webapp/rejectexamples.py::pick_reject_examples` + `frontend/src/components/target/rejectExamples.ts`; `/frames/reject-summary` gains an additive `examples`, and `RejectionBreakdown` offers up to three of a bucket's own rejected subs behind one shared **collapsed** toggle (one line of page height, and no thumbnail fetched until asked — the reel cards' bargain). **Only the three buckets whose cause is visible in the frame** (`EXAMPLE_BUCKETS` = trailed / clouds / soft): a thumbnail teaches nothing for "you removed these" or "not located yet", and for "couldn't be read" there is nothing to render. **And the example is the *worst* one** — fattest stars for soft, thinnest star field for cloud, id order for trailed, which has no stored score and says so. Bucketing is `rejection_summary.bucket_for` (made public), so "cause" here means exactly what the count beside it means. The pass streams `accept = 0` rows only (new additive `Project.iter_frame_columns(rejected_only=)`), retains a few dozen tuples at any depth, and asks "is this file still there?" of at most nine candidates. The hover-card copy of the same breakdown is passed neither prop, so hovering a badge still loads no pictures. Tests +14 Python / +9 vitest, fail-before verified on the endpoint field, the projection flag and the strip. One additive response field + one additive keyword; no config, schema, on-disk, default or API-shape change. Full entry in [`SHIPPED.md`](SHIPPED.md).
