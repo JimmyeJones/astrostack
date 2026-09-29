@@ -1,0 +1,194 @@
+/* The night-sky look: a deep-navy sky instead of flat grey, with a gentle
+ * parallax starfield drifting behind the pages.
+ *
+ * Everything here hangs off two attributes the `NightSky` component writes on
+ * `<html>`, so the whole theme switches with the route and with the per-device
+ * preference and *nothing* below is unconditional:
+ *
+ *   data-astro-surround="sky" | "neutral"   — "neutral" is the untouched Mantine
+ *       dark theme, for the picture-judging and three.js routes (see
+ *       `surround.ts` for why each one refuses the sky).
+ *   data-astro-motion="drifting" | "still"  — "still" for `prefers-reduced-motion`
+ *       and for a hidden tab.
+ *
+ * With neither attribute present (the component not yet mounted, or a test that
+ * renders a card on its own) the app looks exactly as it did before this file.
+ *
+ * It is paint, not layout: no element moves, nothing is removed, and the sky
+ * layer is `pointer-events: none` behind everything at `z-index: -1`.
+ */
+
+/* ---- the sky itself -------------------------------------------------------
+ * A navy re-tint of Mantine's dark surfaces, keeping each step's *luminance*
+ * roughly where it was so text contrast can only improve: body #242424 → #141a30
+ * takes the contrast of default text (#c9c9c9) from ~9.2:1 to ~10.3:1. The text
+ * greys (dark-0..dark-3) are deliberately untouched.
+ */
+:root[data-mantine-color-scheme='dark'][data-astro-surround='sky'] {
+  --mantine-color-dark-4: #333a5e;
+  --mantine-color-dark-5: #2a3152;
+  --mantine-color-dark-6: #1d2440;
+  --mantine-color-dark-7: #141a30;
+  --mantine-color-dark-8: #101528;
+  --mantine-color-dark-9: #080b16;
+}
+
+/* The page behind everything: a little more light towards the top, falling away
+ * to near-black at the bottom, plus one broad, very faint band of haze standing
+ * in for the Milky Way. Fixed attachment so it doesn't slide as a long page
+ * scrolls — the stars are the thing that moves. */
+:root[data-astro-surround='sky'] body {
+  background-color: #060913;
+  background-image:
+    radial-gradient(120% 90% at 50% -20%, rgba(38, 52, 104, 0.55) 0%, transparent 60%),
+    linear-gradient(180deg, #0d1226 0%, #070a15 55%, #05070f 100%);
+  background-attachment: fixed;
+}
+
+.astro-nightsky {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* The haze: one wide, soft, tilted ellipse at a few percent opacity. Static —
+ * a moving Milky Way would be the one thing in here you could not ignore. */
+.astro-nightsky__haze {
+  position: absolute;
+  inset: -20%;
+  background-image:
+    radial-gradient(55% 22% at 62% 34%, rgba(140, 162, 235, 0.10) 0%, rgba(120, 140, 220, 0.045) 45%, transparent 72%);
+  transform: rotate(-24deg);
+}
+
+/* ---- the stars ------------------------------------------------------------
+ * Three tiled layers at different sizes, brightnesses and speeds — the parallax
+ * is that the near layer crosses its tile in under two minutes and the far layer
+ * takes five. Each layer is one element painting a repeating background, so the
+ * whole field costs the compositor a single transform per layer and React
+ * nothing at all: there is no per-frame state anywhere in this feature.
+ *
+ * Each layer is inset by a whole tile on every side, and its keyframes translate
+ * by exactly one tile, so the loop is seamless in either direction and the
+ * viewport is covered throughout.
+ */
+.astro-nightsky__layer {
+  position: absolute;
+  top: calc(-1 * var(--astro-tile));
+  left: calc(-1 * var(--astro-tile));
+  width: calc(100% + 2 * var(--astro-tile));
+  height: calc(100% + 2 * var(--astro-tile));
+  background-repeat: repeat;
+  background-size: var(--astro-tile) var(--astro-tile);
+  will-change: transform;
+}
+
+.astro-nightsky__layer--far {
+  --astro-tile: 340px;
+  opacity: 0.4;
+  background-image:
+    radial-gradient(0.7px 0.7px at 13% 19%, #cfd8ff 99%, transparent),
+    radial-gradient(0.7px 0.7px at 47% 8%, #ffffff 99%, transparent),
+    radial-gradient(0.7px 0.7px at 78% 27%, #c8d4ff 99%, transparent),
+    radial-gradient(0.7px 0.7px at 29% 52%, #ffffff 99%, transparent),
+    radial-gradient(0.7px 0.7px at 61% 44%, #d8e0ff 99%, transparent),
+    radial-gradient(0.7px 0.7px at 91% 61%, #ffffff 99%, transparent),
+    radial-gradient(0.7px 0.7px at 8% 73%, #cfd8ff 99%, transparent),
+    radial-gradient(0.7px 0.7px at 38% 88%, #ffffff 99%, transparent),
+    radial-gradient(0.7px 0.7px at 69% 81%, #d0dcff 99%, transparent),
+    radial-gradient(0.7px 0.7px at 84% 95%, #ffffff 99%, transparent);
+  animation: astro-drift-far 300s linear infinite;
+}
+
+.astro-nightsky__layer--mid {
+  --astro-tile: 260px;
+  opacity: 0.55;
+  background-image:
+    radial-gradient(1px 1px at 22% 12%, #ffffff 99%, transparent),
+    radial-gradient(1px 1px at 66% 23%, #dbe4ff 99%, transparent),
+    radial-gradient(1px 1px at 41% 47%, #ffffff 99%, transparent),
+    radial-gradient(1px 1px at 88% 55%, #cdd9ff 99%, transparent),
+    radial-gradient(1px 1px at 15% 68%, #ffffff 99%, transparent),
+    radial-gradient(1px 1px at 57% 79%, #e3e9ff 99%, transparent),
+    radial-gradient(1px 1px at 79% 92%, #ffffff 99%, transparent);
+  animation: astro-drift-mid 180s linear infinite;
+}
+
+.astro-nightsky__layer--near {
+  --astro-tile: 200px;
+  opacity: 0.78;
+  background-image:
+    radial-gradient(1.4px 1.4px at 31% 17%, #ffffff 99%, transparent),
+    radial-gradient(1.4px 1.4px at 74% 39%, #ffe9c8 99%, transparent),
+    radial-gradient(1.4px 1.4px at 19% 63%, #ffffff 99%, transparent),
+    radial-gradient(1.4px 1.4px at 62% 86%, #cfe0ff 99%, transparent);
+  animation: astro-drift-near 110s linear infinite;
+}
+
+/* Three directions, so the layers separate visually rather than sliding as one
+ * sheet. Each is one whole tile, which is what makes the wrap invisible. */
+@keyframes astro-drift-far {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(340px, 340px, 0); }
+}
+@keyframes astro-drift-mid {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-260px, 260px, 0); }
+}
+@keyframes astro-drift-near {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(200px, 0, 0); }
+}
+
+/* Stars sit still when the tab is hidden or the reader asked for less motion.
+ * The media query is the belt to the component's braces: the CSS alone is
+ * correct even if the JS never runs. */
+:root[data-astro-motion='still'] .astro-nightsky__layer {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .astro-nightsky__layer {
+    animation: none;
+  }
+}
+
+/* ---- letting the sky show at the edges ------------------------------------
+ * The header and navbar are the two surfaces that span a whole edge, so a little
+ * translucency there is what makes the page feel like it is sitting *in front of*
+ * a sky rather than on top of a picture of one. The blur keeps a drifting star
+ * from crawling behind the navigation text, and is skipped where unsupported.
+ */
+:root[data-astro-surround='sky'] .astro-nightsky-header,
+:root[data-astro-surround='sky'] .astro-nightsky-navbar {
+  background-color: rgba(11, 16, 34, 0.78);
+}
+
+@supports (backdrop-filter: blur(6px)) or (-webkit-backdrop-filter: blur(6px)) {
+  :root[data-astro-surround='sky'] .astro-nightsky-header,
+  :root[data-astro-surround='sky'] .astro-nightsky-navbar {
+    background-color: rgba(11, 16, 34, 0.62);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+  }
+}
+
+/* Cards go *slightly* translucent — enough that the sky reads as continuous
+ * behind them, far short of anything a star could be mistaken for content in.
+ * `--mantine-color-body` is already the navy above, so this only adds the alpha;
+ * the dots that come through are at ~8 % of their own opacity. A first dogfood
+ * pass took this to 0.88 with brighter layers, and the star dots read through a
+ * dense paragraph of body text on the Target page — visible, not unreadable, but
+ * more than "slightly". These are the calmed numbers. */
+:root[data-mantine-color-scheme='dark'][data-astro-surround='sky'] .mantine-Paper-root {
+  background-color: rgba(20, 26, 48, 0.92);
+}
+
+/* The accent, given the faint halo a bright star has through an eyepiece. One
+ * element — the app mark in the header — so it reads as a touch of atmosphere
+ * rather than a glow effect applied to the UI. */
+:root[data-astro-surround='sky'] .astro-nightsky-mark {
+  filter: drop-shadow(0 0 6px rgba(151, 117, 250, 0.55));
+}

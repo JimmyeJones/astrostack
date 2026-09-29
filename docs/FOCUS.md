@@ -24,7 +24,11 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
      so a target gets the night-by-night reel without being re-stacked. Its own sizing; the primitive
      (`deepening_series`' capture-window grouping) already exists.
 
-   - **NEW, owner-requested 2026-09-28: the night-sky theme** — `READY`, M; spec under "UX & polish".
+   - ~~**NEW, owner-requested 2026-09-28: the night-sky theme**~~ — **✅ SHIPPED v0.485.0** (Builder
+     2026-09-29). Deep-navy sky + three drifting star layers, `prefers-reduced-motion`/hidden-tab still, a
+     per-device switch in Settings → *This device*, and a **plain neutral surround on the editor, Compare and
+     the two three.js routes** — `frontend/src/nightsky/surround.ts` is where that decision lives, so a new
+     picture-judging route has one line to add. Entry in [`SHIPPED.md`](SHIPPED.md).
 
 3. **Open observer issues (all verified, filed, and awaiting the last mile — no new issue since
    2026-09-25):** #878 (the app now offers the reconcile; closes on a reading that shows the 11 pairs
