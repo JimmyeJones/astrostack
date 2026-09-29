@@ -13,13 +13,20 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
    come back clean, but AGENTS.md is explicit: **do not believe "well-hardened"** — a "What Auto did"
    trim above ~15 % of the canvas is a bug, not a ragged edge.
 
-2. **Owner-approved, buildable now** (answers of 2026-09-25). All but two of this group have shipped
+2. **Owner-approved, buildable now** (answers of 2026-09-25) — **this group is now empty.** Everything in it
+   has shipped
    (astroalign single-field + mosaic → v0.482.0/v0.484.0; the cumulative-by-night reel → v0.483.0; the
    noise-delta picture → v0.479.0; the 11 mosaic pairs are now *offered* in the Library → v0.482.1/.2).
-   **One remainder, plus one that is closed below:**
-   - **auto-*apply* the classified object preset** — two Builders have costed it and both landed on
-     "the honest next step is a **measurement**, not a build". Read the two ⚠ notes on its backlog
-     entry before touching it; the literal build is an image-quality downgrade.
+   **Nothing of this group is open any more:**
+   - ~~**auto-*apply* the classified object preset**~~ — **⚪ CLOSED WITH THE NUMBER** (Builder 2026-09-29).
+     Two Builders had costed it and both landed on "the honest next step is a **measurement**, not a build";
+     that measurement ran. `auto_recipe` **already** classifies and already applies the archetype (to
+     `auto_prefs.apply_profile(..., object_type=…)`, which moves exactly the parameters a preset would), and the
+     only delta the sizings left standing — nebula SCNR 0.7→0.8, saturation 1.25→1.35 — costs **+3–4 % sky
+     chroma noise** on both bundled masters, which is what Auto's own measured saturation ceiling exists to
+     hold down. Both samples classify `galaxy` at confidence 1.0, the archetype with no surviving delta.
+     Working in [`SHIPPED.md`](SHIPPED.md); **do not re-pick it** except with a rule that is data-driven per
+     archetype.
    - ~~**the reel-*from-history* half**~~ — **✅ SHIPPED v0.486.0** (Builder 2026-09-29). A history that
      already nests night-wise is reported and labelled as "night 1; nights 1–2; …"
      (`capture_nights.cumulative_night_steps`, `night_steps` on `/deepening-reel/info`), with `None` for

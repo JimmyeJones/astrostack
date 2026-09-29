@@ -20,20 +20,10 @@ the scan then does.
 from __future__ import annotations
 
 import hashlib
-import time
 from pathlib import Path
 
 from tests.synth import write_seestar_fits
-
-
-def _wait_job(client, job_id, timeout=60):
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        body = client.get(f"/api/jobs/{job_id}").json()
-        if body["state"] in ("done", "error", "cancelled", "interrupted"):
-            return body
-        time.sleep(0.1)
-    raise AssertionError(f"job {job_id} did not finish in {timeout}s")
+from tests.webapp.jobwait import wait_job as _wait_job
 
 
 def _scan(client, root=None):
