@@ -785,9 +785,9 @@ def test_stack_run_options_chunks_past_sqlites_parameter_limit(proj):
     assert len(proj.stack_run_options(ids)) == 1200
 
 
-def test_solved_frame_geometry_reports_the_newest_solved_frame(tmp_path):
+def test_solved_frame_geometry_reports_the_newest_solved_frames(tmp_path):
     """The three numbers the framing advice needs to know which telescope it is
-    advising, read as one row rather than by building a FrameRow per sub."""
+    advising, read as one query rather than by building a FrameRow per sub."""
     from seestack.io.project import FrameRow, Project
 
     proj = Project.create(tmp_path / "t", "T")
@@ -802,10 +802,12 @@ def test_solved_frame_geometry_reports_the_newest_solved_frame(tmp_path):
                                       height_px=1080, pixscale_arcsec=3.987))
         assert proj.solved_frame_geometry() == (3.987, 1920, 1080)
 
-        # The newest solved frame wins, so a scope swapped mid-library answers
-        # with what it is now rather than what it was.
-        proj.add_frame(FrameRow(source_path="c.fit", width_px=1920,
-                                height_px=1080, pixscale_arcsec=2.392))
+        # A scope swapped mid-library still answers with what it is now: only the
+        # newest GEOMETRY_SAMPLE_FRAMES rows are read, so once the new scope's
+        # subs are the majority of them the answer is the new scope's.
+        for i in range(13):
+            proj.add_frame(FrameRow(source_path=f"c{i}.fit", width_px=1920,
+                                    height_px=1080, pixscale_arcsec=2.392))
         assert proj.solved_frame_geometry() == (2.392, 1920, 1080)
 
         # A non-positive scale is not an answer (a failed solve writing zero).
@@ -813,5 +815,76 @@ def test_solved_frame_geometry_reports_the_newest_solved_frame(tmp_path):
                                 height_px=1080, pixscale_arcsec=0.0))
         assert proj.solved_frame_geometry() == (2.392, 1920, 1080)
         assert fid is not None
+    finally:
+        proj.close()
+
+
+def test_one_implausible_plate_solve_does_not_resize_the_telescope(tmp_path):
+    """FAIL-BEFORE: the field was read off the single newest solved row.
+
+    An implausible plate scale is not hypothetical — the engine has a rule for
+    dropping them from a stack (``mosaic._plate_scale_outlier_indices``) and the
+    owner's library carries 178 of them (observer issue #965). One landing last
+    re-sized *every* "will it fit in one frame?" and every mosaic panel count in
+    the app, and ``webapp/frame_field.py`` caches that for the life of the
+    process.
+    """
+    from seestack.framing import frame_field_from_solve, framing_hint, mosaic_plan
+    from seestack.io.project import FrameRow, Project
+
+    proj = Project.create(tmp_path / "t", "T")
+    try:
+        # A Seestar S30: 1920x1080 at 4"/px is a 128' x 72' field.
+        for i in range(20):
+            proj.add_frame(FrameRow(source_path=f"g{i}.fit", width_px=1920,
+                                    height_px=1080, pixscale_arcsec=4.0))
+        good = frame_field_from_solve(*proj.solved_frame_geometry())
+        assert good is not None
+        assert good.long_arcmin == pytest.approx(128.0, abs=0.5)
+
+        # …and the newest sub comes back solved at half that scale. It is well
+        # inside frame_field_from_solve's 3'–1200' sanity band, so nothing below
+        # it can tell: the field simply halves.
+        proj.add_frame(FrameRow(source_path="bad.fit", width_px=1920,
+                                height_px=1080, pixscale_arcsec=2.0))
+        assert frame_field_from_solve(*proj.solved_frame_geometry()) == good
+
+        # What that would have cost, in the app's own words: the Orion Nebula
+        # (85' x 60') is a tight single field on an S30 and needs a four-panel
+        # mosaic in the half-sized one — so the advice flips from "one more
+        # pointing, with margin" to "go and shoot a 2x2", on every page that asks.
+        half = frame_field_from_solve(2.0, 1920, 1080)
+        assert framing_hint(85.0, field=good).level == "tight"
+        assert mosaic_plan(85.0, 60.0, field=good) is None
+        assert framing_hint(85.0, field=half).level == "mosaic"
+        assert mosaic_plan(85.0, 60.0, field=half).panels == 4
+    finally:
+        proj.close()
+
+
+def test_the_field_survives_a_solves_own_jitter(tmp_path):
+    """And the ordinary case is unmoved: every frame is solved independently, so
+    a healthy target's plate scales differ in the last digits. The median of them
+    is a real frame's own triple, within a hair of any of them — and the advice
+    that reads it does not move at all."""
+    import random
+
+    from seestack.framing import frame_field_from_solve, mosaic_plan
+    from seestack.io.project import FrameRow, Project
+
+    proj = Project.create(tmp_path / "t", "T")
+    try:
+        rng = random.Random(7)
+        for i in range(30):
+            proj.add_frame(FrameRow(
+                source_path=f"j{i}.fit", width_px=1920, height_px=1080,
+                pixscale_arcsec=4.0 * (1.0 + rng.uniform(-0.002, 0.002))))
+        geom = proj.solved_frame_geometry()
+        assert geom is not None
+        assert geom[0] == pytest.approx(4.0, rel=0.003)
+        field = frame_field_from_solve(*geom)
+        assert field is not None
+        assert mosaic_plan(200.0, 150.0, field=field) == mosaic_plan(
+            200.0, 150.0, field=frame_field_from_solve(4.0, 1920, 1080))
     finally:
         proj.close()

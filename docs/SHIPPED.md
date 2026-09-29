@@ -1,5 +1,72 @@
 # Shipped — the record
 
+## 2026-09-29 (Builder, sixth) — one plate solve was deciding which telescope the app thinks you own
+
+### v0.488.5 — 🟠 BUG FIX (autonomy + trust, PRIORITY 2/3): the frame field is read from the newest solved *frames*, not the newest solved *frame*
+
+*(Builder-found on a `--mosaic --editor --big` dogfood pass and traced end to end in the code before it was
+fixed. Not from the backlog.)*
+
+**What the pass showed.** Two of the app's prescriptive surfaces gave the same object two different mosaic
+grids in the same minute: the Tonight week plan chipped *Sample: Orion Nebula (M42)* **`NEEDS 2×2 MOSAIC`**
+while the Target page's framing card, one route away, said **"About a 3×3 mosaic (9 panels) covers all of
+it."** *(That particular divergence is a fixture artifact and is written up in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md) so nobody re-chases it — `--big` adds a sample whose synthetic frames
+are 900×600 where the other two are 480×320, so the library genuinely holds two "telescopes". What it exposed
+underneath is not an artifact.)*
+
+**The mechanism.** Both grids come from one function, `framing.mosaic_plan`, against one input: a
+`FrameField` derived from `Project.solved_frame_geometry`. That method read **one row** —
+
+```sql
+… ORDER BY id DESC LIMIT 1
+```
+
+— the single newest solved frame. So the field of view the whole app advises against was a property of one
+plate solve. Everything downstream reads it: `framing_hint` ("will it fit in one frame?"), `mosaic_plan` (the
+panel count), `field_fill` (the drawing under the sentence) and `background_mode_hint`, on the Target page's
+object card and on **every** Tonight-planner and week-plan row. And `webapp/frame_field.py` caches a
+successful answer **for the life of the process**, so a bad read persists until the app restarts.
+
+**Why that is a live risk and not a theoretical one.** An implausible plate scale is a shape this repo already
+has a rule for — `stack/mosaic._plate_scale_outlier_indices` drops them from a canvas — and the owner's own
+library carries **178 rows** of it (observer issue
+[#965](https://github.com/JimmyeJones/astrostack/issues/965)). The existing guard does not reach it:
+`frame_field_from_solve` refuses a field outside **3′–1200′**, a band ~400× wide, so a solve wrong by 2× sails
+through. Measured in the app's own words, for the Orion Nebula (85′ × 60′) on the owner's S30:
+
+| field the app believes | framing verdict | mosaic plan |
+|---|---|---|
+| 128′ × 72′ (4″/px — the real S30) | `tight` | **none — it fits one pointing** |
+| 64′ × 36′ (one sub mis-solved at 2″/px) | `mosaic` | **a 2×2, 4 panels** |
+
+i.e. one bad row turns *"one more pointing, with margin"* into *"go and shoot four panels"*, everywhere, until
+the process restarts.
+
+**The fix.** `solved_frame_geometry` now reads the newest `GEOMETRY_SAMPLE_FRAMES = 25` solved rows and
+returns the one at the **median plate scale** — one of those frames' *own* triples, never an average of them,
+because a scale taken from one frame with another's dimensions describes a field neither frame had. Still one
+query and three columns: this is asked from request handlers on targets with thousands of subs, and the cost
+note that shape exists for is unchanged (25 rows, not a `FrameRow` per sub).
+
+**What the constant keeps.** Reading the *newest* rows was deliberate — "a scope that changed mid-library
+answers with what it is now" — and that survives: 25 is a few minutes of one Seestar session, so a telescope
+the owner really did change is the majority of the window within one short session, while a handful of bad
+solves cannot carry the median. **Today's rule is this rule at `N = 1`**, i.e. the setting at which a single
+solve decides everything.
+
+**Tests.** +2 and one rewritten in `tests/test_project.py`: the scope-swap case restated at the real window
+size; the implausible newest solve, asserted through to `framing_hint` and `mosaic_plan` so the regression is
+pinned in the app's own vocabulary rather than in a tuple; and the ordinary case — 30 independently-solved
+frames with real ±0.2 % scale jitter — giving a field within 0.3 % and an **identical** mosaic plan.
+**Fail-before verified by scratch revert:** setting the window back to `1` (which is the old SQL exactly)
+turns the implausible-solve test red.
+
+**Scope.** One query's `LIMIT`; no config, schema, on-disk, default or API-shape change, no new dependency, and
+no frontend change. Filed rather than built: `library_frame_field` still answers from whichever target it
+probes first, which is a separate (and now much better defended) question — see
+[`IMPROVEMENTS.md`](IMPROVEMENTS.md).
+
 ## 2026-09-29 (Builder, fifth) — the rescued sub's own rotation, and the image the rescue hands the solver
 
 ### v0.488.4 — 🟠 BUG FIX (autonomy, PRIORITY 2): the deep image is integrated from the star transforms too

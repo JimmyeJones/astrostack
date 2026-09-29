@@ -264,6 +264,30 @@ _ACQUISITION_COLUMNS: tuple[str, ...] = (
 )
 
 
+#: How many of the newest solved frames :meth:`Project.solved_frame_geometry`
+#: reads this target's telescope off.
+#:
+#: It was **one row**, which made the whole app's framing advice a property of a
+#: *single* plate solve. The framing verdict, the mosaic panel count, the
+#: field-fill drawing and the background-mode hint are all a comparison against
+#: that one number, on the Target page's object card and on every Tonight-planner
+#: and week-plan row — and ``webapp/frame_field.py`` caches the answer for the
+#: life of the process, so a bad read persists until the app restarts. An
+#: implausible plate scale is not hypothetical: the engine has a rule for
+#: dropping them from a stack (``stack/mosaic._plate_scale_outlier_indices``) and
+#: the owner's own library carries 178 such rows (observer issue #965). A solve
+#: wrong by 2x survives :func:`seestack.framing.frame_field_from_solve`'s
+#: 3'-1200' sanity band untouched, and turns "this fits in one frame" into "go
+#: and shoot a four-panel mosaic".
+#:
+#: Twenty-five is a few minutes of one Seestar session: enough that a handful of
+#: bad solves cannot carry the median, few enough that a telescope the owner
+#: really did change is reflected within one short session — which is what
+#: reading the *newest* rows was for, and is kept. Today's rule is this one at
+#: ``N = 1``, i.e. the setting at which a single solve decides everything.
+GEOMETRY_SAMPLE_FRAMES = 25
+
+
 @dataclass(frozen=True)
 class AcquisitionValues:
     """Every accepted sub's acquisition settings, one list per column.
@@ -1542,7 +1566,8 @@ class Project:
         return digest.hexdigest()
 
     def solved_frame_geometry(self) -> tuple[float, int, int] | None:
-        """``(pixscale_arcsec, width_px, height_px)`` of a solved frame, or ``None``.
+        """``(pixscale_arcsec, width_px, height_px)`` of a *representative* solved
+        frame, or ``None``.
 
         The three numbers that say what field of view this target's telescope
         actually has — the plate solve already measured the scale, and the frame
@@ -1551,26 +1576,40 @@ class Project:
         assumed camera model (AGENTS.md §1 "Owner facts";
         :func:`seestack.framing.frame_field_from_solve` turns this into a field).
 
-        Deliberately **one row, three columns**, like :meth:`source_paths`: the
-        question is asked from request handlers on a target with thousands of
-        subs, and building a ``FrameRow`` per frame to read three numbers off one
-        of them is the shape of cost this app has had to remove before. Takes the
-        newest such frame (highest id) so a scope that changed mid-library
-        answers with what it is now. ``None`` when nothing is solved yet.
+        The representative is the **median plate scale of the newest
+        :data:`GEOMETRY_SAMPLE_FRAMES` solved frames**, returned as one of those
+        frames' own triples rather than as an average of them — a scale taken
+        from one frame and dimensions from another would describe a field neither
+        frame had. Reading the *newest* rows is what lets a scope the owner really
+        did change answer with what it is now; taking the median of them is what
+        stops one plate solve deciding it (see that constant).
+
+        Still **three columns and one query**, like :meth:`source_paths`: this is
+        asked from request handlers on a target with thousands of subs, and
+        building a ``FrameRow`` per frame to read three numbers off one of them is
+        the shape of cost this app has had to remove before. ``None`` when nothing
+        is solved yet.
         """
         assert self._conn is not None
-        row = self._conn.execute(
+        rows = self._conn.execute(
             "SELECT pixscale_arcsec, width_px, height_px FROM frames "
             "WHERE pixscale_arcsec IS NOT NULL AND pixscale_arcsec > 0 "
             "AND width_px IS NOT NULL AND height_px IS NOT NULL "
-            "ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        if row is None:
+            "ORDER BY id DESC LIMIT ?",
+            (GEOMETRY_SAMPLE_FRAMES,),
+        ).fetchall()
+        usable: list[tuple[float, int, int]] = []
+        for row in rows:
+            try:
+                usable.append((float(row[0]), int(row[1]), int(row[2])))
+            except (TypeError, ValueError):
+                continue
+        if not usable:
             return None
-        try:
-            return float(row[0]), int(row[1]), int(row[2])
-        except (TypeError, ValueError):
-            return None
+        # Sorted from a newest-first list and stable, so equal scales keep their
+        # id order and the answer is the same on every call.
+        usable.sort(key=lambda g: g[0])
+        return usable[(len(usable) - 1) // 2]
 
     def accepted_solved_pointings(
         self,

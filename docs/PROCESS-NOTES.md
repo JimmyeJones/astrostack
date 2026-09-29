@@ -1,5 +1,62 @@
 # Process notes & QA sweep records
 
+## 2026-09-29 (Builder run, fifth of the day) — both halves of the v0.481.0 rescue lead, and a dogfood pass that found a real one
+
+*(Builder, branch `claude/awesome-fermat-fzn5hx` → **v0.488.3**, **v0.488.4**, **v0.488.5**. Baseline on
+`origin/main` at c6d1637: **6964 passed, 2 skipped**, 19m10s with the BLAS cap and `-n 4 --dist worksteal`,
+`/tmp/pytest-of-root` cleared first. Green.)*
+
+### DOGFOOD SWEEP — `--mosaic --editor --big`, and what "clean" hid
+
+**Console-clean, and that was never the question.** Auto's trim on the 2×2 was **7.9 %** (well under the ~15 %
+bug line), nothing overflowed at 420 px or 1440 px, no console error, and both editor drives added all 21 ops
+with the preview re-rendering each time, plus undo/redo. Tallest page `/tonight` at 3630 px (phone), in line
+with the standing baselines.
+
+**Reading the paragraph is what found something.** The Tonight week plan chipped *Sample: Orion Nebula (M42)*
+**`NEEDS 2×2 MOSAIC`**; the Target page's framing card, one route away, said **"About a 3×3 mosaic (9 panels)
+covers all of it."** Same object, same app, same minute, two grids.
+
+**Half of that is a fixture artifact — do not re-chase it.** `--big` adds a third sample whose synthetic frames
+are **900×600** where the other two are **480×320**, all at 5″/px, so the dogfood library genuinely holds two
+"telescopes" (75′ × 50′ and 40′ × 26.7′). `library_frame_field` returns the newest-activity target's (75′ →
+2×2); the Target page prefers `target_frame_field`, this target's own (40′ → 3×3). A real install has one
+telescope and the two agree. Verified by reading the three projects' `solved_frame_geometry` directly off the
+dogfood library.
+
+**The other half was not.** Chasing *why* the two could differ at all led to
+`Project.solved_frame_geometry`, which read **one row** — the newest solved frame — as the answer to "what
+field of view does this owner's telescope have?", for every framing verdict, mosaic panel count, field-fill
+drawing and background-mode hint in the app, cached by `webapp/frame_field.py` for the life of the process.
+Shipped as **v0.488.5**; full entry, the measured cost (one mis-solved sub flips the Orion Nebula from
+`tight` / no mosaic to `mosaic` / four panels) and the reasoning behind `GEOMETRY_SAMPLE_FRAMES = 25` are in
+[`SHIPPED.md`](SHIPPED.md).
+
+**The generalisation worth carrying: a dogfood divergence can be a fixture's fault and still be worth a full
+trace.** The two grids were not a bug in either surface, and neither one was wrong. What was worth having is
+the question *"how could these two ever differ?"* — because the answer was a single-row read that a real
+install can hit for an entirely different reason.
+
+### The rescue lead (v0.481.0's `LEAD ×2`), both halves, and why neither was a guess
+
+Both halves were gated on something their entries said to settle first, and both were settled **in this repo**
+rather than deferred again:
+
+- **(a) the sign.** The entry refused to write `ref_rotation ± θ` because `StarTransform.rotation_deg`'s
+  convention against ASTAP's `CROTA2` was unknown, and proposed two real ASTAP solves to settle it. Measured
+  on the fixture ladder instead: the transform's angle runs **opposite** to the sky's position angle (+2.0°
+  field → member PA **+2.005°**, transform **−2.005°**), so the guess was a coin flip. The fix sidesteps the
+  question entirely — take the *difference* of the two headers' own position angles, read the same way, and
+  the solver's convention offset cancels.
+- **(b) "measure before building".** Measured, and the answer was build: a turning night costs the shift-only
+  deep integration **3.8×** of its star peaks, and a source extractor finds **281 sources in a 60-star field**
+  because each star is laid down as its own arc. ASTAP itself was not run — the numbers describe the image it
+  is handed, not its verdict — and that is enough to build while it would not have been enough to close.
+
+**The generalisation worth carrying: a "measure before building" gate is often answerable without the thing
+the entry named.** Both entries named an ASTAP call this container does not have. Neither actually needed one:
+(a) needed the two headers the fix already writes, (b) needed the star catalogue the fixture already knows.
+
 ## 2026-09-29 (Builder run, fourth of the day) — a flake that was `main`'s, the version an unattended reader can see, and the measurement that closed the last owner-approved item
 
 *(Builder, branch `claude/awesome-fermat-378cir` → **v0.488.1** + **v0.488.2** + one docs closure. Baseline on
