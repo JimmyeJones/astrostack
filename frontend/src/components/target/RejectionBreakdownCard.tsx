@@ -2,6 +2,7 @@ import { Paper } from "@mantine/core";
 
 import type { RejectionSummary } from "../../api/client";
 import { RejectionBreakdown } from "./RejectionBreakdown";
+import type { RejectExamples } from "./rejectExamples";
 
 /** "Why were some frames left out?" — with a home you can actually reach.
  *
@@ -19,18 +20,24 @@ import { RejectionBreakdown } from "./RejectionBreakdown";
  * nothing (so its tab doesn't appear on a target that kept every sub).
  */
 export function RejectionBreakdownCard(
-  { summary, onRunPlateSolve, onTryHarder, deepRescueOffered }: {
+  { summary, onRunPlateSolve, onTryHarder, deepRescueOffered, safe, examples }: {
     summary: RejectionSummary | null | undefined;
     onRunPlateSolve?: () => void;
     onTryHarder?: () => void;
     deepRescueOffered?: boolean;
+    /** The target, for the worked-example thumbnails. This card is where they
+     *  belong — the hover-card copy of the same breakdown deliberately gets
+     *  neither prop, so hovering a badge never starts loading pictures. */
+    safe?: string;
+    examples?: RejectExamples;
   },
 ) {
   if (!summary || summary.buckets.length === 0) return null;
   return (
     <Paper withBorder p="md" radius="md">
       <RejectionBreakdown summary={summary} onRunPlateSolve={onRunPlateSolve}
-        onTryHarder={onTryHarder} deepRescueOffered={deepRescueOffered} />
+        onTryHarder={onTryHarder} deepRescueOffered={deepRescueOffered}
+        safe={safe} examples={examples} />
     </Paper>
   );
 }

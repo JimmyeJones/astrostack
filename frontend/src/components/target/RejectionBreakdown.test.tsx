@@ -9,14 +9,19 @@ import type { RejectionBucket, RejectionSummary } from "../../api/client";
 function renderBreakdown(
   summary: RejectionSummary,
   onRunPlateSolve?: () => void,
-  opts: { onTryHarder?: () => void; deepRescueOffered?: boolean } = {},
+  opts: {
+    onTryHarder?: () => void; deepRescueOffered?: boolean;
+    safe?: string;
+    examples?: Record<string, { frame_id: number; name: string }[]>;
+  } = {},
 ) {
   return render(
     <MantineProvider>
       <MemoryRouter>
         <RejectionBreakdown summary={summary} onRunPlateSolve={onRunPlateSolve}
           onTryHarder={opts.onTryHarder}
-          deepRescueOffered={opts.deepRescueOffered} />
+          deepRescueOffered={opts.deepRescueOffered}
+          safe={opts.safe} examples={opts.examples} />
       </MemoryRouter>
     </MantineProvider>,
   );
@@ -186,5 +191,58 @@ describe("RejectionBreakdown — trying harder on a faint field", () => {
     }, vi.fn(), { onTryHarder: vi.fn(), deepRescueOffered: true });
     expect(screen.getAllByRole("button", { name: "Try harder to locate these" }))
       .toHaveLength(1);
+  });
+});
+
+describe("RejectionBreakdown worked examples", () => {
+  const EXAMPLES = {
+    trailed: [{ frame_id: 7, name: "light_0007.fit" },
+              { frame_id: 9, name: "light_0009.fit" }],
+    // A bucket with no copy: counted above, never illustrated.
+    removed: [{ frame_id: 3, name: "light_0003.fit" }],
+  };
+
+  it("offers the strip collapsed, and fetches no thumbnail until asked", () => {
+    // The same bargain the reel cards make: one line of page height, and the
+    // card does not pull pictures nobody asked for.
+    renderBreakdown(SUMMARY, undefined, { safe: "M_42", examples: EXAMPLES });
+    expect(screen.getByRole("button", { name: /show me what they looked like/i }))
+      .toBeInTheDocument();
+    expect(document.querySelector("img")).toBeNull();
+    expect(screen.queryByText(/straight bright line/)).toBeNull();
+  });
+
+  it("shows each visible cause's own subs, with what to look for", () => {
+    renderBreakdown(SUMMARY, undefined, { safe: "M_42", examples: EXAMPLES });
+    fireEvent.click(
+      screen.getByRole("button", { name: /show me what they looked like/i }));
+
+    expect(screen.getByText(/Here are 2 we set aside/)).toBeInTheDocument();
+    const imgs = Array.from(document.querySelectorAll("img"));
+    expect(imgs.map((i) => i.getAttribute("src"))).toEqual([
+      "/api/targets/M_42/frames/7/preview?size=160",
+      "/api/targets/M_42/frames/9/preview?size=160",
+    ]);
+    expect(imgs[0]).toHaveAttribute("loading", "lazy");
+    expect(imgs[0]).toHaveAttribute("alt", "A sub we set aside: light_0007.fit");
+    // The bucket with no copy gets no strip even though the server sent frames.
+    expect(screen.queryByAltText(/light_0003/)).toBeNull();
+    // And it folds away again.
+    fireEvent.click(screen.getByRole("button", { name: /hide the examples/i }));
+    expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("offers nothing without a target key or without examples", () => {
+    // The hover-card copy of this breakdown passes neither, so hovering a badge
+    // can never start loading pictures; an older backend reads the same way.
+    for (const opts of [
+      { examples: EXAMPLES },
+      { safe: "M_42" },
+      { safe: "M_42", examples: { removed: [{ frame_id: 3, name: "a.fit" }] } },
+    ]) {
+      const { unmount } = renderBreakdown(SUMMARY, undefined, opts);
+      expect(screen.queryByRole("button", { name: /show me what/i })).toBeNull();
+      unmount();
+    }
   });
 });

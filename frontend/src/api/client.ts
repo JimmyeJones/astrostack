@@ -3639,6 +3639,10 @@ export const api = {
       // button is never offered where the job would stand down. Older backends
       // omit it, which reads as false and shows no button (today's behaviour).
       deep_rescue_offered?: boolean;
+      // Up to three example frames per reject bucket whose cause is *visible* in
+      // the sub (trailed / clouds / soft), keyed by the same bucket keys as
+      // `summary.buckets`. Older backends omit it, which reads as "no strip".
+      examples?: Record<string, { frame_id: number; name: string }[]>;
     }>(
       `/api/targets/${safe}/frames/reject-summary`,
     ),

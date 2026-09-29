@@ -1452,7 +1452,8 @@ class Project:
             )
 
     def iter_frame_columns(self, *columns: str,
-                           accepted_only: bool = False) -> Iterator[tuple]:
+                           accepted_only: bool = False,
+                           rejected_only: bool = False) -> Iterator[tuple]:
         """Just *columns* of this target's frames, as plain tuples in ``id``
         order — the same rows :meth:`iter_frames` yields, without building one.
 
@@ -1472,6 +1473,12 @@ class Project:
         no reason a reader could see. ``accepted_only`` mirrors
         :meth:`iter_frames` and defaults to ``False``.
 
+        ``rejected_only`` is its opposite — the rows
+        :meth:`reject_reason_counts` tallies (``accept = 0``) — for a caller
+        asking about the frames that were *left out*. It is a separate flag
+        rather than a tri-state because every existing caller reads as before;
+        asking for both at once is a contradiction and raises.
+
         Column names are checked against :data:`_FRAME_COLUMNS` before they
         reach the SQL. They are code-supplied today rather than user-supplied,
         but the check is free, it is the rule :meth:`iter_frames_page` already
@@ -1484,7 +1491,10 @@ class Project:
         for name in columns:
             if name not in _FRAME_COLUMNS:
                 raise ValueError(f"not a frame column: {name!r}")
-        where = " WHERE accept = 1" if accepted_only else ""
+        if accepted_only and rejected_only:
+            raise ValueError("accepted_only and rejected_only are exclusive")
+        where = (" WHERE accept = 1" if accepted_only
+                 else " WHERE accept = 0" if rejected_only else "")
         cols = ", ".join(columns)
         # Plain tuples rather than this connection's ``sqlite3.Row``: a Row's
         # ``repr`` is its memory address, and these are values a caller compares,

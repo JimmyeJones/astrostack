@@ -1,5 +1,75 @@
 # Shipped — the record
 
+## 2026-09-29 (Builder, third) — the frames it threw away, shown rather than counted
+
+### v0.488.0 — 🌟 NEW BEGINNER FEATURE (understand + trust): **"we set aside 18 for cloud" is a verdict you can now look at.**
+
+`webapp/rejection_summary.py` has told a beginner *how many* subs went and *why*, in plain language, since
+v0.159.2. What it has never done is let them **see** one. A first-time Seestar owner has no mental model of what
+"trailed" or "soft stars" looks like in their own data, so the count is something to take on trust — and the
+worry actually underneath it, *"did it throw away my best frame?"*, is answered by looking, not by reading.
+
+**Nothing on the page reached an example.** The frames grid previews the *selected* row, but it cannot be
+filtered to "the ones you called cloudy" — so getting to one meant scrolling a table of thousands reading a
+reason column. Checked before building, as the entry asked: this is a new educational surface, not a second
+door onto the technical grid.
+
+**What it does.** `GET …/frames/reject-summary` gains an additive `examples`, keyed by the *same* bucket keys
+as `summary.buckets`; `RejectionBreakdown` renders, under each such bucket's existing note, a line saying what
+to look for and up to three thumbnails of that bucket's own subs:
+
+> **Soft or elongated stars — 12**
+> Soft focus, wind or tracking wobble left the stars fuzzy or streaked in these frames.
+> *Here are 3 we set aside — the stars here are fat and fuzzy rather than tight points, so they'd have blurred
+> the detail in everything else.*
+> ▫️ ▫️ ▫️
+
+**Collapsed behind one shared toggle** ("Show me what they looked like"), which is what keeps the cost to a
+single line of page height on a card that is already long, and stops the page fetching thumbnails nobody asked
+for — the same bargain `ProgressReelCard` and `DeepeningReelCard` make. The images are `loading="lazy"` on top
+of that.
+
+**Only the buckets whose cause is visible in the frame** — `EXAMPLE_BUCKETS = ("trailed", "clouds", "soft")`.
+A thumbnail is worth showing when the picture *is* the explanation: a streak across the field, a thin star
+field, fat stars. It teaches nothing for "you removed these" or "not located in the sky yet" (those subs look
+entirely ordinary), and for "couldn't be read" or "their files aren't on your disk" there is, by construction,
+nothing to render. A strip there would be a contact sheet, not a lesson. The gate is stated twice, on purpose
+and independently: the server only sends those buckets, and the client only has copy for those buckets — so a
+bucket added on one side alone renders nothing rather than a puzzle.
+
+**The example is the worst one, not the first one.** `soft` offers the fattest stars (largest `fwhm_px`),
+`clouds` the thinnest star field (smallest `star_count`) — each bucket's own metric, the one it is bucketed
+*by*. `trailed` has none: a satellite crossing is detected, not scored, and ranking it by a number it is not
+about would pick a frame for the wrong reason, so id order stands and the docstring says why. A frame with no
+measurement sorts last within its bucket and can only ever be a filler — it cannot displace a ranked one.
+
+**One vocabulary.** `rejection_summary._bucket_for` became the public `bucket_for` (the old name kept as an
+alias) rather than growing a second definition of "cause", so a strip can never illustrate something other than
+the number above it. Pinned by a test that asserts every key in `examples` is a key in `summary.buckets`.
+
+**Cost.** The pass reads six small columns over the **rejected rows only** — a new additive
+`Project.iter_frame_columns(..., rejected_only=True)`, mirroring the existing `accepted_only` and raising if
+both are asked for — so a deep target's accepted subs are never read for this. Candidates are ranked and
+truncated as they stream, so the pass retains a few dozen tuples whatever the depth (the memory lesson of
+v0.471.4: the lever is what the caller *keeps*). "Is this file still on disk?" is asked, through the one
+existing `first_existing_frame_path`, of at most `3 × 3 × 4` candidates — never once per rejected sub — so a
+vanished file costs an example rather than a broken image in a strip whose whole job is to be looked at. It is
+injected, so the ranking is unit-tested without a filesystem.
+
+**The hover-card copy of this breakdown is passed neither `safe` nor `examples`**, so hovering the badge beside
+the frame counts still loads no pictures at all. The props are optional throughout and an older backend omits
+the field entirely, which reads as "show no strip" — i.e. exactly the card that shipped before this.
+
+**Upgrade safety (§9).** One additive response field, one additive keyword argument, one function made public
+under a kept alias. No config, schema, on-disk layout, default or API-shape change; no new dependency; nothing
+removed; no new card and no page taller by more than the one collapsed line.
+
+**Tests +14 Python** (`tests/webapp/test_reject_examples.py` — ten on the pure picker including the
+unmeasured-filler rule, the cap, the vanished file and a guard that the readability question is asked of
+candidates rather than of 499 rejects; one on the new projection flag; three on the endpoint) **/ +9 vitest**
+(`rejectExamples.test.ts`, three component cases). **Fail-before verified by scratch revert** on the endpoint
+field (3 red), the `rejected_only` flag (1 red) and the strip itself (2 red).
+
 ## 2026-09-29 (Builder, later still) — the reel the subs are already there for, and the switch nobody finds
 
 ### v0.487.0 — 🌟 NEW BEGINNER FEATURE (enjoy / understand): **a target stacked *once* across several nights holds every sub the night-by-night reel is made of — and had no way to say so.**

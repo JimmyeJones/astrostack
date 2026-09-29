@@ -81,8 +81,15 @@ _BUCKET_ORDER = {key: i for i, (key, _, _) in enumerate(_BUCKETS)}
 _BUCKET_META = {key: (label, note) for key, label, note in _BUCKETS}
 
 
-def _bucket_for(reason: str) -> str:
-    """Map one namespaced ``reject_reason`` to a friendly bucket key."""
+def bucket_for(reason: str) -> str:
+    """Map one namespaced ``reject_reason`` to a friendly bucket key.
+
+    Public because a second surface now asks the same question — the worked
+    examples beside each count (:mod:`webapp.rejectexamples`) must mean by
+    "cause" exactly what the number beside them means, and the only way to
+    guarantee that is for both to call this. ``_bucket_for`` remains as its
+    former name.
+    """
     if reason in ("auto:streak", "bulk:streaked", "bulk:trailed"):
         return "trailed"
     # qc_error must be checked before the generic "qc:" branch below.
@@ -115,6 +122,10 @@ def _bucket_for(reason: str) -> str:
         metric = reason.split(":")[-1]
         return _metric_bucket(metric) or "other"
     return "other"
+
+
+#: Former private name, kept for the callers (and tests) that use it.
+_bucket_for = bucket_for
 
 
 # When a lot of frames drop and ONE actionable cause clearly dominates them, name
@@ -244,7 +255,7 @@ def summarize_rejections(
     for reason, n in counts.items():
         if n <= 0:
             continue
-        grouped[_bucket_for(reason)] = grouped.get(_bucket_for(reason), 0) + int(n)
+        grouped[bucket_for(reason)] = grouped.get(bucket_for(reason), 0) + int(n)
 
     # Accepted-but-unsolved subs never reach the stack — surface them as their
     # own bucket and remove them from "used" so the accounting is honest. Of
