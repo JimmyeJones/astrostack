@@ -40,6 +40,7 @@ from webapp.preview_orient import (
     recovered_preview_crop,
     remaining_north_up_deg,
 )
+from webapp.reeloffer import night_reel_offer
 from webapp.run_options import parse_run_options, run_has_reusable_options
 from webapp.schemas import (
     STACK_DEFAULTS_META_KEY,
@@ -2385,7 +2386,22 @@ def deepening_reel_info(safe: str, request: Request) -> dict[str, Any]:
         lib.close()
     runs = series.runs
     if len(runs) < 2:
-        return {"available": False, "n_stacks": len(runs)}
+        only = runs[0] if runs else None
+        return {
+            "available": False,
+            "n_stacks": len(runs),
+            # A target stacked *once* across several nights holds the reel's
+            # subs and has no reel — the shape neither v0.483.0's `save_progress`
+            # (an advanced switch nobody finds) nor v0.486.0's reel-from-history
+            # (which needs a re-stack per night) reaches. ``None`` unless there
+            # is honestly something to offer; every gate is in
+            # :mod:`webapp.reeloffer`.
+            "reel_offer": night_reel_offer(
+                only, n_stacks=len(runs), lon_deg=lon,
+                has_reel=_run_progress_reel(
+                    only.fits_path if only is not None else None) is not None,
+            ),
+        }
     night_steps = _deepening_night_steps(series, lon)
     from PIL import features
 

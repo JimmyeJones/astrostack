@@ -102,6 +102,47 @@ describe("StackView", () => {
     expect(screen.getByText("Sub-pixel alignment refine")).toBeInTheDocument();
   });
 
+  it("ticks the “watch it appear” switch when arriving from the reel offer", async () => {
+    // The "night after night" card offers to build the night-by-night clip a
+    // target already has the subs for, and links here with ?reel=1. The switch
+    // that makes the clip is advanced and off by default, and the run the form
+    // pre-fills from is by definition one that was stacked *without* it — so the
+    // parameter has to win over both the defaults and the reused options.
+    mockSchema([
+      { key: "save_progress", label: "Save a “watch it appear” clip", type: "bool",
+        group: "advanced", default: false, min: null, max: null, step: null,
+        options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ save_progress: false });
+    vi.spyOn(client.api, "stackRunOptions").mockResolvedValue({
+      run_id: 12, options: { save_progress: false },
+    } as never);
+
+    renderStackAt("/targets/M_42/stack?from=12&open=advanced&reel=1");
+
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: /watch it appear/ })).toBeChecked());
+    // And the page says so, so nobody has to go looking for what changed — the
+    // note names the switch, which is why the label now appears twice.
+    expect(screen.getByText(/builds your night-by-night clip/)).toBeInTheDocument();
+  });
+
+  it("leaves that switch alone without the parameter", async () => {
+    mockSchema([
+      { key: "save_progress", label: "Save a “watch it appear” clip", type: "bool",
+        group: "advanced", default: false, min: null, max: null, step: null,
+        options: null, help: null, depends_on: null },
+    ]);
+    vi.spyOn(client.api, "getStackDefaults").mockResolvedValue({ save_progress: false });
+
+    renderStackAt("/targets/M_42/stack?open=advanced");
+
+    await waitFor(() =>
+      expect(screen.getByText(/Save a .watch it appear. clip/)).toBeInTheDocument());
+    expect(screen.getByRole("switch", { name: /watch it appear/ })).not.toBeChecked();
+    expect(screen.queryByText(/builds your night-by-night clip/)).toBeNull();
+  });
+
   it("leaves the Advanced disclosure shut without the parameter", async () => {
     mockSchema([
       { key: "subpixel_refine", label: "Sub-pixel alignment refine", type: "bool",

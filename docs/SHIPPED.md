@@ -1,5 +1,84 @@
 # Shipped — the record
 
+## 2026-09-29 (Builder, later still) — the reel the subs are already there for, and the switch nobody finds
+
+### v0.487.0 — 🌟 NEW BEGINNER FEATURE (enjoy / understand): **a target stacked *once* across several nights holds every sub the night-by-night reel is made of — and had no way to say so.**
+
+The owner asked for a progression video, and the app now produces one two ways. Neither reaches the shape a
+walk-away install most often has.
+
+* `StackOptions.save_progress` makes an ordinary stack emit the cumulative-by-night snapshots (v0.483.0) — the
+  ask exactly, at **no extra stacking cost**, because the accumulator is already cumulative and `_QuickLook`
+  simply snapshots it at the night boundaries. But it is an **advanced** Stack-form field, off by default.
+* `capture_nights.cumulative_night_steps` finds the same reel in a history that already nests (v0.486.0) — but
+  that needs the owner to have re-stacked as the nights came in.
+
+*"I stacked this target once, across six nights"* falls between them: the subs are all there, the switch that
+would have caught them was never found, and the "night after night" card **self-hides** because there is only
+one stack. So the target that most needs the offer is the one surface that says nothing at all. This is the
+missing affordance, not a new capability.
+
+**What it does.** `GET /api/targets/{safe}/deepening-reel/info`'s *unavailable* branch gains an additive
+`reel_offer`, and `DeepeningReelCard` — the same card, the same heading, the same icon, via a new shared
+`ReelShell` — renders the offer where it used to render `null`:
+
+> **Your target, night after night**
+> Watch M 31 fill in night by night — your first night, then that night plus the next, and so on up to all 6.
+> You stacked it in one go, so there's no clip of it yet; stacking it once more with "Save a 'watch it appear'
+> clip" switched on makes one.
+> The snapshots are taken as the stack runs, so they add no time of their own — it's stacking your 1,234 subs
+> again that takes about 25 min, going by how long that stack took. And it adds a stack rather than replacing
+> one: the stack you have now stays in History, and the new one becomes this target's picture.
+> **[ Set up that stack ]**
+
+**It offers; it never starts a job.** The button is a link to the target's own Stack form carrying
+`?from=<run>&open=advanced&reel=1` — the run's settings pre-filled (the existing reuse path), the Advanced
+disclosure open (the existing `?open=advanced`), and the new `?reel=1` defaulting `save_progress` **on**. The
+overlay is applied *last*, after the reused options, because the run being repeated is by definition one that
+was stacked without the clip and would otherwise turn the switch back off. It is a default, not a lock: untick
+it and this is an ordinary re-stack. The form's existing pre-fill note says which switch was set, naming it.
+
+**The lead's own check, answered rather than dodged** — *"what that pass costs on his 35,894-sub target,
+because an offer that takes six hours is not an offer"*. The card **prices it before the click**, and not from
+an estimate: the run being repeated recorded its own wall clock (`stack_runs.duration_s`), it is the same subs
+on the same canvas with the same options, and the snapshots are free. So the sentence is a measurement of the
+very work being proposed. A six-hour target says six hours, and the reader decides. A run recorded before that
+column drops the clause ("as long as that stack took") rather than guessing a number.
+
+**And the one surprise it could not otherwise predict is stated:** a fresh run is the newest run, and the
+newest run with a preview is what the wall shows — so the card says the new stack becomes this target's
+picture. That is the class `docs/IMPROVEMENTS.md` tracks as observer issue #903, and a delight that quietly
+flattens the picture on the wall is not a delight.
+
+**Four gates, because a card that has never appeared on a single-stack target must not become a nag**
+(`webapp/reeloffer.py`, pure and duck-typed over the run row):
+
+1. exactly **one** stack with a master on disk — two or more already animate as the cross-run reel;
+2. that run has **no reel of its own** already (`{stem}_progress.webp|png` beside the master);
+3. at least `MIN_REEL_NIGHTS` = 3 observing nights — mirroring `stacker._PROGRESS_MIN_FRAMES`, the floor
+   `plan_capture_nights` itself refuses to go below, so the app never offers a clip the stacker would then
+   decline to label by night — and counted **both ways**: the webapp buckets nights at the observer's local
+   noon and the engine (which has no longitude) at UTC noon, so a run straddling that boundary is three nights
+   to one and two to the other. The offer speaks only where they agree;
+4. not **re-ordered**: `lucky_fraction < 1` sorts the frame list by FWHM, which is the one case
+   `plan_capture_nights` names as a lie (it snapshots a *cumulative* accumulator, so "nights 1–2" is only true
+   while no night-3 sub has gone in).
+
+Anything unknown answers "no offer" — a run from before `capture_hours_json` cannot be *shown* to hold three
+nights, and an offer resting on a guess is worse than silence.
+
+**Upgrade safety (§9).** One additive response field on one endpoint, on the branch that previously carried two
+keys; an older frontend ignores it and a newer frontend reads its absence as "say nothing", which is exactly
+what the two existing no-offer tests pin. No config, schema, on-disk layout, default or API-shape change, no
+new dependency, nothing removed and no page made taller (the card is self-hiding either way).
+
+**Tests +12 Python** (`tests/webapp/test_night_reel_offer.py` — eight on the pure decision including the
+both-bucketings gate, which asserts its own premise with `capture_night_count` rather than assuming it, and
+four on the endpoint) **/ +11 vitest** (`nightReelOffer.test.ts`, two card cases, two Stack-form cases).
+**Fail-before verified by scratch revert on all three production layers**: the router's `reel_offer` (3 red),
+the card's offer branch and the form's `wantReel` overlay (2 red). The card's test harness gained a
+`MemoryRouter`, since the offer links into the app.
+
 ## 2026-09-29 (Builder, later) — the reel he asked for, already in the stacks he has
 
 ### v0.486.0 — 🎞️ PRIORITY 2-adjacent (enjoy / understand), the **reel-*from-history*** half of the owner's progression-video ask: **a target he re-stacked as the nights came in is already "night 1; nights 1–2; …", and nothing had ever checked.**
