@@ -1,6 +1,61 @@
 # Shipped — the record
 
-## 2026-09-29 (Builder, fifth) — the rescued sub's own rotation
+## 2026-09-29 (Builder, fifth) — the rescued sub's own rotation, and the image the rescue hands the solver
+
+### v0.488.4 — 🟠 BUG FIX (autonomy, PRIORITY 2): the deep image is integrated from the star transforms too
+
+*(The second half of the `LEAD ×2` filed with v0.481.0. The entry is gated — "**Measure before building:** how
+much does a rotated population actually cost the deep solve? … if the answer is 'it solves anyway' this should
+be **closed with the number**" — so the measurement ran first, and it is what decided this.)*
+
+**The measurement.** Two integrations of the *same* members, on the ladder the entry names
+(`make_rotated_star_field` at a rotation ladder), at 960×640 with 60 stars: today's integer shifts, and the
+same members warped by their accepted star transform. Ground truth is the fixture's own catalogue, so "how
+bright is this star" is asked at the place the reference says the star is, not of a detector's opinion.
+
+| night | median star peak SNR | `sep` detections (60 real stars) |
+|---|---|---|
+| still (0°) — control, shift-integrated | 2599 | 60 |
+| still (0°) — warp-integrated | 2593 | 60 |
+| turning to 8° — **shift**-integrated | **685** | **242** |
+| turning to 8° — warp-integrated | 2635 | 75 |
+| turning to 16° — **shift**-integrated | **664** | **281** |
+| turning to 16° — warp-integrated | 2579 | 86 |
+
+So "it solves anyway" is not a live reading. A turning night costs the shift-only integration **3.8× of its
+star peaks**, and the second column is the worse half: the extractor finds **281 sources in a 60-star field**,
+because each star has been laid down as its own arc of fragments. A plate solver matching *quads of star
+positions* is being handed a source list that is 4.7× pollution — in the one image whose entire job is to clear
+its detection floor, on exactly the fields (nothing solved alone) where the rescue is the last resort.
+**Caveat, stated plainly: ASTAP itself was not run** — this measures the image ASTAP is handed, not its
+verdict. With these numbers that is enough to build; it would not have been enough to close.
+
+**Built as the entry's shape (ii), the one it calls "the *correct* answer".** New
+`solve/bootstrap.py::_warp_onto_ref` resamples a member onto the reference's grid by its own star transform:
+bilinear, and **NaN outside the member's own footprint, exactly as `_shift_int` leaves it**, so the engine's
+"NaN = no coverage" rule holds through the NaN-aware mean and a rotation that swings a corner off the grid
+leaves a hole rather than a zero that averages into the sky. A matrix with no inverse returns `None` and the
+caller falls back to the shift. `integrate_deep_image` takes `transforms=` and gives it the **same precedence
+`propagate_wcs` already gives it** — the two now agree about where a member is, which they did not before.
+
+**What deliberately did *not* change.** The engage/decline gate still counts **shifts only**
+(`integrable`), so which bursts the rescue takes on and which it declines is byte-identical: the entry's shape
+**(i)** warned that a rotation floor could drop the count below `min_frames` and make the rescue decline where
+it previously succeeded, and nothing here can. A caller that passes no transforms, and a burst where nothing
+matched, get the old array **bit for bit** (`np.array_equal`, pinned). The anchored path builds no deep image
+at all and is untouched.
+
+**Tests.** +1 in `tests/test_star_match_registration.py` — the ladder measured against a still-night control,
+so the bar is a ratio and does not move with the fixture's flux — and +2 in `tests/test_bootstrap_solve.py`
+(the bit-for-bit identity without transforms; the NaN-coverage and degenerate-matrix contract of the warp).
+**Fail-before verified by scratch revert:** with the warp branch removed the ladder test reads 202.8 against a
+1409 bar.
+
+**Scope.** One engine function's input, on the rescue path only; no config, schema, on-disk, default or
+API-shape change, and no new dependency (`scipy.ndimage` is already a hard dep). Cost is one bilinear
+resample per member, bounded by `DEFAULT_MAX_FRAMES = 16`, against a plate solve.
+
+**Nothing of the v0.481.0 lead is open any more** — half (a) shipped as v0.488.3 above.
 
 ### v0.488.3 — 🟡 BUG FIX (trust, PRIORITY 3): a star-matched member is stamped with **its own** `rotation_deg`, not the reference's
 

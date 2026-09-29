@@ -36,6 +36,7 @@ from seestack.io.wcs_io import (  # noqa: E402
 )
 from seestack.solve.bootstrap import (  # noqa: E402
     bootstrap_solve,
+    integrate_deep_image,
     propagate_wcs,
     register_members,
     star_match_members,
@@ -564,6 +565,67 @@ def test_an_ordinary_dithered_burst_is_placed_either_way(tmp_path, star_match):
             assert float(np.median(errs)) < 1.5 * PIXSCALE, float(np.median(errs))
     finally:
         proj.close()
+
+
+# --- the image the rescue asks a solver to solve ---------------------------
+
+def _deep_star_peak_snr(deep: np.ndarray) -> float:
+    """Median star peak over the sky noise, at the *reference*'s own star positions.
+
+    Ground truth from the fixture's catalogue, not from a detector's opinion: a
+    star integrated on the wrong registration does not vanish, it spreads into an
+    arc, and the honest measure of that is how far its peak has fallen into the
+    noise at the place the reference says the star is.
+    """
+    sky = float(np.std(deep[deep < np.percentile(deep, 80)]))
+    peaks = []
+    for cat_xy, _ in rotated_star_positions(
+        width=W, height=H, n_stars=N_STARS, seed=SEED,
+        rotation_deg=0.0, shift=(0.0, 0.0),
+    ):
+        x, y = int(round(cat_xy[0])), int(round(cat_xy[1]))
+        if 4 <= x < W - 4 and 4 <= y < H - 4:
+            peaks.append(float(deep[y - 3:y + 4, x - 3:x + 4].max()))
+    assert peaks
+    return float(np.median(peaks)) / sky
+
+
+def _deep_pair(rotations):
+    """``(shift_integrated, warp_integrated, star_matched)`` for one night."""
+    ref = _gray(0.0, shift=(0.0, 0.0), noise_seed=1)
+    grays = [ref] + [_gray(r, noise_seed=10 + i) for i, r in enumerate(rotations)]
+    shifts = register_members(grays, 0)
+    transforms = star_match_members(grays, 0)
+    return (
+        integrate_deep_image(grays, shifts, 0),
+        integrate_deep_image(grays, shifts, 0, transforms=transforms),
+        sum(1 for t in transforms if t is not None),
+    )
+
+
+def test_a_rotated_night_smears_the_deep_image_the_rescue_solves():
+    """FAIL-BEFORE + AND-PASSES-AFTER, in one measurement, in numbers.
+
+    The deep image exists for one reason: to clear a plate solver's detection
+    floor on a field none of whose subs solved alone. Integer-shifting a member
+    the night has turned lays its stars down as arcs across the reference's, so
+    the image built to be *more* detectable is less so. Ground truth is the
+    fixture's own catalogue; the still night is the control, so the assertion is
+    a ratio rather than a bare number and does not move with the fixture's flux.
+    """
+    still_shift, still_warp, still_matched = _deep_pair([0.0] * 8)
+    turn_shift, turn_warp, turn_matched = _deep_pair(ROTATIONS)
+    assert still_matched == 8 and turn_matched == 8
+
+    still = _deep_star_peak_snr(still_shift)
+    # A still night is a rotation of zero: warping it changes nothing that matters.
+    assert _deep_star_peak_snr(still_warp) > 0.7 * still
+
+    # FAIL-BEFORE: shifted, a turning night loses most of its star peaks.
+    assert _deep_star_peak_snr(turn_shift) < 0.3 * still, _deep_star_peak_snr(turn_shift)
+    # AFTER: warped by the same matches that already place these subs, the deep
+    # image of a turning night is as deep as a still one's.
+    assert _deep_star_peak_snr(turn_warp) > 0.7 * still, _deep_star_peak_snr(turn_warp)
 
 
 # --- the rotation the row is stamped with ----------------------------------
