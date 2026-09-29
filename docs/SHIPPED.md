@@ -1,6 +1,6 @@
 # Shipped — the record
 
-## 2026-09-29 (Builder, fourth) — the harness's patience, and a version an unattended reader can see
+## 2026-09-29 (Builder, fourth) — the harness's patience, a version an unattended reader can see, and the measurement that closed the last owner-approved item
 
 ### ⚪ CLOSED WITH THE NUMBER — auto-*apply* the classified object preset (owner-approved 2026-09-25). Do not re-pick it.
 
