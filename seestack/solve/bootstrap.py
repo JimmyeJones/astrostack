@@ -337,6 +337,40 @@ def _wcs_from_star_transform(ref_wcs_text: str, transform, shape) -> str | None:
     )
 
 
+def member_rotation_deg(
+    ref_rotation_deg: float | None,
+    ref_wcs_text: str,
+    member_wcs_text: str,
+) -> float | None:
+    """A star-placed member's *own* field rotation, in the reference's convention.
+
+    A member the session has turned no longer shares the reference's orientation,
+    so stamping it with ``ref_rotation_deg`` records a rotation that is knowably
+    wrong for it. The delta is measurable, but the obvious source for it --
+    :attr:`~seestack.align.starmatch.StarTransform.rotation_deg` -- is the angle
+    of the *pixel* transform and runs **opposite** to the sky's position angle, so
+    ``ref_rotation_deg +/- theta`` is a guess about a sign.
+
+    This reads the answer off the two headers instead. ``propagate_wcs`` composes
+    the member's WCS as ``CD' = CD . A``, so the difference between the two
+    headers' own position angles (:func:`~seestack.io.wcs_io.wcs_rotation_deg_from_text`)
+    *is* the on-sky rotation between them; adding it to the solver's number keeps
+    whatever convention offset that number carries, because both sides of the
+    difference are read the same way. Returns ``ref_rotation_deg`` unchanged when
+    either header cannot be read -- the honest approximation, never a guess.
+    """
+    from seestack.io.wcs_io import wcs_rotation_deg_from_text
+
+    if ref_rotation_deg is None:
+        return None
+    ref_pa = wcs_rotation_deg_from_text(ref_wcs_text)
+    mine = wcs_rotation_deg_from_text(member_wcs_text)
+    if ref_pa is None or mine is None:
+        return ref_rotation_deg
+    delta = (mine - ref_pa + 180.0) % 360.0 - 180.0
+    return ref_rotation_deg + delta
+
+
 def propagate_wcs(
     deep_wcs_text: str,
     shifts: list[tuple[float, float] | None],
@@ -680,12 +714,20 @@ def bootstrap_solve(
         gh, gw = grays[i].shape[:2]
         centre = wcs_image_center_deg_from_text(wtext, width=gw, height=gh)
         ra_c, dec_c = centre if centre is not None else (None, None)
+        # A star-matched member carries a rotation of its own, and the composed
+        # header above already knows it -- so read it off there rather than
+        # repeating the reference's. A member placed by a shift shares the
+        # reference's CD exactly, so it keeps the reference's number untouched.
+        member_rotation = (
+            member_rotation_deg(rotation, wcs_text, wtext)
+            if star_placed[i] else rotation
+        )
         fields: dict = dict(
             wcs_json=wtext,
             ra_center_deg=ra_c,
             dec_center_deg=dec_c,
             pixscale_arcsec=pixscale,
-            rotation_deg=rotation,
+            rotation_deg=member_rotation,
         )
         # A member that carried a stale ``solve_failed:`` reason is now located —
         # clear it (mirrors ``apply_solve_result_to_db``'s self-heal); never touch

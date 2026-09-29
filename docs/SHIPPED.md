@@ -1,5 +1,70 @@
 # Shipped — the record
 
+## 2026-09-29 (Builder, fifth) — the rescued sub's own rotation
+
+### v0.488.3 — 🟡 BUG FIX (trust, PRIORITY 3): a star-matched member is stamped with **its own** `rotation_deg`, not the reference's
+
+*(The first half of the `LEAD ×2` filed with v0.481.0, top of "Bugs (fix these first)". The lead's own
+blocker — "writing `ref_rotation ± θ` is a guess about a convention, and a wrong sign is worse than today's
+honest approximation" — is what this settles, and it settles it without needing the two real ASTAP solves the
+entry proposed.)*
+
+**The bug.** `bootstrap_solve` writes one `rotation` — the anchor's, or the deep solve's — into **every**
+rescued member's row. That was true while every member was a pure translation of the reference, and stopped
+being true in v0.481.0, when a member the alt-az field has turned started being placed by a star-pattern match
+that *measures* its rotation. The member's `wcs_json` has carried the real, rotated CD ever since; only the
+number in the column beside it still said the reference's.
+
+**Why "ref ± θ" was not just added, and why it would have been a coin flip.** The obvious source for the delta
+is `StarTransform.rotation_deg`, and it runs the **opposite way** to the sky's position angle. Measured on the
+fixture ladder this run:
+
+| fixture rotation | member header's own PA − reference's | `StarTransform.rotation_deg` |
+|---|---|---|
+| +2.0° | +2.005° | −2.005° |
+| +7.0° | +6.990° | −6.990° |
+| −13.0° | −13.001° | +13.001° |
+| +16.0° | +16.005° | −16.005° |
+
+So the sign the lead worried about is real: half of the two guesses lands *further* from the truth than doing
+nothing.
+
+**The fix reads the answer instead of guessing at it.** `propagate_wcs` composes a star-placed member's
+solution as `CD′ = CD · A` (`wcs_io.wcs_text_after_pixel_affine`), so the member's header already knows its
+own orientation. New `solve/bootstrap.py::member_rotation_deg` takes the **difference** between the two
+headers' own position angles and adds it to the solver's number:
+
+```
+member = ref_rotation + wrap180( PA(member_wcs) − PA(ref_wcs) )
+```
+
+Both sides of that difference are read the same way, so whatever offset ASTAP's `CROTA2` convention carries
+against ours cancels exactly — the result stays in ASTAP's convention without anyone having to know what it
+is. The position angle itself comes from new `io/wcs_io.py::wcs_rotation_deg_from_text`, and the
+`atan2(−CD2_1, CD2_2)` relation it uses is now written **once**
+(`_rotation_deg_from_scale_matrix`), shared with `_extent_from_scale_matrix`, which had the only previous copy
+— a second spelling of a sign is a second convention.
+
+**Nothing moves for the burst the rescue was built for.** The re-derivation is applied **only** where
+`star_placed[i]`; a member placed by a shift shares the reference's CD exactly and keeps the reference's number
+byte for byte, not a rounding away from it. And it never invents one: a solve that reported no rotation still
+writes `None`, and a header that cannot be read falls back to the old honest approximation.
+
+**Tests.** +3 in `tests/test_star_match_registration.py` (the ladder stamped against fixture truth — sign
+pinned, not just magnitude; the shift-placed burst unchanged; `member_rotation_deg`'s three declines) and +2 in
+`tests/test_wcs_io.py` (the `CROTA2` convention through *text*, and every unreadable input answering `None`).
+**Fail-before verified by scratch revert:** with the one branch reverted to `rotation`, the ladder test goes
+red (`1 failed, 43 passed`) and every delta reads 0.0.
+
+**Scope.** One nullable column's *value* on the rescue path only; no config, schema, on-disk, default or
+API-shape change. The column's one reader (`webapp/routers/sky.py::_representative_pixscale_rotation`, which
+takes the first solved frame's value as representative of the target) is untouched — this makes the rows it
+may consult honest rather than changing what it does with them.
+
+**Still open, unchanged:** half **(b)** of the same lead — the deep image is integrated from *unwarped* rotated
+members, so the image the rescue hands ASTAP is partly smeared. It stays in "Bugs (fix these first)" with its
+"measure before building" gate intact.
+
 ## 2026-09-29 (Builder, fourth) — the harness's patience, a version an unattended reader can see, and the measurement that closed the last owner-approved item
 
 ### ⚪ CLOSED WITH THE NUMBER — auto-*apply* the classified object preset (owner-approved 2026-09-25). Do not re-pick it.

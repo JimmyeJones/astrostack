@@ -685,6 +685,40 @@ def wcs_dict_rescaled_to_preview(
         return None
 
 
+def _rotation_deg_from_scale_matrix(m) -> float:  # noqa: ANN001 — a 2x2 array-like
+    """The position angle of a 2x2 CD/scale matrix, in ASTAP's ``CROTA2`` sense.
+
+    ``atan2(-CD2_1, CD2_2)`` is the inverse of the FITS-standard ``CROTA2``->CD
+    relation for the RA-flipped convention (``CDELT1 < 0``), which is the one a
+    Seestar sub's solved header carries. Written once, here, because two callers
+    now ask it of two different headers and a second spelling of the sign would
+    be a second convention.
+    """
+    return math.degrees(math.atan2(-float(m[1][0]), float(m[1][1])))
+
+
+def wcs_rotation_deg_from_text(text: str | None) -> float | None:
+    """A stored WCS header's own position angle, or ``None``.
+
+    The answer is in the same sense as the ``rotation_deg`` a solve records (ASTAP
+    reports ``CROTA2``), so a *difference* between two headers read this way is a
+    real on-sky rotation between them whatever offset the solver's convention
+    carries -- which is what lets a propagated member be stamped with its own
+    rotation instead of the reference's. See :func:`_rotation_deg_from_scale_matrix`.
+    """
+    if not wcs_text_is_usable(text):
+        return None
+    wcs = wcs_from_text(text)
+    if wcs is None:
+        return None
+    try:
+        rot = _rotation_deg_from_scale_matrix(wcs.celestial.pixel_scale_matrix)
+    except Exception as exc:  # noqa: BLE001 — a degenerate WCS just means "no answer"
+        log.warning("WCS rotation read failed: %s", exc)
+        return None
+    return rot if math.isfinite(rot) else None
+
+
 def _extent_from_scale_matrix(
     m, full_w: int, full_h: int,
 ) -> tuple[float, float, float]:
@@ -707,8 +741,7 @@ def _extent_from_scale_matrix(
     cd12, cd22 = float(m[0][1]), float(m[1][1])   # column 1 (per y-pixel)
     width_deg = full_w * math.hypot(cd11, cd21)
     height_deg = full_h * math.hypot(cd12, cd22)
-    rotation_deg = math.degrees(math.atan2(-cd21, cd22))
-    return width_deg, height_deg, rotation_deg
+    return width_deg, height_deg, _rotation_deg_from_scale_matrix(m)
 
 
 def canvas_extent_from_fits(
