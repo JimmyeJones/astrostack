@@ -1,5 +1,74 @@
 # Process notes & QA sweep records
 
+## 2026-09-29 (Scout run) — rotation item (1), scale-dependent preview↔export parity on a mosaic canvas — CLEAN; a re-stocked feature; and a kickoff-vs-AGENTS disagreement
+
+*(Scout, branch `claude/admiring-brahmagupta-wug5ut`. Baseline green on `origin/main` at 8b56471 —
+**6,927 passed, 2 skipped**, 13m09s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root`
+cleared first.)*
+
+### Disagreement filed (AGENTS.md §"If this document and your kickoff prompt disagree, this document wins")
+
+**The kickoff prompt told the Scout to "lead your rotation with the stacking engine — `seestack/stack/*` …
+re-audit the editor only occasionally," and to treat the editor as well-hardened.** AGENTS.md's Scout role
+says the opposite about the engine: the QA rotation is the fixed four-item list **(1) scale-dependent
+preview↔export parity on a mosaic canvas; (2) mosaic/walk-away per-panel vs whole-target thresholds; (3)
+ASTAP/ffmpeg filesystem side effects with a stub binary; (4) the webapp routers**, and it states outright
+**"Do NOT re-sweep `seestack/stack` or `seestack/calibrate` until a new bug is found there."** Per AGENTS.md,
+this document wins, so this run followed the rotation, not the kickoff. The rotation position was read off
+this file: item (3) was swept 2026-09-26 and item (4) on 2026-09-27, so the next item is **(1)**. (The
+kickoff and AGENTS.md *agree* that the editor is well-hardened; only the engine instruction conflicts.)
+
+### QA sweep — rotation item (1), scale-dependent preview↔export parity, CLEAN (traced + ran on `--big`)
+
+Item (1) is "does the strided live-preview proxy render the same picture the full-res export bakes, on a
+canvas big enough that the proxy is actually decimated?" Traced the whole surface and it is consistently
+scale-corrected:
+
+* **Proxy and coverage share one stride.** `edit/proxy.py::build_proxy` strides the image by
+  `step = ceil(longest/1500)` and sets `proxy_scale = step`; `routers/editor.py::_proxy_coverage` /
+  `_proxy_frame_coverage` load the coverage siblings at the *same* `round(scale)` step, and the export loads
+  them at `step=1` (`webapp/pipeline.py::_render_recipe_fullres`). So preview and export bin the same integer
+  coverage levels.
+* **Every full-res pixel measure is divided by `proxy_scale`.** `edit/ops/background.py::_scaled_box` (box
+  size, dilations), `bg/coverage_leveling.py::_level_context` (`include_min` and `grain_sky_min` scaled by
+  `1/step²`, with `_MIN_STRIDED_PIXELS` as the floor, and a level that clears the export floor but not the
+  measurement floor routed to the interpolated fill exactly as the export does), `tone.py::scnr_noise_sigma`
+  and the colour-calibrate star finder. `_level_coverage` shape-guards **both** `ctx.coverage` and
+  `ctx.frame_coverage` against the rgb shape before it acts.
+* **The five known preview≠export advisories** (deconv/sharpen understatement, `star_reduce_differs_on_proxy`,
+  the grain caption) are the documented, *disclosed* residue — not silent divergences — and all vanish at
+  `proxy_scale == 1`.
+
+Ran on owner-shaped data with `scripts/agent-dogfood.sh --big` (EXIT=0): the full-size 1693×1150 mosaic is
+**shrunk to 1/2 for the editor** (`available=True` → the five advisories and the loupe all live at
+proxy_scale 2), and both the shrunk-preview target and the full-size target probe **"nothing overflowing, no
+console errors"**, with the panel map / framing / next-best-move cards mutually coherent. The `--mosaic
+--editor --big` editor drive on the field target drove all 21 ops with every preview re-rendering; the
+coverage-leveling drive on the `--big` mosaic was cut short by my own `timeout` (the "Target page … has been
+closed" trace is the harness being killed, **not** an app error), and the leveling parity math itself is what
+the trace above covers directly. **Verdict: CLEAN.** Do not re-sweep the engine per AGENTS.md until a new bug
+is found there; the next rotation item is **(2)**, mosaic/walk-away per-panel thresholds.
+
+### Issue inbox — all three open issues already verified, filed, and awaiting the last mile
+
+`list_issues` open: **#903, #880, #878** — the same three FOCUS.md §3 already tracks, no new issue since
+2026-09-25. #878's 11 duplicate pairs are now *offered* for reconcile in the app (closes on a reading, not
+code); #880's only open piece is the ⚪ storage-hygiene exception-repr; #903's open remainder is prevention by
+cover semantics (option 3), with the existing damage already repairable (v0.479.3). Nothing to re-file or
+close this run.
+
+### Feature pipeline — re-stocked with one genuine gap; the mature app makes marginal ones scarce
+
+Filed **"See what got thrown away"** (🌟, S–M) under "Features that serve real workflows": a few representative
+*rejected* subs, grouped by cause, beside the reject summary a beginner already reads — an *educational*
+surface built on the existing `frames.py::frame_preview` render endpoint and `rejection_summary._bucket_for`
+buckets, so it is a picker + strip, not a new render path. Before proposing it I grepped `SHIPPED.md` and the
+code and found the obvious beginner features are **already built** — the in-frame catalog-object annotation
+overlay (`annotate.objects_in_field` + `stack_run_annotations`), the share caption/nameplate + print sizes
+(`export_share`'s `blurb`, `print_sizes`), framing/mosaic advice (`framing_hint`, surfaced on planner rows and
+the framing-verdict card), and the retrospective moon notes (`session_moon`). That scarcity is the point of
+§4's "do not manufacture a marginal one," so this is the one filed, not three.
+
 ## 2026-09-29 (Builder run) — the one READY entry, the last reachable half of an owner ask, and a clean sweep
 
 *(Builder, branch `claude/awesome-fermat-juugz1` → **v0.485.0** + **v0.486.0**. Baseline green on

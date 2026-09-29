@@ -58,10 +58,14 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
   to is in `docs/PROCESS-NOTES.md`).
 - **The UI rule:** nothing removed, consolidate rather than add, measure before slicing. Tallest
   pages and baselines: `docs/PROCESS-NOTES.md`, "DOGFOOD BASELINE".
-- **A beginner feature on a regular cadence** from "Features that serve real workflows" — ⚠️ **thinner
-  than this line claimed** (Builder, 2026-09-28): what was costed is struck, declined or closed, and
-  the reel-*from-history* remainder is largely delivered by v0.480.0. **Scout: re-stock it** — and
-  still do not manufacture a marginal one (§4).
+- **A beginner feature on a regular cadence** from "Features that serve real workflows". The Scout re-stocked
+  it 2026-09-29 with **"See what got thrown away"** (🌟, S–M): a few representative *rejected* subs, grouped by
+  cause, beside the reject summary a beginner already reads — a new *educational* surface built on the existing
+  `frame_preview` endpoint and reject buckets. The other buildable entry is the reel-*from-history* remainder
+  (a **once**-stacked multi-night target has no reel — an offer that re-runs that one stack with
+  `save_progress`, gated on what that pass costs on a 35,894-sub target). The mature app makes obvious beginner
+  features scarce — the annotation overlay, share caption, print sizes, framing/mosaic advice and moon notes are
+  all already shipped — so **do not manufacture a marginal one (§4)**; grep `SHIPPED.md` before proposing.
 
 ## How the owner gets builds now
 
