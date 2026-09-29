@@ -319,8 +319,25 @@ async def health() -> dict:
     (e.g. shelling out to ASTAP, which is slow under load) can blow the probe's
     timeout, get the container restarted mid-stack, and leave jobs "interrupted".
     Rich status (ASTAP, disk, GPU) lives on ``/api/system`` instead.
+
+    It also says which build answered, and that is the point rather than a
+    decoration. This is the **only** path `_AUTH_OPEN_PATHS` leaves open, so on
+    an install with a password set it is the one thing an unattended reader — a
+    deploy script, a health dashboard, the owner's own on-NAS observer — can ask
+    without a credential. Without it the running version can only be *inferred*
+    from the newest `stack_runs.engine_version`, which is as stale as the last
+    stack: the observer spent its whole life reading a checked-out tree that had
+    never run here and could not have noticed
+    (https://github.com/JimmyeJones/astrostack/issues/1015). A reading taken
+    against the wrong code is silently wrong, and one field turns that confound
+    into a check anybody can make in one request.
+
+    Same key and same value as ``/api/system``'s ``version``, so the two can
+    never give one number two names; adding a field breaks no caller (§9), and
+    the probe stays a dict literal plus a ``sys.modules`` lookup. Nothing here
+    is a secret: every release of this app is a public, tagged commit.
     """
-    return {"ok": True}
+    return {"ok": True, "version": __import__("webapp").__version__}
 
 
 @router.get("/api/system")

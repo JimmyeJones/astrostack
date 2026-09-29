@@ -1,6 +1,39 @@
 # Shipped — the record
 
-## 2026-09-29 (Builder, fourth) — the harness's patience, said once
+## 2026-09-29 (Builder, fourth) — the harness's patience, and a version an unattended reader can see
+
+### v0.488.2 — 🔎 TRUST / operability, from observer issue [#1015](https://github.com/JimmyeJones/astrostack/issues/1015)'s suggested fix (2): **`/api/health` says which build answered it.**
+
+`/api/health` is the **only** path `webapp.main._AUTH_OPEN_PATHS` leaves open, so on an install with a
+password set it is the one thing an unattended reader can ask without a credential — a deploy script
+confirming the upgrade took, a health dashboard, the owner's own on-NAS observer. It answered exactly
+`{"ok": true}`, and the running version could only be *inferred* from the newest `stack_runs.engine_version`,
+i.e. from whenever the owner last stacked anything.
+
+**What that cost, measured by the reader it cost it to.** The observer reported that it had spent its entire
+life reading a checked-out tree the deployed app had never run — first 36 minor versions ahead of it, later 18
+behind — and that nothing it is permitted to read could have told it. It caught this only because a function
+it had read out of the working tree (`_my_map_pictures`) resolves a run's preview geometry one way there and
+another way in the deployed build; the two happen to agree on today's library, so the working-tree reading
+produced the right answer for the wrong reason. **A reading taken against the wrong code is silently wrong
+rather than absent**, which is the worst shape a confound can have, and it puts a bound on every finding that
+reader has produced.
+
+**The change is one field.** `webapp/routers/system.py::health` now returns
+`{"ok": True, "version": webapp.__version__}` — the **same key and same value** `/api/system` already
+serves, so the two endpoints can never give one number two names. Additive (§9: add fields, never rename),
+and the probe stays what its docstring promises: a dict literal plus a `sys.modules` lookup, no subprocess,
+no disk, no lock, so Docker's HEALTHCHECK is unaffected even while the job worker is pinning every core.
+
+**Not a security-posture change.** The read-only token's allowlist (`_READONLY_GET_PATHS`) is untouched and no
+path changed sides; `/api/health` was already open, and every release of this app is a public, tagged commit,
+so the number is not a secret. What it stops being is *unknowable to the one reader that most needs it*.
+
+**Tests** (+4, all four verified fail-before by a scratch revert to `{"ok": True}`): the field is the running
+version; it is the same number `/api/system` reports; **a password-protected install still answers it
+unauthenticated** while `/api/system` 401s, which is the exact position the observer was in; and the probe
+still touches nothing — `Library.open_or_create` and `shutil.disk_usage` are made fatal and it answers anyway.
+No config, schema, on-disk, API-shape or default change.
 
 ### v0.488.1 — 🔧 INFRA / green baseline (AGENTS.md §2: a red suite is the run's first task): **a second scan suite was carrying the 60 s job deadline that already flaked once, and it flaked.**
 
