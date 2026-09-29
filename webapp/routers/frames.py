@@ -27,6 +27,7 @@ from seestack.solve.astap import (
 )
 from seestack.solve.bootstrap import rescue_is_worth_offering
 from webapp import deps
+from webapp.rejectexamples import pick_reject_examples
 from webapp.rejection_summary import summarize_rejections
 from webapp.schemas import (
     BulkFrameAction,
@@ -277,6 +278,16 @@ def reject_summary(safe: str, request: Request) -> dict:
         # the solver must already have been beaten on these, not merely never run.
         rescue_offered = rescue_is_worth_offering(
             proj.count_solved(), n_unsolved, proj.count_accepted_unsolved_tried())
+        # A few worked examples per *visible* cause, so "18 clouds" can be
+        # looked at rather than only believed. Six small columns over the
+        # ``accept = 0`` rows only (`rejected_only`, so a deep target's accepted
+        # subs are never read for this), ranked and truncated as they stream —
+        # the pass retains a few dozen tuples whatever the depth — and at most a
+        # few dozen `stat`s to keep a vanished file out of a strip.
+        # See :mod:`webapp.rejectexamples` for which buckets get one and why.
+        reject_examples = pick_reject_examples(proj.iter_frame_columns(
+            "id", "reject_reason", "fwhm_px", "star_count",
+            "cached_path", "source_path", rejected_only=True))
     finally:
         proj.close()
         lib.close()
@@ -302,6 +313,12 @@ def reject_summary(safe: str, request: Request) -> dict:
         # that runs it instead of naming a Settings switch. Omitted by older
         # backends, which reads as False — i.e. exactly today's behaviour.
         "deep_rescue_offered": rescue_offered,
+        # Additive: up to three example frames per reject bucket whose cause is
+        # *visible* in the sub (trailed / clouds / soft), keyed by the same
+        # bucket keys as ``summary.buckets``. Absent buckets simply have no
+        # example; an older backend omits the field entirely, which the UI reads
+        # as "show no strip" — i.e. exactly today's card.
+        "examples": reject_examples,
     }
 
 

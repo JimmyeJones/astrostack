@@ -1,8 +1,12 @@
-import { Anchor, Button, Group, Stack, Text } from "@mantine/core";
+import { useState } from "react";
+import { Anchor, Button, Group, Image, Stack, Text } from "@mantine/core";
 import { Link } from "react-router-dom";
 
-import type { RejectionSummary } from "../../api/client";
+import { api, type RejectionSummary } from "../../api/client";
 import { bucketAction, verdictAction, type RejectionAction } from "./rejectionActions";
+import {
+  exampleLead, hasRenderableExamples, type RejectExamples,
+} from "./rejectExamples";
 
 /** "Why were some frames left out?" — a plain-language, grouped breakdown of the
  * frames the stack dropped, with a single reassuring headline verdict.
@@ -12,6 +16,16 @@ import { bucketAction, verdictAction, type RejectionAction } from "./rejectionAc
  * translates the internal `reject_reason` tally (grouped server-side into a few
  * buckets, each with a friendly note) into words a non-expert reads. The server
  * pre-orders and filters the buckets (non-zero only); this is pure presentation.
+ *
+ * Where the cause is something you can *see*, it can also be looked at: with a
+ * `safe` key and the server's `examples`, each such bucket offers up to three
+ * thumbnails of its own rejected subs behind one shared "show me" toggle — so a
+ * beginner learns to recognise a satellite streak or a soft frame instead of
+ * taking the count on trust. Collapsed by default, which is what keeps it to one
+ * line of page height and stops the card fetching thumbnails nobody asked for
+ * (the same bargain the reel cards make). Without either prop it renders exactly
+ * as it always has, which is how the hover-card copy of this breakdown stays a
+ * quick read rather than an image gallery.
  *
  * Where a note names something to do, it is offered as one small control rather
  * than left as a hunt (`rejectionActions`). `onRunPlateSolve` is the page's own
@@ -61,13 +75,20 @@ function actionId(action: RejectionAction | null): string | null {
 }
 
 export function RejectionBreakdown(
-  { summary, onRunPlateSolve, onTryHarder, deepRescueOffered = false }: {
+  { summary, onRunPlateSolve, onTryHarder, deepRescueOffered = false,
+    safe, examples }: {
     summary: RejectionSummary;
     onRunPlateSolve?: () => void;
     onTryHarder?: () => void;
     deepRescueOffered?: boolean;
+    /** The target, for the thumbnail URLs. Without it, no examples render. */
+    safe?: string;
+    /** `reject-summary.examples` — a few frames per *visible* cause. */
+    examples?: RejectExamples;
   },
 ) {
+  const [showExamples, setShowExamples] = useState(false);
+  const canShowExamples = !!safe && hasRenderableExamples(examples);
   const { verdict, buckets, used, dropped } = summary;
   const headline = verdictAction(verdict.key, deepRescueOffered);
   // Offered at the top, where the advice that earned it is — so a bucket
@@ -97,12 +118,48 @@ export function RejectionBreakdown(
               <Text size="xs" fw={600}>{b.count}</Text>
             </Group>
             <Text size="xs" c="dimmed">{b.note}</Text>
+            {showExamples && safe ? (
+              <ExampleStrip safe={safe} bucketKey={b.key} examples={examples} />
+            ) : null}
             <ActionLink action={dup ? null : act} onRunPlateSolve={onRunPlateSolve}
               onTryHarder={onTryHarder} />
           </div>
           );
         })}
       </Stack>
+      {canShowExamples ? (
+        <Button size="compact-xs" variant="subtle" mt={2}
+          style={{ alignSelf: "flex-start" }}
+          onClick={() => setShowExamples((v) => !v)}>
+          {showExamples ? "Hide the examples" : "Show me what they looked like"}
+        </Button>
+      ) : null}
+    </Stack>
+  );
+}
+
+/** Up to three of one bucket's own rejected subs, with a line saying what to
+ *  look for. Renders nothing for a bucket the server sent no examples for (most
+ *  of them) or that has no copy — see `rejectExamples`. */
+function ExampleStrip(
+  { safe, bucketKey, examples }: {
+    safe: string; bucketKey: string; examples?: RejectExamples;
+  },
+) {
+  const list = examples?.[bucketKey] ?? [];
+  const lead = exampleLead(bucketKey, list.length);
+  if (!lead) return null;
+  return (
+    <Stack gap={4} mt={4}>
+      <Text size="xs" c="dimmed">{lead}</Text>
+      <Group gap="xs">
+        {list.map((ex) => (
+          <Image key={ex.frame_id} w={88} h={88} radius="sm" fit="cover"
+            loading="lazy" fallbackSrc=""
+            src={api.framePreviewUrl(safe, ex.frame_id, 160)}
+            alt={`A sub we set aside: ${ex.name}`} />
+        ))}
+      </Group>
     </Stack>
   );
 }

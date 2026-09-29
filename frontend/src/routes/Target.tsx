@@ -1867,7 +1867,9 @@ export function TargetView() {
                 summary={rejectSummary.data?.summary}
                 onRunPlateSolve={() => qcSolve.mutate()}
                 onTryHarder={() => tryHarder.mutate()}
-                deepRescueOffered={rejectSummary.data?.deep_rescue_offered} />
+                deepRescueOffered={rejectSummary.data?.deep_rescue_offered}
+                safe={safe}
+                examples={rejectSummary.data?.examples} />
               <FocusTrendCard safe={safe} />
               <TransparencyTrendCard safe={safe} />
               <StackHealthCard safe={safe} />
