@@ -13,6 +13,7 @@ pytest.importorskip("skimage")
 
 from seestack.io.project import FrameRow, Project  # noqa: E402
 from seestack.solve.bootstrap import (  # noqa: E402
+    _warp_onto_ref,
     bootstrap_solve,
     integrate_deep_image,
     propagate_wcs,
@@ -60,6 +61,51 @@ def test_register_members_rejects_out_of_bounds_shift():
     shifts = register_members(grays, ref_index=0, max_shift_px=0.5)
     assert shifts[0] == (0.0, 0.0)
     assert shifts[1] is None  # a 2px shift exceeds the 0.5px cap → skipped
+
+
+def test_integrate_deep_image_without_transforms_is_the_shift_integration():
+    """The dithered burst the rescue was built for is untouched, bit for bit.
+
+    Warping only ever applies where a star match placed the member; a caller that
+    passes no transforms — and a burst where none matched — must get exactly the
+    array the shift-only integration always gave, not a re-derivation of it that
+    lands an interpolation away.
+    """
+    grays = [_gray_from_shift(dx, dy) for dx, dy in SHIFTS]
+    shifts = register_members(grays, ref_index=0)
+    baseline = integrate_deep_image(grays, shifts, ref_index=0)
+    assert np.array_equal(
+        integrate_deep_image(grays, shifts, ref_index=0, transforms=None), baseline)
+    assert np.array_equal(
+        integrate_deep_image(grays, shifts, ref_index=0,
+                             transforms=[None] * len(grays)), baseline)
+
+
+def test_warp_onto_ref_keeps_the_no_coverage_semantics():
+    """A warped member is NaN where it has no pixels, exactly like a shift.
+
+    ``NaN = no coverage`` is the engine's rule, and the integration's mean is
+    NaN-aware because of it: a rotation that swings a corner off the grid must
+    leave a hole, never a zero that averages into the sky.
+    """
+    from seestack.align.starmatch import StarTransform
+
+    img = np.ones((H, W), dtype=np.float32)
+    theta = np.radians(20.0)
+    c, sn = float(np.cos(theta)), float(np.sin(theta))
+    turned = StarTransform(
+        matrix=((c, -sn), (sn, c)), translation=(0.0, 0.0), rotation_deg=20.0,
+        scale=1.0, n_matched=12, residual_px=0.1, centre_shift_px=(0.0, 0.0))
+    out = _warp_onto_ref(img, turned)
+    assert out is not None and out.shape == img.shape
+    assert np.isnan(out).any(), "a rotation must leave uncovered corners"
+    assert out[H // 2, W // 2] == pytest.approx(1.0, abs=1e-5)
+
+    # A degenerate matrix has no inverse to warp with — the caller falls back.
+    flat = StarTransform(
+        matrix=((1.0, 1.0), (1.0, 1.0)), translation=(0.0, 0.0), rotation_deg=0.0,
+        scale=1.0, n_matched=12, residual_px=0.1, centre_shift_px=(0.0, 0.0))
+    assert _warp_onto_ref(img, flat) is None
 
 
 def test_integrate_deep_image_averages_down_the_noise():

@@ -36,6 +36,7 @@ from seestack.io.wcs_io import (  # noqa: E402
 )
 from seestack.solve.bootstrap import (  # noqa: E402
     bootstrap_solve,
+    integrate_deep_image,
     propagate_wcs,
     register_members,
     star_match_members,
@@ -59,6 +60,11 @@ SEED = 7
 # further than the frame's own centre ever does.
 ROTATIONS = [2.0, 4.0, 7.0, 11.0, 16.0, 22.0, -5.0, -13.0]
 DITHER = (2.0, -1.0)
+# The anchor's own ASTAP ``CROTA2``. A real solved sub carries one, and it is
+# what every rescued member used to inherit wholesale — so the fixture has to
+# carry a non-zero one for "did this member get its *own* rotation?" to be a
+# question with an answer. The value is arbitrary and deliberately not 0.
+ANCHOR_ROTATION_DEG = 12.5
 
 # A **real** Seestar sub's shape, for the tests that cannot be written at this
 # module's 240x160. ``sep`` — the extractor astroalign detects stars with —
@@ -430,7 +436,7 @@ def _rotated_project(tmp_path, rotations, *, anchor: bool = True):
         )
         proj.add_frame(FrameRow(
             source_path=str(p), wcs_json=_ref_wcs_text(), star_count=N_STARS,
-            fwhm_px=4.0,
+            fwhm_px=4.0, rotation_deg=ANCHOR_ROTATION_DEG,
         ))
     for i, rot in enumerate(rotations):
         p = tmp_path / f"sub_{i:03d}.fit"
@@ -559,6 +565,133 @@ def test_an_ordinary_dithered_burst_is_placed_either_way(tmp_path, star_match):
             assert float(np.median(errs)) < 1.5 * PIXSCALE, float(np.median(errs))
     finally:
         proj.close()
+
+
+# --- the image the rescue asks a solver to solve ---------------------------
+
+def _deep_star_peak_snr(deep: np.ndarray) -> float:
+    """Median star peak over the sky noise, at the *reference*'s own star positions.
+
+    Ground truth from the fixture's catalogue, not from a detector's opinion: a
+    star integrated on the wrong registration does not vanish, it spreads into an
+    arc, and the honest measure of that is how far its peak has fallen into the
+    noise at the place the reference says the star is.
+    """
+    sky = float(np.std(deep[deep < np.percentile(deep, 80)]))
+    peaks = []
+    for cat_xy, _ in rotated_star_positions(
+        width=W, height=H, n_stars=N_STARS, seed=SEED,
+        rotation_deg=0.0, shift=(0.0, 0.0),
+    ):
+        x, y = int(round(cat_xy[0])), int(round(cat_xy[1]))
+        if 4 <= x < W - 4 and 4 <= y < H - 4:
+            peaks.append(float(deep[y - 3:y + 4, x - 3:x + 4].max()))
+    assert peaks
+    return float(np.median(peaks)) / sky
+
+
+def _deep_pair(rotations):
+    """``(shift_integrated, warp_integrated, star_matched)`` for one night."""
+    ref = _gray(0.0, shift=(0.0, 0.0), noise_seed=1)
+    grays = [ref] + [_gray(r, noise_seed=10 + i) for i, r in enumerate(rotations)]
+    shifts = register_members(grays, 0)
+    transforms = star_match_members(grays, 0)
+    return (
+        integrate_deep_image(grays, shifts, 0),
+        integrate_deep_image(grays, shifts, 0, transforms=transforms),
+        sum(1 for t in transforms if t is not None),
+    )
+
+
+def test_a_rotated_night_smears_the_deep_image_the_rescue_solves():
+    """FAIL-BEFORE + AND-PASSES-AFTER, in one measurement, in numbers.
+
+    The deep image exists for one reason: to clear a plate solver's detection
+    floor on a field none of whose subs solved alone. Integer-shifting a member
+    the night has turned lays its stars down as arcs across the reference's, so
+    the image built to be *more* detectable is less so. Ground truth is the
+    fixture's own catalogue; the still night is the control, so the assertion is
+    a ratio rather than a bare number and does not move with the fixture's flux.
+    """
+    still_shift, still_warp, still_matched = _deep_pair([0.0] * 8)
+    turn_shift, turn_warp, turn_matched = _deep_pair(ROTATIONS)
+    assert still_matched == 8 and turn_matched == 8
+
+    still = _deep_star_peak_snr(still_shift)
+    # A still night is a rotation of zero: warping it changes nothing that matters.
+    assert _deep_star_peak_snr(still_warp) > 0.7 * still
+
+    # FAIL-BEFORE: shifted, a turning night loses most of its star peaks.
+    assert _deep_star_peak_snr(turn_shift) < 0.3 * still, _deep_star_peak_snr(turn_shift)
+    # AFTER: warped by the same matches that already place these subs, the deep
+    # image of a turning night is as deep as a still one's.
+    assert _deep_star_peak_snr(turn_warp) > 0.7 * still, _deep_star_peak_snr(turn_warp)
+
+
+# --- the rotation the row is stamped with ----------------------------------
+
+def test_a_star_matched_member_is_stamped_with_its_own_rotation(tmp_path):
+    """FAIL-BEFORE: every rescued member used to inherit the reference's rotation.
+
+    The member's *placement* has been right since star matching shipped — its
+    ``wcs_json`` carries the composed, rotated CD — but the ``rotation_deg``
+    column beside it still said the reference's number, which a member the night
+    has turned knowably is not. Ground truth here is the fixture's own rotation
+    ladder, not the matcher's opinion of itself: a member built at
+    ``rotation_deg=r`` shows a sky turned by ``r`` against the reference, so its
+    position angle must differ from the anchor's by exactly that, in that
+    direction. Reverting the fix leaves every delta at 0.0 and every rung red.
+    """
+    proj, truth = _rotated_project(tmp_path, ROTATIONS)
+    try:
+        res = bootstrap_solve(proj, min_frames=4)
+        assert res.engaged and res.anchored_on_solved_sub
+        seen = 0
+        for f in proj.iter_frames():
+            if f.id not in truth or not f.wcs_json or f.rotation_deg is None:
+                continue
+            delta = f.rotation_deg - ANCHOR_ROTATION_DEG
+            # The sign is pinned, not just the size: the pixel transform's own
+            # ``rotation_deg`` runs the *other* way, so "ref ± θ" had a 50 %
+            # chance of being worse than the approximation it replaced.
+            assert delta == pytest.approx(truth[f.id], abs=0.25), (
+                truth[f.id], f.rotation_deg)
+            seen += 1
+        assert seen >= 6
+    finally:
+        proj.close()
+
+
+def test_a_shift_placed_member_keeps_the_references_rotation(tmp_path):
+    """The other half: a member a translation placed shares the reference's CD.
+
+    Nothing about that case may move — the rescue's ordinary, un-rotated burst is
+    the one the owner's dithered nights actually take — so the stamped value is
+    the anchor's own number exactly, not a re-derivation of it that lands a
+    rounding away.
+    """
+    proj, truth = _rotated_project(tmp_path, [0.0] * 8)
+    try:
+        res = bootstrap_solve(proj, min_frames=4, star_match=False)
+        assert res.engaged and res.n_star_matched == 0
+        stamped = [f.rotation_deg for f in proj.iter_frames() if f.id in truth]
+        assert stamped and all(v == ANCHOR_ROTATION_DEG for v in stamped), stamped
+    finally:
+        proj.close()
+
+
+def test_member_rotation_deg_declines_rather_than_guessing():
+    """No reference rotation, or a header it cannot read, is never invented."""
+    from seestack.solve.bootstrap import member_rotation_deg
+
+    ref = _ref_wcs_text()
+    # Nothing to offset from — a solve that reported no rotation stays silent.
+    assert member_rotation_deg(None, ref, ref) is None
+    # An unreadable member header falls back to the honest approximation.
+    assert member_rotation_deg(12.5, ref, "not a header") == 12.5
+    assert member_rotation_deg(12.5, "not a header", ref) == 12.5
+    # The reference against itself is a rotation of zero, exactly.
+    assert member_rotation_deg(12.5, ref, ref) == pytest.approx(12.5, abs=1e-9)
 
 
 def test_the_scan_summary_carries_the_star_match_count(tmp_path):

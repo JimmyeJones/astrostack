@@ -14,6 +14,7 @@ from seestack.io.wcs_io import (  # noqa: E402
     wcs_center_deg_from_text,
     wcs_dict_rescaled_to_preview,
     wcs_from_text,
+    wcs_rotation_deg_from_text,
     wcs_text_from_sidecar,
     wcs_to_text,
 )
@@ -201,6 +202,34 @@ def test_extent_from_scale_matrix_recovers_crota2(crota2):
     assert width_deg == pytest.approx(1920 * scale, rel=1e-9)
     assert height_deg == pytest.approx(1080 * scale, rel=1e-9)
     assert rotation_deg == pytest.approx(crota2, abs=1e-6)
+
+
+@pytest.mark.parametrize("crota2", [0.0, 12.0, 37.0, -25.0, 90.0])
+def test_wcs_rotation_deg_from_text_recovers_crota2(crota2):
+    """The same convention, asked of a header held as *text*.
+
+    This is the form the solve path has: a member's propagated ``wcs_json`` is a
+    string, and its rotation has to be readable from it in ASTAP's own
+    ``CROTA2`` sense or the number stamped beside it means nothing."""
+    scale = 2.5 / 3600.0
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [83.6, -5.4]
+    w.wcs.crpix = [960.5, 540.5]
+    w.wcs.cdelt = np.array([-scale, scale])  # RA-flipped (CDELT1 < 0)
+    w.wcs.crota = [0.0, crota2]
+    assert wcs_rotation_deg_from_text(wcs_to_text(w)) == pytest.approx(
+        crota2, abs=1e-6)
+
+
+def test_wcs_rotation_deg_from_text_declines_what_it_cannot_read():
+    """No header, no solution, no guess — every unreadable input is ``None``."""
+    assert wcs_rotation_deg_from_text(None) is None
+    assert wcs_rotation_deg_from_text("") is None
+    assert wcs_rotation_deg_from_text("not a header at all") is None
+    # Readable FITS, but nothing celestial in it.
+    assert wcs_rotation_deg_from_text(_header_text(SIMPLE=True, BITPIX=8,
+                                                   NAXIS=0)) is None
 
 
 def test_canvas_extent_from_fits_reads_the_stored_geometry(tmp_path):

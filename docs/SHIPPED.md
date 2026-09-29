@@ -1,5 +1,125 @@
 # Shipped — the record
 
+## 2026-09-29 (Builder, fifth) — the rescued sub's own rotation, and the image the rescue hands the solver
+
+### v0.488.4 — 🟠 BUG FIX (autonomy, PRIORITY 2): the deep image is integrated from the star transforms too
+
+*(The second half of the `LEAD ×2` filed with v0.481.0. The entry is gated — "**Measure before building:** how
+much does a rotated population actually cost the deep solve? … if the answer is 'it solves anyway' this should
+be **closed with the number**" — so the measurement ran first, and it is what decided this.)*
+
+**The measurement.** Two integrations of the *same* members, on the ladder the entry names
+(`make_rotated_star_field` at a rotation ladder), at 960×640 with 60 stars: today's integer shifts, and the
+same members warped by their accepted star transform. Ground truth is the fixture's own catalogue, so "how
+bright is this star" is asked at the place the reference says the star is, not of a detector's opinion.
+
+| night | median star peak SNR | `sep` detections (60 real stars) |
+|---|---|---|
+| still (0°) — control, shift-integrated | 2599 | 60 |
+| still (0°) — warp-integrated | 2593 | 60 |
+| turning to 8° — **shift**-integrated | **685** | **242** |
+| turning to 8° — warp-integrated | 2635 | 75 |
+| turning to 16° — **shift**-integrated | **664** | **281** |
+| turning to 16° — warp-integrated | 2579 | 86 |
+
+So "it solves anyway" is not a live reading. A turning night costs the shift-only integration **3.8× of its
+star peaks**, and the second column is the worse half: the extractor finds **281 sources in a 60-star field**,
+because each star has been laid down as its own arc of fragments. A plate solver matching *quads of star
+positions* is being handed a source list that is 4.7× pollution — in the one image whose entire job is to clear
+its detection floor, on exactly the fields (nothing solved alone) where the rescue is the last resort.
+**Caveat, stated plainly: ASTAP itself was not run** — this measures the image ASTAP is handed, not its
+verdict. With these numbers that is enough to build; it would not have been enough to close.
+
+**Built as the entry's shape (ii), the one it calls "the *correct* answer".** New
+`solve/bootstrap.py::_warp_onto_ref` resamples a member onto the reference's grid by its own star transform:
+bilinear, and **NaN outside the member's own footprint, exactly as `_shift_int` leaves it**, so the engine's
+"NaN = no coverage" rule holds through the NaN-aware mean and a rotation that swings a corner off the grid
+leaves a hole rather than a zero that averages into the sky. A matrix with no inverse returns `None` and the
+caller falls back to the shift. `integrate_deep_image` takes `transforms=` and gives it the **same precedence
+`propagate_wcs` already gives it** — the two now agree about where a member is, which they did not before.
+
+**What deliberately did *not* change.** The engage/decline gate still counts **shifts only**
+(`integrable`), so which bursts the rescue takes on and which it declines is byte-identical: the entry's shape
+**(i)** warned that a rotation floor could drop the count below `min_frames` and make the rescue decline where
+it previously succeeded, and nothing here can. A caller that passes no transforms, and a burst where nothing
+matched, get the old array **bit for bit** (`np.array_equal`, pinned). The anchored path builds no deep image
+at all and is untouched.
+
+**Tests.** +1 in `tests/test_star_match_registration.py` — the ladder measured against a still-night control,
+so the bar is a ratio and does not move with the fixture's flux — and +2 in `tests/test_bootstrap_solve.py`
+(the bit-for-bit identity without transforms; the NaN-coverage and degenerate-matrix contract of the warp).
+**Fail-before verified by scratch revert:** with the warp branch removed the ladder test reads 202.8 against a
+1409 bar.
+
+**Scope.** One engine function's input, on the rescue path only; no config, schema, on-disk, default or
+API-shape change, and no new dependency (`scipy.ndimage` is already a hard dep). Cost is one bilinear
+resample per member, bounded by `DEFAULT_MAX_FRAMES = 16`, against a plate solve.
+
+**Nothing of the v0.481.0 lead is open any more** — half (a) shipped as v0.488.3 above.
+
+### v0.488.3 — 🟡 BUG FIX (trust, PRIORITY 3): a star-matched member is stamped with **its own** `rotation_deg`, not the reference's
+
+*(The first half of the `LEAD ×2` filed with v0.481.0, top of "Bugs (fix these first)". The lead's own
+blocker — "writing `ref_rotation ± θ` is a guess about a convention, and a wrong sign is worse than today's
+honest approximation" — is what this settles, and it settles it without needing the two real ASTAP solves the
+entry proposed.)*
+
+**The bug.** `bootstrap_solve` writes one `rotation` — the anchor's, or the deep solve's — into **every**
+rescued member's row. That was true while every member was a pure translation of the reference, and stopped
+being true in v0.481.0, when a member the alt-az field has turned started being placed by a star-pattern match
+that *measures* its rotation. The member's `wcs_json` has carried the real, rotated CD ever since; only the
+number in the column beside it still said the reference's.
+
+**Why "ref ± θ" was not just added, and why it would have been a coin flip.** The obvious source for the delta
+is `StarTransform.rotation_deg`, and it runs the **opposite way** to the sky's position angle. Measured on the
+fixture ladder this run:
+
+| fixture rotation | member header's own PA − reference's | `StarTransform.rotation_deg` |
+|---|---|---|
+| +2.0° | +2.005° | −2.005° |
+| +7.0° | +6.990° | −6.990° |
+| −13.0° | −13.001° | +13.001° |
+| +16.0° | +16.005° | −16.005° |
+
+So the sign the lead worried about is real: half of the two guesses lands *further* from the truth than doing
+nothing.
+
+**The fix reads the answer instead of guessing at it.** `propagate_wcs` composes a star-placed member's
+solution as `CD′ = CD · A` (`wcs_io.wcs_text_after_pixel_affine`), so the member's header already knows its
+own orientation. New `solve/bootstrap.py::member_rotation_deg` takes the **difference** between the two
+headers' own position angles and adds it to the solver's number:
+
+```
+member = ref_rotation + wrap180( PA(member_wcs) − PA(ref_wcs) )
+```
+
+Both sides of that difference are read the same way, so whatever offset ASTAP's `CROTA2` convention carries
+against ours cancels exactly — the result stays in ASTAP's convention without anyone having to know what it
+is. The position angle itself comes from new `io/wcs_io.py::wcs_rotation_deg_from_text`, and the
+`atan2(−CD2_1, CD2_2)` relation it uses is now written **once**
+(`_rotation_deg_from_scale_matrix`), shared with `_extent_from_scale_matrix`, which had the only previous copy
+— a second spelling of a sign is a second convention.
+
+**Nothing moves for the burst the rescue was built for.** The re-derivation is applied **only** where
+`star_placed[i]`; a member placed by a shift shares the reference's CD exactly and keeps the reference's number
+byte for byte, not a rounding away from it. And it never invents one: a solve that reported no rotation still
+writes `None`, and a header that cannot be read falls back to the old honest approximation.
+
+**Tests.** +3 in `tests/test_star_match_registration.py` (the ladder stamped against fixture truth — sign
+pinned, not just magnitude; the shift-placed burst unchanged; `member_rotation_deg`'s three declines) and +2 in
+`tests/test_wcs_io.py` (the `CROTA2` convention through *text*, and every unreadable input answering `None`).
+**Fail-before verified by scratch revert:** with the one branch reverted to `rotation`, the ladder test goes
+red (`1 failed, 43 passed`) and every delta reads 0.0.
+
+**Scope.** One nullable column's *value* on the rescue path only; no config, schema, on-disk, default or
+API-shape change. The column's one reader (`webapp/routers/sky.py::_representative_pixscale_rotation`, which
+takes the first solved frame's value as representative of the target) is untouched — this makes the rows it
+may consult honest rather than changing what it does with them.
+
+**Still open, unchanged:** half **(b)** of the same lead — the deep image is integrated from *unwarped* rotated
+members, so the image the rescue hands ASTAP is partly smeared. It stays in "Bugs (fix these first)" with its
+"measure before building" gate intact.
+
 ## 2026-09-29 (Builder, fourth) — the harness's patience, a version an unattended reader can see, and the measurement that closed the last owner-approved item
 
 ### ⚪ CLOSED WITH THE NUMBER — auto-*apply* the classified object preset (owner-approved 2026-09-25). Do not re-pick it.
