@@ -230,38 +230,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   tolerance wide enough to cover a night"*). Re-open it only with a shape that is not "the mode of a
   continuous quantity".
 
-- **LEAD (Builder 2026-09-19, filed while shipping v0.470.0 — the one thing in that fix that is a *proxy*
-  rather than a measurement, and I knew it when I shipped it) — the app decides "ragged rim or under-shot
-  panel?" from a share it did not measure for that question, and on a mosaic that is both, the rim wins.**
-  *(Pillar: friendliness / trust — PRIORITY 3; size **S to write, M to be sure of**; severity low;
-  confidence: **the proxy and its failure direction are traced in code**, how often the ambiguous shape
-  occurs on the owner's library is **not** measured — which is why this is a lead.)*
-  **What shipped and why.** v0.470.0's grain note has to choose between two opposite prescriptions about one
-  thin region: *"another night on that panel"* and *"Trim border crops the worst of it away"*. It chooses
-  with `stackhealth.has_ragged_border`, i.e. `coverage_thin_frac >= _COVERAGE_THIN_SHARE` — deliberately the
-  ragged-border note's **own** condition, so the two notes on one card cannot disagree, which was the whole
-  point. That was the right call for the fix: it needed no new column, no migration and no new threshold.
-  **What it is not.** `coverage_thin_frac` answers *"how much of this canvas is under a quarter of one
-  panel's depth?"* — a question about **amount**, not about **place**. The thing being inferred is
-  geometric: is the thin region the canvas's perimeter, or an interior panel nobody has finished? The
-  observer's own discriminator for that is a **distance transform of the covered footprint normalised by its
-  maximum inscribed radius** (0 % of thin pixels beyond half that radius on all 22 of the owner's mosaics,
-  the same as on the single-field controls), which is cheap (`scipy.ndimage.distance_transform_edt`, already
-  a dependency) and definitive where the share is circumstantial.
-  **The failure direction, stated so nobody has to re-derive it:** a mosaic that has *both* a ragged union
-  rim **and** a genuinely under-shot interior panel takes the rim branch, so the owner is told to trim when
-  the more useful answer was to go and shoot that panel — and the grain note is the one surface that would
-  have said so (the panel map says *where*, but it is a different card). The reverse cannot happen: without
-  a rim the note keeps the sentence it has always had.
-  **Why it was not built.** It needs the interior fraction carried onto the run to be read at note time, and
-  `stack_runs` has no column for it — so it is an additive migration plus a `coverage_backfill` pass, which
-  is the right shape for a *measured* answer and far too much for an inference the card already makes
-  coherently. **Check first, before building any of it:** how often does the owner's library actually hold a
-  mosaic that is both? If the answer is "rarely", the proxy is good enough and this should be **closed with
-  the number** rather than built. If it is built, put the fraction behind the same lazy backfill the grain
-  columns already use, default it to "unknown" (never to 0.0, which would read as "all rim"), and keep
-  `has_ragged_border` as the fallback for every run recorded before it existed.
-
 - **LEAD, MEASURED (Builder 2026-09-19, filed with v0.471.2/v0.471.3 — the readers of the same class those two
   fixes deliberately did NOT take, because each needs an *engine* signature decision rather than a router-local
   edit) — three more of the Target page's own fetches build a `FrameRow` for every sub of the target, and two of
@@ -847,6 +815,38 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `−scale·sinθ`, and pin the sign with a known-orientation regression test. This is the same underlying bug as
   Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
   scratchpad (`wcs_repro.py`).)_
+
+- **⚪ LEAD (Builder 2026-09-30, filed while shipping v0.492.4 — traced in the code, not reproduced) — a
+  `restored_utc` later than a picture does **not** prove the picture lacks that sub, because a sub can be set
+  aside *after* the stack that used it and put back later.** *(Pillar: trust — PRIORITY 2-adjacent; size **S to
+  state, M to fix properly**; severity **low** — it can only over-count, by a sub or two, on a target the
+  surface is already naming. Confidence: **mechanism traced end to end in the code**; not reproduced, and its
+  rate on the owner's library is unmeasured.)*
+  `restorednudge.restored_since_stack` says in its own docstring that *"a stamp strictly later than the run's
+  own `timestamp_utc` means that sub was set aside while the picture was being made"*, and v0.492.3's
+  `Project.count_light_missing_from_stack` — the rule behind the Dashboard note, the "Bring my pictures up to
+  date" scope and its dialog's counts — is built on the same reading. But `qc.grading.apply_grade_report` can
+  **reject a frame that an earlier stack accepted and used** (a re-grade on a bigger population moves the
+  percentile cut), and a later re-grade's `apply_grade_reaccepts` then stamps `restored_utc`. Sequence: stack at
+  T0 with F in it → re-grade rejects F at T1 > T0 → re-grade re-accepts F at T2 > T1, stamping T2 > T0. F now
+  reads as "missing from the picture" on both surfaces although it is in its pixels. Nothing distinguishes the
+  two cases today: `frames` records *when a sub came back* and never *when it was set aside*, and `stack_runs`
+  records `n_frames_used`, not which frames.
+  **Do not fix it by narrowing `restored_utc`** — the stamp is right, and v0.492.3's widening is the thing that
+  finally reached the 178 wrong-scale-solve restorations. The only exact shape is a sibling `rejected_utc`
+  (additive column, stamped in the reject paths): `rejected_utc > stack_time` means the sub was accepted *at*
+  stack time, so it was in the picture and must not be counted. One-sided and upgrade-safe — a frame with no
+  stamp keeps today's answer — but that is a schema bump and four writers for an over-count of a few, on a
+  target that already has genuine new light by definition (the rejection happened after the stack, so the
+  nights that caused it are newer too). **Check first whether it is worth a slot**, and if it is not, close it
+  with that reasoning rather than leaving it to be re-derived.
+  **One adjacent question the same grep raised, filed here so it is not lost:** both counts require
+  `wcs_json` (*"accepted **and** solved — the two things a re-stack needs from a frame"*), but since
+  v0.482.0/v0.484.0 the stacker also places **unsolved** subs by star matching
+  (`stacker.STAR_MATCH_MAX_UNSOLVED`, up to 400 per run). `StackOptions.star_match_unsolved` defaults **False**
+  and is a hand-set advanced field, so the bar is still exactly right for the owner's runs — but on an install
+  that turns it on, "a re-stack would fold this in" is wider than "solved", and the note and the batch would
+  both under-reach. Gate the decision on that option, not on a new threshold.
 
 ---
 
@@ -3872,6 +3872,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **⚪ CLOSED (no code) 2026-09-30** — the grain note's **"ragged rim or under-shot panel?"** proxy (`stackhealth.has_ragged_border` / `coverage_thin_frac`, filed as a LEAD with v0.470.0) is **closed with the number its own last paragraph asked for**, rather than built. The gate was *"how often does the owner's library hold a mosaic that is **both** a ragged union rim and a genuinely under-shot interior panel?"* — and the answer was already measured twice in this repo: the observer's distance-transform discriminator puts **0 % of thin pixels beyond half the footprint's inscribed radius on all 22 of the owner's mosaics** (the same as on the single-field controls), and `seestack/stackhealth.py` carries that finding as a comment beside the very branch (*"a long, ragged rim reaching a quarter to a half of the canvas by area"*, observer #952). The wrong branch needs an **interior** thin region; none of his has one, so the failure direction has **no instance** in the data the decision is for — and the build it would justify is an additive `stack_runs` column plus a `coverage_backfill` pass. This does **not** claim `coverage_thin_frac` answers the geometric question (it answers *amount*, not *place* — that stays the honest description); it says the proxy and the measurement agree on every mosaic there is to disagree about. **Re-open only on a reading** that puts thin pixels beyond half the inscribed radius on one of his mosaics — then the preserved sketch (lazy backfill, default "unknown" never 0.0, `has_ragged_border` as the fallback) is correct as written. Entry cut to [`SHIPPED.md`](SHIPPED.md).
 - **v0.492.4** — 🟠 BUG FIX (friendliness / robustness, PRIORITY 3), Builder-found and reproduced in the same run: **one unreadable `project.sqlite` 500'd the whole maintenance page.** `webapp/pipeline.py`'s three library-wide roll-ups — `reprocess_status`, `auto_cast_summary`, `auto_highlight_summary` — each walked every target's own DB with an **unguarded** `lib.open_target`, and all three land on *one* page: Settings → Maintenance (the v0.492.0 scope, its counts, the #903 warning), the two Auto read-outs below it, and the navbar's outdated-targets badge that every page mounts. So a truncated DB, a `user_version` a newer build wrote, or a target folder a mount took away blanked all of them **together** — the page that exists to *run* maintenance went dark exactly when something needed maintaining, and the badge fails silently by design so the reader was not even told. The app had already decided this question everywhere else: `gallery.py` (*"one broken project must not 500 the wall"*, ×3), `sky.py` (×2), `overtrim.py`, `newsubs.py` — the sibling of this very feature — `incominglag.py`, `refinish.py`, `storage.py`; these three were never brought into line, and v0.492.3 had just added a per-target `COUNT` to one of them. New `_skip_unreadable_target` holds the reasoning and the one log line a roll-up can make; all three now guard the open **and** the reads. A skipped target still counts in `total_targets` and lands in **no** bucket, exactly as a never-stacked one does. Tests +4 (one per read-out + one end-to-end 200-not-500), failure injected at `Project.open` for one target as the `test_new_subs_waiting.py` sibling does; **all four fail before** by scratch revert. No config, schema, migration, on-disk, default or API-shape change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.492.3** — 🟠 BUG FIX (autonomy, PRIORITY 2), Builder-found and reproduced in the same run: **"new light" meant *light shot since*, so the one-click catch-up could not reach the subs the app itself had just handed back.** `newsubs.new_light_since_picture` — *"the one definition of 'this target has new light'"*, asked by the Dashboard note, v0.492.0's "Bring my pictures up to date" scope **and** the counts its dialog quotes — counted accepted+solved subs **captured** after the picture. But a sub can be missing from a picture without having been shot after it: four reconcilers stamp `frames.restored_utc`, and as of **v0.489.0, shipped the day before**, `reconcile_bad_solve_frames` exists to hand back subs a stack dropped for a wrong-scale plate solve — **178 of them on the owner's library** (#965), every one shot long before the picture it is missing from, usually on the very night that picture is made of. So v0.489.0 put the subs back and the one library-wide batch built to restack behind-the-light targets could not see one of those targets; the only route left was the Stack form, target by target, which is the friction v0.492.0 exists to remove. `seestack/restorednudge.py` has said in its own docstring since it was written that this nudge *"cannot see this case at all"* — what was missing was carrying that to the library-wide surface. New `Project.count_light_missing_from_stack`: accepted **and** solved, captured after the stack **or restored** after it, as one `OR` inside **one** `COUNT` (two counts added would report a sub that is both as two — pinned). `count_accepted_solved_after` is untouched, because the Target page's two precise sentences (new-subs line + restored-subs card) are deliberately separate and the roll-up is their **union** — a new drift guard pins the equality on a **disjoint** fixture. Copy follows the meaning: the note's *"You've shot N more … since AstroStack last stacked it"* was false of a restored sub and now reads *"You have N more subs … ready to stack than the picture you're seeing includes"*; the scope radio and `newLightScopeText` move the same way. Nothing removed, no new card or control. No migration, schema, config, on-disk, default or API-shape change; on a library that never had a restoration the count is byte-identical to the old one, so this can only widen the set, never narrow it. Tests +5 with fail-before on **both** layers by scratch revert (backend `OR` neutralised: 4 red; the two old sentences restored: 4 red). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.492.2** — INFRA / the quality bar itself, the **generalisation of v0.492.1, measured rather than reasoned**: **the sweep now opens what a page keeps behind a click — and the "which page is the wall?" table had been wrong by 4.3x.** `page.goto` lands on one option of a `SegmentedControl` and on a **shut** `Accordion`; the probe's one exception was hard-coded (`COMPARE_MODES = ["Split", "Blink"]`, v0.440.2, one page), so `/life-list`'s four filters, `/tonight`'s four, `/logs`' four, `/sky`'s three maps, the Stack form's entire advanced panel and the Glossary's forty term bodies were unswept. Measured first: `/life-list [Still to shoot]` is **14,492 px** on a phone and `[Up tonight]` 7,006 px, against a landing `/life-list` of 3,094 px and a tallest-ever-recorded landing height of ~3,400 px — i.e. the tallest thing this app draws is **4.3x** anything a pass had seen, one click from a nav page, and AGENTS.md §1's layout rule is scored on exactly that number. New `viewSwitches()` reads both control shapes off the page's own DOM (no list to keep in step; `COMPARE_MODES` deleted), and the two are swept **differently on purpose**: a **view** switch replaces the page, so each inactive option is its own probe *and* its own height row (active options seeded from Mantine's `data-active`/`checked`, so a loop cannot re-shoot the landing view); a **panel** only adds to the page, so they open **together** in one in-page round trip (`expandAllPanels`) and probe once, pushing **no** height — one at a time would put forty cumulative Glossary heights, which are nobody's page, at the top of the wall table. **Cost stated, not hidden:** the probe half goes **2m11s → 3m01s** (1.4x), 64 → 106 shots, for 42 views never drawn; the one-at-a-time version was 2.8x, which is the sort of number that stops a tool being run. Discovery keys off Mantine class names, so a rename would find nothing everywhere and still report CLEAN — `KNOWN_VIEW_SWITCHES` makes that a printed **finding**, and `tests/test_dogfood_view_switches.py` pins that list against the components that render each switch (one-directional: Gallery's and History's switches are behind a modal / on data this library lacks, so "no switch here" is their honest landing state). **All 106 views read clean** at 1440 px and 420 px. `/life-list`'s 14,492 px is **not a bug** — `Section` collapses the to-do tail only in the mixed "All" view, deliberately (*"the list the user just asked for … is never shortened there"*) — recorded so nobody re-derives it or takes a layout slice at it. Tooling only; no engine, webapp, frontend, config, schema, on-disk, API or default change. Tests +2, **both fail before**. Full entry in [`SHIPPED.md`](SHIPPED.md).

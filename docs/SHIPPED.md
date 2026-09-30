@@ -1,5 +1,76 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder, later the same day) — the grain note's rim-vs-panel proxy, closed with the number the lead asked for
+
+### ⚪ CLOSED WITH THE NUMBER (no code) — "ragged rim or under-shot panel?" is a proxy, and on the owner's library it is never wrong. Do not build the distance transform.
+
+*(Builder 2026-09-30. The check the entry's own last paragraph asks for, answered from the measurement already
+in the repo rather than deferred again. No code changed; the entry is cut out of "Bugs (fix these first)" and
+preserved below.)*
+
+**The gate, in the entry's words:** *"**Check first, before building any of it:** how often does the owner's
+library actually hold a mosaic that is both [a ragged union rim **and** a genuinely under-shot interior panel]?
+If the answer is 'rarely', the proxy is good enough and this should be **closed with the number** rather than
+built."*
+
+**The answer is "never, on all 22 of them", and it was already measured — twice, in this repo.** The entry
+itself records the observer's discriminator and its result: a distance transform of the covered footprint
+normalised by its maximum inscribed radius puts **0 % of thin pixels beyond half that radius on all 22 of the
+owner's mosaics** — the same as on the single-field controls. `seestack/stackhealth.py` carries the same
+finding as a code comment beside the branch in question (observer report #952): *"none of the thin pixels on
+any of his 22 mosaics sits beyond half the footprint's inscribed radius — it is a long, ragged rim reaching a
+quarter to a half of the canvas by area."* A mosaic can only take the wrong branch if its thin region is
+**interior**, and on his library none of it is. So the failure direction the lead names — being told to trim
+when the more useful answer was to go and shoot a panel — has **no instance** in the data the decision is for.
+
+**What that closes, and what it does not.** It closes the *build*: an additive `stack_runs` column plus a
+`coverage_backfill` pass, for an inference the card already makes coherently and correctly on every canvas the
+owner has. It does **not** claim `coverage_thin_frac` answers the geometric question — the lead is right that
+it answers *amount*, not *place*, and that remains the honest description of `has_ragged_border`. The reason
+not to build is that the proxy and the measurement **agree on every mosaic there is to disagree about**, which
+is the strongest form of "good enough" available without the owner shooting a new shape.
+
+**Re-open only on a finding, not on a re-reading.** The one thing that would reopen it is a *new* mosaic shape
+in his library — an interrupted raster left with a genuinely unfinished interior panel, which the panel map
+would show as a hole rather than a fade. That is a Scout observation about the data, not a code audit: if a
+reading ever puts thin pixels beyond half the inscribed radius on one of his mosaics, the build sketch in the
+preserved entry below is correct as written (lazy backfill, default "unknown" and never 0.0, `has_ragged_border`
+as the fallback for every earlier run) and should be taken then.
+
+**The entry as filed, preserved:**
+
+> - **LEAD (Builder 2026-09-19, filed while shipping v0.470.0 — the one thing in that fix that is a *proxy*
+>   rather than a measurement, and I knew it when I shipped it) — the app decides "ragged rim or under-shot
+>   panel?" from a share it did not measure for that question, and on a mosaic that is both, the rim wins.**
+>   *(Pillar: friendliness / trust — PRIORITY 3; size **S to write, M to be sure of**; severity low;
+>   confidence: **the proxy and its failure direction are traced in code**, how often the ambiguous shape
+>   occurs on the owner's library is **not** measured — which is why this is a lead.)*
+>   **What shipped and why.** v0.470.0's grain note has to choose between two opposite prescriptions about one
+>   thin region: *"another night on that panel"* and *"Trim border crops the worst of it away"*. It chooses
+>   with `stackhealth.has_ragged_border`, i.e. `coverage_thin_frac >= _COVERAGE_THIN_SHARE` — deliberately the
+>   ragged-border note's **own** condition, so the two notes on one card cannot disagree, which was the whole
+>   point. That was the right call for the fix: it needed no new column, no migration and no new threshold.
+>   **What it is not.** `coverage_thin_frac` answers *"how much of this canvas is under a quarter of one
+>   panel's depth?"* — a question about **amount**, not about **place**. The thing being inferred is
+>   geometric: is the thin region the canvas's perimeter, or an interior panel nobody has finished? The
+>   observer's own discriminator for that is a **distance transform of the covered footprint normalised by its
+>   maximum inscribed radius** (0 % of thin pixels beyond half that radius on all 22 of the owner's mosaics,
+>   the same as on the single-field controls), which is cheap (`scipy.ndimage.distance_transform_edt`, already
+>   a dependency) and definitive where the share is circumstantial.
+>   **The failure direction, stated so nobody has to re-derive it:** a mosaic that has *both* a ragged union
+>   rim **and** a genuinely under-shot interior panel takes the rim branch, so the owner is told to trim when
+>   the more useful answer was to go and shoot that panel — and the grain note is the one surface that would
+>   have said so (the panel map says *where*, but it is a different card). The reverse cannot happen: without
+>   a rim the note keeps the sentence it has always had.
+>   **Why it was not built.** It needs the interior fraction carried onto the run to be read at note time, and
+>   `stack_runs` has no column for it — so it is an additive migration plus a `coverage_backfill` pass, which
+>   is the right shape for a *measured* answer and far too much for an inference the card already makes
+>   coherently. **Check first, before building any of it:** how often does the owner's library actually hold a
+>   mosaic that is both? If the answer is "rarely", the proxy is good enough and this should be **closed with
+>   the number** rather than built. If it is built, put the fraction behind the same lazy backfill the grain
+>   columns already use, default it to "unknown" (never to 0.0, which would read as "all rim"), and keep
+>   `has_ragged_border` as the fallback for every run recorded before it existed.
+
 ## 2026-09-30 (Builder, later the same day) — one unreadable target took out the whole maintenance page
 
 ### v0.492.4 — 🟠 BUG FIX (friendliness / robustness, PRIORITY 3), Builder-found and reproduced: the three library-wide read-outs on Settings had no per-target guard, so one broken `project.sqlite` 500'd all of them at once
