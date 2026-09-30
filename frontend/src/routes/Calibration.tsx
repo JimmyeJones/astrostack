@@ -71,8 +71,10 @@ function BuildForm({ onDone }: { onDone: () => void }) {
         </Button>
       </Group>
       <Text size="xs" c="dimmed" mt="xs">
-        Point at a server-side folder of raw dark/flat FITS frames (e.g. a Seestar
-        "Dark" folder on your NAS). The master is combined once and reused across targets.
+        Name a folder of raw dark/flat FITS frames <b>inside your incoming folder</b> (e.g.
+        a Seestar "Dark" folder copied there) — just its name, like <i>darks</i>, or the
+        full path. Folders elsewhere on the NAS are not accepted. The master is combined
+        once and reused across targets.
       </Text>
     </Paper>
   );

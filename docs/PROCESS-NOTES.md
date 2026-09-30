@@ -1,5 +1,38 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (audit run A — security and the release pipeline) — the 2026-09-30 audit's C-F2, C-F5, B-F2..B-F6, and a clean sweep of `scripts/` for the A1/A2 class
+
+*(Audit run A, branch `claude/new-session-qz9mr2`. Baseline on `origin/main` at 4dc89d3: **7106 passed,
+2 skipped**, 15m47s under `-n 4`. Green. Run B works the library and process findings in parallel; this run
+stayed inside `webapp/main.py`, `webapp/routers/calibration.py`, `scripts/`, the two workflows and tests.)*
+
+### Sweep: root-run host scripts following links the container can plant — **clean**
+
+v0.492.5 fixed the class in `scripts/update_agent.py` (A1) and `scripts/lib/restore-data.sh` (A2). The
+audit asked whether any instance remained in `scripts/`; the three other host-side scripts were read for
+every write that starts from a path under ASTRO_DATA:
+
+- `deploy.sh` — its only ASTRO_DATA read is the tar backup: `find library state -name '*.sqlite*' -o -name
+  config.json` without `-L`/`-H` (a starting-point link is not followed, a linked folder is not descended)
+  piped to `tar --null -czf … --files-from=-` without `-h`, so a planted *file* link named `x.sqlite` is stored
+  **as a link**, never dereferenced; the archive lands in the owner's `~/.astrostack-deploy`, outside
+  ASTRO_DATA. Reads, no writes.
+- `restore-data.sh` — the file list is `find "$top" -type f` (a link is not `-type f`, in the snapshot view
+  and in the extracted tar alike), every path component under DATA is `-L`-checked before any write, the WAL
+  delete is `-type f` under a non-link top, and the copy is `cp -p --remove-destination` (a link at the
+  destination is unlinked, not written through). The app is stopped for the whole restore.
+- `rollback.sh` — writes nothing under ASTRO_DATA; it delegates to `restore-data.sh`.
+
+Nothing to fix. The audit's own three tests are in `tests/test_updater_symlink_escape.py`, with the one
+that expected `ensure_queue` to carry on changed to expect v0.492.5's refusal (see `SHIPPED.md`, v0.492.15).
+
+### The audit's CSRF test, and why it was changed rather than made to pass
+
+It posted with **no headers** and expected 403 — which would have refused curl, the observer's scripts and
+`scripts/agent-dogfood.sh`'s own probes. A browser sends `Origin` on every cross-site POST (and
+`Sec-Fetch-Site` on all of them), so the refusal is keyed on those, and the no-header case is pinned as
+*allowed*. Fail-before was shown in a `git worktree` of `origin/main` (never `stash` while a suite runs —
+the 2026-09-30 note above): 13 refusals red on main, 12 allowances green on both.
 ## 2026-09-30 (Builder) — two runs rescued the same stranded PR at the same time, and the fixture trap that makes a gate-test vacuous
 
 *(Builder, branch `claude/keen-darwin-ioh4nq` → **v0.492.11**. Baseline on `origin/main` at `4dc89d3`:
