@@ -1203,3 +1203,29 @@ def test_bulk_reject_worst_on_a_mosaic_cuts_each_panel(client, built_library, da
     }
     # Two from each panel — not all six from the sparsest one.
     assert rejected == {f"panel{p}_{k}.fit" for p in range(3) for k in (0, 1)}
+
+
+def test_system_reports_the_stack_memory_budget_and_where_it_came_from(client, monkeypatch):
+    """The Settings page says which budget a stack is priced against, so it has to
+    be told — the precedence has three steps and the browser cannot see the
+    container's environment. Served from the engine's own resolver, so the page
+    and the run cannot disagree about which control is in force."""
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    mem = client.get("/api/system").json()["memory"]
+    assert mem["stack_budget_gb"] > 0
+    # No env override and no Settings value on a fresh install → the live read.
+    assert mem["stack_budget_source"] in ("available", "fallback")
+
+    # A Settings budget takes over…
+    r = client.put("/api/settings", json={"max_stack_memory_gb": 6.0})
+    assert r.status_code == 200
+    mem = client.get("/api/system").json()["memory"]
+    assert mem["stack_budget_source"] == "setting"
+    assert mem["stack_budget_gb"] == 6.0
+
+    # …and the env override beats it, which is the case the page was getting
+    # wrong: it warned about a number no stack would ever read.
+    monkeypatch.setenv("ASTROSTACK_MAX_STACK_GB", "3")
+    mem = client.get("/api/system").json()["memory"]
+    assert mem["stack_budget_source"] == "env"
+    assert mem["stack_budget_gb"] == 3.0

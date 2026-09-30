@@ -16,6 +16,7 @@ import {
 } from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { compassPoint } from "../tonight";
+import { stackBudgetNote } from "../stackBudgetNote";
 import { RefinishPicturesCard } from "../components/RefinishPicturesCard";
 import { UpdatesCard } from "../components/UpdatesCard";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
@@ -1175,10 +1176,29 @@ export function SettingsView() {
               decimalScale={1} placeholder="auto (~70% of RAM)" w={{ base: "100%", xs: 260 }}
               onChange={(v) => set("max_stack_memory_gb", v === "" ? null : Number(v))} />
             {(() => {
+              // What the budget actually is right now, and which control set it —
+              // the engine's own answer, because the browser can't see the
+              // container's environment. `null` on an older backend.
+              const note = stackBudgetNote(system.data?.memory);
+              if (!note) return null;
+              return note.tone === "warning" ? (
+                <Alert color="orange" icon={<IconInfoCircle size={16} />}
+                  title="This field is being overridden">
+                  {note.text}
+                </Alert>
+              ) : (
+                <Text size="sm" c="dimmed">{note.text}</Text>
+              );
+            })()}
+            {(() => {
               // Advisory only: a budget higher than the box's available RAM re-opens
-              // the OOM door the guard exists to close.
+              // the OOM door the guard exists to close. Silent where the env
+              // override is in force: the field it is warning about is not the
+              // number any stack will be priced against, and the note above has
+              // already said so.
               const budget = form.max_stack_memory_gb;
               const avail = system.data?.memory?.available_gb;
+              if (system.data?.memory?.stack_budget_source === "env") return null;
               if (typeof budget !== "number" || typeof avail !== "number") return null;
               if (budget <= avail) return null;
               return (

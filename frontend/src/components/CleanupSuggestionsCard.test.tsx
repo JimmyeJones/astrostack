@@ -1,5 +1,5 @@
 import { MantineProvider } from "@mantine/core";
-import { Notifications } from "@mantine/notifications";
+import { Notifications, notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -29,7 +29,14 @@ function renderCard() {
   );
 }
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  // Mantine's notification store is module-level and outlives a render, so a
+  // message one test raised is still on screen for the next one — which makes a
+  // `screen` query for a confirmation match the *previous* test's copy.
+  notifications.clean();
+  notifications.cleanQueue();
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe("CleanupSuggestionsCard", () => {
@@ -241,6 +248,62 @@ describe("CleanupSuggestionsCard", () => {
     // The one thing this group must never do: delete the target that holds the
     // only copy of those pictures.
     expect(del).not.toHaveBeenCalled();
+  });
+
+  it("says what the combine did to the pictures and the cover, like the nudge does", async () => {
+    // Same endpoint, same two facts. This card used to discard the answer, so a
+    // cover the merge pinned — a visible change nobody asked for by name — was
+    // reported on the same-object nudge and silently on this one, which is the
+    // button the duplicate reconciliation is actually offered on.
+    vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([
+      suggestion({
+        safe: "m_44_mosaic_sub",
+        name: "M 44_mosaic_sub",
+        reason: "duplicate_sub_merge",
+        merge_into_safe: "m_44_mosaic-328c48ae",
+        merge_into_name: "M 44 (mosaic)",
+      }),
+    ]);
+    vi.spyOn(client.api, "mergeTargets").mockResolvedValue(
+      { frames_added: 812, pictures_kept: 2, picture_pinned: true } as never);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByText("Combine it into the main target")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Combine it into the main target"));
+
+    // Scoped to this notification's own text: Mantine's notification store is
+    // module-level, so a bare screen query can read a message an earlier test
+    // left behind.
+    const note = await screen.findByText(/Combined 1 leftover target/);
+    expect(note.textContent).toContain("Your 2 existing pictures came with them");
+    expect(note.textContent).toContain("kept as the cover");
+  });
+
+  it("stays quiet about pictures and covers when the merge kept neither", async () => {
+    vi.spyOn(client.api, "cleanupSuggestions").mockResolvedValue([
+      suggestion({
+        safe: "m_44_mosaic_sub",
+        name: "M 44_mosaic_sub",
+        reason: "duplicate_sub_merge",
+        merge_into_safe: "m_44_mosaic-328c48ae",
+        merge_into_name: "M 44 (mosaic)",
+      }),
+    ]);
+    // An older backend answers neither field — which must read as "say nothing
+    // extra", never as "0 pictures".
+    vi.spyOn(client.api, "mergeTargets").mockResolvedValue({} as never);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderCard();
+
+    await waitFor(() =>
+      expect(screen.getByText("Combine it into the main target")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Combine it into the main target"));
+
+    const note = await screen.findByText(/Combined 1 leftover target/);
+    expect(note.textContent).not.toContain("came with");
+    expect(note.textContent).not.toContain("kept as the cover");
   });
 
   it("does not offer a combine without a destination", async () => {

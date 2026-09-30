@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { api, type CleanupSuggestion } from "../api/client";
 import { WRAPPING_BADGE } from "../badgeFit";
+import { mergeCoverClause, mergeKeptClause } from "./mergeSuggestions";
 
 // Remember which cleanup nudges the user dismissed, keyed per group so declining
 // one (e.g. "these aren't real subs") doesn't also hide the other (e.g. "these
@@ -181,16 +182,29 @@ export function CleanupSuggestionsCard() {
   const combine = useMutation({
     mutationFn: async (targets: CleanupSuggestion[]) => {
       let n = 0;
+      // The same two facts the merge *nudge* reports, because this is the same
+      // `POST /api/targets/merge`: how many finished pictures came across, and
+      // whether the destination had its own picture pinned as the cover to stop
+      // a carried one-night stack replacing it. Both were being thrown away
+      // here, so one operation described itself two ways depending on which
+      // Combine button the owner happened to press — and this is the button the
+      // duplicate-target reconciliation is offered on.
+      let pictures = 0;
+      let pinned = false;
       for (const t of targets) {
         if (!t.merge_into_safe) continue;
-        await api.mergeTargets(t.merge_into_safe, [t.safe]);
+        const res = await api.mergeTargets(t.merge_into_safe, [t.safe]);
+        pictures += res?.pictures_kept ?? 0;
+        pinned = pinned || !!res?.picture_pinned;
         n += 1;
       }
-      return n;
+      return { n, pictures, pinned };
     },
-    onSuccess: (n) => {
+    onSuccess: ({ n, pictures, pinned }) => {
       notifications.show({
-        message: `Combined ${n} leftover ${n === 1 ? "target" : "targets"} into your main ${n === 1 ? "target" : "targets"}. Your pictures and notes moved across; your files on disk are untouched.`,
+        message: `Combined ${n} leftover ${n === 1 ? "target" : "targets"} into your main ${n === 1 ? "target" : "targets"}.`
+          + ` Your pictures and notes moved across; your files on disk are untouched.`
+          + `${mergeKeptClause(pictures)}${mergeCoverClause(pinned)}`,
         color: "teal",
       });
       qc.invalidateQueries({ queryKey: ["targets"] });
