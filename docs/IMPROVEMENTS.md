@@ -816,37 +816,19 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
   scratchpad (`wcs_repro.py`).)_
 
-- **⚪ LEAD (Builder 2026-09-30, filed while shipping v0.492.4 — traced in the code, not reproduced) — a
-  `restored_utc` later than a picture does **not** prove the picture lacks that sub, because a sub can be set
-  aside *after* the stack that used it and put back later.** *(Pillar: trust — PRIORITY 2-adjacent; size **S to
-  state, M to fix properly**; severity **low** — it can only over-count, by a sub or two, on a target the
-  surface is already naming. Confidence: **mechanism traced end to end in the code**; not reproduced, and its
-  rate on the owner's library is unmeasured.)*
-  `restorednudge.restored_since_stack` says in its own docstring that *"a stamp strictly later than the run's
-  own `timestamp_utc` means that sub was set aside while the picture was being made"*, and v0.492.3's
-  `Project.count_light_missing_from_stack` — the rule behind the Dashboard note, the "Bring my pictures up to
-  date" scope and its dialog's counts — is built on the same reading. But `qc.grading.apply_grade_report` can
-  **reject a frame that an earlier stack accepted and used** (a re-grade on a bigger population moves the
-  percentile cut), and a later re-grade's `apply_grade_reaccepts` then stamps `restored_utc`. Sequence: stack at
-  T0 with F in it → re-grade rejects F at T1 > T0 → re-grade re-accepts F at T2 > T1, stamping T2 > T0. F now
-  reads as "missing from the picture" on both surfaces although it is in its pixels. Nothing distinguishes the
-  two cases today: `frames` records *when a sub came back* and never *when it was set aside*, and `stack_runs`
-  records `n_frames_used`, not which frames.
-  **Do not fix it by narrowing `restored_utc`** — the stamp is right, and v0.492.3's widening is the thing that
-  finally reached the 178 wrong-scale-solve restorations. The only exact shape is a sibling `rejected_utc`
-  (additive column, stamped in the reject paths): `rejected_utc > stack_time` means the sub was accepted *at*
-  stack time, so it was in the picture and must not be counted. One-sided and upgrade-safe — a frame with no
-  stamp keeps today's answer — but that is a schema bump and four writers for an over-count of a few, on a
-  target that already has genuine new light by definition (the rejection happened after the stack, so the
-  nights that caused it are newer too). **Check first whether it is worth a slot**, and if it is not, close it
-  with that reasoning rather than leaving it to be re-derived.
-  **One adjacent question the same grep raised, filed here so it is not lost:** both counts require
-  `wcs_json` (*"accepted **and** solved — the two things a re-stack needs from a frame"*), but since
-  v0.482.0/v0.484.0 the stacker also places **unsolved** subs by star matching
-  (`stacker.STAR_MATCH_MAX_UNSOLVED`, up to 400 per run). `StackOptions.star_match_unsolved` defaults **False**
-  and is a hand-set advanced field, so the bar is still exactly right for the owner's runs — but on an install
-  that turns it on, "a re-stack would fold this in" is wider than "solved", and the note and the batch would
-  both under-reach. Gate the decision on that option, not on a new threshold.
+- **⚪ LEAD (Builder 2026-09-30, filed while shipping v0.492.4; its first half — the `restored_utc`
+  over-count — was reproduced and **SHIPPED as v0.492.8**, see [`SHIPPED.md`](SHIPPED.md). This is the
+  adjacent question that fix deliberately left) — "a re-stack would fold this in" is read as *solved*, and
+  since v0.482.0/v0.484.0 the stacker can also place **unsolved** subs.** *(Pillar: trust — PRIORITY
+  2-adjacent; size **S**; severity **none for the owner**, by the gate below. Confidence: traced in the code,
+  not reproduced.)*
+  `Project.count_light_missing_from_stack` and `restored_frame_windows` both require
+  `wcs_json` (*"accepted **and** solved — the two things a re-stack needs from a frame"*), but the stacker
+  places up to `stacker.STAR_MATCH_MAX_UNSOLVED` (400) unsolved subs per run by star matching.
+  `StackOptions.star_match_unsolved` defaults **False** and is a hand-set advanced field, so the bar is
+  exactly right for the owner's runs — but on an install that turns it on, the note and the batch both
+  **under-reach**. **Gate the decision on that option, not on a new threshold**, and note the direction: this
+  one can only make the app say *less* than it could, which is the safe way for an offer to be wrong.
 
 ---
 
@@ -3872,6 +3854,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.492.8** — 🟠 BUG FIX (trust / autonomy, PRIORITY 2), the first half of the `restored_utc` LEAD filed with v0.492.4, reproduced and fixed: **a sub set aside *after* the picture that used it is still in that picture.** `qc.grading.apply_grade_report` can reject a frame an earlier stack combined (a re-grade on a bigger population moves the percentile cut) and `apply_grade_reaccepts` then stamps a `restored_utc` later than that stack — so `Project.count_light_missing_from_stack` (the Dashboard's new-light note, v0.492.0's "Bring my pictures up to date" scope, the counts its dialog quotes) and `restorednudge.restored_since_stack` both read the sub as *missing* from a picture whose pixels contain it. Reachable with **no new light at all** (a sensitivity change, or the Target page's own `auto-grade/apply` followed by the next scan), so it is a false *"this picture is behind"* that costs hours of NAS CPU producing the identical picture — and it clears itself afterwards, so nobody is told. New additive `frames.rejected_utc`, added **without** a `SCHEMA_VERSION` bump (like `seam_residual` / `duration_s`) so a rollback can still open a project this build touched — two existing `test_an_old_build_can_still_read_a_project_this_build_wrote` guards say so and went red on the first draft's bump — and stamped **centrally in `Project.update_frame`** — the only `UPDATE frames` statement in the codebase, so no reject path can forget it — and only on a genuine accepted → set-aside transition, read off the pre-update `accept` inside the same statement (`CASE WHEN accept = 1`), so re-writing a reason on an already-aside frame leaves the stamp alone. Both readers now ask `rejected_utc < run < restored_utc`; `restored_frame_stamps` becomes `restored_frame_windows` returning `RestoredWindow`. **One-sided everywhere**: no stamp (legacy row, rejected at ingest) keeps today's answer byte for byte, a tie counts, and an unparseable set-aside is ignored rather than trusted — the other direction would silence a real nudge. `restored_utc` itself untouched, per the lead's own instruction. Also out of `frames_fingerprint` (new `_FINGERPRINT_PROVENANCE_COLS`): hashing a set-aside stamp cost `estimate_cache` its ~1 s hit on a reject-then-re-accept, and loses nothing, because every change the stamps accompany is already visible through `accept` — an *exclusion* list, so a later column is hashed unless named and forgetting only over-invalidates. No config, on-disk, default, schema-version or API-shape change; the `ALTER` is ungated and has its own frozen-DDL test. Tests +17, **fail-before shown for all five pieces** by scratch revert. The adjacent `star_match_unsolved` question is left open in the backlog, gated on that option. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **✅ v0.492.7** — the **same defect on the recap surface, and the drift test that should have caught both**: `seestack/session_recap.bucket_reject_reason` (the grouping behind the "last night" sentence, the Nights rows, the live-session card and the per-target night contributions — four call sites, shared with `livesession.py`) sent **four of the six** reasons the app names to `other`, so the owner read *"12 other"* — including `auto:seestar_output` and `auto:file_missing`, which had **already** been given their own words on the badge and the breakdown card in two earlier fixes. Three new `_REJECT_BUCKETS` rows keyed on the constants themselves, matched first so a word inside one of those sentences can never be read as a metric: `wrongly located` / `Seestar's own pictures` / `files missing`. **And the root cause of why this class keeps shipping:** `tests/test_reject_reason_labels.py` already had a "no reason may bucket as other" test, but the stacker's write passes a *local*, so the site is opaque and lives in `_EXEMPT` — with a sentence about the **badge** — and `_vocabulary()` is shared by all four tests, so **one exemption written about one test silently excused the write from the other three**. New `_named_reasons()` reads the `REJECT_REASON_*` constants off the module at runtime and unions them into both bucket tests; reverting `rejection_summary.py` to pre-v0.492.6 now fails that test and names all three strings, so v0.492.6's bug could not have shipped. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **✅ v0.492.6** — the beginner "why were some frames left out?" card no longer calls a **wrong plate solve** *"other reasons"*: new `bad_solve` bucket ("Matched to the wrong patch of sky") + the `bucket_for` branch for `REJECT_REASON_BAD_SOLVE_PREFIX` in `webapp/rejection_summary.py`. Found and fixed this run, reproduced first: v0.473.1 writes two precise sentences for a solve that *succeeded and is wrong* (`REJECT_REASON_BAD_SOLVE_SCALE`/`_FOOTPRINT`) so the Frames-table badge can show them verbatim — but nothing in `bucket_for` matched `"bad plate-solve ("`, so the one card built to say *why* was the one surface that threw the diagnosis away, on the owner's **178** such rows (observer #965). **The second instance of the class `auto:seestar_output` was already fixed for**, so it now has a **drift test** over every `REJECT_REASON_*` constant. Backend-only by design (the breakdown renders buckets generically and `bucketAction` returns null for an unknown key, so no button is invented and nothing was added to the page); no `_DOMINANT_VERDICTS` line, because `solve.runner.reconcile_bad_solve_frames` already offers a wrong-scale sub one more solve by itself, so there is no action to name — pinned by a test. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.492.5** — 🔴 SECURITY FIX (update helper, runs as root on the NAS): `scripts/update_agent.py` followed symlinks the container can plant under `state/updater/` — `last.log` (root overwrites any host file), `status.json` (a host file's JSON copied into what the container reads), `request.json` (acted on a request behind a link; a FIFO hung it forever), and the folder itself. All access now goes through one `O_NOFOLLOW` directory fd (`QueueDir`); `restore-data.sh` refuses a linked `library/`/`state/` component before touching anything. Found by the owner session re-reading its own v0.490.0 before anyone installed the helper.
