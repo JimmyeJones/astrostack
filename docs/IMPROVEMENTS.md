@@ -102,52 +102,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   **Check first, cheaply:** what share of the owner's runs actually drizzle, and at what scale. If most are
   1×, this is a footnote and should be **closed with the number** rather than built.
 
-- **LEAD (Builder 2026-09-25, filed while shipping v0.473.0 — the observer's second point in issue
-  [#966](https://github.com/JimmyeJones/astrostack/issues/966), which that fix deliberately did not touch) —
-  a reprocess batch prices every target against a budget that is 70 % of *whatever RAM is free at the minute
-  that target comes up*, so which mosaics survive a five-day batch is a property of the host, not of the
-  picture.** *(Pillar: trust + autonomy — PRIORITY 2; size **S to write, M to be sure of**; severity low now
-  that v0.473.0 makes the batch degrade rather than refuse. Confidence: **mechanism traced**; the owner-side
-  observation is the observer's.)*
-  `webapp.pipeline`/`stacker._stack_memory_budget_bytes` falls through to a live free-memory read when
-  `max_stack_memory_gb` is unset in the config and `ASTROSTACK_MAX_STACK_GB` is not exported — which is the
-  owner's state. The observer saw the *same target* priced against a **~4.1 GB** budget in one batch and a
-  **~3.2 GB** budget in the next, so the same subs and the same options produced a different answer a week
-  apart with nothing about the data changed.
-  **Why it is smaller than it was.** Before v0.473.0 that decided *picture or no picture*. It now decides how
-  far the drizzle scale steps down, so the failure mode is a mosaic that is quietly less zoomed-in on one batch
-  than on another — real, but not a hole in the library.
-  **The shape worth costing:** capture the budget **once** at the start of a batch and price every target in it
-  against that one number, so a refusal (or a step-down) is a property of the canvas rather than of the minute.
-  **Check first, because it cuts both ways:** a budget captured when the box happened to be busy would then hold
-  down *every* target in a five-day batch, including the ones that would have fit comfortably an hour later.
-  A floor (never price below what the run would have got at, say, the median of a few samples) is probably part
-  of any workable answer. **Do not blind-flip the guard's source** — it is the on-by-default hot path and this
-  box has an OOM history (§10).
-  **⚠ BUILDER FINDING 2026-09-30, while sizing this entry (v0.490.1's run) — the shape above has a SAFETY
-  INVERSION this entry does not name, and it probably does not address the measurement either. Read both
-  before spending a slot.**
-  **(1) "Capture once" is not strictly safer — it is strictly *less* safe in one direction.** A budget captured
-  while the box was quiet is *larger* than the live figure later in a five-day batch, so pricing target 45
-  against target 1's `MemAvailable` can authorise a canvas the box can no longer hold. On a box with a recorded
-  OOM history that is the wrong direction to be wrong in, and it is the direction this entry's own "do not
-  blind-flip the guard's source" warning is about. Any workable shape has to be `min(batch_open, live)`, which
-  buys reproducibility in the **upward** direction only — a target can never get a *bigger* canvas than the
-  batch opened with, and can still get a smaller one.
-  **(2) It probably does not reach the observation.** The measurement is the same target priced against ~4.1 GB
-  in one batch and ~3.2 GB in the next, **a week apart**. Within one batch the `JobManager` runs one stack at a
-  time and nothing else of the app's competes, so the intra-batch drift a per-batch capture removes is the small
-  part; the week-apart difference is the host's own state, and no in-batch capture can touch it.
-  **What that leaves, and it is cheaper than re-plumbing the guard.** The honest lever for "same subs, same
-  options, same answer" is the setting that already exists — `Settings.max_stack_memory_gb`, which
-  short-circuits the live read entirely and is `None` on the owner's install. So the shape worth costing is
-  *surfacing* that (a Settings line saying results are priced against whatever RAM is free unless a fixed budget
-  is set), not capturing the free-memory read per batch. **The disclosure half is already built** and was
-  verified so while sizing this: `DRZSCLAD`/`DRZSCLRQ` → `drizzle_degraded` → `drizzleDegradedNote` already
-  tells the owner when a memory step-down changed his picture's size, and **v0.490.1 added the same for the
-  other two levers** (`REJKAD`/`REJKRQ`, `DRZREJSK` → `rejection_degraded`), which were stamped and read by
-  nothing. Working in [`PROCESS-NOTES.md`](PROCESS-NOTES.md) under that date.
-
 - **LEAD (Builder 2026-09-25, filed while shipping v0.473.1 — the two halves of observer issue
   [#965](https://github.com/JimmyeJones/astrostack/issues/965) that fix deliberately left) — refuse an
   implausible solve at *solve* time, and heal the rows already carrying one.** *(Pillar: image quality —
@@ -3952,6 +3906,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.491.0** — 🟡 PRIORITY 2/3 (trust + friendliness), the **"one budget per batch" lead cut from "Bugs (fix these first)"** and closed with the cheaper lever it actually needed: **the stack memory budget now says what it is and names the control that sets it.** Its own shape — capture the budget once per batch — was declined with reasons (it is strictly *less* safe upward on a box with an OOM history, and cannot reach a measurement taken a week apart); the lever that does make "same subs, same options, same answer" true is `Settings.max_stack_memory_gb`, and nothing said so. New `stacker.resolve_stack_memory_budget` returns the ceiling **and its source** (`env`/`setting`/`available`/`fallback`) with `_stack_memory_budget_bytes` a thin view of it, so all nine call sites are byte-identical; `/api/system`'s `memory` gains `stack_budget_gb` + `stack_budget_source`; and Settings → Stacking → Memory says which of the four is in force (pure `frontend/src/stackBudgetNote.ts`) — blank means *"priced against however much memory is free when it starts… on a busy day than on a quiet one"*. Two things fixed on the way: the *"higher than this machine's RAM"* advisory was firing on the Settings field even where `ASTROSTACK_MAX_STACK_GB` overrides it (a number no stack would read), and every memory refusal ended *"raise ASTROSTACK_MAX_STACK_GB"* — a container knob told to a non-technical owner whose app ships the same control one click away. Tests +8 engine (7 fail-before in a scratch worktree) / +1 endpoint / +5 unit / +3 rendered (2 fail-before). Two additive response fields; no config, schema, on-disk, default or existing-shape change, and every guard decision byte-identical. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.490.1** — 🟡 BUG FIX (friendliness + trust, PRIORITY 3), Builder-found in the code while sizing the "one budget per batch" lead at the top of "Bugs (fix these first)", verified by grep before anything changed: **two of the three memory step-downs left no trace anyone could read.** The stack guard has three levers it pulls rather than refuse a picture, and each stamps the FITS so the image explains itself after the job log has rolled — but only `DRZSCLAD`/`DRZSCLRQ` (the drizzle canvas) had a reader. `REJKAD`/`REJKRQ` (extremes per side lowered) and `DRZREJSK` (the drizzle rejection pass skipped) were read by **nothing** outside `tests/`: not `/stack-runs/<id>/info`, not `_INFO_CARDS`, not the frontend, not `stackhealth`. **And they are the two that most need a sentence**, because unlike the scale step they leave the canvas, the pixel grid and the sub list exactly as asked — so a target set to three extremes per side that could only afford one reads on this very card as plain `min/max reject`, and a drizzled run whose second pass was dropped reads as a picture that never had any rejection. Both fire on the unattended path (`stacker` gates the k step-down on `eff.unattended`) i.e. the owner's walk-away mosaics on a RAM-capped NAS, with nobody watching; `rejectionOutlookNote`'s own docstring already records the other half of the hole ("the memory budget settles its two-pass rejection at run time and this cannot know it"). One additive `rejection_degraded` key mirroring `drizzle_degraded`, plus a pure `rejectionDegradedNote` rendered right after `drizzleDegradedNote`. **One key and one note, because the two cards cannot co-occur** (`REJKAD` needs drizzle off, `DRZREJSK` needs it on), which also keeps a busy card from growing two always-on lines. The k note states the honest small cost ("the same size and the same subs; there's just a little less protection where two trails cross one pixel"); the drizzle note names the lever that buys the pass back. Self-hiding on a missing card, an unknown `kind`, a nonsense `applied`, or a request no larger than what ran. **No engine code touched** — the cards were already stamped. Tests +3 Python (all fail-before by stash) / +8 vitest unit / +2 rendered (the panel one fail-before by scratch removal of the JSX alone). One additive response key and one additive optional client field; no config, schema, on-disk, default, engine behaviour or existing-response-shape change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.490.0** — ✨ FEATURE (owner request, PRIORITY 2–3): **one-click updates** — Settings → Maintenance → App updates: Check for updates / Update to the `stable` version / Go back (typed RESTORE when the data must come back). The page only writes `state/updater/request.json`; `scripts/update_agent.py` (stdlib, root cron on the NAS, installed once with `--install`) validates it and runs `deploy.sh`/`rollback.sh`. Fetches only when asked (owner, 2026-09-30).
 - **v0.489.3** — 🔴 BUG FIX (§10, data safety): `rollback.sh --restore-data` no longer runs `zfs rollback` on the dataset `incoming/` lives in — it would have deleted every raw sub copied in since the update. Restore is now `scripts/lib/restore-data.sh`: library/ + state/ databases and config only, from the snapshot's read-only `.zfs/snapshot/` view or the tar; stale `-wal` files cleared first. Found by the owner session building the update button, before the path was ever run.

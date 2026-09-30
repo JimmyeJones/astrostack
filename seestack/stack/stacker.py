@@ -33,7 +33,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from itertools import islice
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 
@@ -103,24 +103,86 @@ def _available_memory_bytes() -> int | None:
     return None
 
 
-def _stack_memory_budget_bytes(setting_gb: float | None = None) -> float:
-    """How much working memory a single stack may use. Precedence:
-    the ``ASTROSTACK_MAX_STACK_GB`` env override (a deployment/container knob)
-    wins, then an explicit ``setting_gb`` (the user-facing Settings value passed
-    in by the webapp), then ~70% of currently-available RAM (leaving headroom
-    for worker subprocesses, OS cache and the web app)."""
+class StackMemoryBudget(NamedTuple):
+    """The working-memory ceiling one stack is priced against, **and where the
+    number came from**.
+
+    The number on its own cannot be explained to anybody. Four different facts
+    produce it, and they do not mean the same thing to whoever reads the
+    sentence: only ``"available"`` — the default — makes the same target, with
+    the same subs and the same options, come out differently on different days,
+    and only ``"env"`` means the control the owner can actually reach is being
+    ignored. So anything that *says* what the budget is (the refusal's advice,
+    the Settings page) needs the source alongside it, or it ends up telling
+    someone to change a number the run will not read.
+
+    ``source`` is one of:
+
+    ``"env"``
+        ``ASTROSTACK_MAX_STACK_GB`` is set and parses — a deployment knob that
+        silently beats the Settings value.
+    ``"setting"``
+        the user-facing Settings budget (``Settings.max_stack_memory_gb``).
+    ``"available"``
+        ~70 % of the RAM that happened to be free when this was asked. The
+        default, and the only source that is not reproducible.
+    ``"fallback"``
+        this box's free memory could not be read, so a fixed default stands in.
+    """
+
+    bytes: float
+    source: str
+
+
+def resolve_stack_memory_budget(
+    setting_gb: float | None = None,
+) -> StackMemoryBudget:
+    """How much working memory a single stack may use, and which source decided
+    it. Precedence: the ``ASTROSTACK_MAX_STACK_GB`` env override (a
+    deployment/container knob) wins, then an explicit ``setting_gb`` (the
+    user-facing Settings value passed in by the webapp), then ~70% of
+    currently-available RAM (leaving headroom for worker subprocesses, OS cache
+    and the web app).
+
+    One function, so the guard that refuses a run, the sentence that explains the
+    refusal and the Settings page that offers to change it cannot come to
+    different opinions about which number is in force.
+    """
     override = os.environ.get("ASTROSTACK_MAX_STACK_GB")
     if override:
         try:
-            return float(override) * 1e9
+            return StackMemoryBudget(float(override) * 1e9, "env")
         except ValueError:
             pass
     if setting_gb is not None and setting_gb > 0:
-        return float(setting_gb) * 1e9
+        return StackMemoryBudget(float(setting_gb) * 1e9, "setting")
     avail = _available_memory_bytes()
     if avail:
-        return avail * 0.7
-    return _DEFAULT_STACK_BUDGET_GB * 1e9
+        return StackMemoryBudget(avail * 0.7, "available")
+    return StackMemoryBudget(_DEFAULT_STACK_BUDGET_GB * 1e9, "fallback")
+
+
+def _stack_memory_budget_bytes(setting_gb: float | None = None) -> float:
+    """Just the ceiling, for the dozen call sites that only need the number.
+    :func:`resolve_stack_memory_budget` is the decision; this is a thin view of
+    it, so there is still exactly one place the precedence lives."""
+    return resolve_stack_memory_budget(setting_gb).bytes
+
+
+def raise_the_budget_sentence(source: str) -> str:
+    """The "…or give the stack more memory" clause, naming the control **in force**.
+
+    The env override silently beats the Settings field, so an install that sets
+    it must not be told to raise a number the run will not read — and, far more
+    common, an install that does *not* set it must not be told to go and set a
+    container environment variable when the app ships the same knob one click
+    away. Every memory refusal and every memory step-down ends with this clause.
+    """
+    if source == "env":
+        return ("raise ASTROSTACK_MAX_STACK_GB, which is set on this install "
+                "and overrides the Settings budget")
+    return ("raise the stack memory budget in Settings → Stacking → Memory "
+            "(or ASTROSTACK_MAX_STACK_GB, which overrides it)")
 
 
 def _min_max_reject_arrays(reject_count: int) -> int:
@@ -402,21 +464,25 @@ def _guard_stack_memory(dst_shape: tuple[int, int], *, drizzle: bool,
                                    drizzle_reject=drizzle_reject,
                                    reject_arrays=reject_arrays,
                                    rejection_map=rejection_map)
-    budget = _stack_memory_budget_bytes(memory_budget_gb)
+    resolved = resolve_stack_memory_budget(memory_budget_gb)
+    budget = resolved.bytes
     if need > budget:
         fix = _best_memory_fix(
             dst_shape, ref_shape, is_mosaic=is_mosaic, drizzle=drizzle,
             drizzle_scale=drizzle_scale, drizzle_reject=drizzle_reject,
             reject_arrays=reject_arrays, rejection_map=rejection_map,
             min_max_reject_count=min_max_reject_count, budget=int(budget))
+        # The closing clause names whichever budget control the run actually
+        # reads (:func:`raise_the_budget_sentence`). This line is shown verbatim
+        # under the Jobs page's plain-language translation, so it is where a
+        # beginner on a RAM-capped box learns what to change.
+        raise_it = raise_the_budget_sentence(resolved.source)
         if fix is not None:
             advice = (f"To fit, {_memory_fix_sentence(fix)} "
-                      f"(~{fix.peak_bytes / 1e9:.1f} GB), or raise "
-                      f"ASTROSTACK_MAX_STACK_GB to override.")
+                      f"(~{fix.peak_bytes / 1e9:.1f} GB), or {raise_it}.")
         else:
             advice = ("Reduce drizzle scale, switch Canvas mode to 'reference', "
-                      "reject outlier/off-target frames, or raise "
-                      "ASTROSTACK_MAX_STACK_GB to override.")
+                      f"reject outlier/off-target frames, or {raise_it}.")
         raise MemoryError(
             f"stack output canvas {w}×{h}"
             + (f" ×{drizzle_scale:g} drizzle" if drizzle else "")
@@ -3412,13 +3478,15 @@ def run_stack(
         _reject_need, _ = _estimate_peak_bytes(
             dst_shape, drizzle=True, drizzle_scale=options.drizzle_scale,
             drizzle_reject=True)
+        _resolved = resolve_stack_memory_budget(memory_budget_gb)
         log.warning(
             "Drizzle outlier rejection not run: its second pass would need "
             "~%.1f GB of working memory, over the ~%.1f GB budget. Stacking "
             "without it rather than refusing the run — lower the drizzle scale "
-            "or raise ASTROSTACK_MAX_STACK_GB to get it back.",
+            "or %s to get it back.",
             _reject_need / 1e9,
-            _stack_memory_budget_bytes(memory_budget_gb) / 1e9,
+            _resolved.bytes / 1e9,
+            raise_the_budget_sentence(_resolved.source),
         )
     # …and the second half of the same asymmetry, one level up: the *canvas*
     # itself over budget. Dropping the rejection above only frees the extra

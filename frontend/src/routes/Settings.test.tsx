@@ -584,6 +584,10 @@ function renderSettingsWith(
   // caller assumed, so they are unchanged; the access-control tests pass their
   // own (a spy set *before* this helper would be overwritten by it).
   authStatus: Record<string, unknown> = { enabled: false },
+  // What `/api/system` reports for memory. `{}` is the old fixture — no RAM
+  // figures and no budget — so every existing caller is unchanged; the memory
+  // tests pass the fields the endpoint really serves.
+  memory: Record<string, unknown> = {},
 ) {
   vi.spyOn(client.api, "getSettings").mockResolvedValue({
     default_stack_options: stackDefaults, ...extraSettings,
@@ -592,7 +596,7 @@ function renderSettingsWith(
     version: "0.0.0", data_root: "/data", cpu_count: 4, cpu_workers: 3,
     gpu_available: false,
     astap: { found: true, path: "/usr/bin/astap", star_db_found: true },
-    disk: {}, memory: {}, watcher_enabled: false,
+    disk: {}, memory, watcher_enabled: false,
   } as never);
   vi.spyOn(client.api, "optionsSchema").mockResolvedValue(STACK_FIELDS);
   vi.spyOn(client.api, "authStatus").mockResolvedValue(authStatus as never);
@@ -953,5 +957,45 @@ describe("Access control — the read-only token", () => {
     withAuth({ enabled: true, username: "admin" });
     expect(await screen.findByRole("button", { name: /Create a token/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Remove$/i })).toBeNull();
+  });
+});
+
+// --- The Memory card says which budget is actually in force ------------------
+// The box shows one number and a placeholder. What decides a stack is a
+// three-step precedence the browser cannot see, so the server reports it; these
+// pin the two cases that change what the owner should do.
+
+describe("Settings → Stacking → Memory", () => {
+  it("says a blank budget is priced against whatever RAM is free, and varies", async () => {
+    renderSettingsWith({}, "stacking", {}, { enabled: false },
+      { total_gb: 16, available_gb: 6, stack_budget_gb: 4.1, stack_budget_source: "available" });
+
+    await waitFor(() => expect(screen.getByText("Memory")).toBeVisible());
+    expect(screen.getByText(/about 4.1 GB right now/)).toBeVisible();
+    expect(screen.getByText(/busy day than on a quiet one/)).toBeVisible();
+  });
+
+  it("stands the over-RAM advisory down where the env override is what runs", async () => {
+    // The advisory compares the *field* against this box's RAM. With
+    // ASTROSTACK_MAX_STACK_GB set, the field is not the number any stack will be
+    // priced against, so warning about it sends the owner to change nothing.
+    renderSettingsWith({}, "stacking", { max_stack_memory_gb: 64 }, { enabled: false },
+      { total_gb: 16, available_gb: 6, stack_budget_gb: 3, stack_budget_source: "env" });
+
+    await waitFor(() => expect(screen.getByText("Memory")).toBeVisible());
+    expect(screen.getByText(/This field is being overridden/)).toBeVisible();
+    expect(
+      screen.queryByText(/Budget is higher than this machine's available RAM/),
+    ).toBeNull();
+  });
+
+  it("still warns about an over-RAM budget that IS what runs", async () => {
+    renderSettingsWith({}, "stacking", { max_stack_memory_gb: 64 }, { enabled: false },
+      { total_gb: 16, available_gb: 6, stack_budget_gb: 64, stack_budget_source: "setting" });
+
+    await waitFor(() => expect(screen.getByText("Memory")).toBeVisible());
+    expect(
+      screen.getByText(/Budget is higher than this machine's available RAM/),
+    ).toBeVisible();
   });
 });
