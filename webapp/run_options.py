@@ -83,3 +83,40 @@ def derived_from_run_id(options_json: str | None) -> int | None:
     if not math.isfinite(raw):
         return None
     return int(raw)
+
+
+def run_places_unsolved_subs(options_json: str | None) -> bool:
+    """True when this run stacked with ``star_match_unsolved`` on — i.e. when a
+    sub **no plate solve could place** is still light a re-stack would fold in.
+
+    Everything that asks *"how much light is this picture missing?"* has to answer
+    *"missing light a re-stack could actually use"*, and the bar for that is
+    normally accepted **and** solved
+    (:meth:`seestack.io.project.Project.count_light_missing_from_stack`,
+    :meth:`~seestack.io.project.Project.restored_frame_windows`). Since v0.482.0
+    that bar has one exception: with ``StackOptions.star_match_unsolved`` on, the
+    stacker places un-located subs by matching their star patterns to the
+    reference (``seestack.stack.stacker._star_matched_unsolved_frames``) — which
+    is the *point* of the option, because on a faint or star-poor field ASTAP
+    fails on most subs and the solved ones are a handful. On such an install a
+    target whose whole shortfall is unsolved subs reads as **nothing waiting**,
+    and the one library-wide offer never names it.
+
+    **Gated on the option, never on a threshold.** The star-match path is capped
+    at ``stacker.STAR_MATCH_MAX_UNSOLVED`` per run and refuses any sub whose stars
+    do not clearly match, so the exact number a re-stack rescues is not knowable
+    from the ``frames`` table. Modelling that cap here would be a second, worse
+    copy of the stacker's own rule; asking "is this install even trying?" is one
+    bit that the run itself recorded.
+
+    Read off **the run being measured against**, which is the run a reprocess
+    reuses the settings of (``webapp.pipeline._last_stack_options_for_target``),
+    so the question "what would stacking this again fold in?" is answered with the
+    settings it would in fact be stacked with.
+
+    Strictly ``is True``: the option defaults ``False``, and a run that recorded
+    no settings, a non-boolean, or nothing at all reads as off. That keeps the
+    error on the side the bug already errs on — the offer says *less* than it
+    could, which for an offer is the safe direction to be wrong in.
+    """
+    return parse_run_options(options_json).get("star_match_unsolved") is True

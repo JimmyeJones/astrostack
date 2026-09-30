@@ -1,6 +1,6 @@
 # Shipped — the record
 
-## 2026-09-30 (audit run B) — v0.492.13: a Combine whose folder delete fails part way no longer resurrects the source on the next scan
+## 2026-09-30 (audit run B) — v0.492.14: a Combine whose folder delete fails part way no longer resurrects the source on the next scan
 
 ### 🟠 BUG FIX (autonomy / library integrity — PRIORITY 2; the 2026-09-30 audit's C-F3, MEDIUM) — `Library.open_or_create_target`, `_remove_target_files`, `MergeTargetsResult.folders_left`
 
@@ -32,7 +32,8 @@ unregisters and logs rather than raising). **Fail-before**: all 4 red on `origin
 on-disk, default or API-shape change (`folders_left` is a new field with a default; the `/api/targets/merge`
 response is unchanged — surfacing the count there is a one-line follow-up for whoever next touches
 `routers/targets.py`).
-## 2026-09-30 (audit run B) — v0.492.12: a bulk restack never makes a finished picture look worse without the owner choosing it
+
+## 2026-09-30 (audit run B) — v0.492.13: a bulk restack never makes a finished picture look worse without the owner choosing it
 
 ### 🟠 BUG FIX (trust — PRIORITY 1-adjacent; the 2026-09-30 audit's C-F4, MEDIUM, the #903 shape; closes the open remainder of observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903) — option (3), "an auto-cover with provenance") — `seestack/coverpin.py`, `pipeline._displayed_picture_state`, `_settle_cover_after_restack`, `reprocess_status.hand_finished*`, Settings → Maintenance
 
@@ -84,7 +85,7 @@ re-recorded as kept, an owner's pin never touched, the status counts, the yield 
 previous commit with `coverpin.py` copied in so the imports resolve. One existing assertion changed
 deliberately: a pinned auto-finished picture now answers `True` to `_picture_is_auto_finished`.
 
-## 2026-09-30 (audit run B) — v0.492.11: "new light" is measured against the picture on the wall, by membership
+## 2026-09-30 (audit run B) — v0.492.12: "new light" is measured against the picture on the wall, by membership
 
 ### 🟠 BUG FIX (autonomy / trust — PRIORITY 2; the 2026-09-30 audit's C-F1, HIGH) — `stack_run_frames`, `Project.count_light_missing_from_run`, `newsubs.picture_measured_for_new_light`, `merge.carry_stack_runs`
 
@@ -135,6 +136,93 @@ a real `run_stack` with `lucky_fraction`, the two-night Combine, a shared sub, a
 as recorded, the no-map older caller; `tests/webapp/test_new_subs_waiting.py` +5: the Combine, the carried
 picture displayed, a pinned older cover, an export via `derived_from`, an export without one). **Fail-before**:
 12 of the 14 red on `origin/main` in a scratch worktree with only the tests copied in.
+## 2026-09-30 (Builder) — v0.492.11: "a re-stack would fold this in" read *solved* unconditionally
+
+### 🟠 BUG FIX (trust — PRIORITY 2-adjacent) — the second half of the `restored_utc` LEAD filed with v0.492.4, closed on the gate the lead named
+
+*(Builder 2026-09-30. Filed as a lead the same day by the run that shipped v0.492.8, traced but not
+reproduced; reproduced and fixed here. Severity is **none for the owner**, and the entry said so — which is
+why what follows is careful to change nothing for him.)*
+
+**The two questions and the one bar.** Three surfaces ask *"is this picture behind the light I own?"*: the
+library-wide note `GET /api/new-subs-waiting`, v0.492.0's "Bring my pictures up to date" scope (which asks the
+same `new_light_since_picture`), and the per-target `GET …/restored-subs` card. All three answer it through
+two `Project` reads, and both required a plate solve:
+
+```
+count_light_missing_from_stack:  WHERE accept = 1 AND wcs_json IS NOT NULL AND wcs_json <> '' …
+restored_frame_windows:          WHERE accept = 1 AND restored_utc IS NOT NULL AND wcs_json IS NOT NULL
+```
+
+with the same reasoning written above each: *"accepted **and** solved — the two things a re-stack needs from a
+frame"*. That reasoning has been out of date since **v0.482.0/v0.484.0**: with
+`StackOptions.star_match_unsolved` on, `run_stack` places subs **no plate solve could locate**, by matching
+their star patterns to the reference (`_star_matched_unsolved_frames`, one anchor per panel on a mosaic since
+v0.484.0). Placing un-located subs *is what the option is for* — its own comment says so: on a faint or
+star-poor field ASTAP fails on most subs and "hundreds of good subs sit unused and the picture is the handful
+that happened to solve."
+
+**So the failure is not "the count is one low".** It is that on an install with the option on, a target whose
+**whole** shortfall is un-located subs answers `0`, is therefore not named by the library-wide note at all,
+and is skipped by the batch that note links to — the one install where the missing light is most of the light,
+and the one surface built to find it cannot see it. That is precisely the class of shortfall the option exists
+to recover.
+
+**Gated on the option, never on a threshold** — the lead's own instruction, and the right one. The star-match
+path is capped at `STAR_MATCH_MAX_UNSOLVED` (400) per run and refuses any sub whose stars do not clearly
+match, so how many subs a re-stack would actually rescue is **not knowable from the `frames` table**.
+Modelling that cap in a `COUNT` would be a second, worse copy of the stacker's rule, drifting the moment the
+matcher changes. "Is this install even trying to place un-located subs?" is one bit, and the run recorded it.
+
+**What changed.**
+
+* `Project.count_light_missing_from_stack(ts, *, include_unsolved=False)` and
+  `Project.restored_frame_windows(*, include_unsolved=False)` — keyword-only, **defaulting to today's SQL**,
+  so every ordinary install's answer is byte for byte what it was. The flag drops *only* the solved clause;
+  `accept = 1`, the capture-time test, the restoration window and the `rejected_utc` guard v0.492.8 added are
+  all untouched, and a test walks each of them under the flag to say so.
+* New `webapp.run_options.run_places_unsolved_subs(options_json)`. It lives beside
+  `run_has_reusable_options` deliberately: that module exists because "what settings did this run use?" had
+  three hand-written spellings that disagreed, and this is a fourth question of the same kind.
+* Both callers read it off **the run being measured against** — `new_light_since_picture`'s newest genuine
+  run, and `target_restored_subs`' `runs[0]`. That is the run whose options a reprocess reuses
+  (`pipeline._last_stack_options_for_target`), so *"what would stacking this again fold in?"* is answered with
+  the settings it would in fact be stacked with, rather than with the app's defaults or with some older run's.
+  An editor export supplies no settings and does not reset the clock, so the "which run?" and "which bar?"
+  questions walk past it to the *same* row — pinned by a test, because reading the timestamp off one run and
+  the rules off another is the drift this shape invites.
+
+**Strict `is True`, and that is the whole safety argument.** A run that recorded no settings, an editor
+recipe, the string `"yes"`, the integer `1`, or nothing at all all read as **off**. The option defaults
+`False` and is a hand-set advanced field, so the owner's runs are unaffected; and where the helper is unsure
+it errs toward the narrow bar, which keeps the mistake on the side the bug already made — an offer that says
+**less** than it could. An offer that over-promises is the one that becomes a nag, which is the standard
+`restorednudge` and `newsubs` were both written to.
+
+**One token that was a genuine second spelling.** `restored_frame_windows` tested `wcs_json IS NOT NULL`,
+while `FrameRow.solved` — the module's own named definition of *"did the plate solve locate this sub?"* — is
+`bool(wcs_json)`. An empty string would have been promised by this one query and read as unsolved by every
+other reader. No writer stores `''` today; the fix is that the two spellings of one bit can no longer
+disagree if it ever does.
+
+**Tests +10**, and the fail-before was *shown*, not asserted — the production files were reverted to
+`origin/main` in place with the new tests kept, and four of the new tests failed (plus the helper's own file
+erroring at import); the empty-`wcs_json` guard was failed separately by restoring that one clause. The
+remaining new tests are one-directional guards that must pass in both states: a solved restored sub still
+counts under star-matching, a sub the **user** set aside is still not promised, an older run's option does not
+speak for a newer run, and a non-`True` value reads as off.
+
+**A fixture trap worth recording, because three of these tests would have been vacuous.** The synthetic
+frames carry `DATE-OBS` of 2024-09-12, and `MID`/`AFTER` in these files postdate that — so a target measured
+against a run stamped `MID` has nothing waiting **whatever the bar is**, and a test built on it passes without
+the gate ever being read. Caught because the first draft's positive case failed for that reason; the three
+affected fixtures now use two stamps that both *predate* the frames, so the run's options are the only thing
+separating the two outcomes, and the reasoning is written into the fixture's own comment.
+
+**Upgrade safety.** No new column, no `SCHEMA_VERSION` change, no migration, no config field, no on-disk
+path, no flipped default, and no API shape change — the endpoints' response models are untouched and both new
+parameters are keyword-only with the old behaviour as their default. A rollback reads the same rows and gives
+the same answers.
 
 ## 2026-09-30 (Builder, same run as v0.492.6/.7) — v0.492.10: a flaky frontend test, caught by CI on this run's own PR and proved nondeterministic rather than assumed
 
