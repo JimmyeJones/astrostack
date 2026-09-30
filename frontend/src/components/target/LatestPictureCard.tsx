@@ -285,12 +285,18 @@ export function LatestPictureCard({
       <Text size="xs" c="dimmed" mt={6}>
         {latestPictureCaption(run)} — click to view it big
       </Text>
-      {/* The one thing a beginner could misread here: this is the picture they
-          pinned as this target's cover, and a newer stack exists. Say so plainly
-          rather than let them wonder where their new stack went. */}
+      {/* The one thing a beginner could misread here: this is the picture pinned
+          as this target's cover, and a newer stack exists. Say so plainly rather
+          than let them wonder where their new stack went.
+
+          It does NOT say "the version *you* pinned", and that is deliberate:
+          "Combine into one deep target" pins the destination's own picture when
+          the target had none pinned (`Library.merge_targets`), so after a
+          combine this note was telling the owner he had done something he had
+          not. The cover is described, never attributed. */}
       {pinnedCover ? (
         <Text size="xs" c="dimmed" mt={4} data-testid="pinned-cover-note">
-          This is the version you pinned as this target&rsquo;s cover, so it&rsquo;s
+          This is the version pinned as this target&rsquo;s cover, so it&rsquo;s
           the one shown everywhere. You have a newer stack too —{" "}
           <Anchor component={Link} to={`/targets/${safe}/history`} size="xs">
             see all versions

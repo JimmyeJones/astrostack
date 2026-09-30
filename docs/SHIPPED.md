@@ -1,5 +1,52 @@
 # Shipped — the record
 
+### v0.491.1 — 🟡 BUG FIX (friendliness + trust, PRIORITY 3): a cover the Combine pinned is not a cover *you* pinned
+
+*(Found by this run's `scripts/agent-dogfood.sh --combine` pass, which was otherwise CLEAN — see
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md) for the sweep record. Not from the backlog.)*
+
+**Why it matters now.** `Library.merge_targets` pins the destination's own picture as its cover when the
+target had none pinned, so a carried one-night stack cannot replace the deep picture the owner was looking
+at. That is right, and it is also a visible change to a target that nobody asked for by name — and the
+**reconciliation of the 11 historical duplicate pairs** (issue [#878](https://github.com/JimmyeJones/astrostack/issues/878),
+offered on the Library's cleanup card since v0.482.2) is a flow that will do it 11 times.
+
+**Three things were wrong, all of them the same shape: the app crediting the owner with its own decision.**
+
+1. **The Library has two Combine buttons and only one of them said what happened.** The same-object *nudge*
+   (`MergeSuggestionsCard`) reports both facts the merge returns — *"Your 2 existing pictures came with them
+   — see History. It still shows its own picture, kept as the cover."* The **cleanup card**
+   (`CleanupSuggestionsCard`), which is where the duplicate reconciliation is offered, ran the identical
+   `POST /api/targets/merge` and **threw the answer away**: it awaited the promise and never read
+   `pictures_kept` or `picture_pinned`. So one operation described itself two ways depending on which button
+   was pressed. The two clauses are now shared — `mergeKeptClause` / `mergeCoverClause` in
+   `mergeSuggestions.ts`, which `mergeOutcomeMessage` is itself built from, so the two surfaces cannot drift
+   — and the cleanup card sums them across the merges it runs in one click.
+2. **`LatestPictureCard`'s pinned-cover note said "This is the version *you* pinned as this target's cover".**
+   After a combine, he didn't. The cover is now *described*, never attributed: "This is the version pinned as
+   this target's cover…". Nothing else about the sentence changes.
+3. **`CleanestShotNote` said "than the picture *you* pinned as this target's cover"** — same untruth, same
+   one-word fix. Its neighbouring reassurance, *"it only changes when you say so"*, is **left alone and that
+   was checked rather than assumed**: `merge_targets` pins only when `cover_stack_run_id is None`, so a merge
+   can fill an empty pin but can never replace a cover that is already set.
+
+**What was deliberately NOT changed.** The Target page's notice board and health card still describe the
+**newest** run while the hero shows the pinned cover — `Target.tsx` says so in a comment and
+`LatestPictureCard` signposts it ("You have a newer stack too — see all versions"). On a combined target that
+means the thin-stack warning can describe the run carried in from the folder that was combined away; that run
+really is the newest stack by timestamp, so the note is true, and making the analysis follow a pinned cover
+is the change that comment exists to refuse.
+
+**Upgrade-safe (§9):** frontend copy and one discarded return value. No endpoint, config, schema, on-disk,
+default or API-shape change.
+
+**Tests: +6 unit, +2 rendered; seven of the eight fail before** (verified by reverting the four source files
+in place). The eighth pins the degrade that must stay — an older backend answering neither field reads as
+"say nothing extra", never as "0 pictures". One harness fix came out of writing them and is worth knowing:
+**Mantine's notification store is module-level and outlives a render**, so a bare `screen` query for a
+confirmation can match the message a *previous* test raised — which is exactly how the first version of this
+test passed against the unfixed card. `CleanupSuggestionsCard.test.tsx` now cleans the store in `beforeEach`.
+
 ## 2026-09-30 (Builder, a later run of the day) — the stack memory budget says what it is, and names the control that sets it
 
 ### v0.491.0 — 🟡 PRIORITY 2/3 (trust + friendliness): the "one budget per batch" lead, closed with the cheaper lever it actually needed

@@ -64,7 +64,7 @@ export function CleanestShotNote({ safe }: { safe: string }) {
       data-testid="cleanest-shot-note">
       <Text size="sm">
         {`Your newest stack has about ${s.percent_cleaner}% less background grain `}
-        {"than the picture you pinned as this target's cover"}
+        {"than the picture pinned as this target's cover"}
         {deeper
           ? ` — it combined ${s.n_frames_used} subs against ${s.cover_n_frames_used}, `
             + "so the extra time you put in is showing. "

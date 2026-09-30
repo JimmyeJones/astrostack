@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { MergeSuggestion } from "../api/client";
 import {
   describeMergeSuggestion,
+  mergeCoverClause,
   mergeInto,
+  mergeKeptClause,
   mergeOutcomeMessage,
   mergeSources,
   mergeSuggestionSignature,
@@ -130,5 +132,36 @@ describe("mergeOutcomeMessage", () => {
       "Re-stack it to get the deeper picture.";
     expect(mergeOutcomeMessage(3, "M 31", undefined)).toBe(today);
     expect(mergeOutcomeMessage(3, "M 31", null)).toBe(today);
+  });
+});
+
+// --- The two clauses both Combine buttons owe the user ------------------------
+// Shared because the Library has two of them — the same-object nudge and the
+// cleanup card's duplicate reconciliation — running the identical endpoint. One
+// operation must not describe itself two ways depending on which was pressed.
+
+describe("mergeKeptClause / mergeCoverClause", () => {
+  it("names the pictures that came across, singular and plural", () => {
+    expect(mergeKeptClause(1)).toContain("Your 1 existing picture came with it");
+    expect(mergeKeptClause(3)).toContain("Your 3 existing pictures came with them");
+  });
+
+  it("says nothing for zero, for an older backend, or for nonsense", () => {
+    for (const v of [0, null, undefined, Number.NaN, -2]) {
+      expect(mergeKeptClause(v as number)).toBe("");
+    }
+  });
+
+  it("says the cover was kept, and only when the merge actually pinned one", () => {
+    expect(mergeCoverClause(true)).toContain("kept as the cover");
+    for (const v of [false, null, undefined]) {
+      expect(mergeCoverClause(v as boolean)).toBe("");
+    }
+  });
+
+  it("is what mergeOutcomeMessage is built from, so the two cannot drift", () => {
+    const msg = mergeOutcomeMessage(2, "M 31", 1, true);
+    expect(msg).toContain(mergeKeptClause(1));
+    expect(msg).toContain(mergeCoverClause(true));
   });
 });

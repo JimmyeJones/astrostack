@@ -50,34 +50,51 @@ export function mergeSources(s: MergeSuggestion): string[] {
   return s.targets.slice(1).map((t) => t.safe);
 }
 
-// What to say once the merge has run.
+// The two clauses every "we combined it" confirmation owes the user, shared so
+// the app's **two** Combine buttons cannot describe one operation differently.
 //
-// The nudge's fine print promises "nothing is deleted", and the merge does
-// delete the source *folders* — so the confirmation has to account for the one
-// thing in them a user could not get back: a finished picture. `POST /merge`
-// answers `pictures_kept`; an older backend omits it, which reads as "say
-// nothing extra" rather than as zero, so the sentence degrades to exactly the
-// one this app has always shown.
+// The Library nudge ("these look like the same object") has said both since
+// v0.480.x. The Library's *cleanup* card — which is where the duplicate-target
+// reconciliation is offered, and therefore the button an owner with historical
+// duplicates actually presses — ran the identical `POST /api/targets/merge` and
+// threw the answer away, so the same operation reported a pinned cover on one
+// screen and stayed silent about it on the other.
+
+// "…and your finished pictures came too." The nudge's fine print promises
+// "nothing is deleted", and the merge does delete the source *folders* — so a
+// confirmation has to account for the one thing in them a user could not get
+// back. `POST /merge` answers `pictures_kept`; an older backend omits it, which
+// reads as "say nothing extra" rather than as zero.
+export function mergeKeptClause(picturesKept?: number | null): string {
+  if (picturesKept == null || !Number.isFinite(picturesKept) || picturesKept <= 0) {
+    return "";
+  }
+  return (
+    ` Your ${picturesKept} existing picture${picturesKept === 1 ? "" : "s"} ` +
+    `came with ${picturesKept === 1 ? "it" : "them"} — see History.`
+  );
+}
+
+// "…and it kept showing its own picture." A carried picture is usually the
+// *newest* one, so the backend pins the deep target's own picture as its cover
+// to stop a one-night stack replacing it. That is a visible change to the
+// target — and one nobody asked for by name — so say it rather than leave a
+// cover the user never pinned to be discovered later. Absent ⇒ older backend ⇒
+// say nothing.
+export function mergeCoverClause(picturePinned?: boolean | null): string {
+  return picturePinned ? " It still shows its own picture, kept as the cover." : "";
+}
+
+// What to say once the nudge's merge has run.
 export function mergeOutcomeMessage(
   nFolders: number,
   label: string,
   picturesKept?: number | null,
   picturePinned?: boolean | null,
 ): string {
-  const kept =
-    picturesKept != null && Number.isFinite(picturesKept) && picturesKept > 0
-      ? ` Your ${picturesKept} existing picture${picturesKept === 1 ? "" : "s"} ` +
-        `came with ${picturesKept === 1 ? "it" : "them"} — see History.`
-      : "";
-  // A carried picture is usually the *newest* one, so the backend pins the deep
-  // target's own picture as its cover to stop a one-night stack replacing it.
-  // That is a visible change to the target, so say it rather than leave a cover
-  // nobody pinned to be discovered. Absent ⇒ an older backend ⇒ say nothing.
-  const pinned = picturePinned
-    ? " It still shows its own picture, kept as the cover."
-    : "";
   return (
     `Combined ${nFolders} folders of ${label} into one deep target.` +
-    `${kept}${pinned} Re-stack it to get the deeper picture.`
+    `${mergeKeptClause(picturesKept)}${mergeCoverClause(picturePinned)}` +
+    ` Re-stack it to get the deeper picture.`
   );
 }

@@ -1,5 +1,65 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (Builder, the run after that one) — two dogfood configurations nobody had re-run, and the one that found something
+
+*(Builder, branch `claude/magical-wright-k909b6` → **v0.491.0** + **v0.491.1**. Baseline on `origin/main` at
+6fa5a1b: **7045 passed, 2 skipped**, 16m32s with the BLAS cap and `-n 4 --dist worksteal`. Green.)*
+
+**Why these two flags and not `--mosaic --editor --big` again.** The previous run had finished a clean
+`--mosaic --editor --big` pass **an hour earlier**, and the three before that were the same combination. So
+the cheapest new information was in the configurations nobody had re-run against the ~20 versions shipped
+since: `--deep` (last baselined 2026-09-19 at v0.471.x) and `--combine` (built 2026-09-27, run once). Both
+were run **after** the suite, never beside it (§7).
+
+### `--deep` — the owner's scale, CLEAN, and a note on the numbers
+
+1,200 subs on one field. Nothing overflowing on phone or desktop, no console error, no failed request. The
+frames table at scale: **301 rows of 1,200 · 7,564 DOM nodes · 1,804 ms first paint**, growing to 601 rows /
+14,478 nodes when the foot observer fires. Read against the 2026-09-19 baseline (301 rows · 7,483 nodes ·
+1,195 ms) the node count is +81 — the night-sky layers and the cards shipped since, i.e. nothing — and the
+**first paint is not comparable**: different container, different load, and this box had just finished a
+16-minute suite. **Do not treat 1,195 → 1,804 as a regression**; re-baseline the timing on a quiet box before
+anyone reads a trend into it. The four prescriptive surfaces read as one paragraph (20 % of the object
+captured, so coaching, readiness and framing all say "shoot it in mosaic mode" together — v0.444.2's
+`framingIsFragment` gate).
+
+### `--combine` — the journey the owner's data really takes, and the finding
+
+CLEAN mechanically, **including the rule AGENTS.md §10 calls the most important in the file**: after the whole
+journey the fingerprint of `incoming/` reports *"all 7 original file(s) still there, unchanged"*, with the one
+addition the pass makes itself listed as create-new. The merge carried 3 frames, kept 1 picture, survived two
+rescans, and a further night dropped into the folder that was combined away landed in the **deep** target
+rather than minting the old one again.
+
+**What it found is not in that list — it is in the sentence the page says afterwards.** The merge reports
+`picture_pinned: true`, and that pin is correct (`Library.merge_targets` fills an *empty* cover so a carried
+one-night stack cannot replace the deep picture). But it is a change the owner did not ask for by name, and
+three surfaces then talked about it as though he had: the Library's **cleanup** card — the one the 11
+duplicate-pair reconciliations are offered on — discarded the merge result entirely while the same-object
+nudge reported it, and `LatestPictureCard` and `CleanestShotNote` both said *"the version **you** pinned"*.
+Shipped as **v0.491.1**; entry in [`SHIPPED.md`](SHIPPED.md).
+
+**The general lesson, which is the reason to write this down:** a `--combine`/`--merge` pass has to be read
+for *what the app says once the operation is over*, not only for whether the operation worked. Everything
+mechanical about this merge was right. The defect was entirely in the attribution of a decision, and no
+assertion about frames, pictures or files could have reached it.
+
+### One test-harness trap, found while pinning v0.491.1
+
+**Mantine's notification store is module-level and outlives a render.** A `screen.findByText(/Combined 1
+leftover target/)` in one test matched the confirmation an *earlier* test in the same file had raised — so the
+first version of the new assertion passed against the **unfixed** card, for the wrong reason. It was caught
+only because the fail-before run was done. Two defences, both now in
+`CleanupSuggestionsCard.test.tsx`: clean the store in `beforeEach`, and assert against the found element's own
+`textContent` rather than with a second `screen` query. Any test that asserts on a notification is exposed to
+this.
+
+### The version number, again
+
+`origin/main` did not move during this run, but the number was still chosen at merge time per §11 — and both
+of this run's changes went out under **one PR with two versions** (v0.491.0 then v0.491.1), the shape
+PR #1024 already used. Two independently green commits, two numbers, one merge.
+
 ## 2026-09-30 (Builder, a later run of the day) — the provenance-card sweep that found one real gap and is otherwise clean
 
 *(Builder, branch `claude/magical-wright-b7qklw` → **v0.490.1**. Baseline on `origin/main` at b0a27f5:
