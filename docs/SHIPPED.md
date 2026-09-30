@@ -1,5 +1,40 @@
 # Shipped — the record
 
+## 2026-09-30 (owner session, later) — the update helper stops trusting links
+
+### v0.492.5 — 🔴 SECURITY FIX: the root-run update helper followed links the container can plant
+
+**What was wrong.** `scripts/update_agent.py` (v0.490.0) runs as root on the NAS and works in
+`$ASTRO_DATA/state/updater/`, which the container can write — the whole design rests on the
+container being unable to gain anything on the host through it. But it opened files there by name:
+- `last.log` with a plain `open(..., "w")` — a symlink planted there made root **overwrite any host
+  file** on the next update or rollback;
+- `status.json` read by name and written back — a symlink to a host JSON file **copied that file's
+  contents** into the status the container reads;
+- `request.json` read after the rename — a request behind a link was **acted on**, and a FIFO planted
+  there **hung the helper forever** (cron's next runs then skip on the lock);
+- the folder itself, and `state/`, were not checked for being links.
+
+`scripts/lib/restore-data.sh` (v0.489.3, runs as root with the app stopped) likewise followed a
+`library/` or `state/` the app had replaced with a link.
+
+**The fix.** `QueueDir` opens `state` and then `updater` with `O_NOFOLLOW | O_DIRECTORY` (a link is
+refused with ELOOP), holds the directory fd, and does every read, create, rename and unlink relative
+to it: reads with `O_NOFOLLOW | O_NONBLOCK` and only of regular files, creates with
+`O_EXCL | O_NOFOLLOW` after unlinking the old name, renames with `src_dir_fd`/`dst_dir_fd`. Swapping a
+path mid-run changes nothing, because the fd already names the checked directory. The log tail is
+read back from the helper's own fd. `restore-data.sh` checks every path component of every file it
+will write for a link **before** it deletes or writes anything.
+
+**How it was found.** Re-reading v0.490.0 while writing the brief for the second external audit —
+before the owner had installed the helper, so it was never exposed.
+
+**Pinned by** 6 new tests in `tests/test_update_agent.py` (planted `last.log`, `status.json` and
+`request.json` links, a FIFO request — guarded by a join timeout so a regression fails instead of
+hanging CI — and a linked `updater/` or `state/`) and 1 in `tests/test_restore_data.py`. Against the
+previous helper five fail and the FIFO test hangs; against the previous `restore-data.sh` the restore
+runs straight through the link.
+
 ## 2026-09-30 (Builder, later the same day) — the grain note's rim-vs-panel proxy, closed with the number the lead asked for
 
 ### ⚪ CLOSED WITH THE NUMBER (no code) — "ragged rim or under-shot panel?" is a proxy, and on the owner's library it is never wrong. Do not build the distance transform.

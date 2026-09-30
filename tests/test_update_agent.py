@@ -256,3 +256,78 @@ def test_install_refuses_a_clone_or_helper_inside_the_data_folder(tmp_path: Path
     with pytest.raises(SystemExit, match="inside the app's data folder"):
         ua.check_install_paths(tmp_path / "clone", data / "state", data)
     ua.check_install_paths(tmp_path / "clone", tmp_path / "home", data)   # fine
+
+
+# ---- the container is the adversary -------------------------------------------------
+# Everything under ASTRO_DATA is writable by the container, and the helper runs as
+# root on the host. Each test plants what a compromised container could, then checks
+# the helper neither writes through it nor reads through it.
+
+def _secret(tmp_path: Path, text: str = '{"id": "host-secret-1", "token": "s3cr3t"}') -> Path:
+    s = tmp_path / "host" / "secret.json"
+    s.parent.mkdir(parents=True, exist_ok=True)
+    s.write_text(text)
+    return s
+
+
+def test_a_planted_last_log_link_is_not_written_through(nas, tmp_path) -> None:
+    victim = _secret(tmp_path, "root-owned host file\n")
+    nas.publish_stable("0.2.0")
+    nas.queue.mkdir()
+    (nas.queue / "last.log").symlink_to(victim)
+    nas.ask("update")
+    nas.agent().tick()
+    assert victim.read_text() == "root-owned host file\n"
+    log = nas.queue / "last.log"
+    assert not log.is_symlink() and "doing the thing" in log.read_text()
+    assert nas.status()["last_result"]["ok"] is True
+
+
+def test_a_planted_status_link_does_not_leak_the_file_it_points_at(nas, tmp_path) -> None:
+    secret = _secret(tmp_path)
+    nas.queue.mkdir()
+    (nas.queue / "status.json").symlink_to(secret)
+    nas.agent().tick()
+    status = nas.queue / "status.json"
+    assert not status.is_symlink()
+    assert "s3cr3t" not in status.read_text()
+    assert secret.read_text() == '{"id": "host-secret-1", "token": "s3cr3t"}'
+
+
+def test_a_request_that_is_a_link_is_refused_not_read(nas, tmp_path) -> None:
+    nas.publish_stable("0.2.0")
+    target = _secret(tmp_path, json.dumps({"id": "via-link", "action": "update",
+                                           "requested_at": time.time()}))
+    nas.queue.mkdir()
+    (nas.queue / "request.json").symlink_to(target)
+    nas.agent().tick()
+    assert nas.called() == []                        # a valid request, but only behind a link
+    assert nas.status()["last_result"]["ok"] is False
+    assert target.exists()                           # moved/unlinked the link, not the target
+
+
+def test_a_fifo_for_a_request_does_not_hang_the_helper(nas) -> None:
+    import os
+    nas.queue.mkdir()
+    import threading
+    os.mkfifo(nas.queue / "request.json")
+    worker = threading.Thread(target=nas.agent().tick, daemon=True)
+    worker.start()
+    worker.join(timeout=20)                          # a plain open() blocks here forever
+    assert not worker.is_alive(), "the helper hung on a FIFO planted as request.json"
+    assert nas.status()["last_result"]["ok"] is False
+
+
+@pytest.mark.parametrize("which", ["updater", "state"])
+def test_a_linked_folder_is_refused_and_nothing_is_written_there(nas, tmp_path, which) -> None:
+    elsewhere = tmp_path / "host" / "etc"
+    elsewhere.mkdir(parents=True)
+    if which == "updater":
+        (nas.data / "state" / "updater").symlink_to(elsewhere)
+    else:
+        shutil.rmtree(nas.data / "state")
+        (nas.data / "state").symlink_to(elsewhere)
+        (elsewhere / "updater").mkdir()
+    with pytest.raises(SystemExit, match="not links|does not exist"):
+        nas.agent().tick()
+    assert [p.name for p in elsewhere.rglob("*") if p.is_file()] == []
