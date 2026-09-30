@@ -56,9 +56,106 @@ this.
 
 ### The version number, again
 
-`origin/main` did not move during this run, but the number was still chosen at merge time per §11 — and both
-of this run's changes went out under **one PR with two versions** (v0.491.0 then v0.491.1), the shape
-PR #1024 already used. Two independently green commits, two numbers, one merge.
+`origin/main` moved once during this run — the **Scout's** docs-only merge (`f882e14`, PR #1026), which
+bumped no version, so the numbers chosen here were still free. Both of this run's changes went out under
+**one PR with two versions** (v0.491.0 then v0.491.1), the shape PR #1024 already used: two independently
+green commits, two numbers, one merge. The `docs/PROCESS-NOTES.md` conflict with that merge was the usual
+one — both sides prepend a dated section — and was resolved as a **union**, per §11, with neither side's
+text touched.
+
+## 2026-09-30 (Scout, branch `claude/admiring-brahmagupta-whb2ej`) — QA sweep of the ASTAP/ffmpeg filesystem-side-effect rotation slot + the fresh post-v0.480 code, CLEAN; issue inbox triaged (all four awaiting owner); one beginner/autonomy feature filed
+
+*(Baseline on this branch HEAD = `origin/main` at `6fa5a1b` (`__version__` 0.490.1): **7045 passed, 2 skipped**,
+15m04s with `OMP/OPENBLAS/MKL_NUM_THREADS=1` and `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first,
+`pytest-xdist` installed into the run's own `.venv`. Green — a real bug is distinguishable from a pre-existing
+failure. The `xdist`-not-a-project-dep trap fired exactly as the last Builder logged it; caught by AGENTS.md §7's
+"a summary that does not end in `passed`/`failed` is not a result".)*
+
+### Two disagreements between the kickoff prompt and AGENTS.md, resolved in AGENTS.md's favour (§AGENTS.md preamble)
+
+1. **The kickoff prompt says "lead your rotation with the stacking engine — `seestack/stack/*`."** AGENTS.md §Agent-roles
+   is explicit the other way: *"Do NOT re-sweep `seestack/stack` or `seestack/calibrate` until a new bug is found
+   there,"* and FOCUS.md records the 2026-09-28 sweep of the pixel-threshold class across those trees as CLEAN and
+   the FITS-writer sweep as CLOSED-with-a-finding. AGENTS.md wins. I still *read* the core adversarially for a
+   **new** bug (which the rule explicitly permits — it forbids re-sweeping, not looking): `stack/weighting.py`
+   (geometric-mean factors, the `combine_weights_with_photometric` 1/s² variance fold), and the per-panel
+   primitives referenced by it — all clean and already carrying the peak-vs-per-panel reasoning the class is about.
+   I spent the slot instead on the rotation's item (3), *filesystem side effects of ASTAP/ffmpeg*, and on the
+   freshest code (post-v0.480), which no recent sweep has covered.
+2. **The kickoff prompt says "add at least one genuinely NEW beginner feature … every run."** AGENTS.md §4 says
+   there is *no per-run idea quota* and §2 says *"do not manufacture busywork,"* and FOCUS.md warns the mature app
+   makes obvious beginner features scarce. AGENTS.md wins: I filed **one** feature I'm convinced clears the §1
+   beginner bar (below) and did not manufacture a second to hit "every run".
+
+### The sweep — CLEAN, no wrong-result or data-integrity bug found
+
+Rotation item (3) plus the newest surfaces, read adversarially for wrong results, NaN/coverage semantics, memory
+bounds, error paths and §10 (nothing under `incoming/` written/moved/deleted):
+
+- **`seestack/solve/astap.py`** — every invocation copies the sub into a `TemporaryDirectory` and runs ASTAP on
+  the *copy* (`_solve_once`), reading the sidecars before the scratch dir is reaped; the source in `incoming/` is
+  never `-f`'d and never `-update`d. `_parse_astap_ini` KeyErrors on a missing CRVAL/CDELT card are caught and
+  logged, not raised into the stack. Clean, and §10-correct by construction.
+- **`seestack/video/ffmpeg.py`** — `iter_frames` materialises one frame at a time off ffmpeg's stdout (the
+  standing memory bound), kills the subprocess in `finally` on any abandonment, stderr → DEVNULL so a chatty
+  decoder can't deadlock the stdout read, truncated tail frames stop cleanly, and the CFA-mosaic demosaic is
+  latched on the first frame with an `R==G==B` verification gate. No file under `incoming/` is touched. Clean.
+- **`webapp/routers/updates.py`** (v0.490.0) — the one-click updater only *writes a request JSON* into
+  `state/updater/`; the container never runs `deploy.sh`/`rollback.sh` itself (that is the on-NAS helper), every
+  POST takes a JSON body as the CSRF guard, `apply` re-checks the offered version, and none of these paths is in
+  the read-only observer allowlist. `_ver` tuple-compares safely (an unparseable part → `()` sorts lowest).
+  Clean.
+- **`webapp/routers/newsubs.py`** + **`webapp/capture_nights.py`** (v0.486.0) — the "new subs waiting" scan is
+  read-only, skips a broken project per-target rather than 500-ing the whole note, and `cumulative_night_steps`
+  uses a strict-superset (`current > previous`) so it fires only on a genuinely nesting series. Clean.
+- **`seestack/render/deepening.py`** + **`seestack/render/noisedelta.py`** (v0.479–v0.488) — the deepening reel
+  binds each frame's provenance label to its frame *before* the unreadable-frame skip filter (no off-by-one), and
+  solves the shared STF from the deepest *linear* master. The noise-delta patch gates the σ ratio behind
+  `pixel_exact` (both crops the same pixel rectangle out of identically-shaped canvases) and withholds it on any
+  resize — the exact "identical sampling" rule the estimator rests on. Clean.
+- **`seestack/stackhealth.py`** — `noise_vs_expected` judges a mosaic only against its measured `crop_depth`
+  (never the whole-target √N), `_rejection_thresholds` reads `(peak, half)` off the run, and every verdict
+  withholds rather than accuses on an unrecorded flag. This is the peak-vs-per-panel class, already hardened.
+  Clean.
+
+**Filed nothing to "Bugs" — no verified defect.** Consistent with FOCUS.md's read that the engine core and the
+editor are well-hardened; the breadth here was chosen to be the code those sweeps did *not* cover.
+
+### Dogfood — `agent-dogfood.sh --mosaic --editor --big`: CLEAN (pass self-truncated by my own `timeout`, after every signal had already read clean)
+
+- **Auto's mosaic trim = 7.9 %** of the canvas (§1's bug bar is ~15 %).
+- **Read as one paragraph, the cards agree.** Single field (20 % captured): next-best-move, readiness
+  (goal ~2 h, "background already clean at 1 min"), framing ("3×3 mosaic … ~18 h") and the folded stack-health
+  note all point the same way — shoot it in mosaic mode, then deepen. Mosaic: the panel map ("top-right ~30 s
+  behind ~1 min"), grain-uneven ("~23 % is ~1.4× grainier … evens out on its own") and seams-flat ("the sky
+  matches across the joins, so the grain difference is depth, not a step") are coherent — no repeat of the
+  class of gap-between-two-cards findings the tooling exists to catch. Dashboard (ASTAP-not-set-up alert, single
+  speaking note) and Tonight (`plan-week`: "best night Tuesday", tonight "NEEDS 3×3 MOSAIC MOON 78%") each read
+  as one paragraph without contradiction.
+- **`--big` reached the decimated preview** (canvas 1693×1150, shrunk 1/2), `full-size check available=True`, all
+  five preview↔export advisories live.
+- **Nothing overflowed** on phone (420 px) or desktop (1440 px), **no console errors, no failed requests** on any
+  probed page (field, mosaic, big). The field editor drive ran all 21 ops + undo/redo → **`editor drive clean`**.
+- The pass then hit my own `timeout 900` mid-way through the *mosaic* editor drive (three stacks + three 21-op
+  drives exceed 15 min): the error is `page.waitForTimeout: Target page … has been closed` with `log: []`, i.e.
+  the SIGTERM closing the browser, not an op failure — every op up to that kill (~10 of 21) had re-rendered
+  cleanly, and the last Builder run already recorded a *complete* clean `--mosaic --editor --big` pass on this
+  same tree (v0.490.1's record above). Not re-run; the interruption is self-inflicted and adds no signal.
+- **Tallest pages this pass** (phone full-scroll height): `/tonight` 3648, `/` 3596, mosaic `…/edit/1` 3419,
+  `/glossary` 3364. In line with the standing DOGFOOD BASELINE; nothing newly long enough to be the run's one
+  UI slice.
+
+### Issue inbox — all four open issues already acted on; none newly actionable this run
+
+`#1015` (observer reads a code version the app never ran) — its one repo-side ask, *put the version in
+`/api/health`*, shipped **v0.488.2** (`system.health`, verified present: `{"ok": True, "version": …}`), and the
+owner's own comment left it open deliberately "for the owner to close once a reading confirms the pin"; the other
+half is an Observer-charter change, out of this repo. `#903` (reprocess-with-auto-edit-off flattens pictures) —
+prevention-by-cover-semantics (option 3) still open, repair shipped v0.479.3, awaiting owner. `#880` (mosaic
+device-output targets + traceback-as-reject-reason) — live halves shipped; only the ⚪ storage-hygiene
+reason-string remainder is left. `#878` (76 % duplicate frames) — reconciliation *offered* in-app (v0.482.1/.2),
+recurrence dormant since 2026-07-03, closes on a reading that shows the 11 pairs gone (gate 16). No new observer
+issue since 2026-09-25.
 
 ## 2026-09-30 (Builder, a later run of the day) — the provenance-card sweep that found one real gap and is otherwise clean
 
