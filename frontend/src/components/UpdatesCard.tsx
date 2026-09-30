@@ -126,7 +126,7 @@ export function UpdatesCard() {
   };
   const onError = (e: Error) => notifications.show({ color: "red", title: "Couldn't ask for that", message: e.message });
   const check = useMutation({ mutationFn: api.checkUpdates, onSuccess: onDone, onError });
-  const apply = useMutation({ mutationFn: api.applyUpdate, onSuccess: onDone, onError });
+  const apply = useMutation({ mutationFn: (v: string) => api.applyUpdate(v), onSuccess: onDone, onError });
   const rollback = useMutation({
     mutationFn: (restore: boolean) => api.rollbackUpdate(restore),
     onSuccess: (res) => { setRollbackOpen(false); setTyped(""); onDone(res); },
@@ -157,7 +157,7 @@ export function UpdatesCard() {
       `Update to v${st.available?.version}?\n\nThe app stops for a few minutes while it backs up your `
       + "databases and settings and rebuilds. Your subs in incoming/ are not touched, and you can go "
       + "back with \"Go back\" on this card if anything looks wrong.",
-    )) apply.mutate();
+    )) apply.mutate(st.available!.version!);
   };
 
   return (

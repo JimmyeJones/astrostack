@@ -4238,8 +4238,13 @@ export const api = {
   // (scripts/update_agent.py) does the work and reports back. See
   // webapp/routers/updates.py.
   getUpdates: () => req<UpdatesStatus>("/api/updates"),
-  checkUpdates: () => req<{ id: string; action: string }>("/api/updates/check", { method: "POST" }),
-  applyUpdate: () => req<{ id: string; action: string }>("/api/updates/apply", { method: "POST" }),
+  // Both send a JSON body on purpose: it is the CSRF guard (see the router).
+  checkUpdates: () =>
+    req<{ id: string; action: string }>("/api/updates/check", { method: "POST", body: "{}" }),
+  applyUpdate: (version: string) =>
+    req<{ id: string; action: string }>("/api/updates/apply", {
+      method: "POST", body: JSON.stringify({ version }),
+    }),
   rollbackUpdate: (restoreData: boolean) =>
     req<{ id: string; action: string }>("/api/updates/rollback", {
       method: "POST",

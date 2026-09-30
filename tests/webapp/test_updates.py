@@ -45,8 +45,9 @@ def _newer() -> str:
 def test_no_helper_reads_as_missing_and_refuses_every_action(client, data_root) -> None:
     st = client.get("/api/updates").json()
     assert st["helper"] == "missing" and st["running_version"] == webapp.__version__
-    for path in ("/api/updates/check", "/api/updates/apply", "/api/updates/rollback"):
-        r = client.post(path, json={})
+    for path, body in (("/api/updates/check", {}), ("/api/updates/apply", {"version": _newer()}),
+                       ("/api/updates/rollback", {})):
+        r = client.post(path, json=body)
         assert r.status_code == 409 and "helper" in r.json()["detail"]
     assert not (data_root / "state" / "updater" / "request.json").exists()
 
@@ -59,13 +60,13 @@ def test_a_stale_heartbeat_reads_as_stale(data_root) -> None:
 
 def test_check_writes_one_request_and_then_reads_as_pending(client, data_root) -> None:
     q = _helper(data_root)
-    r = client.post("/api/updates/check")
+    r = client.post("/api/updates/check", json={})
     assert r.status_code == 200 and r.json()["action"] == "check"
     req = json.loads((q / "request.json").read_text())
     assert req["action"] == "check" and isinstance(req["requested_at"], float)
     st = client.get("/api/updates").json()
     assert st["pending"] == {"id": req["id"], "action": "check"}
-    assert client.post("/api/updates/check").status_code == 409     # one at a time
+    assert client.post("/api/updates/check", json={}).status_code == 409     # one at a time
 
 
 def test_an_hour_old_request_no_longer_counts_as_pending(data_root) -> None:
@@ -77,18 +78,21 @@ def test_an_hour_old_request_no_longer_counts_as_pending(data_root) -> None:
 
 def test_busy_helper_refuses_a_second_action(client, data_root) -> None:
     _helper(data_root, state="updating", job={"id": "a", "action": "update"})
-    assert client.post("/api/updates/check").status_code == 409
+    assert client.post("/api/updates/check", json={}).status_code == 409
 
 
 def test_update_needs_a_newer_checked_version(client, data_root) -> None:
     _helper(data_root, available={"version": webapp.__version__, "commit": "abc"})
     st = client.get("/api/updates").json()
     assert st["update_available"] is False
-    assert client.post("/api/updates/apply").status_code == 409
+    assert client.post("/api/updates/apply", json={"version": webapp.__version__}).status_code == 409
 
     q = _helper(data_root, available={"version": _newer(), "commit": "abc"})
     assert client.get("/api/updates").json()["update_available"] is True
-    r = client.post("/api/updates/apply")
+    r = client.post("/api/updates/apply", json={"version": "9.9.9"})       # not what was offered
+    assert r.status_code == 409 and "changed" in r.json()["detail"]
+    assert not (q / "request.json").exists()
+    r = client.post("/api/updates/apply", json={"version": _newer()})
     assert r.status_code == 200
     assert json.loads((q / "request.json").read_text())["action"] == "update"
 
@@ -129,8 +133,8 @@ def test_every_request_the_page_writes_is_one_the_helper_accepts(client, data_ro
     agent = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(agent)
     cases = [
-        ("/api/updates/check", None, {"available": None}),
-        ("/api/updates/apply", None, {"available": {"version": _newer()}}),
+        ("/api/updates/check", {}, {"available": None}),
+        ("/api/updates/apply", {"version": _newer()}, {"available": {"version": _newer()}}),
         ("/api/updates/rollback", {"restore_data": True, "confirm": "RESTORE"},
          {"rollback": {"to_version": "0.1.0", "needs_restore_data": True}}),
         ("/api/updates/rollback", {}, {"rollback": {"to_version": "0.1.0", "needs_restore_data": False}}),
@@ -138,7 +142,7 @@ def test_every_request_the_page_writes_is_one_the_helper_accepts(client, data_ro
     for path, body, fields in cases:
         q = _helper(data_root, **fields)
         (q / "request.json").unlink(missing_ok=True)
-        assert client.post(path, json=body or {}).status_code == 200, path
+        assert client.post(path, json=body).status_code == 200, path
         raw = (q / "request.json").read_bytes()
         parsed = agent.validate_request(raw, now=time.time())
         assert parsed["action"] == path.rsplit("/", 1)[1].replace("apply", "update")
@@ -150,3 +154,17 @@ def test_the_observer_token_cannot_reach_updates(path) -> None:
     from webapp.main import _READONLY_GET_PATHS
 
     assert path not in _READONLY_GET_PATHS
+
+
+@pytest.mark.parametrize("path", ["/api/updates/check", "/api/updates/apply", "/api/updates/rollback"])
+def test_a_bodiless_or_form_post_cannot_start_anything(client, data_root, path) -> None:
+    """What a cross-site page can send without a CORS preflight: no body, or a
+    form / text body. None of it may queue a request."""
+    q = _helper(data_root, available={"version": _newer()},
+                rollback={"to_version": "0.1.0", "needs_restore_data": False})
+    assert client.post(path).status_code == 422
+    r = client.post(path, content=f'{{"version": "{_newer()}"}}', headers={"Content-Type": "text/plain"})
+    assert r.status_code == 422
+    r = client.post(path, data={"version": _newer()})
+    assert r.status_code == 422
+    assert not (q / "request.json").exists()

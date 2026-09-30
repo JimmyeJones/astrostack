@@ -16,6 +16,9 @@ every minute by a TrueNAS cron job as root, set up once with `sudo python3 scrip
 refused and consumed), then runs the same `deploy.sh -y origin/stable` or `rollback.sh --yes [--restore-data]`
 a person would, and reports in `state/updater/status.json` with a heartbeat the page reads as
 missing / ok / stale. An update always installs `origin/stable`: the page cannot name a ref.
+Every POST takes a JSON body — `apply` must name the version the owner was shown — because the app has
+no password by default and a bodiless POST is one any web page he visits could send cross-site; a JSON body
+needs a CORS preflight the app never grants, and FastAPI parses a body only when it is declared JSON.
 `--install` copies the helper out of the clone (into the deploy state folder, so a rollback to a version
 without it keeps it running) and refuses if the clone or the helper would sit inside ASTRO_DATA, where the
 container could edit a file root runs.
@@ -30,7 +33,7 @@ Update when a check found a newer `stable`; "Updating — this page reconnects b
 then a reload onto the new version's own page; the helper's message and log tail when something failed.
 
 **Pinned by** `tests/test_update_agent.py` (23, against a real git origin with stub deploy/rollback scripts),
-`tests/webapp/test_updates.py` (12, including that every request the page writes passes the helper's
+`tests/webapp/test_updates.py` (15, including that a bodiless, form or text/plain POST queues nothing, that every request the page writes passes the helper's
 validator and that the observer token cannot reach any of it), and `UpdatesCard.test.tsx` (10).
 
 ### v0.489.3 — 🔴 BUG FIX (§10, data safety): `rollback.sh --restore-data` rolled back `incoming/` too

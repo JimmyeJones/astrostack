@@ -91,6 +91,7 @@ describe("UpdatesCard", () => {
     expect(apply).not.toHaveBeenCalled();
     fireEvent.click(btn);
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
+    expect(apply).toHaveBeenCalledWith("0.490.0");
     expect(await screen.findByText(/Updating — the app is backing up your data/)).toBeTruthy();
   });
 

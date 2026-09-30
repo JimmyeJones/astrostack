@@ -20,6 +20,14 @@ when the owner presses Check or Update (owner's answer, 2026-09-30; AGENTS.md §
 
 The read-only observer token cannot reach any of this: none of these paths are in
 ``webapp.main._READONLY_GET_PATHS``.
+
+**Every POST takes a JSON body, even where it carries nothing.** The app has no
+password by default, so without one any web page the owner visits could fire a
+bodiless cross-site POST at it and start an update. A browser will not send an
+``application/json`` body cross-site without a CORS preflight this app never
+grants, and FastAPI parses a body only when it is declared JSON — so the body is
+the CSRF guard. ``apply`` also names the version the owner was shown, so the
+request can only mean "install what I saw".
 """
 from __future__ import annotations
 
@@ -128,20 +136,30 @@ def get_updates(request: Request) -> dict[str, Any]:
     return update_status(_queue(request))
 
 
+class CheckIn(BaseModel):
+    pass
+
+
+class ApplyIn(BaseModel):
+    version: str
+
+
 @router.post("/api/updates/check")
-def check_updates(request: Request) -> dict[str, Any]:
+def check_updates(body: CheckIn, request: Request) -> dict[str, Any]:
     q = _queue(request)
     _require_ready(update_status(q))
     return _write_request(q, {"action": "check"})
 
 
 @router.post("/api/updates/apply")
-def apply_update(request: Request) -> dict[str, Any]:
+def apply_update(body: ApplyIn, request: Request) -> dict[str, Any]:
     q = _queue(request)
     st = update_status(q)
     _require_ready(st)
     if not st["update_available"]:
         raise HTTPException(409, "There is no newer tested version to install — press Check for updates first.")
+    if body.version != (st["available"] or {}).get("version"):
+        raise HTTPException(409, "The version on offer changed — reload this page and check again.")
     return _write_request(q, {"action": "update"})
 
 
