@@ -1,5 +1,62 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder, the next run) — six of the seven Settings sections had never been drawn
+
+### v0.492.1 — INFRA / the quality bar itself: the dogfood sweep opens every Settings section, not just the first
+
+*(The top open entry of "Autonomy & friendliness", filed by the previous Builder the same morning while
+dogfooding what v0.492.0 shipped. Its named fix — "a route list, not a feature" — is what shipped, plus the
+guard that stops it coming back.)*
+
+**The blind spot.** `scripts/dogfood_probe.mjs` swept `/settings` and stopped there, and
+`tests/test_dogfood_route_coverage.py` **exempted** `/settings/:section` on the reasoning that it "renders the
+same component as `/settings`, scrolled to one panel, so sweeping every section would re-photograph one page N
+times for no new layout." Both halves of that sentence are wrong:
+
+- `SectionTabs` is a **tab strip**, not a scroll target. `/settings` falls back to `sections[0]` — Folders —
+  so a `/settings` shot is a shot of Folders and of nothing else.
+- The other six panels *are* in the DOM (`keepMounted`, because the sections share one edit buffer), but
+  Mantine hides an inactive `Tabs.Panel`, so every element in them has a **zero-size bounding rect** — which
+  `overflowingLeaves`, `squeezedText` and `clippedLabels` all skip by construction, and which contributes
+  nothing to `document.documentElement.scrollHeight`.
+
+So on the app's tallest-by-content page, six sections had never been rendered at any width, never measured for
+overflow or squeezed text, never watched for a console error, and never appeared in a height baseline.
+Maintenance alone holds the updates card (v0.490.0), the refinish card (v0.479.3), "Reprocess everything" with
+its three-way scope (v0.492.0), Job history, Backup/restore and Access control. This is the same
+tooling-cannot-see-it hole as the missing observing site (v0.436.1), the un-strided editor proxy (v0.446.0),
+the owner's scale (v0.455.3) and the season-closing card (v0.477.0) — the sixth instance, and the first where
+the surface was hidden by a **tab** rather than by the data.
+
+**What shipped.** A `SETTINGS_SECTIONS` list in the probe, spread into `ROUTES` as
+`` `/settings/${s}` ``. Deliberately the **whole** list rather than the six `/settings` does not show: the
+point is that it is the app's own list, so a renamed or added section cannot be silently skipped, and the cost
+of keeping `folders` in it is two screenshots of a page we already have.
+
+**The guard, which is the half that lasts.** `settings/*` is **deleted from `_EXEMPT`** (the probe genuinely
+opens it now, and `_EXEMPT` is empty again), and a new
+`test_the_probe_opens_every_settings_section` reads `SETTINGS_SECTIONS` out of
+`frontend/src/settingsSections.ts` and fails when a section is missing from the probe — in **both** directions,
+so a section the app drops cannot leave a 404-shaped shot behind that reads as a bug in the app. The route
+test alone could not do this job: one template literal satisfies `settings/*` while covering nothing, which is
+exactly the kind of "covered" the old exemption was.
+
+**Measured, not argued — a pass was run with it.** `/settings/maintenance` enters the height table at
+**2737 px** on a phone, the seventh-tallest page in the app, on a pass where it had no row at all before; the
+seven new shots exist (`desktop_settings_maintenance.png` is **569 KB** against `desktop_settings.png`'s
+357 KB, and `desktop_settings_folders.png` is 357 KB — i.e. the bare route really was Folders and really was
+blind to the rest). The sweep read **clean**: nothing overflowing, no console errors, no squeezed or clipped
+text on any of the seven, at 1440 px and at 420 px. That matches what the lead found driving Maintenance by
+hand, so this closes a blind spot rather than chasing a bug.
+
+**Tooling only.** No engine, webapp, frontend, config, schema, on-disk, API or default change; nothing the
+owner's install runs is touched.
+
+**Tests (+1, and 2 fail before).** Reverting `scripts/dogfood_probe.mjs` in a scratch copy takes both
+`test_the_probe_opens_every_route_the_app_registers` (the exemption is gone, so the route is simply unprobed)
+and `test_the_probe_opens_every_settings_section` (all seven sections missing) red, and restoring it takes
+them green — run, not reasoned.
+
 ## 2026-09-30 (Builder) — "Bring my pictures up to date"
 
 ### v0.492.0 — 🌟 NEW BEGINNER FEATURE (autonomy, PRIORITY 2): re-stack only the targets that have new light, in one click

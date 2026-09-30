@@ -61,6 +61,14 @@
 // tests/test_dogfood_route_coverage.py fails when main.tsx registers a route
 // this file does not reach.
 //
+// A third kind of view a route table cannot reach: a page that hides most of
+// itself behind a tab. `/settings` is one registered route and SEVEN sections,
+// six of which are mounted-but-hidden and therefore invisible to all three DOM
+// probes below — so the app's tallest-by-content page had been photographed as
+// its first tab only, and Maintenance (updates, refinish, "Reprocess
+// everything", Job history, Backup/restore, Access control) had never been drawn
+// at all. Each section is now its own route; see SETTINGS_SECTIONS.
+//
 // It is a FINDER, not a test: what it reports still needs a real regression test
 // in the suite before anything is called fixed.
 import { existsSync } from "node:fs";
@@ -140,6 +148,33 @@ const YEAR = await yearRoute();
  * same blind spot `--editor` exists for on the editor. */
 const COMPARE_MODES = ["Split", "Blink"];
 
+/** The Settings page's own sections — the same blind spot again, and the one it
+ * hid the most behind.
+ *
+ * `/settings` lands on the FIRST section (`SectionTabs` falls back to
+ * `sections[0]`, i.e. Folders). The other six panels are in the DOM —
+ * `keepMounted`, because the sections share one edit buffer — but Mantine hides
+ * an inactive `Tabs.Panel`, so every element in them has a zero-size bounding
+ * rect, which `overflowingLeaves`, `squeezedText` and `clippedLabels` all skip
+ * by construction. So a `/settings` shot is a shot of Folders, and six sections
+ * of the app's tallest-by-content page had never been drawn at any width, never
+ * measured for overflow or squeezed text, and never watched for a console error.
+ * Maintenance alone holds the updates card (v0.490.0), the refinish card
+ * (v0.479.3), "Reprocess everything" with its three-way scope (v0.492.0), Job
+ * history, Backup/restore and Access control.
+ *
+ * Mirrored by hand from `SETTINGS_SECTIONS` in
+ * `frontend/src/settingsSections.ts`, and a hand-mirrored list goes stale — so
+ * `tests/test_dogfood_route_coverage.py` reads that constant and goes red when a
+ * section is missing here. Deliberately the WHOLE list rather than the six
+ * `/settings` does not show: the point is that it is the app's own list, so a
+ * renamed or added section cannot be silently skipped, and the cost of keeping
+ * `folders` in it is two screenshots of a page we already have. */
+const SETTINGS_SECTIONS = [
+  "folders", "automation", "plate-solving", "observing-site", "stacking",
+  "telescope", "maintenance",
+];
+
 // The real route table (frontend/src/main.tsx) — a typo here reads as a bug
 // ("Unexpected Application Error! 404 Not Found") that is entirely the probe's.
 const ROUTES = [
@@ -150,7 +185,11 @@ const ROUTES = [
   "/live",
   "/sky", "/universe", "/life-list",
   "/telescope", "/moon-sun", "/calibration", "/combine", "/jobs", "/storage",
-  "/logs", "/settings", "/glossary",
+  "/logs",
+  // `/settings` is where a URL typed by hand lands; the seven `/settings/<section>`
+  // routes are the page's real content (see SETTINGS_SECTIONS above).
+  "/settings", ...SETTINGS_SECTIONS.map((s) => `/settings/${s}`),
+  "/glossary",
   ...(COMPARE ? [COMPARE] : []),
   ...(YEAR ? [YEAR] : []),
   ...(SAFE ? [`/targets/${SAFE}`, `/targets/${SAFE}/stack`,
