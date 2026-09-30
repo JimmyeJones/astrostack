@@ -1,5 +1,71 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder) — a bad plate scale stops deciding what the whole app advises
+
+### v0.488.6 — 🟡 BUG FIX (trust, PRIORITY 3): the library-wide frame field is a consensus, not the first hit
+
+*(The `LEAD` filed by the Builder on 2026-09-29 while shipping v0.488.5 — the half of that fix that was a
+different question.)*
+
+**What it was.** v0.488.5 made *one target's* answer robust: `Project.solved_frame_geometry` returns the
+triple at the **median** plate scale of the newest `GEOMETRY_SAMPLE_FRAMES = 25` solved rows, so no single
+plate solve decides what field of view a target was shot at. The **library-wide** probe was untouched.
+`webapp/frame_field.py::library_frame_field` walked targets newest-activity-first and returned the **first**
+one that yielded a physically-sensible field, and `install_frame_field` caches that for the life of the
+process. The Tonight planner and the week plan badge every catalogue row at once, so they have no "this
+target" to refine it with — they got whichever target the walk reached first. The only guard between one
+implausible solve and every one of those rows was
+`seestack.framing.frame_field_from_solve`'s 3′–1200′ sanity band, which is ~400× wide: a solve wrong by 2×
+sails straight through it. The owner's own library carries **178** rows with an implausible solve (observer
+issue [#965](https://github.com/JimmyeJones/astrostack/issues/965)), and the engine already has a rule for
+dropping that shape from a canvas (`stack/mosaic._plate_scale_outlier_indices`).
+
+**Why it was built rather than deferred again.** The entry's own first line said *check cheaply whether the
+owner's library holds more than one frame geometry at all, and close it with the number if not*. That check
+is a `SELECT DISTINCT` over his project DBs — a read no in-repo agent has, and one the observer has not filed.
+What the entry *also* said is that the shape to build if the check came back positive is "a consensus across
+the probed targets rather than first-past-the-post" — and that shape turns out to be **one-sided on a
+one-telescope install**, which is the whole population this app is for: every probed target reports the same
+field, so the median *is* the first answer and the result is byte-identical. It only moves where the first
+answer disagrees with the library, which is exactly the failure being fixed. So there is nothing for the
+number to decide, and waiting for it was buying nothing.
+
+**What shipped.** New pure `frame_field.consensus_field(fields)`:
+
+* the **median of the answers**, returned as *one probed target's own* `FrameField` rather than an average of
+  them — a long edge from one telescope beside a short edge from another would describe a frame neither had.
+  The element is picked with the same `(n - 1) // 2`-of-a-stable-sort rule
+  `Project.solved_frame_geometry` picks its triple with, deliberately, so the two rules that answer "which
+  telescope?" at the two scales cannot drift apart;
+* **below `_FIELD_CONSENSUS_MIN = 3` answers, nothing moves.** One or two targets cannot outvote anything, and
+  preferring the smaller of two fields would be a behaviour change bought with nothing. `fields[0]` — today's
+  answer — is returned, and an empty list is still `None` (the caller keeps `FALLBACK_FIELD`, i.e. a fresh
+  install is unchanged).
+
+`library_frame_field` now collects answers instead of returning the first, stopping at
+`_FIELD_CONSENSUS_TARGETS = 5` of them. **The cost ceiling is unchanged and that is the point of the number:**
+the walk has always been willing to open all `_MAX_TARGETS_PROBED = 8` projects when nothing answered, so five
+is inside a bill this polled path already paid, and it is paid **once per process** because a successful answer
+is cached for the life of it. A consensus that differs from the newest target's answer is logged once, with
+both fields named — either a telescope change part-way through, or a solve this library should not be trusting.
+
+**The trade, written down in the docstring so nobody re-derives it.** An owner who changes telescope has one
+recent target on the new optics and several older ones on the old, and the median says "old" until the new one
+is the majority. That is the right answer for a *library-wide* default — the question is about the library, not
+about the newest night — and the surface where the distinction bites, a target's own card, does not use this:
+`target_frame_field` asks that target's own frames first and only falls back here (v0.488.x).
+
+**Tests.** +5 in `tests/webapp/test_frame_field_consensus.py`, against a real `Library`/`Project` on disk (five
+targets, 30 solved frames each, `last_activity_utc` stamped so the probe's order is the test's): the regression
+(four targets agree, the **newest** carries a 2× solve, and the library answers 107.7′ × 71.8′ rather than
+215′), the two-answer stand-down, the cost pin (eight answering targets → exactly five opens), and the two
+purity claims (the answer is an element of the input; empty stays `None`). **Two fail before** — verified by
+reverting `library_frame_field` to first-past-the-post in a scratch copy and watching them go red.
+
+**Upgrade safety.** No config key, no schema, no on-disk path, no default and no API shape is touched; the
+module is read-only over the project DBs it opens.
+
+
 ## 2026-09-29 (Builder, sixth) — one plate solve was deciding which telescope the app thinks you own
 
 ### v0.488.5 — 🟠 BUG FIX (autonomy + trust, PRIORITY 2/3): the frame field is read from the newest solved *frames*, not the newest solved *frame*
