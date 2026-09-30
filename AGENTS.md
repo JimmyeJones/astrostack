@@ -1,7 +1,7 @@
 # Autonomous development playbook — AstroStack
 
 This file tells an AI agent how to improve this app **on its own, with no human in
-the loop**. The **Builder** runs every four hours and the **Scout** once a day; a run
+the loop**. The **Builder** runs every few hours and the **Scout** once a day (the owner sets the schedules); a run
 completes a few well-finished improvements — or none, which is fine. Read this file
 in full before doing anything. It holds the **live rules** only; the files below
 hold everything else:
@@ -23,7 +23,7 @@ your kickoff prompt disagree, **this document wins** — file the disagreement i
 Both roles share this manual and one backlog. Everything below — priorities (§1),
 quality bar (§5), shipping (§8), upgrade safety (§9), guardrails (§10) — applies to both.
 
-- **Builder** (every 4 h) — *drains* the backlog: picks the highest-priority item,
+- **Builder** (every few hours) — *drains* the backlog: picks the highest-priority item,
   implements it **deeply** with tests, and ships it to `main`. Bugs in "Bugs (fix these
   first)" outrank everything. It fixes bugs it trips over and files only verified bugs
   and unfinished leads; it does not invent features.
