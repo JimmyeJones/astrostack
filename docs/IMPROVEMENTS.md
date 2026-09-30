@@ -866,6 +866,20 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ### Autonomy & friendliness (PRIORITY 2–3)
 
+- **LEAD (Builder 2026-09-30, found while dogfooding what v0.492.0 shipped — a gap in the *tooling*, not in the
+  app) — `scripts/agent-dogfood.sh`'s page sweep has never drawn Settings → Maintenance, or any Settings
+  section but the first.** *(Pillar: the quality bar itself; size **S**; confidence: **verified this run** —
+  the shots dir holds `desktop_settings.png` / `phone_settings.png` and nothing else for that page.)*
+  The sweep visits `/settings`, and `SectionTabs` lands that URL on **Folders**. Everything else on the page
+  lives at `/settings/<section>` and has therefore never been rendered by any pass: Maintenance alone now holds
+  the updates card (v0.490.0), the refinish card (v0.479.3), "Reprocess everything" with its new three-way
+  scope (v0.492.0), Job history, Backup/restore and Access control — six cards on the app's tallest-by-content
+  page, none of them ever measured for the overflow/console-error probe or the height baseline. The same holds
+  for the other six sections. **The fix is a route list, not a feature:** add `/settings/<section>` for each key
+  in `SETTINGS_PAGE_SECTIONS` (the constant is already exported for exactly this kind of check) to the sweep's
+  routes. Driven by hand this run, Maintenance read clean at 420 px (0 px overflow, no console errors) — so
+  this is a blind spot to close, not a bug to chase.
+
 - **LEAD (Builder 2026-09-14, read off a `--mosaic` dogfood pass that was otherwise CLEAN) — the mosaic
   effort clause prices the grid from scratch on a target that is *already a mosaic*, and its own stand-down
   was argued for a target that is not.** *(Pillar: friendliness / trust — PRIORITY 3; size S to write,

@@ -48,6 +48,30 @@ cd frontend && npm install
 > something you touched minutes ago. Start the suite, then **read** — the
 > backlog, the code, the docs — until its summary line prints.
 >
+> > **⚠️⚠️ And "edit" means the bytes on disk, not who wrote them — `git stash`
+> > counts** *(added 2026-09-30, after it cost a second run its whole suite)*. A
+> > run wanting to know whether `ruff`'s complaints were pre-existing did
+> > `git stash` → `ruff` → `git stash pop` while the suite was running: twenty
+> > seconds, no editor, and every file in the diff rewritten twice under four
+> > workers. **Any git command that rewrites the working tree is an edit** —
+> > `stash`, `stash pop`, `checkout <path>`, `restore`, `merge`. (Use
+> > `git worktree add` for a scratch comparison; it touches nothing the suite is
+> > reading.)
+> >
+> > **And for this variant the tell above is exactly backwards.** It finished
+> > `2 failed` in **`tests/webapp/test_derived_light.py`** — a file the run had
+> > *not* touched, in a subsystem its change did not go near. Those two are
+> > **drift guards**: they read their own production module's source through
+> > `inspect.getsource`, which resolves `co_firstlineno` against the file on
+> > disk, so a module whose line numbers moved (`webapp/pipeline.py`, by ~75
+> > lines) makes a guard **elsewhere** slice out the wrong function. Several
+> > tests here are that shape — `test_derived_light.py`,
+> > `test_project_schema_drift.py`, the `pack_unit` tree-grep, the
+> > `StackOptions` form-descriptor drift test — so **a red naming a file your
+> > diff does not touch is a reason to re-run that file alone before believing
+> > it** (five seconds against eighteen minutes). Details in
+> > `docs/PROCESS-NOTES.md`, 2026-09-30.
+>
 > **⚠️ Clear `/tmp/pytest-of-root` between suite runs** *(added 2026-09-14)*. One
 > run leaves **~7 GB** there — pytest keeps the last three `tmp_path` roots per
 > invocation and `-n 4` multiplies them — so the fourth suite of a run hits
