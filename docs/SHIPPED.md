@@ -44,6 +44,16 @@ order is chronological order. `new_light_since_picture` now calls it, so **all t
 the note, the batch's target list and the dialog's counts cannot come to different opinions about which
 targets are behind.
 
+**Cost measured, not assumed — and it decided against an index.** On a synthetic target of **35,894 subs
+carrying ~2 kB of `wcs_json` each (a 77 MB project DB)**, best of 5 on this box: the capture-time-only `COUNT`
+**32.8 ms**, the widened one **33.5 ms** (**+2 %**), and `EXPLAIN QUERY PLAN` is *identical* — both drive off
+`idx_frames_accept (accept=?)`, so the old query was never using `idx_frames_ts` either and the `OR` adds no
+scan that was not already happening. Adding `CREATE INDEX … ON frames(restored_utc)` made it **worse**
+(**46.8 ms**) *without* changing the plan, so there is **no new index and no migration** — which is also why
+the "one indexed `COUNT` per target, no second walk" the note and `reprocess_status` both promise is still
+true. (Recorded because this endpoint is asked of *every* target on a Dashboard visit and the owner's library
+is 89 targets / 54,681 frames; the v0.471.x work exists because that read got expensive once before.)
+
 **`count_accepted_solved_after` is left exactly as it was.** It is a different question with a different right
 answer, it is the rule the Target page's `countNewSubsSinceStack` mirrors, and its tests still pin it
 unchanged. The Target page keeps its **two** precise sentences (the new-subs line and the restored-subs card)

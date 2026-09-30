@@ -61,6 +61,20 @@ and would be reported as two. The union has to be taken inside the query. The fi
 then deliberately rebuilt to make the two sets **disjoint** (one sub of each kind, none of both), because on an
 overlapping fixture the only honest assertion is `union <= a + b`, which passes on the bug.
 
+### The measurement that changed the shape of the fix
+
+Widening a `WHERE` with an `OR` on an unindexed column, on an endpoint asked of **every** target on a Dashboard
+visit, on a library of 89 targets and 54,681 frames, looked like it needed `CREATE INDEX … ON
+frames(restored_utc)` to stay cheap. **It did not, and the index would have been a pessimisation.** Measured on
+a synthetic 35,894-sub / 77 MB project (best of 5): **32.8 ms → 33.5 ms**, and `EXPLAIN QUERY PLAN` is
+*identical* on both — `SEARCH frames USING INDEX idx_frames_accept (accept=?)`. The old query was never using
+`idx_frames_ts`; SQLite was already driving off `accept` and testing the rest per row, so the extra `OR` term
+costs one more comparison on rows it was visiting anyway. Adding the index: **46.8 ms**, same plan.
+
+**The note worth keeping:** *"is this column indexed?"* is the wrong question; *"what does the planner actually
+drive off?"* is the right one, and it is three lines of `EXPLAIN QUERY PLAN`. A migration was written in my head
+and deleted before it was typed, which is the cheapest a migration ever gets.
+
 ### What was deliberately *not* changed
 
 `Project.count_accepted_solved_after` and the Target page's `countNewSubsSinceStack` stay exactly as they are.
