@@ -131,3 +131,60 @@ def test_an_empty_project_has_a_fingerprint_rather_than_an_error(tmp_path):
         assert proj.frames_fingerprint() != empty
     finally:
         proj.close()
+
+
+# --- what it deliberately does *not* hash -------------------------------------
+
+
+def test_the_set_aside_and_restoration_stamps_are_not_part_of_the_fingerprint():
+    """They record *when the app changed its mind*, not the frame's own state.
+
+    Every change they accompany is already visible to the hash through
+    ``accept``, so hashing them would buy a cache holder nothing — and would
+    cost the property the test above pins, because ``update_frame`` stamps
+    ``rejected_utc`` on every set-aside and the undo could never get back."""
+    from seestack.io.project import _FINGERPRINT_PROVENANCE_COLS
+
+    assert _FINGERPRINT_PROVENANCE_COLS == {"restored_utc", "rejected_utc"}
+
+
+def test_a_column_nobody_listed_is_hashed_by_default(tmp_path):
+    """The exclusion fails *safe*: only a deliberately named column drops out,
+    so a column added later over-invalidates rather than going unnoticed —
+    which is the direction :meth:`frames_fingerprint`'s docstring accepts."""
+    from seestack.io.project import _FRAME_COLUMNS, _FINGERPRINT_PROVENANCE_COLS
+
+    hashed = [c for c in _FRAME_COLUMNS if c not in _FINGERPRINT_PROVENANCE_COLS]
+    proj = _project(tmp_path)
+    try:
+        before = proj.frames_fingerprint()
+        first = next(iter(proj.iter_frames()))
+        # A column that is neither an id nor a provenance stamp: moving it must
+        # move the hash.
+        assert "sky_adu_median" in hashed
+        proj.update_frame(first.id, sky_adu_median=123.0)
+        assert proj.frames_fingerprint() != before
+    finally:
+        proj.close()
+
+
+def test_putting_a_sub_back_returns_the_fingerprint_to_where_it_was(tmp_path):
+    """The whole point of leaving the stamps out: a re-grade that sets a sub
+    aside and a later one that puts it back leave the frame set as it was, so
+    the ~1 s canvas computation ``webapp.estimate_cache`` guards is a **hit**
+    again. Goes red if either stamp is hashed."""
+    from seestack.io.project import restoration_stamp
+
+    proj = _project(tmp_path)
+    try:
+        before = proj.frames_fingerprint()
+        first = next(iter(proj.iter_frames()))
+        proj.update_frame(first.id, accept=False,
+                          reject_reason="auto:grade:fwhm_px")
+        assert proj.get_frame(first.id).rejected_utc is not None
+        assert proj.frames_fingerprint() != before
+        proj.update_frame(first.id, accept=True, reject_reason=None,
+                          restored_utc=restoration_stamp())
+        assert proj.frames_fingerprint() == before
+    finally:
+        proj.close()

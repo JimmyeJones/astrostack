@@ -23,6 +23,7 @@ from seestack.io.project import (
     REJECT_REASON_FILE_MISSING,
     FrameRow,
     Project,
+    RestoredWindow,
     restoration_stamp,
 )
 from seestack.qc.runner import reconcile_streak_rejections
@@ -166,7 +167,7 @@ def test_a_regraded_sub_records_when_it_came_back(tmp_path):
         proj.close()
 
 
-def test_restored_frame_stamps_lists_only_stack_ready_subs(tmp_path):
+def test_restored_frame_windows_lists_only_stack_ready_subs(tmp_path):
     """A restored sub that is still unsolved would not go into a re-stack, so
     promising it would be a promise the re-stack couldn't keep. It self-heals the
     moment the solve lands."""
@@ -182,6 +183,88 @@ def test_restored_frame_stamps_lists_only_stack_ready_subs(tmp_path):
                                 restored_utc=now))
         proj.add_frame(FrameRow(source_path="ordinary.fit", accept=True,
                                 wcs_json="{}"))
-        assert proj.restored_frame_stamps() == [now]
+        assert proj.restored_frame_windows() == [
+            RestoredWindow(restored=now, set_aside=None)]
+    finally:
+        proj.close()
+
+
+def test_restored_frame_windows_carry_the_set_aside_moment_too(tmp_path):
+    """Both ends of the window, because "put back after the run" alone cannot
+    say whether the run *had* the sub — see :mod:`seestack.restorednudge`."""
+    proj = Project.create(tmp_path / "p", name="M 106")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="sub.fit", accept=True,
+                                      wcs_json="{}"))
+        proj.update_frame(fid, accept=False, reject_reason="auto:grade:fwhm_px")
+        aside = proj.get_frame(fid).rejected_utc
+        assert parse_capture_time(aside) is not None
+        proj.update_frame(fid, accept=True, reject_reason=None,
+                          restored_utc=restoration_stamp())
+        window, = proj.restored_frame_windows()
+        assert window.set_aside == aside
+        # And the set-aside stamp survives the restoration — it is the record of
+        # *that* rejection, not of the frame's current state.
+        assert proj.get_frame(fid).rejected_utc == aside
+    finally:
+        proj.close()
+
+
+# --- ``frames.rejected_utc`` — the other end of the window --------------------
+
+
+def test_setting_a_frame_aside_records_when(tmp_path):
+    """Stamped centrally in ``Project.update_frame``, so no reject path can
+    forget it. Fails before — the column did not exist."""
+    proj = Project.create(tmp_path / "p", name="M 33")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="sub.fit", accept=True))
+        assert proj.get_frame(fid).rejected_utc is None
+        proj.update_frame(fid, accept=False, reject_reason="auto:grade:fwhm_px")
+        when = parse_capture_time(proj.get_frame(fid).rejected_utc)
+        assert when is not None and when.tzinfo is not None
+        assert abs((datetime.now(timezone.utc) - when).total_seconds()) < 60
+    finally:
+        proj.close()
+
+
+def test_re_writing_the_reason_on_an_already_rejected_frame_keeps_the_stamp(
+        tmp_path):
+    """The column answers "when did this sub last stop being in the picture?",
+    so only a genuine accepted → set-aside transition may move it. A reason
+    rewritten on a frame that was already aside must not."""
+    proj = Project.create(tmp_path / "p", name="M 13")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="sub.fit", accept=True))
+        proj.update_frame(fid, accept=False, reject_reason="auto:grade:fwhm_px")
+        first = proj.get_frame(fid).rejected_utc
+        assert first is not None
+        proj.update_frame(fid, accept=False, reject_reason="auto:streak")
+        assert proj.get_frame(fid).rejected_utc == first
+    finally:
+        proj.close()
+
+
+def test_a_frame_rejected_at_ingest_carries_no_set_aside_stamp(tmp_path):
+    """It was never in a picture to be taken out of, and "we do not know" is the
+    honest record — which is also the reading that keeps today's answer."""
+    proj = Project.create(tmp_path / "p", name="M 27")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="sub.fit", accept=False,
+                                      reject_reason="qc_error:unreadable"))
+        assert proj.get_frame(fid).rejected_utc is None
+    finally:
+        proj.close()
+
+
+def test_an_ordinary_patch_never_stamps_a_set_aside(tmp_path):
+    """A stamp written where no rejection happened would silence a real nudge,
+    so nothing but an ``accept``-falsy patch may write it."""
+    proj = Project.create(tmp_path / "p", name="M 57")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="sub.fit", accept=True))
+        proj.update_frame(fid, fwhm_px=3.1, star_count=120)
+        proj.update_frame(fid, accept=True, reject_reason=None)
+        assert proj.get_frame(fid).rejected_utc is None
     finally:
         proj.close()

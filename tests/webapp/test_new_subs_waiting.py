@@ -161,6 +161,58 @@ def test_count_light_missing_from_stack_sees_a_sub_that_came_back_after_it(
         lib.close()
 
 
+
+def test_a_sub_set_aside_after_the_picture_was_made_is_not_missing_from_it(
+        solved_library):
+    """The over-count the restoration stamp alone cannot avoid.
+
+    ``apply_grade_report`` can set aside a frame an *earlier* stack used — a
+    re-grade on a bigger population moves the percentile cut — and
+    ``apply_grade_reaccepts`` then puts it back, stamping a restoration later
+    than that stack. Read on the restoration alone the sub looks missing from a
+    picture whose pixels contain it, so the Dashboard note says a target is
+    behind when it is not and "Bring my pictures up to date" spends hours of NAS
+    CPU producing the identical picture.
+
+    ``frames.rejected_utc`` settles it: the sub was still accepted when the run
+    started, so the run has it.
+    """
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            frames = list(proj.iter_frames())
+            assert proj.count_light_missing_from_stack(AFTER) == 0
+
+            # Set aside *after* the picture at AFTER, then put back later still.
+            proj.update_frame(frames[0].id, accept=0,
+                              reject_reason="auto:grade:fwhm_px")
+            aside = proj.get_frame(frames[0].id).rejected_utc
+            assert aside is not None and aside > AFTER
+            proj.update_frame(frames[0].id, accept=1, reject_reason=None,
+                              restored_utc=RESTORED_AFTER_EVERYTHING)
+
+            # Fails before: the restoration postdates the run, so the naive rule
+            # counted it as light the picture lacks. It does not lack it.
+            assert proj.count_light_missing_from_stack(AFTER) == 0
+
+            # …and the genuine case is untouched: a sub set aside *before* that
+            # picture and put back after it really is missing from it.
+            proj.update_frame(frames[1].id, rejected_utc=BEFORE,
+                              restored_utc=RESTORED_AFTER_EVERYTHING)
+            assert proj.count_light_missing_from_stack(AFTER) == 1
+
+            # A legacy row carries no set-aside stamp at all, and keeps exactly
+            # the answer it had before the column existed.
+            proj.update_frame(frames[2].id, rejected_utc=None,
+                              restored_utc=RESTORED_AFTER_EVERYTHING)
+            assert proj.count_light_missing_from_stack(AFTER) == 2
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
 # ------------------------------------------------------------ the endpoint ---
 
 def test_a_library_with_no_stacks_says_nothing(client, solved_library):

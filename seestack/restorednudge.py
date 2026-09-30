@@ -24,7 +24,19 @@ So this module answers one question, from one fact:
   alignment failure, a capped run), which is a permanent nag on an ordinary
   install. ``frames.restored_utc`` records the moment automation put a sub back,
   so "was the picture made before that?" is a comparison of two timestamps that
-  are both about the app's own actions, and it is exactly right.
+  are both about the app's own actions.
+* **…but the restoration stamp alone is not the whole fact, and reading it as
+  one over-counts.** A sub can be set aside *after* the very picture that used
+  it and put back later — ``apply_grade_reaccepts``' own sibling
+  :func:`~seestack.qc.grading.apply_grade_report` re-grades on a now-larger
+  population, the percentile cut moves, and a frame an earlier stack combined is
+  rejected and then re-accepted, both after that stack ran. The picture *has*
+  that sub. So the question is whether the sub was absent **while the picture
+  was being made**, which needs both ends of the window: it was absent only if
+  it was set aside before the run and put back after it
+  (``frames.rejected_utc``). A sub with no set-aside stamp — one rejected at
+  ingest, or any row written before that column existed — is read exactly as
+  it was before it did.
 * **It offers; it never acts.** Re-stacking a deep target is hours of CPU on a
   NAS, and ``AGENTS.md`` §9 says new behaviour is opt-in.
 * **Silence is the default and the common case.** A healthy install has no
@@ -38,7 +50,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from seestack.io.project import StackRunRow
+from seestack.io.project import RestoredWindow, StackRunRow
 from seestack.session_recap import parse_capture_time
 
 
@@ -58,20 +70,25 @@ class RestoredSubs:
 
 
 def restored_since_stack(
-    runs: list[StackRunRow], *, restored_stamps: list[str],
+    runs: list[StackRunRow], *, restored: list[RestoredWindow],
 ) -> RestoredSubs | None:
     """What the newest *genuine* run in ``runs`` (newest first, editor exports and
     combines already filtered out by the caller) missed because subs came back
     after it ran — or ``None`` when there is nothing to say.
 
-    ``restored_stamps`` are the ``restored_utc`` values of the target's
-    stack-ready subs (see :meth:`seestack.io.project.Project.restored_frame_stamps`).
-    A stamp strictly later than the run's own ``timestamp_utc`` means that sub
-    was set aside while the picture was being made, so the picture does not
-    contain it.
+    ``restored`` are the set-aside → put-back windows of the target's
+    stack-ready subs (see
+    :meth:`seestack.io.project.Project.restored_frame_windows`). A sub counts
+    only when it was genuinely absent while the picture was being made: put back
+    strictly after the run, **and** not still accepted when the run started. A
+    window whose ``set_aside`` postdates the run is a sub the run combined and
+    the app set aside afterwards, so the picture has it and it must not be
+    counted; a window with no ``set_aside`` at all (a legacy row, or a sub
+    rejected at ingest) is read on the restoration stamp alone, exactly as this
+    function behaved before that stamp existed.
 
     ``None`` — meaning *say nothing* — for a target with no runs, and whenever no
-    stamp postdates the newest one. Both are the common case: saying nothing is
+    window postdates the newest one. Both are the common case: saying nothing is
     the right default for an offer.
     """
     if not runs:
@@ -84,10 +101,15 @@ def restored_since_stack(
         return None
 
     n = 0
-    for s in restored_stamps:
-        when = parse_capture_time(s)
-        if when is not None and when > ran:
-            n += 1
+    for window in restored:
+        when = parse_capture_time(window.restored)
+        if when is None or when <= ran:
+            continue
+        if window.set_aside:
+            aside = parse_capture_time(window.set_aside)
+            if aside is not None and aside > ran:
+                continue  # it was still accepted when the picture was made
+        n += 1
     if n <= 0:
         return None
 

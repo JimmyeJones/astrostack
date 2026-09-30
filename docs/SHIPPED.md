@@ -1,6 +1,6 @@
 # Shipped — the record
 
-## 2026-09-30 (Builder, same run as v0.492.6/.7) — v0.492.8: a flaky frontend test, caught by CI on this run's own PR and proved nondeterministic rather than assumed
+## 2026-09-30 (Builder, same run as v0.492.6/.7) — v0.492.10: a flaky frontend test, caught by CI on this run's own PR and proved nondeterministic rather than assumed
 
 ### 🟠 FLAKY TEST (the first category AGENTS.md §3 says to look in) — three Memory-card tests read `getSystem` data synchronously after waiting only for the card's own chrome
 
@@ -54,6 +54,139 @@ so nothing about the owner's install differs.
 
 **Verification.** `npx tsc --noEmit` clean; `npx vitest run` **4,535 passed across 296 files**;
 `npx vite build` clean; Python suite green. All run from `frontend/` as AGENTS.md §7 requires.
+## 2026-09-30 (Builder, same run as v0.492.8) — v0.492.9: the documented suite command needs a plugin nobody installs
+
+### INFRA / the quality bar itself — `pytest-xdist` joins `pytest-timeout` in the `dev` extra, with a contract test over both
+
+`docs/AGENT-ENVIRONMENT.md` documents `OMP_NUM_THREADS=1 … python -m pytest -q -n 4 --dist worksteal` as
+*the* way to run this suite, and states the reason in numbers: **~11 minutes instead of ~75**. It also says,
+in the trap directly above it, that a summary line which does not end in `passed` or `failed` is not a
+result. Those two paragraphs are about the same failure and neither of them prevents it, because the plugin
+that makes `-n` parse is **not installed by anything**: it is not in `pyproject.toml`, not in
+`scripts/agent-setup.sh`, and the document itself says only *"after `pip install pytest-xdist` into the
+run's own `.venv`"*.
+
+A missing pytest plugin does not degrade — it is a **usage error**. `pytest … -n 4 --dist worksteal` with no
+xdist prints `error: unrecognized arguments: -n --dist worksteal`, an `inifile:`/`rootdir:` block, and exits
+**4** with nothing collected. It has now cost two unattended runs a suite start: this one, and the run before
+it, whose process note records `pip install pytest-xdist` landing in the **system** site-packages because
+`source scripts/agent-setup.sh` does not survive into the next `Bash` call — a failure that reads identical
+until the following command.
+
+`pytest-timeout` sits in the `dev` extra for *precisely* this reason and its comment says so, so this is the
+same fix for the sibling flag, with the same reasoning written down. New
+`tests/test_image_contract.py::test_the_documented_suite_flags_have_their_plugins_in_the_dev_extra` asserts
+both plugins are in the `dev` extra **and in neither case in the base dependencies** — the extra is what CI's
+test job and `agent-setup.sh` install (`.[dev,web]` / `.[dev,web,gui]`), while the image and the `Image
+contract` job install `.[web]`, so **nothing the owner deploys gains a byte**. Fail-before verified by
+deleting the line in a scratch copy.
+
+No engine, webapp, frontend, config, schema, on-disk, API or default change. Tests +1.
+
+
+## 2026-09-30 (Builder) — v0.492.8: a sub set aside *after* the picture that used it is still in that picture
+
+### 🟠 BUG FIX (trust / autonomy — PRIORITY 2), the first half of the `restored_utc` LEAD filed with v0.492.4, reproduced and fixed — `frames.rejected_utc`, `count_light_missing_from_stack`, `restored_frame_windows`
+
+**The claim that was wrong.** `restorednudge.restored_since_stack` says in its own docstring that *"a stamp
+strictly later than the run's own `timestamp_utc` means that sub was set aside while the picture was being
+made"*, and v0.492.3's `Project.count_light_missing_from_stack` — the rule behind the Dashboard's
+"new light waiting" note, v0.492.0's **"Bring my pictures up to date"** scope and the counts its confirm
+dialog quotes — was built on the same reading. It does not hold. A sub can be set aside **after** the stack
+that used it and put back later:
+
+| moment | what happens |
+|---|---|
+| T0 | the target is stacked; frame F is accepted, solved, and **goes into the picture** |
+| T1 > T0 | `qc.grading.apply_grade_report` re-grades on a now-larger population, the percentile cut moves, and F is rejected |
+| T2 > T1 | `apply_grade_reaccepts` puts F back and stamps `restored_utc = T2` |
+
+`T2 > T0`, so both surfaces read F as *"light the picture lacks"* — and the picture contains it. The
+mechanism is in the code, not inferred: `apply_grade_report` rejects any currently-accepted frame the report
+names, and `apply_grade_reaccepts` stamps every one it restores. It is reachable with **no new light at all**
+(the owner changes `auto_grade_sensitivity`, or presses the Target page's own `auto-grade/apply` and the next
+scan re-accepts) and with new light that is itself unstackable (a night whose subs all fail to solve still
+moves the cut). Nothing distinguished the two cases: `frames` recorded *when a sub came back* and never *when
+it was set aside*, and `stack_runs` records `n_frames_used`, not which frames.
+
+**Why it is worth a schema column and not a footnote.** The two surfaces it feeds are the ones that spend the
+owner's hardware. The note says a target has fallen behind; the batch re-stacks it — hours of NAS CPU
+producing the identical picture — and then the count clears, so the loop is self-hiding and the owner is
+never told the trip was wasted. The lead's own estimate ("an over-count of a few, on a target that already
+has genuine new light by definition") is right about the *size* and wrong about the *set*: the "by
+definition" holds only when the subs that moved the cut are themselves accepted and solved.
+
+**The fix — one stamp, written in one place.** New additive `frames.rejected_utc`, stamped
+**centrally in `Project.update_frame`**, which is the only
+`UPDATE frames` statement in the codebase — so none of the dozen reject sites, nor one written later, can
+forget it. It is stamped only on a genuine **accepted → set-aside transition**, read off the row's
+*pre-update* `accept` inside the same statement (`rejected_utc = CASE WHEN accept = 1 THEN ? ELSE
+rejected_utc END`; SQLite evaluates every right-hand side against the original row), so re-writing a reason
+on a frame that was already aside leaves the stamp where it is and the column always answers *"when did this
+sub last stop being in the picture?"* rather than *"when did something last touch it?"*. No extra read, no
+extra statement.
+
+Both readers then ask the same question of both ends of the window — *was the sub absent while the picture
+was being made?*, i.e. `rejected_utc < run < restored_utc`:
+
+* `Project.count_light_missing_from_stack` gains one `AND NOT (rejected_utc > ?)` inside the existing
+  restored-branch, still one indexed `COUNT`.
+* `Project.restored_frame_stamps` becomes `restored_frame_windows`, returning
+  `RestoredWindow(restored, set_aside)` instead of a bare stamp, and `restorednudge.restored_since_stack`
+  skips a window whose `set_aside` postdates the run. Internal rename; the endpoint
+  (`GET …/restored-subs`) and its `RestoredSubsOut` are untouched.
+
+**One-sided in every direction, which is what makes it safe on a live install.** A frame with no
+`rejected_utc` — rejected at ingest, never un-accepted, or any row written before schema 23 — keeps *exactly*
+today's answer, so the upgrade cannot change a single number on the owner's box until the app itself sets a
+sub aside. A tie (`rejected_utc == run`) counts, the same direction. An **unparseable** set-aside stamp is
+ignored rather than trusted, because the other direction would *silence* a real nudge. And `restored_utc`
+itself is untouched — the lead's own instruction ("do not fix it by narrowing `restored_utc`") was followed:
+the stamp is right, and v0.492.3's widening is what finally reached the 178 wrong-scale-solve restorations.
+
+**Two things the full suite caught that the reasoning had not, and both are in the fix.** The first draft
+bumped `SCHEMA_VERSION` 22 → 23 and hashed the new column into the frames fingerprint. Both were wrong, and
+the repo already had a test saying so in each case — which is the argument for running the whole suite rather
+than the slice you touched.
+
+* **No version bump — the upgrade has to stay rollable.** `_check_schema` refuses outright to open a project
+  stamped *newer* than the running build, so a bump means that after this upgrade a **rollback to v0.492.7
+  cannot open any project v0.492.8 has touched**. Two existing guards
+  (`test_an_old_build_can_still_read_a_project_this_build_wrote`, in
+  `tests/test_stack_time_estimate.py` and `tests/test_uncovered_fraction.py`) went red on `assert 23 <= 22`
+  and are exactly that rule. So `rejected_utc` is added the way `seam_residual`, `duration_s` and the
+  `grain_*` columns were: an **ungated** `ALTER` that runs for every older DB and no-ops once present, with
+  `_reconcile_table_columns` covering a DB already stamped current. A third guard,
+  `test_an_old_build_can_still_open_a_project_this_build_set_a_sub_aside_in`, now states the rule for this
+  column too and goes red if anyone bumps for an additive column again.
+* **The two provenance stamps are out of the frames fingerprint.**
+  `Project.frames_fingerprint` was `SELECT *`, so stamping a set-aside made
+  `test_undoing_a_change_restores_the_fingerprint` fail: a reject-then-re-accept no longer returned the
+  frame set to a cache **hit**, costing `webapp.estimate_cache` its ~1 s canvas computation every time.
+  New `_FINGERPRINT_PROVENANCE_COLS = {"restored_utc", "rejected_utc"}`. This loses **nothing**: every
+  change those stamps accompany is already visible to the hash through `accept`, which is the column the
+  derivation actually depends on. And it is an *exclusion* list on purpose — a column added later is hashed
+  unless someone deliberately names it, so forgetting over-invalidates, which is the same safe direction
+  the method's docstring already accepts.
+
+**Upgrade safety (§9).** Additive nullable column, no `SCHEMA_VERSION` change, additive `ALTER` that runs
+from any older version, no table dropped or rewritten, no row deleted; on-disk layout, config, defaults and
+every HTTP response shape unchanged. The route that actually reaches a live install — the ungated `ALTER`
+plus the reconcile, on a DB stamped at the current version — has its own frozen-DDL test.
+
+**Tests +17, fail-before shown for every behavioural claim** by scratch reverts that neutralise only the
+logic under test: the SQL exclusion clause (1 red), the nudge's set-aside check (2 red), the central stamp
+(3 red), the fingerprint exclusion (3 red), the version bump (1 red). The positive cases are pinned
+alongside — a sub set aside *before* the picture and back after it still counts, a legacy row with no
+set-aside stamp reads as it always did, a target carrying all three shapes at once counts exactly the two
+that are news, and a column nobody excluded is still hashed.
+
+**What this deliberately does not do.** The adjacent question the same grep raised — both counts require
+`wcs_json`, while `stacker.STAR_MATCH_MAX_UNSOLVED` lets an install that turns on `star_match_unsolved` place
+unsolved subs too — is left open in `docs/IMPROVEMENTS.md`, gated on that option rather than on a threshold.
+`StackOptions.star_match_unsolved` defaults `False` and is hand-set advanced, so the bar is exactly right for
+the owner's runs, and the failure direction there is *under*-reach, which is the safe way for an offer to be
+wrong.
 
 
 ## 2026-09-30 (Builder, same run as v0.492.6) — v0.492.7: the recap line said "12 other" too, and the drift test that should have caught both was exempted
