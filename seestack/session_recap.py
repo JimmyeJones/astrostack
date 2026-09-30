@@ -30,7 +30,13 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Callable, Hashable, Sequence, TypeVar
 
-from seestack.io.project import FrameRow, Project
+from seestack.io.project import (
+    FrameRow,
+    Project,
+    REJECT_REASON_BAD_SOLVE_PREFIX,
+    REJECT_REASON_FILE_MISSING,
+    REJECT_REASON_SEESTAR_OUTPUT,
+)
 from seestack.qc.grading import CLOUD_METRIC_NAMES, SEEING_METRIC_NAMES
 
 # Any row whose first element is its capture time — see ``_split_sessions``.
@@ -84,7 +90,18 @@ FWHM_DRIFT_ABS_PX = 0.6             # ≥ 0.6 px worse in absolute terms — bot
 # "hazy" verdict below counts only the ``cloudy`` bucket, never as the night
 # the sky was to blame for. ``grade`` stays as the trailing catch-all for an
 # ``auto:grade:`` reason naming a metric grading doesn't know.
+# Reasons the app writes about a *file* rather than about the sky come first:
+# each is an exact string (or prefix) the code names as a constant, so a needle
+# for it cannot be ambiguous, and matching them before the metric rows below
+# means a future word in one of their sentences can never be read as a metric.
+# They were "other" until v0.492.7 — which on the recap line meant the owner read
+# "12 other" about subs the app had diagnosed precisely, two of them
+# (`auto:seestar_output`, `auto:file_missing`) already given their own words on
+# every *other* surface that describes a rejection.
 _REJECT_BUCKETS: list[tuple[tuple[str, ...], str]] = [
+    ((REJECT_REASON_BAD_SOLVE_PREFIX,), "wrongly located"),
+    ((REJECT_REASON_SEESTAR_OUTPUT,), "Seestar's own pictures"),
+    ((REJECT_REASON_FILE_MISSING,), "files missing"),
     (("streak", "trail"), "trailed"),
     (CLOUD_METRIC_NAMES, "cloudy"),
     (SEEING_METRIC_NAMES + ("grade",), "soft"),
@@ -95,9 +112,17 @@ _REJECT_BUCKETS: list[tuple[tuple[str, ...], str]] = [
 
 def bucket_reject_reason(reason: str | None) -> str:
     """Collapse a raw ``reject_reason`` into a plain bucket (``trailed`` /
-    ``cloudy`` / ``soft`` / ``unreadable`` / ``set aside by you`` / ``other``).
-    A NULL reason bucketed under ``set aside by you`` — a manual reject with no
-    explicit reason is recorded that way elsewhere (``reject_reason_counts``)."""
+    ``cloudy`` / ``soft`` / ``unreadable`` / ``wrongly located`` /
+    ``Seestar's own pictures`` / ``files missing`` / ``set aside by you`` /
+    ``other``). A NULL reason bucketed under ``set aside by you`` — a manual
+    reject with no explicit reason is recorded that way elsewhere
+    (``reject_reason_counts``).
+
+    The labels are the words the count is rendered with (``"12 cloudy, 2
+    trailed"``), so they read as a plural noun phrase rather than as a bucket
+    key. ``other`` is the honest answer only for a reason the app never named;
+    a reason it *did* name belongs in a row above — see :data:`_REJECT_BUCKETS`,
+    and the drift test that now keeps the two in step."""
     if not reason:
         return "set aside by you"
     low = reason.lower()

@@ -28,6 +28,7 @@ import ast
 import re
 from pathlib import Path
 
+from seestack import session_recap
 from seestack.io import project as project_mod
 from seestack.qc import grading
 from webapp import rejection_summary
@@ -58,7 +59,14 @@ _EXEMPT: dict[str, str] = {
     "seestack/stack/stacker.py::run_stack::reason": (
         "a plain-English sentence composed at stack time (\"bad plate-solve "
         "(footprint far from the group)\") — deliberately shown verbatim, which is "
-        "what rejectReasonLabel's fall-through is for."
+        "what rejectReasonLabel's fall-through is for. **This exempts the two "
+        "label checks only.** It used to exempt the site from the bucket checks "
+        "below as well, because one opaque write drops out of ``_vocabulary()`` "
+        "for every test that reads it — and that is exactly how two reasons the "
+        "app names precisely reached the owner as \"other\" on the breakdown card "
+        "(fixed v0.492.6) and on the recap line (v0.492.7). The bucket test now "
+        "reads the named constants off ``seestack.io.project`` directly instead "
+        "of trusting this scrape."
     ),
 }
 
@@ -199,6 +207,39 @@ def _ts_prefixes() -> list[str]:
     return re.findall(r'"([^"]+)"', body)
 
 
+def _named_reasons() -> set[str]:
+    """Every whole reject reason the engine names as a module constant.
+
+    Read off the module at runtime rather than scraped out of the source, and
+    that is the point: a write site whose expression the scraper cannot derive
+    is exempted in :data:`_EXEMPT`, and an exemption written about one of these
+    tests silently covers all of them. The stacker's bad-solve write is exactly
+    that case — it passes a local (``reason``), assigned from one of two
+    constants one line above — so its label exemption also hid it from the
+    bucket tests, and the owner's breakdown card called 178 precisely-diagnosed
+    subs "other reasons" (v0.492.6). A constant cannot hide this way: it either
+    buckets or it does not.
+
+    Includes the ``_PREFIX`` constants deliberately. A prefix is the head of
+    every reason composed from it, and both bucket mappings match by prefix or
+    substring, so requiring it to bucket is the same requirement as for the
+    whole reasons built on it.
+    """
+    return {str(getattr(project_mod, n)) for n in dir(project_mod)
+            if n.startswith("REJECT_REASON_")
+            and isinstance(getattr(project_mod, n), str)}
+
+
+def test_the_named_reason_sweep_actually_finds_the_constants():
+    """A guard on the guard: if the constants are renamed or moved out of
+    ``seestack.io.project``, :func:`_named_reasons` starts returning a smaller
+    set and the two bucket tests above quietly stop checking anything."""
+    found = _named_reasons()
+    assert len(found) >= 6, f"the REJECT_REASON_* constants moved: {sorted(found)}"
+    assert any("bad plate-solve" in r for r in found)
+    assert "auto:seestar_output" in found
+
+
 def _vocabulary() -> tuple[set[str], set[str]]:
     """The exact reasons and namespace prefixes the code can store."""
     exact: set[str] = set()
@@ -279,9 +320,27 @@ def test_every_reason_the_code_writes_groups_into_a_named_bucket():
     an exact reason the app writes about a *file* falling into "Left out for
     other reasons" is the same failure as showing its raw code."""
     exact, _ = _vocabulary()
-    vague = sorted(r for r in exact
+    vague = sorted(r for r in exact | _named_reasons()
                    if rejection_summary._bucket_for(r) == "other")
     assert not vague, (
         "these reject_reasons are written by the app but webapp/rejection_summary.py "
         f"has no bucket for them, so the breakdown says only \"other\": {vague}"
+    )
+
+
+def test_every_reason_the_code_writes_groups_into_a_named_recap_bucket():
+    """The same requirement for the *other* grouping — the one behind the "last
+    night" recap line and the Nights rows
+    (:func:`seestack.session_recap.bucket_reject_reason`). It is a separate hand
+    mirror of the same vocabulary, keyed on substrings rather than namespaces,
+    and nothing checked it until v0.492.7: it was sending four of the six named
+    reasons to "other", including the two that had already been given their own
+    words everywhere else ("12 other" in the sentence the owner reads on
+    return)."""
+    vague = sorted(r for r in _vocabulary()[0] | _named_reasons()
+                   if session_recap.bucket_reject_reason(r) == "other")
+    assert not vague, (
+        "these reject_reasons are written by the app but "
+        "seestack/session_recap.py has no bucket for them, so the recap line "
+        f"says only \"other\": {vague}"
     )

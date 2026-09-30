@@ -471,20 +471,6 @@ def test_a_wrong_solve_never_becomes_the_headline_advice():
     assert s["verdict"]["tone"] == "warn"
 
 
-def test_every_canonical_reject_reason_the_app_writes_has_its_own_bucket():
-    """Drift guard, and the reason this test exists: the same defect has now
-    landed twice — `auto:seestar_output` and then the stacker's bad-solve prose
-    both shipped as reject reasons the app writes deliberately and this card
-    described as "other reasons". A new `REJECT_REASON_*` constant added without
-    a bucket fails here rather than silently reaching the owner's card."""
-    from seestack.io import project
-    from webapp.rejection_summary import bucket_for
-
-    names = sorted(n for n in dir(project) if n.startswith("REJECT_REASON_"))
-    assert len(names) >= 6, f"constants moved or were renamed: {names}"
-    unbucketed = [n for n in names
-                  if bucket_for(str(getattr(project, n))) == "other"]
-    assert unbucketed == [], (
-        "these reject reasons land in 'Left out for other reasons' on the "
-        f"beginner breakdown card: {unbucketed}"
-    )
+# The drift guard for "every reason the app names buckets somewhere" lives in
+# tests/test_reject_reason_labels.py, which owns this vocabulary for the badge,
+# this breakdown and the recap line at once — see _named_reasons() there.
