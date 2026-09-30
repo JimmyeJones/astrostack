@@ -20,6 +20,13 @@ as root, so:
   ``rollback`` (plus a yes/no for restoring data), is validated field by field, and
   nothing in it ever reaches a command line. An update always installs
   ``origin/stable``; the page cannot name a commit;
+* it touches ASTRO_DATA **only through one directory handle**: ``state/updater``,
+  opened once with ``O_NOFOLLOW`` at every step from ASTRO_DATA down, and every file
+  in it opened relative to that handle with ``O_NOFOLLOW`` (and ``O_EXCL`` for
+  anything it creates). So a symlink the container plants — ``last.log`` pointing at
+  a system file, ``status.json`` at a secret, the folder itself at ``/etc`` — is
+  refused rather than followed as root, and swapping a path mid-run changes nothing,
+  because the handle already names the directory that was checked;
 * this script and the clone it drives must live **outside** ASTRO_DATA —
   ``--install`` refuses otherwise — because a file the container could edit, run as
   root by cron, would hand the web page root on the NAS.
@@ -40,7 +47,9 @@ import json
 import os
 import pwd
 import re
+import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -116,19 +125,111 @@ def _is_within(child: Path, parent: Path) -> bool:
         return False
 
 
-def _atomic_write(path: Path, text: str, like: Path | None = None) -> None:
+def _atomic_write(path: Path, text: str) -> None:
+    """For the helper's own folder only (outside ASTRO_DATA); see QueueDir for the rest."""
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
         with os.fdopen(fd, "w") as f:
             f.write(text)
         os.chmod(tmp, 0o644)
-        if like is not None and os.geteuid() == 0:
-            st = like.stat()
-            os.chown(tmp, st.st_uid, st.st_gid)
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
+
+
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+class QueueDir:
+    """``$ASTRO_DATA/state/updater``, held open as a directory fd.
+
+    The container can write anywhere under ASTRO_DATA, and this runs as root, so
+    nothing here resolves a path by name after the fd is open: each file is opened
+    relative to it with ``O_NOFOLLOW``. ``state`` and ``updater`` are each opened
+    with ``O_NOFOLLOW`` too, so a symlinked folder is refused (ELOOP / ENOTDIR),
+    not followed. ASTRO_DATA itself comes from the owner's own ``.env`` and is
+    trusted.
+    """
+
+    def __init__(self, data: Path) -> None:
+        data_fd = os.open(data, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            try:
+                state_fd = os.open("state", _DIR_FLAGS, dir_fd=data_fd)
+            except FileNotFoundError:
+                raise SystemExit(f"{data}/state does not exist — is ASTRO_DATA right, and has the app run once?") from None
+        finally:
+            os.close(data_fd)
+        try:
+            try:
+                self.fd = os.open("updater", _DIR_FLAGS, dir_fd=state_fd)
+            except FileNotFoundError:
+                os.mkdir("updater", 0o755, dir_fd=state_fd)
+                self.fd = os.open("updater", _DIR_FLAGS, dir_fd=state_fd)
+                if os.geteuid() == 0:
+                    st = os.fstat(state_fd)
+                    os.fchown(self.fd, st.st_uid, st.st_gid)
+        finally:
+            os.close(state_fd)
+
+    def _owner(self) -> os.stat_result:
+        return os.fstat(self.fd)
+
+    def read(self, name: str, limit: int = 1 << 20) -> bytes | None:
+        """A regular file's bytes, or None if it is missing, a symlink or not a
+        regular file (a FIFO would otherwise block the helper forever)."""
+        try:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=self.fd)
+        except OSError:
+            return None
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return None
+            return os.read(fd, limit)
+        finally:
+            os.close(fd)
+
+    def create(self, name: str) -> int:
+        """A fresh regular file opened for writing — never an existing one, never
+        through a link. The old name, whatever it was, is unlinked first."""
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(name, dir_fd=self.fd)
+        fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                     0o644, dir_fd=self.fd)
+        os.fchmod(fd, 0o644)
+        if os.geteuid() == 0:
+            st = self._owner()
+            os.fchown(fd, st.st_uid, st.st_gid)
+        return fd
+
+    def write_atomic(self, name: str, text: str) -> None:
+        tmp = f".{name}.{secrets.token_hex(6)}"
+        fd = self.create(tmp)
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(text)
+            os.replace(tmp, name, src_dir_fd=self.fd, dst_dir_fd=self.fd)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp, dir_fd=self.fd)
+            raise
+
+    def rename(self, src: str, dst: str) -> bool:
+        """Rename within the folder (a symlink is moved, not followed). False if
+        *src* is missing."""
+        try:
+            os.replace(src, dst, src_dir_fd=self.fd, dst_dir_fd=self.fd)
+            return True
+        except FileNotFoundError:
+            return False
+
+    def unlink(self, name: str) -> None:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(name, dir_fd=self.fd)
+
+    def close(self) -> None:
+        os.close(self.fd)
 
 
 def _ver_tuple(v: str | None) -> tuple[int, ...]:
@@ -145,7 +246,8 @@ class Agent:
         self.clone = clone
         self.home = home
         self.data = read_astro_data(clone)
-        self.queue = self.data / "state" / "updater"
+        self.queue = self.data / "state" / "updater"      # for messages only — see QueueDir
+        self.qdir: QueueDir | None = None
         st = clone.stat()
         self.owner = pwd.getpwuid(st.st_uid).pw_name
         # Where deploy.sh keeps last-good / last-backup (its STATE_DIR).
@@ -178,15 +280,13 @@ class Agent:
         return (int(p.group(1)), int(lib.group(1))) if p and lib else None
 
     # ---- status.json ----
-    def _status_path(self) -> Path:
-        return self.queue / "status.json"
-
     def read_status(self) -> dict:
+        raw = self.ensure_queue().read("status.json")
         try:
-            st = json.loads(self._status_path().read_text())
-            return st if isinstance(st, dict) else {}
-        except (OSError, ValueError):
+            st = json.loads(raw) if raw is not None else {}
+        except ValueError:
             return {}
+        return st if isinstance(st, dict) else {}
 
     def update_status(self, **fields) -> dict:
         with self._status_lock:
@@ -195,18 +295,17 @@ class Agent:
             st["schema"] = 1
             st["agent_version"] = AGENT_VERSION
             st["agent_seen_at"] = time.time()
-            _atomic_write(self._status_path(), json.dumps(st, indent=1), like=self.queue)
+            self.ensure_queue().write_atomic("status.json", json.dumps(st, indent=1))
             return st
 
-    def ensure_queue(self) -> None:
-        state = self.data / "state"
-        if not state.is_dir():
-            raise SystemExit(f"{state} does not exist — is ASTRO_DATA right, and has the app run once?")
-        if not self.queue.is_dir():
-            self.queue.mkdir()
-            if os.geteuid() == 0:
-                st = state.stat()
-                os.chown(self.queue, st.st_uid, st.st_gid)
+    def ensure_queue(self) -> QueueDir:
+        if self.qdir is None:
+            try:
+                self.qdir = QueueDir(self.data)
+            except OSError as e:     # ELOOP / ENOTDIR: a symlink or a file where a folder should be
+                raise SystemExit(f"refusing to use {self.queue}: {e.strerror} — "
+                                 "state/ and state/updater/ must be real folders, not links") from None
+        return self.qdir
 
     # ---- facts the page shows ----
     def installed(self) -> dict:
@@ -274,7 +373,7 @@ class Agent:
     def run_logged(self, cmd: list[str]) -> tuple[bool, list[str]]:
         """Run *cmd* in the clone, logging to state/updater/last.log, stamping the
         heartbeat while it runs (a deploy takes minutes)."""
-        log_path = self.queue / "last.log"
+        log_fd = self.ensure_queue().create("last.log")
         done = threading.Event()
 
         def beat() -> None:
@@ -285,13 +384,15 @@ class Agent:
         t = threading.Thread(target=beat, daemon=True)
         t.start()
         try:
-            with open(log_path, "w") as log:
-                r = subprocess.run(cmd, cwd=self.clone, stdin=subprocess.DEVNULL,
-                                   stdout=log, stderr=subprocess.STDOUT, env=self._env())
+            r = subprocess.run(cmd, cwd=self.clone, stdin=subprocess.DEVNULL,
+                               stdout=log_fd, stderr=subprocess.STDOUT, env=self._env())
+            size = os.fstat(log_fd).st_size
+            tail = os.pread(log_fd, 64 * 1024, max(0, size - 64 * 1024))
         finally:
             done.set()
             t.join()
-        lines = log_path.read_text(errors="replace").splitlines()
+            os.close(log_fd)
+        lines = tail.decode("utf-8", errors="replace").splitlines()
         return r.returncode == 0, lines[-LOG_TAIL_LINES:]
 
     def refresh_self(self) -> None:
@@ -307,18 +408,15 @@ class Agent:
 
     # ---- one cron tick ----
     def tick(self) -> None:
-        self.ensure_queue()
+        q = self.ensure_queue()
         st = self.read_status()
         self.update_status(state="idle", job=None, installed=self.installed(),
                            rollback=self.rollback_info(),
                            **({} if "available" in st else {"available": None}))
-        req, claimed = self.queue / "request.json", self.queue / "request.claimed.json"
-        try:
-            os.replace(req, claimed)
-        except FileNotFoundError:
+        if not q.rename("request.json", "request.claimed.json"):
             return
-        raw = claimed.read_bytes()
-        claimed.unlink(missing_ok=True)
+        raw = q.read("request.claimed.json", limit=4096) or b""
+        q.unlink("request.claimed.json")
         now = time.time()
         rid = None
         try:

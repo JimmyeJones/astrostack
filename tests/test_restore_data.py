@@ -138,3 +138,23 @@ def test_rollback_script_no_longer_rolls_the_dataset_back() -> None:
     assert "zfs rollback" not in code
     assert "scripts/lib/restore-data.sh" in code
     assert os.access(SCRIPT, os.X_OK)
+
+
+def test_a_folder_the_app_replaced_with_a_link_stops_the_restore(tmp_path: Path) -> None:
+    """Root must not write through library/ -> somewhere else on the host."""
+    data = tmp_path / "astro"
+    snap_name = "astrostack-pre-v0.490.0-x"
+    _state_at_backup(data / ".zfs" / "snapshot" / snap_name)
+    _state_at_backup(data)
+    (data / "state" / "jobs.sqlite-wal").write_text("current wal")
+    host = tmp_path / "host-etc"
+    host.mkdir()
+    shutil.rmtree(data / "library")
+    (data / "library").symlink_to(host)
+
+    r = _run(data, f"tank/astro@{snap_name}")
+
+    assert r.returncode != 0 and "is a link" in r.stderr
+    assert list(host.rglob("*")) == []
+    assert (data / "state" / "config.json").read_text() == '{"auto_stack": false}'   # nothing restored
+    assert (data / "state" / "jobs.sqlite-wal").exists()                            # nothing deleted
