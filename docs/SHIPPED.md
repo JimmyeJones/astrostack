@@ -1,5 +1,80 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder, the run after that) — the one-click catch-up could not reach the subs the app itself had just handed back
+
+### v0.492.3 — 🟠 BUG FIX (autonomy, PRIORITY 2), Builder-found and reproduced: "new light" meant *light shot since*, so the library-wide catch-up was blind to a sub the app set aside and put back
+
+*(Filed and fixed in one run, so it never entered "Bugs (fix these first)". Traced in the code, then
+reproduced through the real endpoint and the real batch body before anything changed — both fail-before by
+scratch revert.)*
+
+**The bug.** `webapp/routers/newsubs.py::new_light_since_picture` is, by its own docstring, *"the one
+definition of 'this target has new light'"* — three surfaces ask it: the Dashboard's *"you've shot more of
+these"* note, v0.492.0's **"Bring my pictures up to date"** reprocess scope (`new_light_only`), and the counts
+that scope's confirm dialog quotes. It answered with `Project.count_accepted_solved_after(run.timestamp_utc)`,
+which counts accepted-and-solved subs **captured** after the picture was stacked. That is the right question
+for the Target page's *"N new subs since your last stack"* line and the wrong one for *"is this picture behind
+the light I own?"* — **a sub can be missing from a picture without having been shot after it.**
+
+**Why that is not hypothetical, and why it mattered this week.** The app sets subs aside by itself and puts
+them back by itself, and a restoration *after* a stack means that stack does not contain the sub. Four
+reconcilers write `frames.restored_utc`: a streak that turned out to be a tracked object, a grade re-run on a
+bigger population, a missing file that reappeared — and, as of **v0.489.0 (shipped the day before this fix)**,
+`seestack/solve/runner.py::reconcile_bad_solve_frames`, which exists precisely to hand back subs a stack
+dropped for a wrong-scale plate solve: **178 of them on the owner's library** (observer issue #965). Every one
+of those was shot long before the picture it is missing from — usually on the very night that picture is made
+of — so the capture-time rule is silent on them **by construction**. The result: v0.489.0 puts the subs back,
+and the one library-wide offer built to restack behind-the-light targets in a single batch could not see a
+single one of those targets. The only route left was the Stack form, target by target, which is exactly the
+friction v0.492.0 was built to remove. `stable` advances to a `main` commit ≥ 3 days old, so this follow-up
+lands with the change it follows rather than a soak behind it.
+
+**The app already knew.** `seestack/restorednudge.py` — the per-target *"some of your subs came back after this
+picture was made"* card — has said in its own module docstring since it was written that *"the 'N new subs
+since your last stack' nudge cannot see this case at all"*. What was missing was not the insight; it was that
+nothing carried it to the **library-wide** surface, where the question is only *which* pictures are behind.
+
+**The fix — one COUNT, not two.** New `Project.count_light_missing_from_stack(timestamp_utc)`: accepted **and**
+solved (the same bar both siblings use — the two things a re-stack needs from a frame), and either **captured**
+after the stack **or restored** after it, as a single `OR` inside one `COUNT`. Two counts added together would
+report a sub that is both as two missing subs; a test pins that it is one. `restored_utc` is compared as a
+string for the same reason `timestamp_utc` is: every writer goes through `project.restoration_stamp()`, whose
+whole purpose is that the stamp and a run's own `timestamp_utc` are produced in one shape, so lexicographic
+order is chronological order. `new_light_since_picture` now calls it, so **all three surfaces move together** —
+the note, the batch's target list and the dialog's counts cannot come to different opinions about which
+targets are behind.
+
+**`count_accepted_solved_after` is left exactly as it was.** It is a different question with a different right
+answer, it is the rule the Target page's `countNewSubsSinceStack` mirrors, and its tests still pin it
+unchanged. The Target page keeps its **two** precise sentences (the new-subs line and the restored-subs card)
+on purpose: beside one picture, *why* it is behind is worth saying. The library roll-up is their **union**, and
+a new drift guard pins that against both of the page's own numbers on a fixture where the two sets are
+**disjoint**, so the relationship is an equality rather than an inequality.
+
+**Copy, because one number's meaning changed.** The Dashboard note said *"You've shot N more subs of this
+target since AstroStack last stacked it"*, which is **false** of a restored sub. It now reads *"You have N more
+subs of this target ready to stack than the picture you're seeing includes"* — shorter *and* true of both
+kinds; its title (*"N subs you've shot aren't in the picture yet"*) was already true of both and is unchanged,
+as are the "folds it in" and "stays in that target's history" halves. Settings → Maintenance's scope moves the
+same way: the radio reads *"Only targets whose picture is missing subs you have"* and `newLightScopeText`
+*"Re-stacks the N targets whose pictures are missing subs you already have — N subs of yours that aren't in a
+picture yet"*. Two vitest tests pin that neither sentence claims the subs were shot *since* the stack.
+
+**Nothing removed, nothing added to a screen.** No new card, no new banner, no new control: one label and two
+sentences reworded in place, and one SQL predicate widened.
+
+**Upgrade-safe (§9).** `restored_utc` has existed since schema 22; no migration, no new column, no config key,
+no on-disk change, no default flip, no API **shape** change. A frame written before schema 22 carries no stamp
+and contributes nothing, so on a library that has never had a restoration the new count returns exactly what
+the old one did — which is every healthy install, and why this can only ever widen the set, never narrow it.
+`n_new_subs` / `total_new_subs` / `new_light_subs` keep their names and types; their values become more
+complete, which is the bug fix.
+
+**Tests: +5 (4 Python, +2 vitest, 2 existing selectors re-pointed at the new label).** Fail-before verified by
+scratch revert on both layers — the backend `OR` neutralised (3 red in `test_new_subs_waiting.py`, 1 red in
+`test_reprocess_all.py`), and the two old sentences put back (4 red in the frontend, the two new ones plus the
+two that assert the new wording). Nothing was weakened, skipped or rewritten to pass.
+
 ## 2026-09-30 (Builder, the next run) — six of the seven Settings sections had never been drawn
 
 ### v0.492.2 — INFRA / the quality bar itself: the sweep opens what a page keeps behind a click, and the wall table was wrong by 4.3x

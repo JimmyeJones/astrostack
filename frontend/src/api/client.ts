@@ -2566,10 +2566,12 @@ export interface UnexportedEditItem {
 }
 
 // One target whose newest picture no longer includes every sub it has: subs
-// accepted and plate-solved *after* that stack ran. Same definition as the
-// Target page's own "N new subs since your last stack" nudge — see
-// `/api/new-subs-waiting`. Every field is optional-safe (defaulted server-side)
-// so an older backend simply reports nothing.
+// accepted and plate-solved that the stack does not contain — shot after it ran,
+// or set aside while it was being made and since put back by the app itself. That
+// makes it deliberately *wider* than the Target page's own "N new subs since your
+// last stack" nudge, which counts by capture time and has a sibling card for the
+// restored case; the reasoning is on `/api/new-subs-waiting`. Every field is
+// optional-safe (defaulted server-side) so an older backend simply reports nothing.
 export interface NewSubsWaitingItem {
   safe: string;
   target_name: string;

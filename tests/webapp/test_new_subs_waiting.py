@@ -6,9 +6,10 @@ auto-stack off and a target per object across many nights (AGENTS.md §1), the
 question after a night's capture is *which* target to open — and until
 ``GET /api/new-subs-waiting`` nothing anywhere answered it.
 
-These pin the definition ("new" = accepted **and** solved **and** dated, after
-the newest *genuine* stack), the honesty cases that keep it from nagging, and
-that it never claims a target the Target page's own nudge would call quiet.
+These pin the definition ("new" = accepted **and** solved, and missing from the
+newest *genuine* stack — shot after it, or set aside while it was made and since
+put back), the honesty cases that keep it from nagging, and that the library-wide
+answer is exactly the union of the Target page's own two numbers.
 """
 
 from __future__ import annotations
@@ -28,6 +29,17 @@ EDITOR_OPTS = json.dumps({"editor_recipe": {"ops": []}})
 FRAME_UTC = "2024-09-12T03:14:55.123000+00:00"
 BEFORE = "2024-09-01T00:00:00+00:00"
 AFTER = "2025-01-01T00:00:00+00:00"
+
+# A restoration stamp later than every run these tests write. A real row holds
+# `restoration_stamp()`'s output — `datetime.now(timezone.utc).isoformat()` — so a
+# literal of that shape is what the column actually carries.
+RESTORED_AFTER_EVERYTHING = "2026-06-01T00:00:00+00:00"
+
+# A run stamped between the synthetic frames' own capture time and `SHOT_AFTER_MID`,
+# so one sub of a three-sub target can be shot after the picture and another shot
+# before it — the disjoint fixture the union guard needs.
+MID = "2024-10-01T00:00:00+00:00"
+SHOT_AFTER_MID = "2024-11-01T00:00:00+00:00"
 
 
 def _add_run(data_root, safe, ts, *, options_json=REAL_OPTS, basename="master",
@@ -94,6 +106,55 @@ def test_count_accepted_solved_after_counts_only_usable_dated_new_subs(solved_li
             # Undated: it cannot be placed on either side of the stack.
             proj.update_frame(frames[2].id, timestamp_utc=None)
             assert proj.count_accepted_solved_after(BEFORE) == 0
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_count_light_missing_from_stack_sees_a_sub_that_came_back_after_it(
+        solved_library):
+    """The half `count_accepted_solved_after` cannot see.
+
+    The app sets subs aside by itself and puts them back by itself, and a sub
+    restored *after* a picture was stacked is not in that picture — however long
+    before it the sub was shot. That is usually the very night the picture is made
+    of, so the capture-time test is silent on it by construction.
+    """
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            frames = list(proj.iter_frames())
+            assert len(frames) == 3
+            # A picture stacked after every sub was shot: nothing is "new".
+            assert proj.count_accepted_solved_after(AFTER) == 0
+            assert proj.count_light_missing_from_stack(AFTER) == 0
+
+            # One of them was set aside while that picture was made, and came
+            # back afterwards. The capture-time question still answers zero; the
+            # picture is still missing a sub.
+            proj.update_frame(frames[0].id,
+                              restored_utc=RESTORED_AFTER_EVERYTHING)
+            assert proj.count_accepted_solved_after(AFTER) == 0
+            assert proj.count_light_missing_from_stack(AFTER) == 1
+
+            # A sub that is both shot after the picture *and* restored after it is
+            # one missing sub, not two — the reason this is one COUNT with an OR
+            # rather than two counts added together.
+            assert proj.count_light_missing_from_stack(BEFORE) == 3
+
+            # The same bar as the other half: a re-stack has to be able to use it.
+            proj.update_frame(frames[0].id, accept=0)
+            assert proj.count_light_missing_from_stack(AFTER) == 0
+            proj.update_frame(frames[0].id, accept=1, wcs_json=None)
+            assert proj.count_light_missing_from_stack(AFTER) == 0
+
+            # And a restoration that happened *before* the picture was stacked is
+            # light the picture has: the run combined it.
+            proj.update_frame(frames[0].id, wcs_json=frames[0].wcs_json,
+                              restored_utc=BEFORE)
+            assert proj.count_light_missing_from_stack(AFTER) == 0
         finally:
             proj.close()
     finally:
@@ -213,3 +274,76 @@ def test_one_unreadable_project_does_not_cost_the_whole_answer(
     monkeypatch.setattr(Project, "open", staticmethod(_boom))
     data = _waiting(client)
     assert [i["safe"] for i in data["items"]] == ["M_42"]
+
+
+
+def test_a_target_whose_only_shortfall_is_a_restored_sub_is_still_named(
+        client, solved_library):
+    """The case the library-wide note was blind to, and the reason it matters.
+
+    ``reconcile_bad_solve_frames`` (v0.489.0) exists to hand back subs a stack
+    dropped for a wrong-scale plate solve — up to 178 of them on the owner's
+    library — and every one of those was shot long before the picture it is
+    missing from. On the capture-time rule alone the note said nothing about those
+    targets, so the one library-wide offer that could restack them in a batch
+    could not reach them either: the only route was target by target.
+    """
+    _add_run(solved_library, "M_42", AFTER)          # stacked after every sub
+    assert _waiting(client)["count"] == 0            # …so: silence, correctly
+
+    _update_frames(solved_library, "M_42",
+                   restored_utc=RESTORED_AFTER_EVERYTHING)
+    data = _waiting(client)
+    assert data["count"] == 1
+    assert data["total_new_subs"] == 3
+    assert data["items"][0]["safe"] == "M_42"
+    assert data["items"][0]["n_new_subs"] == 3
+    assert data["items"][0]["stacked_utc"] == AFTER
+
+
+def test_the_library_note_is_the_union_of_the_target_page_s_own_two_numbers(
+        client, solved_library):
+    """The drift guard for a definition that is deliberately *wider* than one of
+    its siblings.
+
+    The Target page keeps the two reasons apart on purpose — *"N new subs since
+    your last stack"* counts by capture time, and the ``restored-subs`` card
+    counts the subs that came back — because beside one picture the reason is
+    worth saying. The library-wide roll-up only has to answer *which* pictures are
+    behind, so it is their union. Re-derived here from the very payloads that page
+    reads, on a fixture where the two sets are **disjoint**, so the union is their
+    sum and the three surfaces cannot drift into naming different numbers.
+    """
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            a, b, _c = list(proj.iter_frames())
+            # a: shot after the picture was made. b: shot before it, set aside
+            # while it was made, and put back afterwards. c: in the picture.
+            proj.update_frame(a.id, timestamp_utc=SHOT_AFTER_MID)
+            proj.update_frame(b.id, restored_utc=RESTORED_AFTER_EVERYTHING)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    _add_run(solved_library, "M_42", MID)
+
+    runs = client.get("/api/targets/M_42/stack-runs").json()
+    newest_genuine = next(r for r in runs if r["reusable"])
+    frames = client.get("/api/targets/M_42/frames").json()
+    rows = frames["frames"] if isinstance(frames, dict) else frames
+    page_new = sum(
+        1 for f in rows
+        if f.get("accept") and f.get("solved") and f.get("timestamp_utc")
+        and f["timestamp_utc"] > newest_genuine["timestamp_utc"]
+    )
+    back = client.get("/api/targets/M_42/restored-subs").json()
+    page_restored = back["n_restored"]
+    # The fixture, stated so a change to it is visible: one sub of each kind, and
+    # no sub of both — so the union is the sum and this is an equality.
+    assert (page_new, page_restored) == (1, 1)
+
+    data = _waiting(client)
+    assert data["items"][0]["n_new_subs"] == page_new + page_restored
+    assert data["items"][0]["stacked_utc"] == newest_genuine["timestamp_utc"]

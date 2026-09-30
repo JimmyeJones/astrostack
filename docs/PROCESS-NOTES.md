@@ -1,5 +1,74 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (Builder, the run after that one) — the bug was in the seam between two features shipped a day apart, and neither one's tests could see it
+
+*(Builder, branch `agent/new-light-restored-subs` → **v0.492.3**. Baseline on `origin/main` at 2c7f338:
+**7065 passed, 2 skipped**, 17m06s with the BLAS cap and `-n 4 --dist worksteal`. Green.)*
+
+### How the work was chosen, since the Bugs section is still gated
+
+Same starting position the previous run recorded, re-checked rather than taken on trust: every open entry in
+"Bugs (fix these first)" is gated on a measurement only the owner's library can supply. Two of those gates were
+re-read to see whether this repo could answer them after all, and **neither can**:
+
+* **The drizzle share** (top entry — *"if most runs are 1x, close this with the number"*). Not answerable
+  here, and worth writing down **why**, because the obvious grep looks conclusive and is not:
+  `StackOptions.drizzle` defaults `False`, so one is tempted to say "so most runs are 1x". But `drizzle` is a
+  `"group": "simple"` field on the Stack form (`webapp/schemas.py:1201`) labelled *"Drizzle
+  (super-resolution)"* — not advanced, not hidden, and appealing. A hand-stacking owner may well be turning it
+  on. The gate stands; the grep bounds nothing.
+* **The ragged-rim-vs-under-shot-panel proxy.** Needs *"how often is one of the owner's mosaics both"*. Not in
+  this repo either.
+
+One entry *was* closed by reading the code — the **watcher clock-skew hardening note**. Its stated mitigation
+(*"a manual 'Scan incoming' or app restart picks the files up anyway"*) is **real**: `StabilityTracker` has
+exactly one consumer, `Watcher`, and the manual scan path never constructs one, so the mtime-age gate cannot
+strand a file against a rescan. Left filed and stood down, as it says; recorded so nobody re-traces it.
+
+So the work came from the place AGENTS.md §3 puts first — *anything broken* — hunted in the **least-swept**
+code there is: what merged in the last two days. The Scout's 2026-09-30 sweep of "fresh post-v0.480 code"
+predates the v0.492.0 merge, so `new_light_only` had never been swept by anyone.
+
+### The finding, and the shape it belongs to
+
+`new_light_since_picture` (v0.492.0, yesterday) asks *"were any subs **captured** after this picture was
+stacked?"*. `reconcile_bad_solve_frames` (v0.489.0, yesterday) hands back subs that were **captured long
+before** the picture they are missing from — 178 of them on the owner's library. Each feature is correct. The
+**seam** is the bug: the second creates exactly the population the first cannot see, and the one library-wide
+catch-up button is built on the first.
+
+**The generalisation worth keeping:** *a predicate written as a date comparison is a claim about causation, and
+a second feature can create the case where the two come apart.* "Shot after the stack" was a perfectly good
+proxy for "not in the stack" until something started putting old subs back. Neither feature's tests could fail:
+v0.489.0's pin that the frames are restored, v0.492.0's that capture-dated subs are counted, and nothing owned
+the sentence *"these two are about the same set"*. **Where a new feature changes what an existing predicate is
+a proxy for, the test that catches it is the one that pins the relationship between them** — which is what the
+union guard on a *disjoint* fixture now is.
+
+### Two things the build itself settled
+
+**1. The app had already written the finding down, three months before it was a bug.**
+`seestack/restorednudge.py`'s module docstring says, in so many words, that the "N new subs since your last
+stack" nudge *"cannot see this case at all"*. It is a **correct** observation about the per-target surface —
+that page has a second card for exactly this — and it was silently inherited by a *library-wide* surface where
+the distinction buys nothing and costs reachability. **A reasoned limitation is scoped to the surface it was
+reasoned about**, and the next surface built on the same predicate does not inherit the reasoning.
+
+**2. One `COUNT` with an `OR`, not two counts added.** The first sketch was
+`count_accepted_solved_after(...) + restored_since_stack(...).n_restored`, which reuses the existing pure
+helper and reads well. It is **wrong**: a sub shot after the picture *and* restored after it is one missing sub
+and would be reported as two. The union has to be taken inside the query. The fixture for the drift guard was
+then deliberately rebuilt to make the two sets **disjoint** (one sub of each kind, none of both), because on an
+overlapping fixture the only honest assertion is `union <= a + b`, which passes on the bug.
+
+### What was deliberately *not* changed
+
+`Project.count_accepted_solved_after` and the Target page's `countNewSubsSinceStack` stay exactly as they are.
+Widening the per-target nudge would have made it double-speak with the `restored-subs` card sitting beside it,
+and the two sentences are there because beside one picture the *reason* it is behind is worth saying. The
+library roll-up is the union; the target page is the breakdown. The docstring claiming "one definition, two
+surfaces" was rewritten to say which way each surface is deliberately wider, rather than deleted.
+
 ## 2026-09-30 (Builder, the run after that one) — the sweep was measuring landing views, and the app's wall is 4.3x taller than any of them
 
 *(Builder, branch `claude/magical-wright-gqme0n` → **v0.492.1** + **v0.492.2**. Baseline on `origin/main` at

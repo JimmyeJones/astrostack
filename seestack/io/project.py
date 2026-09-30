@@ -2023,6 +2023,52 @@ class Project:
             (str(timestamp_utc),),
         ).fetchone()[0]
 
+    def count_light_missing_from_stack(self, timestamp_utc: str) -> int:
+        """How many stack-ready subs a picture stacked at ``timestamp_utc`` does
+        **not** contain — the whole shortfall, not just the newly shot half.
+
+        :meth:`count_accepted_solved_after` answers "what did I shoot since?",
+        which is the right question for the Target page's *"N new subs since your
+        last stack"* line and the wrong one for *"is this picture behind the light
+        I own?"*. A sub can be missing from a picture without having been shot
+        after it: the app sets subs aside by itself and puts them back by itself
+        (a streak that turned out to be a tracked object, a grade re-run on a
+        bigger population, a missing file that reappeared, a wrong-scale plate
+        solve given a second chance — :func:`seestack.solve.runner.reconcile_bad_solve_frames`),
+        and a sub restored *after* the picture was stacked was not in it. It was
+        usually shot on the very night the picture is made of, so the capture-time
+        test cannot see it at all — which is exactly what
+        :mod:`seestack.restorednudge` says about the per-target nudge.
+
+        So: accepted **and** solved (the two things a re-stack needs from a
+        frame — the same bar both siblings use), and either **captured** after
+        the stack or **restored** after it. One ``OR`` inside one ``COUNT``, so a
+        sub that is both is counted once; two separate counts added together
+        would report it twice.
+
+        ``restored_utc`` is compared as a string for the same reason
+        ``timestamp_utc`` is: every writer goes through
+        :func:`restoration_stamp`, whose whole purpose is that the stamp and a
+        run's own ``timestamp_utc`` are produced in one shape, so the
+        lexicographic order is the chronological one.
+
+        A frame written before schema 22 carries no stamp and contributes
+        nothing, so on a library that has never had a restoration this returns
+        exactly what :meth:`count_accepted_solved_after` does — which is every
+        healthy install."""
+        assert self._conn is not None
+        if not timestamp_utc:
+            return 0
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM frames "
+            "WHERE accept = 1 AND wcs_json IS NOT NULL AND wcs_json <> '' "
+            "AND ((timestamp_utc IS NOT NULL AND timestamp_utc <> '' "
+            "      AND timestamp_utc > ?) "
+            "  OR (restored_utc IS NOT NULL AND restored_utc <> '' "
+            "      AND restored_utc > ?))",
+            (str(timestamp_utc), str(timestamp_utc)),
+        ).fetchone()[0]
+
     def source_frames_under(self, prefix: str) -> tuple[int, int, int]:
         """``(n_frames, known_bytes, unsized_frames)`` for the frames whose
         ``source_path`` lies under ``prefix``.

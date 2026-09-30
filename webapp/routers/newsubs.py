@@ -1,8 +1,8 @@
-""""You've shot more of this since the picture was made."
+""""You've shot more of this than the picture has in it."
 
 ``GET /api/new-subs-waiting`` answers, for the whole library at once: *which
-targets have accepted, plate-solved subs that arrived after their newest stack
-ran?* — i.e. whose current picture is no longer made of all the light they own.
+targets have accepted, plate-solved subs their newest stack does not contain?* —
+i.e. whose current picture is no longer made of all the light they own.
 
 **Why it needs its own endpoint.** The per-target version of this note has
 shipped since v0.90.0 (``countNewSubsSinceStack`` on the Target page), and it is
@@ -14,12 +14,25 @@ the one you have to visit per target to reach. That is the same gap
 ``/api/gallery/unexported-edits`` was built to close for saved-but-unexported
 edits, and this is its sibling for un-stacked light.
 
-**One definition, two surfaces.** "New" means exactly what the Target page's
-nudge means — accepted **and** solved, captured after the newest *genuine* stack
-run (an editor export or a channel combine does not reset the clock, via the
-shared :func:`webapp.run_options.run_has_reusable_options` the Target page's
-``reusable`` flag already comes from). So the Dashboard and the Target page can
-never name different numbers for one target; a test pins that.
+**One bar, and the same "which run?" rule as the Target page.** A sub counts
+only if a re-stack would actually combine it — accepted **and** solved — and the
+run it is measured against is the newest *genuine* one (an editor export or a
+channel combine does not reset the clock, via the shared
+:func:`webapp.run_options.run_has_reusable_options` the Target page's
+``reusable`` flag already comes from).
+
+**Where this is deliberately *wider* than the Target page's own nudge, and why.**
+That nudge says *"N new subs since your last stack"* and counts by **capture**
+time, which is the right sentence beside the picture; the sibling card next to it
+(``GET …/restored-subs``, :mod:`seestack.restorednudge`) separately says *"some of
+your subs came back after this picture was made"*. Two precise sentences, because
+on one target the *reason* the picture is behind is worth saying. This endpoint is
+the library-wide roll-up and its question is only *which* pictures are behind, so
+it is their **union** — see :func:`new_light_since_picture`. Keeping it at "shot
+since" left the one library-wide offer unable to reach a target whose whole
+shortfall was a restoration, which is the shape
+:func:`seestack.solve.runner.reconcile_bad_solve_frames` creates by design. A
+test pins the union against both of the Target page's own numbers.
 
 **It offers; it never acts.** Re-stacking is hours of CPU on a NAS, so this
 endpoint is read-only and there is no batch button *here*: each named target
@@ -35,9 +48,9 @@ different targets.
 
 Deliberately cheap: per target, one ``stack_runs`` read that stops at the newest
 genuine row, and — only for a target that has one — a single indexed ``COUNT``
-(:meth:`seestack.io.project.Project.count_accepted_solved_after`). A target that
-has never been stacked costs the first read alone and is skipped: this note is
-about a picture that has fallen behind, and "you have never stacked this" is a
+(:meth:`seestack.io.project.Project.count_light_missing_from_stack`). A target
+that has never been stacked costs the first read alone and is skipped: this note
+is about a picture that has fallen behind, and "you have never stacked this" is a
 different sentence that other surfaces already say.
 """
 
@@ -65,7 +78,8 @@ class NewSubsWaitingItem(BaseModel):
     #: How many subs that picture combined, so the note can say what the
     #: re-stack would grow from as well as by.
     n_frames_used: int = 0
-    #: Accepted + solved subs captured after ``stacked_utc``.
+    #: Accepted + solved subs this picture does not contain — captured after
+    #: ``stacked_utc``, or set aside while it was made and since put back.
     n_new_subs: int = 0
 
 
@@ -90,6 +104,20 @@ def new_light_since_picture(proj, runs):  # noqa: ANN001
     spelling of the rule is exactly how two of them would end up naming different
     targets — the drift ``webapp/run_options.py`` was created to undo.
 
+    **"New light" means light this picture does not contain, not light shot since
+    it was made** — the two diverge, and the narrower reading made this note and
+    the batch it scopes blind to a whole class of shortfall.
+    :meth:`~seestack.io.project.Project.count_light_missing_from_stack` owns the
+    rule: a sub the app set aside by itself and has since put back (a streak that
+    turned out to be a tracked object, a grade re-run on a bigger population, a
+    file that reappeared, a wrong-scale plate solve given its one retry) was shot
+    on the very night the picture is made of, so a capture-time test cannot see
+    it — and it is missing from that picture just the same. The per-target card
+    that says so (:mod:`seestack.restorednudge`, ``GET …/restored-subs``) has said
+    since it was written that this nudge "cannot see this case at all"; now it
+    can, which is what lets the one library-wide offer reach those targets instead
+    of sending the owner through them one at a time.
+
     ``runs`` is the target's stack runs **newest first**, and the walk stops at
     the newest *genuine* one, so passing the iterator keeps the read cheap. A
     target whose newest runs are all editor exports walks past them, which is the
@@ -101,12 +129,12 @@ def new_light_since_picture(proj, runs):  # noqa: ANN001
     run = next((r for r in runs if run_has_reusable_options(r.options_json)), None)
     if run is None:
         return None, 0
-    return run, proj.count_accepted_solved_after(run.timestamp_utc)
+    return run, proj.count_light_missing_from_stack(run.timestamp_utc)
 
 
 def scan_new_subs_waiting(lib) -> list[NewSubsWaitingItem]:  # noqa: ANN001
-    """Every target whose newest genuine stack predates subs it has since
-    accepted and solved — most waiting first.
+    """Every target whose newest genuine stack is missing accepted, solved subs
+    the target already has — most waiting first.
 
     A broken project DB is skipped exactly as the other cross-target reads skip
     it, so one corrupt target cannot cost the whole answer.
