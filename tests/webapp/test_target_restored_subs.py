@@ -150,3 +150,116 @@ def test_the_restack_lands_and_the_note_goes_away(client, built_library):
 
     _register_run(built_library, safe, ts="2026-09-03T01:00:00+00:00")
     assert client.get(f"/api/targets/{safe}/restored-subs").json() is None
+
+
+# --------------------------------- the star-matching install's own bar ---
+
+# A run whose options say the stacker placed un-located subs by matching their
+# star patterns (`StackOptions.star_match_unsolved`). Off by default and hand-set,
+# so this is a deliberate non-owner install; `output_name` rides along so the run
+# still parses as a genuine stack the way every other fixture here does.
+STAR_MATCH_OPTS = {"output_name": "m42", "star_match_unsolved": True}
+
+
+def test_an_unsolved_restored_sub_counts_when_the_run_star_matched_unsolved_subs(
+    client, built_library,
+):
+    """The sibling of ``…_is_not_promised`` above, for the install that turns the
+    option on.
+
+    With ``star_match_unsolved`` on, an un-located sub **is** one the stack would
+    place — by matching its stars to the reference rather than by a solve of its
+    own — so a target whose whole shortfall is un-located subs is a picture that
+    really is behind the light it owns. Before this, the solved half of the bar was
+    unconditional and the note could not see that install at all.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(built_library, safe, ts=RAN, options=STAR_MATCH_OPTS)
+    _mark_restored(built_library, safe, when=AFTER, n=2, solved=False)
+
+    body = client.get(f"/api/targets/{safe}/restored-subs").json()
+    assert body is not None
+    assert body["run_id"] == run_id
+    assert body["n_restored"] == 2
+
+
+def test_the_option_is_read_off_the_run_being_measured_against(
+    client, built_library,
+):
+    """Not off the app's defaults, and not off any older run.
+
+    The question is *"what would stacking this again fold in?"*, and a reprocess
+    reuses the newest genuine run's settings — so that run is the one whose option
+    decides. A target stacked once with star-matching and then re-stacked without
+    it is back to the solved bar.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_run(built_library, safe, ts=BEFORE, options=STAR_MATCH_OPTS)
+    _register_run(built_library, safe, ts=RAN)          # no star-matching
+    _mark_restored(built_library, safe, when=AFTER, n=2, solved=False)
+
+    assert client.get(f"/api/targets/{safe}/restored-subs").json() is None
+
+
+def test_the_option_off_is_spelt_the_narrow_way(client, built_library):
+    """Anything other than a recorded ``True`` reads as off, so the offer errs by
+    saying *less* than it could — the safe direction for an offer to be wrong in.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_run(built_library, safe, ts=RAN,
+                  options={"output_name": "m42", "star_match_unsolved": "yes"})
+    _mark_restored(built_library, safe, when=AFTER, n=2, solved=False)
+
+    assert client.get(f"/api/targets/{safe}/restored-subs").json() is None
+
+
+def test_a_star_matching_run_still_counts_the_solved_restored_subs(
+    client, built_library,
+):
+    """Lifting the solved half of the bar widens it; it must not replace it."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_run(built_library, safe, ts=RAN, options=STAR_MATCH_OPTS)
+    _mark_restored(built_library, safe, when=AFTER, n=2, solved=True)
+
+    body = client.get(f"/api/targets/{safe}/restored-subs").json()
+    assert body is not None
+    assert body["n_restored"] == 2
+
+
+def test_a_sub_the_user_set_aside_is_still_not_promised_under_star_matching(
+    client, built_library,
+):
+    """The option lifts *one* half of the bar. Accepted is the other, and a sub
+    the user rejected is not coming back into the picture whatever the stacker
+    could align."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_run(built_library, safe, ts=RAN, options=STAR_MATCH_OPTS)
+    _mark_restored(built_library, safe, when=AFTER, n=2, solved=False, accept=False)
+
+    assert client.get(f"/api/targets/{safe}/restored-subs").json() is None
+
+
+def test_an_empty_wcs_string_reads_as_unsolved_here_too(client, built_library):
+    """One definition of "did the plate solve locate this sub?".
+
+    ``FrameRow.solved`` is ``bool(wcs_json)``, and every other reader agrees, but
+    this one query tested ``IS NOT NULL`` alone — so an empty string would have
+    been promised here while counting as unsolved everywhere else. No writer
+    stores ``''`` today; the point is that the two spellings of one bit cannot
+    disagree if the column ever holds it.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_run(built_library, safe, ts=RAN)
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for f in list(proj.iter_frames())[:2]:
+                proj.update_frame(f.id, restored_utc=AFTER, accept=True,
+                                  wcs_json="")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    assert client.get(f"/api/targets/{safe}/restored-subs").json() is None
