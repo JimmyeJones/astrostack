@@ -184,6 +184,39 @@ the app already takes the only action there is. AGENTS.md §1's "grep before you
 *don't rebuild a shipped feature*; this run's version is **don't write a justification you have not grepped**,
 because a wrong "nothing can be done here" comment is the kind a later agent believes.
 
+### The flaky frontend test, and how to tell a flake from a regression without guessing
+
+A `Frontend build + tests` failure arrived by wake **after** PR #1034 had merged, on an intermediate head
+(`6378a18`, run 36749881941) — so it was nobody's red CI to clear, and the temptation was to file it as "CI
+was busy" and stop. It is a real test bug, and one command settled whose:
+
+```
+git diff --stat 6378a18 ba924ed -- frontend/     # empty
+```
+
+**The head that failed and the head that passed have identical `frontend/` bytes** (the only change between
+them was the import order of a Python module), and the branch never touched `frontend/` at all. Same source,
+both outcomes, twenty minutes apart. That is the shape of evidence to reach for before calling anything a
+flake: not "it passed on a re-run" but *"the bytes under the failing job are the bytes under the passing
+one."* AGENTS.md's "a failing test is never an infra flake" is satisfied by proving nondeterminism, not by
+asserting it.
+
+**The cause, which generalises to any `renderSettingsWith`-style test.** `renderSettingsWith` mocks **four
+independent promises** (`getSettings`, `getSystem`, `optionsSchema`, `authStatus`). The Memory card's chrome
+— its heading and field — renders off `getSettings`/`optionsSchema`; its numbers and both advisories come
+off **`getSystem`**. So `await waitFor(() => getByText("Memory"))` followed by a synchronous
+`getByText(/the number/)` waits on one query and then reads another. **Waiting for a card to appear is not
+waiting for its contents when the contents come from a different query** — and in this file three tests were
+written that way. Reproduced deterministically by resolving `getSystem` 25 ms late: two of the three fail,
+one with CI's exact error. Fixed with `findBy`; v0.492.10 (PR #1035).
+
+**One of the three was worse than flaky — it was vacuous.** The sibling test asserted
+`expect(queryByText(/Budget is higher/)).toBeNull()` after waiting only for the heading, so it passed
+whenever `getSystem` had not resolved yet: the advisory was absent because *nothing had loaded*, which is not
+the fact the test names. A negative assertion behind an insufficient wait is a test that cannot fail. Worth
+grepping for: `queryByText(...).toBeNull()` reached without first awaiting something that proves the data
+arrived.
+
 ### Version numbers: PR #1033 had already published a claim on v0.492.5
 
 Both commits were first made as v0.492.5 + v0.492.6. A fetch before merging surfaced **PR #1033**, open and

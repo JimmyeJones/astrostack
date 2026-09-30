@@ -1,5 +1,59 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder, same run as v0.492.6/.7) — v0.492.10: a flaky frontend test, caught by CI on this run's own PR and proved nondeterministic rather than assumed
+
+### 🟠 FLAKY TEST (the first category AGENTS.md §3 says to look in) — three Memory-card tests read `getSystem` data synchronously after waiting only for the card's own chrome
+
+*(Builder 2026-09-30. Found because CI failed on an intermediate head of PR #1034 and the failure was **not**
+this run's to own — the wake arrived after the PR had merged. Rather than leave "CI went red once and then
+green" unexplained, the failure was run down; it is real, and it is a test bug.)*
+
+**What CI saw.** `Frontend build + tests` failed on head `6378a18` of PR #1034
+([run 36749881941](https://github.com/JimmyeJones/astrostack/actions/runs/36749881941)):
+
+```
+FAIL src/routes/Settings.test.tsx > Settings → Stacking → Memory
+     > still warns about an over-RAM budget that IS what runs
+TestingLibraryElementError: Unable to find an element with the text:
+  /Budget is higher than this machine's available RAM/
+```
+
+**Why it is certainly a flake and not that PR's doing — the one measurement that settles it.** The same job
+passed on head `ba924ed`, and `git diff --stat 6378a18 ba924ed -- frontend/` is **empty**: the two heads'
+`frontend/` bytes are identical (the only change between them was the import order of a Python module). The
+whole branch never touched `frontend/` at all (`git diff 024babd e59a71e -- frontend/` is likewise empty). So
+the same frontend source failed and passed within twenty minutes. That is nondeterminism, not a regression.
+
+**Root cause, and it is a real test bug rather than "CI was busy".** Each test in this block does:
+
+```js
+await waitFor(() => expect(screen.getByText("Memory")).toBeVisible());
+expect(screen.getByText(/Budget is higher than .../)).toBeVisible();   // synchronous
+```
+
+The card's chrome — the "Memory" heading, the field — renders off `getSettings` / `optionsSchema`. The RAM
+figures and *both* advisories come from **`getSystem`**, a different query (`renderSettingsWith` mocks four
+independent promises). So waiting for the heading proves nothing about whether the figures have arrived, and
+the synchronous read one line later is a race whose outcome depends on microtask ordering under load.
+
+**Reproduced deterministically before fixing**, by resolving `getSystem` 25 ms late in the harness: **two of
+the three tests fail, one with the exact error CI reported** — including the sibling
+(*"stands the over-RAM advisory down where the env override is what runs"*), whose positive assertion was
+racy in the same way and had simply not lost yet. With the fix and the same 25 ms delay, all three pass; the
+delay was then removed.
+
+**The fix** is three `getBy` → `findBy` changes and the comment explaining why, nothing else. One of them
+also **strengthens** a test rather than merely stabilising it: that sibling's
+`expect(queryByText(/Budget is higher/)).toBeNull()` could previously pass *vacuously*, because before
+`getSystem` resolves the advisory is absent for the wrong reason — nothing had loaded. Awaiting the override
+notice first makes the negative assertion mean what it says.
+
+**Not** "disable the flaky test", and not a `retry`: AGENTS.md §10 forbids weakening a test to get green, and
+the flake had a real cause that a wait fixes exactly. No production code changed — this is a test-only commit,
+so nothing about the owner's install differs.
+
+**Verification.** `npx tsc --noEmit` clean; `npx vitest run` **4,535 passed across 296 files**;
+`npx vite build` clean; Python suite green. All run from `frontend/` as AGENTS.md §7 requires.
 ## 2026-09-30 (Builder, same run as v0.492.8) — v0.492.9: the documented suite command needs a plugin nobody installs
 
 ### INFRA / the quality bar itself — `pytest-xdist` joins `pytest-timeout` in the `dev` extra, with a contract test over both

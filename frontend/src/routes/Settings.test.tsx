@@ -1120,13 +1120,24 @@ describe("Access control — the read-only token", () => {
 // three-step precedence the browser cannot see, so the server reports it; these
 // pin the two cases that change what the owner should do.
 
+// Every assertion below that names a *number* or an advisory waits with `findBy`
+// rather than reading with `getBy`. The card's own chrome ("Memory", the field)
+// renders off `getSettings`/`optionsSchema`; the figures and both advisories come
+// from `getSystem`. Those are separate queries, so the heading is on screen while
+// the figures are still in flight, and a synchronous read after waiting only for
+// the heading is a race that the CI runner lost on 2026-09-30 (run 36749881941,
+// on a head whose `frontend/` bytes were identical to the one that had just
+// passed). Reproduced deterministically by resolving `getSystem` 25 ms late.
 describe("Settings → Stacking → Memory", () => {
   it("says a blank budget is priced against whatever RAM is free, and varies", async () => {
     renderSettingsWith({}, "stacking", {}, { enabled: false },
       { total_gb: 16, available_gb: 6, stack_budget_gb: 4.1, stack_budget_source: "available" });
 
     await waitFor(() => expect(screen.getByText("Memory")).toBeVisible());
-    expect(screen.getByText(/about 4.1 GB right now/)).toBeVisible();
+    // `findBy`, not `getBy`: the RAM figures come from `getSystem`, a *different*
+    // query from the ones that render this card, so the "Memory" heading above is
+    // on screen before they arrive. See the note on this describe block.
+    expect(await screen.findByText(/about 4.1 GB right now/)).toBeVisible();
     expect(screen.getByText(/busy day than on a quiet one/)).toBeVisible();
   });
 
@@ -1138,7 +1149,10 @@ describe("Settings → Stacking → Memory", () => {
       { total_gb: 16, available_gb: 6, stack_budget_gb: 3, stack_budget_source: "env" });
 
     await waitFor(() => expect(screen.getByText("Memory")).toBeVisible());
-    expect(screen.getByText(/This field is being overridden/)).toBeVisible();
+    // Awaiting the override notice is what makes the `queryByText` below mean
+    // anything: before `getSystem` resolves the advisory is absent because
+    // nothing has loaded, which is not the fact this test is about.
+    expect(await screen.findByText(/This field is being overridden/)).toBeVisible();
     expect(
       screen.queryByText(/Budget is higher than this machine's available RAM/),
     ).toBeNull();
@@ -1150,7 +1164,7 @@ describe("Settings → Stacking → Memory", () => {
 
     await waitFor(() => expect(screen.getByText("Memory")).toBeVisible());
     expect(
-      screen.getByText(/Budget is higher than this machine's available RAM/),
+      await screen.findByText(/Budget is higher than this machine's available RAM/),
     ).toBeVisible();
   });
 });
