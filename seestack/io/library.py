@@ -199,6 +199,14 @@ class MergeTargetsResult:
     #: cover the owner had already pinned. Additive, so a caller that never asked
     #: reads exactly what it always did.
     picture_pinned: bool = False
+    #: Source folders that were combined and removed from the registry but whose
+    #: files could **not** be deleted (a permission error on a NAS where the
+    #: files are owned by another account, a busy file). Their subs and pictures
+    #: are already in the destination and the folder is recorded as combined, so
+    #: nothing is lost and the next scan will not re-adopt it — but the folder is
+    #: still on disk, and the caller should say so rather than report a tidy
+    #: library. Additive; ``0`` for every merge that ever completed before.
+    folders_left: int = 0
 
 
 @dataclass(frozen=True)
@@ -519,27 +527,60 @@ class Library:
         ``incoming/`` is read-only (AGENTS.md §10), so every folder a merge pulled
         together is still on disk and the next scan offers it again — which used to
         re-create the source target with all its subs and split the library back in
-        two. The redirect is consulted **only** on the path that would otherwise
-        create a new target, so it can never shadow one that exists.
+        two. The redirect is consulted **only** on the paths that would otherwise
+        create or *adopt* a target, so it can never shadow one that is registered.
+
+        **Adopting an unregistered folder asks the redirect first, too.** A merge
+        ends by removing the source target's folder under ``targets/``, and on a
+        NAS where the files belong to another account that delete can fail part
+        way (:meth:`_remove_target_files` says so rather than hiding it). The
+        leftover ``project.sqlite`` used to be re-adopted here on the next scan —
+        *before* the redirect was consulted — so the combined-away target came
+        back from its own corpse, split the library in two again, and its stale
+        rows were re-offered as a target of their own. Now a folder that is not
+        registered *and* answers to a combined-away name is left where it is and
+        its subs go to the target they were combined into.
         """
         safe = self._allocate_safe_name(name)
         proj_dir = self.targets_dir / safe
         if proj_dir.exists() and (proj_dir / "project.sqlite").exists():
-            proj = Project.open(proj_dir)
             entry = self.find_target(safe)
             if entry is None:
-                # Folder exists but isn't registered yet — register it.
+                # Folder exists but isn't registered. Before adopting it, ask
+                # whether it is the corpse of a combined-away target — see the
+                # docstring. A registered target is never asked (the redirect
+                # can never shadow one).
+                dest = self._combined_destination(name)
+                if dest is not None:
+                    log.warning(
+                        "%r was combined into target %r, but its old folder %s is "
+                        "still on disk (the delete after the combine did not "
+                        "finish); leaving it alone and not adopting it — its subs "
+                        "go to %r", name, dest.safe_name, proj_dir, dest.safe_name)
+                    return dest, Project.open(self.target_dir(dest))
                 entry = self._upsert_target(name=name, safe_name=safe, notes=notes)
-            return entry, proj
-        combined_into = self.merged_folder_destination(name)
-        if combined_into is not None:
-            dest = self.find_target(combined_into)
-            if dest is not None and (self.target_dir(dest) / "project.sqlite").exists():
-                log.info(
-                    "%r was combined into target %r, so its subs go there rather "
-                    "than into a second target", name, dest.safe_name)
-                return dest, Project.open(self.target_dir(dest))
+            return entry, Project.open(proj_dir)
+        dest = self._combined_destination(name)
+        if dest is not None:
+            log.info(
+                "%r was combined into target %r, so its subs go there rather "
+                "than into a second target", name, dest.safe_name)
+            return dest, Project.open(self.target_dir(dest))
         return self.create_target(name, notes=notes)
+
+    def _combined_destination(self, name: str) -> TargetEntry | None:
+        """The live target ``name``'s folder was combined into, or ``None``.
+
+        :meth:`merged_folder_destination` with the last mile: the destination
+        must still exist *and* still have a project to open, or there is nothing
+        to route to and the folder is free to be a target again."""
+        combined_into = self.merged_folder_destination(name)
+        if combined_into is None:
+            return None
+        dest = self.find_target(combined_into)
+        if dest is None or not (self.target_dir(dest) / "project.sqlite").exists():
+            return None
+        return dest
 
     def open_target(self, name_or_safe: str) -> Project:
         """Open a target's Project by display name or by safe folder name."""
@@ -713,8 +754,40 @@ class Library:
             return False
         self._conn.execute("DELETE FROM targets WHERE id = ?", (entry.id,))
         if remove_files:
-            import shutil
-            shutil.rmtree(self.targets_dir / entry.safe_name, ignore_errors=True)
+            self._remove_target_files(entry.safe_name)
+        return True
+
+    def _remove_target_files(self, safe_name: str) -> bool:
+        """Delete a target's folder under ``targets/``. True when it is gone.
+
+        **Never** ``ignore_errors``: on the owner's NAS the files under a target
+        can belong to a non-root local account, so a delete can stop part way and
+        leave a folder holding a ``project.sqlite`` and half an ``output/``. That
+        used to happen silently, and the leftover was then re-adopted by the next
+        scan as a target of its own — for a combined-away folder, the target the
+        merge had just removed came back with its stale rows
+        (:meth:`open_or_create_target` no longer adopts such a folder, and this is
+        the other half: say what happened). The registry row is already gone by
+        the time this runs, so the answer is logged rather than raised; the
+        caller decides what to tell the owner.
+
+        Only ever a path under this library's own ``targets/`` tree — never
+        anything under ``incoming/`` (AGENTS.md §10), which no code path of this
+        class writes to.
+        """
+        import shutil
+
+        path = self.targets_dir / safe_name
+        if not path.exists():
+            return True
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            log.warning(
+                "could not remove target folder %s (%s); leaving what is left of "
+                "it on disk — nothing in it is registered any more, and a later "
+                "scan will not adopt it", path, exc)
+            return not path.exists()
         return True
 
     # ---- wishlist ------------------------------------------------------
@@ -910,6 +983,7 @@ class Library:
         # error). Deleting that folder is what would make them unrecoverable, so
         # the safe answer is to leave the target alone: the user sees two entries
         # and nothing is lost, which beats a tidy library and a missing picture.
+        folders_left = 0
         for se, lost in zip(source_entries, lost_by_source, strict=False):
             if lost:
                 log.warning(
@@ -921,8 +995,16 @@ class Library:
             # are actually removing: one we keep is still its own target, and
             # copying its note into the destination would duplicate it.
             self._carry_target_user_data(se, dest.safe_name)
+            # Recorded *before* the delete, deliberately: if the delete then
+            # fails part way, the redirect is what keeps the leftover folder
+            # from being adopted back as a target on the next scan.
             self.record_merged_folder(se, dest.safe_name)
-            self.delete_target(se.safe_name, remove_files=True)
+            self.delete_target(se.safe_name, remove_files=False)
+            if not self._remove_target_files(se.safe_name):
+                # Everything of it is in the destination and it is no longer a
+                # target; only its bytes are still there. Counted so the caller
+                # can say so instead of reporting a tidy library.
+                folders_left += 1
 
         # Keep showing the picture the owner was looking at. A carried run keeps
         # its own ``timestamp_utc``, the folder being combined in is usually the
@@ -950,7 +1032,7 @@ class Library:
                 proj.close()
 
         self.refresh_target_stats(dest.safe_name)
-        return MergeTargetsResult(total_added, total_runs, pinned)
+        return MergeTargetsResult(total_added, total_runs, pinned, folders_left)
 
     def _displayed_run_id(self, entry: TargetEntry) -> int | None:
         """The run whose preview ``entry`` currently shows, or ``None``.
