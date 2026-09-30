@@ -91,6 +91,36 @@ def test_the_agent_setup_script_asks_for_the_gui_extra() -> None:
     )
 
 
+def test_the_documented_suite_flags_have_their_plugins_in_the_dev_extra(
+    pyproject: dict,
+) -> None:
+    """Every flag ``docs/AGENT-ENVIRONMENT.md`` tells a run to type must parse.
+
+    A pytest plugin that is *missing* does not degrade: pytest rejects the flag
+    with a **usage error** — exit 4, nothing collected, and an
+    ``inifile:``/``rootdir:`` block that is not a summary line — which the same
+    document warns reads exactly like a green run. ``pytest-timeout`` is in the
+    extra for that reason and says so; ``pytest-xdist`` is the one that carries
+    the documented ``-n 4 --dist worksteal`` (~11 minutes against ~75), and its
+    absence has cost two unattended runs a suite start.
+
+    The extra, not the base dependencies: the image and the ``Image contract``
+    job install ``.[web]``, so nothing here reaches the owner's deploy.
+    """
+    dev = " ".join(pyproject["project"]["optional-dependencies"]["dev"]).lower()
+    base = " ".join(pyproject["project"]["dependencies"]).lower()
+    for plugin in ("pytest-timeout", "pytest-xdist"):
+        assert plugin in dev, (
+            f"{plugin} is not in the `dev` extra, so the suite command "
+            "docs/AGENT-ENVIRONMENT.md documents exits 4 with nothing "
+            "collected on a fresh container"
+        )
+        assert plugin not in base, (
+            f"{plugin} is a test-time plugin; keep it out of the base "
+            "dependencies the image installs"
+        )
+
+
 # --------------------------------------------------------------------------
 # The frontend stage builds what CI tested
 # --------------------------------------------------------------------------

@@ -1,5 +1,35 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder, same run as v0.492.8) — v0.492.9: the documented suite command needs a plugin nobody installs
+
+### INFRA / the quality bar itself — `pytest-xdist` joins `pytest-timeout` in the `dev` extra, with a contract test over both
+
+`docs/AGENT-ENVIRONMENT.md` documents `OMP_NUM_THREADS=1 … python -m pytest -q -n 4 --dist worksteal` as
+*the* way to run this suite, and states the reason in numbers: **~11 minutes instead of ~75**. It also says,
+in the trap directly above it, that a summary line which does not end in `passed` or `failed` is not a
+result. Those two paragraphs are about the same failure and neither of them prevents it, because the plugin
+that makes `-n` parse is **not installed by anything**: it is not in `pyproject.toml`, not in
+`scripts/agent-setup.sh`, and the document itself says only *"after `pip install pytest-xdist` into the
+run's own `.venv`"*.
+
+A missing pytest plugin does not degrade — it is a **usage error**. `pytest … -n 4 --dist worksteal` with no
+xdist prints `error: unrecognized arguments: -n --dist worksteal`, an `inifile:`/`rootdir:` block, and exits
+**4** with nothing collected. It has now cost two unattended runs a suite start: this one, and the run before
+it, whose process note records `pip install pytest-xdist` landing in the **system** site-packages because
+`source scripts/agent-setup.sh` does not survive into the next `Bash` call — a failure that reads identical
+until the following command.
+
+`pytest-timeout` sits in the `dev` extra for *precisely* this reason and its comment says so, so this is the
+same fix for the sibling flag, with the same reasoning written down. New
+`tests/test_image_contract.py::test_the_documented_suite_flags_have_their_plugins_in_the_dev_extra` asserts
+both plugins are in the `dev` extra **and in neither case in the base dependencies** — the extra is what CI's
+test job and `agent-setup.sh` install (`.[dev,web]` / `.[dev,web,gui]`), while the image and the `Image
+contract` job install `.[web]`, so **nothing the owner deploys gains a byte**. Fail-before verified by
+deleting the line in a scratch copy.
+
+No engine, webapp, frontend, config, schema, on-disk, API or default change. Tests +1.
+
+
 ## 2026-09-30 (Builder) — v0.492.8: a sub set aside *after* the picture that used it is still in that picture
 
 ### 🟠 BUG FIX (trust / autonomy — PRIORITY 2), the first half of the `restored_utc` LEAD filed with v0.492.4, reproduced and fixed — `frames.rejected_utc`, `count_light_missing_from_stack`, `restored_frame_windows`

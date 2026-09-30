@@ -62,6 +62,17 @@ dev = [
     # command is piped (see the process note in docs/IMPROVEMENTS.md). It also
     # stops a single hung test from burning an unattended run.
     "pytest-timeout>=2.3",
+    # Same class as the line above, and the same cost when it is missing.
+    # `docs/AGENT-ENVIRONMENT.md` documents `-n 4 --dist worksteal` as *the* way
+    # to run the suite — "~11 minutes, not ~75" — so every unattended run types
+    # it, and without this plugin pytest rejects `-n` with a usage error: exit
+    # 4, nothing collected, and an `inifile:`/`rootdir:` block that is not a
+    # summary line. That has cost two runs a suite start (one of them installed
+    # it into the *system* site-packages instead, which looks identical until
+    # the next call). It is a test-time plugin only: the image and the Image
+    # contract job install `.[web]`, never `.[dev]`, so nothing the owner
+    # deploys gains a byte.
+    "pytest-xdist>=3.5",
     "ruff>=0.4",
     "mypy>=1.10",
     "httpx>=0.27",
