@@ -1069,7 +1069,13 @@ def test_picture_is_auto_finished_reads_the_newest_previewed_run(solved_library)
         finally:
             proj.close()
         lib.set_target_cover(a, cover)
-        assert pipeline._picture_is_auto_finished(lib, a) is False
+        # A pinned cover used to answer False here ("a pin outranks the newest
+        # run, so nothing regresses") — which left the fresh, deeper run flat
+        # and undisplayed behind a pin the *app* had placed. The pin is settled
+        # separately now (``_settle_cover_after_restack``), so a pinned
+        # auto-finished picture carries its finish onto the run that may take
+        # its place.
+        assert pipeline._picture_is_auto_finished(lib, a) is True
     finally:
         lib.close()
 
@@ -2400,3 +2406,296 @@ def test_auto_highlight_summary_skips_an_unreadable_target(
     assert summary["measured"] == 1
     assert summary["blown"] == 1
     assert summary["max_flat_fraction"] == 0.12
+
+
+# --------------------------------------------------------------------------- #
+# The other half of #903 (2026-09-30 audit, C-F4): a picture the owner finished
+# *by hand* could still be replaced on the wall by the flat fresh run — the
+# carry-forward above only covers pictures the app baked — and on a Combined
+# target the merge's own pin meant the deeper run was made and never shown.
+# The batch now settles the cover after each restack: hand-finished stays
+# (pinned, reported), an app pin advances, an owner's pin is never touched.
+# --------------------------------------------------------------------------- #
+
+NEW_RUN_ID = 999
+
+
+def _patch_run_stack_new_run(monkeypatch):
+    """Like ``_patch_run_stack`` but the fresh run has an id of its own, so a
+    cover decision cannot accidentally match the seeded run's id."""
+    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None):  # noqa: ANN001
+        return SimpleNamespace(output_dir="/tmp/x", run_id=NEW_RUN_ID, n_frames_used=3,
+                               canvas_shape=(1, 1, 3), cancelled=False,
+                               errors=[], excluded_frames=[])
+    monkeypatch.setattr("seestack.stack.stacker.run_stack", fake)
+
+
+def _seed_hand_finished_run(proj) -> int:
+    """A picture the *owner* finished: a recipe rendered into the preview (the
+    ``preview_display_space`` mark) with no ``editor_auto_baked_look`` stamp —
+    finished by ``finishedpicture``'s rule, and not the app's work."""
+    run_id = _seed_finished_run(proj, baked=False, recipe=True)
+    proj.set_run_preview_display_space(run_id)
+    return run_id
+
+
+def _cover_and_reason(lib, safe):
+    from seestack.coverpin import app_pin_reason
+
+    entry = lib.find_target(safe)
+    proj = lib.open_target(safe)
+    try:
+        return entry.cover_stack_run_id, app_pin_reason(proj, entry.cover_stack_run_id)
+    finally:
+        proj.close()
+
+
+def _mark(lib, safe, run_id, reason):
+    from seestack.coverpin import mark_app_pin
+
+    lib.set_target_cover(safe, run_id)
+    proj = lib.open_target(safe)
+    try:
+        mark_app_pin(proj, run_id, reason)
+    finally:
+        proj.close()
+
+
+def test_reprocess_all_keeps_a_hand_finished_picture_on_the_wall(
+        solved_library, monkeypatch):
+    """Regression (C-F4 (a)): with the switch off, the fresh flat run must not
+    take a hand-finished picture's place. Fails before: no pin, the newest run
+    is the picture, ``kept_displayed`` did not exist."""
+    from seestack.coverpin import PIN_REASON_KEPT_FINISHED
+
+    _patch_run_stack_new_run(monkeypatch)
+    edited = _record_auto_edits(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        kept = {}
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                kept[entry.safe_name] = _seed_hand_finished_run(proj)
+            finally:
+                proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job)
+        assert summary["stacked"] == 2
+        assert summary["kept_displayed"] == 2
+        assert sorted(summary["kept_displayed_targets"]) == sorted(
+            e.name for e in lib.list_targets())
+        assert summary["cover_advanced"] == 0
+        # His own work is never auto-edited over, and nothing else was either.
+        assert edited == [] and summary["auto_edited"] == 0
+        for safe, run_id in kept.items():
+            assert _cover_and_reason(lib, safe) == (run_id, PIN_REASON_KEPT_FINISHED)
+    finally:
+        lib.close()
+
+
+def test_reprocess_all_keeps_a_hand_finished_picture_even_with_the_switch_on(
+        solved_library, monkeypatch):
+    """"Also auto-edit each result" finishes the *new* run; it is not a licence
+    to replace the picture he finished himself."""
+    _patch_run_stack_new_run(monkeypatch)
+    edited = _record_auto_edits(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            run_id = _seed_hand_finished_run(proj)
+        finally:
+            proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job, auto_edit=True)
+        assert summary["kept_displayed"] == 1
+        assert (safe, NEW_RUN_ID) in edited
+        assert _cover_and_reason(lib, safe)[0] == run_id
+    finally:
+        lib.close()
+
+
+def test_reprocess_all_advances_a_cover_the_merge_pinned(solved_library, monkeypatch):
+    """Regression (C-F4 (b)): a Combine pins the deep picture so the carried
+    one-night stack cannot take its place; that pin is the app's, and once the
+    batch has made the deeper run the pin is lifted so the new picture shows.
+    Fails before: the pin stayed and the deeper run was never displayed."""
+    from seestack.coverpin import PIN_REASON_MERGE
+
+    _patch_run_stack_new_run(monkeypatch)
+    _record_auto_edits(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            run_id = _seed_finished_run(proj)          # auto-baked, finished
+        finally:
+            proj.close()
+        _mark(lib, safe, run_id, PIN_REASON_MERGE)
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job)
+        assert summary["cover_advanced"] == 1
+        assert summary["kept_displayed"] == 0
+        # Its finish was carried onto the fresh run first, so the wall shows a
+        # finished, deeper picture — and no pin at all, the newest run being it.
+        assert summary["kept_finished"] == 1
+        assert _cover_and_reason(lib, safe) == (None, None)
+    finally:
+        lib.close()
+
+
+def test_a_merge_pin_on_an_unfinished_picture_advances_too(solved_library, monkeypatch):
+    _patch_run_stack_new_run(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            run_id = _seed_finished_run(proj, baked=False, recipe=False)  # a flat preview
+        finally:
+            proj.close()
+        _mark(lib, safe, run_id, "merge")
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job)
+        assert summary["cover_advanced"] == 1
+        assert _cover_and_reason(lib, safe) == (None, None)
+    finally:
+        lib.close()
+
+
+def test_a_merge_pin_stays_when_the_fresh_runs_finish_fails(solved_library, monkeypatch):
+    """The one guard on advancing: an auto-finished picture is only replaced by
+    a finished run. If Auto could not be applied to the fresh run, lifting the
+    pin would put a flat stack on the wall in place of a finished picture."""
+    _patch_run_stack_new_run(monkeypatch)
+    monkeypatch.setattr("webapp.pipeline._auto_edit_process_run",
+                        lambda lib, safe, run_id, auto_crop=True: None)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            run_id = _seed_finished_run(proj)
+        finally:
+            proj.close()
+        _mark(lib, safe, run_id, "merge")
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job)
+        assert summary["cover_advanced"] == 0
+        assert _cover_and_reason(lib, safe) == (run_id, "merge")
+    finally:
+        lib.close()
+
+
+def test_a_merge_pin_on_a_hand_finished_picture_becomes_a_kept_one(
+        solved_library, monkeypatch):
+    """The deep target's own picture, finished by hand, then a night combined
+    in: the merge pinned it. The batch keeps it (it is his work) and re-records
+    the pin as "kept", so the next batch and the new-light note read it right."""
+    from seestack.coverpin import PIN_REASON_KEPT_FINISHED
+
+    _patch_run_stack_new_run(monkeypatch)
+    _record_auto_edits(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            run_id = _seed_hand_finished_run(proj)
+        finally:
+            proj.close()
+        _mark(lib, safe, run_id, "merge")
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job)
+        assert summary["kept_displayed"] == 1 and summary["cover_advanced"] == 0
+        assert _cover_and_reason(lib, safe) == (run_id, PIN_REASON_KEPT_FINISHED)
+    finally:
+        lib.close()
+
+
+def test_a_cover_the_owner_pinned_is_never_touched(solved_library, monkeypatch):
+    """His pin, his picture: whether it is hand-finished, auto-finished or a
+    flat stack, the batch leaves it exactly where it is and reports nothing
+    about it — the fresh run is in History, and an auto-finished pinned
+    picture still lends its finish to that run."""
+    _patch_run_stack_new_run(monkeypatch)
+    edited = _record_auto_edits(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        a, b = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(a)
+        try:
+            pinned_a = _seed_hand_finished_run(proj)
+        finally:
+            proj.close()
+        proj = lib.open_target(b)
+        try:
+            pinned_b = _seed_finished_run(proj)        # auto-baked
+        finally:
+            proj.close()
+        lib.set_target_cover(a, pinned_a)
+        lib.set_target_cover(b, pinned_b)
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job)
+        assert summary["kept_displayed"] == 0
+        assert summary["cover_advanced"] == 0
+        assert _cover_and_reason(lib, a) == (pinned_a, None)
+        assert _cover_and_reason(lib, b) == (pinned_b, None)
+        assert edited == [(b, NEW_RUN_ID)] and summary["kept_finished"] == 1
+    finally:
+        lib.close()
+
+
+def test_reprocess_status_counts_the_hand_finished_pictures_apart(solved_library):
+    """The dialog's sentence changed from a warning to a promise, and the count
+    behind it is the hand-finished subset of each scope."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        a, b = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(a)
+        try:
+            _seed_hand_finished_run(proj)              # version 0.0.1: stale
+        finally:
+            proj.close()
+        proj = lib.open_target(b)
+        try:
+            _seed_finished_run(proj, version=pipeline.APP_VERSION)   # auto, current
+        finally:
+            proj.close()
+        status = pipeline.reprocess_status(lib)
+        assert status["finished_pictures"] == 2
+        assert status["hand_finished"] == 1
+        assert status["finished_pictures_stale_only"] == 1
+        assert status["hand_finished_stale_only"] == 1
+        # Neither run has a preview file that predates the subs, so by the
+        # fixture's dates nothing is waiting: the new-light share is 0.
+        assert status["hand_finished_new_light_only"] == 0
+    finally:
+        lib.close()
+
+
+def test_a_yielding_slice_carries_the_cover_counters_forward(solved_library, monkeypatch):
+    """The resumed remainder must keep counting what the first slice kept."""
+    class _SubmittingJM(_FakeJM):
+        def submit(self, kind, fn, *, target=None):  # noqa: ANN001
+            return Job(kind=kind)
+
+    summary = pipeline._reprocess_yield(
+        _settings(solved_library), _SubmittingJM(), Job(kind="reprocess_all"), "import",
+        remaining=["x"], counters={"total": 3, "done": 2, "kept_displayed": 1,
+                                   "kept_displayed_targets": ["M 42"],
+                                   "cover_advanced": 1},
+        stale_only=False, deep_rescan=False, auto_edit=False)
+    assert summary["kept_displayed"] == 1
+    assert summary["kept_displayed_targets"] == ["M 42"]
+    assert summary["cover_advanced"] == 1

@@ -157,6 +157,35 @@ CREATE INDEX IF NOT EXISTS idx_frames_panel  ON frames(mosaic_panel_id);
 CREATE INDEX IF NOT EXISTS idx_frames_ts     ON frames(timestamp_utc);
 """
 
+#: Project tables added *after* the base schema was version-stamped.
+#:
+#: Kept out of :data:`SCHEMA_SQL`'s versioned history and re-run (idempotently)
+#: on **every** open, so adding one never needs a :data:`SCHEMA_VERSION` bump —
+#: the same rule ``seestack/io/library.py`` applies to its ``merged_folders``
+#: table, for the same reason: a bump makes the *previous* build refuse to open a
+#: project this one has touched, which turns a rollback of the Docker image into
+#: a bricked target. A bare ``CREATE TABLE IF NOT EXISTS`` is additive in both
+#: directions — a new build adds the table to an old project on first open, and
+#: an old build simply never asks about it.
+#:
+#: ``stack_run_frames`` is which subs a stack run was **offered** — every
+#: accepted, located sub the stacker built its frame list from, before its own
+#: lucky-imaging cut and before any alignment failure. "Offered" rather than
+#: "combined" on purpose: the question the table answers is *"is there light
+#: this picture never had a chance at?"* (:meth:`Project.count_light_missing_from_run`),
+#: and a sub the run saw and set aside itself would be set aside again by a
+#: re-stack, so counting it as missing would offer the owner hours of NAS CPU
+#: for an identical picture. A run with no rows here was recorded before the
+#: table existed (or carried in from one that was), and is measured by the
+#: capture-time rule instead.
+_AUX_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS stack_run_frames (
+    run_id   INTEGER NOT NULL,   -- stack_runs.id
+    frame_id INTEGER NOT NULL,   -- frames.id, at the time the run was recorded
+    PRIMARY KEY (run_id, frame_id)
+) WITHOUT ROWID;
+"""
+
 # Tables whose columns are reconciled additively on open (see
 # ``Project._reconcile_table_columns``). ``project_meta`` is a static key/value
 # table, so it's excluded — only the two evolving tables matter.
@@ -678,6 +707,7 @@ class Project:
     def _init_schema(self) -> None:
         assert self._conn is not None
         self._conn.executescript(SCHEMA_SQL)
+        self._conn.executescript(_AUX_TABLES_SQL)
 
     def _check_schema(self) -> None:
         assert self._conn is not None
@@ -689,6 +719,10 @@ class Project:
             )
         if version < SCHEMA_VERSION:
             self._migrate_schema(from_version=version)
+        # The unversioned aux tables, on every open — a project stamped current
+        # by a build that had never heard of one gains it here, and a build that
+        # has never heard of it loses nothing (see ``_AUX_TABLES_SQL``).
+        self._conn.executescript(_AUX_TABLES_SQL)
         # Always reconcile columns, even at the current version. The
         # version-specific migration steps only ALTER the columns they knew
         # about, so a project created before a *frames* column was added — but
@@ -2567,6 +2601,139 @@ class Project:
     def delete_stack_run(self, run_id: int) -> None:
         assert self._conn is not None
         self._conn.execute("DELETE FROM stack_runs WHERE id = ?", (run_id,))
+        self._conn.execute("DELETE FROM stack_run_frames WHERE run_id = ?", (run_id,))
+
+    # ---- which subs a run was offered --------------------------------------
+
+    def set_stack_run_frames(self, run_id: int, frame_ids: Iterable[int]) -> int:
+        """Record the subs ``run_id`` was **offered** (see ``_AUX_TABLES_SQL``).
+
+        Replaces any earlier record for the run, so a caller that re-derives the
+        set writes one answer. Returns how many ids were recorded. Ids the
+        ``frames`` table no longer holds are recorded all the same — the read
+        side joins against the live table, so a deleted frame simply stops
+        counting either way.
+        """
+        assert self._conn is not None
+        ids = sorted({int(i) for i in frame_ids if i is not None})
+        # No ``transaction()`` here: a caller may already hold one (the merge
+        # copies frames inside one), and SQLite refuses a nested BEGIN. The
+        # ``executemany`` is a single statement, so the insert is atomic anyway.
+        self._conn.execute(
+            "DELETE FROM stack_run_frames WHERE run_id = ?", (int(run_id),))
+        self._conn.executemany(
+            "INSERT INTO stack_run_frames(run_id, frame_id) VALUES(?, ?)",
+            [(int(run_id), fid) for fid in ids])
+        return len(ids)
+
+    def stack_run_has_frame_record(self, run_id: int) -> bool:
+        """Whether ``run_id``'s offered-sub set was recorded at all.
+
+        False for every run written before the table existed and for a run
+        carried out of such a project — the two the capture-time rule still
+        measures."""
+        assert self._conn is not None
+        row = self._conn.execute(
+            "SELECT 1 FROM stack_run_frames WHERE run_id = ? LIMIT 1",
+            (int(run_id),)).fetchone()
+        return row is not None
+
+    def stack_run_frame_ids(self, run_id: int) -> list[int] | None:
+        """The subs ``run_id`` was offered, or ``None`` when nothing was recorded
+        (which is a different answer from "it was offered no subs")."""
+        assert self._conn is not None
+        rows = self._conn.execute(
+            "SELECT frame_id FROM stack_run_frames WHERE run_id = ? ORDER BY frame_id",
+            (int(run_id),)).fetchall()
+        if not rows:
+            return None
+        return [int(r[0]) for r in rows]
+
+    def freeze_unrecorded_stack_run_frames(self) -> int:
+        """Give every run with no offered-sub record one, derived from the
+        capture-time rule **as it stands now**. Returns how many runs were frozen.
+
+        The one moment this is right to do is just before this project's frame
+        set changes for a reason no timestamp can describe — a merge is about to
+        copy another night's subs in (:func:`seestack.io.merge.merge_projects`),
+        or this project's own pictures are about to be carried into a target that
+        holds subs they never saw. Until that moment "which subs did this run
+        have a chance at?" and "which subs does the capture-time rule not count
+        as missing?" are the same question, and afterwards they are not: a sub
+        merged in from a different folder was shot *before* this run and never
+        restored, so the capture-time rule reads it as light the picture has,
+        and the picture on the wall stays "up to date" with a whole night it has
+        never seen. That is the blindness this table exists to remove, and
+        freezing the answer while it is still true is what makes a legacy run
+        measurable afterwards.
+
+        Members are every located sub the rule does not count as missing — a
+        currently set-aside sub only if it was set aside *after* the run (so it
+        was accepted when the run was made); one with no set-aside stamp is
+        taken as never offered, which errs toward calling a restored legacy sub
+        new light, the direction the rest of this module already accepts.
+
+        A run that already has a record is left exactly alone: the stacker's own
+        answer beats a reconstruction.
+        """
+        assert self._conn is not None
+        frozen = 0
+        # One statement per run and no ``transaction()`` — see
+        # ``set_stack_run_frames`` for why (a caller may already hold one).
+        for run in self._conn.execute(
+                "SELECT id, timestamp_utc FROM stack_runs "
+                "WHERE id NOT IN (SELECT DISTINCT run_id FROM stack_run_frames)"
+        ).fetchall():
+            ts = str(run["timestamp_utc"] or "")
+            if not ts:
+                continue
+            self._conn.execute(
+                "INSERT OR IGNORE INTO stack_run_frames(run_id, frame_id) "
+                "SELECT ?, id FROM frames "
+                "WHERE wcs_json IS NOT NULL AND wcs_json <> '' "
+                "  AND NOT (timestamp_utc IS NOT NULL AND timestamp_utc <> '' "
+                "           AND timestamp_utc > ?) "
+                "  AND NOT (restored_utc IS NOT NULL AND restored_utc <> '' "
+                "           AND restored_utc > ? "
+                "           AND NOT (rejected_utc IS NOT NULL AND rejected_utc <> '' "
+                "                    AND rejected_utc > ?)) "
+                "  AND (accept = 1 "
+                "       OR (rejected_utc IS NOT NULL AND rejected_utc <> '' "
+                "           AND rejected_utc > ?))",
+                (int(run["id"]), ts, ts, ts, ts),
+            )
+            frozen += 1
+        return frozen
+
+    def count_light_missing_from_run(self, run: "StackRunRow") -> int:
+        """How many stack-ready subs ``run``'s picture does **not** contain.
+
+        The answer :meth:`count_light_missing_from_stack` gives, made honest for
+        a picture whose frame set is not the whole target's: a run carried in by
+        a Combine (its night was stacked on its own, and the other night's subs
+        were shot *before* it), a run the target made before another folder was
+        combined into it, a run measured against a project that has since taken
+        in subs a timestamp cannot place. Where the run's offered-sub set was
+        recorded (``stack_run_frames``) the count is simply every accepted,
+        located sub **not in that set** — no clock involved, so a sub shot years
+        before the run and never seen by it is missing from it, which is exactly
+        what a merged night is. Where nothing was recorded — a run written before
+        the table existed, on a project no merge has touched since — the
+        capture-time rule is the only evidence and is used unchanged.
+
+        Same bar on both paths: accepted **and** located, because a re-stack has
+        to be able to use the sub for the offer to mean anything.
+        """
+        assert self._conn is not None
+        if run.id is not None and self.stack_run_has_frame_record(run.id):
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM frames f "
+                "WHERE f.accept = 1 AND f.wcs_json IS NOT NULL AND f.wcs_json <> '' "
+                "AND NOT EXISTS (SELECT 1 FROM stack_run_frames s "
+                "                WHERE s.run_id = ? AND s.frame_id = f.id)",
+                (int(run.id),),
+            ).fetchone()[0]
+        return self.count_light_missing_from_stack(run.timestamp_utc)
 
     def set_stack_run_notes(self, run_id: int, notes: str | None) -> bool:
         """Set (or clear) a run's free-text notes/label. Returns True if a row
