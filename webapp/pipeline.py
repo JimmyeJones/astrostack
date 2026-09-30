@@ -1159,6 +1159,35 @@ def _last_stack_version_for_target(lib: Library, safe: str) -> str | None:
         proj.close()
 
 
+def _skip_unreadable_target(what: str, safe: str) -> None:
+    """Log that one target's project DB could not be read, and carry on.
+
+    The three library-wide read-outs below — :func:`reprocess_status`,
+    :func:`auto_cast_summary`, :func:`auto_highlight_summary` — each walk every
+    target's own SQLite, and all three land on **one** page: Settings (the
+    reprocess scope and its counts, the two Auto read-outs) plus the navbar's
+    outdated-targets badge. So a single unreadable project — a truncated
+    ``project.sqlite``, a schema a newer build wrote, a target folder a NAS mount
+    took away mid-read — used to 500 all three at once, blanking the page that
+    exists to *run* maintenance exactly when something needed maintaining, and
+    with nothing on screen to say which target was at fault.
+
+    Every other cross-target reader in the app already skips the one broken
+    target and answers for the rest — ``routers/gallery.py`` ("one broken project
+    must not 500 the wall"), ``routers/sky.py``, ``routers/overtrim.py``,
+    ``routers/newsubs.py``, ``refinish.py``, ``routers/incominglag.py`` — and
+    these three are now the same shape. The log line is the only place the
+    failure is reported, deliberately: these are counts, and a roll-up has no
+    per-target row to hang a message on.
+
+    A target that fails *partway* through keeps whatever it contributed before it
+    failed. Deliberate, and not worth all-or-nothing bookkeeping: these DBs break
+    on open, not between two reads of one connection, and the numbers at stake are
+    a broken target's own.
+    """
+    log.warning("%s: skipping unreadable target %s", what, safe, exc_info=True)
+
+
 def reprocess_status(lib: Library) -> dict[str, Any]:
     """Count targets whose current image is stale relative to the running build.
 
@@ -1220,7 +1249,15 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
     finished_new_light = 0
     for entry in lib.list_targets():
         total += 1
-        proj = lib.open_target(entry.safe_name)
+        # One unreadable project must not cost the whole read-out — see
+        # :func:`_skip_unreadable_target`. The target still counts in
+        # ``total_targets`` (it exists); it simply lands in no bucket, exactly as
+        # a never-stacked one already does.
+        try:
+            proj = lib.open_target(entry.safe_name)
+        except Exception:  # noqa: BLE001 — one broken project must not 500 the page
+            _skip_unreadable_target("reprocess status", entry.safe_name)
+            continue
         try:
             runs = list(proj.iter_stack_runs())  # newest first
             run = next((r for r in runs
@@ -1237,6 +1274,9 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
             # how the Dashboard and this page would come to disagree about which
             # targets are behind.
             _, n_new = new_light_since_picture(proj, runs)
+        except Exception:  # noqa: BLE001 — one broken project must not 500 the page
+            _skip_unreadable_target("reprocess status", entry.safe_name)
+            continue
         finally:
             proj.close()
         if run is not None:
@@ -1315,7 +1355,13 @@ def auto_cast_summary(lib: Library) -> dict[str, Any]:
     by_cast: dict[str, int] = {}
     deviations: list[float] = []
     for entry in lib.list_targets():
-        proj = lib.open_target(entry.safe_name)
+        # Skipped rather than fatal, like its two siblings — see
+        # :func:`_skip_unreadable_target`.
+        try:
+            proj = lib.open_target(entry.safe_name)
+        except Exception:  # noqa: BLE001 — one broken project must not 500 the page
+            _skip_unreadable_target("auto cast summary", entry.safe_name)
+            continue
         try:
             for run in proj.iter_stack_runs():
                 raw = proj.get_meta(f"{AUTO_EDIT_SKYCAST_PREFIX}{run.id}")
@@ -1338,6 +1384,9 @@ def auto_cast_summary(lib: Library) -> dict[str, Any]:
                 else:
                     cast += 1
                     by_cast[verdict] = by_cast.get(verdict, 0) + 1
+        except Exception:  # noqa: BLE001 — one broken project must not 500 the page
+            _skip_unreadable_target("auto cast summary", entry.safe_name)
+            continue
         finally:
             proj.close()
     measured = neutral + cast
@@ -1384,7 +1433,13 @@ def auto_highlight_summary(lib: Library) -> dict[str, Any]:
     strengths: list[float] = []
     fractions: list[float] = []
     for entry in lib.list_targets():
-        proj = lib.open_target(entry.safe_name)
+        # Skipped rather than fatal, like its two siblings — see
+        # :func:`_skip_unreadable_target`.
+        try:
+            proj = lib.open_target(entry.safe_name)
+        except Exception:  # noqa: BLE001 — one broken project must not 500 the page
+            _skip_unreadable_target("auto highlight summary", entry.safe_name)
+            continue
         try:
             for run in proj.iter_stack_runs():
                 raw = proj.get_meta(f"{AUTO_EDIT_HIGHLIGHT_PREFIX}{run.id}")
@@ -1404,6 +1459,9 @@ def auto_highlight_summary(lib: Library) -> dict[str, Any]:
                 frac = parsed.get("flat_fraction")
                 if isinstance(frac, (int, float)):
                     fractions.append(float(frac))
+        except Exception:  # noqa: BLE001 — one broken project must not 500 the page
+            _skip_unreadable_target("auto highlight summary", entry.safe_name)
+            continue
         finally:
             proj.close()
     return {

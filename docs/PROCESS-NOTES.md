@@ -1,5 +1,73 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (Builder, later the same day) — the editor's proxy-scale class re-read CLEAN; the finding was one class over, in the roll-ups nobody had lined up against their own neighbours
+
+*(Builder, branch `claude/keen-darwin-3tsljv` → **v0.492.4** + a docs commit. Baseline on `origin/main` at
+46606c4: **7069 passed, 2 skipped**, 22m59s with the BLAS cap and `-n 4 --dist worksteal` on a 4-CPU container.
+Green. Note the shape of the progress line, because it misleads: it read 14 % at the fifteen-minute mark and
+81 % at the forty-fifth, so a projection taken early says 80+ minutes and is wrong by 4x — the `tests/webapp/`
+files at the tail are fast. Don't re-plan a run around that number.)*
+
+### Where the work came from, and the sweep that came back clean
+
+"Bugs (fix these first)" is still gated top-to-bottom (the previous two runs each recorded the same), so the
+run started where AGENTS.md §1 points — the editor — and read it adversarially for the one class FOCUS.md names
+as live: **a threshold or radius whose units are pixels, correct at fixture scale and wrong at the owner's.**
+
+**CLEAN, and more thoroughly than the phrase "swept clean" usually means.** Every spatial measure in the
+editor is already converted through `EditContext.scaled_px` (= `px / max(1, proxy_scale)`) at its use site, and
+each one carries the reasoning in place: `ops/background.py::_scaled_box` (mesh box **and** the object-mask
+dilation, on all three `background.*` ops), `ops/detail.py` (`bilateral_sigma_spatial`, the unsharp radius with
+its `_SHARPEN_PROXY_FLOOR_PX`, the chroma radius, the deconvolution PSF **and** its ring blur),
+`ops/tone.py` (`scnr_noise_sigma`, the star finder's `detect_fwhm_px` and aperture), `ops/stars.py`. Several go
+further and *advertise* the residual — `sharpen_understates_on_proxy`, `deconv_understates_on_proxy`,
+`star_reduce_differs_on_proxy`, `hot_pixels_skipped_on_proxy` — which is what the loupe exists to answer. Two
+adjacent parity mechanisms were read the same way and are also clean: `edit/proxy.py::_load_map` strides the
+coverage siblings on the proxy's own `step` (so `_level_coverage`'s shape guard lines up by construction), and
+the loupe (`routers/editor.py::_render_loupe_png`) renders the window with geometry ops **disabled** and the
+whole-image render's fits and additive fields **frozen** onto it, which is the only way the fractional-crop
+contract and a window can both be true. **Nothing to file. Do not re-sweep this class in the editor** — the
+next honest question there is a different one (what an op *measures*, not what it scales).
+
+### The finding, and the generalisation
+
+The bug was one class over, and it is a **convention** class rather than an arithmetic one: three library-wide
+roll-ups in `webapp/pipeline.py` — `reprocess_status`, `auto_cast_summary`, `auto_highlight_summary` — walked
+every target's own SQLite through an unguarded `lib.open_target`, while **every other** cross-target reader in
+the app already skips the one broken target and answers for the rest, most of them saying so in the comment
+(`routers/gallery.py` ×3, `routers/sky.py` ×2, `routers/overtrim.py`, `routers/newsubs.py`,
+`routers/incominglag.py`, `refinish.py`, and `routers/storage.py`, whose comment names the convention
+outright). Shipped as v0.492.4.
+
+**The generalisation worth keeping:** *when a repo has decided a question eleven times in one idiom, the twelfth
+place that does not use it is a finding, and the cheapest way to find it is to grep the idiom rather than to
+reason about the code.* `grep -n "in lib.list_targets()"` over `webapp/` and reading sixteen call sites side by
+side took minutes and produced the run's only real bug, after a much longer adversarial read of the
+best-defended module in the tree produced none. The same grep is worth repeating for the other conventions this
+repo states in comments (server-side path resolution, NaN-as-no-coverage, "stride first, cast last").
+
+**And the aggravating detail:** all three land on **one page**. `/api/reprocess-status` feeds Settings →
+Maintenance *and* the navbar badge every page mounts; the two Auto read-outs sit directly below it. So the blast
+radius of one unreadable target was the whole maintenance surface, and the badge fails silently by design
+(`data?.outdated ?? 0`), so a reader was not even told a count was missing. **Worth carrying forward: when
+several roll-ups share a page, their failure modes compose, and a "one of N is degraded" guard is worth more
+there than on a page that shows one number.**
+
+### One gate the previous run recorded as unanswerable *is* answerable — and why the number was easy to miss
+
+The 2026-09-30 note above this one lists the **ragged-rim-vs-under-shot-panel proxy** as needing *"how often is
+one of the owner's mosaics both"* and concludes *"Not in this repo either."* It is in this repo, twice: the
+entry's own parenthesis (*"0 % of thin pixels beyond half that radius on all 22 of the owner's mosaics"*) and
+`seestack/stackhealth.py`'s comment beside the very branch (*"none of the thin pixels on any of his 22 mosaics
+sits beyond half the footprint's inscribed radius"*, observer #952). The entry is **closed with that number**
+this run.
+
+It was easy to miss for a structural reason worth naming: the measurement is presented as **validating the
+proposed discriminator**, in the sentence that argues *for* building it — so it reads as a reason to build
+rather than as the answer to the gate three paragraphs below. **When an entry quotes a number to justify a
+mechanism, check whether that same number already answers the entry's own gate before treating the gate as
+owner-data-bound.** Two runs read past it.
+
 ## 2026-09-30 (Builder, the run after that one) — the bug was in the seam between two features shipped a day apart, and neither one's tests could see it
 
 *(Builder, branch `agent/new-light-restored-subs` → **v0.492.3**. Baseline on `origin/main` at 2c7f338:

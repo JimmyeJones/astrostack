@@ -1,5 +1,135 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder, later the same day) — the grain note's rim-vs-panel proxy, closed with the number the lead asked for
+
+### ⚪ CLOSED WITH THE NUMBER (no code) — "ragged rim or under-shot panel?" is a proxy, and on the owner's library it is never wrong. Do not build the distance transform.
+
+*(Builder 2026-09-30. The check the entry's own last paragraph asks for, answered from the measurement already
+in the repo rather than deferred again. No code changed; the entry is cut out of "Bugs (fix these first)" and
+preserved below.)*
+
+**The gate, in the entry's words:** *"**Check first, before building any of it:** how often does the owner's
+library actually hold a mosaic that is both [a ragged union rim **and** a genuinely under-shot interior panel]?
+If the answer is 'rarely', the proxy is good enough and this should be **closed with the number** rather than
+built."*
+
+**The answer is "never, on all 22 of them", and it was already measured — twice, in this repo.** The entry
+itself records the observer's discriminator and its result: a distance transform of the covered footprint
+normalised by its maximum inscribed radius puts **0 % of thin pixels beyond half that radius on all 22 of the
+owner's mosaics** — the same as on the single-field controls. `seestack/stackhealth.py` carries the same
+finding as a code comment beside the branch in question (observer report #952): *"none of the thin pixels on
+any of his 22 mosaics sits beyond half the footprint's inscribed radius — it is a long, ragged rim reaching a
+quarter to a half of the canvas by area."* A mosaic can only take the wrong branch if its thin region is
+**interior**, and on his library none of it is. So the failure direction the lead names — being told to trim
+when the more useful answer was to go and shoot a panel — has **no instance** in the data the decision is for.
+
+**What that closes, and what it does not.** It closes the *build*: an additive `stack_runs` column plus a
+`coverage_backfill` pass, for an inference the card already makes coherently and correctly on every canvas the
+owner has. It does **not** claim `coverage_thin_frac` answers the geometric question — the lead is right that
+it answers *amount*, not *place*, and that remains the honest description of `has_ragged_border`. The reason
+not to build is that the proxy and the measurement **agree on every mosaic there is to disagree about**, which
+is the strongest form of "good enough" available without the owner shooting a new shape.
+
+**Re-open only on a finding, not on a re-reading.** The one thing that would reopen it is a *new* mosaic shape
+in his library — an interrupted raster left with a genuinely unfinished interior panel, which the panel map
+would show as a hole rather than a fade. That is a Scout observation about the data, not a code audit: if a
+reading ever puts thin pixels beyond half the inscribed radius on one of his mosaics, the build sketch in the
+preserved entry below is correct as written (lazy backfill, default "unknown" and never 0.0, `has_ragged_border`
+as the fallback for every earlier run) and should be taken then.
+
+**The entry as filed, preserved:**
+
+> - **LEAD (Builder 2026-09-19, filed while shipping v0.470.0 — the one thing in that fix that is a *proxy*
+>   rather than a measurement, and I knew it when I shipped it) — the app decides "ragged rim or under-shot
+>   panel?" from a share it did not measure for that question, and on a mosaic that is both, the rim wins.**
+>   *(Pillar: friendliness / trust — PRIORITY 3; size **S to write, M to be sure of**; severity low;
+>   confidence: **the proxy and its failure direction are traced in code**, how often the ambiguous shape
+>   occurs on the owner's library is **not** measured — which is why this is a lead.)*
+>   **What shipped and why.** v0.470.0's grain note has to choose between two opposite prescriptions about one
+>   thin region: *"another night on that panel"* and *"Trim border crops the worst of it away"*. It chooses
+>   with `stackhealth.has_ragged_border`, i.e. `coverage_thin_frac >= _COVERAGE_THIN_SHARE` — deliberately the
+>   ragged-border note's **own** condition, so the two notes on one card cannot disagree, which was the whole
+>   point. That was the right call for the fix: it needed no new column, no migration and no new threshold.
+>   **What it is not.** `coverage_thin_frac` answers *"how much of this canvas is under a quarter of one
+>   panel's depth?"* — a question about **amount**, not about **place**. The thing being inferred is
+>   geometric: is the thin region the canvas's perimeter, or an interior panel nobody has finished? The
+>   observer's own discriminator for that is a **distance transform of the covered footprint normalised by its
+>   maximum inscribed radius** (0 % of thin pixels beyond half that radius on all 22 of the owner's mosaics,
+>   the same as on the single-field controls), which is cheap (`scipy.ndimage.distance_transform_edt`, already
+>   a dependency) and definitive where the share is circumstantial.
+>   **The failure direction, stated so nobody has to re-derive it:** a mosaic that has *both* a ragged union
+>   rim **and** a genuinely under-shot interior panel takes the rim branch, so the owner is told to trim when
+>   the more useful answer was to go and shoot that panel — and the grain note is the one surface that would
+>   have said so (the panel map says *where*, but it is a different card). The reverse cannot happen: without
+>   a rim the note keeps the sentence it has always had.
+>   **Why it was not built.** It needs the interior fraction carried onto the run to be read at note time, and
+>   `stack_runs` has no column for it — so it is an additive migration plus a `coverage_backfill` pass, which
+>   is the right shape for a *measured* answer and far too much for an inference the card already makes
+>   coherently. **Check first, before building any of it:** how often does the owner's library actually hold a
+>   mosaic that is both? If the answer is "rarely", the proxy is good enough and this should be **closed with
+>   the number** rather than built. If it is built, put the fraction behind the same lazy backfill the grain
+>   columns already use, default it to "unknown" (never to 0.0, which would read as "all rim"), and keep
+>   `has_ragged_border` as the fallback for every run recorded before it existed.
+
+## 2026-09-30 (Builder, later the same day) — one unreadable target took out the whole maintenance page
+
+### v0.492.4 — 🟠 BUG FIX (friendliness / robustness, PRIORITY 3), Builder-found and reproduced: the three library-wide read-outs on Settings had no per-target guard, so one broken `project.sqlite` 500'd all of them at once
+
+*(Found by reading the class rather than the entry — `webapp/pipeline.py`'s cross-target roll-ups against the
+same loops everywhere else in the app. Filed and fixed in one run, so it never entered "Bugs (fix these
+first)". All four tests fail before, by scratch revert against unmodified `main`.)*
+
+**The bug.** `webapp/pipeline.py` holds three library-wide read-only roll-ups — `reprocess_status`,
+`auto_cast_summary`, `auto_highlight_summary` — and each walks **every** target's own SQLite:
+
+```python
+for entry in lib.list_targets():
+    proj = lib.open_target(entry.safe_name)   # ← unguarded
+    try:
+        ...
+    finally:
+        proj.close()
+```
+
+`Library.open_target` → `Project.open` raises on a truncated or malformed `project.sqlite`, on a
+`user_version` a newer build wrote, and on a target directory a mount took away mid-read; `iter_stack_runs`,
+`get_meta` and the new `count_light_missing_from_stack` can raise after a clean open for the same reasons.
+Nothing caught any of it, so the exception went straight out through the endpoint as a **500**.
+
+**Why that is worse than one missing number.** All three land on **one page**. `GET /api/reprocess-status`
+feeds Settings → Maintenance (the three-way reprocess scope of v0.492.0, its target and sub counts, and the
+#903 finished-picture warning) **and** the navbar's outdated-targets badge, which every page in the app
+mounts; `auto_cast_summary` and `auto_highlight_summary` are the two Auto read-outs directly below it. So a
+single unreadable target blanked the reprocess scope, both Auto read-outs and the upgrade badge **together** —
+i.e. the page that exists to *run maintenance* went dark exactly when something needed maintaining, with
+nothing on screen to say which target was at fault. The badge fails silently by design (`data?.outdated ?? 0`
+renders nothing), so the reader is not even told the count is missing.
+
+**And the app had already decided this question everywhere else.** Every other cross-target reader skips the
+one broken target and answers for the rest, most of them saying so in the comment:
+`routers/gallery.py` (*"one broken project must not 500 the wall"*, ×3), `routers/sky.py` (×2),
+`routers/overtrim.py`, `routers/newsubs.py` — the sibling of this very feature, added with v0.492.0 —
+`routers/incominglag.py`, `refinish.py`, and `routers/storage.py`, whose comment names the convention
+outright. These three were simply never brought into line; v0.492.3 then added a per-target `COUNT` to one of
+them, widening the surface.
+
+**The fix.** New `pipeline._skip_unreadable_target(what, safe)` — one place for the reasoning and one log line
+(`log.warning(..., exc_info=True)`, the only report a roll-up can make: it has no per-target row to hang a
+message on) — and all three loops now guard the open **and** the reads, skipping that target and carrying on.
+In `reprocess_status` the skipped target still counts in `total_targets` (it exists) and lands in **no**
+bucket, exactly as a never-stacked target already does, so `outdated + up_to_date ≤ total_targets` keeps the
+meaning it had. Nothing else moved: same response keys, same numbers on a healthy library.
+
+**Tests +4 in `tests/webapp/test_reprocess_all.py`**, one per read-out plus one end-to-end through the real
+endpoint (200, not 500), with the failure injected at `Project.open` for exactly one target — the same
+monkeypatch the sibling test in `tests/webapp/test_new_subs_waiting.py` uses, because that is the call all
+three reach a project through. **All four fail before** (scratch revert of `webapp/pipeline.py` to
+`origin/main`, run: `4 failed`).
+
+**Upgrade-safe.** No config key, no schema change, no migration, no on-disk change, no default flip, no API
+shape change (the response gains and loses nothing); a library with no broken target behaves identically.
+`ruff` unchanged — the same 11 pre-existing findings in `webapp/pipeline.py` before and after.
+
 ## 2026-09-30 (Builder, the run after that) — the one-click catch-up could not reach the subs the app itself had just handed back
 
 ### v0.492.3 — 🟠 BUG FIX (autonomy, PRIORITY 2), Builder-found and reproduced: "new light" meant *light shot since*, so the library-wide catch-up was blind to a sub the app set aside and put back

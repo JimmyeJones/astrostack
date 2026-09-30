@@ -2278,3 +2278,125 @@ def test_reprocess_status_new_light_is_zero_on_a_caught_up_library(solved_librar
     assert status["new_light"] == 0
     assert status["new_light_subs"] == 0
     assert status["finished_pictures_new_light_only"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# One unreadable project must not cost the whole read-out
+#
+# All three of these roll-ups walk every target's own SQLite, and all three land
+# on one page (Settings, plus the navbar's outdated-targets badge), so an
+# unguarded one blanked the maintenance page — and the other two read-outs on it
+# — for a single truncated DB. Every other cross-target reader in the app already
+# skips the broken target and answers for the rest; these three now do too. The
+# failure is monkeypatched at ``Project.open`` exactly as the sibling test in
+# ``test_new_subs_waiting.py`` does, because that is the call every one of them
+# reaches the project through.
+# --------------------------------------------------------------------------- #
+
+def _break_one_target(monkeypatch, safe: str) -> None:
+    """Make ``Project.open`` fail for one target and no other."""
+    from seestack.io.project import Project
+
+    real_open = Project.open
+
+    def _boom(path, *a, **kw):  # noqa: ANN001, ANN202
+        if Path(path).name == safe:
+            raise OSError("database disk image is malformed")
+        return real_open(path, *a, **kw)
+
+    monkeypatch.setattr(Project, "open", staticmethod(_boom))
+
+
+def test_reprocess_status_skips_an_unreadable_target(solved_library, monkeypatch):
+    """A target whose project DB cannot be opened is skipped, the healthy one is
+    still classified, and the read-out still answers at all — it used to raise
+    straight out through the endpoint."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        assert len(targets) == 2
+        proj = lib.open_target(targets[0])
+        try:
+            _seed_run(proj, version="0.0.1")   # the healthy, stale target
+        finally:
+            proj.close()
+        _break_one_target(monkeypatch, targets[1])
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    # The broken target is still a target — it just lands in no bucket, exactly
+    # as a never-stacked one already does.
+    assert status["total_targets"] == 2
+    assert status["outdated"] == 1
+    assert status["up_to_date"] == 0
+    assert status["new_light"] == 0
+
+
+def test_reprocess_status_endpoint_survives_an_unreadable_target(
+        client, solved_library, monkeypatch):
+    """End to end: the badge/Settings fetch answers 200 rather than 500, which is
+    the whole point — a roll-up has no per-target row to report the fault on, so
+    a 500 is all the reader would have seen."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+    finally:
+        lib.close()
+    _break_one_target(monkeypatch, targets[0])
+    r = client.get("/api/reprocess-status")
+    assert r.status_code == 200
+    assert r.json()["total_targets"] == 2
+
+
+def test_auto_cast_summary_skips_an_unreadable_target(solved_library, monkeypatch):
+    """The Auto-cast read-out keeps the healthy target's runs when its neighbour's
+    DB cannot be opened."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(targets[0])
+        try:
+            _seed_run_with_cast(proj, _cast("neutral", 0.004))
+            _seed_run_with_cast(proj, _cast("green", 0.02))
+        finally:
+            proj.close()
+        proj = lib.open_target(targets[1])
+        try:
+            _seed_run_with_cast(proj, _cast("magenta", 0.03))
+        finally:
+            proj.close()
+        _break_one_target(monkeypatch, targets[1])
+        summary = pipeline.auto_cast_summary(lib)
+    finally:
+        lib.close()
+
+    assert summary["measured"] == 2
+    assert summary["neutral"] == 1
+    assert summary["by_cast"] == {"green": 1}
+
+
+def test_auto_highlight_summary_skips_an_unreadable_target(
+        solved_library, monkeypatch):
+    """Same degradation for the highlight read-out beside it on the same page."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        targets = [e.safe_name for e in lib.list_targets()]
+        proj = lib.open_target(targets[0])
+        try:
+            _seed_run_with_highlight(proj, _blown(0.4, 0.12))
+        finally:
+            proj.close()
+        proj = lib.open_target(targets[1])
+        try:
+            _seed_run_with_highlight(proj, _blown(0.8, 0.55))
+        finally:
+            proj.close()
+        _break_one_target(monkeypatch, targets[1])
+        summary = pipeline.auto_highlight_summary(lib)
+    finally:
+        lib.close()
+
+    assert summary["measured"] == 1
+    assert summary["blown"] == 1
+    assert summary["max_flat_fraction"] == 0.12
