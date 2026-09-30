@@ -19,7 +19,9 @@ only if a re-stack would actually combine it — accepted **and** solved — and
 run it is measured against is the newest *genuine* one (an editor export or a
 channel combine does not reset the clock, via the shared
 :func:`webapp.run_options.run_has_reusable_options` the Target page's
-``reusable`` flag already comes from).
+``reusable`` flag already comes from). That same run also says whether "solved"
+is part of the bar at all: see
+:func:`webapp.run_options.run_places_unsolved_subs`.
 
 **Where this is deliberately *wider* than the Target page's own nudge, and why.**
 That nudge says *"N new subs since your last stack"* and counts by **capture**
@@ -60,7 +62,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from webapp import deps
-from webapp.run_options import run_has_reusable_options
+from webapp.run_options import run_has_reusable_options, run_places_unsolved_subs
 
 router = APIRouter(tags=["new-subs"])
 
@@ -118,6 +120,18 @@ def new_light_since_picture(proj, runs):  # noqa: ANN001
     can, which is what lets the one library-wide offer reach those targets instead
     of sending the owner through them one at a time.
 
+    **The "and solved" half of the bar has one exception, and the run itself says
+    whether it applies.** Since v0.482.0 the stacker can place a sub *no plate
+    solve could locate*, by matching its star patterns to the reference — that is
+    what ``StackOptions.star_match_unsolved`` is for, on a faint or star-poor field
+    where ASTAP fails on most subs and the picture is the handful that happened to
+    solve. It is off by default and hand-set, so for the owner's runs the solved
+    bar is exactly right; on an install that turns it on, a target whose whole
+    shortfall is un-located subs read as **nothing waiting** and this note could
+    never name it. So the bar is taken from the run being measured against
+    (:func:`webapp.run_options.run_places_unsolved_subs`) — the run a reprocess
+    reuses the settings of, i.e. the settings the re-stack would in fact use.
+
     ``runs`` is the target's stack runs **newest first**, and the walk stops at
     the newest *genuine* one, so passing the iterator keeps the read cheap. A
     target whose newest runs are all editor exports walks past them, which is the
@@ -129,7 +143,10 @@ def new_light_since_picture(proj, runs):  # noqa: ANN001
     run = next((r for r in runs if run_has_reusable_options(r.options_json)), None)
     if run is None:
         return None, 0
-    return run, proj.count_light_missing_from_stack(run.timestamp_utc)
+    return run, proj.count_light_missing_from_stack(
+        run.timestamp_utc,
+        include_unsolved=run_places_unsolved_subs(run.options_json),
+    )
 
 
 def scan_new_subs_waiting(lib) -> list[NewSubsWaitingItem]:  # noqa: ANN001

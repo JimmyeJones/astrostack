@@ -17,6 +17,7 @@ from webapp.run_options import (
     derived_from_run_id,
     parse_run_options,
     run_has_reusable_options,
+    run_places_unsolved_subs,
 )
 
 
@@ -134,3 +135,29 @@ def test_a_settingless_run_is_never_offered_a_form_it_cannot_fill(
     r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/options")
     assert r.status_code == 400
     assert "reusable" in r.json()["detail"]
+
+
+def test_only_a_recorded_true_means_the_run_placed_unsolved_subs():
+    """The bar "accepted **and** solved" has exactly one exception, and it is a
+    setting the run recorded rather than a guess.
+
+    Strict ``is True`` on purpose: the option defaults ``False``, and everything
+    else — a run with no settings, an editor export, a string, a number, a
+    missing key — reads as off. That keeps the error on the side the readers
+    already err on, which for an *offer* is saying less than it could rather than
+    promising light a re-stack cannot place.
+    """
+    assert run_places_unsolved_subs(json.dumps({"star_match_unsolved": True})) is True
+
+    for payload in (
+        json.dumps({"star_match_unsolved": False}),
+        json.dumps({"star_match_unsolved": "yes"}),
+        json.dumps({"star_match_unsolved": 1}),      # truthy, but not the setting
+        json.dumps({"sigma_clip": True}),            # a genuine run that left it off
+        json.dumps({"editor_recipe": {"ops": []}}),  # not a stack at all
+        json.dumps([1, 2, 3]),
+        "{not json",
+        "",
+        None,
+    ):
+        assert run_places_unsolved_subs(payload) is False, payload
