@@ -627,6 +627,54 @@ def test_reject_summary_splits_out_subs_the_solver_ran_out_of_time_on(
     assert body["solve_setup_problem"] is None
 
 
+def test_reject_summary_names_a_solve_the_stack_ruled_wrong(
+    client, built_library, data_root,
+):
+    """End to end: a sub the stacker dropped because its plate solve disagreed
+    with the rest of the target (v0.473.1's consensus test) must come back in the
+    "matched to the wrong patch of sky" bucket, not in "left out for other
+    reasons". The app diagnosed it precisely and writes that sentence into the
+    row; the beginner card is the one surface that used to throw the diagnosis
+    away. The owner's library carries 178 such rows (observer #965)."""
+    from seestack.io.library import Library
+    from seestack.io.project import (
+        REJECT_REASON_BAD_SOLVE_FOOTPRINT,
+        REJECT_REASON_BAD_SOLVE_SCALE,
+    )
+
+    frames = client.get("/api/targets/M_42/frames").json()
+    n_total = len(frames)
+    assert n_total >= 2
+
+    # The stacker rejects these outright (``accept = 0``), unlike the accepted
+    # -but-unsolved cases above: the frame *has* a solve, it is just wrong.
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            proj.update_frame(frames[0]["id"], accept=False,
+                              reject_reason=REJECT_REASON_BAD_SOLVE_SCALE)
+            proj.update_frame(frames[1]["id"], accept=False,
+                              reject_reason=REJECT_REASON_BAD_SOLVE_FOOTPRINT)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    summary = client.get(
+        "/api/targets/M_42/frames/reject-summary").json()["summary"]
+    keys = {b["key"]: b["count"] for b in summary["buckets"]}
+    # Both sub-cases in one bucket, and nothing in the vague catch-all.
+    assert keys.get("bad_solve") == 2
+    assert "other" not in keys
+    note = next(b["note"] for b in summary["buckets"] if b["key"] == "bad_solve")
+    assert "disagrees" in note
+    # Not mistaken for a one-time setup problem (install ASTAP / a star
+    # database), which would show the wrong banner: these subs *did* solve.
+    body = client.get("/api/targets/M_42/frames/reject-summary").json()
+    assert body["solve_setup_problem"] is None
+
+
 def test_reject_summary_counts_accepted_subs_whose_files_have_vanished(
     client, built_library, data_root,
 ):

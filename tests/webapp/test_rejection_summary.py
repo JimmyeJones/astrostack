@@ -406,3 +406,85 @@ def test_the_seestars_own_pictures_sit_beside_the_real_rejects_in_order():
     assert [b["key"] for b in s["buckets"]] == [
         "trailed", "removed", "seestar_output", "missing", "error",
     ]
+
+
+def test_a_solve_the_stack_ruled_wrong_gets_its_own_bucket_not_other():
+    """A plate solve that *succeeded* and disagrees with the rest of the target
+    (`stack/mosaic`'s consensus test, v0.473.1) writes a precise sentence —
+    "bad plate-solve (scale disagrees with the other frames)" — which the Frames
+    table shows verbatim. This card used to throw that diagnosis away into "Left
+    out for other reasons", the exact failure `seestar_output` was given its own
+    bucket for. The owner's library carries 178 of these rows (observer #965)."""
+    from seestack.io.project import (
+        REJECT_REASON_BAD_SOLVE_FOOTPRINT,
+        REJECT_REASON_BAD_SOLVE_SCALE,
+    )
+
+    s = summarize_rejections(
+        {REJECT_REASON_BAD_SOLVE_SCALE: 120,
+         REJECT_REASON_BAD_SOLVE_FOOTPRINT: 58},
+        n_accepted=5000,
+    )
+    k = _keys(s)
+    # Both sub-cases share the bucket: one physical cause for the beginner card,
+    # while the per-frame badge keeps the two distinct sentences.
+    assert k == {"bad_solve": 178}
+    assert "other" not in k
+    (bucket,) = s["buckets"]
+    assert bucket["label"] == "Matched to the wrong patch of sky"
+    assert "wrong" in bucket["note"] or "disagrees" in bucket["note"]
+
+
+def test_a_wrong_solve_is_not_the_couldnt_be_located_bucket():
+    """"Couldn't be matched to the star field" and "was matched, wrongly" are
+    different things to go and look at, so they must not merge."""
+    from seestack.io.project import REJECT_REASON_BAD_SOLVE_SCALE
+
+    s = summarize_rejections(
+        {REJECT_REASON_BAD_SOLVE_SCALE: 3, "solve_failed:no star database": 5},
+        n_accepted=100,
+    )
+    assert _keys(s) == {"solve_failed": 5, "bad_solve": 3}
+
+
+def test_a_wrong_solve_sits_with_the_other_plate_solve_buckets_in_order():
+    """Its slot is after the three "the solver had trouble" buckets and before
+    the benign ones, so the card reads as one plate-solve story."""
+    counts = {"auto:streak": 1, "solve_failed:foo": 1,
+              "bad plate-solve (footprint far from the group)": 1, "user": 1}
+    s = summarize_rejections(counts, n_accepted=10, n_unsolved=0)
+    assert [b["key"] for b in s["buckets"]] == [
+        "trailed", "solve_failed", "bad_solve", "removed",
+    ]
+
+
+def test_a_wrong_solve_never_becomes_the_headline_advice():
+    """`_DOMINANT_VERDICTS` deliberately has no `bad_solve` line: there is no
+    action to name, because `solve.runner.reconcile_bad_solve_frames` already
+    offers a wrong-scale sub one more plate solve by itself. A dominant
+    bad-solve night must keep the generic copy rather than invent advice —
+    pinned because adding a verdict here is the tempting change."""
+    from seestack.io.project import REJECT_REASON_BAD_SOLVE_SCALE
+
+    s = summarize_rejections({REJECT_REASON_BAD_SOLVE_SCALE: 60}, n_accepted=40)
+    assert s["verdict"]["key"] == "mixed"
+    assert s["verdict"]["tone"] == "warn"
+
+
+def test_every_canonical_reject_reason_the_app_writes_has_its_own_bucket():
+    """Drift guard, and the reason this test exists: the same defect has now
+    landed twice — `auto:seestar_output` and then the stacker's bad-solve prose
+    both shipped as reject reasons the app writes deliberately and this card
+    described as "other reasons". A new `REJECT_REASON_*` constant added without
+    a bucket fails here rather than silently reaching the owner's card."""
+    from seestack.io import project
+    from webapp.rejection_summary import bucket_for
+
+    names = sorted(n for n in dir(project) if n.startswith("REJECT_REASON_"))
+    assert len(names) >= 6, f"constants moved or were renamed: {names}"
+    unbucketed = [n for n in names
+                  if bucket_for(str(getattr(project, n))) == "other"]
+    assert unbucketed == [], (
+        "these reject reasons land in 'Left out for other reasons' on the "
+        f"beginner breakdown card: {unbucketed}"
+    )

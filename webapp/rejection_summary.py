@@ -16,6 +16,7 @@ mapping can be reused anywhere the counts are known.
 from __future__ import annotations
 
 from seestack.io.project import (
+    REJECT_REASON_BAD_SOLVE_PREFIX,
     REJECT_REASON_FILE_MISSING,
     REJECT_REASON_SEESTAR_OUTPUT,
 )
@@ -61,6 +62,11 @@ _BUCKETS: list[tuple[str, str, str]] = [
      "it found a match — often a hazy or star-poor sub. They'll be tried again "
      "on the next scan; if it keeps happening, raise the ASTAP timeout in "
      "Settings and run Plate Solve again."),
+    ("bad_solve", "Matched to the wrong patch of sky",
+     "The star-matcher did find a match for these, but it disagrees with all "
+     "your other subs — a different patch of sky, or a different zoom. Lining "
+     "them up on that would smear the stars, so they're left out; your picture "
+     "keeps every sub that agrees."),
     ("removed", "You removed these",
      "Frames you rejected by hand."),
     ("seestar_output", "The Seestar's own pictures, not your subs",
@@ -102,6 +108,26 @@ def bucket_for(reason: str) -> str:
         return ("solve_timeout"
                 if reason == f"solve_failed:{SOLVE_FAILED_TIMEOUT}"
                 else "solve_failed")
+    if reason.startswith(REJECT_REASON_BAD_SOLVE_PREFIX):
+        # A plate solve that *succeeded* and is wrong: the stacker's own
+        # consensus test ruled it out (``stack/mosaic._plate_scale_outlier_indices``
+        # and its footprint sibling). Deliberately NOT the ``solve_failed``
+        # bucket — nothing failed, and "couldn't be matched to the star field" is
+        # a different thing for the owner to go and look at than "was matched,
+        # wrongly". Its own bucket rather than the vague "other" for the reason
+        # ``seestar_output`` has one: the app diagnosed these precisely, and
+        # "left out for other reasons" throws that diagnosis away on the one
+        # card whose whole job is saying why (the owner's library carries 178 of
+        # these rows, observer issue #965).
+        #
+        # The two sub-cases v0.473.1 writes — wrong *scale* and displaced
+        # *footprint* — share this bucket on purpose. They are two different
+        # things to go and look at, which is why each gets its own sentence on
+        # the frame's badge in the Frames table (``frontend/rejectReason.ts``
+        # shows that prose verbatim); but this card's job is the physical cause
+        # a beginner can hold, and "the app matched this sub to the wrong bit of
+        # sky" is one cause with one consequence.
+        return "bad_solve"
     if reason == "user":
         return "removed"
     if reason == REJECT_REASON_SEESTAR_OUTPUT:
@@ -134,7 +160,15 @@ _bucket_for = bucket_for
 # Keyed by bucket; only buckets with a clear, still-reassuring next step get a
 # line. "trailed" is already reassuring (the stacker doing its job) and "removed"
 # is the user's own choice, while "error"/"other" have no useful advice — those
-# fall through to the generic copy.
+# fall through to the generic copy. "bad_solve" falls through for the same
+# reason and one more: there is no action for the owner here because the app
+# already takes the only one there is, by itself —
+# ``solve.runner.reconcile_bad_solve_frames`` clears a wrong-*scale* solve and
+# offers the sub one more plate solve on the next scan (once per frame, ledgered).
+# Telling him to do something the reconcile has already done would be advice that
+# makes his night sound broken. Nor can this bucket dominate a night by that
+# route: the consensus bar deciding it caps wrong-scale frames at a tenth of the
+# population by construction (``stack/mosaic.SCALE_CONSENSUS_SHARE``).
 _DOMINANT_VERDICTS: dict[str, str] = {
     "soft": "A lot of frames were left out — mostly soft or elongated stars this "
             "time. It's worth checking focus (and dew on the lens) before your "
