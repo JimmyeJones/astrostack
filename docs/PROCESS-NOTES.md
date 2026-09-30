@@ -26,6 +26,17 @@ every write that starts from a path under ASTRO_DATA:
 Nothing to fix. The audit's own three tests are in `tests/test_updater_symlink_escape.py`, with the one
 that expected `ensure_queue` to carry on changed to expect v0.492.5's refusal (see `SHIPPED.md`, v0.492.15).
 
+### `queue: max` — verified before use
+
+The audit suggested `queue: max` for the tagging workflow's concurrency block and asked that it be
+verified. It exists: GitHub's changelog of 2026-05-07 ("concurrency groups now allow larger queues") —
+up to 100 pending runs per group, FIFO, not combinable with `cancel-in-progress: true` (a validation
+error), which `release-tags.yml` never set. `ci.yml` could not take it (its `cancel-in-progress` is an
+expression that is true on PRs), so main's runs there group per commit instead. Both scripts were also
+run against the real history: `check-commit-identity.sh HEAD --not --tags` and `check-version-bump.sh
+HEAD origin/main` pass, and a dry run of `release-tags.sh` on `main` reports "Created 0 tags; 1 already
+existed" — the walk stops at the tip's own tag as designed.
+
 ### The audit's CSRF test, and why it was changed rather than made to pass
 
 It posted with **no headers** and expected 403 — which would have refused curl, the observer's scripts and

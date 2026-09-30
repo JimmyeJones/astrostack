@@ -1,5 +1,54 @@
 # Shipped — the record
 
+## 2026-09-30 (audit run A, release pipeline) — v0.492.16: an unreadable range passed the email guard, and two changes could ship under one version number
+
+### v0.492.16 — 🔴 INFRA / the guard that keeps a personal email out of a public history (B-F3 HIGH, B-F6 LOW)
+
+**B-F3 — `scripts/check-commit-identity.sh` exited 0 on an invalid revision range.** It read `git log`
+through a process substitution (`< <(git log …)`), whose failure `set -e` never sees, so a range it could
+not read checked nothing and reported clean. CI feeds it `github.event.before..sha`, and `before` is
+unusable after any force-push — exactly when a rewrite is most likely to carry a wrong identity. The script
+now captures `git rev-list "$@"` and returns 2 ("cannot list revisions") when it fails; the `*)` and
+`--pre-push` modes never turn that into a pass (a pre-push whose remote tip is unknown locally checks
+everything not on any remote instead). CI's `identity` job verifies both ends with `rev-parse --verify`
+before using the range and, when the recorded base is unusable, falls back to the merge base with the base
+branch (a PR) or to everything no release tag carries yet (a push to main) — never to "-1 HEAD".
+
+**B-F6 — the guard ignored the message.** A commit's body and trailers are published with it, and a
+`Co-authored-by: Name <address>` trailer is the obvious place for the same address to land. Every
+email-shaped string in `%B` is now held to the same allowlist: a dotted domain ending in letters (so
+`react@18.2.0` and `root@nas` are not addresses) that is not a file name (`logo@2x.png`), masked to
+`***@domain` in the refusal like the author field is. `tests/test_commit_identity_check.py` builds scratch
+repositories with RFC 2606 addresses: an invalid range is an error, a trailer or body mention is refused,
+pins/hosts/retina names/decorators/no-reply trailers pass, the author refusal still works, and the pre-push
+mode still checks the pushed range — the four guard tests fail on main's script.
+
+### also in v0.492.16 — 🔴 INFRA (B-F2 HIGH, B-F4/B-F5 MEDIUM): two changes could ship under one version number, and a queued run could be lost
+
+**B-F2.** Both PRs of the audit's pair bumped 0.492.4 → 0.492.5 — an identical hunk, a clean merge — and the
+second was never tagged, because CI's `version` job judged a PR only against its recorded base SHA (stale by
+the time the second merged) and treated "unchanged" as fine. New `scripts/check-version-bump.sh` judges the
+head against *each* ref it is given — the recorded base **and main as it is now** (fetched) — with
+M = merge-base: a change touching anything outside `docs/` must change the version against M; a changed
+version must be strictly greater than the ref's own (`sort -V`: never backwards, never a number already on
+main); a changed version must not already be a tag unless that tag sits on the head itself. **B-F4:** the
+job now runs on every push to main too, against the commit before the push. The same "code changed but
+version didn't" refusal is mirrored in the tagger (B-F2's silent half): `scripts/release-tags.sh` goes red
+and tags nothing where it used to print "unchanged; nothing to tag".
+
+**B-F5.** With one concurrency group per branch and no queue, a third push to main cancelled the second's
+pending run — its CI verdict and its tag both lost. `ci.yml`'s main runs now group per commit
+(`github.sha`; PR runs keep cancelling their superseded selves). `release-tags.yml` keeps one group and adds
+`queue: max` — verified to exist (GitHub changelog 2026-05-07: up to 100 pending runs per group, not
+combinable with `cancel-in-progress: true`, which it never used) — **and** no longer needs the queue to be
+right: the tagger walks main's first-parent line from HEAD back to the last tagged transition and tags every
+version it passes, so a run that never happened is made up for by the next one, runs landing in either order
+agree, and re-running is a no-op. A tag that already names a different commit's change is the same red as
+before. `tests/test_version_bump_check.py` runs both scripts against scratch repositories with a bare
+`origin` (19 cases: the stale-base reuse, the lost middle run, the wrong-order pair, backwards, docs-only,
+the tag of this very push, backfill) — all red without the scripts. What could not be exercised outside
+GitHub: the event payloads and the queue itself; the YAML is pinned by a text test and validated as YAML.
+
 ## 2026-09-30 (audit run A, security) — v0.492.15: a page on any other site could run the whole library, and the build form took any path on the NAS
 
 ### v0.492.15 — 🔴 SECURITY FIX (C-F2, MEDIUM but the broadest exposure): every state-changing endpoint was triggerable cross-site
