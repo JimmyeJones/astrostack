@@ -4263,6 +4263,37 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
         if "applied" not in drizzle_degraded:
             drizzle_degraded = None
 
+    # …and the same question for the *other* two levers the memory guard can pull,
+    # which until now were stamped and read by nothing. Both are about outlier
+    # removal rather than the canvas, so nothing the owner can see about the
+    # picture's size or shape changed — which is exactly why a run that took one
+    # needs a sentence: History would otherwise report "min/max ×1" on a target
+    # configured for ×3, or no rejection at all on a drizzled run that asked for
+    # it, with the reason only ever in a job log that has since rolled.
+    #
+    # One key, not two, because the two cannot co-occur: ``REJKAD`` is stamped
+    # only where the order-statistic min/max combine runs (``_min_max_reject_runs``
+    # requires drizzle **off**) and ``DRZREJSK`` only where drizzle is on. A
+    # single note also keeps this card from growing two more always-on lines on a
+    # page the owner already calls busy. ``REJKAD`` is preferred if a future
+    # engine ever stamps both, since it carries the numbers.
+    rejection_degraded: dict[str, Any] | None = None
+    if "REJKAD" in header:
+        rejection_degraded = {"reason": "memory", "kind": "fewer_extremes"}
+        for hk, k in (("REJKAD", "applied"), ("REJKRQ", "requested")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                rejection_degraded[k] = int(header[hk])
+        if "applied" not in rejection_degraded:
+            rejection_degraded = None
+    elif "DRZREJSK" in header:
+        # The card's own value is the reason ("memory"); keep it rather than
+        # re-asserting one, so a future engine that skips the pass for another
+        # cause reports that cause instead of this one.
+        reason = "memory"
+        with contextlib.suppress(KeyError, TypeError, ValueError):
+            reason = str(header["DRZREJSK"]).strip() or "memory"
+        rejection_degraded = {"reason": reason, "kind": "drizzle_reject_skipped"}
+
     # Frame-accounting summary (present on stacks recorded once the stacker began
     # stamping it): how many subs it attempted to combine and how many couldn't be
     # aligned. Lets the panel honestly report "1,850 of 2,000 subs combined; 150
@@ -4335,7 +4366,9 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             "photometric": photometric, "panel_gain": panel_gain,
             "dark_scaling": dark_scaling,
             "sensor_defects": sensor_defects,
-            "rejection": rejection, "frame_accounting": frame_accounting,
+            "rejection": rejection,
+            "rejection_degraded": rejection_degraded,
+            "frame_accounting": frame_accounting,
             "drizzle_degraded": drizzle_degraded,
             "auto_edit": auto_edit, "sky_cast": sky_cast,
             "color_cal": color_cal,

@@ -1,5 +1,74 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder, a later run of the day) — the two memory step-downs that left no trace anyone could read
+
+### v0.490.1 — 🟡 BUG FIX (friendliness + trust, PRIORITY 3): a picture whose outlier removal was cut back to fit memory now says so
+
+*(Found by the Builder in the code while sizing the "one budget per batch" lead at the top of "Bugs (fix these
+first)", and verified by grep before anything was changed. Not from the backlog.)*
+
+**The gap, stated exactly.** The stack's memory guard has **three** levers it can pull rather than refuse to
+make a picture, and each one stamps the finished FITS so the image can explain itself long after the job log
+has rolled. One of the three is read by something. The other two were read by **nothing** — not by
+`/stack-runs/<id>/info`, not by `_INFO_CARDS`, not by the frontend, not by `stackhealth`:
+
+| lever | cards | surfaced before this fix |
+|---|---|---|
+| drizzle canvas stepped down | `DRZSCLAD`/`DRZSCLRQ` | **yes** — `drizzle_degraded` → `drizzleDegradedNote` |
+| extremes per side lowered | `REJKAD`/`REJKRQ` | **no** — grep found no reader outside `tests/` |
+| drizzle rejection pass skipped | `DRZREJSK` | **no** — same |
+
+**Why the two silent ones are the two that most need a sentence.** The drizzle-scale step changes the
+picture's *size*, so the owner notices something and goes looking. These two leave the canvas, the pixel grid
+and the sub list exactly as asked — there is nothing to notice. So a target configured for three extremes per
+side that could only afford one reads, on this very card, as plain `min/max reject`; and a drizzled run whose
+second pass was dropped reads as a picture that simply never had any rejection. Both decisions are taken on
+the unattended path — `stacker.py` gates the k step-down on `eff.unattended`, and the owner's walk-away
+mosaics on a RAM-capped NAS are exactly where they fire — so nobody was watching, and the reason existed only
+in a server log. `rejectionOutlookNote`'s own docstring already records the other half of this hole: *"the
+memory budget settles its two-pass rejection at run time and this cannot know it"* — nothing after the run
+said what it settled on either.
+
+**What shipped.** One additive `rejection_degraded` key on `/api/targets/<safe>/stack-runs/<id>/info`
+(`webapp/routers/stack.py`), mirroring `drizzle_degraded`'s shape, plus a pure
+`rejectionDegradedNote` (`frontend/src/routes/History.tsx`) rendered on the Info panel immediately after
+`drizzleDegradedNote`.
+
+**One key and one note, not two of each, and that is a decision rather than a shortcut.** The two cards cannot
+co-occur: `REJKAD` is stamped only where the order-statistic min/max combine runs, and
+`_min_max_reject_runs` requires drizzle **off**, while `DRZREJSK` requires it **on**. A `kind` discriminator
+(`"fewer_extremes"` / `"drizzle_reject_skipped"`) therefore describes the space honestly, and it keeps a card
+the owner already calls busy from growing *two* more always-on lines instead of one conditional one. `REJKAD`
+wins if a future engine ever stamps both, because it is the one carrying numbers.
+
+**The copy says what happened, why, and what it cost** — in that order, like the drizzle note, and ending on
+the reassurance that actually matters. For the k step-down the honest cost is small and it is said plainly:
+*"…the same size and the same subs; there's just a little less protection where two trails cross one pixel."*
+For the skipped drizzle pass the cost is real, so that note is the one that names the lever which buys it
+back: *"Every sub is in it, but a satellite trail is more likely to have survived; re-stack at a lower
+super-resolution scale to get the pass back."*
+
+**Self-hiding in every direction, which is the whole property on a healthy box.** No card → `None` → no line,
+so a master recorded before the cards existed is indistinguishable from a run that fitted (which is all of
+them on a healthy box). A `kind` this build does not know renders nothing rather than half a sentence. A
+missing, zero or NaN `applied` count renders nothing rather than inventing one, and a recorded request that is
+not larger than what ran omits the comparison rather than printing "1 instead of 1".
+
+**Nothing about any stack changed.** No engine code was touched: the cards were already being stamped, and
+`DRZREJSK` keeps its own recorded reason string rather than having `"memory"` re-asserted over it, so a future
+engine that skips the pass for a different cause reports that cause.
+
+**Upgrade safety (§9).** One additive response key and one additive optional client field; no config key,
+schema, on-disk path, default, engine behaviour or existing response shape changed. An older frontend against
+this backend ignores the key; this frontend against an older backend gets `undefined` and renders nothing.
+
+**Tests. +3 Python (`tests/webapp/test_stack_render.py`), +8 vitest unit and +2 rendered
+(`frontend/src/routes/History.test.tsx`).** All three Python tests were verified **failing before** against a
+stash of the production change, and the rendered "puts the reason on the Info panel" test was verified failing
+against a scratch removal of the JSX block alone (not of the function, so the failure is about the panel and
+not about an import). Full suite green; `tsc`, `vitest` (4,495) and `vite build` all pass. The rendered
+"says nothing on a run that fitted" test anchors on the rejection line rather than on `min/max reject`, which
+also matches the raw `STACKER` card.
 ## 2026-09-30 (owner session) — one-click updates, and the restore that would have deleted new subs
 
 ### v0.490.0 — ✨ FEATURE (owner request): one-click updates from Settings

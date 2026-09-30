@@ -1777,6 +1777,21 @@ export interface StackDrizzleDegraded {
   requested?: number;
 }
 
+/** A run whose *outlier removal* was cut back to fit the memory budget — the two
+ *  levers the guard can pull that leave the picture's size and shape alone.
+ *  `kind` discriminates them; they cannot co-occur (one needs drizzle off, the
+ *  other needs it on). */
+export interface StackRejectionDegraded {
+  reason: string;
+  /** `"fewer_extremes"` — min/max dropped fewer samples per side than asked for.
+   *  `"drizzle_reject_skipped"` — the drizzle outlier pass didn't run at all. */
+  kind: string;
+  /** Extremes per side the run actually dropped (`fewer_extremes` only). */
+  applied?: number;
+  /** Extremes per side it was set to, when the run recorded it. */
+  requested?: number;
+}
+
 export interface StackFrameAccounting {
   // Subs the stacker attempted to combine (after lucky/mosaic-outlier filtering).
   n_offered: number;
@@ -1977,6 +1992,11 @@ export interface StackRunInfo {
   // one that did — instead of refusing to make a picture at all with advice
   // nobody was there to read. Absent on every run that fitted.
   drizzle_degraded?: StackDrizzleDegraded | null;
+  // The same story for outlier removal rather than the canvas: the guard cut the
+  // pass back (fewer extremes per side) or dropped it entirely (drizzle) so the
+  // run could still make a picture. Nothing about the picture's size changed,
+  // which is why it needs saying. Absent on every run that fitted.
+  rejection_degraded?: StackRejectionDegraded | null;
   // Plain-language "what the unattended auto-edit did (and why)" note, present
   // only on runs an autonomous job auto-edited (Process-target / reprocess /
   // watcher auto-stack). Absent on manual/un-edited runs.

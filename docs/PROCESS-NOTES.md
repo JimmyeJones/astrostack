@@ -1,5 +1,127 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (Builder, a later run of the day) — the provenance-card sweep that found one real gap and is otherwise clean
+
+*(Builder, branch `claude/magical-wright-b7qklw` → **v0.490.1**. Baseline on `origin/main` at b0a27f5:
+**6999 passed, 2 skipped**, 13m35s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root`
+cleared first. Green.)*
+
+**One environment note worth repeating because the trap fired again.** `pytest-xdist` is deliberately not a
+project dependency, so the first `-n 4 --dist worksteal` run of a fresh container exits **4** with
+`unrecognized arguments: -n --dist`. `AGENTS.md` §7's rule is what caught it: the summary line did not end in
+`passed` or `failed`, so it was not a result — the background wrapper had meanwhile reported "exit code 0",
+which is `tail`'s. `pip install pytest-xdist` into the run's own `.venv` and re-run.
+
+### Dogfood pass — `--mosaic --editor --big`, CLEAN (and one misreading of the tooling, corrected)
+
+Ran after the fix, before the merge. Auto's trim on the 2×2 mosaic is **7.9 %** of the canvas (AGENTS.md §1's
+bar is ~15 %), nothing overflowed on phone or desktop, no console error, no failed request, all 21 ops
+re-rendered the preview and both editor drives reported `editor drive clean`. The full-size leg reached the
+decimated preview (canvas 1693×1150, shrunk to 1/2) and the five preview↔export advisories were all live.
+
+**Read as one paragraph, the Target page's five cards agree.** On the mosaic: the coaching card says "another
+pass or two over the same mosaic evens out the thinner part", the readiness card scopes its goal as "~7.3 h
+(about 4 fields of sky)", the panel map names the top-right at "about 30 s there against 1 min on a typical
+panel", and the framing verdict — which does say the object is bigger than this mosaic — closes with *"Most of
+it is already in this picture, though — until you're happy with the depth, more passes over the panels you
+already have do more for it than a wider grid."* That is v0.444.2's `framingIsFragment` gate working as
+designed: 75 % captured is below the fragment bar, so the page prescribes depth and not a wider grid, and the
+coaching card does not contradict it. On the single field (20 % captured) all three flip together to "shoot it
+in mosaic mode", with the readiness card's goal correctly labelled "for this single field".
+
+**One thing looked like a finding for twenty minutes and was not — recorded so nobody re-files it.** On the
+`--big` editor drive the "Hot-pixel removal isn't shown on this downscaled preview" advisory appears on
+exactly one render and is gone from every later one, while "Sharpening preview understates the effect"
+persists through all 21 — which reads exactly like an advisory that stops being shown while its op is still
+enabled, i.e. a user judging and exporting from a preview whose caveat has silently gone. It is not.
+`scripts/dogfood_editor.mjs` **removes each op after measuring it** ("so op N is measured against the same
+recipe as op 1"), so the recipe at every step is Auto's seed plus the one op under test — the persistent
+sharpen advisory is the *seed's own* sharpen op, and the hot-pixel one correctly appears only while its op is
+in the recipe. The backend flag is a whole-recipe `any(op.enabled and op.id == ...)` and was never in doubt.
+**The lesson for the next reader of this log: an advisory that appears once is the probe's design, not a
+regression — the probe's paragraph is cumulative in what it prints and not in what it renders.**
+
+### §11 collision — this run's version number was taken mid-flight, and that is the normal case
+
+Between this run's baseline (`origin/main` at b0a27f5, `__version__` 0.489.2) and its first push, an **owner
+session** merged PR #1024 carrying **v0.489.3 + v0.490.0**. So the number this work had already been
+committed, pushed and PR'd under was released by someone else, and CI's "Version bump is sane" job would
+rightly have refused it.
+
+Handled exactly as §11 prescribes and recorded because the *detection* is the interesting part: it was not the
+push that surfaced it (the push succeeded — a branch push races nothing) and not the PR (its checks had not
+started). It was reading the CI run list while waiting, and seeing another branch's completed run titled with
+this run's own version. **So "re-fetch `origin/main` before each task" is not enough on its own for the
+version line** — the collision can land between the last fetch and the merge, which is precisely why §11 puts
+the number's choice *at merge time*. Merged `origin/main` in, took main's value, bumped again to **v0.490.1**,
+resolved both doc conflicts as unions (nobody's entry deleted, mine renumbered and ordered newest-first) and
+re-ran the full suite on the merged tree before merging.
+
+Worth knowing for the next run: the owner's own sessions ship into this repo too, so `main` can move under a
+Builder for reasons no agent branch would predict.
+
+### How the run found its work
+
+"Bugs (fix these first)" still holds no unclaimed actionable entry — the same state the previous two runs
+recorded, for the same reasons (leads gated on a read of the owner's library, decisions already costed and
+stood down with numbers, unreachable defensive notes). The GitHub inbox is drained: #1015's one in-repo ask
+shipped as v0.488.2 and is answered on the issue; #878/#880/#903 each wait on the owner rather than on code.
+
+So the run sized the top Bugs entry — **"capture the stack memory budget once at the start of a batch"** — and
+in reading its code found a different, smaller, certain thing instead. The sizing itself is recorded below,
+because it is a caution the entry does not carry.
+
+### ⚠ The "one budget per batch" lead has a safety inversion its entry does not name — read this before picking it up
+
+The entry asks for the batch's memory budget to be captured once at the start and every target priced against
+that one number. Two things found while sizing it:
+
+1. **Capturing once is not strictly safer — it is strictly *less* safe in one direction.** A budget captured
+   when the box was quiet is *larger* than the live figure later in a five-day batch, so pricing target 45
+   against target 1's `MemAvailable` can authorise a canvas the box can no longer hold. On a box with a
+   recorded OOM history (§10) that is the wrong direction to be wrong in. Any workable shape therefore has to
+   be `min(batch_open, live)`, which restores reproducibility in the *upward* direction only.
+2. **It probably does not address the observation anyway.** The observer's measurement is the same target
+   priced against **~4.1 GB in one batch and ~3.2 GB in the next, a week apart**. Within one batch the
+   `JobManager` runs one stack at a time and nothing else of the app's is competing, so the intra-batch drift
+   a per-batch capture removes is the small part; the week-apart difference is the host's own state and no
+   in-batch capture can touch it.
+
+**What that leaves.** The honest lever for "same subs, same options, same answer" is the setting that already
+exists — `Settings.max_stack_memory_gb`, which short-circuits the live read entirely and is `None` on the
+owner's install. So the shape worth costing is *surfacing* that (a Settings nudge saying results are priced
+against whatever RAM is free unless a fixed budget is set), not re-plumbing the guard. **The disclosure half
+this would otherwise have wanted is already built and was verified so this run:** `DRZSCLAD`/`DRZSCLRQ` →
+`drizzle_degraded` → `drizzleDegradedNote` already tells the owner when a memory step-down changed his
+picture's size.
+
+### The sweep that came out of that, and its one finding
+
+Verifying that disclosure chain raised the obvious question: **does every provenance card the engine stamps
+have a reader?** Swept mechanically over `seestack/` and `webapp/` — every `meta[...]`/`header_meta[...]` card
+assignment (75 distinct keys), each grepped for a reader outside `tests/` and outside its own writing module.
+
+**Four keys came back with no reader, and two of them were a real gap** — shipped as **v0.490.1**:
+
+| key | verdict |
+|---|---|
+| `REJKAD` / `REJKRQ` | **GAP — fixed.** The unattended min/max k step-down was stamped and read by nothing. |
+| `DRZREJSK` | **GAP — fixed.** Same, for a skipped drizzle rejection pass. |
+| `GRAINRAT` / `GRAINTHN` / `GRAINDEP` / `GRAINSHR` | **Not a gap.** Deliberate redundancy: the app reads the `stack_runs.grain_*` columns, and the cards are the same numbers kept where an external tool (or a library whose DB is gone) can still read them. |
+| `SEAMRES`, `STKFWHM`, `BKGSIGMA` | **Not a gap.** Same shape — column-backed; `BUNIT` is a standard FITS card with no reader to want. |
+
+**So the class is clean apart from the two that shipped — do not re-run this sweep.** The generalisation worth
+keeping is the discriminator, because it is what separated the gap from the redundancy: *a card is only
+unread if the fact it carries has no other home.* A card duplicating a `stack_runs` column is a backup; a card
+that is the **only** record of a decision, with no reader, is a decision the app has silently forgotten it made.
+
+**And the reason those two were the ones that mattered is worth stating on its own.** The memory guard's three
+levers are not equally visible. The drizzle-scale step changes the picture's *size*, so the owner notices
+something and comes looking — which is why it got a reader first. The other two leave the canvas, the pixel
+grid and the sub list exactly as asked, so there is nothing at all to notice, and both fire on the unattended
+path where nobody was watching. **The less a degradation shows, the more it needs to be written down** — the
+opposite of the order these surfaces actually got built in.
+
 ## 2026-09-30 (Builder, second run of the day) — two bugs in four lines, and a clean whole-app dogfood pass
 
 *(Builder, branch `claude/magical-wright-olpyzx` → **v0.489.1**, **v0.489.2**. Baseline on `origin/main` at
