@@ -25,7 +25,8 @@ or a channel combine does not reset the clock, via the shared
 regardless of what was shown, and after a Combine that is a one-night stack
 carried in with its own timestamp — so the deep target the Combine existed to
 make deeper was the one target this note could never name
-(:func:`new_light_since_picture`).
+(:func:`new_light_since_picture`). That same run also says whether "solved" is part of the bar at all:
+see :func:`webapp.run_options.run_places_unsolved_subs`.
 
 **Where this is deliberately *wider* than the Target page's own nudge, and why.**
 That nudge says *"N new subs since your last stack"* and counts by **capture**
@@ -68,7 +69,11 @@ from pydantic import BaseModel
 
 from webapp import deps
 from webapp.finishedpicture import displayed_picture_run
-from webapp.run_options import derived_from_run_id, run_has_reusable_options
+from webapp.run_options import (
+    derived_from_run_id,
+    run_has_reusable_options,
+    run_places_unsolved_subs,
+)
 
 router = APIRouter(tags=["new-subs"])
 
@@ -190,6 +195,18 @@ def new_light_since_picture(proj, runs, cover_stack_run_id=None):  # noqa: ANN00
     when there is no genuine stack at all — "you have never stacked this" is a
     different sentence other surfaces already say, and there is nothing to
     count "after".
+
+    **The "and solved" half of the bar has one exception, and the run itself says
+    whether it applies.** Since v0.482.0 the stacker can place a sub *no plate
+    solve could locate*, by matching its star patterns to the reference — that is
+    what ``StackOptions.star_match_unsolved`` is for, on a faint or star-poor field
+    where ASTAP fails on most subs and the picture is the handful that happened to
+    solve. It is off by default and hand-set, so for the owner's runs the solved
+    bar is exactly right; on an install that turns it on, a target whose whole
+    shortfall is un-located subs read as **nothing waiting** and this note could
+    never name it. So the bar is taken from the run being measured against
+    (:func:`webapp.run_options.run_places_unsolved_subs`) — the run a reprocess
+    reuses the settings of, i.e. the settings the re-stack would in fact use.
     """
     runs = list(runs)
     if cover_stack_run_id is not None:
@@ -207,7 +224,8 @@ def new_light_since_picture(proj, runs, cover_stack_run_id=None):  # noqa: ANN00
     run = picture_measured_for_new_light(runs, cover_stack_run_id)
     if run is None:
         return None, 0
-    return run, proj.count_light_missing_from_run(run)
+    return run, proj.count_light_missing_from_run(
+        run, include_unsolved=run_places_unsolved_subs(run.options_json))
 
 
 def scan_new_subs_waiting(lib) -> list[NewSubsWaitingItem]:  # noqa: ANN001
