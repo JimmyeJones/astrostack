@@ -1,8 +1,8 @@
 # Shipped — the record
 
-## 2026-09-30 (audit run A, security) — v0.492.11: a page on any other site could run the whole library, and the build form took any path on the NAS
+## 2026-09-30 (audit run A, security) — v0.492.12: a page on any other site could run the whole library, and the build form took any path on the NAS
 
-### v0.492.11 — 🔴 SECURITY FIX (C-F2, MEDIUM but the broadest exposure): every state-changing endpoint was triggerable cross-site
+### v0.492.12 — 🔴 SECURITY FIX (C-F2, MEDIUM but the broadest exposure): every state-changing endpoint was triggerable cross-site
 
 **What was wrong.** The app has no password by default (AGENTS.md §1), and a password would not have
 helped: a page on any other site the owner visits can auto-submit a `<form>` at the app — a bodiless or
@@ -34,7 +34,7 @@ alone, default ports, the vite dev-proxy shape — `frontend/vite.config.ts` set
 backend sees `localhost:5173` in both headers — a forwarded host, no headers at all, reads, health) pass on
 both. No API shape changed; nothing on disk changed. Upgrade-safe.
 
-### also in v0.492.11 — 🟡 SECURITY FIX (C-F5, LOW): `POST /api/calibration/masters` took any folder on the NAS
+### also in v0.492.12 — 🟡 SECURITY FIX (C-F5, LOW): `POST /api/calibration/masters` took any folder on the NAS
 
 The Calibration page's build form sent a raw `source_dir`, and the endpoint built a master from any
 readable folder on the server — with no password set, anyone on the LAN could point it anywhere. AGENTS.md §6:
@@ -59,6 +59,93 @@ same class was hunted through the rest of `scripts/`: `deploy.sh`'s tar backup u
 and `tar` stores a planted link as a link; `restore-data.sh` lists `-type f` only, checks every path
 component for a link before writing, and `cp --remove-destination`s; `rollback.sh` writes nothing under
 ASTRO_DATA itself. Nothing found — recorded in `PROCESS-NOTES.md`.
+## 2026-09-30 (Builder) — v0.492.11: "a re-stack would fold this in" read *solved* unconditionally
+
+### 🟠 BUG FIX (trust — PRIORITY 2-adjacent) — the second half of the `restored_utc` LEAD filed with v0.492.4, closed on the gate the lead named
+
+*(Builder 2026-09-30. Filed as a lead the same day by the run that shipped v0.492.8, traced but not
+reproduced; reproduced and fixed here. Severity is **none for the owner**, and the entry said so — which is
+why what follows is careful to change nothing for him.)*
+
+**The two questions and the one bar.** Three surfaces ask *"is this picture behind the light I own?"*: the
+library-wide note `GET /api/new-subs-waiting`, v0.492.0's "Bring my pictures up to date" scope (which asks the
+same `new_light_since_picture`), and the per-target `GET …/restored-subs` card. All three answer it through
+two `Project` reads, and both required a plate solve:
+
+```
+count_light_missing_from_stack:  WHERE accept = 1 AND wcs_json IS NOT NULL AND wcs_json <> '' …
+restored_frame_windows:          WHERE accept = 1 AND restored_utc IS NOT NULL AND wcs_json IS NOT NULL
+```
+
+with the same reasoning written above each: *"accepted **and** solved — the two things a re-stack needs from a
+frame"*. That reasoning has been out of date since **v0.482.0/v0.484.0**: with
+`StackOptions.star_match_unsolved` on, `run_stack` places subs **no plate solve could locate**, by matching
+their star patterns to the reference (`_star_matched_unsolved_frames`, one anchor per panel on a mosaic since
+v0.484.0). Placing un-located subs *is what the option is for* — its own comment says so: on a faint or
+star-poor field ASTAP fails on most subs and "hundreds of good subs sit unused and the picture is the handful
+that happened to solve."
+
+**So the failure is not "the count is one low".** It is that on an install with the option on, a target whose
+**whole** shortfall is un-located subs answers `0`, is therefore not named by the library-wide note at all,
+and is skipped by the batch that note links to — the one install where the missing light is most of the light,
+and the one surface built to find it cannot see it. That is precisely the class of shortfall the option exists
+to recover.
+
+**Gated on the option, never on a threshold** — the lead's own instruction, and the right one. The star-match
+path is capped at `STAR_MATCH_MAX_UNSOLVED` (400) per run and refuses any sub whose stars do not clearly
+match, so how many subs a re-stack would actually rescue is **not knowable from the `frames` table**.
+Modelling that cap in a `COUNT` would be a second, worse copy of the stacker's rule, drifting the moment the
+matcher changes. "Is this install even trying to place un-located subs?" is one bit, and the run recorded it.
+
+**What changed.**
+
+* `Project.count_light_missing_from_stack(ts, *, include_unsolved=False)` and
+  `Project.restored_frame_windows(*, include_unsolved=False)` — keyword-only, **defaulting to today's SQL**,
+  so every ordinary install's answer is byte for byte what it was. The flag drops *only* the solved clause;
+  `accept = 1`, the capture-time test, the restoration window and the `rejected_utc` guard v0.492.8 added are
+  all untouched, and a test walks each of them under the flag to say so.
+* New `webapp.run_options.run_places_unsolved_subs(options_json)`. It lives beside
+  `run_has_reusable_options` deliberately: that module exists because "what settings did this run use?" had
+  three hand-written spellings that disagreed, and this is a fourth question of the same kind.
+* Both callers read it off **the run being measured against** — `new_light_since_picture`'s newest genuine
+  run, and `target_restored_subs`' `runs[0]`. That is the run whose options a reprocess reuses
+  (`pipeline._last_stack_options_for_target`), so *"what would stacking this again fold in?"* is answered with
+  the settings it would in fact be stacked with, rather than with the app's defaults or with some older run's.
+  An editor export supplies no settings and does not reset the clock, so the "which run?" and "which bar?"
+  questions walk past it to the *same* row — pinned by a test, because reading the timestamp off one run and
+  the rules off another is the drift this shape invites.
+
+**Strict `is True`, and that is the whole safety argument.** A run that recorded no settings, an editor
+recipe, the string `"yes"`, the integer `1`, or nothing at all all read as **off**. The option defaults
+`False` and is a hand-set advanced field, so the owner's runs are unaffected; and where the helper is unsure
+it errs toward the narrow bar, which keeps the mistake on the side the bug already made — an offer that says
+**less** than it could. An offer that over-promises is the one that becomes a nag, which is the standard
+`restorednudge` and `newsubs` were both written to.
+
+**One token that was a genuine second spelling.** `restored_frame_windows` tested `wcs_json IS NOT NULL`,
+while `FrameRow.solved` — the module's own named definition of *"did the plate solve locate this sub?"* — is
+`bool(wcs_json)`. An empty string would have been promised by this one query and read as unsolved by every
+other reader. No writer stores `''` today; the fix is that the two spellings of one bit can no longer
+disagree if it ever does.
+
+**Tests +10**, and the fail-before was *shown*, not asserted — the production files were reverted to
+`origin/main` in place with the new tests kept, and four of the new tests failed (plus the helper's own file
+erroring at import); the empty-`wcs_json` guard was failed separately by restoring that one clause. The
+remaining new tests are one-directional guards that must pass in both states: a solved restored sub still
+counts under star-matching, a sub the **user** set aside is still not promised, an older run's option does not
+speak for a newer run, and a non-`True` value reads as off.
+
+**A fixture trap worth recording, because three of these tests would have been vacuous.** The synthetic
+frames carry `DATE-OBS` of 2024-09-12, and `MID`/`AFTER` in these files postdate that — so a target measured
+against a run stamped `MID` has nothing waiting **whatever the bar is**, and a test built on it passes without
+the gate ever being read. Caught because the first draft's positive case failed for that reason; the three
+affected fixtures now use two stamps that both *predate* the frames, so the run's options are the only thing
+separating the two outcomes, and the reasoning is written into the fixture's own comment.
+
+**Upgrade safety.** No new column, no `SCHEMA_VERSION` change, no migration, no config field, no on-disk
+path, no flipped default, and no API shape change — the endpoints' response models are untouched and both new
+parameters are keyword-only with the old behaviour as their default. A rollback reads the same rows and gives
+the same answers.
 
 ## 2026-09-30 (Builder, same run as v0.492.6/.7) — v0.492.10: a flaky frontend test, caught by CI on this run's own PR and proved nondeterministic rather than assumed
 

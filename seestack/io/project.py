@@ -1392,7 +1392,8 @@ class Project:
                                   restored_utc=stamp)
         return back
 
-    def restored_frame_windows(self) -> list[RestoredWindow]:
+    def restored_frame_windows(self, *, include_unsolved: bool = False,
+                               ) -> list[RestoredWindow]:
         """The set-aside → put-back window of each sub that is *ready to stack
         now*, for the subs automation reconsidered.
 
@@ -1403,6 +1404,20 @@ class Project:
         lands). A frame the automation never reconsidered carries no stamp and
         is not listed — which is every frame on a healthy install, and every
         frame written before schema 22.
+
+        ``include_unsolved`` lifts the solved half of that bar, and only the
+        caller can decide it: with ``StackOptions.star_match_unsolved`` on, an
+        un-located sub *is* one the stack would try to place, by matching its
+        stars to the reference rather than by a solve of its own — so on that
+        install the promise is one the re-stack can keep. Read off the run being
+        measured against (:func:`webapp.run_options.run_places_unsolved_subs`),
+        which is the run a reprocess reuses the settings of. Default ``False``
+        keeps today's list exactly, which is every ordinary install.
+
+        The solved test is ``wcs_json`` *truthy*, matching
+        :attr:`FrameRow.solved` — the one definition of "did the plate solve
+        locate this sub?" — rather than merely ``IS NOT NULL``, so an empty
+        string reads as unsolved here the way it does everywhere else.
 
         **Both ends of the window, not just the restoration.** A sub can be set
         aside *after* the very picture that used it and put back later (a grade
@@ -1416,9 +1431,13 @@ class Project:
         what the windows mean (see :mod:`seestack.restorednudge`).
         """
         assert self._conn is not None
+        solved_bar = (
+            "" if include_unsolved
+            else " AND wcs_json IS NOT NULL AND wcs_json <> ''"
+        )
         rows = self._conn.execute(
             "SELECT restored_utc, rejected_utc FROM frames "
-            "WHERE accept = 1 AND restored_utc IS NOT NULL AND wcs_json IS NOT NULL"
+            f"WHERE accept = 1 AND restored_utc IS NOT NULL{solved_bar}"
         ).fetchall()
         return [
             RestoredWindow(
@@ -2141,7 +2160,8 @@ class Project:
             (str(timestamp_utc),),
         ).fetchone()[0]
 
-    def count_light_missing_from_stack(self, timestamp_utc: str) -> int:
+    def count_light_missing_from_stack(self, timestamp_utc: str, *,
+                                      include_unsolved: bool = False) -> int:
         """How many stack-ready subs a picture stacked at ``timestamp_utc`` does
         **not** contain — the whole shortfall, not just the newly shot half.
 
@@ -2191,13 +2211,27 @@ class Project:
 
         One-sided, like the stamp itself: a frame with no ``rejected_utc`` — one
         rejected at ingest, never un-accepted, or written before the column
-        existed — keeps exactly today's answer."""
+        existed — keeps exactly today's answer.
+
+        ``include_unsolved`` drops the *solved* half of the bar, for the one
+        install where a sub no plate solve could place is still light a re-stack
+        would use: ``StackOptions.star_match_unsolved`` (off by default, a hand-set
+        advanced field) puts un-located subs on the canvas by matching their star
+        patterns to the reference. The caller decides, from the run it is measuring
+        against (:func:`webapp.run_options.run_places_unsolved_subs`), because the
+        answer is a property of how the picture will be *re-made*, not of the
+        frames table. Default ``False`` is today's answer byte for byte, which is
+        every ordinary install."""
         assert self._conn is not None
         if not timestamp_utc:
             return 0
+        solved_bar = (
+            "" if include_unsolved
+            else "AND wcs_json IS NOT NULL AND wcs_json <> '' "
+        )
         return self._conn.execute(
             "SELECT COUNT(*) FROM frames "
-            "WHERE accept = 1 AND wcs_json IS NOT NULL AND wcs_json <> '' "
+            f"WHERE accept = 1 {solved_bar}"
             "AND ((timestamp_utc IS NOT NULL AND timestamp_utc <> '' "
             "      AND timestamp_utc > ?) "
             "  OR (restored_utc IS NOT NULL AND restored_utc <> '' "
