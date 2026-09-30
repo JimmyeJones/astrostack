@@ -36,6 +36,41 @@ import math
 from typing import Any
 
 
+def _supersampling(drizzle_scale: float | None) -> float:
+    """How many canvas pixels there are per native frame pixel along one axis.
+
+    Always ``>= 1.0``. A missing or unusable ``drizzle_scale`` means "read the
+    canvas as native", which is what every non-drizzled path wants; and a
+    **sub-unity** one is clamped rather than honoured because that is what the
+    engine itself did with it — ``seestack.stack.stacker`` takes
+    ``max(1.0, drizzle_scale)`` and its ladder lives in ``[1.0, max_scale)``, so a
+    canvas was never written finer-than-native however the number reads. Written
+    once so :func:`field_fulls_of_sky` and :func:`canvas_supersampling` cannot come
+    to different conclusions about the same run.
+    """
+    scale = float(drizzle_scale) if drizzle_scale is not None else 1.0
+    if not math.isfinite(scale) or scale < 1.0:
+        return 1.0
+    return scale
+
+
+def canvas_supersampling(options_json: str | None) -> float:
+    """The same factor, for a caller holding a stack run's stored ``options_json``.
+
+    A canvas pixel is a *fraction* of a native frame pixel on a drizzled run — a
+    2× drizzle writes four canvas pixels for every one the camera has — so
+    anything that converts canvas pixels into sky using a **frame's** plate scale
+    has to divide by this first, or the picture is that factor too big. The canvas
+    scale is normally read straight off the master's own WCS
+    (:func:`seestack.io.wcs_io.canvas_extent_from_fits`); this is for the fallback
+    that has no master WCS to read.
+
+    ``1.0`` — i.e. change nothing — whenever the JSON is missing, malformed or
+    says the run was not drizzled.
+    """
+    return _supersampling(drizzle_scale_from_options(options_json))
+
+
 def field_fulls_of_sky(
     canvas_w: int | float | None,
     canvas_h: int | float | None,
@@ -67,9 +102,7 @@ def field_fulls_of_sky(
     if not _positive(frame_w) or not _positive(frame_h):
         return None
 
-    scale = float(drizzle_scale) if drizzle_scale is not None else 1.0
-    if not math.isfinite(scale) or scale < 1.0:
-        scale = 1.0
+    scale = _supersampling(drizzle_scale)
 
     canvas_area = float(canvas_w) * float(canvas_h) / (scale * scale)
     frame_area = float(frame_w) * float(frame_h)

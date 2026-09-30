@@ -30,6 +30,7 @@ from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, preview_crop_json
 from webapp import deps
 from webapp.capture_nights import capture_night_range
+from webapp.field_fulls import canvas_supersampling
 from webapp.preview_orient import baked_north_up_deg, recovered_preview_crop
 
 router = APIRouter(tags=["sky"])
@@ -213,8 +214,16 @@ def get_sky(request: Request) -> SkyResponse:
                 if extent is not None:
                     width_deg, height_deg, rotation = extent
                 elif pixscale:
-                    width_deg = run.canvas_w * pixscale / 3600.0
-                    height_deg = run.canvas_h * pixscale / 3600.0
+                    # A *frame's* plate scale describes a native camera pixel, and
+                    # `canvas_w`/`canvas_h` count canvas pixels — four of them per
+                    # camera pixel on a 2× drizzle. Divide the run's own
+                    # super-sampling out, the way `field_fulls_of_sky` already does
+                    # for the same reason, or a drizzled picture is drawn that many
+                    # times too big. Not drizzled → 1.0 → unchanged.
+                    canvas_pixscale = pixscale / canvas_supersampling(
+                        run.options_json)
+                    width_deg = run.canvas_w * canvas_pixscale / 3600.0
+                    height_deg = run.canvas_h * canvas_pixscale / 3600.0
                 else:
                     # No stored WCS and no plate-solved frame → can't size it. Skip.
                     continue

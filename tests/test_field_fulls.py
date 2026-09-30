@@ -343,3 +343,33 @@ class TestTargetFieldFulls:
             pass
 
         assert target_field_fulls(Bare()) is None
+
+
+class TestCanvasSupersampling:
+    """How many canvas pixels there are per native camera pixel — the factor a
+    caller converting canvas pixels to sky with a *frame's* plate scale has to
+    divide out (``webapp.routers.sky``'s no-canvas-WCS fallback)."""
+
+    def test_a_drizzled_run_reports_its_scale(self):
+        from webapp.field_fulls import canvas_supersampling
+
+        assert canvas_supersampling(
+            '{"drizzle": true, "drizzle_scale": 2.0}') == pytest.approx(2.0)
+        assert canvas_supersampling(
+            '{"drizzle": true, "drizzle_scale": 1.4}') == pytest.approx(1.4)
+
+    def test_everything_else_changes_nothing(self):
+        """1.0 — not None — for every shape that isn't a drizzled run, so the
+        caller's arithmetic needs no branch: missing options, malformed JSON, the
+        drizzle switch off (which is how ``StackOptions`` ships), a nonsense
+        scale, and a sub-unity one — clamped because that is what the engine did
+        with it (``stacker`` takes ``max(1.0, drizzle_scale)``), so the canvas was
+        never written finer-than-native however the number reads."""
+        from webapp.field_fulls import canvas_supersampling
+
+        for options in (None, "", "not json{", "{}", '{"drizzle": false}',
+                        '{"drizzle": true}',
+                        '{"drizzle": true, "drizzle_scale": "x"}',
+                        '{"drizzle": true, "drizzle_scale": 0.5}',
+                        '{"drizzle": true, "drizzle_scale": 0}'):
+            assert canvas_supersampling(options) == 1.0, options

@@ -2,6 +2,47 @@
 
 ## 2026-09-30 (Builder, second run of the day) — the picture on the sky map is sized by the app's own answer, not by one arbitrary sub
 
+### v0.489.2 — 🟡 BUG FIX (trust, PRIORITY 3): a drizzled picture is no longer drawn that many times too big on the sky map
+
+*(The second bug in the same four lines, found while fixing v0.489.1 and reproduced through the real
+`GET /api/sky` before anything was changed. Not from the backlog.)*
+
+**The arithmetic.** The same no-canvas-WCS fallback sized a tile as
+`width_deg = canvas_w × pixscale / 3600`. But `canvas_w`/`canvas_h` count **canvas** pixels
+(`pipeline` stores `out.shape`, i.e. the drizzled array), while `pixscale_arcsec` describes a **native camera**
+pixel — and a 2× drizzle writes four canvas pixels for every one the camera has. Multiplying the two together
+draws a 2×-drizzled picture twice as wide and twice as tall as the sky it covers: overlapping its neighbours on
+the owner's map, and disagreeing with the *same run's* Aladin placement, which reads the master's own canvas WCS
+and was never affected.
+
+This is not a new observation about drizzle — it is the app's own, stated in `field_fulls_of_sky`'s docstring
+("a 2× drizzled single-field canvas (4× the pixels of a native frame) doesn't read as 4 fields of sky covered")
+and applied there since that module shipped. This one path did not have it.
+
+Reproduced on a 1920×1080 canvas at 4.0″/px with `{"drizzle": true, "drizzle_scale": 2.0}`: **2.133° × 1.200°
+drawn where the sky is 1.067° × 0.600°.**
+
+**What shipped.** New `webapp.field_fulls.canvas_supersampling(options_json)` — canvas pixels per native pixel,
+read off the run's own stored options through the existing `drizzle_scale_from_options`, always `>= 1.0` — and
+the fallback divides the frame's scale by it. `field_fulls_of_sky`'s own clamp now goes through the same new
+private `_supersampling`, so the two readers of "how much finer is this canvas?" cannot answer differently; that
+refactor is behaviour-preserving (the clamp is the code it replaces, line for line).
+
+**Everything that is not a drizzled run divides by 1.0 and is placed exactly where it was** — which is every
+walk-away and interactive stack, since `StackOptions.drizzle` ships off: missing options, malformed JSON, the
+switch off, a scale that will not parse, and a sub-unity one (which would otherwise *grow* a canvas's share of
+sky off a value the stack never writes). The Aladin `wcs` dict is built from the same `width_deg`, so the two
+placements of one picture stay in agreement.
+
+**Upgrade safety.** No config key, schema, on-disk path, default or API shape change; one endpoint's value
+becomes correct.
+
+**Tests.** +4. `tests/webapp/test_sky.py` — a 2×-drizzled run is placed at its true size and its Aladin `CD1_1`
+agrees with the tile's own width (**fails before**, 2.133° against 1.067°, verified by reverting the two lines
+in a scratch copy), and an un-drizzled/malformed run is sized exactly as before (the stand-down direction, which
+passes either way by design). `tests/test_field_fulls.py` — `canvas_supersampling` reports a drizzled run's
+scale, and answers `1.0` rather than `None` for all nine other shapes so the caller needs no branch.
+
 ### v0.489.1 — 🟡 BUG FIX (trust, PRIORITY 3): a plate solve the stack has ruled wrong stops sizing a picture on "My sky map"
 
 *(Builder-found while looking for the other readers of the class v0.488.7 named — "a rejection is a claim about

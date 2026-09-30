@@ -8,8 +8,13 @@ from seestack.io.library import Library
 from seestack.io.project import StackRunRow
 
 
-def _add_stack_run_with_preview(data_root, safe: str) -> None:
-    """Give one target a plate-scale + a stack run with a real preview file."""
+def _add_stack_run_with_preview(data_root, safe: str, *,
+                                options_json: str = "{}") -> None:
+    """Give one target a plate-scale + a stack run with a real preview file.
+
+    ``options_json`` is the run's stored stack options — the default ``"{}"`` is a
+    plain un-drizzled run; pass a drizzled one to exercise the canvas-vs-native
+    pixel scale the frame-scale fallback has to divide out."""
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -28,7 +33,7 @@ def _add_stack_run_with_preview(data_root, safe: str) -> None:
                 output_basename="master", fits_path=None, tiff_path=None,
                 preview_path=str(preview), n_frames_used=3,
                 canvas_h=1080, canvas_w=1920, coverage_min=1, coverage_max=3,
-                options_json="{}",
+                options_json=options_json,
             ))
         finally:
             proj.close()
@@ -361,3 +366,63 @@ def test_a_solve_the_stack_ruled_wrong_does_not_size_a_picture_on_the_sky_map(
     assert img["width_deg"] == pytest.approx(1920 * 4.0 / 3600.0)
     assert img["height_deg"] == pytest.approx(1080 * 4.0 / 3600.0)
     assert img["rotation_deg"] == pytest.approx(12.0)
+
+
+def _every_frame_solved_at(data_root, safe: str, pixscale: float) -> None:
+    """One agreed plate scale across the target, so the tile's size is decided by
+    the arithmetic under test rather than by which frame is representative."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, pixscale_arcsec=pixscale, rotation_deg=0.0)
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_a_drizzled_picture_is_not_drawn_that_many_times_too_big(
+        client, solved_library):
+    """FAIL-BEFORE: a 2x-drizzled run with no stored canvas WCS was placed at 2x
+    its true size on the sky.
+
+    ``canvas_w``/``canvas_h`` count **canvas** pixels, and a drizzled canvas has
+    ``drizzle_scale`` of them per camera pixel along each axis — the app's own
+    shared definition (``field_fulls_of_sky``: "a 2x drizzled single-field canvas
+    (4x the pixels of a native frame) doesn't read as 4 fields of sky"). The
+    fallback that sizes a tile from a *frame's* plate scale multiplied the two
+    together anyway, so a 2x drizzle drew the picture twice as wide and twice as
+    tall as the sky it covers — overlapping its neighbours on the map and
+    disagreeing with the same run's Aladin placement, which reads the master's own
+    canvas WCS and is unaffected.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack_run_with_preview(
+        solved_library, safe,
+        options_json='{"drizzle": true, "drizzle_scale": 2.0}')
+    _every_frame_solved_at(solved_library, safe, 4.0)
+
+    img = client.get("/api/sky").json()["images"][0]
+    # 1920 canvas px at 2x drizzle is 960 camera px of sky, at 4.0"/px.
+    assert img["width_deg"] == pytest.approx(960 * 4.0 / 3600.0)
+    assert img["height_deg"] == pytest.approx(540 * 4.0 / 3600.0)
+    # …and the Aladin WCS built from that width agrees with it.
+    assert img["wcs"] is not None
+    assert abs(img["wcs"]["CD1_1"]) == pytest.approx(
+        img["width_deg"] / img["wcs"]["NAXIS1"])
+
+
+def test_an_undrizzled_run_is_sized_exactly_as_before(client, solved_library):
+    """The other direction: the run that is not drizzled — every walk-away and
+    interactive stack, since ``StackOptions.drizzle`` ships off — divides by 1.0
+    and is placed byte for byte where it was. Malformed options say the same."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack_run_with_preview(solved_library, safe, options_json="not json{")
+    _every_frame_solved_at(solved_library, safe, 4.0)
+
+    img = client.get("/api/sky").json()["images"][0]
+    assert img["width_deg"] == pytest.approx(1920 * 4.0 / 3600.0)
+    assert img["height_deg"] == pytest.approx(1080 * 4.0 / 3600.0)
