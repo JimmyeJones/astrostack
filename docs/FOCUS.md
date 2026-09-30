@@ -13,41 +13,24 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
    come back clean, but AGENTS.md is explicit: **do not believe "well-hardened"** — a "What Auto did"
    trim above ~15 % of the canvas is a bug, not a ragged edge.
 
-2. **Owner-approved, buildable now** (answers of 2026-09-25) — **this group is now empty.** Everything in it
-   has shipped
-   (astroalign single-field + mosaic → v0.482.0/v0.484.0; the cumulative-by-night reel → v0.483.0; the
-   noise-delta picture → v0.479.0; the 11 mosaic pairs are now *offered* in the Library → v0.482.1/.2).
-   **Nothing of this group is open any more:**
-   - ~~**auto-*apply* the classified object preset**~~ — **⚪ CLOSED WITH THE NUMBER** (Builder 2026-09-29).
-     Two Builders had costed it and both landed on "the honest next step is a **measurement**, not a build";
-     that measurement ran. `auto_recipe` **already** classifies and already applies the archetype (to
-     `auto_prefs.apply_profile(..., object_type=…)`, which moves exactly the parameters a preset would), and the
-     only delta the sizings left standing — nebula SCNR 0.7→0.8, saturation 1.25→1.35 — costs **+3–4 % sky
-     chroma noise** on both bundled masters, which is what Auto's own measured saturation ceiling exists to
-     hold down. Both samples classify `galaxy` at confidence 1.0, the archetype with no surviving delta.
-     Working in [`SHIPPED.md`](SHIPPED.md); **do not re-pick it** except with a rule that is data-driven per
-     archetype.
-   - ~~**the reel-*from-history* half**~~ — **✅ SHIPPED v0.486.0** (Builder 2026-09-29). A history that
-     already nests night-wise is reported and labelled as "night 1; nights 1–2; …"
-     (`capture_nights.cumulative_night_steps`, `night_steps` on `/deepening-reel/info`), with `None` for
-     every series that cannot be *shown* to nest. ↳ **The progression-video entry is now CLOSED outright**:
-     the one shape history could not reach — a target stacked *once* across several nights — shipped as
-     **v0.487.0** (Builder 2026-09-29), as an *offer* on the same card, priced from that run's own recorded
-     `duration_s` and landing on the Stack form with `save_progress` pre-ticked (`?reel=1`). Nothing of the
-     owner's 2026-09-25 progression ask is open.
+2. **Owner-approved, buildable now** (answers of 2026-09-25) — **empty; everything shipped and cut to
+   [`SHIPPED.md`](SHIPPED.md).** astroalign single-field + mosaic (v0.482.0/v0.484.0), the cumulative-by-night
+   reel (v0.483.0) and the reel-from-history + once-stacked-reel offer (v0.486.0/v0.487.0), the noise-delta
+   picture (v0.479.0), the night-sky theme (v0.485.0), the 11 mosaic pairs now *offered* in the Library
+   (v0.482.1/.2). The one item that turned out not to be a build — auto-*apply* the classified preset — is
+   **⚪ CLOSED WITH THE NUMBER** (Builder 2026-09-29): `auto_recipe` already applies the archetype, and the only
+   surviving delta costs +3–4 % sky chroma noise, so **do not re-pick it** except with a per-archetype
+   data-driven rule.
 
-   - ~~**NEW, owner-requested 2026-09-28: the night-sky theme**~~ — **✅ SHIPPED v0.485.0** (Builder
-     2026-09-29). Deep-navy sky + three drifting star layers, `prefers-reduced-motion`/hidden-tab still, a
-     per-device switch in Settings → *This device*, and a **plain neutral surround on the editor, Compare and
-     the two three.js routes** — `frontend/src/nightsky/surround.ts` is where that decision lives, so a new
-     picture-judging route has one line to add. Entry in [`SHIPPED.md`](SHIPPED.md).
-
-3. **Open observer issues (all verified, filed, and awaiting the last mile — no new issue since
-   2026-09-25):** #878 (the app now offers the reconcile; closes on a reading that shows the 11 pairs
-   gone — a click, not code), #880 (both live halves shipped v0.483.1/.2; only (a), the exception repr
+3. **Open observer issues (all verified, filed, and awaiting the last mile — re-triaged 2026-09-30 Scout, no
+   new issue since 2026-09-25):** #878 (the app now offers the reconcile; closes on a reading that shows the 11
+   pairs gone — a click, not code), #880 (both live halves shipped v0.483.1/.2; only (a), the exception repr
    *stored* as a reject reason, is left — filed ⚪ storage hygiene, deliberately **not** a PRIORITY 3
    item), #903 (prevention by cover semantics still open; existing damage has a one-off repair,
-   v0.479.3).
+   v0.479.3), #1015 (observer read a code version the app never ran; its repo-side ask — the version on
+   `/api/health` — shipped v0.488.2, and the owner deliberately left it open to close on a reading that
+   confirms the pin; the other half is an Observer-charter change, out of this repo). **Nothing newly
+   actionable in the inbox this run — every open issue is awaiting an owner click/reading.**
 
 ## Standing frontier (unchanged until a finding says otherwise)
 
@@ -65,15 +48,22 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
   *writers* are clean; one card's **value** was not — `REJREACH` stamped from `coverage_max`, the
   deepest pixel, which on a mosaic is the corner where panels meet (v0.484.6; the class it generalises
   to is in `docs/PROCESS-NOTES.md`).
+- **The ASTAP/ffmpeg filesystem-side-effect rotation slot + the fresh post-v0.480 code (updates, new-subs,
+  capture-nights, deepening/noise-delta reels) were swept 2026-09-30 (Scout) — CLEAN**, details in
+  `docs/PROCESS-NOTES.md`. A `--mosaic --editor --big` dogfood the same day read clean (Auto trim 7.9 %, cards
+  coherent, no overflow/console errors). Don't re-run these before a finding says to.
 - **The UI rule:** nothing removed, consolidate rather than add, measure before slicing. Tallest
   pages and baselines: `docs/PROCESS-NOTES.md`, "DOGFOOD BASELINE".
-- **A beginner feature on a regular cadence** from "Features that serve real workflows". ⚠️ **That section is
-  empty again** (Builder, 2026-09-29): the Scout's two buildable entries both shipped the same day —
-  **"See what got thrown away"** as **v0.488.0** (up to three of a bucket's own rejected subs, behind one
-  collapsed toggle, only for the causes you can *see*) and the once-stacked reel offer as **v0.487.0**. The
-  mature app makes obvious beginner features scarce — the annotation overlay, share caption, print sizes,
-  framing/mosaic advice and moon notes are all already shipped — so **do not manufacture a marginal one (§4)**;
-  grep `SHIPPED.md` before proposing. **Scout: re-stock.**
+- **A beginner feature on a regular cadence** from "Features that serve real workflows". **Re-stocked
+  2026-09-30 (Scout): one buildable entry now sits at the top** — 🌟 **"Bring my pictures up to date"** (re-stack
+  only the targets with new light, in one click, by adding a `new_light_only` scope to the hardened
+  `reprocess_all` path). It serves the owner's exact stack→result-autonomy cadence (many targets, `auto_stack`
+  off) and reuses the #903/#880 auto-edit + failure-summary handling; read its three non-optional constraints
+  (§903 flattening, the single-worker queue / import-starvation interaction, §10) and its "settle before
+  building" note — the read-only-by-design new-subs card is being reversed, so a Builder may route it to owner
+  sign-off. The mature app makes obvious beginner features scarce — the annotation overlay, share caption, print
+  sizes, framing/mosaic advice and moon notes are all already shipped — so **do not manufacture a marginal one
+  (§4)**; grep `SHIPPED.md` before proposing another.
 
 ## How the owner gets builds now
 

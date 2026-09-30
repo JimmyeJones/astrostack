@@ -2828,63 +2828,66 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **🌟 NEW BEGINNER FEATURE (Scout 2026-09-30, from the §1 stack→result-autonomy journey) — "Bring my pictures up
+  to date": re-stack only the targets that have new light, in one click.** *(Pillar: autonomy — PRIORITY 2, with a
+  clear beginner "get" angle; size **M**; grepped `IMPROVEMENTS.md` + `SHIPPED.md` first — no existing entry does
+  this.)*
+  **The gap, in the owner's own workflow.** He shoots many targets across many nights with `auto_stack` **off**
+  (Owner Facts), so after a night's capture his displayed pictures fall behind the light he owns. The app already
+  *names* which ones: `GET /api/new-subs-waiting` (`webapp/routers/newsubs.py`) lists every target whose newest
+  genuine stack predates accepted-and-solved subs it has since taken — and it is **deliberately read-only** ("It
+  offers; it never acts … re-stacking is hours of CPU on a NAS, so there is no batch button here"). The friction
+  that leaves is real: catching up N targets is N manual trips through the Stack form. Meanwhile `reprocess_all`
+  (`webapp/routers/system.py`) *is* a batch stacker, but its only scope filter is `stale_only` — **by engine
+  *version***, not by new light — so today the owner's choice is "re-stack everything (or everything an upgrade
+  changed)" or "re-stack each new-light target by hand". Nothing sits in between, and the in-between is exactly
+  what his cadence needs: strictly *less* work than the reprocess he already runs, aimed only at pictures that
+  would actually change.
+  **The shape — reuse the hardened path, don't grow a new one.** Add a `new_light_only: bool` filter to the
+  existing `reprocess_all` body that intersects its target list with `scan_new_subs_waiting`'s set (one function
+  already written and tested), and give the new-subs card / Dashboard note a **"Bring these up to date"** entry
+  point that opens the existing reprocess confirm dialog **pre-scoped** to that set. That inherits, for free,
+  everything the last year of #903/#880 work hardened on that path: the confirm dialog, the by-cause failure
+  summary (v0.483.2), the unreadable-frame reconcile (v0.483.1), and — load-bearing — the **auto-edit handling**.
+  **Three constraints that are not optional, each already learned on this exact path:**
+  - **§903 — auto-edit off must not silently flatten finished pictures.** A batch restack with the auto-edit
+    switch off replaces each target's *displayed* picture (newest wins) with a flat linear stack; that is the
+    whole of observer issue #903. So this must ride `reprocess_all`'s **current** auto-edit treatment
+    (`pipeline._picture_is_auto_finished` → re-derive Auto for app-baked pictures, v0.448.1) and the confirm
+    dialog's consequence wording — never a bare "off means leave them alone".
+  - **Single-worker JobManager (OOM history, §10-adjacent).** Stacks serialise through one worker on a RAM-capped
+    box on purpose; a "catch up" of many deep targets holds the queue for hours-to-days exactly as `reprocess_all`
+    does, and can **starve the import job** (the open v0.441.1 LEAD / issue #883). So the dialog must show the
+    **count and a rough time** before it queues (the reprocess dialog's estimate is the model), and this feature
+    must not make the starvation worse — ideally it is the *smaller* batch that reduces it.
+  - **§10 absolute.** Nothing under `incoming/` is touched — this only reads the same rows `new-subs-waiting`
+    already reads and queues the same stacks the Stack form already queues.
+  **Why it clears the bar and the guardrails.** Additive (one bool on an existing body + one button + one dialog
+  pre-fill), reversible (non-destructive, new results beside old, exactly as `reprocess_all` already is),
+  upgrade-safe (§9: no config/schema/on-disk/default/API-shape change — a new *optional* field defaulting to
+  today's behaviour), offline, and testable on the pure intersection plus the router. Default **off** (it is a
+  button the owner presses, never a standing behaviour).
+  **One thing to settle before building, honestly.** The read-only-by-design stance on the new-subs card was a
+  *deliberate* call ("it offers; it never acts"). This feature reverses it — behind a confirm dialog with a cost
+  estimate, which is the mitigation the original note was really about ("hours of CPU"). If a Builder judges that a
+  reversal of a stated design decision needs the owner's word, file it under **Needs owner sign-off** with this
+  shape rather than shipping it unasked; it is a one-line question ("want a *Bring my pictures up to date* button
+  that re-stacks just the targets with new light, behind a confirm dialog that shows how long it'll take?").
+
 - ~~**OWNER-APPROVED 2026-09-25 — a noise-delta *picture* beside the "Did it get better?" sentence.**~~ —
   **✅ SHIPPED v0.479.0** (Builder 2026-09-26). Entry cut to [`SHIPPED.md`](SHIPPED.md); one-liner under
   "Shipped" below. One finding came out of sizing its sibling: the third owner-approved item in this section
   (auto-*apply* the classified preset) cannot be built the way it reads — that entry is now **closed with the
   measurement** it was gated on (Builder 2026-09-29), in [`SHIPPED.md`](SHIPPED.md).
-- ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-25) — "Was the moon out?": a retrospective moon note on a
-  session.**~~ — **⚪ CLOSED: ALREADY BUILT, END TO END. Do not pick it up** *(Builder 2026-09-25, grepped and
-  read before starting it — it was the freshest entry in this section and the run's first candidate).* The
-  premise ("the app's moon machinery is all forward-looking; nothing explains a night already shot") is not the
-  live behaviour, and has not been since `SessionMoon` shipped. **What exists, in the entry's own terms:**
-  `seestack/nightplan.py::session_moon` / `session_moons` — a *retrospective* verdict at the session's
-  midpoint, graded through the same `_moon_verdict` the forward-looking readout uses, with
-  `_session_moon_text` writing the finished sentence (*"A bright 96 %-lit Moon was only ~21° from this target
-  while you were shooting… That's the sky, not your setup"*); `webapp/routers/targets.py::_session_moon_note`
-  puts it on the "Last night" card as `SessionRecapOut.moon_note`
-  (`frontend/src/components/SessionRecapCard.tsx`), and `_night_moons` → `NightSummaryOut.moon` puts it on
-  **every** night of the Nights card (`NightsCard.tsx::moonTooltip`). Offline, self-hiding, one ephemeris pass
-  for the whole table, and covered by `tests/test_session_moon.py`, `tests/webapp/test_target_nights.py`,
-  `tests/webapp/test_target_session_recap.py`, `NightsCard.test.tsx` and `SessionRecapCard.test.tsx`.
-  **It is also *better* than the entry's shape on the one point that matters, so do not "improve" it back:**
-  the entry proposes firing on illumination + altitude, and the shipped verdict also requires the Moon to be
-  **close to the target** — a 90 %-lit Moon 150° away across the sky is not why that night was bright.
-  **The one piece of the entry that is genuinely not built is its shape note (2), the two-stage degrade on a
-  site-less install ("you can still say the Moon was 87 % lit"), and it is DECLINED on the shipped design's own
-  reasoning:** without a site you know neither *up* nor *close*, so the only sentence you could write is one
-  that may be describing a Moon that never rose — which is exactly the nag `SessionMoon`'s "quiet by design"
-  contract exists to prevent. Re-open only with a shape that does not guess at the two missing facts.
-  **The gap.** `seestack/nightplan.py` already computes the Moon fully **offline** — `moon_illumination(when_utc)`,
-  `moon_is_waxing`, `_moon_altitudes(stamps, location)`, `moon_window` — but only for **tonight/future** planning
-  ("shoot this near new moon"). A beginner staring at a grainy stack has no way to learn that the sky was bright
-  *because the Moon was 87 % lit and 40° up that night*. The app's own session-recap even lists "Cloud, haze or
-  **moonlight**" as a reject cause (`webapp/rejection_summary`, `session_recap`) — but it is a guess from star
-  counts; it never actually checks where the Moon was, because it can't per-session today.
-  **The feature.** For each capture **session/night** of a target, take the session's median `timestamp_utc`
-  (frames already carry it) and the install's site (`Settings.site_lat`/`site_lon`), and compute the Moon's
-  illuminated fraction and altitude at that time with the *existing* nightplan helpers. Surface a one-line,
-  self-hiding note where a beginner already looks at a night — the session recap / Nights card / the frames
-  table's per-night group — e.g. *"A bright night: the Moon was 87 % lit and 40° up. That lifts the sky and
-  adds noise — this target will come out cleaner shot within a few days of new moon."* Say nothing when the
-  Moon was **down or near-new** at that session (the common good case), so it is signal, not clutter.
-  **Why it clears the bar and the guardrails.** Offline (no network, §1 standing policy; no new dependency —
-  the ephemeris is already in the tree), additive (one computed response field + one card, everything else
-  unchanged), upgrade-safe (§9: no config/schema/on-disk/default change; a site-less install simply omits the
-  note, exactly as Tonight already degrades — see the v0.436.1 dogfood note about the empty-site state), and
-  testable in isolation on the pure nightplan functions plus a session-grouping helper. It also **closes the
-  loop on the rejection-cause guess**: where `session_recap` says "likely moonlight", this can confirm or deny
-  it from geometry rather than star counts.
-  **Shape notes for the Builder.** (1) Per-*session* grouping is the one new primitive — reuse whatever the
-  Nights card / `session_recap` / `stacktime.py` already use to split a target's frames by night, don't invent a
-  second definition. (2) Altitude needs the site; illumination does **not** (`moon_illumination` is
-  location-independent), so on a site-less install you can still say "the Moon was 87 % lit" and just drop the
-  "and 40° up" clause — a graceful two-stage degrade rather than all-or-nothing. (3) Keep the threshold for
-  "worth mentioning" honest: mention only when illumination **and** altitude were both high enough to matter
-  (a 90 %-lit Moon that never rose is not why the night was bright); pick the bar against the owner's own nights
-  if a later run has the observer's distribution, else a conservative default (e.g. illum ≥ 0.5 and median
-  altitude ≥ 20°) that a comment marks as provisional. (4) It is a **note, never an action** — like
-  `new-subs-waiting` it explains and links, it never re-stacks.
+- ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-25) — "Was the moon out?": a retrospective moon note.**~~ —
+  **⚪ CLOSED: ALREADY BUILT END TO END; do not re-file** *(Builder 2026-09-25; condensed 2026-09-30 Scout).*
+  `SessionMoon` already writes a retrospective per-night verdict (`seestack/nightplan.py::session_moon` →
+  `SessionRecapOut.moon_note` on the "Last night" card and `NightSummaryOut.moon` on every Nights-card night),
+  offline and self-hiding, and it is *better* than the entry's shape — it also requires the Moon to be **close to
+  the target**, not just up and lit. The one unbuilt piece — a site-less two-stage degrade ("you can still say
+  the Moon was 87 % lit") — is **DECLINED**: without a site you know neither *up* nor *close*, so the sentence
+  could describe a Moon that never rose, the exact nag the "quiet by design" contract prevents. Re-open only with
+  a shape that does not guess at those two facts.
 
 *(The Scout's 2026-09-09 "shareable labelled picture" entry shipped as v0.407.0 and was cut to
 [`SHIPPED.md`](SHIPPED.md) — the engine render and the endpoint flag already existed; only the download was
