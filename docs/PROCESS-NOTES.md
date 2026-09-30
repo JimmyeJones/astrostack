@@ -1,8 +1,8 @@
 # Process notes & QA sweep records
 
-## 2026-09-30 (Builder, third run of the day) — the provenance-card sweep that found one real gap and is otherwise clean
+## 2026-09-30 (Builder, a later run of the day) — the provenance-card sweep that found one real gap and is otherwise clean
 
-*(Builder, branch `claude/magical-wright-b7qklw` → **v0.489.3**. Baseline on `origin/main` at b0a27f5:
+*(Builder, branch `claude/magical-wright-b7qklw` → **v0.490.1**. Baseline on `origin/main` at b0a27f5:
 **6999 passed, 2 skipped**, 13m35s with the BLAS cap and `-n 4 --dist worksteal`, `/tmp/pytest-of-root`
 cleared first. Green.)*
 
@@ -11,6 +11,25 @@ project dependency, so the first `-n 4 --dist worksteal` run of a fresh containe
 `unrecognized arguments: -n --dist`. `AGENTS.md` §7's rule is what caught it: the summary line did not end in
 `passed` or `failed`, so it was not a result — the background wrapper had meanwhile reported "exit code 0",
 which is `tail`'s. `pip install pytest-xdist` into the run's own `.venv` and re-run.
+
+### §11 collision — this run's version number was taken mid-flight, and that is the normal case
+
+Between this run's baseline (`origin/main` at b0a27f5, `__version__` 0.489.2) and its first push, an **owner
+session** merged PR #1024 carrying **v0.489.3 + v0.490.0**. So the number this work had already been
+committed, pushed and PR'd under was released by someone else, and CI's "Version bump is sane" job would
+rightly have refused it.
+
+Handled exactly as §11 prescribes and recorded because the *detection* is the interesting part: it was not the
+push that surfaced it (the push succeeded — a branch push races nothing) and not the PR (its checks had not
+started). It was reading the CI run list while waiting, and seeing another branch's completed run titled with
+this run's own version. **So "re-fetch `origin/main` before each task" is not enough on its own for the
+version line** — the collision can land between the last fetch and the merge, which is precisely why §11 puts
+the number's choice *at merge time*. Merged `origin/main` in, took main's value, bumped again to **v0.490.1**,
+resolved both doc conflicts as unions (nobody's entry deleted, mine renumbered and ordered newest-first) and
+re-ran the full suite on the merged tree before merging.
+
+Worth knowing for the next run: the owner's own sessions ship into this repo too, so `main` can move under a
+Builder for reasons no agent branch would predict.
 
 ### How the run found its work
 
@@ -53,7 +72,7 @@ Verifying that disclosure chain raised the obvious question: **does every proven
 have a reader?** Swept mechanically over `seestack/` and `webapp/` — every `meta[...]`/`header_meta[...]` card
 assignment (75 distinct keys), each grepped for a reader outside `tests/` and outside its own writing module.
 
-**Four keys came back with no reader, and two of them were a real gap** — shipped as **v0.489.3**:
+**Four keys came back with no reader, and two of them were a real gap** — shipped as **v0.490.1**:
 
 | key | verdict |
 |---|---|

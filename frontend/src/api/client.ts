@@ -3483,6 +3483,24 @@ function autoCropBody(autoCrop?: boolean): { body?: string } {
   return autoCrop === undefined ? {} : { body: JSON.stringify({ auto_crop: autoCrop }) };
 }
 
+/** `GET /api/updates` — what the NAS update helper last reported. */
+export interface UpdatesStatus {
+  running_version: string;
+  helper: "missing" | "ok" | "stale";
+  helper_seen_at: number | null;
+  state: "idle" | "checking" | "updating" | "rolling_back";
+  job: { id: string; action: string; started_at: number } | null;
+  pending: { id: string; action: string } | null;
+  checked_at: number | null;
+  available: { version: string | null; commit?: string; committed_at?: number } | null;
+  update_available: boolean;
+  rollback: { to_version: string | null; needs_restore_data: boolean; backup: string | null } | null;
+  last_result: {
+    id: string | null; action: string | null; ok: boolean; message: string;
+    finished_at: number; log_tail: string[];
+  } | null;
+}
+
 export const api = {
   // targets
   listTargets: () => req<Target[]>("/api/targets"),
@@ -4236,6 +4254,23 @@ export const api = {
   // open every project a second time. Read-only; it never writes a recipe.
   // `thin`/`thin_count` are optional so an older backend reads as "nothing to
   // chip", which is what the wall did before they existed.
+  // Settings → App updates. The page only asks; the NAS helper
+  // (scripts/update_agent.py) does the work and reports back. See
+  // webapp/routers/updates.py.
+  getUpdates: () => req<UpdatesStatus>("/api/updates"),
+  // Both send a JSON body on purpose: it is the CSRF guard (see the router).
+  checkUpdates: () =>
+    req<{ id: string; action: string }>("/api/updates/check", { method: "POST", body: "{}" }),
+  applyUpdate: (version: string) =>
+    req<{ id: string; action: string }>("/api/updates/apply", {
+      method: "POST", body: JSON.stringify({ version }),
+    }),
+  rollbackUpdate: (restoreData: boolean) =>
+    req<{ id: string; action: string }>("/api/updates/rollback", {
+      method: "POST",
+      body: JSON.stringify(restoreData ? { restore_data: true, confirm: "RESTORE" } : {}),
+    }),
+
   // The owner-requested #903 repair: which flat pictures the app had finished
   // with Auto before a restack flattened them (and which it leaves alone), and
   // the job that gives them back. See webapp/refinish.py.

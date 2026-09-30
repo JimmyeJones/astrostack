@@ -232,6 +232,24 @@ the app. It reads them and writes everything it makes into `library/`.
 
 ## Updating later
 
+**From the app (recommended):** Settings → Maintenance → **App updates** shows the
+version you're on, a **Check for updates** button, and — when a newer tested
+version is out — **Update**. It needs a small helper on the NAS, set up once:
+
+```bash
+cd astrostack
+sudo python3 scripts/update_agent.py --install
+```
+
+That prints one line to add under **System → Advanced Settings → Cron Jobs**
+(run as root, every minute). The app can't update itself — it runs inside the
+container an update rebuilds — so the button only *asks*, and the helper does
+exactly what the command below does. It only reaches the internet when you press
+Check or Update, and it only ever installs the `stable` version. The same card
+has **Go back** to undo the last update.
+
+**From a terminal:**
+
 ```bash
 cd astrostack
 sudo scripts/deploy.sh

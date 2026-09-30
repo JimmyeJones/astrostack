@@ -4,6 +4,7 @@
 #   sudo scripts/rollback.sh                      # back to what deploy.sh recorded
 #   sudo scripts/rollback.sh v0.455.7             # back to an exact release tag
 #   sudo scripts/rollback.sh --restore-data       # …and put the data back as it was
+#   sudo scripts/rollback.sh --yes …              # no prompts (Settings → App updates)
 #
 # Code-only rollback is safe whenever the older version understands the newer
 # database format. When it does not (older code refuses a newer schema — see
@@ -11,11 +12,13 @@
 # LIBRARY_SCHEMA_VERSION), this script says so and requires --restore-data,
 # which restores the backup deploy.sh took. Restoring LOSES anything the app
 # wrote since that backup (new stacks, edits, imported frames' records); your
-# raw subs in incoming/ are never touched either way.
+# raw subs in incoming/ are never touched either way — the restore is
+# scripts/lib/restore-data.sh, which copies back only library/ and state/
+# databases and never runs `zfs rollback` (that would roll incoming/ back too).
 set -euo pipefail
 
-RESTORE=0; REF=""
-for a in "$@"; do case "$a" in --restore-data) RESTORE=1 ;; -h|--help) sed -n '2,14p' "$0"; exit 0 ;; *) REF="$a" ;; esac; done
+RESTORE=0; YES=0; REF=""
+for a in "$@"; do case "$a" in --restore-data) RESTORE=1 ;; -y|--yes) YES=1 ;; -h|--help) sed -n '2,17p' "$0"; exit 0 ;; *) REF="$a" ;; esac; done
 
 cd "$(dirname "$0")/.."
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -47,17 +50,14 @@ if [ "$NEEDS_DATA" = 1 ] && [ "$RESTORE" != 1 ]; then
 fi
 if [ "$RESTORE" = 1 ]; then
   [ -n "$BACKUP" ] || die "no backup recorded by deploy.sh."
-  read -r -p "Restore $BACKUP? Anything the app wrote since then is lost. Type RESTORE: " ok; [ "$ok" = RESTORE ] || die "cancelled."
+  if [ "$YES" != 1 ]; then
+    read -r -p "Restore $BACKUP? Anything the app wrote since then is lost. Type RESTORE: " ok; [ "$ok" = RESTORE ] || die "cancelled."
+  fi
 fi
 
 "${COMPOSE[@]}" stop
 if [ "$RESTORE" = 1 ]; then
-  case "$BACKUP" in
-    *@*) zfs rollback "$BACKUP" || die "ZFS refused: newer snapshots exist after $BACKUP. Not deleting them for you — list them with 'zfs list -t snapshot' and decide." ;;
-    *.tar.gz) tar -xzf "$BACKUP" -C "$ASTRO_DATA" ;;         # databases + settings only
-    *) die "don't know how to restore '$BACKUP'." ;;
-  esac
-  echo "Restored $BACKUP"
+  scripts/lib/restore-data.sh "$ASTRO_DATA" "$BACKUP" || die "restore failed — the app is stopped. Start it again with: ${COMPOSE[*]} up -d"
 fi
 g -c advice.detachedHead=false checkout --quiet --detach "$TARGET"
 "${COMPOSE[@]}" up -d --build
