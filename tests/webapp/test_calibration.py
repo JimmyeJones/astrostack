@@ -58,12 +58,12 @@ def test_build_master_source_dir_that_raises_is_400_not_500(client, monkeypatch)
     assert "not a folder" in r.json()["detail"]
 
 
-def test_build_master_job_reports_skipped_frames(client, tmp_path):
+def test_build_master_job_reports_skipped_frames(client, data_root):
     """A build from a folder mixing good frames with a wrong-size and an
     unreadable one finishes `done` with the good frames combined and a
     plain-language skip accounting in the job result — so the Jobs page can tell
     the user how many of their frames were actually used, not just 'done'."""
-    src = tmp_path / "darks"
+    src = data_root / "incoming" / "darks"
     _write_darks(src, n=3, shape=(8, 8))              # three good frames
     # one wrong-size frame + one unreadable file in the same folder
     fits.PrimaryHDU(data=np.full((4, 4), 100.0, dtype=np.float32)).writeto(
@@ -81,8 +81,8 @@ def test_build_master_job_reports_skipped_frames(client, tmp_path):
     assert result["skipped_buckets"] == {"wrong size": 1, "unreadable": 1}
 
 
-def test_build_master_job_reports_zero_skipped_on_a_clean_set(client, tmp_path):
-    src = tmp_path / "flats"
+def test_build_master_job_reports_zero_skipped_on_a_clean_set(client, data_root):
+    src = data_root / "incoming" / "flats"
     _write_darks(src, n=3, shape=(8, 8))
     r = client.post("/api/calibration/masters",
                     json={"kind": "flat", "source_dir": str(src)})
@@ -98,7 +98,7 @@ def test_build_master_job_reports_zero_skipped_on_a_clean_set(client, tmp_path):
 
 
 def test_build_master_job_reports_the_supplied_count_when_the_set_is_sampled(
-    client, tmp_path, monkeypatch,
+    client, data_root, monkeypatch,
 ):
     """A very large dark/flat set is evenly sampled down to a memory bound before
     combining. That was only ever written to the log, so a beginner who dropped
@@ -114,7 +114,7 @@ def test_build_master_job_reports_the_supplied_count_when_the_set_is_sampled(
 
     monkeypatch.setattr(masters_mod, "build_master", small_bound)
 
-    src = tmp_path / "many_darks"
+    src = data_root / "incoming" / "many_darks"
     _write_darks(src, n=5, shape=(8, 8))
     r = client.post("/api/calibration/masters",
                     json={"kind": "dark", "source_dir": str(src)})
@@ -1456,8 +1456,8 @@ def test_modal_dim_ignores_strays_and_unknowns():
     assert calibration.modal_dim([None, None]) is None
 
 
-def test_build_master_endpoint(client, data_root, tmp_path):
-    darks = tmp_path / "darks"
+def test_build_master_endpoint(client, data_root):
+    darks = data_root / "incoming" / "darks"
     _write_darks(darks)
 
     r = client.post("/api/calibration/masters", json={
@@ -1489,7 +1489,7 @@ def test_build_master_cancel_is_classified_cancelled(client, data_root, tmp_path
 
     from seestack.calibrate import masters as masters_mod
 
-    darks = tmp_path / "darks"
+    darks = data_root / "incoming" / "darks"
     _write_darks(darks, n=8)
 
     started = threading.Event()
@@ -1533,6 +1533,82 @@ def test_build_master_missing_dir(client):
     assert r.status_code == 400
 
 
+# --------------------------------------------------------------------------- #
+# the build folder is confined to incoming/ (audit 2026-09-30, C-F5)
+# --------------------------------------------------------------------------- #
+
+def test_build_master_refuses_a_folder_outside_incoming(client, tmp_path, data_root):
+    """With no password set, a raw server path here let anyone on the LAN point
+    a build at any readable folder on the NAS. Only ``incoming/`` is allowed."""
+    elsewhere = tmp_path / "elsewhere"
+    _write_darks(elsewhere, n=2)
+    assert elsewhere.is_dir()
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": str(elsewhere)})
+    assert r.status_code == 400
+    assert "inside your incoming folder" in r.json()["detail"]
+    # The library's own tree is not incoming/ either.
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": str(data_root / "library")})
+    assert r.status_code == 400
+    # Nor is incoming/ itself (a build over every target's lights).
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": str(data_root / "incoming")})
+    assert r.status_code == 400
+    assert client.get("/api/jobs").json() == [] or all(
+        j["kind"] != "build_master" for j in client.get("/api/jobs").json())
+
+
+def test_build_master_refuses_a_relative_path_that_climbs_out(client, tmp_path, data_root):
+    _write_darks(tmp_path / "elsewhere", n=2)
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": "../../elsewhere"})
+    assert r.status_code == 400
+    assert "inside your incoming folder" in r.json()["detail"]
+
+
+def test_build_master_refuses_a_link_planted_inside_incoming(client, tmp_path, data_root):
+    elsewhere = tmp_path / "elsewhere"
+    _write_darks(elsewhere, n=2)
+    (data_root / "incoming" / "linked").symlink_to(elsewhere)
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": "linked"})
+    assert r.status_code == 400
+
+
+def test_build_master_accepts_a_folder_named_relative_to_incoming(client, data_root):
+    """What the form's help now asks for: the folder's name inside incoming/."""
+    _write_darks(data_root / "incoming" / "darks", n=2)
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "source_dir": "darks"})
+    assert r.status_code == 200, r.text
+    assert _wait_job(client, r.json()["job_id"])["state"] == "done"
+
+
+def test_build_master_accepts_a_discovered_folder_id(client, data_root):
+    """The id the "you already have darks" offer hands out names the folder
+    without any path crossing the wire."""
+    folder = data_root / "incoming" / "Dark"
+    folder.mkdir(parents=True)
+    for i in range(5):    # discover.MIN_FRAMES
+        hdu = fits.PrimaryHDU(data=np.full((8, 8), 100.0, dtype=np.float32))
+        hdu.header["EXPTIME"] = 30.0
+        hdu.header["IMAGETYP"] = "Dark Frame"
+        hdu.writeto(folder / f"d{i}.fit", overwrite=True)
+    offered = client.get("/api/calibration/incoming").json()["folders"]
+    assert len(offered) == 1
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "folder_id": offered[0]["id"],
+                          "name": "By id"})
+    assert r.status_code == 200, r.text
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done" and job["result"]["n_frames"] == 5
+    # An id that names nothing is a 404, not a build of whatever is there.
+    r = client.post("/api/calibration/masters",
+                    json={"kind": "dark", "folder_id": "no-such-folder"})
+    assert r.status_code == 404
+
+
 def test_stack_rejects_unknown_master(client, solved_library):
     # Triggering a stack with a non-existent dark master id → 404.
     r = client.post("/api/targets/M_42/stack", json={"dark_master_id": 4242})
@@ -1542,7 +1618,7 @@ def test_stack_rejects_unknown_master(client, solved_library):
 def test_stack_with_calibration_master_runs(client, solved_library, tmp_path):
     # Build a master dark matching the solved frames' raw size (320×480) and
     # stack with it — the full resolve → engine path must complete.
-    darks = tmp_path / "cdarks"
+    darks = solved_library / "incoming" / "cdarks"
     _write_darks(darks, n=3, shape=(320, 480), level=5.0)
     r = client.post("/api/calibration/masters",
                     json={"kind": "dark", "source_dir": str(darks), "method": "median"})
@@ -1977,11 +2053,11 @@ def test_header_kind_note_never_claims_fewer_frames_than_declared():
     assert calibration.header_kind_note("dark", {"dark": 40}, None)["severity"] == "ok"
 
 
-def test_build_master_job_says_what_the_frames_claimed_to_be(client, tmp_path):
+def test_build_master_job_says_what_the_frames_claimed_to_be(client, data_root):
     """End to end: build a 'dark' master out of frames that say they're lights,
     and the finished job carries both the tally and the plain-language verdict —
     said at the moment it happens, not only next time the page loads."""
-    src = tmp_path / "not_darks"
+    src = data_root / "incoming" / "not_darks"
     src.mkdir(parents=True, exist_ok=True)
     for i in range(3):
         hdu = fits.PrimaryHDU(data=np.full((8, 8), 100.0, dtype=np.float32))
@@ -2006,8 +2082,8 @@ def test_build_master_job_says_what_the_frames_claimed_to_be(client, tmp_path):
     assert row["header_note"]["severity"] == "warn"
 
 
-def test_a_good_dark_folder_is_confirmed_not_warned(client, tmp_path):
-    src = tmp_path / "real_darks"
+def test_a_good_dark_folder_is_confirmed_not_warned(client, data_root):
+    src = data_root / "incoming" / "real_darks"
     src.mkdir(parents=True, exist_ok=True)
     for i in range(3):
         hdu = fits.PrimaryHDU(data=np.full((8, 8), 100.0, dtype=np.float32))
@@ -2023,10 +2099,10 @@ def test_a_good_dark_folder_is_confirmed_not_warned(client, tmp_path):
         "severity": "ok", "message": "All 3 frames say they are dark frames."}
 
 
-def test_a_master_built_before_the_check_existed_says_nothing(client, tmp_path):
+def test_a_master_built_before_the_check_existed_says_nothing(client, data_root):
     """Upgrade safety: an existing registry entry has no ``header_kinds`` key.
     It must list exactly as before, with the note absent — not an empty warning."""
-    src = tmp_path / "quiet_darks"
+    src = data_root / "incoming" / "quiet_darks"
     _write_darks(src, n=3, shape=(8, 8))   # no IMAGETYP written
     r = client.post("/api/calibration/masters",
                     json={"kind": "dark", "source_dir": str(src)})
@@ -2508,10 +2584,10 @@ def test_a_registered_master_keeps_the_range_its_stamped_temperature_hides(tmp_p
     assert rows["One night"]["sensor_temp_min_c"] is None
 
 
-def test_the_build_job_says_at_once_that_its_darks_straddled_two_nights(tmp_path, client):
+def test_the_build_job_says_at_once_that_its_darks_straddled_two_nights(data_root, client):
     """The moment it matters is the moment the master is built: no frame is set
     aside, so every count the summary reports says this was a clean build."""
-    folder = tmp_path / "incoming" / "Darks"
+    folder = data_root / "incoming" / "Darks"
     folder.mkdir(parents=True, exist_ok=True)
     for i, temp in enumerate((-10.0, -10.0, -10.0, 15.0, 15.0, 15.0)):
         hdu = fits.PrimaryHDU(data=np.full((8, 8), 100.0, dtype=np.float32))

@@ -1,5 +1,64 @@
 # Shipped — the record
 
+## 2026-09-30 (audit run A, security) — v0.492.15: a page on any other site could run the whole library, and the build form took any path on the NAS
+
+### v0.492.15 — 🔴 SECURITY FIX (C-F2, MEDIUM but the broadest exposure): every state-changing endpoint was triggerable cross-site
+
+**What was wrong.** The app has no password by default (AGENTS.md §1), and a password would not have
+helped: a page on any other site the owner visits can auto-submit a `<form>` at the app — a bodiless or
+form-encoded POST that needs no CORS preflight — and the browser attaches any cached Basic credentials.
+Every endpoint that accepts an empty body answered such a request: `/api/reprocess-all` (restack the whole
+library, hours of CPU), `/api/scan`, `/api/jobs/clear`, `/api/targets/{safe}/process`, `/api/sample`, the
+cache clear, the defect repair, set-missing-aside, job cancel, and more. Only the update endpoints had
+guarded themselves (by requiring a JSON body); nothing else had. The audit's test posted at three of them and
+each returned 200 on main @ 024babd.
+
+**The fix, once, in the auth gate.** `webapp.main.cross_site_reason` runs before the password check for
+every `POST`/`PUT`/`PATCH`/`DELETE`, from what the browser itself says about where the request came from:
+`Sec-Fetch-Site: cross-site` is refused outright and `same-origin`/`none` allowed outright (unforgeable from a
+page, and what keeps a reverse proxy that rewrites `Host` working); otherwise `Origin` (else `Referer`) must
+name the host *and port* the request was addressed to (`Host`, or `X-Forwarded-Host` behind a proxy — a page
+cannot set the forwarded header without a preflight, so accepting it opens nothing). `Origin: null` names no
+host and is refused. The refusal is a 403 with a plain sentence ("came from another site… open AstroStack in
+its own tab"), logged with the reason. **A request carrying none of the three headers is allowed** — curl,
+the observer's scripts, the owner's own tooling — which is the standard trade for an API that is also driven
+from a shell, and a browser never sends a state-changing request with none of them. Reads are never gated
+(a cross-site GET can be embedded in an `<img>` and refusing it gains nothing); `/api/health` stays open.
+
+The audit's own test sent *no* headers and expected a refusal; that would have refused every script the
+owner runs, so it was brought over with the cross-site cases carrying exactly what a browser sends from
+another site, and the no-header case pinned as allowed. `tests/webapp/test_csrf_state_changing_posts.py`:
+13 refusals (bodiless, form-encoded, fetch-metadata, referer-only, `null`, another port, and a password that
+does not help) fail on main and pass now; 12 allowances (the app's own frontend, a matching origin or referer
+alone, default ports, the vite dev-proxy shape — `frontend/vite.config.ts` sets no `changeOrigin`, so the
+backend sees `localhost:5173` in both headers — a forwarded host, no headers at all, reads, health) pass on
+both. No API shape changed; nothing on disk changed. Upgrade-safe.
+
+### also in v0.492.15 — 🟡 SECURITY FIX (C-F5, LOW): `POST /api/calibration/masters` took any folder on the NAS
+
+The Calibration page's build form sent a raw `source_dir`, and the endpoint built a master from any
+readable folder on the server — with no password set, anyone on the LAN could point it anywhere. AGENTS.md §6:
+paths are resolved server-side. New `_incoming_folder` confines it to **inside `incoming/`** — the one tree
+the app already reads on the owner's behalf, and the tree the "you already have darks" offer discovers in —
+accepting an absolute path there (what the placeholder always showed) or a name relative to it (`darks`),
+resolving symlinks before judging so a link planted inside `incoming/` reaches nothing, and refusing
+`incoming/` itself. The endpoint also accepts the offer's own `folder_id`, re-discovered server-side exactly
+as `build_master_from_incoming` does, so a client need never send a path at all. `incoming/` is only read
+(§10). The form's help now says where the folder must be; the request shape is unchanged, so the existing
+frontend flow works as before. Five new tests in `tests/webapp/test_calibration.py` (outside, `..`, a planted
+link, a relative name, a folder id) fail on main and pass now; the eleven existing build tests were moved
+into the fixture's `incoming/` — the contract they test is unchanged.
+
+### also — the audit's A1/A2 tests brought over, with the one changed to expect the refusal
+
+`tests/test_updater_symlink_escape.py` (audit branch `claude/blissful-mccarthy-laygw6`): v0.492.5 already
+fixed the class, and its `ensure_queue` *refuses* a symlinked queue (a `SystemExit` the cron log shows)
+where the audit's test expected it to carry on; the test now expects the refusal, asserts nothing was
+written outside ASTRO_DATA and that the planted link was left as evidence. The other two pass unchanged. The
+same class was hunted through the rest of `scripts/`: `deploy.sh`'s tar backup uses a non-following `find`
+and `tar` stores a planted link as a link; `restore-data.sh` lists `-type f` only, checks every path
+component for a link before writing, and `cp --remove-destination`s; `rollback.sh` writes nothing under
+ASTRO_DATA itself. Nothing found — recorded in `PROCESS-NOTES.md`.
 ## 2026-09-30 (audit run B) — v0.492.14: a Combine whose folder delete fails part way no longer resurrects the source on the next scan
 
 ### 🟠 BUG FIX (autonomy / library integrity — PRIORITY 2; the 2026-09-30 audit's C-F3, MEDIUM) — `Library.open_or_create_target`, `_remove_target_files`, `MergeTargetsResult.folders_left`

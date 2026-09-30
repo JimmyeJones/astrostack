@@ -28,8 +28,58 @@ def list_masters(request: Request) -> list[dict[str, Any]]:
     return calibration.list_masters(settings.resolved_library_root)
 
 
+def _incoming_folder(settings: Any, source_dir: str) -> str:
+    """Resolve a user-typed ``source_dir`` to a real folder **inside**
+    ``incoming/``, or raise a 400.
+
+    The Calibration page's build form takes a folder the owner types, and until
+    the 2026-09-30 audit (C-F5) that was any path on the server: with no
+    password set, anyone on the LAN could point a build at any readable folder
+    on the NAS and have its FITS files combined into a master. AGENTS.md §6
+    says paths are resolved server-side, so the folder is now confined to the
+    one tree the app already reads on the owner's behalf — the incoming folder
+    the Seestar drops into — the same way the "you already have darks" offer
+    only ever names folders it discovered there.
+
+    Accepts an absolute path inside ``incoming/`` (what the placeholder always
+    showed) or a name relative to it (``darks``), and resolves symlinks before
+    judging, so a link planted inside ``incoming/`` cannot reach outside it.
+    ``incoming/`` itself is only *read* here (AGENTS.md §10).
+    """
+    try:
+        root = Path(settings.resolved_incoming_dir).resolve()
+        candidate = Path(source_dir)
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        resolved = candidate.resolve()
+        is_dir = resolved.is_dir()
+    except (OSError, ValueError):
+        # e.g. an embedded null byte raises ValueError on some platforms
+        # rather than returning False — still a client-supplied bad path (400),
+        # not a server fault (500).
+        is_dir = False
+    if not is_dir:
+        raise HTTPException(status_code=400,
+                            detail=f"source_dir is not a folder: {source_dir}")
+    if resolved == root or not resolved.is_relative_to(root):
+        raise HTTPException(
+            status_code=400,
+            detail=(f"source_dir must be a folder inside your incoming folder "
+                    f"({root}) — put the dark/flat frames in a folder there and "
+                    f"give its name, e.g. darks"))
+    return str(resolved)
+
+
 @router.post("/api/calibration/masters")
 def build_master(body: dict[str, Any], request: Request) -> dict[str, str]:
+    """Build a master from a folder of calibration frames.
+
+    The folder is named either by ``folder_id`` — the id of a folder the
+    "you already have darks" offer discovered under ``incoming/``, re-discovered
+    server-side exactly as :func:`build_master_from_incoming` does — or by
+    ``source_dir``, a folder inside ``incoming/`` (see :func:`_incoming_folder`).
+    No filesystem path outside that tree ever comes from the client.
+    """
     settings = deps.get_settings(request)
     jm = deps.get_job_manager(request)
 
@@ -41,19 +91,21 @@ def build_master(body: dict[str, Any], request: Request) -> dict[str, str]:
     if method not in VALID_METHODS:
         raise HTTPException(status_code=400,
                             detail=f"method must be one of {VALID_METHODS}")
-    source_dir = str(body.get("source_dir", "")).strip()
-    if not source_dir:
-        raise HTTPException(status_code=400, detail="source_dir is required")
-    try:
-        is_dir = Path(source_dir).is_dir()
-    except (OSError, ValueError):
-        # e.g. an embedded null byte raises ValueError on some platforms
-        # rather than returning False — still a client-supplied bad path (400),
-        # not a server fault (500).
-        is_dir = False
-    if not is_dir:
-        raise HTTPException(status_code=400,
-                            detail=f"source_dir is not a folder: {source_dir}")
+    folder_id = str(body.get("folder_id", "") or "").strip()
+    if folder_id:
+        found = discover.find_calibration_folder(
+            str(settings.resolved_incoming_dir), folder_id)
+        if found is None:
+            raise HTTPException(
+                status_code=404,
+                detail="That folder is no longer there, or its frames no longer "
+                       "say they are calibration frames.")
+        source_dir = found.folder
+    else:
+        source_dir = str(body.get("source_dir", "") or "").strip()
+        if not source_dir:
+            raise HTTPException(status_code=400, detail="source_dir is required")
+        source_dir = _incoming_folder(settings, source_dir)
     try:
         sigma = float(body.get("sigma", 3.0))
     except (TypeError, ValueError):
