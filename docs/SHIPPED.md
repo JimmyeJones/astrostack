@@ -1,5 +1,113 @@
 # Shipped — the record
 
+### v0.491.1 — 🟡 BUG FIX (friendliness + trust, PRIORITY 3): a cover the Combine pinned is not a cover *you* pinned
+
+*(Found by this run's `scripts/agent-dogfood.sh --combine` pass, which was otherwise CLEAN — see
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md) for the sweep record. Not from the backlog.)*
+
+**Why it matters now.** `Library.merge_targets` pins the destination's own picture as its cover when the
+target had none pinned, so a carried one-night stack cannot replace the deep picture the owner was looking
+at. That is right, and it is also a visible change to a target that nobody asked for by name — and the
+**reconciliation of the 11 historical duplicate pairs** (issue [#878](https://github.com/JimmyeJones/astrostack/issues/878),
+offered on the Library's cleanup card since v0.482.2) is a flow that will do it 11 times.
+
+**Three things were wrong, all of them the same shape: the app crediting the owner with its own decision.**
+
+1. **The Library has two Combine buttons and only one of them said what happened.** The same-object *nudge*
+   (`MergeSuggestionsCard`) reports both facts the merge returns — *"Your 2 existing pictures came with them
+   — see History. It still shows its own picture, kept as the cover."* The **cleanup card**
+   (`CleanupSuggestionsCard`), which is where the duplicate reconciliation is offered, ran the identical
+   `POST /api/targets/merge` and **threw the answer away**: it awaited the promise and never read
+   `pictures_kept` or `picture_pinned`. So one operation described itself two ways depending on which button
+   was pressed. The two clauses are now shared — `mergeKeptClause` / `mergeCoverClause` in
+   `mergeSuggestions.ts`, which `mergeOutcomeMessage` is itself built from, so the two surfaces cannot drift
+   — and the cleanup card sums them across the merges it runs in one click.
+2. **`LatestPictureCard`'s pinned-cover note said "This is the version *you* pinned as this target's cover".**
+   After a combine, he didn't. The cover is now *described*, never attributed: "This is the version pinned as
+   this target's cover…". Nothing else about the sentence changes.
+3. **`CleanestShotNote` said "than the picture *you* pinned as this target's cover"** — same untruth, same
+   one-word fix. Its neighbouring reassurance, *"it only changes when you say so"*, is **left alone and that
+   was checked rather than assumed**: `merge_targets` pins only when `cover_stack_run_id is None`, so a merge
+   can fill an empty pin but can never replace a cover that is already set.
+
+**What was deliberately NOT changed.** The Target page's notice board and health card still describe the
+**newest** run while the hero shows the pinned cover — `Target.tsx` says so in a comment and
+`LatestPictureCard` signposts it ("You have a newer stack too — see all versions"). On a combined target that
+means the thin-stack warning can describe the run carried in from the folder that was combined away; that run
+really is the newest stack by timestamp, so the note is true, and making the analysis follow a pinned cover
+is the change that comment exists to refuse.
+
+**Upgrade-safe (§9):** frontend copy and one discarded return value. No endpoint, config, schema, on-disk,
+default or API-shape change.
+
+**Tests: +6 unit, +2 rendered; seven of the eight fail before** (verified by reverting the four source files
+in place). The eighth pins the degrade that must stay — an older backend answering neither field reads as
+"say nothing extra", never as "0 pictures". One harness fix came out of writing them and is worth knowing:
+**Mantine's notification store is module-level and outlives a render**, so a bare `screen` query for a
+confirmation can match the message a *previous* test raised — which is exactly how the first version of this
+test passed against the unfixed card. `CleanupSuggestionsCard.test.tsx` now cleans the store in `beforeEach`.
+
+## 2026-09-30 (Builder, a later run of the day) — the stack memory budget says what it is, and names the control that sets it
+
+### v0.491.0 — 🟡 PRIORITY 2/3 (trust + friendliness): the "one budget per batch" lead, closed with the cheaper lever it actually needed
+
+*(Cut from "Bugs (fix these first)". The entry was filed 2026-09-25 off the observer's second point in issue
+[#966](https://github.com/JimmyeJones/astrostack/issues/966); its proposed shape was sized and declined by the
+previous run, whose finding named what to build instead. Both halves are recorded below, because the decline
+is the more useful half.)*
+
+**The observation.** With `max_stack_memory_gb` unset and `ASTROSTACK_MAX_STACK_GB` unexported — the owner's
+state — every stack is priced against **70 % of whatever RAM is free at the minute it starts**. The observer
+saw the *same target* priced against a **~4.1 GB** budget in one batch and a **~3.2 GB** budget in the next, a
+week apart, with nothing about the data changed. Since v0.473.0 that decides how far the drizzle scale steps
+down rather than picture-or-no-picture, so the failure mode is a mosaic quietly less zoomed-in on one batch
+than on another.
+
+**What was NOT built, and why — do not re-pick it.** The entry's shape was "capture the budget once at the
+start of a batch and price every target against that one number". Two things kill it. **(1) It is strictly
+*less* safe in one direction:** a budget captured while the box was quiet is *larger* than the live figure
+later in a five-day batch, so pricing target 45 against target 1's `MemAvailable` authorises a canvas the box
+can no longer hold — the wrong way to be wrong on a box with an OOM history (§10). Any workable version is
+`min(batch_open, live)`, which buys reproducibility upward only. **(2) It does not reach the measurement
+anyway:** the `JobManager` runs one stack at a time and nothing else of the app's competes, so intra-batch
+drift is the small part — the week-apart difference is host state no in-batch capture can touch.
+
+**What was built instead.** The one lever that really does make "same subs, same options, same answer" true is
+the setting that already exists — and nothing said so, in either direction:
+
+* **`stacker.resolve_stack_memory_budget(setting_gb)`** is now the single decision: it returns the ceiling
+  **and its source** (`"env"` / `"setting"` / `"available"` / `"fallback"`). `_stack_memory_budget_bytes` is a
+  thin view of it, so the precedence still lives in one place and **every caller gets the identical number**:
+  five sites still call the old helper untouched, and the two that needed the source (the refusal guard and the
+  drizzle-rejection warning) read `.bytes` off the same answer. The source is what the number alone can never say: only `"available"` is irreproducible, and only
+  `"env"` means the control the owner can reach is being ignored.
+* **`/api/system`'s `memory` gains `stack_budget_gb` + `stack_budget_source`** (additive; the two RAM fields
+  behave exactly as before, and the two new ones are always present because the engine always has an answer).
+  Served rather than re-derived in the browser, which cannot see the container's environment.
+* **Settings → Stacking → Memory says which of the four is in force** (`frontend/src/stackBudgetNote.ts`,
+  pure). Blank: *"each stack is priced against however much memory is free when it starts — about 4.1 GB right
+  now. The same target can come out at a smaller super-resolution scale, or with less outlier removal, on a
+  busy day than on a quiet one… Put a number here and every stack is priced against that instead."* Set: it
+  says the answer is repeatable. Fallback: it says the box's memory could not be read.
+* **One small bug fixed on the way.** `ASTROSTACK_MAX_STACK_GB` silently beats the Settings field, and the
+  card's *"Budget is higher than this machine's available RAM"* advisory was firing on the field regardless —
+  warning about a number no stack would ever read. It now stands down where the override is in force, and an
+  orange alert says the field is being overridden instead.
+* **And the refusal stops sending a non-technical owner to an environment variable.** Every memory refusal used
+  to end *"or raise ASTROSTACK_MAX_STACK_GB to override"* — a container knob, on an app that ships the same
+  control one click away. `stacker.raise_the_budget_sentence(source)` now names whichever one the run actually
+  reads: Settings → Stacking → Memory normally, the env var only where it is set. The `"working memory"` phrase
+  the error classifier keys on is untouched, so `memory_budget` still classifies.
+
+**Upgrade-safe (§9):** two additive response fields, no config, schema, on-disk, default or existing-shape
+change; the budget *value* and every guard decision are byte-identical to v0.490.1 in all four sources.
+
+**Tests: +8 engine (`tests/test_stack_memory_guard.py`), +1 endpoint, +5 unit and +3 rendered frontend.**
+Seven of the eight engine ones fail before (verified in a scratch worktree at `origin/main`), as do two of the
+three Settings ones (verified by reverting `Settings.tsx` in place); the two that pass either way are there
+deliberately — they pin the direction that was *not* broken (a refusal on an env-override install still names
+the env var) and the advisory that must still fire on a budget that really is in force.
+
 ## 2026-09-30 (Builder, a later run of the day) — the two memory step-downs that left no trace anyone could read
 
 ### v0.490.1 — 🟡 BUG FIX (friendliness + trust, PRIORITY 3): a picture whose outlier removal was cut back to fit memory now says so

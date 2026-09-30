@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
+from seestack.stack.stacker import resolve_stack_memory_budget
 from webapp import deps, pipeline
 
 router = APIRouter(tags=["system"])
@@ -151,10 +152,24 @@ def _folder_status(path: Path) -> dict:
     return {"path": str(path), "exists": exists, "writable": writable}
 
 
-def _memory_info() -> dict:
+def _memory_info(setting_gb: float | None = None) -> dict:
     """Total + currently-available RAM in GB (Linux /proc/meminfo), so the UI can
-    warn when the stack memory budget is set higher than the box can back. Empty
-    dict when meminfo can't be read (non-Linux / restricted container)."""
+    warn when the stack memory budget is set higher than the box can back — plus
+    the budget one stack is **actually** priced against and where that number
+    comes from (``stack_budget_gb`` / ``stack_budget_source``, the engine's own
+    :func:`~seestack.stack.stacker.resolve_stack_memory_budget`).
+
+    The budget is served rather than re-derived in the browser because the
+    precedence has three steps and the page was getting the top one wrong: with
+    ``ASTROSTACK_MAX_STACK_GB`` set, the Settings field is ignored, and the
+    "budget is higher than this machine's RAM" advisory was firing on a number
+    the run would never read.
+
+    The two RAM fields are absent when meminfo can't be read (non-Linux /
+    restricted container); the two budget fields are always present, because the
+    engine always has an answer — it falls back to a fixed default.
+    """
+    out: dict = {}
     fields: dict[str, int] = {}
     try:
         with open("/proc/meminfo") as fh:
@@ -165,12 +180,14 @@ def _memory_info() -> dict:
                     if len(fields) == 2:
                         break
     except (OSError, ValueError):
-        return {}
-    out: dict = {}
+        fields = {}
     if "MemTotal" in fields:
         out["total_gb"] = round(fields["MemTotal"] / 1e9, 1)
     if "MemAvailable" in fields:
         out["available_gb"] = round(fields["MemAvailable"] / 1e9, 1)
+    budget = resolve_stack_memory_budget(setting_gb)
+    out["stack_budget_gb"] = round(budget.bytes / 1e9, 1)
+    out["stack_budget_source"] = budget.source
     return out
 
 
@@ -371,7 +388,7 @@ def system(request: Request) -> dict:
         "gpu_available": _gpu_available(),
         "astap": astap,
         "disk": disk,
-        "memory": _memory_info(),
+        "memory": _memory_info(settings.max_stack_memory_gb),
         "folders": {
             "incoming": _folder_status(settings.resolved_incoming_dir),
             "library": _folder_status(settings.resolved_library_root),

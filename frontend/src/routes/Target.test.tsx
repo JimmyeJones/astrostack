@@ -2739,8 +2739,14 @@ describe("TargetView honours the pinned cover", () => {
     pinned();
     renderTarget();
 
-    expect(await screen.findByTestId("pinned-cover-note")).toHaveTextContent(
-      /pinned as this target/i);
+    const note = await screen.findByTestId("pinned-cover-note");
+    expect(note).toHaveTextContent(/pinned as this target/i);
+    // …and it does NOT say the *user* pinned it. "Combine into one deep target"
+    // pins the destination's own picture when nothing was pinned, so on a
+    // combined target this sentence was crediting the owner with a decision the
+    // app made for him — and the reconciliation of historical duplicates is
+    // exactly the flow that reaches it.
+    expect(note.textContent).not.toMatch(/you pinned/i);
     expect(await screen.findByText("Your picture (cover)")).toBeInTheDocument();
   });
 

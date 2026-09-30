@@ -223,3 +223,94 @@ def test_largest_drizzle_scale_none_when_even_unity_exceeds():
     s = stacker._largest_drizzle_scale_within_budget(
         shape, drizzle_reject=False, budget=_peak(shape, 1.0) - 1, max_scale=2.0)
     assert s is None
+
+
+# --- Which budget is in force, and which control the refusal names -------------
+#
+# The number alone can't be explained to anybody: `resolve_stack_memory_budget`
+# reports the source beside it so the refusal's closing clause, and the Settings
+# page, name the control the run actually reads.
+
+def test_budget_reports_the_env_override_as_its_source(monkeypatch):
+    monkeypatch.setenv("ASTROSTACK_MAX_STACK_GB", "42")
+    resolved = stacker.resolve_stack_memory_budget(8.0)
+    assert resolved.source == "env"
+    assert resolved.bytes == pytest.approx(42e9)
+
+
+def test_budget_reports_the_settings_value_as_its_source(monkeypatch):
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    resolved = stacker.resolve_stack_memory_budget(8.0)
+    assert resolved.source == "setting"
+    assert resolved.bytes == pytest.approx(8e9)
+
+
+def test_budget_reports_free_ram_as_its_source(monkeypatch):
+    """The default, and the only source that is not reproducible: the same subs
+    with the same options are priced against whatever was free at the time."""
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    monkeypatch.setattr(stacker, "_available_memory_bytes", lambda: 10_000_000_000)
+    resolved = stacker.resolve_stack_memory_budget(None)
+    assert resolved.source == "available"
+    assert resolved.bytes == pytest.approx(7e9)
+
+
+def test_budget_reports_the_fallback_when_meminfo_cannot_be_read(monkeypatch):
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    monkeypatch.setattr(stacker, "_available_memory_bytes", lambda: None)
+    resolved = stacker.resolve_stack_memory_budget(None)
+    assert resolved.source == "fallback"
+    assert resolved.bytes == pytest.approx(stacker._DEFAULT_STACK_BUDGET_GB * 1e9)
+
+
+def test_an_unparseable_env_override_falls_through_to_the_setting(monkeypatch):
+    """Same fall-through the value has always had — now the source has to agree
+    with it, or the page would name a control that isn't deciding anything."""
+    monkeypatch.setenv("ASTROSTACK_MAX_STACK_GB", "not-a-number")
+    resolved = stacker.resolve_stack_memory_budget(6.0)
+    assert resolved.source == "setting"
+    assert resolved.bytes == pytest.approx(6e9)
+
+
+def test_refusal_points_at_the_settings_control_the_owner_can_reach(monkeypatch):
+    """A refusal on an ordinary install used to end "raise ASTROSTACK_MAX_STACK_GB
+    to override" — a container environment variable, told to a non-technical owner
+    whose app ships the same knob one click away. It now names that knob."""
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    with pytest.raises(MemoryError) as exc:
+        stacker._guard_stack_memory((10000, 10000), drizzle=False,
+                                    drizzle_scale=1.0, memory_budget_gb=1.0)
+    msg = str(exc.value)
+    assert "Settings → Stacking → Memory" in msg
+    # …and still classifies as the memory kind, which keys on this phrase.
+    assert "working memory" in msg
+
+
+def test_refusal_names_the_env_var_when_that_is_what_is_in_force(monkeypatch):
+    """The other direction, and the reason the source is carried at all: where the
+    override is set, raising the Settings budget changes nothing."""
+    monkeypatch.setenv("ASTROSTACK_MAX_STACK_GB", "1")
+    with pytest.raises(MemoryError) as exc:
+        stacker._guard_stack_memory((10000, 10000), drizzle=False,
+                                    drizzle_scale=1.0, memory_budget_gb=64.0)
+    msg = str(exc.value)
+    assert "ASTROSTACK_MAX_STACK_GB" in msg
+    assert "Settings → Stacking → Memory" not in msg
+
+
+def test_both_refusal_shapes_carry_the_advice(monkeypatch):
+    """The guard writes two advice strings — one when a concrete lever would fit
+    and one when none would. Both must end with the in-force control."""
+    monkeypatch.delenv("ASTROSTACK_MAX_STACK_GB", raising=False)
+    # A drizzled canvas has a smaller scale to fall back to → the "To fit, …" shape.
+    with pytest.raises(MemoryError) as with_fix:
+        stacker._guard_stack_memory((4000, 4000), drizzle=True, drizzle_scale=3.0,
+                                    memory_budget_gb=1.0)
+    assert "To fit," in str(with_fix.value)
+    assert "Settings → Stacking → Memory" in str(with_fix.value)
+    # An undrizzled canvas that overflows on its own → the generic shape.
+    with pytest.raises(MemoryError) as no_fix:
+        stacker._guard_stack_memory((20000, 20000), drizzle=False,
+                                    drizzle_scale=1.0, memory_budget_gb=0.5)
+    assert "Reduce drizzle scale" in str(no_fix.value)
+    assert "Settings → Stacking → Memory" in str(no_fix.value)

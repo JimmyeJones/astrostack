@@ -39,7 +39,13 @@ describe("CleanestShotNote", () => {
     expect(screen.getByText(/about 33% less background grain/)).toBeInTheDocument();
     expect(screen.getByText(/combined 90 subs against 40/)).toBeInTheDocument();
     // The reassurance that this is a suggestion, not something that happened.
+    // ("only changes when you say so" stays true: a merge only ever fills an
+    // *empty* pin, so it can never replace a cover that is already set.)
     expect(screen.getByText(/only changes when you say so/)).toBeInTheDocument();
+    // But the cover is described, never attributed: a combine pins one, so
+    // "the picture *you* pinned" is not something this note can know.
+    expect(screen.getByTestId("cleanest-shot-note").textContent)
+      .not.toMatch(/you pinned/i);
   });
 
   it("pins the offered run through the same set-cover path History uses", async () => {

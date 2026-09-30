@@ -2662,7 +2662,16 @@ export interface SystemInfo {
      *  `*_gb` fields are decimal, the rest of the UI is binary. */
     free_bytes?: number; total_bytes?: number;
   };
-  memory: { total_gb?: number; available_gb?: number };
+  memory: {
+    total_gb?: number; available_gb?: number;
+    /** The ceiling one stack is priced against right now, and which control set
+     *  it — `env` (ASTROSTACK_MAX_STACK_GB, which overrides the Settings field),
+     *  `setting`, `available` (~70 % of free RAM — the default, and the only one
+     *  that changes between days) or `fallback`. Additive; absent on an older
+     *  backend, where the page keeps its old wording. */
+    stack_budget_gb?: number;
+    stack_budget_source?: string;
+  };
   folders?: {
     incoming: { path: string; exists: boolean; writable: boolean };
     library: { path: string; exists: boolean; writable: boolean };
