@@ -1,5 +1,86 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (Builder, the run after that one) — the sweep was measuring landing views, and the app's wall is 4.3x taller than any of them
+
+*(Builder, branch `claude/magical-wright-gqme0n` → **v0.492.1** + **v0.492.2**. Baseline on `origin/main` at
+5e8cae1: **7062 passed, 2 skipped**, 21m20s with the BLAS cap and `-n 4 --dist worksteal`. Green.)*
+
+### The run
+
+Two commits, both tooling, both the same class. The Bugs section's open entries are every one of them gated on
+a measurement only the owner's library can supply (the drizzle share, the retry-success rate, a before/after on
+real masters, how often a mosaic is both ragged and under-shot) — which is what `FOCUS.md` already says — so
+the front-of-queue work was the `LEAD` at the top of "Autonomy & friendliness", and then the class it turned
+out to belong to.
+
+### The generalisation, and how it was found
+
+v0.492.1 was the filed lead: `/settings` renders its **first** tab and the other six panels are
+`keepMounted`-but-hidden, so every element in them has a zero-size rect that all three DOM probes skip. Six
+sections of the app's tallest-by-content page had never been drawn.
+
+The question that followed — **"what else does a page keep behind a click?"** — was answered by driving the
+running app rather than by reading, and the answer was bigger than the lead:
+
+| view | phone height | in any baseline? |
+|---|---|---|
+| `/life-list` **[Still to shoot]** | **14,492 px** | no |
+| `/life-list` **[Up tonight]** | 7,006 px | no |
+| `/life-list` (landing) | 3,094 px | yes |
+| `/tonight` **[Nebula]** | 3,543 px | no |
+| `/stack` **[Advanced options open]** | 3,264 px (from 1,748) | no |
+
+**The tallest landing height ever recorded is ~3,400 px; the tallest thing the app draws is 4.3x that.** Since
+AGENTS.md §1 gates a layout slice on a page *measured* long, the table that answers "which page is the wall?"
+had been answering it wrong for as long as there has been a table.
+
+### Three things worth keeping
+
+**1. The probe had already written down what it needed, and nobody did it.** `probeCurrentView` was split out
+of the route loop in v0.440.2 *"so a view reached by a click — a comparator mode, **and anything else added
+later** — is held to the identical checks"*. The seam was cut; only `COMPARE_MODES = ["Split", "Blink"]` ever
+went through it. **A hand-written list of two labels looks like a mechanism and is an instance.**
+
+**2. A stale *exemption* is worse than a missing route, because it comes with a reason.** `settings/*` sat in
+`_EXEMPT` with a sentence — "renders the same component as `/settings`, scrolled to one panel" — that was
+wrong in both halves (`SectionTabs` is a tab strip, not a scroll target; the hidden panels are invisible to
+every probe). An un-probed route is a gap; a **reasoned** exemption is a gap that argues back, and it survived
+however many readings of that file.
+
+**3. Cost is a correctness property for a tool nobody is forced to run.** The first working version clicked the
+Glossary's forty terms one at a time through Playwright's actionability machinery: **2m11s → 6m04s, 2.8x**.
+Opening panels in one in-page round trip instead: **3m01s, 1.4x**. This repo already has the note that *"a
+dogfood pass that takes twenty minutes will stop being run"* (the `--big` entry), so the 2.8x version was not a
+slower fix, it was a fix that would have been switched off.
+
+### What the sweep then read — CLEAN
+
+All 106 views, at 1440 px and 420 px: nothing overflowing, nothing squeezed, no clipped label, no console
+error. Read as paragraphs, Settings → Maintenance and → Automation both hold together on a phone (the cards
+stack, the tab strip wraps to three lines as its docstring intends). The Target page, Dashboard notice board
+and Tonight column printed the same paragraphs as the previous run.
+
+**`/life-list [Still to shoot]`'s 14,492 px is not a bug, and this is the note that stops it being re-derived.**
+`Section` collapses the to-do tail to `TODO_PREVIEW` **only** in the mixed "All" view, with the reason in the
+code: *"'Still to shoot' is the list the user just asked for, so it is never shortened there; only the mixed
+'All' view collapses its tail."* It is ~200 catalogue tiles in a two-column grid, rendering correctly. **Do not
+take a layout slice at it** — the length is the answer to an explicit question.
+
+### DOGFOOD BASELINE — running-app probe at v0.492.2 (Builder 2026-09-30)
+
+Default pass (no flags), sample library, tallest first. **Landing heights and view heights are now different
+kinds of row**; a `[label]` row is a view reached by a click, and a panels probe pushes no height at all.
+
+```
+[phone] /life-list [Still to shoot]  14492      [phone] /tonight                3396
+[phone] /life-list [Up tonight]       7006      [phone] /glossary               3364
+[desktop] /life-list [Still to shoot] 5101      [phone] /targets/<T>            3287
+[phone] /tonight [Nebula]             3543      [phone] /settings/maintenance   3058
+[phone] /tonight [Galaxy]             3417      [phone] /                       2524
+```
+
+Probe half: **3m01s**, 106 screenshots (was 2m11s / 64 before this run).
+
 ## 2026-09-30 (Builder, the run after that one) — `git stash` is "editing a source file while the suite is running", and the tell is the opposite of the documented one
 
 *(Builder, branch `claude/magical-wright-1cme5c` → **v0.492.0**. Baseline on `origin/main` at f882e14:

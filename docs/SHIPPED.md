@@ -1,5 +1,130 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder, the next run) — six of the seven Settings sections had never been drawn
+
+### v0.492.2 — INFRA / the quality bar itself: the sweep opens what a page keeps behind a click, and the wall table was wrong by 4.3x
+
+*(The generalisation of v0.492.1, found by measuring it rather than reasoning about it. v0.492.1 closed one
+instance — a page hiding six of its seven sections behind a **tab**. This is the class.)*
+
+**What was measured, before anything was built.** A one-off drive of the running dogfood app clicked every
+`SegmentedControl` option and expanded every `Accordion` on the routes that carry one, at 1440 px and 420 px.
+Nothing overflowed, nothing was squeezed or clipped, no console error — but the heights say the sweep had
+been measuring the wrong thing:
+
+| view | phone height | in any baseline? |
+|---|---|---|
+| `/life-list` **[Still to shoot]** | **14,492 px** | no |
+| `/life-list` **[Up tonight]** | 7,006 px | no |
+| `/life-list` (landing, "All") | 3,094 px | yes |
+| `/tonight` **[Nebula]** | 3,543 px | no |
+| `/stack` **[Advanced options open]** | 3,264 px (from 1,748) | no |
+
+The tallest landing height any dogfood pass has ever recorded is `/tonight` at ~3,400 px. The tallest thing
+this app actually draws is **4.3x** that, one click from a nav page, and no pass had ever drawn it. Since
+AGENTS.md §1's layout rule is scored on exactly this number — *"only on a page **measured** long with the data
+that makes it long"* — the table that answers "which page is the wall?" had been answering it wrong.
+
+**Why the landing view is all a sweep ever saw.** `page.goto` lands on one option of a `SegmentedControl` and
+on a **shut** `Accordion`. `dogfood_probe.mjs` had exactly one exception, hard-coded: `COMPARE_MODES =
+["Split", "Blink"]`, added in v0.440.2 because a bug lived behind that one control. It covered one page.
+`/life-list`'s four filters, `/tonight`'s four, `/logs`' four, `/sky`'s three maps, the Stack form's entire
+advanced panel and the Glossary's forty term bodies were all unswept, and the probe's own comment had
+anticipated this — `probeCurrentView` was split out of the route loop precisely so *"a view reached by a
+click — a comparator mode, **and anything else added later** — is held to the identical checks"*.
+
+**What shipped.** `viewSwitches()` reads both control shapes off the page's own DOM, so a filter added
+tomorrow is swept without anyone remembering, and `COMPARE_MODES` is gone. The two shapes are swept
+differently, on purpose:
+
+- a **view** switch replaces the page, so each inactive option is its own probe **and its own height row**,
+  labelled `"/life-list [Still to shoot]"`. Active options are seeded into the seen-set from Mantine's own
+  `data-active` / `checked` marks, so clicking round a control does not come back and photograph the landing
+  view twice.
+- a **panel** adds to the page it is on, so they are opened **together** (`expandAllPanels`, one in-page round
+  trip) and probed once, pushing **no** height. One at a time would mean forty screenshots of a growing
+  Glossary and forty cumulative heights that are nobody's page — the tallest would top the wall table while
+  describing a state no reader is ever in. The bulk open is also what keeps the cost sane: clicking the
+  Glossary's forty terms through Playwright's actionability machinery cost more than every other route in the
+  sweep put together (**6m04s**), against **3m01s** in one round trip.
+
+**The cost, stated rather than hidden.** The probe half goes **2m11s → 3m01s** (1.4x) and 64 → 106
+screenshots, for 42 views no pass had ever drawn. The earlier one-at-a-time version was 2.8x, which is the
+sort of number that stops a tool being run; that is why the panels are bulk-opened.
+
+**The new way to fail silently, and its guard.** Discovery keys off Mantine's own class names, so a Mantine
+rename would find nothing, on every route, and a sweep covering only landing views would report CLEAN exactly
+as before. `KNOWN_VIEW_SWITCHES` names the five routes a pass has observed a switch on and the probe prints a
+**finding** when one yields nothing to click. That list is then itself the thing that rots, so
+`tests/test_dogfood_view_switches.py` pins each entry against the route component that renders its switch —
+one-directional on purpose, because Gallery's and History's switches render only behind a modal / on data this
+sweep's library does not have, so "no switch here" is their honest landing state. A second test keeps the
+hand-written label list from coming back.
+
+**Read, not just measured.** All 106 views came back clean at both widths. `/life-list [Still to shoot]`'s
+14,492 px is **not** a bug: `Section` collapses the to-do tail to `TODO_PREVIEW` only in the mixed "All" view,
+and its comment says why — *"'Still to shoot' is the list the user just asked for, so it is never shortened
+there"*. Recorded here so the next run does not re-derive it and does not take a layout slice at it.
+
+**Tooling only.** No engine, webapp, frontend, config, schema, on-disk, API or default change.
+
+**Tests (+2).** Both in the new `tests/test_dogfood_view_switches.py`, and both fail on a reverted probe.
+
+### v0.492.1 — INFRA / the quality bar itself: the dogfood sweep opens every Settings section, not just the first
+
+*(The top open entry of "Autonomy & friendliness", filed by the previous Builder the same morning while
+dogfooding what v0.492.0 shipped. Its named fix — "a route list, not a feature" — is what shipped, plus the
+guard that stops it coming back.)*
+
+**The blind spot.** `scripts/dogfood_probe.mjs` swept `/settings` and stopped there, and
+`tests/test_dogfood_route_coverage.py` **exempted** `/settings/:section` on the reasoning that it "renders the
+same component as `/settings`, scrolled to one panel, so sweeping every section would re-photograph one page N
+times for no new layout." Both halves of that sentence are wrong:
+
+- `SectionTabs` is a **tab strip**, not a scroll target. `/settings` falls back to `sections[0]` — Folders —
+  so a `/settings` shot is a shot of Folders and of nothing else.
+- The other six panels *are* in the DOM (`keepMounted`, because the sections share one edit buffer), but
+  Mantine hides an inactive `Tabs.Panel`, so every element in them has a **zero-size bounding rect** — which
+  `overflowingLeaves`, `squeezedText` and `clippedLabels` all skip by construction, and which contributes
+  nothing to `document.documentElement.scrollHeight`.
+
+So on the app's tallest-by-content page, six sections had never been rendered at any width, never measured for
+overflow or squeezed text, never watched for a console error, and never appeared in a height baseline.
+Maintenance alone holds the updates card (v0.490.0), the refinish card (v0.479.3), "Reprocess everything" with
+its three-way scope (v0.492.0), Job history, Backup/restore and Access control. This is the same
+tooling-cannot-see-it hole as the missing observing site (v0.436.1), the un-strided editor proxy (v0.446.0),
+the owner's scale (v0.455.3) and the season-closing card (v0.477.0) — the sixth instance, and the first where
+the surface was hidden by a **tab** rather than by the data.
+
+**What shipped.** A `SETTINGS_SECTIONS` list in the probe, spread into `ROUTES` as
+`` `/settings/${s}` ``. Deliberately the **whole** list rather than the six `/settings` does not show: the
+point is that it is the app's own list, so a renamed or added section cannot be silently skipped, and the cost
+of keeping `folders` in it is two screenshots of a page we already have.
+
+**The guard, which is the half that lasts.** `settings/*` is **deleted from `_EXEMPT`** (the probe genuinely
+opens it now, and `_EXEMPT` is empty again), and a new
+`test_the_probe_opens_every_settings_section` reads `SETTINGS_SECTIONS` out of
+`frontend/src/settingsSections.ts` and fails when a section is missing from the probe — in **both** directions,
+so a section the app drops cannot leave a 404-shaped shot behind that reads as a bug in the app. The route
+test alone could not do this job: one template literal satisfies `settings/*` while covering nothing, which is
+exactly the kind of "covered" the old exemption was.
+
+**Measured, not argued — a pass was run with it.** `/settings/maintenance` enters the height table at
+**2737 px** on a phone, the seventh-tallest page in the app, on a pass where it had no row at all before; the
+seven new shots exist (`desktop_settings_maintenance.png` is **569 KB** against `desktop_settings.png`'s
+357 KB, and `desktop_settings_folders.png` is 357 KB — i.e. the bare route really was Folders and really was
+blind to the rest). The sweep read **clean**: nothing overflowing, no console errors, no squeezed or clipped
+text on any of the seven, at 1440 px and at 420 px. That matches what the lead found driving Maintenance by
+hand, so this closes a blind spot rather than chasing a bug.
+
+**Tooling only.** No engine, webapp, frontend, config, schema, on-disk, API or default change; nothing the
+owner's install runs is touched.
+
+**Tests (+1, and 2 fail before).** Reverting `scripts/dogfood_probe.mjs` in a scratch copy takes both
+`test_the_probe_opens_every_route_the_app_registers` (the exemption is gone, so the route is simply unprobed)
+and `test_the_probe_opens_every_settings_section` (all seven sections missing) red, and restoring it takes
+them green — run, not reasoned.
+
 ## 2026-09-30 (Builder) — "Bring my pictures up to date"
 
 ### v0.492.0 — 🌟 NEW BEGINNER FEATURE (autonomy, PRIORITY 2): re-stack only the targets that have new light, in one click
