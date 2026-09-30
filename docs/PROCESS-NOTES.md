@@ -1,5 +1,88 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (Builder, the run after that one) — `git stash` is "editing a source file while the suite is running", and the tell is the opposite of the documented one
+
+*(Builder, branch `claude/magical-wright-1cme5c` → **v0.492.0**. Baseline on `origin/main` at f882e14:
+**7045 passed, 2 skipped**, 15m19s with the BLAS cap and `-n 4 --dist worksteal`. Green. Post-merge re-run on
+the synced tree: **7062 passed, 2 skipped**, 16m06s.)*
+
+### The incident, and why it is worth a note when the trap is already documented
+
+`docs/AGENT-ENVIRONMENT.md` has said since 2026-09-14: *do not edit a source file while the suite is running*,
+and **its stated tell is "every failure names something you touched minutes ago."** This run hit the same trap
+in a costume that tell does not fit, and spent a whole 18-minute suite on it.
+
+**What I did.** With the full suite running in the background, I wanted to know whether `ruff`'s complaints on
+the files I had touched were pre-existing. So I ran `git stash`, re-ran `ruff`, and `git stash pop`. Roughly
+twenty seconds, no editor involved, nothing "edited" in the sense the warning describes — and it rewrote every
+file in my diff twice, under four pytest workers.
+
+**What came back.** `2 failed, 7051 passed`, both in **`tests/webapp/test_derived_light.py`** — a file I had
+not touched, in a subsystem (the editor export writer) my change does not go near. One asserted the export
+does not carry `{'transparency_ratio', 'total_exposure_s', 'calstat'}`; the other reported that
+`inspect.getsource(pipeline._apply_editor_to_run)` had returned the body of a *nested* function
+(`_noop_progress`). Re-running that file alone against the settled tree: **30 passed**. The post-merge full
+suite: **7062 passed**.
+
+**The mechanism, stated so nobody re-derives it.** Both failures are **drift guards** — tests that read their
+own production module's *source text* via `inspect.getsource`, which resolves `func.__code__.co_firstlineno`
+against the file on disk. My change moves `_apply_editor_to_run` in `webapp/pipeline.py` by ~75 lines. A worker
+that imported the module in one state and read the file in the other got the right line number into the wrong
+file, and sliced out whatever happened to live there.
+
+**So the generalisation, which is the useful part.** The documented tell ("the failures name a file you just
+touched") holds for tests that *exercise* changed code. It is exactly wrong for this class: a
+source-reading drift guard goes red on a module **you did not touch**, because what breaks it is the line
+numbers of a module you *did*. This repo has several such guards (`test_derived_light.py`,
+`test_project_schema_drift.py`, the `pack_unit` tree-grep, the `StackOptions` form-descriptor drift test), so
+this is a live shape, not a one-off.
+
+**Rules that would each have prevented it, cheapest first.**
+- **Any git command that rewrites the working tree — `stash`, `stash pop`, `checkout <path>`, `merge`,
+  `restore` — is an edit.** The suite's exclusion window is about the *bytes on disk*, not about who wrote
+  them. Run them before or after, never beside.
+- The ruff-baseline question that prompted it has a stash-free answer: **`git stash` was never needed** —
+  `ruff check` on the same paths at `origin/main` in a scratch worktree (`git worktree add`) answers it without
+  touching the tree the suite is reading. (The answer, for the record: 11 errors before and 11 after — all
+  pre-existing debt, nothing added.)
+- **A red that names a file your diff does not touch is a reason to re-run that file alone before believing
+  it**, not after. Five seconds against eighteen minutes.
+
+### Dogfood — the new surface, driven in a running app (CLEAN)
+
+A plain `scripts/agent-dogfood.sh` pass (after the suite, never beside it) read clean: nothing overflowing, no
+console errors, tallest page `/tonight` at 3,396 px on phone. It does **not** reach what this run built: the
+page sweep visits `/settings`, which lands on **Folders**, and the Maintenance card is a different section's
+URL. So the new surface was driven directly against the same scratch install, and that is worth recording as a
+**gap in the sweep** rather than as this run's cleverness — *no dogfood pass has ever drawn Settings →
+Maintenance*, which now holds the updates card (v0.490.0), the refinish card (v0.479.3) and this scope
+question. Worth adding `/settings/<section>` to the sweep's route list.
+
+What the direct probe found, on a scratch library made to have new light by backdating its one run:
+- `/api/reprocess-status` → `new_light: 1`, `new_light_subs: 6`, `finished_pictures_new_light_only: 1`,
+  against `finished_pictures: 1` and `finished_pictures_stale_only: 0`. `/api/new-subs-waiting` on the same
+  library → `count: 1`, `total_new_subs: 6`. **The two surfaces agree exactly**, which is the whole point of
+  extracting `new_light_since_picture` — and the scope's own finished-picture count differs from the stale
+  scope's on real data, which is what the §903 warning needs to never overstate.
+- `/settings/maintenance?scope=new-light` arrives pre-scoped (the button reads *"Bring my pictures up to
+  date…"*), the scope sentence reads naturally in the singular (*"Re-stacks the 1 target you've shot more of
+  since its picture was made — 6 subs of yours that aren't in a picture yet."*), and the §903 warning quotes
+  **1**, the new-light count.
+- **420 px: 0 px horizontal overflow, no console errors**, card height 2,861 px full-page. The three-way scope
+  question reads as one block on a phone.
+- The Dashboard note at `count: 1` shows the per-target Stack link and **not** the batch link, which is the
+  `count > 1` guard holding in the real app as well as in jsdom.
+
+### Collisions
+
+Another Builder shipped **v0.491.0 + v0.491.1** (PR #1027) during this run's suite. Caught by the pre-merge
+`git fetch` (§11), so this run's v0.491.0 was renumbered to **v0.492.0** before the merge, not after. Three
+conflicts, all resolved as §11 says: `webapp/__init__.py` took the higher number; `docs/IMPROVEMENTS.md` and
+`docs/SHIPPED.md` were **unions** — both sides' entries kept, newest first, nothing deleted. Worth noting the
+one judgement call: their `SHIPPED.md` block arrived with no `## <date>` heading of its own, so the marker sat
+on mine. I briefly wrote a heading for *their* entries and then removed it — inventing a summary of another
+run's work is not a merge resolution.
+
 ## 2026-09-30 (Builder, the run after that one) — two dogfood configurations nobody had re-run, and the one that found something
 
 *(Builder, branch `claude/magical-wright-k909b6` → **v0.491.0** + **v0.491.1**. Baseline on `origin/main` at
