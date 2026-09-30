@@ -1,5 +1,102 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (Builder, the run after that one) — an exemption written about one test silenced four, and that is why the same "other reasons" bug shipped twice
+
+*(Builder, branch `claude/keen-darwin-ry0wzd` → **v0.492.6** + **v0.492.7**, PR #1034. Baseline on
+`origin/main` at 024babd: **7073 passed, 2 skipped**, 13m48s with the BLAS cap and `-n 4 --dist worksteal`.
+Green. Final: 7081/2.)*
+
+### The trap that cost the first ten minutes: `source scripts/agent-setup.sh` does not survive a second Bash call
+
+The setup script leaves `.venv` activated **in the shell that sourced it**. The harness gives each `Bash` tool
+call its own shell, so the very next command ran against the system interpreter and reported
+`ModuleNotFoundError: No module named 'numpy'` from `tests/conftest.py` — which reads exactly like a broken
+checkout, and is not one. `pip install pytest-xdist` in that same call had also gone to the system site-packages
+("Running pip as the 'root' user…" is the tell). **Prefix every command that needs the toolchain with
+`source .venv/bin/activate &&`**, in the same call, or it is not in the venv. Cost: one wasted suite start.
+
+### Where the work came from
+
+"Bugs (fix these first)" is gated top-to-bottom for the fourth consecutive run — the top four open entries are
+the drizzle-sampling lead (gated on *what share of the owner's runs drizzle*), the #965 solve-refusal lead
+(gated on a retry-success-rate measurement), the auto-binder's (c) half-range charge (gated on a before/after
+against real masters) and the `FrameRow` projection (a) (downgraded by its own entry: *"probably not worth a
+slot"*). The one buildable slice among them is the #965 lead's **(b)**, a read-only per-target count of subs
+carrying an implausible solve. **Costing (b) is what found two real bugs instead**, both better value, and (b)
+itself is untouched and still open.
+
+### The bug, and the fact that it was the *second* instance
+
+v0.473.1 gave a wrong plate solve two precise sentences — `REJECT_REASON_BAD_SOLVE_SCALE` ("scale disagrees
+with the other frames") and `..._FOOTPRINT` ("footprint far from the group") — as **prose** rather than an
+`auto:` code, deliberately, so `frontend/rejectReason.ts` could show them verbatim on the frame's badge. It
+does. But `webapp/rejection_summary.bucket_for` matched `auto:`/`bulk:`/`qc:`/`solve_failed`/`user` and two
+named constants, and **nothing matched `"bad plate-solve ("`** — so the one surface whose entire job is
+answering *"why were some frames left out?"* was the one surface that threw the answer away, on the owner's
+**178** such rows. And `seestack/session_recap.bucket_reject_reason` — the *other* mirror of the same
+vocabulary, behind the "last night" sentence, the Nights rows and the live-session card — sent **four of the
+six** named reasons to `other`, two of which (`auto:seestar_output`, `auto:file_missing`) had *already* been
+given their own words on the badge and on the breakdown card in two separate earlier fixes.
+
+### The generalisable finding: a shared-`_vocabulary()` exemption is not scoped to the test that justified it
+
+`tests/test_reject_reason_labels.py` already contained
+`test_every_reason_the_code_writes_groups_into_a_named_bucket`, written for exactly this failure — *"an exact
+reason the app writes about a file falling into 'Left out for other reasons' is the same failure as showing its
+raw code"* — and it was **green the whole time**. The mechanism is worth carrying forward because it is not
+specific to reject reasons:
+
+1. the stacker's write passes a **local** (`project.update_frame(f.id, accept=False, reject_reason=reason)`,
+   where `reason` is assigned from one of two constants by an `if`-expression one line above);
+2. `_literals()` cannot derive a bare local, so the site is **opaque**, and an opaque site must be listed in
+   `_EXEMPT`. It is — with a sentence about the **badge's** deliberate verbatim fall-through. That sentence is
+   *correct*, for the two label tests;
+3. but `_EXEMPT` is consulted inside `_vocabulary()`, which **all four** tests call, and an exempted site
+   contributes nothing to any of them. One exemption, justified against one test, silently excused the write
+   from the other three.
+
+**The shape to watch for: a shared fixture that collects "what the code does" and an exemption list inside it.
+The exemption's *reason* is scoped to one caller; its *effect* is scoped to every caller.** `_EXEMPT`'s own
+docstring is careful about the failure mode it does know (keying on line numbers vs. expressions, which cost
+two runs in September) and says nothing about this one. Fixed by not routing the named constants through the
+scrape at all: `_named_reasons()` reads every `REJECT_REASON_*` string off `seestack.io.project` at runtime and
+unions it into both bucket tests, so a constant either buckets or it does not. It has its own guard
+(`test_the_named_reason_sweep_actually_finds_the_constants`) so a rename cannot quietly shrink the set and
+leave two tests asserting nothing. **Proven rather than claimed**: with `rejection_summary.py` reverted to
+pre-fix, the repaired test fails and names all three strings.
+
+### Near-miss worth recording: two code comments and a test docstring shipped a wrong claim before the grep
+
+Tracing the rejection, I established that a bad-solve frame is **terminal** — `build_solve_arglist` skips it
+twice over, on its truthy `wcs_json` (nothing outside the solve path clears one) and on `accept = 0` with a
+reason that is not `solve_failed:` — and was one edit away from filing that as a new lead. It is already
+fixed: `solve.runner.reconcile_bad_solve_frames` clears a wrong-*scale* solve and offers the sub one more
+plate solve, once per frame, ledgered in `BAD_SOLVE_RETRIED_META_KEY` — and its docstring states the very
+chain I had just re-derived, in the same words. **What makes this worth writing down is the ordering**: I had
+already written the claim into a `_DOMINANT_VERDICTS` comment ("there is nothing the owner can do… the solver
+never re-offers the frame"), a test docstring and a SHIPPED paragraph *before* grepping the solve runner. All
+three were corrected, and the conclusion they supported (no verdict line) survived with a **better** reason —
+the app already takes the only action there is. AGENTS.md §1's "grep before you build" is usually read as
+*don't rebuild a shipped feature*; this run's version is **don't write a justification you have not grepped**,
+because a wrong "nothing can be done here" comment is the kind a later agent believes.
+
+### Version numbers: PR #1033 had already published a claim on v0.492.5
+
+Both commits were first made as v0.492.5 + v0.492.6. A fetch before merging surfaced **PR #1033**, open and
+green, titled `v0.492.5 — update_agent.py QueueDir…`, bumping the same line. §11's rule ("choose the version
+number at merge time from the latest `main`; on a conflict take `main`'s value and bump again") makes .5
+correct for whoever merges first, and `main` was still at .4 — so taking it would have been within the rules.
+It was **renumbered to .6 + .7 anyway**, because the asymmetry is not symmetric: `release-tags.yml` *goes red
+if a number is reused*, so if #1033 merged afterwards without noticing the conflict, `main`'s CI goes red and
+the next run's first task is fixing it. Rewriting two commits on my own unmerged topic branch is cheap;
+a red `main` is not. **Generalisable: when two unmerged branches claim one version, the branch that has not
+yet opened its PR should move, even though §11 does not require it.** Mechanics, since a cherry-pick conflicts
+on the docs: re-apply each commit with `git cherry-pick --no-commit`, then renumber **descending** (`.6→.7`
+*before* `.5→.6`) across the version file, the docs and the commit message, or the two substitutions collide.
+Five source/test files carried the version in a comment or docstring too — `grep -rn "0\.492\.[56]"` over
+`--include=*.py` is what catches those.
+
+
 ## 2026-09-30 (Builder, later the same day) — the editor's proxy-scale class re-read CLEAN; the finding was one class over, in the roll-ups nobody had lined up against their own neighbours
 
 *(Builder, branch `claude/keen-darwin-3tsljv` → **v0.492.4** + a docs commit. Baseline on `origin/main` at
