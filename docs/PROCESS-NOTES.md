@@ -2,7 +2,7 @@
 
 ## 2026-09-30 (Builder) — a fixture can be faithful about *whether* a bug exists and wrong about its **sign**, and the lead it produced pointed the fix the right way for the wrong reason
 
-*(Builder, branch `claude/keen-darwin-1bg1wt` → **v0.492.14**. Baseline on `origin/main` at `ab9a6c6`:
+*(Builder, branch `claude/keen-darwin-1bg1wt` → **v0.492.16**. Baseline on `origin/main` at `ab9a6c6`:
 **7,117 passed, 2 skipped** in 14:08. Final, after merging `7c6b59f` (PR #1039): **7,166/2** in 14:35.)*
 
 ### The class, which is new here and is the reverse of the one this repo already guards
@@ -40,7 +40,7 @@ the native reading at a 160²-crop fixture, because the *native* estimate there 
 narrow and useful: **a probe that compares two estimates has to be sized so both are converged**, or the
 agreement it reports can be one side's sampling error.
 
-The two rejected shapes are measured and recorded in `SHIPPED.md` under v0.492.14, so neither is re-picked: an
+The two rejected shapes are measured and recorded in `SHIPPED.md` under v0.492.16, so neither is re-picked: an
 **exact** fractional area-weighted resample is +4 to +7 % out (its fractional weights smear pixels the kernel has
 already correlated — the thing the estimator's lag walk is *measuring*), and a **rational** match that bins the
 sub by *q* as well as the master by *p* is far worse (5.25 at ×1.5, 3.26 at ×1.25), because the two sides have

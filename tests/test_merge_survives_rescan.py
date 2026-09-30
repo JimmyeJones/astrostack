@@ -257,3 +257,148 @@ def test_a_current_library_written_without_the_table_self_heals(tmp_path):
         assert lib.merged_folder_destination("anything") is None
     finally:
         lib.close()
+
+
+# ------------------------------------------------------------------------------
+# 2026-09-30 audit, C-F3: the delete that ends a Combine can fail part way (on a
+# NAS where the files belong to another local account), and it used to fail
+# *silently* — ``rmtree(..., ignore_errors=True)`` — leaving a folder with a
+# ``project.sqlite`` under ``targets/``. The next scan then re-adopted that
+# unregistered folder *before* consulting the redirect, so the combined-away
+# target came back from its own corpse with its stale rows. Two fixes: the
+# redirect is asked before an unregistered folder is adopted, and the delete
+# says what it could not do. Nothing here touches ``incoming/``.
+
+
+def _fingerprint(root: Path) -> dict[str, tuple[int, float]]:
+    return {str(p.relative_to(root)): (p.stat().st_size, p.stat().st_mtime)
+            for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def test_a_leftover_source_folder_is_not_adopted_back_by_the_next_scan(tmp_path):
+    """The corpse case, staged directly: the merge's delete left the source
+    target's folder behind. Fails before: the scan re-adopted it and the
+    library split back in two."""
+    import shutil
+
+    incoming = _two_nights(tmp_path / "incoming")
+    before = _fingerprint(incoming)
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, incoming)
+        # Keep a copy of the source target's folder, then put it back after the
+        # merge — exactly what a part-failed delete leaves on disk.
+        src_dir = lib.target_dir(lib.find_target("M_31_night_2"))
+        corpse = tmp_path / "corpse"
+        shutil.copytree(src_dir, corpse)
+        lib.merge_targets("M_31", ["M_31_night_2"])
+        assert not src_dir.exists()
+        shutil.copytree(corpse, src_dir)
+        assert (src_dir / "project.sqlite").exists()
+
+        scan_and_organize(lib, incoming)
+        assert _safe_names(lib) == ["M_31"]
+        # …and the folder is left exactly where it was: not adopted, not touched.
+        assert (src_dir / "project.sqlite").exists()
+
+        # A sub landing in that folder later still reaches the deep target.
+        write_seestar_fits(incoming / "M 31_night_2_sub" / "Light_late.fit",
+                           n_stars=6, seed=99)
+        scan_and_organize(lib, incoming)
+        assert _safe_names(lib) == ["M_31"]
+        proj = lib.open_target("M_31")
+        try:
+            names = {Path(f.source_path).name for f in proj.iter_frames(accepted_only=False)}
+        finally:
+            proj.close()
+        assert "Light_late.fit" in names
+    finally:
+        lib.close()
+    # AGENTS.md §10: the drop folder is read-only — one addition, nothing else.
+    after = _fingerprint(incoming)
+    assert set(before) <= set(after)
+    assert all(after[k] == before[k] for k in before)
+    assert set(after) - set(before) == {"M 31_night_2_sub/Light_late.fit"}
+
+
+def test_a_delete_that_fails_part_way_is_said_and_the_library_stays_whole(
+        tmp_path, monkeypatch, caplog):
+    """The merge itself, with the delete refused the way a foreign-owned file
+    refuses it. The registry must end consistent (one target, the redirect in
+    place), the result must say a folder was left, and the next scan must not
+    bring the source back. Fails before: ``ignore_errors=True`` hid the
+    failure, ``folders_left`` did not exist, and the scan re-adopted the folder."""
+    import logging
+    import shutil
+
+    incoming = _two_nights(tmp_path / "incoming")
+    before = _fingerprint(incoming)
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, incoming)
+        src_dir = lib.target_dir(lib.find_target("M_31_night_2"))
+        real_rmtree = shutil.rmtree
+
+        def refuse(path, *a, **kw):
+            if Path(path) == src_dir:
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_rmtree(path, *a, **kw)
+
+        monkeypatch.setattr(shutil, "rmtree", refuse)
+        with caplog.at_level(logging.WARNING, logger="seestack.io.library"):
+            result = lib.merge_targets_result("M_31", ["M_31_night_2"])
+
+        assert result.frames_added == 2
+        assert result.folders_left == 1
+        assert any("could not remove target folder" in r.getMessage()
+                   for r in caplog.records)
+        assert _safe_names(lib) == ["M_31"]
+        assert (src_dir / "project.sqlite").exists()
+        assert lib.merged_folder_destination("M 31_night_2") == "M_31"
+
+        scan_and_organize(lib, incoming)
+        assert _safe_names(lib) == ["M_31"]
+        proj = lib.open_target("M_31")
+        try:
+            assert proj.count(accepted_only=False) == 5
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert _fingerprint(incoming) == before
+
+
+def test_a_merge_whose_delete_succeeds_reports_no_folder_left(tmp_path):
+    incoming = _two_nights(tmp_path / "incoming")
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, incoming)
+        result = lib.merge_targets_result("M_31", ["M_31_night_2"])
+        assert result.folders_left == 0
+        assert not (lib.targets_dir / "M_31_night_2").exists()
+    finally:
+        lib.close()
+
+
+def test_deleting_a_target_whose_files_refuse_to_go_still_unregisters_it(
+        tmp_path, monkeypatch, caplog):
+    """The plain delete path shares the rule: the registry row goes, the
+    failure is logged, and nothing raises into the caller."""
+    import logging
+    import shutil
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        entry, proj = lib.create_target("M 31")
+        proj.close()
+        folder = lib.target_dir(entry)
+        monkeypatch.setattr(shutil, "rmtree", lambda *a, **kw: (_ for _ in ()).throw(
+            PermissionError(13, "Permission denied")))
+        with caplog.at_level(logging.WARNING, logger="seestack.io.library"):
+            assert lib.delete_target("M_31", remove_files=True) is True
+        assert lib.find_target("M_31") is None
+        assert folder.exists()
+        assert any("could not remove target folder" in r.getMessage()
+                   for r in caplog.records)
+    finally:
+        lib.close()

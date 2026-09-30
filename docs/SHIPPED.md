@@ -1,6 +1,6 @@
 # Shipped — the record
 
-## 2026-09-30 (Builder) — v0.492.14: a drizzled stack's "cut your noise ~N×" badge read 11–16 % worse than the stack was
+## 2026-09-30 (Builder) — v0.492.16: a drizzled stack's "cut your noise ~N×" badge read 11–16 % worse than the stack was
 
 ### 🟠 BUG FIX (trust — PRIORITY 1-adjacent) — the `_measure_noise_ratio` LEAD filed with v0.475.0, closed by measuring the thing it asked about, with the opposite answer
 
@@ -104,6 +104,38 @@ flipped, no endpoint or response shape changed — the response is the same `{"r
 byte-identical. `noise_ratio`'s new argument is keyword-only with a no-op default, so
 `render/noisedelta.py`'s caller (master-vs-master on one canvas shape, where both sides are equally sampled by
 its own `pixel_exact` precondition) is untouched and correct as it stands.
+## 2026-09-30 (audit run B) — v0.492.14: a Combine whose folder delete fails part way no longer resurrects the source on the next scan
+
+### 🟠 BUG FIX (autonomy / library integrity — PRIORITY 2; the 2026-09-30 audit's C-F3, MEDIUM) — `Library.open_or_create_target`, `_remove_target_files`, `MergeTargetsResult.folders_left`
+
+**The mechanism.** `merge_targets_result` ends by deleting each source target's folder under ``targets/``
+with `shutil.rmtree(..., ignore_errors=True)`. On the owner's NAS the files under a target can belong to a
+non-root local account, so that delete can stop part way — and it stopped *silently*, leaving a folder with a
+`project.sqlite` in it. `open_or_create_target` then re-adopted any unregistered folder holding a
+`project.sqlite` **before** it consulted the merge redirect (v0.480.x's `merged_folders`), so on the next scan
+the combined-away target came back from its own corpse with its stale rows: the library split in two again,
+the merge nudge re-offered the pair, and `auto_stack` could restack the shallow night — the exact state the
+redirect was built to prevent, reached by a different door.
+
+**The fix, two halves.** (1) **The redirect is asked before an unregistered folder is adopted.** A folder
+that is not registered *and* answers to a combined-away name (`_combined_destination`, the existing
+`merged_folder_destination` with its "destination still exists and opens" last mile) is left where it is,
+logged once as a leftover, and its subs go to the target they were combined into — same as a folder that is
+gone. A registered target is never asked, so the redirect still cannot shadow a live one (the existing test
+holds). (2) **The delete says what it could not do.** New `_remove_target_files` deletes without
+`ignore_errors`, logs the `OSError` with the path, and answers whether the folder is gone; `delete_target`
+uses it, and the merge records the redirect *before* deleting (so a part-failed delete is already covered),
+unregisters, then counts a folder it could not remove in the additive `MergeTargetsResult.folders_left`. The
+"not removing" path for a source whose pictures could not all be carried is untouched. **Nothing here
+touches `incoming/`** (§10): both tests fingerprint the drop folder before and after.
+
+Tests +4 (`tests/test_merge_survives_rescan.py`: the corpse staged by hand and the next scan; the merge with
+`rmtree` refusing as a foreign-owned file does — registry whole, redirect in place, `folders_left == 1`, the
+warning logged, the next scan quiet, `incoming/` byte-identical; a clean merge reports 0; the plain delete path
+unregisters and logs rather than raising). **Fail-before**: all 4 red on `origin/main`. No config, schema,
+on-disk, default or API-shape change (`folders_left` is a new field with a default; the `/api/targets/merge`
+response is unchanged — surfacing the count there is a one-line follow-up for whoever next touches
+`routers/targets.py`).
 
 ## 2026-09-30 (audit run B) — v0.492.13: a bulk restack never makes a finished picture look worse without the owner choosing it
 
