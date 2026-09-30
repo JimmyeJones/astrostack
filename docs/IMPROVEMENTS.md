@@ -124,6 +124,29 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   A floor (never price below what the run would have got at, say, the median of a few samples) is probably part
   of any workable answer. **Do not blind-flip the guard's source** — it is the on-by-default hot path and this
   box has an OOM history (§10).
+  **⚠ BUILDER FINDING 2026-09-30, while sizing this entry (v0.490.1's run) — the shape above has a SAFETY
+  INVERSION this entry does not name, and it probably does not address the measurement either. Read both
+  before spending a slot.**
+  **(1) "Capture once" is not strictly safer — it is strictly *less* safe in one direction.** A budget captured
+  while the box was quiet is *larger* than the live figure later in a five-day batch, so pricing target 45
+  against target 1's `MemAvailable` can authorise a canvas the box can no longer hold. On a box with a recorded
+  OOM history that is the wrong direction to be wrong in, and it is the direction this entry's own "do not
+  blind-flip the guard's source" warning is about. Any workable shape has to be `min(batch_open, live)`, which
+  buys reproducibility in the **upward** direction only — a target can never get a *bigger* canvas than the
+  batch opened with, and can still get a smaller one.
+  **(2) It probably does not reach the observation.** The measurement is the same target priced against ~4.1 GB
+  in one batch and ~3.2 GB in the next, **a week apart**. Within one batch the `JobManager` runs one stack at a
+  time and nothing else of the app's competes, so the intra-batch drift a per-batch capture removes is the small
+  part; the week-apart difference is the host's own state, and no in-batch capture can touch it.
+  **What that leaves, and it is cheaper than re-plumbing the guard.** The honest lever for "same subs, same
+  options, same answer" is the setting that already exists — `Settings.max_stack_memory_gb`, which
+  short-circuits the live read entirely and is `None` on the owner's install. So the shape worth costing is
+  *surfacing* that (a Settings line saying results are priced against whatever RAM is free unless a fixed budget
+  is set), not capturing the free-memory read per batch. **The disclosure half is already built** and was
+  verified so while sizing this: `DRZSCLAD`/`DRZSCLRQ` → `drizzle_degraded` → `drizzleDegradedNote` already
+  tells the owner when a memory step-down changed his picture's size, and **v0.490.1 added the same for the
+  other two levers** (`REJKAD`/`REJKRQ`, `DRZREJSK` → `rejection_degraded`), which were stamped and read by
+  nothing. Working in [`PROCESS-NOTES.md`](PROCESS-NOTES.md) under that date.
 
 - **LEAD (Builder 2026-09-25, filed while shipping v0.473.1 — the two halves of observer issue
   [#965](https://github.com/JimmyeJones/astrostack/issues/965) that fix deliberately left) — refuse an

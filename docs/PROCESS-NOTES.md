@@ -12,6 +12,35 @@ project dependency, so the first `-n 4 --dist worksteal` run of a fresh containe
 `passed` or `failed`, so it was not a result — the background wrapper had meanwhile reported "exit code 0",
 which is `tail`'s. `pip install pytest-xdist` into the run's own `.venv` and re-run.
 
+### Dogfood pass — `--mosaic --editor --big`, CLEAN (and one misreading of the tooling, corrected)
+
+Ran after the fix, before the merge. Auto's trim on the 2×2 mosaic is **7.9 %** of the canvas (AGENTS.md §1's
+bar is ~15 %), nothing overflowed on phone or desktop, no console error, no failed request, all 21 ops
+re-rendered the preview and both editor drives reported `editor drive clean`. The full-size leg reached the
+decimated preview (canvas 1693×1150, shrunk to 1/2) and the five preview↔export advisories were all live.
+
+**Read as one paragraph, the Target page's five cards agree.** On the mosaic: the coaching card says "another
+pass or two over the same mosaic evens out the thinner part", the readiness card scopes its goal as "~7.3 h
+(about 4 fields of sky)", the panel map names the top-right at "about 30 s there against 1 min on a typical
+panel", and the framing verdict — which does say the object is bigger than this mosaic — closes with *"Most of
+it is already in this picture, though — until you're happy with the depth, more passes over the panels you
+already have do more for it than a wider grid."* That is v0.444.2's `framingIsFragment` gate working as
+designed: 75 % captured is below the fragment bar, so the page prescribes depth and not a wider grid, and the
+coaching card does not contradict it. On the single field (20 % captured) all three flip together to "shoot it
+in mosaic mode", with the readiness card's goal correctly labelled "for this single field".
+
+**One thing looked like a finding for twenty minutes and was not — recorded so nobody re-files it.** On the
+`--big` editor drive the "Hot-pixel removal isn't shown on this downscaled preview" advisory appears on
+exactly one render and is gone from every later one, while "Sharpening preview understates the effect"
+persists through all 21 — which reads exactly like an advisory that stops being shown while its op is still
+enabled, i.e. a user judging and exporting from a preview whose caveat has silently gone. It is not.
+`scripts/dogfood_editor.mjs` **removes each op after measuring it** ("so op N is measured against the same
+recipe as op 1"), so the recipe at every step is Auto's seed plus the one op under test — the persistent
+sharpen advisory is the *seed's own* sharpen op, and the hot-pixel one correctly appears only while its op is
+in the recipe. The backend flag is a whole-recipe `any(op.enabled and op.id == ...)` and was never in doubt.
+**The lesson for the next reader of this log: an advisory that appears once is the probe's design, not a
+regression — the probe's paragraph is cumulative in what it prints and not in what it renders.**
+
 ### §11 collision — this run's version number was taken mid-flight, and that is the normal case
 
 Between this run's baseline (`origin/main` at b0a27f5, `__version__` 0.489.2) and its first push, an **owner
