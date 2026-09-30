@@ -163,3 +163,32 @@ def test_a_merge_that_carries_no_picture_pins_nothing(tmp_path):
         assert result.picture_pinned is False
     finally:
         lib.close()
+
+
+def test_the_merge_says_it_was_the_one_that_pinned(tmp_path):
+    """The pin is recorded as the app's (``seestack.coverpin``), so a later bulk
+    restack can tell it from a cover the owner chose and lift it once the
+    deeper run it protected against exists — the other half of issue #903's
+    shape, where a merge-pinned cover meant the new deeper run was never shown."""
+    from seestack.coverpin import PIN_REASON_MERGE, app_pin_reason
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        deep = _target_with_a_picture(lib, "M 31", stamp="2026-09-01T22:00:00Z",
+                                      pixels=b"the-deep-master")
+        shallow = _target_with_a_picture(lib, "M 31 second night",
+                                         stamp="2026-09-20T22:00:00Z",
+                                         pixels=b"one-nights-master")
+        lib.merge_targets_result(deep, [shallow])
+        entry = lib.find_target(deep)
+        proj = lib.open_target(deep)
+        try:
+            assert app_pin_reason(proj, entry.cover_stack_run_id) == PIN_REASON_MERGE
+            # And the owner's own pin, made by hand afterwards, is his.
+            other = [r.id for r in proj.iter_stack_runs()
+                     if r.id != entry.cover_stack_run_id][0]
+            assert app_pin_reason(proj, other) is None
+        finally:
+            proj.close()
+    finally:
+        lib.close()

@@ -306,14 +306,15 @@ export type ReprocessScope = "new-light" | "stale" | "all";
 export function reprocessScopeCounts(
   status: ReprocessStatus | undefined,
   scope: ReprocessScope,
-): { targets: number | null; finished: number | null } {
-  if (!status) return { targets: null, finished: null };
+): { targets: number | null; finished: number | null; handFinished: number | null } {
+  if (!status) return { targets: null, finished: null, handFinished: null };
   const n = (v: number | null | undefined) =>
     (v != null && Number.isFinite(v) ? v : null);
   if (scope === "new-light") {
     return {
       targets: n(status.new_light),
       finished: n(status.finished_pictures_new_light_only),
+      handFinished: n(status.hand_finished_new_light_only),
     };
   }
   if (scope === "stale") {
@@ -324,46 +325,55 @@ export function reprocessScopeCounts(
       // to *describe* the scope, never to promise a number.
       targets: n(status.outdated),
       finished: n(status.finished_pictures_stale_only),
+      handFinished: n(status.hand_finished_stale_only),
     };
   }
-  return { targets: n(status.total_targets), finished: n(status.finished_pictures) };
+  return {
+    targets: n(status.total_targets),
+    finished: n(status.finished_pictures),
+    handFinished: n(status.hand_finished),
+  };
 }
 
 /**
- * What a reprocess run with "also auto-edit each result" **off** would do to the
- * pictures on the wall — or null when it would do nothing worth saying.
+ * What a reprocess run does to the finished pictures on the wall — or null when
+ * there is nothing worth saying.
  *
  * Every restack is saved as a new result, and the picture a target shows is its
- * newest result, so an unedited restack quietly becomes the picture on the
- * Library wall, the life list, the wishlist and the sky map. The dialog's other
- * promises are all literally true and all answer a different question ("your
- * existing edits are untouched", "nothing is ever lost") — the edits do survive
- * on their own runs. It is the *displayed* picture that changes, and until now
- * nothing said so.
+ * newest result, so an unedited restack used to quietly become the picture on
+ * the Library wall, the life list, the wishlist and the sky map (issue #903: 44
+ * pictures at once). The batch now keeps that from happening on its own: a
+ * picture the app finished (Auto) is re-finished on the fresh result, and a
+ * picture the owner finished *by hand* stays on the wall — pinned as the cover,
+ * with the deeper restack waiting in History — whatever the auto-edit switch
+ * says. So the sentence here is no longer a warning about a flat stack; it is
+ * the promise, with the count, so nobody wonders why those cards did not change.
  *
  * `scope` picks the count that matches the scope the user chose, so the
  * sentence can never quote a number bigger than the batch will touch. Null when
- * the switch is on (the restacks are finished pictures too, so nothing
- * regresses), when nothing is affected, and on an older backend that doesn't
- * send the counts.
+ * no target in that scope shows a hand-finished picture, and on an older
+ * backend that doesn't send the counts.
  */
 export function reprocessPictureWarning(
   status: ReprocessStatus | undefined,
   opts: { scope: ReprocessScope; autoEdit: boolean },
 ): string | null {
-  if (!status || opts.autoEdit) return null;
-  const n = reprocessScopeCounts(status, opts.scope).finished;
+  if (!status) return null;
+  const n = reprocessScopeCounts(status, opts.scope).handFinished;
   if (n == null || n <= 0) return null;
   const subj = n === 1
-    ? "1 of your targets currently shows a finished, edited picture"
-    : `${n} of your targets currently show a finished, edited picture`;
+    ? "1 of these targets shows a picture you finished yourself"
+    : `${n} of these targets show pictures you finished yourself`;
+  const it = n === 1 ? "It stays" : "They stay";
+  const its = n === 1 ? "its" : "their";
+  const auto = opts.autoEdit
+    ? " (auto-editing the new result doesn't replace your own work)"
+    : "";
   return (
-    `${subj}. With this switch off, each restacked target's newest result `
-    + `becomes the picture you see — so ${n === 1 ? "it" : "they"} will show a `
-    + `flat, unstretched stack until you edit or re-run `
-    + `${n === 1 ? "it" : "them"}. Your existing edits aren't lost: they stay `
-    + `with the results that have them, in History. Turn this switch on to keep `
-    + `finished pictures on the wall.`
+    `${subj}. ${it} on the wall exactly as ${n === 1 ? "it is" : "they are"}${auto}, `
+    + `and ${its} deeper restack waits in History — the target's page will offer `
+    + `it as a cleaner cover when it is one. Pictures the app finished for you are `
+    + `re-finished on the new result automatically.`
   );
 }
 
@@ -466,10 +476,16 @@ export function Maintenance() {
   // rescan (re-QC / re-solve / re-grade every frame first) is much slower and only
   // pays off when QC/solving/grading improved too, so make it an explicit opt-in.
   const [deepRescan, setDeepRescan] = useState(false);
-  // Off by default: seeds an editor recipe on every restacked run at once, so it's
-  // an explicit opt-in. When on, each fresh master opens as a finished picture (the
-  // one-click Auto recipe) instead of a flat linear stack.
-  const [autoEdit, setAutoEdit] = useState(false);
+  // Off by default for the two engine scopes: it seeds an editor recipe on every
+  // restacked run at once, so it's an explicit opt-in there. **On** by default
+  // when someone arrives on "Bring my pictures up to date": that scope exists so
+  // a night's new subs end up in a *picture* with one click, and a flat linear
+  // stack is not the picture a beginner came for. It is a default for this
+  // visit only — nothing in Settings is written — and the switch stays in view
+  // to turn off. Pictures the owner finished himself are kept either way.
+  const [autoEdit, setAutoEdit] = useState(
+    () => searchParams.get("scope") === "new-light",
+  );
   const status = useQuery({
     queryKey: ["reprocess-status"],
     queryFn: api.reprocessStatus,
@@ -482,9 +498,9 @@ export function Maintenance() {
   // scope stays visible and says so, and only the button that would queue an
   // empty batch stands down.
   const nothingWaiting = scope === "new-light" && newLightTargets === 0;
-  // What the batch would do to the pictures on the wall, in the scope actually
-  // chosen. Self-hides entirely when the auto-edit switch is on, when no target
-  // displays a finished picture, and on a backend that doesn't send the counts.
+  // What the batch does with the finished pictures on the wall, in the scope
+  // actually chosen: the hand-finished ones are kept. Self-hides when no target
+  // in that scope shows one, and on a backend that doesn't send the counts.
   const pictureWarning = reprocessPictureWarning(status.data, { scope, autoEdit });
   const castSummary = useQuery({
     queryKey: ["auto-cast-summary"],
@@ -529,17 +545,17 @@ export function Maintenance() {
         + "re-graded before restacking — slower, but picks up quality/solving "
         + "improvements too. Your manual accept/reject choices are kept.\n\n"
       : "";
-    const editNote = autoEdit
+    const editNote = (autoEdit
       ? "Each fresh result is also auto-edited (the one-click Auto look) so it "
         + "opens as a finished picture, not a flat linear stack. This only sets "
         + "the new results' edits — your existing edits are untouched, and every "
         + "auto-edit is reversible in the editor.\n\n"
-      // With it off, the newest (unedited) result becomes each target's
-      // displayed picture. That is the one consequence the rest of this dialog
-      // doesn't state — every other sentence is about what is *kept*.
-      : pictureWarning
-        ? `${pictureWarning}\n\n`
-        : "";
+      : "")
+      // What happens to the pictures already on the wall: the ones you finished
+      // yourself stay, the ones the app finished are re-finished. Said in the
+      // dialog too, because it is the one consequence the rest of it doesn't
+      // state — every other sentence is about what is *kept* on disk.
+      + (pictureWarning ? `${pictureWarning}\n\n` : "");
     if (
       window.confirm(
         scopeText
@@ -613,7 +629,7 @@ export function Maintenance() {
           checked={autoEdit}
           onChange={(e) => setAutoEdit(e.currentTarget.checked)}
           label="Also auto-edit each result into a finished picture"
-          description="Applies the one-click Auto look to every restacked result so it opens as a finished picture instead of a flat linear stack. Only sets the new results' edits; your existing edits are untouched and every auto-edit is reversible."
+          description="Applies the one-click Auto look to every restacked result so it opens as a finished picture instead of a flat linear stack. Only sets the new results' edits; your existing edits are untouched and every auto-edit is reversible. Either way, a picture you finished yourself stays on the wall and its deeper restack waits in History."
         />
         {pictureWarning && (
           <Text size="xs" c="dimmed" mt={-8}>
