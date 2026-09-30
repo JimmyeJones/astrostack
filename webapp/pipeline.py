@@ -1269,11 +1269,12 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
                            and _run_is_a_finished_picture(proj, shown))
             # Asked of the rows already in hand, so this costs one indexed COUNT
             # per target rather than a second walk of the library. The run it
-            # measures "after" is deliberately *not* ``run`` above: the note's
-            # own rule is ``run_has_reusable_options``, and a second spelling is
-            # how the Dashboard and this page would come to disagree about which
-            # targets are behind.
-            _, n_new = new_light_since_picture(proj, runs)
+            # measures is deliberately *not* ``run`` above: the note's own rule
+            # is the displayed picture's stack, and a second spelling is how the
+            # Dashboard and this page would come to disagree about which targets
+            # are behind.
+            _, n_new = new_light_since_picture(
+                proj, runs, getattr(entry, "cover_stack_run_id", None))
         except Exception:  # noqa: BLE001 — one broken project must not 500 the page
             _skip_unreadable_target("reprocess status", entry.safe_name)
             continue

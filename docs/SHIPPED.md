@@ -1,5 +1,57 @@
 # Shipped — the record
 
+## 2026-09-30 (audit run B) — v0.492.11: "new light" is measured against the picture on the wall, by membership
+
+### 🟠 BUG FIX (autonomy / trust — PRIORITY 2; the 2026-09-30 audit's C-F1, HIGH) — `stack_run_frames`, `Project.count_light_missing_from_run`, `newsubs.picture_measured_for_new_light`, `merge.carry_stack_runs`
+
+**The claim that was wrong.** `newsubs.new_light_since_picture` — *"the one definition of 'this target has
+new light'"*, behind the Dashboard note, v0.492.0's **"Bring my pictures up to date"** scope and the counts
+its dialog quotes — measured the target's **newest genuine run**, by capture time. After a Combine
+(`seestack/io/merge.py` carries each source night's picture in **with its original timestamp**) the newest
+genuine run is the one-night stack of the folder combined in: a recent stamp and a *subset* of the target's
+subs. Every sub of the other night was shot before it and never restored, so `count_light_missing_from_stack`
+answered **0** — the one target a Combine exists to deepen was the one target the note could never name and
+the batch always skipped, while the merge's own pin kept the older, deeper picture on the wall. The same
+reading was wrong for any pinned cover, a set-aside night, or a run that is a subset for any reason.
+
+**Two fixes, one definition.** (1) **The run measured is the picture on the wall**
+(`picture_measured_for_new_light`): the pinned cover, else the newest run with a preview, resolved through an
+editor export to the stack it was rendered from (`derived_from`, else the nearest older genuine run), falling
+back to the newest genuine run only when nothing has a preview at all. (2) **"Missing" is membership, not a
+clock.** New unversioned aux table `stack_run_frames(run_id, frame_id)` records which subs a run was
+**offered** — every accepted, located sub the stacker built its list from, taken *before* the lucky-imaging cut
+and any alignment failure, so a sub the run saw and dropped itself is not "light the owner is missing" (a
+re-stack would drop it again; counting it would offer hours of NAS CPU for an identical picture). `run_stack`
+writes it beside the history row; `Project.count_light_missing_from_run` counts accepted+located subs **not in
+the set** where a record exists and falls back to the capture-time rule where none does. A Combine
+**freezes** every unrecorded run's set from the capture-time rule *before* a foreign sub lands
+(`freeze_unrecorded_stack_run_frames` — at that moment the two rules agree, and afterwards they do not), then
+carries each source run's record **re-keyed** onto the destination's frame ids through the dedup map
+`merge_projects` already builds (`carry_stack_runs(dest_id_by_key=…)`; duplicates map to the row the
+destination already has). So after a Combine the deep night's picture is missing exactly the other night's
+subs and the carried picture exactly the deep night's — pinned on a fixture where every sub predates every
+stack, i.e. where the clock reads 0 for both.
+
+**Upgrade safety (§9).** The table is created on every open through `_AUX_TABLES_SQL`, the same rule the
+registry's `merged_folders` follows, with **no `SCHEMA_VERSION` bump** (the rollback guard is asserted in the
+new test file): an older build never asks about it. A run recorded before this exists is measured exactly as
+before until it is restacked or a Combine freezes it. `delete_stack_run` takes the record with the row. No
+config, on-disk, default or API-shape change; `NewSubsWaitingItem.run_id`/`stacked_utc` now describe the
+picture on the wall, which is what the note's sentence always claimed.
+
+**What this does *not* reach, said plainly.** A target combined **before** this shipped has no records and
+no freeze happened; its displayed picture is measured by the clock. That still names it wherever the deep
+picture was stacked before the other night was shot (the common shape), and stays blind only where the deep
+stack post-dates the other night's capture — one restack, or the next Combine, records the set and closes it.
+The Target page's own *"N new subs since your last stack"* line still counts by capture time against the
+newest reusable run (deliberately separate sentences, per v0.492.3); a lead is filed to hand it this rule.
+
+Tests +14 (`tests/test_stack_run_frames.py` +9: round-trip, no-bump upgrade, membership vs clock, the freeze,
+a real `run_stack` with `lucky_fraction`, the two-night Combine, a shared sub, a stacker-recorded run travelling
+as recorded, the no-map older caller; `tests/webapp/test_new_subs_waiting.py` +5: the Combine, the carried
+picture displayed, a pinned older cover, an export via `derived_from`, an export without one). **Fail-before**:
+12 of the 14 red on `origin/main` in a scratch worktree with only the tests copied in.
+
 ## 2026-09-30 (Builder, same run as v0.492.6/.7) — v0.492.10: a flaky frontend test, caught by CI on this run's own PR and proved nondeterministic rather than assumed
 
 ### 🟠 FLAKY TEST (the first category AGENTS.md §3 says to look in) — three Memory-card tests read `getSystem` data synchronously after waiting only for the card's own chrome
