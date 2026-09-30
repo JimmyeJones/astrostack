@@ -40,6 +40,8 @@ import numpy as np
 from seestack.bg.per_frame import BackgroundOptions
 from seestack.core.xp import GPU_AVAILABLE
 from seestack.io.project import (
+    REJECT_REASON_BAD_SOLVE_FOOTPRINT,
+    REJECT_REASON_BAD_SOLVE_SCALE,
     FrameRow,
     Project,
     count_unreadable_frames,
@@ -3102,9 +3104,9 @@ def run_stack(
                     # Flag it rejected so it's visible in the Frames table and
                     # doesn't keep breaking this (and future) stacks.
                     reason = (
-                        "bad plate-solve (scale disagrees with the other frames)"
+                        REJECT_REASON_BAD_SOLVE_SCALE
                         if getattr(f, "id", None) in bad_scale
-                        else "bad plate-solve (footprint far from the group)"
+                        else REJECT_REASON_BAD_SOLVE_FOOTPRINT
                     )
                     try:
                         project.update_frame(

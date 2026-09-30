@@ -862,6 +862,79 @@ def test_one_implausible_plate_solve_does_not_resize_the_telescope(tmp_path):
         proj.close()
 
 
+def test_a_solve_the_stack_has_already_ruled_wrong_does_not_vote(tmp_path):
+    """FAIL-BEFORE: the median counted the very rows the stack called wrong.
+
+    ``run_stack`` flags a sub whose solved scale disagrees with its neighbours
+    ``accept = 0`` with :data:`REJECT_REASON_BAD_SOLVE_SCALE` — and leaves the
+    wrong ``pixscale_arcsec`` in the column, because nothing outside the solve
+    path clears one. So the app's own record of "this number is wrong" sat in the
+    newest-25 window voting on which telescope the owner owns, and once enough of
+    them landed (the owner's library carries 178, observer issue #965) they carry
+    the median between them and the whole app's framing advice halves.
+    """
+    from seestack.framing import frame_field_from_solve
+    from seestack.io.project import (
+        REJECT_REASON_BAD_SOLVE_SCALE,
+        FrameRow,
+        Project,
+    )
+
+    proj = Project.create(tmp_path / "t", "T")
+    try:
+        for i in range(12):
+            proj.add_frame(FrameRow(source_path=f"g{i}.fit", width_px=1920,
+                                    height_px=1080, pixscale_arcsec=4.0))
+        good = frame_field_from_solve(*proj.solved_frame_geometry())
+        assert good is not None and good.long_arcmin == pytest.approx(128.0, abs=0.5)
+
+        # A night of false solves, all at half the scale, all of them dropped and
+        # flagged by the stack — a majority of the newest window on their own.
+        for i in range(13):
+            proj.add_frame(FrameRow(
+                source_path=f"bad{i}.fit", width_px=1920, height_px=1080,
+                pixscale_arcsec=2.0, accept=False,
+                reject_reason=REJECT_REASON_BAD_SOLVE_SCALE))
+        assert frame_field_from_solve(*proj.solved_frame_geometry()) == good
+
+        # …and with nothing else to go on it is still "no answer" rather than the
+        # wrong one: the caller then keeps framing.FALLBACK_FIELD.
+        empty = Project.create(tmp_path / "u", "U")
+        try:
+            for i in range(13):
+                empty.add_frame(FrameRow(
+                    source_path=f"bad{i}.fit", width_px=1920, height_px=1080,
+                    pixscale_arcsec=2.0, accept=False,
+                    reject_reason=REJECT_REASON_BAD_SOLVE_SCALE))
+            assert empty.solved_frame_geometry() is None
+        finally:
+            empty.close()
+    finally:
+        proj.close()
+
+
+def test_a_sub_rejected_for_anything_else_still_says_what_scope_shot_it(tmp_path):
+    """The other direction, and the reason the exclusion is keyed on the *reason*
+    rather than on ``accept``: a sub dropped for soft stars or cloud measured its
+    plate scale perfectly well, and on a target whose newest window is mostly
+    rejects it is the only vote there is."""
+    from seestack.framing import frame_field_from_solve
+    from seestack.io.project import FrameRow, Project
+
+    proj = Project.create(tmp_path / "t", "T")
+    try:
+        for i in range(25):
+            proj.add_frame(FrameRow(
+                source_path=f"soft{i}.fit", width_px=1920, height_px=1080,
+                pixscale_arcsec=4.0, accept=False,
+                reject_reason="auto:grade:fwhm_px"))
+        field = frame_field_from_solve(*proj.solved_frame_geometry())
+        assert field is not None
+        assert field.long_arcmin == pytest.approx(128.0, abs=0.5)
+    finally:
+        proj.close()
+
+
 def test_the_field_survives_a_solves_own_jitter(tmp_path):
     """And the ordinary case is unmoved: every frame is solved independently, so
     a healthy target's plate scales differ in the last digits. The median of them

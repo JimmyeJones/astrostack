@@ -457,6 +457,34 @@ REJECT_REASON_SEESTAR_OUTPUT = "auto:seestar_output"
 # ``"user"``, whose choice must never be undone by the app.
 REJECT_REASON_FILE_MISSING = "auto:file_missing"
 
+# Prefix of the reject reason :func:`seestack.stack.stacker.run_stack` stamps on a
+# sub whose stored plate solve it has itself measured to be wrong — the two
+# sentences below. Named here, beside the reasons the rest of the app writes,
+# because the writer and every reader that must recognise the shape have to agree
+# on it exactly, and because that shape is special: unlike every other rejection,
+# the number the row still carries in ``pixscale_arcsec``/``wcs_json`` is the very
+# thing being called wrong. A sub rejected for soft stars or cloud measured its
+# plate scale perfectly well and still votes on "what telescope is this?"
+# (:meth:`Project.solved_frame_geometry`); one rejected for *this* must not.
+#
+# Deliberately the prose v0.473.1 already writes rather than an ``auto:`` code:
+# the sentence is composed for the Frames table badge (``frontend/rejectReason.ts``
+# falls through to it verbatim), and rows carrying it are already on disk, so
+# renaming it would leave them unrecognisable — §9.
+REJECT_REASON_BAD_SOLVE_PREFIX = "bad plate-solve ("
+
+#: The two ways a plate solve can be wrong, as the Frames table says them. They
+#: are two different things for the owner to go and look at — a footprint in the
+#: wrong *place*, or one centred correctly and the wrong *size* — so they get
+#: their own sentence rather than one shared code.
+REJECT_REASON_BAD_SOLVE_SCALE = (
+    REJECT_REASON_BAD_SOLVE_PREFIX + "scale disagrees with the other frames)"
+)
+REJECT_REASON_BAD_SOLVE_FOOTPRINT = (
+    REJECT_REASON_BAD_SOLVE_PREFIX + "footprint far from the group)"
+)
+
+
 # Prefix of the reject reason :func:`seestack.qc.runner.apply_qc_result_to_db`
 # stamps on a sub QC has now failed to read **twice** — the terminal half of its
 # retry state machine (``qc_error:`` is the first, still-retryable failure). The
@@ -1584,6 +1612,18 @@ class Project:
         did change answer with what it is now; taking the median of them is what
         stops one plate solve deciding it (see that constant).
 
+        **A row the app has itself called a wrong solve does not vote.** Rejected
+        rows are otherwise counted on purpose — a sub dropped for soft stars or
+        cloud measured its plate scale perfectly well, and on a target whose
+        newest window is mostly rejects it is the only vote there is — but a sub
+        carrying :data:`REJECT_REASON_BAD_SOLVE_PREFIX` was rejected *because*
+        this very number disagreed with its neighbours
+        (``stack/mosaic._plate_scale_outlier_indices``), and its
+        ``pixscale_arcsec`` is still sitting in the column. Letting it into the
+        median would be reading the one number the stack has already ruled on.
+        The owner's library carries 178 rows with an implausible solve (observer
+        issue #965), which is how many of them a deep target's newest 25 can hold.
+
         Still **three columns and one query**, like :meth:`source_paths`: this is
         asked from request handlers on a target with thousands of subs, and
         building a ``FrameRow`` per frame to read three numbers off one of them is
@@ -1591,12 +1631,15 @@ class Project:
         is solved yet.
         """
         assert self._conn is not None
+        prefix = REJECT_REASON_BAD_SOLVE_PREFIX
         rows = self._conn.execute(
             "SELECT pixscale_arcsec, width_px, height_px FROM frames "
             "WHERE pixscale_arcsec IS NOT NULL AND pixscale_arcsec > 0 "
             "AND width_px IS NOT NULL AND height_px IS NOT NULL "
+            "AND (reject_reason IS NULL "
+            "     OR substr(reject_reason, 1, ?) <> ?) "
             "ORDER BY id DESC LIMIT ?",
-            (GEOMETRY_SAMPLE_FRAMES,),
+            (len(prefix), prefix, GEOMETRY_SAMPLE_FRAMES),
         ).fetchall()
         usable: list[tuple[float, int, int]] = []
         for row in rows:

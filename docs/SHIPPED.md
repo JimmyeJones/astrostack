@@ -2,6 +2,64 @@
 
 ## 2026-09-30 (Builder) — a bad plate scale stops deciding what the whole app advises
 
+### v0.488.7 — 🟠 BUG FIX (trust, PRIORITY 3): a solve the stack has already ruled wrong stops voting on which telescope you own
+
+*(Builder-found while verifying the v0.488.6 entry above — reproduced through a real `run_stack` on the
+existing `#965` fixture before it was fixed. Not from the backlog.)*
+
+**What the repro showed.** `run_stack` excludes a sub whose solved plate scale disagrees with its neighbours
+(`stack/mosaic._plate_scale_outlier_indices`, v0.473.1), flags it `accept = 0` and writes the sentence
+*"bad plate-solve (scale disagrees with the other frames)"*. Run on the 11-frame fixture with one frame's scale
+pushed +9.45 %:
+
+```
+accept: False | reason: bad plate-solve (scale disagrees with the other frames)
+wcs_json present: True
+pixscale still stored: 5.4725          ← the number the stack just called wrong
+solved_frame_geometry now: (5.4725, 480, 320)
+```
+
+The rejection is a row in the same table, and **nothing clears the wrong solve** — clearing a stored
+`wcs_json` outside the solve path is deliberately not done. `Project.solved_frame_geometry`'s query filtered on
+neither `accept` nor the reason, so the app's own written record of *"this measurement is wrong"* was still in
+the newest-`GEOMETRY_SAMPLE_FRAMES` window voting on the field of view that `framing_hint`, `mosaic_plan`,
+`field_fill` and `background_mode_hint` are all a comparison against — on the Target page's object card and
+every Tonight-planner and week-plan row.
+
+**Why v0.488.5's median does not already cover it.** A median survives a *minority* of wrong rows. These rows
+arrive together — one night of false solves, or one reprocess flagging a batch — and the owner's library
+carries **178** of them (observer issue [#965](https://github.com/JimmyeJones/astrostack/issues/965)), which is
+seven times the whole 25-row window. Thirteen of them are a majority of it on their own, and then the median
+*is* the wrong number.
+
+**What shipped.** `solved_frame_geometry` excludes rows whose `reject_reason` starts with the stacker's own
+bad-plate-solve prefix. Three new constants in `seestack/io/project.py`, beside the reject reasons the rest of
+the app writes (`REJECT_REASON_SEESTAR_OUTPUT`, `_FILE_MISSING`, `_QC_ERROR_FINAL`):
+
+* `REJECT_REASON_BAD_SOLVE_PREFIX = "bad plate-solve ("`,
+* `REJECT_REASON_BAD_SOLVE_SCALE` and `REJECT_REASON_BAD_SOLVE_FOOTPRINT`, the two sentences themselves — two
+  different things for the owner to go and look at, which is why v0.473.1 gave them their own wording,
+
+now read by `stacker.run_stack` where they were literals, so the writer and the reader cannot drift apart. The
+match uses the `substr(reject_reason, 1, ?) = ?` idiom `Project.frames_rejected_for` already uses rather than
+`LIKE`, so there is no escaping question.
+
+**Keyed on the reason, not on `accept` — deliberately, and pinned in both directions.** A sub dropped for soft
+stars, cloud or by hand measured its plate scale perfectly well, and on a target whose newest window is mostly
+rejects it is the only vote there is; the rows excluded here are the ones rejected **because** this very number
+disagreed with its neighbours.
+
+**Upgrade safety.** The reason strings are the prose v0.473.1 already writes, not a new `auto:` code: rows
+carrying them are already on disk, and `frontend/src/rejectReason.ts` falls through to them verbatim for the
+Frames-table badge, so renaming would have broken both (§9). No config key, schema, on-disk path, default or
+API shape is touched, and it is still three columns and one query.
+
+**Tests.** +2 in `tests/test_project.py`: thirteen bad-solve-rejected rows at half the scale fail to move a
+12-frame target's field, and a target holding *only* such rows answers `None` (the caller keeps
+`framing.FALLBACK_FIELD`) rather than the wrong number; plus the other direction — 25 rows all rejected
+`auto:grade:fwhm_px` still answer. **The first fails before**, verified by reverting the query's two clauses in
+a scratch copy.
+
 ### v0.488.6 — 🟡 BUG FIX (trust, PRIORITY 3): the library-wide frame field is a consensus, not the first hit
 
 *(The `LEAD` filed by the Builder on 2026-09-29 while shipping v0.488.5 — the half of that fix that was a
