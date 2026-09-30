@@ -31,11 +31,11 @@ from statistics import median
 from typing import Callable, Hashable, Sequence, TypeVar
 
 from seestack.io.project import (
-    FrameRow,
-    Project,
     REJECT_REASON_BAD_SOLVE_PREFIX,
     REJECT_REASON_FILE_MISSING,
     REJECT_REASON_SEESTAR_OUTPUT,
+    FrameRow,
+    Project,
 )
 from seestack.qc.grading import CLOUD_METRIC_NAMES, SEEING_METRIC_NAMES
 
