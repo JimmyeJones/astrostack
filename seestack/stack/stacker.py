@@ -3240,6 +3240,16 @@ def run_stack(
         log.info("Star-match: %d of %d un-located sub(s) joined the stack by "
                  "their star patterns", n_star_matched, n_attempted)
 
+    # Every sub this run was *offered* — taken here, before the lucky-imaging cut
+    # and before any alignment failure, and recorded beside the run's history row
+    # (``Project.set_stack_run_frames``). It is what lets "is this picture behind
+    # the light I own?" be answered by membership rather than by a clock: a sub
+    # a later Combine brings in was shot before this run and never restored, so
+    # the capture-time rule reads it as light the picture already has. A sub the
+    # run saw and dropped itself is deliberately *in* this list — a re-stack
+    # would drop it again, so it is not light the owner is missing.
+    offered_frame_ids = [f.id for f in frames if f.id is not None]
+
     # Lucky imaging: filter to the top fraction by FWHM (sharper = better).
     if options.lucky_fraction < 1.0:
         with_fwhm = [f for f in frames if f.fwhm_px is not None]
@@ -4376,6 +4386,9 @@ def run_stack(
             # runs at.
             duration_s=round(time.monotonic() - t_started, 3),
         ))
+        # …and which subs it was offered, so the picture can later be measured
+        # against the light it never saw (see ``offered_frame_ids`` above).
+        project.set_stack_run_frames(run_id, offered_frame_ids)
     except Exception as exc:  # noqa: BLE001 — history is non-critical
         log.warning("Could not record stack run in history: %s", exc)
 

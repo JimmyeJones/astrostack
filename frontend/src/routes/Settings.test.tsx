@@ -109,55 +109,64 @@ describe("reprocessNudgeText", () => {
 });
 
 describe("reprocessPictureWarning", () => {
-  // Observer issue #903: with "also auto-edit" off, every restacked target's
-  // newest (unedited) result becomes the picture on the wall. Nothing in the
-  // dialog said so — every other sentence in it is about what is *kept*.
+  // Observer issue #903, closed from the other side (2026-09-30 audit, C-F4):
+  // the batch now keeps a picture the owner finished by hand on the wall and
+  // re-finishes the app-finished ones, so this sentence is the *promise* with
+  // its count, not a warning about a flat stack that will not happen.
   const base = {
     current_version: "0.447.1", outdated: 3, up_to_date: 1, total_targets: 5,
     finished_pictures: 4, finished_pictures_stale_only: 2,
+    hand_finished: 3, hand_finished_stale_only: 1,
   };
 
-  it("says nothing when the results will be auto-edited anyway", () => {
-    expect(reprocessPictureWarning(base, { scope: "stale" as const, autoEdit: true }))
-      .toBeNull();
+  it("still speaks when the results will be auto-edited — his own work is kept either way", () => {
+    const msg = reprocessPictureWarning(base, { scope: "stale" as const, autoEdit: true });
+    expect(msg).toContain("1 of these targets shows a picture you finished yourself");
+    expect(msg).toContain("doesn't replace your own work");
   });
 
-  it("says nothing when no target displays a finished picture", () => {
+  it("says nothing when no target shows a hand-finished picture", () => {
     expect(reprocessPictureWarning(
-      { ...base, finished_pictures: 0, finished_pictures_stale_only: 0 },
+      { ...base, hand_finished: 0, hand_finished_stale_only: 0 },
       { scope: "all" as const, autoEdit: false },
     )).toBeNull();
   });
 
   it("stays silent on a backend that doesn't send the counts", () => {
     expect(reprocessPictureWarning(
-      { current_version: "0.1.0", outdated: 3, up_to_date: 1, total_targets: 5 },
+      { current_version: "0.1.0", outdated: 3, up_to_date: 1, total_targets: 5,
+        finished_pictures: 4 },
       { scope: "all" as const, autoEdit: false },
     )).toBeNull();
     expect(reprocessPictureWarning(undefined, { scope: "all" as const, autoEdit: false }))
       .toBeNull();
   });
 
-  it("quotes the count for the scope the user actually chose", () => {
+  it("quotes the hand-finished count for the scope the user actually chose", () => {
     const all = reprocessPictureWarning(base, { scope: "all" as const, autoEdit: false });
-    expect(all).toContain("4 of your targets");
+    expect(all).toContain("3 of these targets show pictures you finished yourself");
     const stale = reprocessPictureWarning(base, { scope: "stale" as const, autoEdit: false });
-    expect(stale).toContain("2 of your targets");
+    expect(stale).toContain("1 of these targets shows a picture you finished yourself");
+    const light = reprocessPictureWarning(
+      { ...base, hand_finished_new_light_only: 2 },
+      { scope: "new-light" as const, autoEdit: false });
+    expect(light).toContain("2 of these targets show pictures you finished yourself");
   });
 
-  it("names the consequence and where the edits went, and offers the fix", () => {
+  it("names what happens to them, where the deeper result goes, and what Auto's pictures get", () => {
     const msg = reprocessPictureWarning(base, { scope: "all" as const, autoEdit: false });
-    expect(msg).toContain("flat, unstretched stack");
+    expect(msg).toContain("stay on the wall exactly as they are");
     expect(msg).toContain("History");
-    expect(msg).toContain("Turn this switch on");
+    expect(msg).toContain("re-finished on the new result automatically");
+    expect(msg).not.toContain("flat, unstretched stack");
   });
 
   it("reads naturally for a single target", () => {
     const msg = reprocessPictureWarning(
-      { ...base, finished_pictures: 1 }, { scope: "all" as const, autoEdit: false },
+      { ...base, hand_finished: 1 }, { scope: "all" as const, autoEdit: false },
     );
-    expect(msg).toContain("1 of your targets currently shows");
-    expect(msg).not.toContain("show a finished");
+    expect(msg).toContain("It stays on the wall exactly as it is");
+    expect(msg).toContain("its deeper restack waits in History");
   });
 });
 
@@ -403,60 +412,98 @@ describe("Maintenance — outdated-images nudge", () => {
   });
 });
 
-describe("Maintenance — the wall-picture warning (#903)", () => {
+describe("Maintenance — the wall-picture promise (#903)", () => {
   // A restack is saved as a new result and the newest result is the picture
-  // every wall shows, so with "also auto-edit" off a finished target goes back
-  // to a flat linear stack. The panel and the confirm dialog both have to say
-  // so — "your existing edits are untouched" is true and about something else.
+  // every wall shows. The batch keeps a hand-finished picture on the wall and
+  // re-finishes Auto's, so the panel and the confirm dialog both say so — with
+  // the count for the scope the toggle is set to.
   const withFinished = {
     current_version: "0.81.3", outdated: 3, up_to_date: 0, total_targets: 3,
     finished_pictures: 3, finished_pictures_stale_only: 2,
+    hand_finished: 3, hand_finished_stale_only: 2,
   };
 
-  it("warns in the panel, in the scope the toggle is set to", async () => {
+  it("says it in the panel, in the scope the toggle is set to", async () => {
     vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withFinished);
     renderMaintenance();
     // Outdated-only is the default scope → the stale-only count.
     await waitFor(() =>
-      expect(screen.getByText(/2 of your targets currently show a finished/))
+      expect(screen.getByText(/2 of these targets show pictures you finished yourself/))
         .toBeInTheDocument());
     fireEvent.click(screen.getByLabelText(/Every target/));
     await waitFor(() =>
-      expect(screen.getByText(/3 of your targets currently show a finished/))
+      expect(screen.getByText(/3 of these targets show pictures you finished yourself/))
         .toBeInTheDocument());
   });
 
-  it("withdraws the warning once the auto-edit switch is on", async () => {
+  it("keeps saying it once the auto-edit switch is on — his work is kept either way", async () => {
     vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withFinished);
     renderMaintenance();
     await waitFor(() =>
-      expect(screen.getByText(/currently show a finished/)).toBeInTheDocument());
+      expect(screen.getByText(/pictures you finished yourself/)).toBeInTheDocument());
     fireEvent.click(screen.getByLabelText(/auto-edit each result into a finished picture/));
     await waitFor(() =>
-      expect(screen.queryByText(/currently show a finished/)).toBeNull());
+      expect(screen.getByText(/doesn't replace your own work/)).toBeInTheDocument());
   });
 
-  it("puts the consequence in the confirm dialog too", async () => {
+  it("puts the promise in the confirm dialog too", async () => {
     vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withFinished);
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderMaintenance();
     await waitFor(() =>
-      expect(screen.getByText(/currently show a finished/)).toBeInTheDocument());
+      expect(screen.getByText(/pictures you finished yourself/)).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
 
     expect(confirm).toHaveBeenCalled();
     const text = String(confirm.mock.calls[0][0]);
-    expect(text).toContain("flat, unstretched stack");
+    expect(text).toContain("stay on the wall exactly as they are");
+    expect(text).not.toContain("flat, unstretched stack");
     // …and the promises it already made are still there, not replaced.
     expect(text).toContain("nothing is deleted or overwritten");
   });
 
-  it("says nothing on a library with no finished pictures", async () => {
-    renderMaintenance();  // the default mock sends no finished_pictures at all
+  it("says nothing on a library with no hand-finished pictures", async () => {
+    renderMaintenance();  // the default mock sends no hand_finished at all
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Reprocess .* targets/ }))
         .toBeInTheDocument());
-    expect(screen.queryByText(/currently show a finished/)).toBeNull();
+    expect(screen.queryByText(/of these targets/)).toBeNull();
+  });
+});
+
+describe("Maintenance — arriving on \"Bring my pictures up to date\"", () => {
+  it("defaults the auto-edit switch on for that scope only, and still sends what is chosen", async () => {
+    vi.spyOn(client.api, "reprocessStatus").mockResolvedValue({
+      current_version: "0.81.3", outdated: 0, up_to_date: 3, total_targets: 3,
+      new_light: 2, new_light_subs: 40,
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const call = vi
+      .spyOn(client.api, "reprocessAll")
+      .mockResolvedValue({ job_id: "job-9", already_running: false });
+
+    renderMaintenance("/settings/maintenance?scope=new-light");
+    const toggle = await screen.findByLabelText(/auto-edit each result into a finished picture/);
+    expect(toggle).toBeChecked();
+    fireEvent.click(await screen.findByRole("button", { name: /Bring my pictures up to date/ }));
+    // stale_only off, deep rescan off, auto-edit ON, new-light on.
+    await waitFor(() => expect(call).toHaveBeenCalledWith(false, false, true, true));
+  });
+
+  it("can be turned off for this visit like any other switch", async () => {
+    vi.spyOn(client.api, "reprocessStatus").mockResolvedValue({
+      current_version: "0.81.3", outdated: 0, up_to_date: 3, total_targets: 3,
+      new_light: 2, new_light_subs: 40,
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const call = vi
+      .spyOn(client.api, "reprocessAll")
+      .mockResolvedValue({ job_id: "job-9", already_running: false });
+
+    renderMaintenance("/settings/maintenance?scope=new-light");
+    fireEvent.click(await screen.findByLabelText(/auto-edit each result into a finished picture/));
+    fireEvent.click(await screen.findByRole("button", { name: /Bring my pictures up to date/ }));
+    await waitFor(() => expect(call).toHaveBeenCalledWith(false, false, false, true));
   });
 });
 
@@ -564,6 +611,7 @@ const withNewLight = {
   current_version: "0.492.0", outdated: 1, up_to_date: 4, total_targets: 5,
   finished_pictures: 4, finished_pictures_stale_only: 1,
   finished_pictures_new_light_only: 2,
+  hand_finished: 2, hand_finished_stale_only: 0, hand_finished_new_light_only: 1,
   new_light: 3, new_light_subs: 128,
 };
 
@@ -610,21 +658,21 @@ describe("newLightScopeText", () => {
 describe("reprocessScopeCounts", () => {
   it("gives each scope its own pair, never another scope's", () => {
     expect(reprocessScopeCounts(withNewLight, "new-light"))
-      .toEqual({ targets: 3, finished: 2 });
+      .toEqual({ targets: 3, finished: 2, handFinished: 1 });
     expect(reprocessScopeCounts(withNewLight, "stale"))
-      .toEqual({ targets: 1, finished: 1 });
+      .toEqual({ targets: 1, finished: 1, handFinished: 0 });
     expect(reprocessScopeCounts(withNewLight, "all"))
-      .toEqual({ targets: 5, finished: 4 });
+      .toEqual({ targets: 5, finished: 4, handFinished: 2 });
   });
 
   it("answers null rather than zero when the backend is silent", () => {
     // Zero means "measured, and it is none"; null means "not said". Rendering a
     // silent backend as 0 would disable the button on a library that has work.
     expect(reprocessScopeCounts(undefined, "new-light"))
-      .toEqual({ targets: null, finished: null });
+      .toEqual({ targets: null, finished: null, handFinished: null });
     expect(reprocessScopeCounts({
       current_version: "0.1.0", outdated: 1, up_to_date: 1, total_targets: 2,
-    }, "new-light")).toEqual({ targets: null, finished: null });
+    }, "new-light")).toEqual({ targets: null, finished: null, handFinished: null });
   });
 });
 
@@ -652,13 +700,13 @@ describe("Maintenance — the new-light scope", () => {
       .toBeInTheDocument();
   });
 
-  it("quotes the new-light scope's own finished-picture count, not the library's",
+  it("quotes the new-light scope's own hand-finished count, not the library's",
     async () => {
       vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withNewLight);
       renderMaintenance("/settings/maintenance?scope=new-light");
-      // 2, the count for this scope — never 4 (every target) or 1 (stale).
+      // 1, the count for this scope — never 2 (every target) or 0 (stale).
       await waitFor(() =>
-        expect(screen.getByText(/2 of your targets currently show a finished/))
+        expect(screen.getByText(/1 of these targets shows a picture you finished yourself/))
           .toBeInTheDocument());
     });
 
@@ -686,8 +734,10 @@ describe("Maintenance — the new-light scope", () => {
     const text = String(confirm.mock.calls[0][0]);
     expect(text).toContain("3 targets");
     expect(text).toContain("128 subs");
-    // The #903 consequence and the non-destructive promise both still ride along.
-    expect(text).toContain("flat, unstretched stack");
+    // The #903 promise and the non-destructive promise both still ride along —
+    // and, arriving on this scope, the auto-edit switch is on, so its note too.
+    expect(text).toContain("finished yourself");
+    expect(text).toContain("also auto-edited");
     expect(text).toContain("nothing is deleted or overwritten");
   });
 

@@ -1,8 +1,8 @@
 # Shipped — the record
 
-## 2026-09-30 (audit run A, security) — v0.492.12: a page on any other site could run the whole library, and the build form took any path on the NAS
+## 2026-09-30 (audit run A, security) — v0.492.14: a page on any other site could run the whole library, and the build form took any path on the NAS
 
-### v0.492.12 — 🔴 SECURITY FIX (C-F2, MEDIUM but the broadest exposure): every state-changing endpoint was triggerable cross-site
+### v0.492.14 — 🔴 SECURITY FIX (C-F2, MEDIUM but the broadest exposure): every state-changing endpoint was triggerable cross-site
 
 **What was wrong.** The app has no password by default (AGENTS.md §1), and a password would not have
 helped: a page on any other site the owner visits can auto-submit a `<form>` at the app — a bodiless or
@@ -34,7 +34,7 @@ alone, default ports, the vite dev-proxy shape — `frontend/vite.config.ts` set
 backend sees `localhost:5173` in both headers — a forwarded host, no headers at all, reads, health) pass on
 both. No API shape changed; nothing on disk changed. Upgrade-safe.
 
-### also in v0.492.12 — 🟡 SECURITY FIX (C-F5, LOW): `POST /api/calibration/masters` took any folder on the NAS
+### also in v0.492.14 — 🟡 SECURITY FIX (C-F5, LOW): `POST /api/calibration/masters` took any folder on the NAS
 
 The Calibration page's build form sent a raw `source_dir`, and the endpoint built a master from any
 readable folder on the server — with no password set, anyone on the LAN could point it anywhere. AGENTS.md §6:
@@ -59,6 +59,109 @@ same class was hunted through the rest of `scripts/`: `deploy.sh`'s tar backup u
 and `tar` stores a planted link as a link; `restore-data.sh` lists `-type f` only, checks every path
 component for a link before writing, and `cp --remove-destination`s; `rollback.sh` writes nothing under
 ASTRO_DATA itself. Nothing found — recorded in `PROCESS-NOTES.md`.
+## 2026-09-30 (audit run B) — v0.492.13: a bulk restack never makes a finished picture look worse without the owner choosing it
+
+### 🟠 BUG FIX (trust — PRIORITY 1-adjacent; the 2026-09-30 audit's C-F4, MEDIUM, the #903 shape; closes the open remainder of observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903) — option (3), "an auto-cover with provenance") — `seestack/coverpin.py`, `pipeline._displayed_picture_state`, `_settle_cover_after_restack`, `reprocess_status.hand_finished*`, Settings → Maintenance
+
+**The two holes.** `reprocess_all` records each restack as a *new* run, and the newest run is the picture every
+wall surface shows. v0.448.1's carry-forward (`_picture_is_auto_finished`) re-finishes a picture **the app
+baked**; it deliberately stands down on a picture the owner finished **by hand** (Auto's look is no evidence of
+what he wanted), so **(a)** with "also auto-edit" off — the default — such a picture was replaced on the wall by
+the flat fresh run, which is exactly how 44 of his pictures went flat in 2026-09, from the other author. And
+**(b)** on a Combined target the merge pins the deep target's own picture so the carried one-night stack
+cannot take its place (v0.480.x) — a pin the registry cannot tell from the owner's, so the deeper run the batch
+then made was **never displayed**, and the guard returned `False` on any pin at all.
+
+**The fix, in three parts.** (1) **Provenance for the app's own pins** — new engine module
+`seestack/coverpin.py`: a `project_meta` record `{"run_id", "reason"}` beside the pin, valid **only while it
+names the run actually pinned**, so the owner's later "Set as cover" (or clearing it) retires the record with no
+code on his path having to know; every doubt reads as *his* pin. The registry's `cover_stack_run_id` keeps its
+meaning byte for byte (§9). `Library.merge_targets_result` marks its pin `merge`. (2) **The batch settles the
+cover after each restack** (`_settle_cover_after_restack`, from a `DisplayedPicture` read *before* the restack):
+a cover the **owner** pinned is never touched; a picture **finished by hand** (finished per `finishedpicture`
+and no `editor_auto_baked_look` stamp) **stays on the wall** — pinned if it was not, recorded `kept_finished`,
+reported in `kept_displayed` with the names — whatever the switch says; a cover the **app** pinned advances
+(the pin is lifted, the fresh deeper run is the picture, `cover_advanced`), unless it protected a finished
+picture and the fresh run's own finish failed. `_picture_is_auto_finished` no longer refuses on a pin, so a
+pinned auto-finished picture lends its finish to the run that may replace it. (3) **The nag loop is closed
+where it would start**: `newsubs.new_light_since_picture` measures a `kept_finished`-pinned target against its
+newest picture (the deeper one in History), so the note does not re-name a target the batch deliberately kept,
+restack it again, and keep it again forever; the Target page's cover nudge is what offers the deeper run.
+
+**Screens.** Settings → Maintenance: the #903 sentence turns from a *warning* ("they will show a flat,
+unstretched stack") into the **promise** with its count — "N of these targets show pictures you finished
+yourself. They stay on the wall exactly as they are, and their deeper restack waits in History…" — on the
+`hand_finished` / `_stale_only` / `_new_light_only` counts `reprocess_status` now sends (additive), shown with
+the switch on too (auto-editing the new result does not replace his work), and repeated in the confirm dialog.
+**Arriving on "Bring my pictures up to date" now defaults the auto-edit switch on** — for that visit only,
+nothing in `config.json` is written, the switch stays in view — because that scope exists to turn a night's
+subs into a *picture* with one click; the two engine scopes keep their off default. The Jobs page's batch line
+says "kept N pictures you finished yourself on the wall (names); their deeper restacks are in History" and "N
+targets now show their new, deeper pictures in place of covers the app had pinned". Nothing removed.
+
+**Upgrade safety.** Additive meta key, additive response keys, additive job-summary keys carried through a
+yielding slice; no config, schema-version, on-disk or default-behaviour change (the switch default is a
+page-load state, not a setting). An older build ignores the record and keeps the pin.
+
+Tests +14 Python (`tests/test_coverpin.py` +2; the merge marker; the note's kept-pin rule; nine batch cases in
+`tests/webapp/test_reprocess_all.py`: hand-finished kept with the switch off and on, a merge pin advanced on an
+auto-finished and on a flat picture, kept when the fresh finish fails, a merge pin on a hand-finished picture
+re-recorded as kept, an owner's pin never touched, the status counts, the yield carry) and +9 frontend
+(warning wording per scope, the new-light default on/off, the summary line). **Fail-before**: 12 red on the
+previous commit with `coverpin.py` copied in so the imports resolve. One existing assertion changed
+deliberately: a pinned auto-finished picture now answers `True` to `_picture_is_auto_finished`.
+
+## 2026-09-30 (audit run B) — v0.492.12: "new light" is measured against the picture on the wall, by membership
+
+### 🟠 BUG FIX (autonomy / trust — PRIORITY 2; the 2026-09-30 audit's C-F1, HIGH) — `stack_run_frames`, `Project.count_light_missing_from_run`, `newsubs.picture_measured_for_new_light`, `merge.carry_stack_runs`
+
+**The claim that was wrong.** `newsubs.new_light_since_picture` — *"the one definition of 'this target has
+new light'"*, behind the Dashboard note, v0.492.0's **"Bring my pictures up to date"** scope and the counts
+its dialog quotes — measured the target's **newest genuine run**, by capture time. After a Combine
+(`seestack/io/merge.py` carries each source night's picture in **with its original timestamp**) the newest
+genuine run is the one-night stack of the folder combined in: a recent stamp and a *subset* of the target's
+subs. Every sub of the other night was shot before it and never restored, so `count_light_missing_from_stack`
+answered **0** — the one target a Combine exists to deepen was the one target the note could never name and
+the batch always skipped, while the merge's own pin kept the older, deeper picture on the wall. The same
+reading was wrong for any pinned cover, a set-aside night, or a run that is a subset for any reason.
+
+**Two fixes, one definition.** (1) **The run measured is the picture on the wall**
+(`picture_measured_for_new_light`): the pinned cover, else the newest run with a preview, resolved through an
+editor export to the stack it was rendered from (`derived_from`, else the nearest older genuine run), falling
+back to the newest genuine run only when nothing has a preview at all. (2) **"Missing" is membership, not a
+clock.** New unversioned aux table `stack_run_frames(run_id, frame_id)` records which subs a run was
+**offered** — every accepted, located sub the stacker built its list from, taken *before* the lucky-imaging cut
+and any alignment failure, so a sub the run saw and dropped itself is not "light the owner is missing" (a
+re-stack would drop it again; counting it would offer hours of NAS CPU for an identical picture). `run_stack`
+writes it beside the history row; `Project.count_light_missing_from_run` counts accepted+located subs **not in
+the set** where a record exists and falls back to the capture-time rule where none does. A Combine
+**freezes** every unrecorded run's set from the capture-time rule *before* a foreign sub lands
+(`freeze_unrecorded_stack_run_frames` — at that moment the two rules agree, and afterwards they do not), then
+carries each source run's record **re-keyed** onto the destination's frame ids through the dedup map
+`merge_projects` already builds (`carry_stack_runs(dest_id_by_key=…)`; duplicates map to the row the
+destination already has). So after a Combine the deep night's picture is missing exactly the other night's
+subs and the carried picture exactly the deep night's — pinned on a fixture where every sub predates every
+stack, i.e. where the clock reads 0 for both.
+
+**Upgrade safety (§9).** The table is created on every open through `_AUX_TABLES_SQL`, the same rule the
+registry's `merged_folders` follows, with **no `SCHEMA_VERSION` bump** (the rollback guard is asserted in the
+new test file): an older build never asks about it. A run recorded before this exists is measured exactly as
+before until it is restacked or a Combine freezes it. `delete_stack_run` takes the record with the row. No
+config, on-disk, default or API-shape change; `NewSubsWaitingItem.run_id`/`stacked_utc` now describe the
+picture on the wall, which is what the note's sentence always claimed.
+
+**What this does *not* reach, said plainly.** A target combined **before** this shipped has no records and
+no freeze happened; its displayed picture is measured by the clock. That still names it wherever the deep
+picture was stacked before the other night was shot (the common shape), and stays blind only where the deep
+stack post-dates the other night's capture — one restack, or the next Combine, records the set and closes it.
+The Target page's own *"N new subs since your last stack"* line still counts by capture time against the
+newest reusable run (deliberately separate sentences, per v0.492.3); a lead is filed to hand it this rule.
+
+Tests +14 (`tests/test_stack_run_frames.py` +9: round-trip, no-bump upgrade, membership vs clock, the freeze,
+a real `run_stack` with `lucky_fraction`, the two-night Combine, a shared sub, a stacker-recorded run travelling
+as recorded, the no-map older caller; `tests/webapp/test_new_subs_waiting.py` +5: the Combine, the carried
+picture displayed, a pinned older cover, an export via `derived_from`, an export without one). **Fail-before**:
+12 of the 14 red on `origin/main` in a scratch worktree with only the tests copied in.
 ## 2026-09-30 (Builder) — v0.492.11: "a re-stack would fold this in" read *solved* unconditionally
 
 ### 🟠 BUG FIX (trust — PRIORITY 2-adjacent) — the second half of the `restored_utc` LEAD filed with v0.492.4, closed on the gate the lead named
