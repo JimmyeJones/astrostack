@@ -1,5 +1,57 @@
 # Shipped — the record
 
+## 2026-09-30 (audit run B) — v0.492.12: a bulk restack never makes a finished picture look worse without the owner choosing it
+
+### 🟠 BUG FIX (trust — PRIORITY 1-adjacent; the 2026-09-30 audit's C-F4, MEDIUM, the #903 shape; closes the open remainder of observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903) — option (3), "an auto-cover with provenance") — `seestack/coverpin.py`, `pipeline._displayed_picture_state`, `_settle_cover_after_restack`, `reprocess_status.hand_finished*`, Settings → Maintenance
+
+**The two holes.** `reprocess_all` records each restack as a *new* run, and the newest run is the picture every
+wall surface shows. v0.448.1's carry-forward (`_picture_is_auto_finished`) re-finishes a picture **the app
+baked**; it deliberately stands down on a picture the owner finished **by hand** (Auto's look is no evidence of
+what he wanted), so **(a)** with "also auto-edit" off — the default — such a picture was replaced on the wall by
+the flat fresh run, which is exactly how 44 of his pictures went flat in 2026-09, from the other author. And
+**(b)** on a Combined target the merge pins the deep target's own picture so the carried one-night stack
+cannot take its place (v0.480.x) — a pin the registry cannot tell from the owner's, so the deeper run the batch
+then made was **never displayed**, and the guard returned `False` on any pin at all.
+
+**The fix, in three parts.** (1) **Provenance for the app's own pins** — new engine module
+`seestack/coverpin.py`: a `project_meta` record `{"run_id", "reason"}` beside the pin, valid **only while it
+names the run actually pinned**, so the owner's later "Set as cover" (or clearing it) retires the record with no
+code on his path having to know; every doubt reads as *his* pin. The registry's `cover_stack_run_id` keeps its
+meaning byte for byte (§9). `Library.merge_targets_result` marks its pin `merge`. (2) **The batch settles the
+cover after each restack** (`_settle_cover_after_restack`, from a `DisplayedPicture` read *before* the restack):
+a cover the **owner** pinned is never touched; a picture **finished by hand** (finished per `finishedpicture`
+and no `editor_auto_baked_look` stamp) **stays on the wall** — pinned if it was not, recorded `kept_finished`,
+reported in `kept_displayed` with the names — whatever the switch says; a cover the **app** pinned advances
+(the pin is lifted, the fresh deeper run is the picture, `cover_advanced`), unless it protected a finished
+picture and the fresh run's own finish failed. `_picture_is_auto_finished` no longer refuses on a pin, so a
+pinned auto-finished picture lends its finish to the run that may replace it. (3) **The nag loop is closed
+where it would start**: `newsubs.new_light_since_picture` measures a `kept_finished`-pinned target against its
+newest picture (the deeper one in History), so the note does not re-name a target the batch deliberately kept,
+restack it again, and keep it again forever; the Target page's cover nudge is what offers the deeper run.
+
+**Screens.** Settings → Maintenance: the #903 sentence turns from a *warning* ("they will show a flat,
+unstretched stack") into the **promise** with its count — "N of these targets show pictures you finished
+yourself. They stay on the wall exactly as they are, and their deeper restack waits in History…" — on the
+`hand_finished` / `_stale_only` / `_new_light_only` counts `reprocess_status` now sends (additive), shown with
+the switch on too (auto-editing the new result does not replace his work), and repeated in the confirm dialog.
+**Arriving on "Bring my pictures up to date" now defaults the auto-edit switch on** — for that visit only,
+nothing in `config.json` is written, the switch stays in view — because that scope exists to turn a night's
+subs into a *picture* with one click; the two engine scopes keep their off default. The Jobs page's batch line
+says "kept N pictures you finished yourself on the wall (names); their deeper restacks are in History" and "N
+targets now show their new, deeper pictures in place of covers the app had pinned". Nothing removed.
+
+**Upgrade safety.** Additive meta key, additive response keys, additive job-summary keys carried through a
+yielding slice; no config, schema-version, on-disk or default-behaviour change (the switch default is a
+page-load state, not a setting). An older build ignores the record and keeps the pin.
+
+Tests +14 Python (`tests/test_coverpin.py` +2; the merge marker; the note's kept-pin rule; nine batch cases in
+`tests/webapp/test_reprocess_all.py`: hand-finished kept with the switch off and on, a merge pin advanced on an
+auto-finished and on a flat picture, kept when the fresh finish fails, a merge pin on a hand-finished picture
+re-recorded as kept, an owner's pin never touched, the status counts, the yield carry) and +9 frontend
+(warning wording per scope, the new-light default on/off, the summary line). **Fail-before**: 12 red on the
+previous commit with `coverpin.py` copied in so the imports resolve. One existing assertion changed
+deliberately: a pinned auto-finished picture now answers `True` to `_picture_is_auto_finished`.
+
 ## 2026-09-30 (audit run B) — v0.492.11: "new light" is measured against the picture on the wall, by membership
 
 ### 🟠 BUG FIX (autonomy / trust — PRIORITY 2; the 2026-09-30 audit's C-F1, HIGH) — `stack_run_frames`, `Project.count_light_missing_from_run`, `newsubs.picture_measured_for_new_light`, `merge.carry_stack_runs`

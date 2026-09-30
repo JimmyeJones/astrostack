@@ -1536,6 +1536,48 @@ describe("reprocessSummary", () => {
   });
 });
 
+describe("reprocessSummary — pictures kept on the wall (#903, C-F4)", () => {
+  it("names the hand-finished pictures the batch kept, and where their restacks went", () => {
+    expect(reprocessSummary({
+      total: 5, stacked: 5, kept_displayed: 2,
+      kept_displayed_targets: ["M 42", "NGC 7000"], failed: [],
+    })).toEqual({
+      line: "Restacked 5/5 targets — kept 2 pictures you finished yourself on the wall "
+        + "(M 42, NGC 7000); their deeper restacks are in History.",
+      failed: [],
+      failedGroups: [],
+    });
+    expect(reprocessSummary({
+      total: 5, stacked: 5, kept_displayed: 1, kept_displayed_targets: ["M 42"], failed: [],
+    }).line).toBe(
+      "Restacked 5/5 targets — kept 1 picture you finished yourself on the wall (M 42); "
+      + "its deeper restack is in History.");
+  });
+  it("drops the name list when it would be a wall of text", () => {
+    const names = ["a", "b", "c", "d", "e"];
+    expect(reprocessSummary({
+      total: 5, stacked: 5, kept_displayed: 5, kept_displayed_targets: names, failed: [],
+    }).line).toBe(
+      "Restacked 5/5 targets — kept 5 pictures you finished yourself on the wall; "
+      + "their deeper restacks are in History.");
+  });
+  it("says when a cover the app had pinned was lifted so the deeper picture shows", () => {
+    expect(reprocessSummary({ total: 3, stacked: 3, cover_advanced: 1, failed: [] }).line)
+      .toBe("Restacked 3/3 targets — 1 target now shows its new, deeper picture in place "
+        + "of a cover the app had pinned.");
+    expect(reprocessSummary({ total: 3, stacked: 3, cover_advanced: 2, failed: [] }).line)
+      .toBe("Restacked 3/3 targets — 2 targets now show their new, deeper pictures in "
+        + "place of covers the app had pinned.");
+  });
+  it("is silent on an older backend and when nothing was kept or advanced", () => {
+    expect(reprocessSummary({ total: 3, stacked: 3, failed: [] }).line)
+      .toBe("Restacked 3/3 targets.");
+    expect(reprocessSummary({
+      total: 3, stacked: 3, kept_displayed: 0, cover_advanced: 0, failed: [],
+    }).line).toBe("Restacked 3/3 targets.");
+  });
+});
+
 describe("processTargetSummary", () => {
   it("summarises a successful one-click process into a new master", () => {
     expect(processTargetSummary({

@@ -191,6 +191,19 @@ def new_light_since_picture(proj, runs, cover_stack_run_id=None):  # noqa: ANN00
     different sentence other surfaces already say, and there is nothing to
     count "after".
     """
+    runs = list(runs)
+    if cover_stack_run_id is not None:
+        from seestack.coverpin import PIN_REASON_KEPT_FINISHED, app_pin_reason
+
+        # A pin the bulk restack placed to keep a hand-finished picture on the
+        # wall while the deeper run went into History. The owner has not chosen
+        # that picture over the deeper one — the app kept it for him — so the
+        # light to measure is what the deeper, newest picture is missing:
+        # otherwise every batch would re-name the target, restack it again, keep
+        # the picture again, and never stop. The cover nudge on the Target page
+        # is what offers him the deeper run.
+        if app_pin_reason(proj, cover_stack_run_id) == PIN_REASON_KEPT_FINISHED:
+            cover_stack_run_id = None
     run = picture_measured_for_new_light(runs, cover_stack_run_id)
     if run is None:
         return None, 0

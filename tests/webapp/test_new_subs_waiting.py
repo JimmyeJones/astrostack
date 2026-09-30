@@ -528,3 +528,38 @@ def test_an_export_that_does_not_say_what_it_derives_from_resolves_to_the_neares
     data = _waiting(client)
     assert data["count"] == 1
     assert data["items"][0]["stacked_utc"] == BEFORE
+
+
+def test_a_picture_the_batch_kept_on_the_wall_is_not_nagged_about(client, solved_library):
+    """A cover the bulk restack pinned to keep a hand-finished picture is not
+    the owner's choice of picture — the deeper run it kept in History is what is
+    measured, or every batch would re-name the target, restack it, keep it, and
+    never stop. A pin he made himself (no record) is still the picture measured."""
+    from seestack.coverpin import PIN_REASON_KEPT_FINISHED, mark_app_pin
+
+    kept = _give_a_picture(solved_library, "M_42", BEFORE)
+    _give_a_picture(solved_library, "M_42", AFTER, basename="master_2")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        lib.set_target_cover("M_42", kept)
+        proj = lib.open_target("M_42")
+        try:
+            mark_app_pin(proj, kept, PIN_REASON_KEPT_FINISHED)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert _waiting(client)["count"] == 0         # the deeper picture has it all
+
+    # The owner re-pins the same run by hand: the record no longer matches
+    # (a fresh pin is his), and the kept picture is measured again.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            proj.delete_meta("cover_pinned_by_app")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert _waiting(client)["count"] == 1

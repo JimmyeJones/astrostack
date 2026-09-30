@@ -1233,10 +1233,20 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
     build, so a target with no genuine stack at all (an editor export and
     nothing else) is restacked by both modes and counts in both.
 
+    ``hand_finished`` / ``hand_finished_stale_only`` / ``hand_finished_new_light_only``
+    are the subset of each finished count whose displayed picture the **owner**
+    finished (a finished picture with no ``editor_auto_baked_look`` stamp): the
+    ones a batch keeps on the wall rather than replaces
+    (:func:`_settle_cover_after_restack`), so the dialog can say which promise
+    applies to how many — the auto-finished ones are re-finished, the
+    hand-finished ones are kept.
+
     Returns ``{current_version, outdated, up_to_date, total_targets,
     finished_pictures, finished_pictures_stale_only,
-    finished_pictures_new_light_only, new_light, new_light_subs}``.
+    finished_pictures_new_light_only, hand_finished, hand_finished_stale_only,
+    hand_finished_new_light_only, new_light, new_light_subs}``.
     """
+    from webapp.routers.editor import AUTO_EDIT_BAKED_LOOK_PREFIX
     from webapp.routers.newsubs import new_light_since_picture
 
     outdated = 0
@@ -1247,6 +1257,9 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
     new_light = 0
     new_light_subs = 0
     finished_new_light = 0
+    hand_finished = 0
+    hand_finished_stale_only = 0
+    hand_finished_new_light = 0
     for entry in lib.list_targets():
         total += 1
         # One unreadable project must not cost the whole read-out — see
@@ -1267,6 +1280,9 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
                 runs, getattr(entry, "cover_stack_run_id", None))
             is_finished = (shown is not None
                            and _run_is_a_finished_picture(proj, shown))
+            is_hand_finished = bool(
+                is_finished and not proj.get_meta(
+                    f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{shown.id}"))
             # Asked of the rows already in hand, so this costs one indexed COUNT
             # per target rather than a second walk of the library. The run it
             # measures is deliberately *not* ``run`` above: the note's own rule
@@ -1291,16 +1307,19 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
             new_light_subs += n_new
         if is_finished:
             finished += 1
+            hand_finished += int(is_hand_finished)
             # What ``stale_only`` actually skips: a target whose newest genuine
             # stack is already this build (``_last_stack_version_for_target``).
             # Everything else — including a target with no genuine stack — is
             # restacked either way.
             if run is None or run.engine_version != APP_VERSION:
                 finished_stale_only += 1
+                hand_finished_stale_only += int(is_hand_finished)
             # And ``new_light_only`` restacks exactly the targets with new
             # light, so its share of the warning is a plain intersection.
             if has_new_light:
                 finished_new_light += 1
+                hand_finished_new_light += int(is_hand_finished)
     return {
         "current_version": APP_VERSION,
         "outdated": outdated,
@@ -1312,6 +1331,11 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
         "finished_pictures": finished,
         "finished_pictures_stale_only": finished_stale_only,
         "finished_pictures_new_light_only": finished_new_light,
+        # …and of those, the ones the owner finished himself — kept on the wall
+        # by the batch rather than replaced. Additive, same as the trio above.
+        "hand_finished": hand_finished,
+        "hand_finished_stale_only": hand_finished_stale_only,
+        "hand_finished_new_light_only": hand_finished_new_light,
         # The "Bring my pictures up to date" scope's own size, so its confirm
         # dialog can say what it is about to queue without a second
         # cross-target read.
@@ -1521,9 +1545,29 @@ def _refresh_target(settings: Settings, jm: JobManager, job: Job,
         log.warning("reprocess-all deep-rescan failed for %s: %s", safe, exc)
 
 
-def _picture_is_auto_finished(lib: Library, safe: str) -> bool:
-    """Is this target's **displayed** picture a finished auto-edit that a restack
-    is about to supersede?
+class DisplayedPicture(NamedTuple):
+    """What a target is showing, read *before* a restack changes the answer.
+
+    ``run_id`` is the run :func:`webapp.finishedpicture.displayed_picture_run`
+    picks; ``finished`` is :func:`webapp.finishedpicture.run_is_a_finished_picture`
+    of it; ``auto_baked`` says the app itself baked its look
+    (``editor_auto_baked_look``) — so *finished and not auto_baked* is a picture
+    the owner finished by hand (his own recipe rendered in place, or an export).
+    ``cover_pinned`` is whether the registry has a cover at all, and
+    ``app_pin_reason`` who pinned it: ``None`` for the owner's own pin (or no
+    pin), else one of :mod:`seestack.coverpin`'s reasons.
+    """
+
+    run_id: int
+    finished: bool
+    auto_baked: bool
+    cover_pinned: bool
+    app_pin_reason: str | None
+
+
+def _displayed_picture_state(lib: Library, safe: str) -> DisplayedPicture | None:
+    """The picture ``safe`` is showing now, or ``None`` when it shows nothing
+    (no run has a preview) or cannot be read.
 
     ``reprocess_all`` records each restack as a *new* run, and the picture every
     wall surface shows is the newest one — the library stamps
@@ -1535,54 +1579,152 @@ def _picture_is_auto_finished(lib: Library, safe: str) -> bool:
     on any of them saying why. The edits themselves are not lost (each stays on
     its own run and is reachable in History) — which is exactly why the dialog's
     "your existing edits are untouched" promise reads as true while the pictures
-    change anyway. Seen twice on the owner's install.
+    change anyway. Seen on the owner's install: 44 pictures at once (observer
+    issue #903).
 
-    So the batch asks this per target, *before* the restack, and finishes the
-    fresh run the same way where the answer is yes. That is "re-do what this
-    picture already had", not a new opinion about it. True only when:
+    So the batch reads this per target, *before* the restack, and decides two
+    things from it afterwards (:func:`_settle_cover_after_restack`): whether the
+    fresh run gets the same finish the shown one had — only where the app baked
+    it (``auto_baked``), because re-deriving Auto is "re-do what this picture
+    already had" and a hand-saved recipe is somebody else's work Auto's look is
+    no evidence of — and whether the picture on the wall is one a batch is
+    allowed to replace at all.
 
-    * **no run is pinned as the cover** — a pinned cover already outranks the
-      newest run everywhere, so nothing regresses and nothing needs doing; and
-    * the run :func:`webapp.finishedpicture.displayed_picture_run` picks was
-      auto-edited by **us**, i.e. it has an ``editor_auto_baked_look`` stamp. A
-      saved recipe with no stamp is somebody's own work, and Auto's look is no
-      evidence of what they wanted — there we stand down, and ``v0.447.2``'s
-      dialog warning (``reprocess_status.finished_pictures``) plus ``v0.448.0``'s
-      "Not stretched yet" wall chip are what name the consequence instead.
+    Note the stamp, not "has a recipe": ``auto_baked`` deliberately asks a
+    *narrower* question than ``finished``, which counts any baked recipe because
+    it is answering "should the wall say this isn't finished?". Here the answer
+    decides whether to *write* something. It is also why the fresh run is
+    auto-edited rather than handed the old recipe verbatim: a reprocess exists
+    for the new engine's pixels, and a saved ``geometry.crop`` is expressed
+    against the canvas it was cropped on.
 
-    Note the stamp, not "has a recipe": this deliberately asks a *narrower*
-    question than :func:`webapp.finishedpicture.run_is_a_finished_picture`, which
-    counts any enabled recipe because it is answering "should the wall say this
-    isn't finished?". Here the answer decides whether to *write* something, and
-    re-deriving Auto is only unambiguously right where Auto is what made the
-    picture. It is also why the fresh run is auto-edited rather than handed the
-    old recipe verbatim: a reprocess exists for the new engine's pixels, and a
-    saved ``geometry.crop`` is expressed against the canvas it was cropped on.
-
-    Fail-soft on purpose: anything unreadable answers ``False``, which is the
-    behaviour every install had before this existed.
+    Fail-soft on purpose: anything unreadable answers ``None``, and every caller
+    treats that as "do what this batch always did".
     """
+    from seestack.coverpin import app_pin_reason
     from seestack.io.project import Project
     from webapp.routers.editor import AUTO_EDIT_BAKED_LOOK_PREFIX
 
     try:
         entry = lib.find_target(safe)
-        if entry is None or entry.cover_stack_run_id is not None:
-            return False
+        if entry is None:
+            return None
         proj = Project.open(lib.target_dir(entry))
         try:
-            # Which run the wall is showing is ``finishedpicture``'s question, not
-            # a second copy of it here — the cover arm is already answered above,
-            # so what is being asked for is "the newest run with a preview".
-            shown = _displayed_picture_run(list(proj.iter_stack_runs()), None)
-            if shown is None:
-                return False
-            return bool(proj.get_meta(
-                f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{shown.id}"))
+            shown = _displayed_picture_run(list(proj.iter_stack_runs()),
+                                           entry.cover_stack_run_id)
+            if shown is None or shown.id is None:
+                return None
+            return DisplayedPicture(
+                run_id=int(shown.id),
+                finished=_run_is_a_finished_picture(proj, shown),
+                auto_baked=bool(proj.get_meta(
+                    f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{shown.id}")),
+                cover_pinned=entry.cover_stack_run_id is not None,
+                app_pin_reason=app_pin_reason(proj, entry.cover_stack_run_id),
+            )
         finally:
             proj.close()
     except Exception:  # noqa: BLE001 — an unreadable target keeps today's behaviour
-        return False
+        return None
+
+
+def _picture_is_auto_finished(lib: Library, safe: str) -> bool:
+    """Is this target's **displayed** picture a finished auto-edit that a restack
+    is about to supersede — so the fresh run should get the same finish?
+
+    The ``auto_baked`` bit of :func:`_displayed_picture_state`. It used to
+    answer ``False`` whenever a cover was pinned, on the reasoning that a pinned
+    cover outranks the newest run so nothing regresses. That reasoning left the
+    fresh, deeper run flat and undisplayed behind a pin the *app* had placed
+    (a Combine's), which is the other half of #903's shape; now the pin is
+    settled separately, so a pinned auto-finished picture carries its finish
+    onto the run that may replace it.
+    """
+    state = _displayed_picture_state(lib, safe)
+    return bool(state is not None and state.auto_baked)
+
+
+#: :func:`_settle_cover_after_restack`'s answers.
+COVER_KEPT = "kept"          # a hand-finished picture stays on the wall, pinned
+COVER_ADVANCED = "advanced"  # an app pin was lifted so the fresh run shows
+
+
+def _settle_cover_after_restack(lib: Library, safe: str,
+                                shown: DisplayedPicture | None,
+                                new_run_id: int | None, *,
+                                new_run_finished: bool) -> str | None:
+    """Decide what the wall shows now that ``new_run_id`` is the newest run.
+
+    The rule the batch promises: **it never makes a finished picture look worse
+    without the owner choosing it.** Read with ``shown`` taken *before* the
+    restack, three cases, in order:
+
+    1. **The owner pinned the cover** (``cover_pinned`` and no app reason) —
+       nothing. He chose the picture; the fresh run is in History.
+    2. **The picture on the wall was finished by hand** (``finished`` and not
+       ``auto_baked``: his own recipe rendered in place, or an export) — it
+       stays on the wall: pinned as the cover if it was not already, and
+       recorded as an app pin with reason ``kept_finished``
+       (:mod:`seestack.coverpin`), so the *next* batch knows it may lift it
+       and the new-light note knows to measure the deeper run in History
+       rather than nag about the one deliberately kept. Answer ``"kept"``.
+       Before this existed, a batch with the switch off replaced exactly such
+       pictures with flat linear masters — the #903 shape — and the guard that
+       stopped it only covered pictures the app had baked.
+    3. **The app pinned the cover** (a Combine keeping the deep picture over a
+       carried one-night stack, or a previous batch's "kept") and the picture
+       is not hand-finished — the pin has done its job and is lifted, so the
+       deeper run just made is the picture (``"advanced"``). One guard: an
+       *auto-finished* picture is only replaced by a run that is finished too
+       (``new_run_finished``); if the fresh run's auto-edit failed, the pin
+       stays and the wall keeps the finished picture. Before this, a
+       merge-pinned cover meant the deeper run was made and **never shown**.
+
+    Anything else (no pin, an unfinished or auto-baked picture) is the batch's
+    ordinary behaviour: the newest run is the picture. ``None`` on every path
+    that changes nothing, including an unreadable target.
+    """
+    from seestack.coverpin import (
+        PIN_REASON_KEPT_FINISHED,
+        clear_app_pin,
+        mark_app_pin,
+    )
+    from seestack.io.project import Project
+
+    if shown is None or new_run_id is None:
+        return None
+    try:
+        entry = lib.find_target(safe)
+        if entry is None:
+            return None
+        pinned = entry.cover_stack_run_id
+        owner_pinned = pinned is not None and shown.app_pin_reason is None
+        if owner_pinned:
+            return None
+        hand_finished = shown.finished and not shown.auto_baked
+        if hand_finished:
+            if pinned != shown.run_id:
+                lib.set_target_cover(safe, shown.run_id)
+            proj = Project.open(lib.target_dir(entry))
+            try:
+                mark_app_pin(proj, shown.run_id, PIN_REASON_KEPT_FINISHED)
+            finally:
+                proj.close()
+            return COVER_KEPT
+        if shown.app_pin_reason is not None and pinned == shown.run_id:
+            if shown.finished and not new_run_finished:
+                return None
+            lib.set_target_cover(safe, None)
+            proj = Project.open(lib.target_dir(entry))
+            try:
+                clear_app_pin(proj)
+            finally:
+                proj.close()
+            return COVER_ADVANCED
+    except Exception:  # noqa: BLE001 — the batch's bookkeeping never fails a target
+        log.warning("reprocess-all: could not settle %s's cover", safe, exc_info=True)
+    return None
 
 
 def _reprocess_yield(settings: Settings, jm: JobManager, job: Job, waiting_kind: str, *,
@@ -1622,6 +1764,9 @@ def _reprocess_yield(settings: Settings, jm: JobManager, job: Job, waiting_kind:
         "rescanned": int(counters.get("rescanned") or 0),
         "auto_edited": int(counters.get("auto_edited") or 0),
         "kept_finished": int(counters.get("kept_finished") or 0),
+        "kept_displayed": int(counters.get("kept_displayed") or 0),
+        "kept_displayed_targets": list(counters.get("kept_displayed_targets") or []),
+        "cover_advanced": int(counters.get("cover_advanced") or 0),
         "failed": list(counters.get("failed") or []),
         "cancelled": False,
         # Additive: this slice stopped early *on purpose* and the work continues
@@ -1726,6 +1871,22 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
     ``kept_finished``. The switch still means what it said: finish *every* result,
     including targets that have never been edited at all.
 
+    **And a picture the owner finished by hand stays on the wall, whatever the
+    switch says** (:func:`_settle_cover_after_restack`, the 2026-09-30 audit's
+    C-F4). The carry-forward above cannot reach a hand-finished picture — Auto's
+    look is no evidence of what he wanted — so until now such a picture was
+    replaced by the flat (or Auto'd) fresh run, exactly the #903 shape with a
+    different author. Now it is pinned as the cover before the fresh run can
+    take its place, recorded as an app pin (:mod:`seestack.coverpin`) so a later
+    batch may lift it, and reported in ``kept_displayed`` with the names in
+    ``kept_displayed_targets``; the deeper run sits in History, and the Target
+    page's cover nudge offers it. The mirror case is a cover the **app** pinned
+    — a Combine keeping the deep picture over a carried one-night stack — which
+    used to mean the deeper run this batch made was **never displayed**; that pin
+    now advances (``cover_advanced``), unless the picture it protected was
+    finished and the fresh run's finish failed. A cover the owner pinned himself
+    is never touched.
+
     **It hands the worker back to a waiting import, between targets.** The job
     manager is one queue and one thread on purpose (two stacks at once on a
     RAM-capped NAS is an OOM kill), so a batch that runs for days holds the
@@ -1780,6 +1941,10 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
             rescanned = int(prior.get("rescanned") or 0)
             auto_edited = int(prior.get("auto_edited") or 0)
             kept_finished = int(prior.get("kept_finished") or 0)
+            kept_displayed = int(prior.get("kept_displayed") or 0)
+            kept_displayed_targets: list[str] = list(
+                prior.get("kept_displayed_targets") or [])
+            cover_advanced = int(prior.get("cover_advanced") or 0)
             failed: list[dict[str, str]] = list(prior.get("failed") or [])
             cancelled = False
             for i, entry in enumerate(targets):
@@ -1802,6 +1967,9 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                             "stacked": stacked, "skipped": skipped,
                             "rescanned": rescanned, "auto_edited": auto_edited,
                             "kept_finished": kept_finished,
+                            "kept_displayed": kept_displayed,
+                            "kept_displayed_targets": kept_displayed_targets,
+                            "cover_advanced": cover_advanced,
                             "failed": failed,
                         },
                         stale_only=stale_only, deep_rescan=deep_rescan,
@@ -1828,15 +1996,17 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                         cancelled = True
                         break
                 reuse = _last_stack_options_for_target(lib, safe)
-                # Asked *before* the restack, because afterwards the fresh run is
-                # the newest one and the question can no longer be answered: is
-                # the picture this target currently shows a finished auto-edit
-                # that the new run is about to replace with a flat linear master?
-                # Where it is, the fresh run gets the same finish — see
-                # ``_picture_is_auto_finished``. Skipped entirely when the switch
-                # is on, since then every run is finished anyway.
-                keep_finish = (not auto_edit
-                               and _picture_is_auto_finished(lib, safe))
+                # Read *before* the restack, because afterwards the fresh run is
+                # the newest one and the question can no longer be answered: what
+                # is the picture this target shows, who finished it, and who
+                # pinned it? Two decisions hang off it once the run exists — see
+                # ``_displayed_picture_state`` and ``_settle_cover_after_restack``.
+                shown = _displayed_picture_state(lib, safe)
+                # Where the shown picture is a finished auto-edit, the fresh run
+                # gets the same finish. Skipped entirely when the switch is on,
+                # since then every run is finished anyway.
+                keep_finish = (not auto_edit and shown is not None
+                               and shown.auto_baked)
                 # Write to a fresh, version-tagged basename so the reprocessed run
                 # lands *alongside* the target's existing output instead of
                 # archiving/orphaning its ``master`` (the reused options carry the
@@ -1879,6 +2049,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                         break
                     stacked += 1
                     run_id = res.get("run_id")
+                    new_run_finished = False
                     if ((auto_edit or keep_finish) and run_id is not None
                             and not job.cancel_requested()):
                         # Chain the one-click Auto recipe onto the fresh master so the
@@ -1889,11 +2060,23 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                                 lib, safe, run_id,
                                 auto_crop=settings.auto_crop_border) is not None:
                             auto_edited += 1
+                            new_run_finished = True
                             # Counted apart so the job summary can say *why* a
                             # batch nobody asked to auto-edit auto-edited some
                             # runs: it was keeping a finished picture finished.
                             if keep_finish:
                                 kept_finished += 1
+                    # Now that the fresh run is the newest: is the picture on
+                    # the wall one this batch may replace? A hand-finished one
+                    # stays (pinned); a pin the app placed for a reason that is
+                    # now gone is lifted so the deeper run shows.
+                    settled = _settle_cover_after_restack(
+                        lib, safe, shown, run_id, new_run_finished=new_run_finished)
+                    if settled == COVER_KEPT:
+                        kept_displayed += 1
+                        kept_displayed_targets.append(name)
+                    elif settled == COVER_ADVANCED:
+                        cover_advanced += 1
                 job.set_progress("reprocess", done_before + i + 1, total,
                                  f"{done_before + i + 1}/{total} targets")
                 jm.maybe_flush(job)
@@ -1908,6 +2091,14 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                 # switch asked for it. Always present so a reader never has to
                 # tell "none needed it" apart from "an older build".
                 "kept_finished": kept_finished,
+                # Pictures the owner finished by hand that stayed on the wall
+                # (pinned) while their deeper restack went into History, with
+                # their names so the summary can say which — and how many app
+                # pins (a Combine's) were lifted so the fresh run is shown.
+                # Always present, for the same reason as ``kept_finished``.
+                "kept_displayed": kept_displayed,
+                "kept_displayed_targets": kept_displayed_targets,
+                "cover_advanced": cover_advanced,
                 "failed": failed,
                 "cancelled": cancelled,
                 # Always present so a reader never has to tell "did not yield"
