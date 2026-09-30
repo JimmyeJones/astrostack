@@ -1,5 +1,59 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (Builder run) — the bad-plate-scale chain, followed to its end
+
+*(Builder, branch `agent/builder-run` → **v0.488.6**, **v0.488.7**, **v0.489.0**, merged as PR #1021.
+Baseline on `origin/main` at e68f3bf: **6978 passed, 2 skipped**, 13m39s with the BLAS cap and
+`-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green. Final tree: **6992 passed, 2 skipped**,
+14m03s.)*
+
+### The shape of the run: one entry, then two bugs its own verification turned up
+
+The picked item was the top entry of "Bugs (fix these first)" — the `LEAD` filed with v0.488.5, that
+`library_frame_field` answers "which telescope?" from whichever target it probes first. Its first line asks for
+a **check** before any build: does the owner's library hold more than one frame geometry at all? That check is a
+`SELECT DISTINCT` over his project DBs, which no in-repo agent can run and the observer has not filed. What made
+it buildable anyway is that the entry's own prescribed shape — a consensus across the probed targets — is
+**one-sided on a one-telescope install**: every probed target reports the same field, the median *is* the first
+answer, and the result is byte-identical. There was nothing for the number to decide, so waiting for it was
+buying nothing. Recorded here because "closed with the number" is the right default in this backlog and this is
+the exception's reasoning, not a licence.
+
+**Then verifying it produced the other two.** The repro script written to confirm the entry's mechanism printed
+one line nobody was looking for:
+
+```
+accept: False | reason: bad plate-solve (scale disagrees with the other frames)
+pixscale still stored: 5.4725
+solved_frame_geometry now: (5.4725, 480, 320)
+```
+
+The stack had just called that number wrong, written the rejection, and the app read it anyway — v0.488.7. And
+the same two lines say why the frame is *gone*: it keeps a truthy `wcs_json`, so plate-solve skips it as "already
+solved", and it keeps a rejection that is not `solve_failed:`, so plate-solve skips it a second time — while
+`apply_grade_reaccepts` only ever reconsiders `auto:grade`. Terminal by two independent routes, 178 rows on the
+owner's library, for a flake the observer's own control says is not deterministic — v0.489.0.
+
+**The generalisable class, stated so the next run can look for it:** *a rejection is a claim about a frame, and
+the numbers the frame still carries are not withdrawn by it.* Two readers were trusting a measurement the app
+had itself ruled on, in opposite directions — one read it as truth, the other read its presence as "nothing to
+do here".
+
+### Process deviations, honestly
+
+* **No item was marked "In progress" before work started** (§11, §12). No collision resulted — `origin/main`
+  did not move once during the run, checked at the start, before each commit and before the merge — but the
+  claim is a publication for other agents and skipping it removed their only warning. The two Builder-found
+  bugs were not in the backlog to claim; the first item was.
+* **No dogfood pass this run.** All three changes are backend-only with no UI surface and no Auto/editor claim,
+  and `scripts/agent-dogfood.sh` cannot run alongside `pytest` (§7). The previous run's `--mosaic --editor
+  --big` pass is one day old and recorded above.
+* The scan summary key for the new reconcile is `bad_solve_resolve_offered`, which does not quite match the
+  `unreadable_set_aside` / `streak_reaccepted` shape of its siblings. Deliberately not renamed: it is read only
+  by tests, "offered a re-solve" is the more precise description of what it counts, and the rename would have
+  cost a second full 14-minute suite run for nothing.
+
+
 ## 2026-09-29 (Builder run, fifth of the day) — both halves of the v0.481.0 rescue lead, and a dogfood pass that found a real one
 
 *(Builder, branch `claude/awesome-fermat-fzn5hx` → **v0.488.3**, **v0.488.4**, **v0.488.5**. Baseline on
