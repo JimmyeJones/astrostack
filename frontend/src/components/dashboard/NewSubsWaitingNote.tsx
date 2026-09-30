@@ -31,10 +31,18 @@ const NAMED = 3;
  *
  * **Advisory, and it never acts.** Nothing is broken and nothing is lost; there
  * is just light of theirs the picture doesn't have yet. Re-stacking is hours of
- * CPU on a NAS, so there is deliberately no "do them all" button here — each
+ * CPU on a NAS, so there is deliberately no "do them all" *button* here — each
  * link lands on the Stack form, where the frame count, the time estimate and the
  * settings are, and the existing picture stays in that target's history either
  * way.
+ *
+ * Since v0.492.0 there is one more link, and it is still a link: "Bring them all
+ * up to date" lands on Settings → Maintenance with the scope already picked,
+ * where the confirm dialog names the targets, the subs and the consequence for
+ * the pictures on the wall before anything is queued. That is where an action
+ * this expensive belongs — the note names the backlog, the batch owns the cost.
+ * It appears only when the note is about more than one target: for a single one
+ * the direct Stack-form link above it is the shorter route to the same result.
  */
 export function NewSubsWaitingNote() {
   const { data } = useQuery({
@@ -106,6 +114,17 @@ export function NewSubsWaitingNote() {
           </Anchor>
         ) : null}
       </Group>
+      {/* One trip instead of N through the Stack form. A link, not a button:
+          the dialog with the counts and the consequences lives on the other
+          end, which is the whole reason this note has never had a button. */}
+      {count > 1 ? (
+        <Group gap="xs" mt="xs">
+          <Anchor component={Link} size="xs"
+            to="/settings/maintenance?scope=new-light">
+            {`Bring all ${count} up to date in one go →`}
+          </Anchor>
+        </Group>
+      ) : null}
     </Alert>
   );
 }

@@ -1996,3 +1996,232 @@ def test_reprocess_alls_posture_reaches_the_engines_degrade_lever(
     # The same options answered as if somebody were watching still refuse loudly.
     attended = replace(opts, unattended=False)
     assert stacker._afford_drizzle_reject(attended, 20, big, 1.0) is True
+
+
+# --------------------------------------------------------------------------- #
+# "Bring my pictures up to date": the new-light scope (v0.491.0)
+# --------------------------------------------------------------------------- #
+#
+# The owner shoots many targets across many nights with auto-stack off, so after
+# a night's capture his displayed pictures fall behind the light he owns. The app
+# already *named* those targets (`GET /api/new-subs-waiting`) and the batch
+# stacker already existed, but its only scope filter asked whether the *engine*
+# had changed — so catching up meant N trips through the Stack form, or
+# restacking the whole library to reach a handful of targets.
+
+# The synthetic frames' own DATE-OBS (tests/synth.py), normalised on ingest —
+# the same constants `test_new_subs_waiting.py` pins the definition with.
+_BEFORE_THE_FRAMES = "2024-09-01T00:00:00+00:00"
+_AFTER_THE_FRAMES = "2025-01-01T00:00:00+00:00"
+
+
+def _seed_run_at(lib, safe, ts, *, options=None, engine_version=None):
+    """One genuine stack run for ``safe``, stamped ``ts``."""
+    proj = lib.open_target(safe)
+    try:
+        proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc=ts, output_basename="master",
+            fits_path=None, tiff_path=None, preview_path=None,
+            n_frames_used=3, canvas_h=10, canvas_w=10,
+            coverage_min=1, coverage_max=3,
+            options_json=json.dumps(options or {"method": "sigma", "sigma_kappa": 4.25}),
+            engine_version=engine_version,
+        ))
+    finally:
+        proj.close()
+
+
+def test_new_light_only_restacks_only_the_targets_whose_picture_fell_behind(
+        solved_library, monkeypatch):
+    """The scope the owner's cadence wants: one target was stacked before its
+    subs were shot (its picture is missing light), the other after (it is up to
+    date). Only the first is queued.
+
+    Before ``new_light_only`` the endpoint could express "the engine changed"
+    (``stale_only``) but not "the light changed", so this batch was either both
+    targets or a hand-driven trip through the Stack form per target.
+    """
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        behind, caught_up = [e.safe_name for e in lib.list_targets()]
+        _seed_run_at(lib, behind, _BEFORE_THE_FRAMES)
+        _seed_run_at(lib, caught_up, _AFTER_THE_FRAMES)
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all, _settings(solved_library),
+                            job, new_light_only=True)
+    finally:
+        lib.close()
+
+    # The caught-up target is not "skipped" — it was never in the batch at all,
+    # which is the point: the progress bar counts the work the user asked for.
+    assert summary["total"] == 1
+    assert summary["stacked"] == 1
+    assert summary["skipped"] == 0
+    assert summary["failed"] == []
+    assert len(captured) == 1
+
+
+def test_new_light_only_is_strictly_opt_in(solved_library, monkeypatch):
+    """Without it (the default), a target whose picture already holds every sub
+    is still restacked — the scope never narrows an existing caller's batch."""
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for safe in [e.safe_name for e in lib.list_targets()]:
+            _seed_run_at(lib, safe, _AFTER_THE_FRAMES)   # nothing waiting anywhere
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all, _settings(solved_library), job)
+    finally:
+        lib.close()
+
+    assert summary["total"] == 2
+    assert summary["stacked"] == 2
+    assert len(captured) == 2
+
+
+def test_new_light_only_skips_a_target_that_has_never_been_stacked(
+        solved_library, monkeypatch):
+    """"You have never stacked this" is a different sentence, said elsewhere.
+
+    The note this scope shares its definition with is about a picture that has
+    *fallen behind*; a target with no picture at all has nothing to bring up to
+    date, and sweeping it in would make the button's own count a lie.
+    """
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        behind, never = [e.safe_name for e in lib.list_targets()]
+        _seed_run_at(lib, behind, _BEFORE_THE_FRAMES)
+        # `never` gets no run at all.
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all, _settings(solved_library),
+                            job, new_light_only=True)
+    finally:
+        lib.close()
+
+    assert summary["total"] == 1
+    assert summary["stacked"] == 1
+    assert len(captured) == 1
+
+
+def test_new_light_only_ignores_an_editor_export_when_dating_the_picture(
+        solved_library, monkeypatch):
+    """An editor export is a re-render of an existing picture and never folds in
+    a sub, so it must not reset the clock — the same rule the Dashboard note
+    uses, reached here through the one shared helper."""
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        behind, caught_up = [e.safe_name for e in lib.list_targets()]
+        _seed_run_at(lib, behind, _BEFORE_THE_FRAMES)
+        # …and a *later* editor export on the same target. If the scope dated the
+        # picture from it, this target would read as up to date and be dropped.
+        _seed_run_at(lib, behind, _AFTER_THE_FRAMES,
+                     options={"editor_recipe": {"ops": []}})
+        _seed_run_at(lib, caught_up, _AFTER_THE_FRAMES)
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all, _settings(solved_library),
+                            job, new_light_only=True)
+    finally:
+        lib.close()
+
+    assert summary["total"] == 1
+    assert summary["stacked"] == 1
+
+
+def test_new_light_only_takes_the_most_waiting_target_first(solved_library, monkeypatch):
+    """Most-waiting-first: the batch can be cancelled or stand down for a waiting
+    import at any target boundary, so the light bought before that happens should
+    be the most it can be."""
+    order: list = []
+
+    def fake(proj, opts, **kwargs):  # noqa: ANN001, ARG001
+        order.append(Path(proj.db_path).parent.name)
+        return SimpleNamespace(output_dir="/tmp/x", run_id=1, n_frames_used=3,
+                               canvas_shape=(1, 1, 3), cancelled=False,
+                               errors=[], excluded_frames=[])
+    monkeypatch.setattr("seestack.stack.stacker.run_stack", fake)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        first, second = [e.safe_name for e in lib.list_targets()]
+        _seed_run_at(lib, first, _BEFORE_THE_FRAMES)
+        _seed_run_at(lib, second, _BEFORE_THE_FRAMES)
+        # `second` has more light waiting: drop one of `first`'s three subs out
+        # of the count by un-accepting it.
+        proj = lib.open_target(first)
+        try:
+            proj.update_frame(next(iter(proj.iter_frames())).id, accept=0)
+        finally:
+            proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all, _settings(solved_library),
+                            job, new_light_only=True)
+    finally:
+        lib.close()
+
+    assert summary["stacked"] == 2
+    assert order == [second, first]
+
+
+def test_new_light_only_endpoint_passes_the_scope_through(solved_client, monkeypatch):
+    """The wire: the body's flag reaches the job body, defaulting off for any
+    caller (including an older frontend) that omits it."""
+    seen: list = []
+
+    def fake_submit(settings, jm, **kwargs):  # noqa: ANN001, ARG001
+        seen.append(kwargs)
+        return Job(kind="reprocess_all")
+    monkeypatch.setattr(pipeline, "submit_reprocess_all", fake_submit)
+
+    assert solved_client.post("/api/reprocess-all",
+                              json={"new_light_only": True}).status_code == 200
+    assert seen[-1]["new_light_only"] is True
+    # An older frontend sends the three keys it knows and nothing changes for it.
+    assert solved_client.post("/api/reprocess-all",
+                              json={"stale_only": True}).status_code == 200
+    assert seen[-1]["new_light_only"] is False
+
+
+def test_reprocess_status_counts_the_new_light_scope(solved_library):
+    """The counts the confirm dialog quotes before it queues hours of CPU: how
+    many targets are behind, by how many subs in all, and — separately — how many
+    of *those* currently show a finished picture an un-auto-edited restack would
+    replace with a flat linear stack (observer issue #903's warning, scoped)."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        behind, caught_up = [e.safe_name for e in lib.list_targets()]
+        _seed_run_at(lib, behind, _BEFORE_THE_FRAMES)
+        _seed_run_at(lib, caught_up, _AFTER_THE_FRAMES)
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["new_light"] == 1
+    # The three synthetic subs of the behind target, all accepted and solved.
+    assert status["new_light_subs"] == 3
+    # Neither target displays a finished picture, so the warning stays silent for
+    # every scope — and the new one is never bigger than the batch it describes.
+    assert status["finished_pictures_new_light_only"] == 0
+    assert (status["finished_pictures_new_light_only"]
+            <= status["finished_pictures"])
+
+
+def test_reprocess_status_new_light_is_zero_on_a_caught_up_library(solved_library):
+    """A fully stacked library costs the button nothing to offer and says so."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        for safe in [e.safe_name for e in lib.list_targets()]:
+            _seed_run_at(lib, safe, _AFTER_THE_FRAMES)
+        status = pipeline.reprocess_status(lib)
+    finally:
+        lib.close()
+
+    assert status["new_light"] == 0
+    assert status["new_light_subs"] == 0
+    assert status["finished_pictures_new_light_only"] == 0
