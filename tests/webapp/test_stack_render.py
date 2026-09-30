@@ -1461,6 +1461,72 @@ def test_stack_info_drizzle_degrade_absent_on_a_run_that_fitted(
     assert body["drizzle_degraded"] is None
 
 
+def test_stack_info_surfaces_the_lowered_min_max_extremes(client, solved_library):
+    """The quiet sibling of the drizzle-scale step. A walk-away run configured for
+    three extremes per side that could only afford one stamps REJKAD/REJKRQ and
+    makes the picture — same canvas, same pixel grid, same subs. Nothing about the
+    result *looks* different, so without this the card reports "min/max x1" on a
+    target set to x3 and the reason only ever existed in a job log."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["REJKAD"] = 1
+                hdul[0].header["REJKRQ"] = 3
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    rd = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["rejection_degraded"]
+    assert rd["kind"] == "fewer_extremes"
+    assert rd["applied"] == 1
+    assert rd["requested"] == 3
+    assert rd["reason"] == "memory"
+
+
+def test_stack_info_surfaces_a_skipped_drizzle_rejection_pass(client, solved_library):
+    """The third lever, and the one with a real cost: a drizzled run whose second
+    rejection pass was over budget ran *no* rejection at all. The card would
+    otherwise read as a picture that simply never had any."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == int(run_id))
+            with fits.open(run.fits_path, mode="update") as hdul:
+                hdul[0].header["DRZREJSK"] = "memory"
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    rd = client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/info").json()["rejection_degraded"]
+    assert rd["kind"] == "drizzle_reject_skipped"
+    assert rd["reason"] == "memory"
+    # It carries no counts: the pass didn't run, so there is no "1 instead of 3".
+    assert "applied" not in rd
+
+
+def test_stack_info_rejection_degrade_absent_on_a_run_that_fitted(
+        client, solved_library):
+    """Which is every run on a healthy box. The line has to self-hide rather than
+    read as "unknown" — and a master recorded before the cards existed must be
+    indistinguishable from a run that simply fitted."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _, run_id = _make_run_with_fits(solved_library, safe)
+    body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
+    assert body["rejection_degraded"] is None
+
+
 def test_stack_info_frame_accounting_absent_on_older_master(client, solved_library):
     """A master recorded before frame accounting existed has no NOFFERED card, so
     frame_accounting is None (older masters degrade gracefully)."""

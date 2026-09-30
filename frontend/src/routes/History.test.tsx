@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import roughCases from "../roughlyAligned.cases.json";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, panelGainSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, contributingSubs, calibrationSummaryText, drizzleDegradedNote, removedOverlayCaption, derivedFromNote } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, panelGainSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, contributingSubs, calibrationSummaryText, drizzleDegradedNote, rejectionDegradedNote, removedOverlayCaption, derivedFromNote } from "./History";
 import { formatIntegration } from "../format";
 import * as client from "../api/client";
 import { FULL_RES_PNG_MAX_LONG_EDGE } from "../fullres";
@@ -1750,6 +1750,62 @@ describe("drizzleDegradedNote", () => {
   });
 });
 
+describe("rejectionDegradedNote", () => {
+  it("says nothing on a run that fitted, or one older than the cards", () => {
+    expect(rejectionDegradedNote(null)).toBeNull();
+    expect(rejectionDegradedNote(undefined)).toBeNull();
+  });
+  it("names both counts and says what it actually cost", () => {
+    const s = rejectionDegradedNote({
+      reason: "memory", kind: "fewer_extremes", applied: 1, requested: 3,
+    });
+    expect(s).toContain("dropped 1 most-extreme sample per side");
+    expect(s).toContain("instead of the 3 it was set to");
+    // The whole point: the picture looks identical, so say so explicitly.
+    expect(s).toContain("same size and the same subs");
+  });
+  it("pluralises the count it did manage", () => {
+    const s = rejectionDegradedNote({
+      reason: "memory", kind: "fewer_extremes", applied: 2, requested: 5,
+    });
+    expect(s).toContain("dropped 2 most-extreme samples per side");
+  });
+  it("still reads sensibly when the requested count wasn't recorded", () => {
+    const s = rejectionDegradedNote({
+      reason: "memory", kind: "fewer_extremes", applied: 1,
+    });
+    expect(s).toContain("dropped 1 most-extreme sample per side");
+    expect(s).not.toContain("instead of");
+  });
+  it("omits the comparison when the recorded request isn't larger", () => {
+    const s = rejectionDegradedNote({
+      reason: "memory", kind: "fewer_extremes", applied: 3, requested: 3,
+    });
+    expect(s).not.toContain("instead of");
+  });
+  it("drops a nonsense or missing applied count rather than inventing one", () => {
+    expect(rejectionDegradedNote({ reason: "memory", kind: "fewer_extremes" })).toBeNull();
+    expect(rejectionDegradedNote({
+      reason: "memory", kind: "fewer_extremes", applied: 0,
+    })).toBeNull();
+    expect(rejectionDegradedNote({
+      reason: "memory", kind: "fewer_extremes", applied: Number.NaN,
+    })).toBeNull();
+  });
+  it("names the lever that buys the drizzle pass back, since that one is a real loss", () => {
+    const s = rejectionDegradedNote({
+      reason: "memory", kind: "drizzle_reject_skipped",
+    });
+    expect(s).toContain("Outlier removal didn't run");
+    expect(s).toContain("Every sub is in it");
+    expect(s).toContain("lower super-resolution scale");
+  });
+  it("renders nothing for a lever this build doesn't know about", () => {
+    // A newer engine's fourth reason must self-hide, not print half a sentence.
+    expect(rejectionDegradedNote({ reason: "memory", kind: "something_new" })).toBeNull();
+  });
+});
+
 describe("See what stacking removed", () => {
   const withMap = {
     run_id: 1, integration_s: 2520, n_frames: 840, weighting: null, cards: [],
@@ -2404,6 +2460,53 @@ describe("HistoryView frame accounting", () => {
     await waitFor(() =>
       expect(screen.getByText(/90 of 1,160 stacked subs were only roughly aligned/))
         .toBeInTheDocument());
+  });
+});
+
+describe("HistoryView — a run whose outlier removal was cut back for memory", () => {
+  it("puts the reason on the Info panel beside the method it contradicts", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 42, weighting: null,
+      // The card says "min/max reject" while the target is set to three
+      // extremes per side. Without the note below those two facts sit next to
+      // each other with nothing to connect them.
+      rejection: { mode: "min-max-reject", fraction: 0.002, n_rejected: 20,
+                   n_contributed: 10000, has_map: false },
+      rejection_degraded: { reason: "memory", kind: "fewer_extremes",
+                            applied: 1, requested: 3 },
+      cards: [{ key: "STACKER", value: "min/max reject", comment: "stacking method" }],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/instead of the 3 it was set to/)).toBeInTheDocument());
+  });
+
+  it("says nothing at all on a run that fitted", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([mkRun()]);
+    vi.spyOn(client.api, "stackRunInfo").mockResolvedValue({
+      run_id: 1, integration_s: 2520, n_frames: 42, weighting: null,
+      rejection: { mode: "min-max-reject", fraction: 0.002, n_rejected: 20,
+                   n_contributed: 10000, has_map: false },
+      cards: [{ key: "STACKER", value: "min/max reject", comment: "stacking method" }],
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getByText("M42_stack_01")).toBeInTheDocument());
+    openAbout();
+    fireEvent.click(await menuItem("Info"));
+
+    // Anchor on the rejection line the note would have sat under — "min/max
+    // reject" alone also matches the raw STACKER card, which is not the panel
+    // half this test is about.
+    await waitFor(() =>
+      expect(screen.getByText(/most-extreme samples/)).toBeInTheDocument());
+    expect(screen.queryByText(/didn't fit in memory/)).not.toBeInTheDocument();
   });
 });
 

@@ -8,7 +8,7 @@ import { notifications } from "@mantine/notifications";
 import { IconAdjustments, IconCheck, IconChevronDown, IconCopy, IconDeviceFloppy, IconGitCompare, IconInfoCircle, IconMoon, IconPencil, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackPanelGainSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded } from "../api/client";
+import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackPanelGainSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded, type StackRejectionDegraded } from "../api/client";
 import {
   formatCaptureNights, formatIntegration, formatStampDateTime,
 } from "../format";
@@ -464,6 +464,60 @@ export function drizzleDegradedNote(
   );
 }
 
+// "Why did this picture get less outlier removal than I asked for?" — the other
+// two things a memory-pressed run can change, and the two the finished image was
+// until now silent about.
+//
+// The guard has three levers. The drizzle-scale step above is the loud one: it
+// changes the picture's size, so `drizzleDegradedNote` exists. These two leave
+// the size and the pixel grid exactly as asked — which is precisely why they
+// need a sentence, because there is nothing to notice. A run configured for
+// three extremes per side that made its picture with one reads as "min/max ×1"
+// on this very card, and a drizzled run whose second pass was dropped reads as
+// having had no rejection at all. In both cases the reason lived only in a job
+// log, on a decision taken while nobody was watching.
+//
+// Both notes say the same three things in the same order as the drizzle one:
+// what happened, why, and what it cost — ending on the reassurance that matters
+// most, that no sub was left out. The drizzle case also names the one lever that
+// buys the pass back, because unlike the other it is a real loss of protection.
+//
+// Returns null on every run that fitted (all of them on a healthy box), on
+// masters that predate the cards, and on an unrecognised `kind` — a newer
+// engine's fourth lever must render nothing here rather than a half-sentence.
+// Pure so it can be unit-tested.
+export function rejectionDegradedNote(
+  rd: StackRejectionDegraded | null | undefined,
+): string | null {
+  if (!rd) return null;
+  if (rd.kind === "drizzle_reject_skipped") {
+    return (
+      `Outlier removal didn't run on this picture — the second pass a ` +
+      `super-resolution stack needs for it didn't fit in memory, so AstroStack ` +
+      `made the picture rather than skipping the night. Every sub is in it, but ` +
+      `a satellite trail is more likely to have survived; re-stack at a lower ` +
+      `super-resolution scale to get the pass back.`
+    );
+  }
+  if (rd.kind !== "fewer_extremes") return null;
+  const applied = rd.applied;
+  if (typeof applied !== "number" || !Number.isFinite(applied) || applied <= 0) {
+    return null;
+  }
+  const requested = rd.requested;
+  const asked =
+    typeof requested === "number" && Number.isFinite(requested) && requested > applied
+      ? ` instead of the ${requested} it was set to`
+      : "";
+  const s = applied === 1 ? "" : "s";
+  return (
+    `Outlier removal dropped ${applied} most-extreme sample${s} per side` +
+    `${asked} — the extra passes didn't fit in memory, so AstroStack made the ` +
+    `picture rather than skipping the night. It's the same size and the same ` +
+    `subs; there's just a little less protection where two trails cross one pixel.`
+  );
+}
+
 /** How many subs are actually **in** this picture, from the run's own frame
  *  accounting — `n_offered` minus the ones that could not be aligned.
  *
@@ -783,6 +837,13 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
       {drizzleDegradedNote(data.drizzle_degraded) ? (
         <Text size="xs" c="dimmed">
           {drizzleDegradedNote(data.drizzle_degraded)}
+        </Text>
+      ) : null}
+      {/* …and the two levers that leave the picture's size alone, so there is
+          nothing to notice and the run has to say it. */}
+      {rejectionDegradedNote(data.rejection_degraded) ? (
+        <Text size="xs" c="dimmed">
+          {rejectionDegradedNote(data.rejection_degraded)}
         </Text>
       ) : null}
       {(() => {
