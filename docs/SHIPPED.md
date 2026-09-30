@@ -1,8 +1,8 @@
 # Shipped — the record
 
-## 2026-09-30 (audit run A, security) — v0.492.14: a page on any other site could run the whole library, and the build form took any path on the NAS
+## 2026-09-30 (audit run A, security) — v0.492.15: a page on any other site could run the whole library, and the build form took any path on the NAS
 
-### v0.492.14 — 🔴 SECURITY FIX (C-F2, MEDIUM but the broadest exposure): every state-changing endpoint was triggerable cross-site
+### v0.492.15 — 🔴 SECURITY FIX (C-F2, MEDIUM but the broadest exposure): every state-changing endpoint was triggerable cross-site
 
 **What was wrong.** The app has no password by default (AGENTS.md §1), and a password would not have
 helped: a page on any other site the owner visits can auto-submit a `<form>` at the app — a bodiless or
@@ -34,7 +34,7 @@ alone, default ports, the vite dev-proxy shape — `frontend/vite.config.ts` set
 backend sees `localhost:5173` in both headers — a forwarded host, no headers at all, reads, health) pass on
 both. No API shape changed; nothing on disk changed. Upgrade-safe.
 
-### also in v0.492.14 — 🟡 SECURITY FIX (C-F5, LOW): `POST /api/calibration/masters` took any folder on the NAS
+### also in v0.492.15 — 🟡 SECURITY FIX (C-F5, LOW): `POST /api/calibration/masters` took any folder on the NAS
 
 The Calibration page's build form sent a raw `source_dir`, and the endpoint built a master from any
 readable folder on the server — with no password set, anyone on the LAN could point it anywhere. AGENTS.md §6:
@@ -59,6 +59,39 @@ same class was hunted through the rest of `scripts/`: `deploy.sh`'s tar backup u
 and `tar` stores a planted link as a link; `restore-data.sh` lists `-type f` only, checks every path
 component for a link before writing, and `cp --remove-destination`s; `rollback.sh` writes nothing under
 ASTRO_DATA itself. Nothing found — recorded in `PROCESS-NOTES.md`.
+## 2026-09-30 (audit run B) — v0.492.14: a Combine whose folder delete fails part way no longer resurrects the source on the next scan
+
+### 🟠 BUG FIX (autonomy / library integrity — PRIORITY 2; the 2026-09-30 audit's C-F3, MEDIUM) — `Library.open_or_create_target`, `_remove_target_files`, `MergeTargetsResult.folders_left`
+
+**The mechanism.** `merge_targets_result` ends by deleting each source target's folder under ``targets/``
+with `shutil.rmtree(..., ignore_errors=True)`. On the owner's NAS the files under a target can belong to a
+non-root local account, so that delete can stop part way — and it stopped *silently*, leaving a folder with a
+`project.sqlite` in it. `open_or_create_target` then re-adopted any unregistered folder holding a
+`project.sqlite` **before** it consulted the merge redirect (v0.480.x's `merged_folders`), so on the next scan
+the combined-away target came back from its own corpse with its stale rows: the library split in two again,
+the merge nudge re-offered the pair, and `auto_stack` could restack the shallow night — the exact state the
+redirect was built to prevent, reached by a different door.
+
+**The fix, two halves.** (1) **The redirect is asked before an unregistered folder is adopted.** A folder
+that is not registered *and* answers to a combined-away name (`_combined_destination`, the existing
+`merged_folder_destination` with its "destination still exists and opens" last mile) is left where it is,
+logged once as a leftover, and its subs go to the target they were combined into — same as a folder that is
+gone. A registered target is never asked, so the redirect still cannot shadow a live one (the existing test
+holds). (2) **The delete says what it could not do.** New `_remove_target_files` deletes without
+`ignore_errors`, logs the `OSError` with the path, and answers whether the folder is gone; `delete_target`
+uses it, and the merge records the redirect *before* deleting (so a part-failed delete is already covered),
+unregisters, then counts a folder it could not remove in the additive `MergeTargetsResult.folders_left`. The
+"not removing" path for a source whose pictures could not all be carried is untouched. **Nothing here
+touches `incoming/`** (§10): both tests fingerprint the drop folder before and after.
+
+Tests +4 (`tests/test_merge_survives_rescan.py`: the corpse staged by hand and the next scan; the merge with
+`rmtree` refusing as a foreign-owned file does — registry whole, redirect in place, `folders_left == 1`, the
+warning logged, the next scan quiet, `incoming/` byte-identical; a clean merge reports 0; the plain delete path
+unregisters and logs rather than raising). **Fail-before**: all 4 red on `origin/main`. No config, schema,
+on-disk, default or API-shape change (`folders_left` is a new field with a default; the `/api/targets/merge`
+response is unchanged — surfacing the count there is a one-line follow-up for whoever next touches
+`routers/targets.py`).
+
 ## 2026-09-30 (audit run B) — v0.492.13: a bulk restack never makes a finished picture look worse without the owner choosing it
 
 ### 🟠 BUG FIX (trust — PRIORITY 1-adjacent; the 2026-09-30 audit's C-F4, MEDIUM, the #903 shape; closes the open remainder of observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903) — option (3), "an auto-cover with provenance") — `seestack/coverpin.py`, `pipeline._displayed_picture_state`, `_settle_cover_after_restack`, `reprocess_status.hand_finished*`, Settings → Maintenance

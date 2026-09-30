@@ -24,7 +24,7 @@ every write that starts from a path under ASTRO_DATA:
 - `rollback.sh` — writes nothing under ASTRO_DATA; it delegates to `restore-data.sh`.
 
 Nothing to fix. The audit's own three tests are in `tests/test_updater_symlink_escape.py`, with the one
-that expected `ensure_queue` to carry on changed to expect v0.492.5's refusal (see `SHIPPED.md`, v0.492.14).
+that expected `ensure_queue` to carry on changed to expect v0.492.5's refusal (see `SHIPPED.md`, v0.492.15).
 
 ### The audit's CSRF test, and why it was changed rather than made to pass
 
