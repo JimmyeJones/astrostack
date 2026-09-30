@@ -1,5 +1,156 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder, same run as v0.492.6) — v0.492.7: the recap line said "12 other" too, and the drift test that should have caught both was exempted
+
+### 🟠 BUG (friendliness / trust, found and fixed this run, reproduced before the fix) — `session_recap.bucket_reject_reason` sent **four of the six** reasons the app names to "other", two of them already fixed everywhere else
+
+*(Builder 2026-09-30, immediately after v0.492.6 and from the same grep. Filed and fixed together because they
+are one defect on two surfaces plus the guard that missed them.)*
+
+**The second surface.** `seestack/session_recap.bucket_reject_reason` is the *other* hand mirror of the same
+vocabulary — the grouping behind the "last night" recap sentence (*"412 kept; 88 set aside (10 cloudy, 2
+trailed)"*), the Nights rows, the live-session card and the per-target night contributions (four call sites,
+one function, shared with `seestack/livesession.py`). It matches **substrings** of the lowercased reason
+against a needle table, and measured on the constants the app actually writes:
+
+| reason | bucket before |
+|---|---|
+| `bad plate-solve (scale disagrees with the other frames)` | `other` |
+| `bad plate-solve (footprint far from the group)` | `other` |
+| `auto:seestar_output` | `other` |
+| `auto:file_missing` | `other` |
+
+So the owner read **"12 other"** in the one sentence he sees on return — and two of those four
+(`auto:seestar_output`, `auto:file_missing`) had *already* been given their own words on the Frames-table
+badge (`rejectReason.ts` `EXACT_LABELS`) and their own bucket on the breakdown card, in two separate earlier
+fixes. This surface was simply never swept.
+
+**The fix.** Three new rows at the **top** of `_REJECT_BUCKETS`, keyed on the constants themselves rather than
+on a hand-typed needle: `wrongly located`, `Seestar's own pictures`, `files missing`. First on purpose — each
+is an exact string (or prefix) the code names, so it cannot be ambiguous, and matching before the metric rows
+means a future word inside one of those sentences can never be read as a metric name. The labels are plural
+noun phrases because they are rendered as `"{n} {label}"`, so the line now reads *"88 set aside (10 cloudy, 3
+wrongly located, 2 files missing)"*. No frontend change: `SessionRecapCard.BUCKET_ORDER` already lists unknown
+buckets after the known ones "with its own label verbatim".
+
+### The part worth keeping: **why the drift test did not catch either one**
+
+`tests/test_reject_reason_labels.py` already contained
+`test_every_reason_the_code_writes_groups_into_a_named_bucket`, whose whole purpose is *"an exact reason the app
+writes about a file falling into 'Left out for other reasons' is the same failure as showing its raw code"*. It
+was green throughout. The reason is a one-line interaction nobody had noticed:
+
+* the stacker's bad-solve write passes a **local** (`project.update_frame(f.id, accept=False,
+  reject_reason=reason)`), assigned from one of two constants an `if`-expression above;
+* `_literals()` cannot derive a bare local, so the site is **opaque**, and an opaque site must appear in
+  `_EXEMPT`. It does — with a sentence about the **badge**: *"deliberately shown verbatim, which is what
+  rejectReasonLabel's fall-through is for."* Entirely correct, for the label tests.
+* But `_vocabulary()` is shared by **all four** tests, and an exempted site contributes **nothing** to any of
+  them. One exemption, written about one test, silently excused the write from the other three.
+
+**So the guard was blind exactly where the bug was.** Fixed by not trusting the scrape for the reasons the
+engine *names*: new `_named_reasons()` reads every `REJECT_REASON_*` string off `seestack.io.project` at
+runtime and unions it into both bucket tests. A constant cannot hide this way — it either buckets or it does
+not. The `_EXEMPT` entry now says in its own text that it covers the label checks only, and why. The
+`_PREFIX` constants are included deliberately (a prefix is the head of every reason composed from it, and both
+mappings match by prefix/substring). `_named_reasons()` itself has a guard —
+`test_the_named_reason_sweep_actually_finds_the_constants` — so a rename cannot quietly shrink the set and
+leave two tests checking nothing.
+
+**Proven, not asserted.** With `webapp/rejection_summary.py` reverted to pre-v0.492.6 and the repaired test
+run, it fails and *names all three strings*:
+`['bad plate-solve (', 'bad plate-solve (footprint far from the group)', 'bad plate-solve (scale disagrees with
+the other frames)']`. The v0.492.6 bug would not have shipped. The two new recap tests likewise **fail before
+and pass after** (engine reverted in a scratch copy and run).
+
+**Tests +3 net** (two new, one moved): the recap vocabulary test beside the existing `bucket_reject_reason`
+cases (which also pins that the rows already working did not move — a metric reason still reads as its
+metric, and a genuinely unnamed reason is still honestly `other`), the new recap bucket drift test, and the
+sweep-finds-the-constants guard. v0.492.6's ad-hoc copy of the constant sweep was **moved** out of
+`tests/webapp/test_rejection_summary.py` into the file that owns this vocabulary, so the badge, the breakdown
+and the recap are checked from one place instead of two that can drift.
+
+**Upgrade-safe.** Pure additive: a bucket *label* is presentation, computed per read from `reject_reason`
+strings already on disk, so nothing is migrated and no stored value changes. No config, schema, layout or
+default touched; no API shape change (`reject_buckets` was always an open `dict[str, int]`); nothing on the
+ingest/stack hot path.
+
+
+## 2026-09-30 (Builder, third run of the day) — v0.492.6: the app diagnosed 178 subs precisely and the beginner card said "other reasons"
+
+### 🟠 BUG (trust / friendliness — PRIORITY 1-adjacent, found and fixed this run, reproduced before the fix) — a sub the stacker dropped for a wrong plate solve was described to the owner as "Left out for other reasons"
+
+*(Builder 2026-09-30. Found while costing the read-only half of the #965 lead in "Bugs (fix these first)";
+this is a different and better-value bug in the same area, so it was fixed instead. The lead itself is
+untouched and still open.)*
+
+**Symptom.** The Target page's "why were some frames left out?" card
+(`webapp/rejection_summary.summarize_rejections`, the beginner breakdown) put every sub the stacker had
+rejected for a bad plate solve into the `other` bucket — *"Left out for other reasons / A few frames were set
+aside for other reasons."* The owner's library carries **178** such rows (observer issue #965), so on a target
+holding them that sentence is what he reads about subs the app had diagnosed exactly.
+
+**Why it is a real defect and not a cosmetic one.** v0.473.1 deliberately composed *two precise sentences*
+for the two ways a solve can be wrong — `REJECT_REASON_BAD_SOLVE_SCALE` ("scale disagrees with the other
+frames") and `REJECT_REASON_BAD_SOLVE_FOOTPRINT` ("footprint far from the group") — as prose rather than an
+`auto:` code, precisely so the Frames table badge could show them verbatim (`frontend/rejectReason.ts` falls
+through to the reason text). That worked. But `rejection_summary.bucket_for` matches `auto:`/`bulk:`/`qc:`/
+`solve_failed`/`user` and the two named constants, and nothing matched `"bad plate-solve ("` — so the one
+surface built to answer *"why were some frames left out?"* was the one surface that threw the answer away.
+**This is the second instance of the same class:** `auto:seestar_output` shipped with the identical defect and
+was given its own bucket for the identical reason ("Left out for other reasons" reads as *"some of your night
+is unaccounted for"*).
+
+**Repro, before the fix:** `bucket_for(REJECT_REASON_BAD_SOLVE_SCALE) == "other"`, and
+`summarize_rejections({SCALE: 120, FOOTPRINT: 58}, n_accepted=5000)` returns a single bucket
+`other: 178 | "Left out for other reasons"`.
+
+**The fix.** One new bucket, `bad_solve` — **"Matched to the wrong patch of sky"**, *"The star-matcher did find
+a match for these, but it disagrees with all your other subs — a different patch of sky, or a different zoom.
+Lining them up on that would smear the stars, so they're left out; your picture keeps every sub that
+agrees."* — plus the `bucket_for` branch that routes `REJECT_REASON_BAD_SOLVE_PREFIX` to it. Its slot is
+after the three "the solver had trouble" buckets and before the benign ones, so the card reads as one
+plate-solve story.
+
+**Three judgements the fix makes explicitly, each with its reason in the code:**
+- **Not the `solve_failed` bucket.** Nothing failed. "Couldn't be matched to the star field" and "was matched,
+  wrongly" are different things for the owner to go and look at.
+- **The two sub-cases share one bucket.** They are two different things to look at — which is why each keeps
+  its own sentence on the frame's own badge — but this card's job is the physical cause a beginner can hold,
+  and "the app matched this sub to the wrong bit of sky" is one cause with one consequence.
+- **No `_DOMINANT_VERDICTS` line, deliberately.** There is no action to name — and the reason is better than
+  "none exists": `solve.runner.reconcile_bad_solve_frames` (the v0.473.x follow-up to #965) already clears a
+  wrong-*scale* solve and offers the sub one more plate solve on the next scan, once per frame, ledgered. The
+  app takes the only available action by itself, so advice here would make the owner's night sound broken over
+  something already in hand. Nor can the bucket dominate a night by that route: `SCALE_CONSENSUS_SHARE` caps
+  wrong-scale frames at a tenth of the population by construction. Pinned by a test, because adding a verdict
+  here is the tempting change.
+  *(Worth recording as a near-miss: this run first traced the bad-solve rejection as **terminal** — the stored
+  `wcs_json` and the non-`solve_failed:` reason make `build_solve_arglist` skip it twice over — and was about
+  to file that as a new lead. `reconcile_bad_solve_frames` already fixes exactly that, and says so in its own
+  docstring. Grepping the solve runner before filing is what caught it; two code comments and a test docstring
+  had already been written with the wrong claim in them.)*
+
+**Deliberately backend-only.** `RejectionBreakdown.tsx` renders the server's buckets generically (label +
+note), and `rejectionActions.bucketAction` returns `null` for a key it does not know — so a new bucket needs
+no frontend change and correctly offers no button. Nothing was added to the page: the UI rule is satisfied by
+construction, because this is one more honest line in a card the owner already opens.
+
+**Tests (+6).** Four unit tests and one endpoint test **fail before and pass after** (reverted in a scratch
+copy and run): the bucket mapping for both reasons, that it is not merged into `solve_failed`, its
+presentation order, and the end-to-end `/api/targets/<t>/frames/reject-summary` read on a real
+Library/Project fixture with two subs rejected as the stacker rejects them (`accept = 0` plus the prose
+reason). Plus two guards that pass before and after by design: the no-headline-advice pin above, and a
+**drift test** — `test_every_canonical_reject_reason_the_app_writes_has_its_own_bucket` enumerates every
+`REJECT_REASON_*` constant in `seestack.io.project` and fails if any of them buckets as `other`. That is the
+guard this class has now earned twice: a future reason constant added without a bucket fails in CI instead of
+reaching the owner's card.
+
+**Upgrade-safe.** Pure additive: no config, schema, on-disk layout or default touched; no API *shape* change
+(one more entry in an existing `buckets` list, which every client already renders by iterating it); no
+behaviour change anywhere on the ingest/stack hot path. Frames already on disk carrying the prose reason are
+re-bucketed on the next read, which is the whole point.
+
 ## 2026-09-30 (owner session, later) — the update helper stops trusting links
 
 ### v0.492.5 — 🔴 SECURITY FIX: the root-run update helper followed links the container can plant

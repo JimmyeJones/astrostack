@@ -131,6 +131,39 @@ def test_bucket_reject_reason_direct():
     assert bucket_reject_reason("mystery") == "other"
 
 
+def test_the_recap_says_what_it_set_aside_not_just_other():
+    """Every reason the app names as a constant must reach the recap line in
+    words. Three did not until v0.492.7, and they are rendered as "N <label>"
+    ("12 other") in the one sentence the owner reads on return:
+
+    * the stacker's bad-solve prose — the app measured the solve wrong and said
+      exactly how (observer #965, 178 rows on the owner's library);
+    * `auto:seestar_output` and `auto:file_missing` — which had *already* been
+      given their own words on the Frames-table badge and the breakdown card,
+      and were left as "other" here only because nothing checked this mapping.
+    """
+    from seestack.io.project import (
+        REJECT_REASON_BAD_SOLVE_FOOTPRINT,
+        REJECT_REASON_BAD_SOLVE_SCALE,
+        REJECT_REASON_FILE_MISSING,
+        REJECT_REASON_SEESTAR_OUTPUT,
+    )
+
+    assert bucket_reject_reason(REJECT_REASON_BAD_SOLVE_SCALE) == "wrongly located"
+    assert bucket_reject_reason(REJECT_REASON_BAD_SOLVE_FOOTPRINT) == "wrongly located"
+    assert bucket_reject_reason(REJECT_REASON_SEESTAR_OUTPUT) == "Seestar's own pictures"
+    assert bucket_reject_reason(REJECT_REASON_FILE_MISSING) == "files missing"
+    # The rows that already worked must not have moved: the file-shaped reasons
+    # are matched first, and a metric reason still reads as its metric.
+    assert bucket_reject_reason("auto:grade:star_count") == "cloudy"
+    assert bucket_reject_reason("auto:grade:fwhm_px") == "soft"
+    assert bucket_reject_reason("auto:streak") == "trailed"
+    assert bucket_reject_reason("qc_error_final:boom") == "unreadable"
+    assert bucket_reject_reason("user") == "set aside by you"
+    # And a reason the app genuinely never named is still honestly "other".
+    assert bucket_reject_reason("something_weird") == "other"
+
+
 def _add_session(proj, night, *, n, fwhm, accept=True, reject_reason=None):
     """Add ``n`` frames all captured on ``night`` (30 s apart) with the given FWHM."""
     for i in range(n):
