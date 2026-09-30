@@ -750,17 +750,28 @@ def target_restored_subs(safe: str, request: Request) -> RestoredSubsOut | None:
     than were offered. Both stamps, because a sub set aside *after* the picture
     that used it is in that picture and must not be counted. Only *genuine*
     stack runs count, and only subs that are accepted **and** solved now, so the
-    number is what a re-stack would actually fold in. ``null`` when there is
-    nothing to say, which is the common case. Read-only; it never starts a stack.
+    number is what a re-stack would actually fold in — unless that run stacked
+    with ``star_match_unsolved`` on, which is the one setting under which an
+    un-located sub *is* one the stack would place (by matching its stars to the
+    reference), and then un-located restored subs count too. ``null`` when there
+    is nothing to say, which is the common case. Read-only; it never starts a
+    stack.
     """
     from seestack.restorednudge import restored_since_stack
     from webapp.pipeline import _stack_options_from_run_json
+    from webapp.run_options import run_places_unsolved_subs
 
     lib, proj = deps.open_target_project(request, safe)
     try:
         runs = [r for r in proj.iter_stack_runs()  # newest first
                 if _stack_options_from_run_json(r.options_json) is not None]
-        windows = proj.restored_frame_windows()
+        # "Ready to stack" normally means accepted *and* solved, because an
+        # un-located sub would not go into the picture. `star_match_unsolved`
+        # is the one setting that makes it go in anyway (by matching its stars
+        # to the reference), so the bar comes from the run this is measured
+        # against — the newest genuine one, whose settings a reprocess reuses.
+        windows = proj.restored_frame_windows(include_unsolved=bool(
+            runs and run_places_unsolved_subs(runs[0].options_json)))
     finally:
         proj.close()
         lib.close()

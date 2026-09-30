@@ -60,7 +60,11 @@ class RestoredSubs:
 
     ``n_restored`` counts only subs that are ready to stack **now** (accepted and
     plate-solved), so it is what a re-stack would actually fold in rather than
-    what was reconsidered.
+    what was reconsidered. Which subs those are is the caller's decision, not
+    this module's: it is handed the windows, and
+    :meth:`~seestack.io.project.Project.restored_frame_windows` takes the
+    ``star_match_unsolved`` case — the one setting under which an un-located sub
+    is still one the stack would place.
     """
 
     run_id: int
