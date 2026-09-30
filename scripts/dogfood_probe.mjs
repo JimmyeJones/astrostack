@@ -143,10 +143,22 @@ async function yearRoute() {
 
 const YEAR = await yearRoute();
 
-/** The comparators that only exist behind a click. `page.goto` lands on "Side
- * by side", so a sweep that only navigates can never see the other two — the
- * same blind spot `--editor` exists for on the editor. */
-const COMPARE_MODES = ["Split", "Blink"];
+/** Routes a pass has actually observed a view switch on.
+ *
+ * The switches themselves are discovered off the page (see `viewSwitches`
+ * below) rather than listed, so a control added tomorrow is swept without
+ * anyone remembering. What a list is still good for is the failure this
+ * arrangement newly has: discovery keys off Mantine's own class names, so a
+ * Mantine rename would find **nothing**, everywhere, and a sweep that silently
+ * covers less than it did reports CLEAN exactly as before. Naming the routes
+ * where a switch is known to exist turns that silence into a printed finding.
+ *
+ * `tests/test_dogfood_view_switches.py` pins each of these against the route
+ * component that renders it, so a control genuinely removed is a red test
+ * rather than a warning nobody reads. Gallery's and History's switches are
+ * deliberately absent: they render only inside a modal / on data this sweep's
+ * library does not have, so "no switch here" is the honest landing state. */
+const KNOWN_VIEW_SWITCHES = ["/compare", "/logs", "/life-list", "/tonight", "/sky"];
 
 /** The Settings page's own sections — the same blind spot again, and the one it
  * hid the most behind.
@@ -304,6 +316,78 @@ function clippedLabels() {
     }
   }
   return out;
+}
+
+/** The views a page keeps behind a click, and the labels that reach them.
+ *
+ * Two shapes, both of which hide content from a sweep that only navigates:
+ *
+ * * a **SegmentedControl** swaps the rendered view outright — `/life-list`'s
+ *   "Still to shoot", `/tonight`'s object-type filters, `/logs`' severities,
+ *   `/sky`'s three maps, `/compare`'s Split and Blink;
+ * * a collapsed **Accordion** panel is not in the layout at all — the Stack
+ *   form's "Advanced options" is every advanced stacking control in the app.
+ *
+ * Read off the page's own DOM rather than listed here, for the reason the route
+ * table's comment gives about hand-mirrored lists: a filter added tomorrow is
+ * swept without anyone remembering, and `COMPARE_MODES` — which is what this
+ * replaces — had been a two-string list covering one page since v0.440.2.
+ *
+ * Every option is returned, each marked `active` when it is the one already
+ * showing — the caller seeds its own "done" set from that, so the landing view
+ * is not re-probed after the loop has clicked past it and come back round.
+ *
+ * Deliberately only these two controls. Both are disclosure — they change what
+ * is drawn and nothing else — so a sweep may click them freely, which is not
+ * true of buttons in general. */
+function viewSwitches() {
+  const out = [];
+  for (const el of document.querySelectorAll(
+    '[class*="mantine-SegmentedControl-label"]')) {
+    const text = (el.textContent || "").trim();
+    if (!text) continue;
+    // Active by either of the two marks Mantine leaves — `data-active` on the
+    // label, and the radio it labels being checked.
+    const input = el.control
+      || document.getElementById(el.getAttribute("for") || "");
+    const active = el.getAttribute("data-active") === "true"
+      || Boolean(input && input.checked);
+    out.push({ kind: "view", label: text, active });
+  }
+  for (const el of document.querySelectorAll(
+    '[class*="mantine-Accordion-control"]')) {
+    const text = (el.textContent || "").trim();
+    if (!text) continue;
+    out.push({
+      kind: "panel", label: text,
+      active: el.getAttribute("aria-expanded") === "true",
+    });
+  }
+  return out;
+}
+
+/** Open every shut disclosure panel on the page, in one round trip.
+ *
+ * Driven in-page rather than through Playwright's actionability machinery, and
+ * that is a deliberate difference from the view switches above: the Glossary
+ * carries **forty** terms, and forty `locator.click()`s with a fresh discovery
+ * between each cost more than every other route in the sweep put together. A
+ * disclosure control has nothing to simulate — it toggles a panel and does
+ * nothing else — so the page's own `click()` reaches the same state, and what
+ * is then probed is identical.
+ *
+ * Loops a few times because opening a panel can reveal a nested one; stops as
+ * soon as a pass opens nothing. Returns how many it opened, for the label. */
+function expandAllPanels() {
+  let opened = 0;
+  for (let round = 0; round < 4; round += 1) {
+    const shut = Array.from(document.querySelectorAll(
+      '[class*="mantine-Accordion-control"]'))
+      .filter((el) => el.getAttribute("aria-expanded") !== "true");
+    if (!shut.length) break;
+    for (const el of shut) { el.click(); opened += 1; }
+  }
+  return opened;
 }
 
 /** Every sentence on the Target page that tells the owner what to DO next,
@@ -532,23 +616,100 @@ for (const { name, width, height } of WIDTHS) {
     // work (AGENTS.md §1) is scored on exactly this number, and it has twice
     // been measured by hand from these screenshots afterwards. Report it here
     // so "which page is the wall?" is answered by the run. Taken before any
-    // click below, so a route's height is always its *landing* height.
+    // click below, so a route's *landing* height is always recorded as the bare
+    // route; a view reached by a click is recorded under its own label, because
+    // the tallest thing this app draws is one of those (see below) and a table
+    // that only knew landing heights answered "which page is the wall?" wrong
+    // by a factor of four.
     heights.push([name, route, (await page.evaluate(
       () => document.documentElement.scrollHeight))]);
-    // Compare's other two comparators are behind a SegmentedControl, and they
-    // carry a provenance strip that "Side by side" does not — a whole element
-    // this sweep could not reach by navigating. One click each, then the same
-    // checks. A missing control is not a finding: the page legitimately refuses
-    // Split when a stack has no preview.
-    if (COMPARE && route === COMPARE) {
-      for (const mode of COMPARE_MODES) {
-        errors.length = 0;
-        const button = page.getByText(mode, { exact: true }).first();
-        if (!(await button.count())) continue;
-        await button.click();
-        await page.waitForTimeout(600);
-        await probeCurrentView(`${route} [${mode}]`, `${slug}_${mode.toLowerCase()}`);
+    // What the page keeps behind a click. `page.goto` lands on one view of a
+    // SegmentedControl and on a shut Accordion, so everything else was
+    // structurally unreachable: Compare's Split and Blink carry a provenance
+    // strip "Side by side" does not (v0.440.0 lived exactly there), the Stack
+    // form's "Advanced options" is every advanced stacking control in the app,
+    // the Glossary's forty term bodies are forty blocks of prose, and
+    // `/life-list`'s "Still to shoot" measured **14,492 px** on a phone — 4.3x
+    // the tallest landing height any pass had ever recorded, one click from a
+    // nav page, never drawn.
+    //
+    // The two shapes are swept differently on purpose:
+    //
+    // * a **view** switch replaces the page, so each one is its own probe and
+    //   its own height row — those heights are what "which page is the wall?"
+    //   is actually asking, and the landing-only table answered it wrong by a
+    //   factor of four;
+    // * a **panel** adds to the page it is on, so they are opened *together*
+    //   (in one round trip, see `expandAllPanels`) and probed once. One at a
+    //   time would mean forty screenshots of a growing Glossary, and forty
+    //   cumulative heights that are nobody's page — the tallest of them would
+    //   top the wall table while describing a state no reader is ever in. One
+    //   "everything disclosed" probe catches an overflow in any panel at the
+    //   cost of one shot, and pushes no height.
+    //
+    // Discovery is re-run after each click: a switch can reveal a switch, and a
+    // click re-renders, so element handles do not survive. Clicking by label
+    // keeps that honest. A control may legitimately refuse — Compare refuses
+    // Split when a stack has no preview — which is the page's call, not a
+    // finding.
+    const clickByLabel = async (label) => {
+      const control = page.getByText(label, { exact: true }).first();
+      if (!(await control.count())) return false;
+      return control.click({ timeout: 5000 }).then(() => true, () => false);
+    };
+    const switchesOf = async (kind) =>
+      (await page.evaluate(viewSwitches)).filter((s) => s.kind === kind);
+
+    // Seeded with the view the landing probe just shot, so clicking round the
+    // control does not come back to it and photograph it a second time.
+    const seenViews = new Set(
+      (await switchesOf("view")).filter((s) => s.active).map((s) => s.label));
+    const viewCount = (await switchesOf("view")).length;
+    for (let round = 0; round < 16; round += 1) {
+      const next = (await switchesOf("view"))
+        .find((s) => !seenViews.has(s.label));
+      if (!next) break;
+      seenViews.add(next.label);
+      errors.length = 0;
+      if (!(await clickByLabel(next.label))) continue;
+      await page.waitForTimeout(600);
+      const viewSlug = next.label.replace(/\W+/g, "_").toLowerCase();
+      await probeCurrentView(`${route} [${next.label}]`, `${slug}_${viewSlug}`);
+      heights.push([name, `${route} [${next.label}]`, (await page.evaluate(
+        () => document.documentElement.scrollHeight))]);
+    }
+
+    // Back to the landing view before disclosing, so "everything open" is a
+    // state a reader can actually reach from the page as it arrives, rather
+    // than whichever view the loop above happened to leave behind.
+    const shutPanels = (await switchesOf("panel")).filter((s) => !s.active);
+    if (shutPanels.length) {
+      if (seenViews.size) {
+        await page.goto(BASE + route, { waitUntil: "networkidle", timeout: 20000 })
+          .catch(() => {});
+        await page.waitForTimeout(400);
       }
+      errors.length = 0;
+      const opened = await page.evaluate(expandAllPanels);
+      if (opened) {
+        await page.waitForTimeout(500);
+        await probeCurrentView(
+          `${route} [${opened} panel${opened === 1 ? "" : "s"} open]`,
+          `${slug}_panels`,
+        );
+      }
+    }
+    // Discovery keys off Mantine's own class names, so a Mantine rename finds
+    // nothing everywhere and a sweep that covers less reports CLEAN exactly as
+    // before. Say so where a switch is known to exist.
+    // `/compare` carries two picture refs in its query string, so match the path.
+    if (KNOWN_VIEW_SWITCHES.includes(route.split("?")[0]) && viewCount === 0) {
+      findings++;
+      console.log(
+        `[${name}] ${route}: NO VIEW SWITCH FOUND, but this page has one — ` +
+        `viewSwitches() found nothing to click (a Mantine class rename?). ` +
+        `Everything behind it is unswept.`,
+      );
     }
     // Collected at the desktop width only: the phone pass would say the same
     // sentences twice, and the fold is decided by priority rather than by width.

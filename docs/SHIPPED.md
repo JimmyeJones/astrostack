@@ -2,6 +2,74 @@
 
 ## 2026-09-30 (Builder, the next run) — six of the seven Settings sections had never been drawn
 
+### v0.492.2 — INFRA / the quality bar itself: the sweep opens what a page keeps behind a click, and the wall table was wrong by 4.3x
+
+*(The generalisation of v0.492.1, found by measuring it rather than reasoning about it. v0.492.1 closed one
+instance — a page hiding six of its seven sections behind a **tab**. This is the class.)*
+
+**What was measured, before anything was built.** A one-off drive of the running dogfood app clicked every
+`SegmentedControl` option and expanded every `Accordion` on the routes that carry one, at 1440 px and 420 px.
+Nothing overflowed, nothing was squeezed or clipped, no console error — but the heights say the sweep had
+been measuring the wrong thing:
+
+| view | phone height | in any baseline? |
+|---|---|---|
+| `/life-list` **[Still to shoot]** | **14,492 px** | no |
+| `/life-list` **[Up tonight]** | 7,006 px | no |
+| `/life-list` (landing, "All") | 3,094 px | yes |
+| `/tonight` **[Nebula]** | 3,543 px | no |
+| `/stack` **[Advanced options open]** | 3,264 px (from 1,748) | no |
+
+The tallest landing height any dogfood pass has ever recorded is `/tonight` at ~3,400 px. The tallest thing
+this app actually draws is **4.3x** that, one click from a nav page, and no pass had ever drawn it. Since
+AGENTS.md §1's layout rule is scored on exactly this number — *"only on a page **measured** long with the data
+that makes it long"* — the table that answers "which page is the wall?" had been answering it wrong.
+
+**Why the landing view is all a sweep ever saw.** `page.goto` lands on one option of a `SegmentedControl` and
+on a **shut** `Accordion`. `dogfood_probe.mjs` had exactly one exception, hard-coded: `COMPARE_MODES =
+["Split", "Blink"]`, added in v0.440.2 because a bug lived behind that one control. It covered one page.
+`/life-list`'s four filters, `/tonight`'s four, `/logs`' four, `/sky`'s three maps, the Stack form's entire
+advanced panel and the Glossary's forty term bodies were all unswept, and the probe's own comment had
+anticipated this — `probeCurrentView` was split out of the route loop precisely so *"a view reached by a
+click — a comparator mode, **and anything else added later** — is held to the identical checks"*.
+
+**What shipped.** `viewSwitches()` reads both control shapes off the page's own DOM, so a filter added
+tomorrow is swept without anyone remembering, and `COMPARE_MODES` is gone. The two shapes are swept
+differently, on purpose:
+
+- a **view** switch replaces the page, so each inactive option is its own probe **and its own height row**,
+  labelled `"/life-list [Still to shoot]"`. Active options are seeded into the seen-set from Mantine's own
+  `data-active` / `checked` marks, so clicking round a control does not come back and photograph the landing
+  view twice.
+- a **panel** adds to the page it is on, so they are opened **together** (`expandAllPanels`, one in-page round
+  trip) and probed once, pushing **no** height. One at a time would mean forty screenshots of a growing
+  Glossary and forty cumulative heights that are nobody's page — the tallest would top the wall table while
+  describing a state no reader is ever in. The bulk open is also what keeps the cost sane: clicking the
+  Glossary's forty terms through Playwright's actionability machinery cost more than every other route in the
+  sweep put together (**6m04s**), against **3m01s** in one round trip.
+
+**The cost, stated rather than hidden.** The probe half goes **2m11s → 3m01s** (1.4x) and 64 → 106
+screenshots, for 42 views no pass had ever drawn. The earlier one-at-a-time version was 2.8x, which is the
+sort of number that stops a tool being run; that is why the panels are bulk-opened.
+
+**The new way to fail silently, and its guard.** Discovery keys off Mantine's own class names, so a Mantine
+rename would find nothing, on every route, and a sweep covering only landing views would report CLEAN exactly
+as before. `KNOWN_VIEW_SWITCHES` names the five routes a pass has observed a switch on and the probe prints a
+**finding** when one yields nothing to click. That list is then itself the thing that rots, so
+`tests/test_dogfood_view_switches.py` pins each entry against the route component that renders its switch —
+one-directional on purpose, because Gallery's and History's switches render only behind a modal / on data this
+sweep's library does not have, so "no switch here" is their honest landing state. A second test keeps the
+hand-written label list from coming back.
+
+**Read, not just measured.** All 106 views came back clean at both widths. `/life-list [Still to shoot]`'s
+14,492 px is **not** a bug: `Section` collapses the to-do tail to `TODO_PREVIEW` only in the mixed "All" view,
+and its comment says why — *"'Still to shoot' is the list the user just asked for, so it is never shortened
+there"*. Recorded here so the next run does not re-derive it and does not take a layout slice at it.
+
+**Tooling only.** No engine, webapp, frontend, config, schema, on-disk, API or default change.
+
+**Tests (+2).** Both in the new `tests/test_dogfood_view_switches.py`, and both fail on a reverted probe.
+
 ### v0.492.1 — INFRA / the quality bar itself: the dogfood sweep opens every Settings section, not just the first
 
 *(The top open entry of "Autonomy & friendliness", filed by the previous Builder the same morning while
