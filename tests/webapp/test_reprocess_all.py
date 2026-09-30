@@ -2013,6 +2013,9 @@ def test_reprocess_alls_posture_reaches_the_engines_degrade_lever(
 # the same constants `test_new_subs_waiting.py` pins the definition with.
 _BEFORE_THE_FRAMES = "2024-09-01T00:00:00+00:00"
 _AFTER_THE_FRAMES = "2025-01-01T00:00:00+00:00"
+# `restoration_stamp()`'s shape, later than every run these tests write: the
+# moment automation handed a sub back after the picture had been made.
+_RESTORED_AFTER_EVERYTHING = "2026-06-01T00:00:00+00:00"
 
 
 def _seed_run_at(lib, safe, ts, *, options=None, engine_version=None):
@@ -2210,6 +2213,56 @@ def test_reprocess_status_counts_the_new_light_scope(solved_library):
     assert status["finished_pictures_new_light_only"] == 0
     assert (status["finished_pictures_new_light_only"]
             <= status["finished_pictures"])
+
+
+def _restore_every_sub_at(lib, safe, stamp):
+    """Stamp every sub of ``safe`` as put back by automation at ``stamp``.
+
+    What ``reconcile_bad_solve_frames`` / ``apply_grade_reaccepts`` /
+    ``restore_missing_frames`` each write when they hand a sub back.
+    """
+    proj = lib.open_target(safe)
+    try:
+        for f in proj.iter_frames():
+            proj.update_frame(f.id, restored_utc=stamp)
+    finally:
+        proj.close()
+
+
+def test_new_light_only_reaches_a_target_whose_shortfall_is_a_restored_sub(
+        solved_library, monkeypatch):
+    """The batch has to be able to restack a picture that is behind for the *other*
+    reason, or the one library-wide catch-up cannot reach it at all.
+
+    Both targets here were stacked *after* every sub was shot, so on a capture-time
+    reading of "new light" the batch is empty. One of them then had its subs handed
+    back by the app itself — which is precisely what ``reconcile_bad_solve_frames``
+    (v0.489.0) does for up to 178 of the owner's subs, every one of them shot long
+    before the picture it is missing from. That target's picture is missing light it
+    holds; the other's is not.
+    """
+    captured: list = []
+    _patch_run_stack(monkeypatch, capture=captured)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        came_back, caught_up = [e.safe_name for e in lib.list_targets()]
+        _seed_run_at(lib, came_back, _AFTER_THE_FRAMES)
+        _seed_run_at(lib, caught_up, _AFTER_THE_FRAMES)
+        _restore_every_sub_at(lib, came_back, _RESTORED_AFTER_EVERYTHING)
+        status = pipeline.reprocess_status(lib)
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all, _settings(solved_library),
+                            job, new_light_only=True)
+    finally:
+        lib.close()
+
+    # The dialog and the batch are one set, which is why they share the helper.
+    assert status["new_light"] == 1
+    assert status["new_light_subs"] == 3
+    assert summary["total"] == 1
+    assert summary["stacked"] == 1
+    assert summary["failed"] == []
+    assert len(captured) == 1
 
 
 def test_reprocess_status_new_light_is_zero_on_a_caught_up_library(solved_library):

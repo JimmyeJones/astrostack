@@ -1185,9 +1185,11 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
     quote the number that matches the scope the user picked.
 
     ``new_light``/``new_light_subs`` are the third scope's own pair: how many
-    targets have shot accepted-and-solved subs since their picture was made, and
+    targets hold accepted-and-solved subs their own picture does not contain, and
     how many such subs there are in all — the sentence the "Bring my pictures up
-    to date" button needs before it queues hours of CPU. They are asked through
+    to date" button needs before it queues hours of CPU. "Does not contain" is
+    wider than "shot since" and deliberately so; the reasoning is on
+    :func:`webapp.routers.newsubs.new_light_since_picture`. They are asked through
     :func:`webapp.routers.newsubs.new_light_since_picture`, the same helper the
     Dashboard note is built on, so the note and the batch can never name
     different targets. ``finished_pictures_new_light_only`` completes the set:
@@ -1607,8 +1609,8 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
     with no genuine stack (or one that predates version tracking) is treated as
     stale and reprocessed.
 
-    ``new_light_only`` scopes the batch the other way: to the targets that have
-    shot accepted-and-solved subs **since their own picture was made** — the
+    ``new_light_only`` scopes the batch the other way: to the targets holding
+    accepted-and-solved subs **their own picture does not contain** — the
     "Bring my pictures up to date" button. It is the scope the owner's cadence
     actually wants and the one the endpoint had no way to express: ``stale_only``
     asks "did the *engine* change?", and nothing asked "did the *light* change?",

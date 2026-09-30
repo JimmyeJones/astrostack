@@ -24,6 +24,16 @@ const NAMED = 3;
  * you had to open to find out. So a picture could sit months behind its own data
  * with nothing anywhere saying so.
  *
+ * The count is every sub a target holds ready to stack that its own picture does
+ * not contain — usually light shot since it was made, and also a sub the app set
+ * aside while it was being made and has since put back by itself (a streak that
+ * turned out to be a tracked object, a wrong-scale plate solve given its one
+ * retry). The backend owns that rule (``new_light_since_picture``) and the
+ * sentence below is worded for both, because "you've shot N more since" would be
+ * false of the second kind — it was shot on the very night the picture is made of.
+ * The *per-target* page keeps the two apart on purpose, with a sentence each; a
+ * library-wide note's only question is which pictures are behind.
+ *
  * It self-hides at zero — a library that is fully stacked, and every library on
  * the very first render — names up to three targets with a direct link into each
  * one's Stack form, and is dismissable by *signature*, so "not now" quiets
@@ -85,14 +95,13 @@ export function NewSubsWaitingNote() {
     >
       <Text size="sm">
         {count === 1
-          ? `You've shot ${total} more ${subWord} of this target since AstroStack last `
-            + "stacked it, so the picture you're seeing doesn't include your newest "
-            + `light. Stacking again folds ${total === 1 ? "it" : "them"} in — the `
-            + "picture you have now stays in that target's history."
-          : `You've shot ${total} more ${subWord} across ${count} targets since AstroStack `
-            + "last stacked them, so the pictures you're seeing don't include your "
-            + "newest light. Stacking one again folds its new subs in — the picture you "
-            + "have now stays in that target's history."}
+          ? `You have ${total} more ${subWord} of this target ready to stack than the `
+            + `picture you're seeing includes. Stacking again folds `
+            + `${total === 1 ? "it" : "them"} in — the picture you have now stays in `
+            + "that target's history."
+          : `You have ${total} more ${subWord} ready to stack across ${count} targets `
+            + "than their pictures include. Stacking one again folds its missing subs "
+            + "in — the picture you have now stays in that target's history."}
       </Text>
       <Group gap="sm" mt="xs" wrap="wrap">
         {named.map((it) => (

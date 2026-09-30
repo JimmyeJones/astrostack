@@ -91,6 +91,23 @@ describe("NewSubsWaitingNote", () => {
     expect(screen.getByText(/folds it in/)).toBeInTheDocument();
   });
 
+  it("never claims the subs were shot *since* the stack — some were handed back",
+    async () => {
+      // The count is every sub a picture is missing, and since v0.493.0 that
+      // includes one the app set aside while the picture was being made and has
+      // since put back by itself (`new_light_since_picture`). Such a sub was shot
+      // on the very night the picture is made of, so "you've shot N more since
+      // AstroStack last stacked it" — the sentence this note used to carry — is
+      // false of it. The wording has to be true of both kinds.
+      vi.spyOn(client.api, "getNewSubsWaiting").mockResolvedValue({
+        count: 1, total_new_subs: 4, items: [item({ n_new_subs: 4 })],
+      });
+      renderNote();
+      expect(await screen.findByText(/4 more subs of this target ready to stack/))
+        .toBeInTheDocument();
+      expect(screen.queryByText(/since AstroStack last/)).toBeNull();
+    });
+
   it("stays dismissed for the same backlog, and speaks again after another night",
     async () => {
       const spy = vi.spyOn(client.api, "getNewSubsWaiting").mockResolvedValue({

@@ -445,9 +445,9 @@ export function newLightScopeText(status: ReprocessStatus | undefined): string |
       + "picture yet"
     : "";
   return (
-    `Re-stacks the ${targets} ${targets === 1 ? "target" : "targets"} you've shot `
-    + `more of since ${targets === 1 ? "its picture was" : "their pictures were"} `
-    + `made${waiting}. Every other target is left alone.`
+    `Re-stacks the ${targets} ${targets === 1 ? "target" : "targets"} whose `
+    + `${targets === 1 ? "picture is" : "pictures are"} missing subs you already `
+    + `have${waiting}. Every other target is left alone.`
   );
 }
 
@@ -518,8 +518,8 @@ export function Maintenance() {
   const onClick = () => {
     const scopeText = scope === "new-light"
       ? "Bring your pictures up to date?\n\n"
-        + `(${newLightText ?? "Only the targets you've shot more of since their "
-          + "pictures were made are restacked."})\n\n`
+        + `(${newLightText ?? "Only the targets whose pictures are missing subs "
+          + "you already have are restacked."})\n\n`
       : scope === "stale"
         ? "Restack every target that hasn't already been stacked with the current "
           + "version?\n\n(Targets already up to date on this version are skipped.)\n\n"
@@ -586,7 +586,7 @@ export function Maintenance() {
           <Stack gap="xs" mt="xs">
             <Radio
               value="new-light"
-              label="Only targets with new light since their picture"
+              label="Only targets whose picture is missing subs you have"
               description={newLightText
                 ?? "Restacks just the targets you've shot more of since their "
                    + "pictures were made."}

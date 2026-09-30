@@ -578,9 +578,20 @@ describe("newLightScopeText", () => {
 
   it("reads naturally for one target and one sub", () => {
     const msg = newLightScopeText({ ...withNewLight, new_light: 1, new_light_subs: 1 });
-    expect(msg).toContain("1 target you've shot more of since its picture was made");
+    expect(msg).toContain("1 target whose picture is missing subs you already have");
     expect(msg).toContain("1 sub");
     expect(msg).not.toContain("1 subs");
+  });
+
+  it("never says the subs were shot *since* the picture — some were handed back", () => {
+    // The scope counts every sub a picture is missing, which includes one the app
+    // set aside while the picture was being made and has since put back (see
+    // `webapp.routers.newsubs.new_light_since_picture`). Such a sub was shot on
+    // the very night the picture is made of, so "you've shot more of these since"
+    // would be false of it. The wording has to hold for both kinds.
+    const msg = String(newLightScopeText(withNewLight));
+    expect(msg).toContain("missing subs you already have");
+    expect(msg).not.toMatch(/shot more of since/);
   });
 
   it("says the good state plainly on a fully caught-up library", () => {
@@ -626,7 +637,7 @@ describe("Maintenance — the new-light scope", () => {
       .mockResolvedValue({ job_id: "job-9", already_running: false });
 
     renderMaintenance();
-    fireEvent.click(screen.getByLabelText(/Only targets with new light/));
+    fireEvent.click(screen.getByLabelText(/Only targets whose picture is missing subs/));
     fireEvent.click(
       await screen.findByRole("button", { name: /Bring my pictures up to date/ }));
 
@@ -668,7 +679,7 @@ describe("Maintenance — the new-light scope", () => {
     renderMaintenance("/settings/maintenance?scope=new-light");
     // The scope comes from the URL, so the button is there before the counts
     // are; wait for the numbers themselves, which is what this is about.
-    await screen.findByText(/3 targets you've shot more of/);
+    await screen.findByText(/3 targets whose pictures are missing subs/);
     fireEvent.click(
       screen.getByRole("button", { name: /Bring my pictures up to date/ }));
 
@@ -687,7 +698,7 @@ describe("Maintenance — the new-light scope", () => {
       expect(screen.getByLabelText(/Only targets not already stacked on this version/))
         .toBeChecked());
     expect(screen.getByLabelText(/Every target/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Only targets with new light/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Only targets whose picture is missing subs/)).toBeInTheDocument();
   });
 });
 
