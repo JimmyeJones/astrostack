@@ -29,7 +29,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, NamedTuple
 
 log = logging.getLogger(__name__)
 
@@ -139,8 +139,16 @@ CREATE TABLE IF NOT EXISTS frames (
     -- when automation *un*-rejected this frame (ISO-8601 UTC); NULL for a frame
     -- that was never set aside, is still set aside, or was put back by the user.
     -- Only the automatic reconsiderations stamp it — see
-    -- ``Project.restored_frame_stamps``
+    -- ``Project.restored_frame_windows``
     restored_utc        TEXT,
+    -- when automation last set this frame *aside* from an accepted state
+    -- (ISO-8601 UTC); NULL for a frame that has never been un-accepted, and for
+    -- every row written before this column existed (added without a
+    -- ``SCHEMA_VERSION`` bump, so the upgrade stays rollable). Stamped centrally by
+    -- ``Project.update_frame`` so every reject path records it, and read only to
+    -- answer "was this sub in the picture that was stacked at T?" — see
+    -- ``Project.restored_frame_windows``.
+    rejected_utc        TEXT,
     user_override       INTEGER NOT NULL DEFAULT 0   -- 0/1; 1 means user toggled
 );
 
@@ -220,8 +228,14 @@ class FrameRow:
     user_override: bool = False
     # When automation put this frame *back* after having set it aside (ISO-8601
     # UTC). NULL on every frame that was never reconsidered and on every row
-    # written before schema 22. See :meth:`Project.restored_frame_stamps`.
+    # written before schema 22. See :meth:`Project.restored_frame_windows`.
     restored_utc: str | None = None
+    # …and when it was last set *aside* from an accepted state. The pair is what
+    # says whether the sub was in a picture stacked at some moment T: it was
+    # absent only if ``rejected_utc < T < restored_utc``. NULL on every frame
+    # that has never been un-accepted and on every row written before the column
+    # existed (added without a ``SCHEMA_VERSION`` bump — the upgrade is rollable).
+    rejected_utc: str | None = None
 
     @property
     def solved(self) -> bool:
@@ -439,8 +453,25 @@ _INSERT_COLS = [
     "fwhm_px", "star_count", "sky_adu_median", "eccentricity_median", "transparency_score",
     "streak_detected", "streak_count", "streak_cx", "streak_cy",
     "mosaic_panel_id",
-    "accept", "reject_reason", "user_override", "restored_utc",
+    "accept", "reject_reason", "user_override", "restored_utc", "rejected_utc",
 ]
+
+# The two ``frames`` columns :meth:`Project.frames_fingerprint` leaves out.
+#
+# They record *when* automation set a sub aside and put it back — provenance
+# about the app's own bookkeeping, never the frame's own state — and every
+# change they accompany is already visible to the hash through ``accept``. So
+# they add nothing a cache holder can detect, while costing the one property the
+# fingerprint's own tests pin: that a frame set which returns to what it was is
+# a cache **hit** again rather than a permanent miss. (A restoration writes both
+# ``accept = 1`` and ``restored_utc``; the accept is what the derivation
+# depends on.)
+#
+# An *exclusion* list rather than an inclusion list on purpose: a column added
+# later is hashed unless someone deliberately names it here, so the failure mode
+# of forgetting is over-invalidation — the safe direction, and the same one the
+# method's docstring already accepts.
+_FINGERPRINT_PROVENANCE_COLS = frozenset({"restored_utc", "rejected_utc"})
 
 # Reject reason stamped on the Seestar's own on-device *stacked output* when it
 # was ingested into a target as if it were a raw sub (pre-v0.184.9 scans, before
@@ -495,7 +526,8 @@ REJECT_REASON_QC_ERROR_FINAL = "qc_error_final"
 
 
 def restoration_stamp() -> str:
-    """"Now", in the one format every ``restored_utc`` writer must use.
+    """"Now", in the one format every ``restored_utc``/``rejected_utc`` writer
+    must use.
 
     The stamp is compared against a stack run's ``timestamp_utc`` to answer "was
     the published picture made before this sub came back?", and that run stamp is
@@ -504,8 +536,26 @@ def restoration_stamp() -> str:
     argument between two call sites; readers parse it anyway
     (:func:`seestack.session_recap.parse_capture_time`), so a legacy row in any
     other ISO-8601 spelling still reads correctly.
+
+    ``rejected_utc`` — the other half of the pair, stamped centrally by
+    :meth:`Project.update_frame` — is written through the same function for the
+    same reason: the two stamps and a run's ``timestamp_utc`` are compared
+    against each other, so all three have to be one shape.
     """
     return datetime.now(timezone.utc).isoformat()
+
+
+class RestoredWindow(NamedTuple):
+    """When automation put a sub back, and when it had set it aside.
+
+    ``set_aside`` is ``None`` when nothing recorded it — a sub rejected at
+    ingest, or any row written before the column existed — in which case the reader falls
+    back to the restoration stamp alone, exactly as it behaved before the column
+    existed. See :func:`seestack.restorednudge.restored_since_stack`.
+    """
+
+    restored: str
+    set_aside: str | None = None
 
 # The Seestar's on-device output folder holds a *single* stacked image (allow a
 # tiny margin for an occasional two-file output). A bare ``<T>/`` folder that
@@ -960,6 +1010,32 @@ class Project:
                     "ALTER TABLE frames ADD COLUMN restored_utc TEXT")
             except sqlite3.OperationalError:
                 pass  # already present
+        # When automation last set a sub *aside*. The restoration stamp alone
+        # cannot say whether a picture contains the sub: a sub can be set aside
+        # *after* the stack that used it (a grade re-run on a bigger population
+        # moves the percentile cut) and put back later, at which point a stamp
+        # later than the run reads as "the picture was made without it" although
+        # it is in its pixels. The pair settles it — see
+        # :meth:`Project.count_light_missing_from_stack`.
+        #
+        # Added **without** a ``SCHEMA_VERSION`` bump, like ``seam_residual``,
+        # ``duration_s`` and the ``grain_*`` columns, so a build that has never
+        # heard of it can still open a DB this one wrote — i.e. the upgrade
+        # stays rollable, which matters more here than a version number does:
+        # the column is read one-sidedly and a build without it simply answers
+        # what it answered before. It is therefore **not** gated on
+        # ``from_version``: there is no version at which it arrived, so it runs
+        # for every older DB and is a no-op the moment it is present (a DB
+        # already at the current version never reaches here at all and gets it
+        # from ``_reconcile_table_columns`` instead).
+        # Additive; every existing frame stays NULL, which reads as "we have no
+        # record of when this one was set aside" and keeps exactly today's
+        # answer on a pre-upgrade install.
+        try:
+            self._conn.execute(
+                "ALTER TABLE frames ADD COLUMN rejected_utc TEXT")
+        except sqlite3.OperationalError:
+            pass  # already present
         # Which generation of the seam estimator wrote ``seam_residual``. Added
         # **without** a ``SCHEMA_VERSION`` bump, like ``duration_s`` and the
         # ``grain_*`` columns, so a build that has never heard of it can still
@@ -1076,14 +1152,34 @@ class Project:
         return ids
 
     def update_frame(self, frame_id: int, **fields: Any) -> None:
-        """Patch a frame in place. Pass column names as kwargs."""
+        """Patch a frame in place. Pass column names as kwargs.
+
+        A patch that sets ``accept`` falsy also stamps ``rejected_utc`` — but
+        **only on a genuine accepted → set-aside transition**, which the ``CASE``
+        below reads off the row's *pre-update* ``accept`` (SQLite evaluates every
+        right-hand side against the original row). Re-writing a reason on a frame
+        that was already set aside therefore leaves the stamp where it was, so
+        the column always answers "when did this sub last stop being in the
+        picture?" rather than "when did something last touch it".
+
+        Doing it here rather than at each of the dozen reject sites is the point:
+        this is the only ``UPDATE frames`` statement in the codebase, so one
+        stamp cannot be forgotten by a reject path written later. It costs no
+        extra read — the transition test is part of the same statement.
+        """
         if not fields:
             return
         assert self._conn is not None
         cols = ", ".join(f"{k} = ?" for k in fields)
         values = [_to_db(v) for v in fields.values()]
+        stamp_sql = ""
+        if "accept" in fields and not fields["accept"]:
+            stamp_sql = (", rejected_utc = CASE WHEN accept = 1 THEN ? "
+                         "ELSE rejected_utc END")
+            values.append(restoration_stamp())
         values.append(frame_id)
-        self._conn.execute(f"UPDATE frames SET {cols} WHERE id = ?", values)
+        self._conn.execute(
+            f"UPDATE frames SET {cols}{stamp_sql} WHERE id = ?", values)
 
     def get_frame(self, frame_id: int) -> FrameRow | None:
         assert self._conn is not None
@@ -1296,8 +1392,9 @@ class Project:
                                   restored_utc=stamp)
         return back
 
-    def restored_frame_stamps(self) -> list[str]:
-        """When each sub that is *ready to stack now* was put back by automation.
+    def restored_frame_windows(self) -> list[RestoredWindow]:
+        """The set-aside → put-back window of each sub that is *ready to stack
+        now*, for the subs automation reconsidered.
 
         "Ready to stack" is accepted **and** plate-solved, because those are the
         two things a re-stack needs from a frame: a restored sub that is still
@@ -1307,15 +1404,29 @@ class Project:
         is not listed — which is every frame on a healthy install, and every
         frame written before schema 22.
 
-        Read-only, one indexed-free scan of a small subset; the caller decides
-        what the stamps mean (see :mod:`seestack.restorednudge`).
+        **Both ends of the window, not just the restoration.** A sub can be set
+        aside *after* the very picture that used it and put back later (a grade
+        re-run on a bigger population moves the percentile cut), so a
+        restoration later than a run does not by itself mean the run lacks the
+        sub — see :meth:`count_light_missing_from_stack`, which answers the same
+        question in SQL. ``set_aside`` is ``None`` for a row written before
+        the column existed, which keeps exactly today's reading for it.
+
+        Read-only, one index-free scan of a small subset; the caller decides
+        what the windows mean (see :mod:`seestack.restorednudge`).
         """
         assert self._conn is not None
         rows = self._conn.execute(
-            "SELECT restored_utc FROM frames "
+            "SELECT restored_utc, rejected_utc FROM frames "
             "WHERE accept = 1 AND restored_utc IS NOT NULL AND wcs_json IS NOT NULL"
         ).fetchall()
-        return [str(r[0]) for r in rows]
+        return [
+            RestoredWindow(
+                restored=str(r[0]),
+                set_aside=str(r[1]) if r[1] else None,
+            )
+            for r in rows
+        ]
 
     def count_frames_set_aside_as_missing(self) -> int:
         """How many of this target's subs are currently set aside as missing."""
@@ -1558,19 +1669,21 @@ class Project:
             yield tuple(row)
 
     def frames_fingerprint(self) -> str:
-        """A short hash of the **entire** ``frames`` table — every column of
-        every row, in id order.
+        """A short hash of the ``frames`` table — every column of every row, in
+        id order, bar the two that record only *when the app changed its mind*.
 
         For a caller that wants to memoise something derived from this target's
         frames and needs to know, without argument, when that derivation has
         gone stale. Two properties make it usable as a cache key where a cheaper
         summary (a count, a max rowid, a sum of lengths) is not:
 
-        * **Complete by construction.** It is ``SELECT *``, so it covers a
-          re-solve that rewrites one frame's ``wcs_json`` to the same length, an
-          accept flipped by grading, a frame deleted, a column added by a future
+        * **Complete by default.** Every column is in unless it is named in
+          :data:`_FINGERPRINT_PROVENANCE_COLS`, so it covers a re-solve that
+          rewrites one frame's ``wcs_json`` to the same length, an accept
+          flipped by grading, a frame deleted, a column added by a future
           migration — every change a derivation could possibly depend on, with
-          no list of columns to keep in step.
+          no list to keep in step. The exclusion fails *safe* in the same
+          direction: forgetting to list a new column only over-invalidates.
         * **Cheap next to what it guards.** Measured on a 9-panel, 5,477-sub
           project (the §1 owner's largest): **129 ms**, against the ~1,007 ms
           canvas computation :mod:`webapp.estimate_cache` uses it to skip.
@@ -1587,7 +1700,12 @@ class Project:
         cursor.row_factory = None
         digest = hashlib.blake2b(digest_size=16)
         try:
-            for row in cursor.execute("SELECT * FROM frames ORDER BY id"):
+            names = [r[1] for r in
+                     cursor.execute("PRAGMA table_info(frames)").fetchall()]
+            cols = [n for n in names if n not in _FINGERPRINT_PROVENANCE_COLS]
+            select = ", ".join(f'"{n}"' for n in cols) if cols else "id"
+            for row in cursor.execute(
+                    f"SELECT {select} FROM frames ORDER BY id"):
                 digest.update(repr(row).encode("utf-8", "surrogatepass"))
         finally:
             cursor.close()
@@ -2055,7 +2173,25 @@ class Project:
         A frame written before schema 22 carries no stamp and contributes
         nothing, so on a library that has never had a restoration this returns
         exactly what :meth:`count_accepted_solved_after` does — which is every
-        healthy install."""
+        healthy install.
+
+        **A restoration stamp alone does not prove the sub is missing, which is
+        why ``rejected_utc`` is read next to it.** A sub can be set aside
+        *after* the stack that used it and put back later:
+        :func:`seestack.qc.grading.apply_grade_report` re-grades on a bigger
+        population, the percentile cut moves, and a frame an earlier picture
+        combined is rejected at T1 and re-accepted at T2, both later than the
+        run at T0. The sub is in that picture's pixels, and a naive
+        ``restored_utc > T0`` reads it as missing — a false *"this picture is
+        behind"* that costs the owner a re-stack (hours of NAS CPU) which
+        changes nothing. So the sub counts only if it was genuinely absent when
+        the picture was made, i.e. it was set aside **before** the run:
+        ``rejected_utc > run`` means it was still accepted at run time and was
+        therefore in it.
+
+        One-sided, like the stamp itself: a frame with no ``rejected_utc`` — one
+        rejected at ingest, never un-accepted, or written before the column
+        existed — keeps exactly today's answer."""
         assert self._conn is not None
         if not timestamp_utc:
             return 0
@@ -2065,8 +2201,10 @@ class Project:
             "AND ((timestamp_utc IS NOT NULL AND timestamp_utc <> '' "
             "      AND timestamp_utc > ?) "
             "  OR (restored_utc IS NOT NULL AND restored_utc <> '' "
-            "      AND restored_utc > ?))",
-            (str(timestamp_utc), str(timestamp_utc)),
+            "      AND restored_utc > ? "
+            "      AND NOT (rejected_utc IS NOT NULL AND rejected_utc <> '' "
+            "               AND rejected_utc > ?)))",
+            (str(timestamp_utc), str(timestamp_utc), str(timestamp_utc)),
         ).fetchone()[0]
 
     def source_frames_under(self, prefix: str) -> tuple[int, int, int]:
@@ -2854,4 +2992,5 @@ def _row_to_frame(row: sqlite3.Row) -> FrameRow:
         reject_reason=row["reject_reason"],
         user_override=bool(row["user_override"]),
         restored_utc=row["restored_utc"],
+        rejected_utc=row["rejected_utc"],
     )

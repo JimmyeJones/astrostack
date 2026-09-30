@@ -33,6 +33,7 @@ from seestack.io.project import (
     _INSERT_COLS,
     FrameRow,
     Project,
+    RestoredWindow,
     SCHEMA_SQL,
     StackRunRow,
 )
@@ -197,7 +198,7 @@ def test_old_pre_qc_project_opens_and_round_trips(tmp_path):
 # A **frozen snapshot** of the ``frames`` and ``stack_runs`` DDL as schema 20 had
 # it: today's shape minus ``streak_cx``/``streak_cy`` (added at v21) and
 # ``restored_utc`` (added at v22). The v21 fixture below is this plus the two
-# streak columns.
+# streak columns, and the v22 one is that plus ``restored_utc``.
 #
 # Frozen, rather than ``SCHEMA_SQL`` with the new columns dropped back off, and
 # that is the whole point of the rewrite (fourth external audit, 2026-09-10).
@@ -253,6 +254,13 @@ _V21_FRAMES_SQL = _V20_FRAMES_SQL.replace(
     "    user_override        INTEGER NOT NULL DEFAULT 0,\n"
     "    streak_cx            REAL,\n"
     "    streak_cy            REAL\n",
+)
+
+# v22 = v21 + the restoration stamp, again appended where the ALTER leaves it.
+_V22_FRAMES_SQL = _V21_FRAMES_SQL.replace(
+    "    streak_cy            REAL\n",
+    "    streak_cy            REAL,\n"
+    "    restored_utc         TEXT\n",
 )
 
 _V20_STACK_RUNS_SQL = """
@@ -433,9 +441,99 @@ def test_a_schema_21_project_gains_the_restoration_stamp_without_losing_rows(
         assert f.accept is True
         assert f.restored_utc is None
         # And the read side agrees: nothing to say about a legacy row.
-        assert proj.restored_frame_stamps() == []
+        assert proj.restored_frame_windows() == []
 
         from seestack.io.project import SCHEMA_VERSION
         assert proj._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     finally:
         proj.close()
+
+
+def test_a_schema_22_project_gains_the_set_aside_stamp_without_losing_rows(
+    tmp_path,
+):
+    """``frames.rejected_utc`` reaches a DB stamped at the current version.
+
+    It was added **without** a ``SCHEMA_VERSION`` bump — like ``seam_residual``,
+    ``duration_s`` and the ``grain_*`` columns — so that a build which has never
+    heard of it can still open a project this one wrote (the two
+    ``test_an_old_build_can_still_read_a_project_this_build_wrote`` guards
+    elsewhere in the suite state that rule, and a bump breaks them). The price
+    of no bump is that ``_migrate_schema`` never runs on a DB already stamped
+    current, so this pins the *other* route: the ungated ``ALTER`` plus
+    ``_reconcile_table_columns``, on exactly the shape a live install has.
+
+    Existing values must survive untouched — §9's "databases migrate, never
+    reset" — and the new column must arrive NULL, which reads as "we have no
+    record of when this sub was set aside" and keeps a pre-upgrade install's
+    "new light waiting" answer exactly as it was."""
+    project_dir = tmp_path / "v22"
+    _write_frozen_project(project_dir, user_version=22, frames_sql=_V22_FRAMES_SQL)
+    conn = sqlite3.connect(project_dir / "project.sqlite")
+    try:
+        conn.execute(
+            "UPDATE frames SET streak_cx = 0.5, accept = 1, reject_reason = NULL, "
+            "wcs_json = '{}', restored_utc = '2026-03-14T21:00:00+00:00'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    proj = Project.open(project_dir)
+    try:
+        _assert_tables_are_fully_migrated(proj)
+        frames = list(proj.iter_frames())
+        assert len(frames) == 1
+        f = frames[0]
+        assert f.source_path == "sub_001.fit"
+        assert f.exposure_s == 10.0
+        assert f.star_count == 90
+        assert f.streak_cx == 0.5
+        assert f.accept is True
+        assert f.restored_utc == "2026-03-14T21:00:00+00:00"
+        assert f.rejected_utc is None
+        # And the read side keeps the legacy row's old meaning: a restoration
+        # with no recorded set-aside is read on the restoration alone.
+        assert proj.restored_frame_windows() == [
+            RestoredWindow(restored="2026-03-14T21:00:00+00:00", set_aside=None)]
+    finally:
+        proj.close()
+
+
+def test_an_old_build_can_still_open_a_project_this_build_set_a_sub_aside_in(
+    tmp_path,
+):
+    """The rollback direction, for ``frames.rejected_utc`` specifically.
+
+    A build without the column must still open a DB this one wrote and read its
+    frames. That is only true while ``SCHEMA_VERSION`` stays where it is —
+    ``_check_schema`` refuses a project stamped *newer* than the running build
+    outright — so this is the guard that would go red if someone bumped it for
+    an additive column again."""
+    from seestack.io.project import SCHEMA_VERSION
+
+    proj = Project.create(tmp_path / "t", name="T")
+    try:
+        fid = proj.add_frame(FrameRow(source_path="sub.fit", accept=True))
+        proj.update_frame(fid, accept=False, reject_reason="auto:grade:fwhm_px")
+        assert proj.get_frame(fid).rejected_utc is not None
+    finally:
+        proj.close()
+
+    assert SCHEMA_VERSION == 22, (
+        "rejected_utc was added without a version bump so the upgrade stays "
+        "rollable; bumping for an additive column breaks every older build's "
+        "ability to open a project this one has touched"
+    )
+    # Stand in for the old build: read the row through SQL naming only the
+    # columns it knows about.
+    conn = sqlite3.connect(tmp_path / "t" / "project.sqlite")
+    conn.row_factory = sqlite3.Row
+    try:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] <= 22
+        row = conn.execute(
+            "SELECT id, source_path, accept, reject_reason FROM frames"
+        ).fetchone()
+        assert row["source_path"] == "sub.fit"
+        assert row["accept"] == 0
+    finally:
+        conn.close()

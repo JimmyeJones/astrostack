@@ -744,9 +744,11 @@ def target_restored_subs(safe: str, request: Request) -> RestoredSubsOut | None:
     time against the stack, and a restored sub was shot long before the picture
     was made.
 
-    Answered from ``frames.restored_utc`` — the moment automation put the sub
-    back — rather than by comparing counts, which would fire forever on any run
-    that legitimately combined fewer frames than were offered. Only *genuine*
+    Answered from ``frames.restored_utc``/``rejected_utc`` — when automation put
+    the sub back, and when it had set it aside — rather than by comparing counts,
+    which would fire forever on any run that legitimately combined fewer frames
+    than were offered. Both stamps, because a sub set aside *after* the picture
+    that used it is in that picture and must not be counted. Only *genuine*
     stack runs count, and only subs that are accepted **and** solved now, so the
     number is what a re-stack would actually fold in. ``null`` when there is
     nothing to say, which is the common case. Read-only; it never starts a stack.
@@ -758,11 +760,11 @@ def target_restored_subs(safe: str, request: Request) -> RestoredSubsOut | None:
     try:
         runs = [r for r in proj.iter_stack_runs()  # newest first
                 if _stack_options_from_run_json(r.options_json) is not None]
-        stamps = proj.restored_frame_stamps()
+        windows = proj.restored_frame_windows()
     finally:
         proj.close()
         lib.close()
-    back = restored_since_stack(runs, restored_stamps=stamps)
+    back = restored_since_stack(runs, restored=windows)
     if back is None:
         return None
     return RestoredSubsOut(

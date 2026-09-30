@@ -1,5 +1,109 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (Builder, the run after that one) — the full suite is the gate, and it said no twice to a change the slice had called green
+
+*(Builder, branch `agent/new-light-set-aside` → **v0.492.8** + **v0.492.9**. Baseline on `origin/main` at
+7f2b519: **7080 passed, 2 skipped**, 13m48s. Green. Final on e59a71e + this work: **7105/2**, 14m11s.)*
+
+### The same venv trap as the previous run, plus the one under it
+
+`source scripts/agent-setup.sh` does not survive into the next `Bash` call — the previous run's note says so
+and it still cost this one a suite start, because the *next* trap is one layer down: with the venv finally
+activated, `pytest -n 4 --dist worksteal` exited **4** with `unrecognized arguments`, since **nothing in the
+repo installs `pytest-xdist`**. `docs/AGENT-ENVIRONMENT.md` documents that command as *the* way to run the
+suite and, three paragraphs above, warns that a summary which does not end in `passed` or `failed` is not a
+result — two paragraphs about the same failure, neither of which prevents it. Fixed as **v0.492.9**: the
+plugin joins `pytest-timeout` in the `dev` extra (which is in that extra for the identical reason and says
+so), with a contract test over both. Two runs have now paid this; nobody should pay it again.
+
+### Where the work came from — "Bugs (fix these first)" is gated for the fifth consecutive run
+
+Unchanged from the previous run's reading: the drizzle-sampling lead (gated on *what share of the owner's
+runs drizzle* — checked this run and **not** cheaply closable: `drizzle` is a **simple**-group form field,
+not an advanced hand-set one like `subpixel_refine`, so the "nothing turns it on" argument that closed the
+`n_roughly_aligned` entry does not transfer), the #965 solve-refusal lead, the auto-binder's (c), and the
+`FrameRow` projection (a). The four open observer issues all await an owner click or reading.
+
+What was buildable was the **freshest** entry: the `restored_utc` LEAD filed twelve hours earlier with
+v0.492.4, whose own last paragraph says *"check first whether it is worth a slot, and if it is not, close it
+with that reasoning"*. Checking it is what changed the answer — see below.
+
+### The check that flipped a "probably close it" into a fix
+
+The lead's own severity estimate was *"it can only over-count, by a sub or two, on a target the surface is
+already naming"*, with the argument that a re-grade needs new subs and those subs are themselves new light.
+Tracing `apply_grade_report` / `apply_grade_reaccepts` in the code shows the argument holds only when the
+subs that moved the percentile cut are **themselves accepted and solved**. Three reachable counter-cases:
+an `auto_grade_sensitivity` change (no new subs at all), the Target page's own `POST …/auto-grade/apply`
+followed by the next scan's re-accept (likewise), and a night whose subs all fail to solve (they move the
+cut and count as no light). In those the **target set** moves, not just the count — a false *"this picture is
+behind"* on a surface whose one-click answer is hours of NAS CPU, which then clears itself, so nobody is
+told the trip was wasted. That is a different item from the one the lead described, and it is worth a slot.
+
+### Two things the full suite caught that the reasoning had not — read this before adding a column
+
+Both were caught only by running the **whole** suite; the ten files the change touches were green.
+
+1. **A `SCHEMA_VERSION` bump breaks rollback, and two existing tests say so.** `_check_schema` refuses
+   outright to open a project stamped *newer* than the running build, so bumping 22 → 23 means that after
+   this upgrade a rollback to the previous version **cannot open any project the new one has touched**. Two
+   guards named `test_an_old_build_can_still_read_a_project_this_build_wrote`
+   (`tests/test_stack_time_estimate.py`, `tests/test_uncovered_fraction.py`) went red on `assert 23 <= 22`.
+   `seestack/io/project.py` already carries the answer beside `seam_residual`: an **ungated** `ALTER` that
+   runs for every older DB and no-ops once present, with `_reconcile_table_columns` covering a DB already
+   stamped current. **The rule this generalises to:** a purely additive nullable column read one-sidedly
+   should be added *without* a bump; save the bump for a change an older build would misread. A third guard
+   now states it for this column too.
+2. **`frames_fingerprint` is `SELECT *`, so a new column is a cache key change.** Stamping the set-aside
+   made `test_undoing_a_change_restores_the_fingerprint` fail: a reject-then-re-accept no longer returned
+   the frame set to a cache **hit**, costing `webapp.estimate_cache` its ~1 s canvas computation. The fix is
+   an *exclusion* set (`_FINGERPRINT_PROVENANCE_COLS`), not an inclusion list — a column added later is
+   hashed unless someone deliberately names it, so forgetting over-invalidates, which is the direction the
+   method's own docstring already accepts. It loses nothing, because every change those two stamps
+   accompany is already visible to the hash through `accept`.
+
+**The generalisation worth keeping:** a new `frames` column is not a local change. It reaches
+`_row_to_frame`, `_FRAME_COLUMNS`, the frozen-DDL migration fixtures, the rollability guards **and** the
+content hash — five places, three of which are in files the change does not open.
+
+### QA sweep record — CLEAN: the v0.492.4 class (an unguarded per-target `Project` open in a library-wide read)
+
+v0.492.4 fixed three library-wide roll-ups in `webapp/pipeline.py` that walked every target's SQLite without
+a guard, so one broken project DB 500'd the Settings maintenance page. **Swept the rest of `webapp/` for the
+same shape with an AST walk** (any `lib.open_target(...)` / `Project.open(...)` inside a loop, with no
+enclosing `try` between it and the loop body): **one hit, and it is not the class** —
+`pipeline._channel_combine`, which is a *job body* rather than a read-out, where one unreadable source
+project should indeed fail the job it was asked to do. Everything else is guarded. Recorded so nobody
+re-sweeps it.
+
+### Flake observed and diagnosed, not fixed — `test_stats_and_system_agree_with_storage_on_free_disk` under `-n 4`
+
+The pre-merge suite came back `1 failed` in `tests/webapp/test_storage.py`, a file this run's diff does not
+touch — the shape `docs/AGENT-ENVIRONMENT.md` says to re-run alone before believing. It passed alone,
+**15/15**, twice.
+
+It is not a drift guard like the `test_derived_light.py` case that trap was written for; it is a genuine
+**race against the disk**. The test reads `disk.free_bytes` from `/api/storage`, `/api/stats` and
+`/api/system` in three separate requests and requires them within **50 MB**, "same filesystem, moments
+apart". Under `-n 4` the other three workers are writing `tmp_path` data the whole time — a full suite
+leaves ~7 GB in `/tmp/pytest-of-root` — so the three live reads genuinely disagree: measured
+**24,741,265,408 / 24,597,266,432 / 24,597,233,664**, a spread of **144 MB**, i.e. 2.9× the tolerance.
+The endpoints are consistent; the disk moved between them.
+
+**Agent-local, not a CI risk:** `.github/workflows/ci.yml` runs the suite **sequentially** (no `-n`), so
+only a parallel agent run can see it. Left unfixed deliberately — the obvious "widen the tolerance" is
+exactly the weakening AGENTS.md forbids, and the honest fix is to make the assertion about the three
+endpoints *agreeing with one reading of the disk* rather than with each other across three moments, which is
+a change to what the test means and wants its own slot. Recorded with the numbers so the next run that meets
+it can recognise it in one grep instead of re-measuring.
+
+Two supporting facts checked on the way, both worth not re-deriving: `Project.update_frame` holds the
+**only** `UPDATE frames` statement in the codebase (which is why the new stamp is one line and no reject
+path can forget it), and SQLite evaluates every `UPDATE` right-hand side against the **pre-update** row, so
+`rejected_utc = CASE WHEN accept = 1 THEN ? ELSE rejected_utc END` tests the transition without a second
+read (verified against sqlite3 directly before it was written).
+
+
 ## 2026-09-30 (Builder, the run after that one) — an exemption written about one test silenced four, and that is why the same "other reasons" bug shipped twice
 
 *(Builder, branch `claude/keen-darwin-ry0wzd` → **v0.492.6** + **v0.492.7**, PR #1034. Baseline on
