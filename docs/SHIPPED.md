@@ -77,8 +77,9 @@ the setting that already exists — and nothing said so, in either direction:
 
 * **`stacker.resolve_stack_memory_budget(setting_gb)`** is now the single decision: it returns the ceiling
   **and its source** (`"env"` / `"setting"` / `"available"` / `"fallback"`). `_stack_memory_budget_bytes` is a
-  thin view of it, so all nine existing call sites are byte-identical and the precedence still lives in one
-  place. The source is what the number alone can never say: only `"available"` is irreproducible, and only
+  thin view of it, so the precedence still lives in one place and **every caller gets the identical number**:
+  five sites still call the old helper untouched, and the two that needed the source (the refusal guard and the
+  drizzle-rejection warning) read `.bytes` off the same answer. The source is what the number alone can never say: only `"available"` is irreproducible, and only
   `"env"` means the control the owner can reach is being ignored.
 * **`/api/system`'s `memory` gains `stack_budget_gb` + `stack_budget_source`** (additive; the two RAM fields
   behave exactly as before, and the two new ones are always present because the engine always has an answer).
