@@ -6,7 +6,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   autoCastSummaryText, autoHighlightSummaryText, dropEmptyFields, HINTS,
-  Maintenance, reprocessNudgeText, reprocessPictureWarning,
+  Maintenance, newLightScopeText, reprocessNudgeText, reprocessPictureWarning,
+  reprocessScopeCounts,
   SETTINGS_PAGE_SECTIONS, SettingsView,
   WALK_AWAY_KEYS, walkAwayEnabled, withWalkAway,
 } from "./Settings";
@@ -14,13 +15,16 @@ import { SETTINGS_SECTIONS, settingsLink, type SettingsSection } from "../settin
 import * as client from "../api/client";
 import { stackPlacementMismatches } from "../test/stackOptionPlacement";
 
-function renderMaintenance() {
+function renderMaintenance(entry = "/settings/maintenance") {
   const qc = new QueryClient();
   return render(
     <MantineProvider>
       <Notifications />
       <QueryClientProvider client={qc}>
-        <MemoryRouter>
+        {/* The card reads `?scope=` so the Dashboard note can send someone here
+            with their answer already given; every existing caller lands on the
+            bare path and gets the default. */}
+        <MemoryRouter initialEntries={[entry]}>
           <Maintenance />
         </MemoryRouter>
       </QueryClientProvider>
@@ -114,35 +118,35 @@ describe("reprocessPictureWarning", () => {
   };
 
   it("says nothing when the results will be auto-edited anyway", () => {
-    expect(reprocessPictureWarning(base, { staleOnly: true, autoEdit: true }))
+    expect(reprocessPictureWarning(base, { scope: "stale" as const, autoEdit: true }))
       .toBeNull();
   });
 
   it("says nothing when no target displays a finished picture", () => {
     expect(reprocessPictureWarning(
       { ...base, finished_pictures: 0, finished_pictures_stale_only: 0 },
-      { staleOnly: false, autoEdit: false },
+      { scope: "all" as const, autoEdit: false },
     )).toBeNull();
   });
 
   it("stays silent on a backend that doesn't send the counts", () => {
     expect(reprocessPictureWarning(
       { current_version: "0.1.0", outdated: 3, up_to_date: 1, total_targets: 5 },
-      { staleOnly: false, autoEdit: false },
+      { scope: "all" as const, autoEdit: false },
     )).toBeNull();
-    expect(reprocessPictureWarning(undefined, { staleOnly: false, autoEdit: false }))
+    expect(reprocessPictureWarning(undefined, { scope: "all" as const, autoEdit: false }))
       .toBeNull();
   });
 
   it("quotes the count for the scope the user actually chose", () => {
-    const all = reprocessPictureWarning(base, { staleOnly: false, autoEdit: false });
+    const all = reprocessPictureWarning(base, { scope: "all" as const, autoEdit: false });
     expect(all).toContain("4 of your targets");
-    const stale = reprocessPictureWarning(base, { staleOnly: true, autoEdit: false });
+    const stale = reprocessPictureWarning(base, { scope: "stale" as const, autoEdit: false });
     expect(stale).toContain("2 of your targets");
   });
 
   it("names the consequence and where the edits went, and offers the fix", () => {
-    const msg = reprocessPictureWarning(base, { staleOnly: false, autoEdit: false });
+    const msg = reprocessPictureWarning(base, { scope: "all" as const, autoEdit: false });
     expect(msg).toContain("flat, unstretched stack");
     expect(msg).toContain("History");
     expect(msg).toContain("Turn this switch on");
@@ -150,7 +154,7 @@ describe("reprocessPictureWarning", () => {
 
   it("reads naturally for a single target", () => {
     const msg = reprocessPictureWarning(
-      { ...base, finished_pictures: 1 }, { staleOnly: false, autoEdit: false },
+      { ...base, finished_pictures: 1 }, { scope: "all" as const, autoEdit: false },
     );
     expect(msg).toContain("1 of your targets currently shows");
     expect(msg).not.toContain("show a finished");
@@ -416,7 +420,7 @@ describe("Maintenance — the wall-picture warning (#903)", () => {
     await waitFor(() =>
       expect(screen.getByText(/2 of your targets currently show a finished/))
         .toBeInTheDocument());
-    fireEvent.click(screen.getByLabelText(/Only targets not already stacked on this version/));
+    fireEvent.click(screen.getByLabelText(/Every target/));
     await waitFor(() =>
       expect(screen.getByText(/3 of your targets currently show a finished/))
         .toBeInTheDocument());
@@ -477,23 +481,23 @@ describe("Maintenance — reprocess everything", () => {
     // The default button names the "outdated" scope, matching the default toggle.
     fireEvent.click(screen.getByRole("button", { name: /Reprocess outdated targets/ }));
 
-    // Default: outdated-only on, deep rescan off, auto-edit off.
-    await waitFor(() => expect(call).toHaveBeenCalledWith(true, false, false));
+    // Default: outdated-only on, deep rescan off, auto-edit off, new-light off.
+    await waitFor(() => expect(call).toHaveBeenCalledWith(true, false, false, false));
     await waitFor(() =>
       expect(screen.getByText(/Reprocessing targets/)).toBeInTheDocument());
   });
 
-  it("reprocesses every target when the outdated-only toggle is turned off", async () => {
+  it("reprocesses every target when that scope is picked", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const call = vi
       .spyOn(client.api, "reprocessAll")
       .mockResolvedValue({ job_id: "job-9", already_running: false });
 
     renderMaintenance();
-    fireEvent.click(screen.getByLabelText(/Only targets not already stacked on this version/));
+    fireEvent.click(screen.getByLabelText(/Every target/));
     fireEvent.click(screen.getByRole("button", { name: /Reprocess all targets/ }));
 
-    await waitFor(() => expect(call).toHaveBeenCalledWith(false, false, false));
+    await waitFor(() => expect(call).toHaveBeenCalledWith(false, false, false, false));
   });
 
   it("passes deep_rescan when the QC/solve/grade toggle is turned on", async () => {
@@ -507,7 +511,7 @@ describe("Maintenance — reprocess everything", () => {
     fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
 
     // Still outdated-only by default, now with the deep rescan opted in.
-    await waitFor(() => expect(call).toHaveBeenCalledWith(true, true, false));
+    await waitFor(() => expect(call).toHaveBeenCalledWith(true, true, false, false));
   });
 
   it("passes auto_edit when the auto-edit toggle is turned on", async () => {
@@ -521,7 +525,7 @@ describe("Maintenance — reprocess everything", () => {
     fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
 
     // Still outdated-only by default, now with the auto-edit opted in.
-    await waitFor(() => expect(call).toHaveBeenCalledWith(true, false, true));
+    await waitFor(() => expect(call).toHaveBeenCalledWith(true, false, true, false));
   });
 
   it("surfaces the already-running case", async () => {
@@ -544,6 +548,146 @@ describe("Maintenance — reprocess everything", () => {
     fireEvent.click(screen.getByRole("button", { name: /Reprocess .* targets/ }));
 
     await waitFor(() => expect(screen.getByText("boom")).toBeInTheDocument());
+  });
+});
+
+// --- "Bring my pictures up to date": the new-light scope (v0.492.0) ---------
+//
+// The owner shoots many targets across many nights with auto-stack off, so after
+// a night's capture his pictures are behind the light he owns. The app named
+// those targets on the Dashboard and the batch stacker existed, but its only
+// scope asked whether the *engine* had changed — so the in-between his cadence
+// needs (strictly less work than the reprocess he already runs, aimed only at
+// pictures that would change) could not be expressed.
+
+const withNewLight = {
+  current_version: "0.492.0", outdated: 1, up_to_date: 4, total_targets: 5,
+  finished_pictures: 4, finished_pictures_stale_only: 1,
+  finished_pictures_new_light_only: 2,
+  new_light: 3, new_light_subs: 128,
+};
+
+describe("newLightScopeText", () => {
+  it("names the targets and the subs, so the cost is visible before the click", () => {
+    const msg = newLightScopeText(withNewLight);
+    expect(msg).toContain("3 targets");
+    expect(msg).toContain("128 subs");
+    // The reassurance that makes it safe to press: it is the *small* batch.
+    expect(msg).toContain("Every other target is left alone");
+  });
+
+  it("reads naturally for one target and one sub", () => {
+    const msg = newLightScopeText({ ...withNewLight, new_light: 1, new_light_subs: 1 });
+    expect(msg).toContain("1 target you've shot more of since its picture was made");
+    expect(msg).toContain("1 sub");
+    expect(msg).not.toContain("1 subs");
+  });
+
+  it("says the good state plainly on a fully caught-up library", () => {
+    const msg = newLightScopeText({ ...withNewLight, new_light: 0, new_light_subs: 0 });
+    expect(msg).toContain("Nothing is waiting");
+  });
+
+  it("invents no count on a backend that doesn't send one", () => {
+    expect(newLightScopeText(undefined)).toBeNull();
+    expect(newLightScopeText({
+      current_version: "0.1.0", outdated: 1, up_to_date: 1, total_targets: 2,
+    })).toBeNull();
+  });
+});
+
+describe("reprocessScopeCounts", () => {
+  it("gives each scope its own pair, never another scope's", () => {
+    expect(reprocessScopeCounts(withNewLight, "new-light"))
+      .toEqual({ targets: 3, finished: 2 });
+    expect(reprocessScopeCounts(withNewLight, "stale"))
+      .toEqual({ targets: 1, finished: 1 });
+    expect(reprocessScopeCounts(withNewLight, "all"))
+      .toEqual({ targets: 5, finished: 4 });
+  });
+
+  it("answers null rather than zero when the backend is silent", () => {
+    // Zero means "measured, and it is none"; null means "not said". Rendering a
+    // silent backend as 0 would disable the button on a library that has work.
+    expect(reprocessScopeCounts(undefined, "new-light"))
+      .toEqual({ targets: null, finished: null });
+    expect(reprocessScopeCounts({
+      current_version: "0.1.0", outdated: 1, up_to_date: 1, total_targets: 2,
+    }, "new-light")).toEqual({ targets: null, finished: null });
+  });
+});
+
+describe("Maintenance — the new-light scope", () => {
+  it("sends new_light_only when that scope is picked", async () => {
+    vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withNewLight);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const call = vi
+      .spyOn(client.api, "reprocessAll")
+      .mockResolvedValue({ job_id: "job-9", already_running: false });
+
+    renderMaintenance();
+    fireEvent.click(screen.getByLabelText(/Only targets with new light/));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Bring my pictures up to date/ }));
+
+    // stale_only off (it asks a different question), new_light_only on.
+    await waitFor(() => expect(call).toHaveBeenCalledWith(false, false, false, true));
+  });
+
+  it("arrives pre-scoped when the Dashboard note sent them here", async () => {
+    vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withNewLight);
+    renderMaintenance("/settings/maintenance?scope=new-light");
+    expect(await screen.findByRole("button", { name: /Bring my pictures up to date/ }))
+      .toBeInTheDocument();
+  });
+
+  it("quotes the new-light scope's own finished-picture count, not the library's",
+    async () => {
+      vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withNewLight);
+      renderMaintenance("/settings/maintenance?scope=new-light");
+      // 2, the count for this scope — never 4 (every target) or 1 (stale).
+      await waitFor(() =>
+        expect(screen.getByText(/2 of your targets currently show a finished/))
+          .toBeInTheDocument());
+    });
+
+  it("won't queue a batch with nothing in it", async () => {
+    vi.spyOn(client.api, "reprocessStatus")
+      .mockResolvedValue({ ...withNewLight, new_light: 0, new_light_subs: 0 });
+    renderMaintenance("/settings/maintenance?scope=new-light");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Bring my pictures up to date/ }))
+        .toBeDisabled());
+    // …and the scope still says why, rather than vanishing.
+    expect(screen.getByText(/Nothing is waiting/)).toBeInTheDocument();
+  });
+
+  it("puts the cost in the confirm dialog before it queues hours of CPU", async () => {
+    vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withNewLight);
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    renderMaintenance("/settings/maintenance?scope=new-light");
+    // The scope comes from the URL, so the button is there before the counts
+    // are; wait for the numbers themselves, which is what this is about.
+    await screen.findByText(/3 targets you've shot more of/);
+    fireEvent.click(
+      screen.getByRole("button", { name: /Bring my pictures up to date/ }));
+
+    const text = String(confirm.mock.calls[0][0]);
+    expect(text).toContain("3 targets");
+    expect(text).toContain("128 subs");
+    // The #903 consequence and the non-destructive promise both still ride along.
+    expect(text).toContain("flat, unstretched stack");
+    expect(text).toContain("nothing is deleted or overwritten");
+  });
+
+  it("keeps every scope the switch used to express, one click away", async () => {
+    vi.spyOn(client.api, "reprocessStatus").mockResolvedValue(withNewLight);
+    renderMaintenance();
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Only targets not already stacked on this version/))
+        .toBeChecked());
+    expect(screen.getByLabelText(/Every target/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Only targets with new light/)).toBeInTheDocument();
   });
 });
 

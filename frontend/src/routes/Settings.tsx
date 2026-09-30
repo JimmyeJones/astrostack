@@ -1,7 +1,7 @@
 import {
   Accordion, Alert, Badge, Button, Center, Code, CopyButton, Divider, FileButton,
-  Group, Loader, NumberInput, Paper, Select, SimpleGrid, Stack, Switch, TagsInput,
-  Text, TextInput, Title,
+  Group, Loader, NumberInput, Paper, Radio, Select, SimpleGrid, Stack, Switch,
+  TagsInput, Text, TextInput, Title,
 } from "@mantine/core";
 import {
   IconDeviceFloppy, IconDownload, IconInfoCircle, IconPlus, IconRefresh,
@@ -9,7 +9,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import {
   api, type AutoCastSummary, type AutoHighlightSummary, type ReprocessStatus,
@@ -281,6 +281,54 @@ export function reprocessNudgeText(status: ReprocessStatus | undefined): string 
 }
 
 /**
+ * Which targets a reprocess batch is about.
+ *
+ * One question with three answers rather than a switch per filter: they are
+ * mutually exclusive descriptions of one set, and as switches the two that
+ * existed could be combined into a batch nobody meant. `new-light` is the
+ * owner's actual cadence (many targets, auto-stack off — after a night's
+ * capture some pictures are behind the light he owns); `stale` is the one after
+ * an upgrade; `all` is the big hammer. Nothing was taken away when this replaced
+ * the "only outdated" switch — every scope that switch could express is still
+ * one click, and there is now a third that no combination of switches could.
+ */
+export type ReprocessScope = "new-light" | "stale" | "all";
+
+/**
+ * How many targets a batch in this scope would restack, and how many of them
+ * currently show a finished picture — or `null` for either where the backend
+ * hasn't said.
+ *
+ * The pair is computed in one place because the dialog must never quote a
+ * number bigger than the batch will touch, and each scope has its own.
+ */
+export function reprocessScopeCounts(
+  status: ReprocessStatus | undefined,
+  scope: ReprocessScope,
+): { targets: number | null; finished: number | null } {
+  if (!status) return { targets: null, finished: null };
+  const n = (v: number | null | undefined) =>
+    (v != null && Number.isFinite(v) ? v : null);
+  if (scope === "new-light") {
+    return {
+      targets: n(status.new_light),
+      finished: n(status.finished_pictures_new_light_only),
+    };
+  }
+  if (scope === "stale") {
+    return {
+      // `outdated` counts targets with an existing image on another version; a
+      // never-stacked target is restacked by this scope too but is in neither
+      // version count, so this is a floor, not the batch size. It is only used
+      // to *describe* the scope, never to promise a number.
+      targets: n(status.outdated),
+      finished: n(status.finished_pictures_stale_only),
+    };
+  }
+  return { targets: n(status.total_targets), finished: n(status.finished_pictures) };
+}
+
+/**
  * What a reprocess run with "also auto-edit each result" **off** would do to the
  * pictures on the wall — or null when it would do nothing worth saying.
  *
@@ -292,7 +340,7 @@ export function reprocessNudgeText(status: ReprocessStatus | undefined): string 
  * on their own runs. It is the *displayed* picture that changes, and until now
  * nothing said so.
  *
- * `staleOnly` picks the count that matches the scope the user chose, so the
+ * `scope` picks the count that matches the scope the user chose, so the
  * sentence can never quote a number bigger than the batch will touch. Null when
  * the switch is on (the restacks are finished pictures too, so nothing
  * regresses), when nothing is affected, and on an older backend that doesn't
@@ -300,13 +348,11 @@ export function reprocessNudgeText(status: ReprocessStatus | undefined): string 
  */
 export function reprocessPictureWarning(
   status: ReprocessStatus | undefined,
-  opts: { staleOnly: boolean; autoEdit: boolean },
+  opts: { scope: ReprocessScope; autoEdit: boolean },
 ): string | null {
   if (!status || opts.autoEdit) return null;
-  const n = opts.staleOnly
-    ? status.finished_pictures_stale_only
-    : status.finished_pictures;
-  if (n == null || !Number.isFinite(n) || n <= 0) return null;
+  const n = reprocessScopeCounts(status, opts.scope).finished;
+  if (n == null || n <= 0) return null;
   const subj = n === 1
     ? "1 of your targets currently shows a finished, edited picture"
     : `${n} of your targets currently show a finished, edited picture`;
@@ -379,11 +425,42 @@ export function autoHighlightSummaryText(
   );
 }
 
+/**
+ * The "Bring my pictures up to date" scope in one sentence: what it would queue,
+ * in the two numbers the owner has to weigh before spending a NAS's evening on
+ * it. Null when the backend hasn't said (an older build), so the option can
+ * describe itself without inventing a count.
+ */
+export function newLightScopeText(status: ReprocessStatus | undefined): string | null {
+  const targets = reprocessScopeCounts(status, "new-light").targets;
+  if (targets == null) return null;
+  if (targets <= 0) {
+    return "Nothing is waiting — every picture already includes all the light "
+      + "you've shot.";
+  }
+  const subs = status?.new_light_subs;
+  const waiting = subs != null && Number.isFinite(subs) && subs > 0
+    ? ` — ${subs} ${subs === 1 ? "sub" : "subs"} of yours that aren't in a `
+      + "picture yet"
+    : "";
+  return (
+    `Re-stacks the ${targets} ${targets === 1 ? "target" : "targets"} you've shot `
+    + `more of since ${targets === 1 ? "its picture was" : "their pictures were"} `
+    + `made${waiting}. Every other target is left alone.`
+  );
+}
+
 export function Maintenance() {
   const navigate = useNavigate();
-  // Default to "only outdated" — after an upgrade the user wants to reprocess just
-  // the images that would actually change, not restack the whole library wholesale.
-  const [staleOnly, setStaleOnly] = useState(true);
+  const [searchParams] = useSearchParams();
+  // Which targets the batch is about. Default "stale" — after an upgrade the
+  // user wants the images that would actually change, not the whole library —
+  // unless the Dashboard's "you've shot more of these" note sent them here, in
+  // which case they already picked the scope on the way in and it would be rude
+  // to make them pick it again.
+  const [scope, setScope] = useState<ReprocessScope>(
+    () => (searchParams.get("scope") === "new-light" ? "new-light" : "stale"),
+  );
   // Off by default: the common case is a plain restack with the new engine. A deep
   // rescan (re-QC / re-solve / re-grade every frame first) is much slower and only
   // pays off when QC/solving/grading improved too, so make it an explicit opt-in.
@@ -398,11 +475,16 @@ export function Maintenance() {
     staleTime: 60_000,
   });
   const nudge = reprocessNudgeText(status.data);
+  const newLightText = newLightScopeText(status.data);
+  const newLightTargets = reprocessScopeCounts(status.data, "new-light").targets;
+  // Nothing to bring up to date is not an error, it is the good state — so the
+  // scope stays visible and says so, and only the button that would queue an
+  // empty batch stands down.
+  const nothingWaiting = scope === "new-light" && newLightTargets === 0;
   // What the batch would do to the pictures on the wall, in the scope actually
   // chosen. Self-hides entirely when the auto-edit switch is on, when no target
   // displays a finished picture, and on a backend that doesn't send the counts.
-  const pictureWarning = reprocessPictureWarning(status.data,
-                                                 { staleOnly, autoEdit });
+  const pictureWarning = reprocessPictureWarning(status.data, { scope, autoEdit });
   const castSummary = useQuery({
     queryKey: ["auto-cast-summary"],
     queryFn: api.autoCastSummary,
@@ -416,8 +498,9 @@ export function Maintenance() {
   });
   const highlightText = autoHighlightSummaryText(highlightSummary.data);
   const reprocess = useMutation({
-    mutationFn: (opts: { staleOnly: boolean; deepRescan: boolean; autoEdit: boolean }) =>
-      api.reprocessAll(opts.staleOnly, opts.deepRescan, opts.autoEdit),
+    mutationFn: (opts: { scope: ReprocessScope; deepRescan: boolean; autoEdit: boolean }) =>
+      api.reprocessAll(opts.scope === "stale", opts.deepRescan, opts.autoEdit,
+                       opts.scope === "new-light"),
     onSuccess: (res) => {
       notifications.show({
         color: "teal",
@@ -432,10 +515,14 @@ export function Maintenance() {
   });
 
   const onClick = () => {
-    const scope = staleOnly
-      ? "Restack every target that hasn't already been stacked with the current "
-        + "version?\n\n(Targets already up to date on this version are skipped.)\n\n"
-      : "Restack EVERY target with the current engine?\n\n";
+    const scopeText = scope === "new-light"
+      ? "Bring your pictures up to date?\n\n"
+        + `(${newLightText ?? "Only the targets you've shot more of since their "
+          + "pictures were made are restacked."})\n\n`
+      : scope === "stale"
+        ? "Restack every target that hasn't already been stacked with the current "
+          + "version?\n\n(Targets already up to date on this version are skipped.)\n\n"
+        : "Restack EVERY target with the current engine?\n\n";
     const rescanNote = deepRescan
       ? "Each target's frames are also re-checked (QC), re-plate-solved and "
         + "re-graded before restacking — slower, but picks up quality/solving "
@@ -454,7 +541,7 @@ export function Maintenance() {
         : "";
     if (
       window.confirm(
-        scope
+        scopeText
         + rescanNote
         + editNote
         + "Each target is reprocessed one at a time, reusing its last stack "
@@ -463,7 +550,7 @@ export function Maintenance() {
         + "so you can compare them in History. A large library can take a while.",
       )
     ) {
-      reprocess.mutate({ staleOnly, deepRescan, autoEdit });
+      reprocess.mutate({ scope, deepRescan, autoEdit });
     }
   };
 
@@ -472,11 +559,12 @@ export function Maintenance() {
       <Stack>
         <Text fw={600}>Reprocess everything</Text>
         <Text size="sm" c="dimmed">
-          Restack every target with the current engine, reusing each target's last
+          Restack your targets with the current engine, reusing each target's last
           stack settings. Handy after an upgrade so all your final images benefit
-          from the newest stacking improvements. Targets are processed one at a
-          time; each restack is saved as a new result alongside the old one, so
-          nothing is ever lost.
+          from the newest stacking improvements, and after a night's capture to
+          fold your newest subs into the pictures that are missing them. Targets
+          are processed one at a time; each restack is saved as a new result
+          alongside the old one, so nothing is ever lost.
         </Text>
         {nudge && (
           <Alert
@@ -488,12 +576,32 @@ export function Maintenance() {
             {nudge}
           </Alert>
         )}
-        <Switch
-          checked={staleOnly}
-          onChange={(e) => setStaleOnly(e.currentTarget.checked)}
-          label="Only targets not already stacked on this version"
-          description="Skips targets whose latest stack was already made with the current version, so a large library isn't reprocessed wholesale."
-        />
+        <Radio.Group
+          value={scope}
+          onChange={(v) => setScope(v as ReprocessScope)}
+          label="Which targets?"
+          data-testid="reprocess-scope"
+        >
+          <Stack gap="xs" mt="xs">
+            <Radio
+              value="new-light"
+              label="Only targets with new light since their picture"
+              description={newLightText
+                ?? "Restacks just the targets you've shot more of since their "
+                   + "pictures were made."}
+            />
+            <Radio
+              value="stale"
+              label="Only targets not already stacked on this version"
+              description="Skips targets whose latest stack was already made with the current version, so a large library isn't reprocessed wholesale."
+            />
+            <Radio
+              value="all"
+              label="Every target"
+              description="Restacks your whole library with the current engine, whether or not anything about it has changed."
+            />
+          </Stack>
+        </Radio.Group>
         <Switch
           checked={deepRescan}
           onChange={(e) => setDeepRescan(e.currentTarget.checked)}
@@ -517,9 +625,14 @@ export function Maintenance() {
             variant="light"
             leftSection={<IconRefresh size={16} />}
             loading={reprocess.isPending}
+            disabled={nothingWaiting}
             onClick={onClick}
           >
-            {staleOnly ? "Reprocess outdated targets…" : "Reprocess all targets…"}
+            {scope === "new-light"
+              ? "Bring my pictures up to date…"
+              : scope === "stale"
+                ? "Reprocess outdated targets…"
+                : "Reprocess all targets…"}
           </Button>
         </Group>
         {castText && (
@@ -536,6 +649,7 @@ export function Maintenance() {
     </Paper>
   );
 }
+
 
 function AccessControl() {
   const qc = useQueryClient();

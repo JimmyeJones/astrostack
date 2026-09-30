@@ -1184,6 +1184,16 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
     the targets a ``stale_only`` batch would actually restack, so the dialog can
     quote the number that matches the scope the user picked.
 
+    ``new_light``/``new_light_subs`` are the third scope's own pair: how many
+    targets have shot accepted-and-solved subs since their picture was made, and
+    how many such subs there are in all — the sentence the "Bring my pictures up
+    to date" button needs before it queues hours of CPU. They are asked through
+    :func:`webapp.routers.newsubs.new_light_since_picture`, the same helper the
+    Dashboard note is built on, so the note and the batch can never name
+    different targets. ``finished_pictures_new_light_only`` completes the set:
+    the finished-picture warning must never quote a number bigger than the batch
+    will touch, so each scope needs its own.
+
     Note the two pairs of counters are deliberately **not** the same population.
     ``outdated``/``up_to_date`` describe *images a reprocess would change*, so a
     target with no genuine stack is in neither. The finished-picture counters
@@ -1193,13 +1203,19 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
     nothing else) is restacked by both modes and counts in both.
 
     Returns ``{current_version, outdated, up_to_date, total_targets,
-    finished_pictures, finished_pictures_stale_only}``.
+    finished_pictures, finished_pictures_stale_only,
+    finished_pictures_new_light_only, new_light, new_light_subs}``.
     """
+    from webapp.routers.newsubs import new_light_since_picture
+
     outdated = 0
     up_to_date = 0
     total = 0
     finished = 0
     finished_stale_only = 0
+    new_light = 0
+    new_light_subs = 0
+    finished_new_light = 0
     for entry in lib.list_targets():
         total += 1
         proj = lib.open_target(entry.safe_name)
@@ -1212,6 +1228,13 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
                 runs, getattr(entry, "cover_stack_run_id", None))
             is_finished = (shown is not None
                            and _run_is_a_finished_picture(proj, shown))
+            # Asked of the rows already in hand, so this costs one indexed COUNT
+            # per target rather than a second walk of the library. The run it
+            # measures "after" is deliberately *not* ``run`` above: the note's
+            # own rule is ``run_has_reusable_options``, and a second spelling is
+            # how the Dashboard and this page would come to disagree about which
+            # targets are behind.
+            _, n_new = new_light_since_picture(proj, runs)
         finally:
             proj.close()
         if run is not None:
@@ -1219,6 +1242,10 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
                 up_to_date += 1
             else:
                 outdated += 1
+        has_new_light = n_new > 0
+        if has_new_light:
+            new_light += 1
+            new_light_subs += n_new
         if is_finished:
             finished += 1
             # What ``stale_only`` actually skips: a target whose newest genuine
@@ -1227,6 +1254,10 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
             # restacked either way.
             if run is None or run.engine_version != APP_VERSION:
                 finished_stale_only += 1
+            # And ``new_light_only`` restacks exactly the targets with new
+            # light, so its share of the warning is a plain intersection.
+            if has_new_light:
+                finished_new_light += 1
     return {
         "current_version": APP_VERSION,
         "outdated": outdated,
@@ -1234,9 +1265,15 @@ def reprocess_status(lib: Library) -> dict[str, Any]:
         "total_targets": total,
         # How many targets would visibly change if the batch ran without
         # auto-editing its results — see the docstring. Additive: an older
-        # frontend ignores both keys and behaves exactly as before.
+        # frontend ignores these keys and behaves exactly as before.
         "finished_pictures": finished,
         "finished_pictures_stale_only": finished_stale_only,
+        "finished_pictures_new_light_only": finished_new_light,
+        # The "Bring my pictures up to date" scope's own size, so its confirm
+        # dialog can say what it is about to queue without a second
+        # cross-target read.
+        "new_light": new_light,
+        "new_light_subs": new_light_subs,
     }
 
 
@@ -1540,6 +1577,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                          stale_only: bool = False,
                          deep_rescan: bool = False,
                          auto_edit: bool = False,
+                         new_light_only: bool = False,
                          only_targets: list[str] | None = None,
                          carried: dict[str, Any] | None = None) -> Job:
     """Restack *every* target with the current engine — the owner's one-click
@@ -1568,6 +1606,27 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
     only the images that would actually change, not the whole library. A target
     with no genuine stack (or one that predates version tracking) is treated as
     stale and reprocessed.
+
+    ``new_light_only`` scopes the batch the other way: to the targets that have
+    shot accepted-and-solved subs **since their own picture was made** — the
+    "Bring my pictures up to date" button. It is the scope the owner's cadence
+    actually wants and the one the endpoint had no way to express: ``stale_only``
+    asks "did the *engine* change?", and nothing asked "did the *light* change?",
+    so catching up after a night of capture meant N trips through the Stack form
+    or restacking the whole library to reach a handful of targets. It is strictly
+    *smaller* than either existing scope: only pictures that would actually grow
+    are queued, which is also the honest answer to the single-worker queue — a
+    catch-up holds the one stack thread for as long as it has real work and no
+    longer.
+
+    The set is :func:`webapp.routers.newsubs.new_light_since_picture`'s, i.e. the
+    one the Dashboard's "you've shot more of these" note names, so the note and
+    the batch cannot be about different targets. It is resolved **once, when the
+    batch opens**, exactly as ``lib.list_targets()`` is: a resumed slice carries
+    the answer forward in ``only_targets`` rather than re-deriving it against a
+    library this very batch has been adding runs to. Most-waiting-first, because
+    a batch that can be cancelled or yield to an import should buy the most light
+    first.
 
     ``deep_rescan`` additionally re-runs QC / plate-solve / auto-grade over each
     target's existing frames *before* its restack (see :func:`_refresh_target`), so
@@ -1634,9 +1693,19 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
             if only_targets is not None:
                 # A resumed slice: the same snapshot, minus what is already done,
                 # in its original order. A safe name that has since disappeared
-                # is simply dropped rather than failing the slice.
+                # is simply dropped rather than failing the slice. Note this
+                # branch is also what keeps ``new_light_only`` a *snapshot* — the
+                # scope was resolved into this list when the batch opened and is
+                # never re-derived mid-batch (see the docstring).
                 by_safe = {e.safe_name: e for e in targets}
                 targets = [by_safe[s] for s in only_targets if s in by_safe]
+            elif new_light_only:
+                from webapp.routers.newsubs import scan_new_subs_waiting
+
+                # Most-waiting-first, which is the scan's own order.
+                by_safe = {e.safe_name: e for e in targets}
+                targets = [by_safe[it.safe] for it in scan_new_subs_waiting(lib)
+                           if it.safe in by_safe]
             prior = dict(carried or {})
             done_before = int(prior.get("done") or 0)
             # The *batch's* total, not this slice's, so progress and the summary

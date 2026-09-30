@@ -54,16 +54,15 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
   coherent, no overflow/console errors). Don't re-run these before a finding says to.
 - **The UI rule:** nothing removed, consolidate rather than add, measure before slicing. Tallest
   pages and baselines: `docs/PROCESS-NOTES.md`, "DOGFOOD BASELINE".
-- **A beginner feature on a regular cadence** from "Features that serve real workflows". **Re-stocked
-  2026-09-30 (Scout): one buildable entry now sits at the top** — 🌟 **"Bring my pictures up to date"** (re-stack
-  only the targets with new light, in one click, by adding a `new_light_only` scope to the hardened
-  `reprocess_all` path). It serves the owner's exact stack→result-autonomy cadence (many targets, `auto_stack`
-  off) and reuses the #903/#880 auto-edit + failure-summary handling; read its three non-optional constraints
-  (§903 flattening, the single-worker queue / import-starvation interaction, §10) and its "settle before
-  building" note — the read-only-by-design new-subs card is being reversed, so a Builder may route it to owner
-  sign-off. The mature app makes obvious beginner features scarce — the annotation overlay, share caption, print
-  sizes, framing/mosaic advice and moon notes are all already shipped — so **do not manufacture a marginal one
-  (§4)**; grep `SHIPPED.md` before proposing another.
+- **A beginner feature on a regular cadence** from "Features that serve real workflows". **The one buildable
+  entry the Scout re-stocked on 2026-09-30 — 🌟 "Bring my pictures up to date" — SHIPPED the same day as
+  v0.492.0** (a `new_light_only` scope on the hardened `reprocess_all` path, a three-way scope question in
+  Settings → Maintenance, and a pre-scoped **link** from the new-subs note). Its one open question is answered
+  in the entry: reversing the note's read-only stance was judged not to need the owner's word, because this
+  only *narrows* a batch he already runs and the note still never acts. **Do not re-pick it.** The section is
+  empty again, and the mature app makes obvious beginner features scarce — the annotation overlay, share
+  caption, print sizes, framing/mosaic advice and moon notes are all already shipped — so **do not manufacture
+  a marginal one (§4)**; grep `SHIPPED.md` before proposing another.
 
 ## How the owner gets builds now
 

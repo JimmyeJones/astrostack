@@ -2828,51 +2828,14 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **🌟 NEW BEGINNER FEATURE (Scout 2026-09-30, from the §1 stack→result-autonomy journey) — "Bring my pictures up
-  to date": re-stack only the targets that have new light, in one click.** *(Pillar: autonomy — PRIORITY 2, with a
-  clear beginner "get" angle; size **M**; grepped `IMPROVEMENTS.md` + `SHIPPED.md` first — no existing entry does
-  this.)*
-  **The gap, in the owner's own workflow.** He shoots many targets across many nights with `auto_stack` **off**
-  (Owner Facts), so after a night's capture his displayed pictures fall behind the light he owns. The app already
-  *names* which ones: `GET /api/new-subs-waiting` (`webapp/routers/newsubs.py`) lists every target whose newest
-  genuine stack predates accepted-and-solved subs it has since taken — and it is **deliberately read-only** ("It
-  offers; it never acts … re-stacking is hours of CPU on a NAS, so there is no batch button here"). The friction
-  that leaves is real: catching up N targets is N manual trips through the Stack form. Meanwhile `reprocess_all`
-  (`webapp/routers/system.py`) *is* a batch stacker, but its only scope filter is `stale_only` — **by engine
-  *version***, not by new light — so today the owner's choice is "re-stack everything (or everything an upgrade
-  changed)" or "re-stack each new-light target by hand". Nothing sits in between, and the in-between is exactly
-  what his cadence needs: strictly *less* work than the reprocess he already runs, aimed only at pictures that
-  would actually change.
-  **The shape — reuse the hardened path, don't grow a new one.** Add a `new_light_only: bool` filter to the
-  existing `reprocess_all` body that intersects its target list with `scan_new_subs_waiting`'s set (one function
-  already written and tested), and give the new-subs card / Dashboard note a **"Bring these up to date"** entry
-  point that opens the existing reprocess confirm dialog **pre-scoped** to that set. That inherits, for free,
-  everything the last year of #903/#880 work hardened on that path: the confirm dialog, the by-cause failure
-  summary (v0.483.2), the unreadable-frame reconcile (v0.483.1), and — load-bearing — the **auto-edit handling**.
-  **Three constraints that are not optional, each already learned on this exact path:**
-  - **§903 — auto-edit off must not silently flatten finished pictures.** A batch restack with the auto-edit
-    switch off replaces each target's *displayed* picture (newest wins) with a flat linear stack; that is the
-    whole of observer issue #903. So this must ride `reprocess_all`'s **current** auto-edit treatment
-    (`pipeline._picture_is_auto_finished` → re-derive Auto for app-baked pictures, v0.448.1) and the confirm
-    dialog's consequence wording — never a bare "off means leave them alone".
-  - **Single-worker JobManager (OOM history, §10-adjacent).** Stacks serialise through one worker on a RAM-capped
-    box on purpose; a "catch up" of many deep targets holds the queue for hours-to-days exactly as `reprocess_all`
-    does, and can **starve the import job** (the open v0.441.1 LEAD / issue #883). So the dialog must show the
-    **count and a rough time** before it queues (the reprocess dialog's estimate is the model), and this feature
-    must not make the starvation worse — ideally it is the *smaller* batch that reduces it.
-  - **§10 absolute.** Nothing under `incoming/` is touched — this only reads the same rows `new-subs-waiting`
-    already reads and queues the same stacks the Stack form already queues.
-  **Why it clears the bar and the guardrails.** Additive (one bool on an existing body + one button + one dialog
-  pre-fill), reversible (non-destructive, new results beside old, exactly as `reprocess_all` already is),
-  upgrade-safe (§9: no config/schema/on-disk/default/API-shape change — a new *optional* field defaulting to
-  today's behaviour), offline, and testable on the pure intersection plus the router. Default **off** (it is a
-  button the owner presses, never a standing behaviour).
-  **One thing to settle before building, honestly.** The read-only-by-design stance on the new-subs card was a
-  *deliberate* call ("it offers; it never acts"). This feature reverses it — behind a confirm dialog with a cost
-  estimate, which is the mitigation the original note was really about ("hours of CPU"). If a Builder judges that a
-  reversal of a stated design decision needs the owner's word, file it under **Needs owner sign-off** with this
-  shape rather than shipping it unasked; it is a one-line question ("want a *Bring my pictures up to date* button
-  that re-stacks just the targets with new light, behind a confirm dialog that shows how long it'll take?").
+- ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-30) — "Bring my pictures up to date": re-stack only the
+  targets that have new light, in one click.**~~ — **✅ SHIPPED v0.492.0** (Builder 2026-09-30). Entry cut to
+  [`SHIPPED.md`](SHIPPED.md); one-liner under "Shipped" below. **The entry's one open question is answered, so
+  do not re-file it as a sign-off item:** reversing the new-subs card's read-only stance was judged *not* to
+  need the owner's word, because the batch stacker already exists and he already presses it (this only
+  *narrows* its scope — strictly less CPU than the button he has), and because the note still never acts: the
+  entry point is a **link**, and its own "every action here is a link, the only button is Not now" test passes
+  unchanged. All three constraints the entry named are met and recorded in `SHIPPED.md`.
 
 - ~~**OWNER-APPROVED 2026-09-25 — a noise-delta *picture* beside the "Did it get better?" sentence.**~~ —
   **✅ SHIPPED v0.479.0** (Builder 2026-09-26). Entry cut to [`SHIPPED.md`](SHIPPED.md); one-liner under
@@ -3955,6 +3918,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **v0.492.0** — 🌟 NEW BEGINNER FEATURE (autonomy, PRIORITY 2), the top entry of "Features that serve real workflows" filed by the Scout the same morning: **"Bring my pictures up to date" — re-stack only the targets that have new light, in one click.** With `auto_stack` off and many targets across many nights, the owner's pictures fall behind the light he owns; the app already *named* those targets (`/api/new-subs-waiting`) and `reprocess_all` was already a batch stacker, but its only scope filter asked *"did the engine change?"* (`stale_only`) and nothing asked *"did the light change?"* — so the choice was "re-stack everything" or "re-stack each one by hand". New `newsubs.new_light_since_picture(proj, runs)` is the rule, extracted and named because three surfaces now ask it (the Dashboard note, the scope, and the counts its dialog quotes) and a second spelling is how they would come to name different targets; `submit_reprocess_all(new_light_only=...)` scopes the batch to that set **most-waiting-first** (the batch can be cancelled or stand down for a waiting import at any target boundary, so the light bought first should be the most it can be), resolved **once when the batch opens** — a resumed slice carries it in `only_targets` rather than re-deriving it against a library this very batch has been adding runs to. `reprocess_status` gains `new_light`/`new_light_subs`/`finished_pictures_new_light_only`, asked of rows already in hand. Settings → Maintenance: the "only outdated" switch becomes a three-way **scope** question — nothing removed, every old scope still one click, plus a third no combination of switches could express; the dialog names the targets *and* the subs before it queues, and the §903 consequence sentence gets the scope's **own** finished-picture count so it can never quote a number bigger than the batch will touch. The note gains one **link** ("Bring all N up to date in one go →", pre-scoped), so it still never acts. A caught-up library says so and only the button stands down; `reprocessScopeCounts` answers `null` (not `0`) on a silent backend. Tests +8 Python / +13 vitest, **fail-before verified on all four layers** by scratch reverts that neutralise only the logic under test. One optional request field and three additive response keys; no config, schema, on-disk, default or API-shape change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.490.1** — 🟡 BUG FIX (friendliness + trust, PRIORITY 3), Builder-found in the code while sizing the "one budget per batch" lead at the top of "Bugs (fix these first)", verified by grep before anything changed: **two of the three memory step-downs left no trace anyone could read.** The stack guard has three levers it pulls rather than refuse a picture, and each stamps the FITS so the image explains itself after the job log has rolled — but only `DRZSCLAD`/`DRZSCLRQ` (the drizzle canvas) had a reader. `REJKAD`/`REJKRQ` (extremes per side lowered) and `DRZREJSK` (the drizzle rejection pass skipped) were read by **nothing** outside `tests/`: not `/stack-runs/<id>/info`, not `_INFO_CARDS`, not the frontend, not `stackhealth`. **And they are the two that most need a sentence**, because unlike the scale step they leave the canvas, the pixel grid and the sub list exactly as asked — so a target set to three extremes per side that could only afford one reads on this very card as plain `min/max reject`, and a drizzled run whose second pass was dropped reads as a picture that never had any rejection. Both fire on the unattended path (`stacker` gates the k step-down on `eff.unattended`) i.e. the owner's walk-away mosaics on a RAM-capped NAS, with nobody watching; `rejectionOutlookNote`'s own docstring already records the other half of the hole ("the memory budget settles its two-pass rejection at run time and this cannot know it"). One additive `rejection_degraded` key mirroring `drizzle_degraded`, plus a pure `rejectionDegradedNote` rendered right after `drizzleDegradedNote`. **One key and one note, because the two cards cannot co-occur** (`REJKAD` needs drizzle off, `DRZREJSK` needs it on), which also keeps a busy card from growing two always-on lines. The k note states the honest small cost ("the same size and the same subs; there's just a little less protection where two trails cross one pixel"); the drizzle note names the lever that buys the pass back. Self-hiding on a missing card, an unknown `kind`, a nonsense `applied`, or a request no larger than what ran. **No engine code touched** — the cards were already stamped. Tests +3 Python (all fail-before by stash) / +8 vitest unit / +2 rendered (the panel one fail-before by scratch removal of the JSX alone). One additive response key and one additive optional client field; no config, schema, on-disk, default, engine behaviour or existing-response-shape change. Full entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.490.0** — ✨ FEATURE (owner request, PRIORITY 2–3): **one-click updates** — Settings → Maintenance → App updates: Check for updates / Update to the `stable` version / Go back (typed RESTORE when the data must come back). The page only writes `state/updater/request.json`; `scripts/update_agent.py` (stdlib, root cron on the NAS, installed once with `--install`) validates it and runs `deploy.sh`/`rollback.sh`. Fetches only when asked (owner, 2026-09-30).
 - **v0.489.3** — 🔴 BUG FIX (§10, data safety): `rollback.sh --restore-data` no longer runs `zfs rollback` on the dataset `incoming/` lives in — it would have deleted every raw sub copied in since the update. Restore is now `scripts/lib/restore-data.sh`: library/ + state/ databases and config only, from the snapshot's read-only `.zfs/snapshot/` view or the tar; stale `-wal` files cleared first. Found by the owner session building the update button, before the path was ever run.

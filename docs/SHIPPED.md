@@ -1,5 +1,85 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder) — "Bring my pictures up to date"
+
+### v0.492.0 — 🌟 NEW BEGINNER FEATURE (autonomy, PRIORITY 2): re-stack only the targets that have new light, in one click
+
+*(The top entry of "Features that serve real workflows", filed by the Scout the same morning. Its one open
+question — whether reversing the new-subs card's read-only stance needs owner sign-off — was answered by the
+Builder rather than deferred; the reasoning is below.)*
+
+**The gap, in the owner's own workflow.** He shoots many targets across many nights with `auto_stack` **off**
+(Owner Facts), so after a night's capture his displayed pictures fall behind the light he already owns. The app
+already *named* them — `GET /api/new-subs-waiting` lists every target whose newest genuine stack predates
+accepted-and-solved subs it has since taken — and the batch stacker already existed. But `reprocess_all`'s only
+scope filter was `stale_only`, which asks **"did the *engine* change?"**, and nothing anywhere asked **"did the
+*light* change?"**. So the owner's choice was "re-stack everything (or everything an upgrade touched)" or
+"re-stack each new-light target by hand, N trips through the Stack form". The in-between his cadence needs —
+strictly *less* work than the reprocess he already runs, aimed only at pictures that would actually grow — could
+not be expressed.
+
+**What shipped.**
+- `webapp/routers/newsubs.py::new_light_since_picture(proj, runs)` — the rule, extracted from
+  `scan_new_subs_waiting` and named, returning `(the picture that has fallen behind, how many subs it is
+  missing)`. It is a function because three surfaces now ask it, and a second spelling is exactly how they would
+  come to name different targets (the drift `webapp/run_options.py` was created to undo). It takes the run
+  *iterator*, so the walk still stops at the newest genuine row.
+- `webapp/pipeline.py::submit_reprocess_all(new_light_only=...)` — scopes the batch to that set, **most-waiting
+  first** (the scan's own order), because the batch can be cancelled or stand down for a waiting import at any
+  target boundary and the light bought before that happens should be the most it can be.
+- `webapp/pipeline.py::reprocess_status` — `new_light`, `new_light_subs` and
+  `finished_pictures_new_light_only`, asked of the rows already in hand (one indexed `COUNT` per target, no
+  second walk of the library).
+- `webapp/routers/system.py::ReprocessAllBody.new_light_only` — one optional bool, defaulting to today's
+  behaviour.
+- Settings → Maintenance: the "only outdated" **switch** becomes a three-way **scope** question. Nothing was
+  removed — every scope the switch could express is still one click, and there is now a third that no
+  combination of switches could. `newLightScopeText` / `reprocessScopeCounts` are pure and tested.
+- `NewSubsWaitingNote`: *"Bring all N up to date in one go →"*, to
+  `/settings/maintenance?scope=new-light`, so the answer given by clicking is not asked again.
+
+**The design question the entry asked a Builder to settle, and the answer.** The new-subs card's read-only
+stance ("it offers; it never acts") was a deliberate call, and this feature reverses it. Judged **not** to need
+owner sign-off, for three structural reasons rather than a preference. (1) The batch stacker already exists and
+the owner already presses it; this adds a *narrowing* scope to it, so the worst case is strictly less CPU than
+the button he has today. (2) The note itself still never acts: the entry point is a **link**, and the
+`NewSubsWaitingNote` test that pins *"every action here is a link, the only button is Not now"* passes
+unchanged. The confirm dialog, the counts and the consequence wording live where the cost is paid. (3) Every
+guardrail holds — additive optional field, default off, nothing under `incoming/` read or written differently,
+no config / schema / on-disk / default / API-shape change (§9, §10).
+
+**The three non-optional constraints the entry named, and how each is met.**
+- **§903 — auto-edit off must not silently flatten finished pictures.** It rides `reprocess_all`'s *current*
+  treatment (`_picture_is_auto_finished` → re-derive Auto for app-baked pictures, v0.448.1) untouched, and the
+  confirm dialog's consequence sentence comes with it. Because that sentence must never quote a number bigger
+  than the batch will touch, the scope got its **own** finished-picture count rather than borrowing the
+  library-wide one — a test pins that it quotes 2 where the library's number is 4 and the stale scope's is 1.
+- **Single-worker JobManager (OOM history).** The dialog names the targets *and* the subs before it queues
+  (`"Re-stacks the 3 targets you've shot more of since their pictures were made — 128 subs of yours that aren't
+  in a picture yet. Every other target is left alone."`). No invented minutes: the two counts are what the owner
+  actually has to weigh, and the existing dialog's "a large library can take a while" rides along. The batch
+  yields to a waiting import exactly as before, and being the *smaller* batch it reduces the starvation the open
+  v0.441.1 lead is about rather than adding to it.
+- **§10 absolute.** Nothing under `incoming/` is touched: this reads the rows `new-subs-waiting` already reads
+  and queues the stacks the Stack form already queues.
+
+**The snapshot decision, stated so nobody "fixes" it.** The scope is resolved **once, when the batch opens**,
+into the target list — exactly as `lib.list_targets()` is. A resumed slice (the import-yield path) carries the
+answer forward in `only_targets` and never re-derives it, because by then this very batch has been adding runs
+to the library it would be asking about.
+
+**A caught-up library is the good state, and says so** rather than hiding the option: the scope renders
+*"Nothing is waiting — every picture already includes all the light you've shot."* and only the button that
+would queue an empty batch stands down. `reprocessScopeCounts` answers `null` (not `0`) when the backend is
+silent, so an older backend never disables a button on a library that has work.
+
+**Tests.** +8 Python (`tests/webapp/test_reprocess_all.py`) covering the scope, the strictly-opt-in default, the
+never-stacked target, the editor export that must not reset the clock, the most-waiting-first order, the wire,
+and both status counters; +13 vitest across `Settings.test.tsx` and `NewSubsWaitingNote.test.tsx`.
+**Fail-before verified on every layer by scratch reverts**, each one neutralising only the logic under test
+rather than the whole change: the pipeline filter alone (6 red), the router pass-through alone (1 red), the
+per-scope count and the URL pre-scoping (5 red), the note's link (1 red).
+
 ## 2026-09-30 (Builder, a later run of the day) — the two memory step-downs that left no trace anyone could read
 
 ### v0.490.1 — 🟡 BUG FIX (friendliness + trust, PRIORITY 3): a picture whose outlier removal was cut back to fit memory now says so

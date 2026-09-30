@@ -21,9 +21,17 @@ shared :func:`webapp.run_options.run_has_reusable_options` the Target page's
 ``reusable`` flag already comes from). So the Dashboard and the Target page can
 never name different numbers for one target; a test pins that.
 
-**It offers; it never acts.** Re-stacking is hours of CPU on a NAS, so this is
-read-only and there is no batch button here: each named target links to its own
-Stack form, where the estimate and the settings live.
+**It offers; it never acts.** Re-stacking is hours of CPU on a NAS, so this
+endpoint is read-only and there is no batch button *here*: each named target
+links to its own Stack form, where the estimate and the settings live, and the
+one library-wide offer the note carries is a **link** to Settings → Maintenance,
+where the confirm dialog and the counts are.
+
+**One definition, three surfaces now.** :func:`new_light_since_picture` is the
+rule, and since v0.492.0 the "Bring my pictures up to date" reprocess scope
+(``new_light_only``) and the counts its dialog quotes ask it too — so the note
+that names the targets and the batch that restacks them cannot be about
+different targets.
 
 Deliberately cheap: per target, one ``stack_runs`` read that stops at the newest
 genuine row, and — only for a target that has one — a single indexed ``COUNT``
@@ -71,6 +79,31 @@ class NewSubsWaitingResponse(BaseModel):
     items: list[NewSubsWaitingItem] = []
 
 
+def new_light_since_picture(proj, runs):  # noqa: ANN001
+    """``(the picture that has fallen behind, how many subs it is missing)``.
+
+    **This is the one definition of "this target has new light."** It is a named
+    function rather than three lines inlined below because three surfaces now ask
+    it: this note, the "Bring my pictures up to date" reprocess scope
+    (:func:`webapp.pipeline.submit_reprocess_all`), and the counts that scope's
+    confirm dialog quotes (:func:`webapp.pipeline.reprocess_status`). A second
+    spelling of the rule is exactly how two of them would end up naming different
+    targets — the drift ``webapp/run_options.py`` was created to undo.
+
+    ``runs`` is the target's stack runs **newest first**, and the walk stops at
+    the newest *genuine* one, so passing the iterator keeps the read cheap. A
+    target whose newest runs are all editor exports walks past them, which is the
+    point: an export is a re-render of an existing picture and never folds in a
+    sub. ``(None, 0)`` when there is no genuine stack at all — "you have never
+    stacked this" is a different sentence other surfaces already say, and there
+    is nothing to count "after".
+    """
+    run = next((r for r in runs if run_has_reusable_options(r.options_json)), None)
+    if run is None:
+        return None, 0
+    return run, proj.count_accepted_solved_after(run.timestamp_utc)
+
+
 def scan_new_subs_waiting(lib) -> list[NewSubsWaitingItem]:  # noqa: ANN001
     """Every target whose newest genuine stack predates subs it has since
     accepted and solved — most waiting first.
@@ -85,19 +118,7 @@ def scan_new_subs_waiting(lib) -> list[NewSubsWaitingItem]:  # noqa: ANN001
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
-            # Newest first, so this normally stops on the first row. A target
-            # whose newest runs are all editor exports walks past them, which is
-            # the point: an export is a re-render of an existing picture and
-            # never folds in a sub.
-            run = next(
-                (r for r in proj.iter_stack_runs()
-                 if run_has_reusable_options(r.options_json)),
-                None,
-            )
-            # Never stacked at all → not this note's sentence (see the module
-            # docstring), and nothing to count "after".
-            n_new = (proj.count_accepted_solved_after(run.timestamp_utc)
-                     if run is not None else 0)
+            run, n_new = new_light_since_picture(proj, proj.iter_stack_runs())
         except Exception:  # noqa: BLE001 — one broken project must not 500 the note
             continue
         finally:

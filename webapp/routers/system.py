@@ -200,6 +200,13 @@ class ReprocessAllBody(BaseModel):
     # thumbnail), not flat linear masters. Only touches the new runs' own recipe;
     # off by default (it seeds an editor recipe on many runs at once).
     auto_edit: bool = False
+    # When True, restack only the targets that have shot accepted-and-solved subs
+    # since their own picture was made — the "Bring my pictures up to date"
+    # scope. Orthogonal to ``stale_only`` (which asks whether the *engine*
+    # changed, not whether the *light* did); passing both intersects them, which
+    # is the natural reading. Defaults False so every existing caller is
+    # unchanged.
+    new_light_only: bool = False
 
 
 @router.post("/api/reprocess-all")
@@ -210,6 +217,10 @@ def reprocess_all(request: Request, body: ReprocessAllBody | None = None) -> dic
 
     With ``stale_only`` set, targets already stacked on the current version are
     skipped, so an upgrade reprocesses only the images that would actually change.
+    With ``new_light_only`` set, only targets whose picture has fallen behind the
+    subs they have since accepted and solved are restacked — the same set the
+    Dashboard's "you've shot more of these" note names, and the smallest catch-up
+    the endpoint can do.
     With ``deep_rescan`` set, each target's frames are re-QC'd / re-solved /
     re-graded before its restack (slower; picks up QC/solve/grading improvements
     too, not just the stacker's). With ``auto_edit`` set, the one-click Auto recipe
@@ -227,8 +238,10 @@ def reprocess_all(request: Request, body: ReprocessAllBody | None = None) -> dic
     stale_only = bool(body.stale_only) if body is not None else False
     deep_rescan = bool(body.deep_rescan) if body is not None else False
     auto_edit = bool(body.auto_edit) if body is not None else False
+    new_light_only = bool(body.new_light_only) if body is not None else False
     job = pipeline.submit_reprocess_all(settings, jm, stale_only=stale_only,
-                                        deep_rescan=deep_rescan, auto_edit=auto_edit)
+                                        deep_rescan=deep_rescan, auto_edit=auto_edit,
+                                        new_light_only=new_light_only)
     return {"job_id": job.id, "already_running": False}
 
 

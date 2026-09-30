@@ -128,10 +128,38 @@ describe("NewSubsWaitingNote", () => {
     renderNote();
     await screen.findByTestId("new-subs-waiting-note");
     // Re-stacking is hours of CPU on a NAS: every action here is a link to a
-    // form, and the only button is the note's own "Not now".
+    // form or a dialog, and the only button is the note's own "Not now".
     const buttons = screen.getAllByRole("button");
     expect(buttons.map((b) => b.getAttribute("aria-label") ?? b.textContent))
       .toEqual(["Not now"]);
+  });
+
+  it("offers one trip instead of N, as a link to where the dialog is", async () => {
+    vi.spyOn(client.api, "getNewSubsWaiting").mockResolvedValue({
+      count: 3, total_new_subs: 90,
+      items: [
+        item({ safe: "A", target_name: "M 31", n_new_subs: 40 }),
+        item({ safe: "B", target_name: "M 42", n_new_subs: 30 }),
+        item({ safe: "C", target_name: "NGC 7000", n_new_subs: 20 }),
+      ],
+    });
+    renderNote();
+    const all = await screen.findByRole("link", { name: /Bring all 3 up to date/ });
+    // Pre-scoped, so the answer they gave by clicking isn't asked again — and
+    // Maintenance is where the counts, the cost and the #903 consequence are.
+    expect(all).toHaveAttribute("href", "/settings/maintenance?scope=new-light");
+  });
+
+  it("doesn't offer a batch for a single target", async () => {
+    vi.spyOn(client.api, "getNewSubsWaiting").mockResolvedValue({
+      count: 1, total_new_subs: 45, items: [item()],
+    });
+    renderNote();
+    await screen.findByTestId("new-subs-waiting-note");
+    // The direct Stack-form link beside it is the shorter route to the same
+    // result, and it is already there.
+    expect(screen.queryByText(/up to date in one go/)).toBeNull();
+    expect(screen.getByRole("link", { name: "M 31 · +45" })).toBeInTheDocument();
   });
 
   it("survives a backend that can't answer", async () => {

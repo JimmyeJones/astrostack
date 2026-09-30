@@ -1623,6 +1623,17 @@ export interface ReprocessStatus {
    */
   finished_pictures?: number;
   finished_pictures_stale_only?: number;
+  /** The same count restricted to a "only targets with new light" batch. */
+  finished_pictures_new_light_only?: number;
+  /**
+   * The "Bring my pictures up to date" scope's own size: how many targets have
+   * shot accepted-and-solved subs since their picture was made, and how many
+   * such subs there are in all. The confirm dialog quotes both before it queues
+   * hours of CPU. Optional for the same reason as the pair above — an older
+   * backend sends neither and the scope simply offers nothing to do.
+   */
+  new_light?: number;
+  new_light_subs?: number;
 }
 
 export interface AutoCastSummary {
@@ -4068,11 +4079,13 @@ export const api = {
     ok: boolean; detail?: string | null; solved?: boolean; target?: string;
     frame?: string; ra_deg?: number | null; dec_deg?: number | null; elapsed_s?: number;
   }>("/api/system/astap-test", { method: "POST" }),
-  reprocessAll: (staleOnly = false, deepRescan = false, autoEdit = false) =>
+  reprocessAll: (staleOnly = false, deepRescan = false, autoEdit = false,
+                 newLightOnly = false) =>
     req<{ job_id: string; already_running: boolean }>("/api/reprocess-all", {
       method: "POST",
       body: JSON.stringify({
         stale_only: staleOnly, deep_rescan: deepRescan, auto_edit: autoEdit,
+        new_light_only: newLightOnly,
       }),
     }),
   reprocessStatus: () => req<ReprocessStatus>("/api/reprocess-status"),
