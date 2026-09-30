@@ -1,5 +1,66 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder, second run of the day) — the picture on the sky map is sized by the app's own answer, not by one arbitrary sub
+
+### v0.489.1 — 🟡 BUG FIX (trust, PRIORITY 3): a plate solve the stack has ruled wrong stops sizing a picture on "My sky map"
+
+*(Builder-found while looking for the other readers of the class v0.488.7 named — "a rejection is a claim about
+a frame, and the numbers the frame still carries are not withdrawn by it". Reproduced through the real
+`GET /api/sky` before anything was changed. Not from the backlog.)*
+
+**Where the fallback lives.** `get_sky` places each target's newest picture on the sky from the run's **stored
+canvas WCS** (`canvas_extent_from_fits`), which is the right geometry and has been since v0.142.4. When that
+cannot be read it falls back to the *frames'* own plate scale: `width_deg = canvas_w × pixscale / 3600`. The
+population that lands there is real — the **six** masters on the owner's disk written with no WCS at all
+(observer [#989](https://github.com/JimmyeJones/astrostack/issues/989), one of them a target's current
+picture), plus any run whose master has since been pruned off disk.
+
+**What the fallback read.** `_representative_pixscale_rotation` walked `iter_frames()` — id order, oldest
+first — and returned the **first** row carrying a `pixscale_arcsec`, with no `accept` filter and no bad-solve
+filter. So one sub the stack had itself flagged *"bad plate-solve (scale disagrees with the other frames)"*,
+whose wrong scale is still sitting in the column because nothing outside the solve path clears one, decided how
+big and how turned that picture was drawn — while `Project.solved_frame_geometry`, which the framing verdict,
+the mosaic panel count and the field-fill drawing all read, was already answering from the median of the newest
+`GEOMETRY_SAMPLE_FRAMES` solved rows with exactly those rows excluded (v0.488.5, v0.488.7).
+
+Reproduced on a 13-frame target whose oldest sub carries a condemned solve at twice the real scale:
+
+```
+sky map representative:      pixscale=8.0  rotation=37.0
+rest of the app (median):    (4.0, 1920, 1080)
+tile sized by the sky map:   4.2667 x 2.4000 deg
+tile the true scale gives:   2.1333 x 1.2000 deg
+```
+
+**What shipped.** New `Project.solved_frame_scale_rotation()` — the **same representative**
+`solved_frame_geometry()` answers with, returning that one frame's scale and its own rotation instead of its
+dimensions. Both are now thin readers of one private `_representative_solved_frame()`, so the window, the
+bad-solve exclusion and the median pick exist once and the two cannot drift into two answers about one target.
+`_representative_pixscale_rotation` asks it, which also replaces an unbounded `FrameRow` walk (it built one
+dataclass per sub until it found a solved one, on every target, on every Sky Map request) with the one
+`LIMIT`-ed query the rest of this path already uses.
+
+**Three deliberate details.** The angle is the median-**scale** frame's *own* rotation, never a median of the
+window's — a scale from one sub and an angle from another describe a frame neither sub had, which is the same
+reason `solved_frame_geometry` returns one frame's triple. `rotation_deg` stays `None` where nothing recorded
+one, and only the caller softens it to the `0.0` this path has always meant by it. And the shared window still
+requires `width_px`/`height_px`, even though the new caller reads neither: every ingested frame carries them
+(`io/fits_loader` takes them off the array it just read, before anything is solved), so no real row is excluded,
+and one shared representative is worth more than a second window that could pick a different frame.
+
+**Upgrade safety.** No config key, schema, on-disk path, default or API **shape** change — the same three
+response fields, with a value that is now the app's own answer. `solved_frame_geometry`'s own behaviour is
+unchanged by construction: same SQL window, same exclusions, same coercion, same pick, and an unreadable
+`rotation_deg` is treated as "no angle recorded" rather than dropping the row, so it cannot move which frame the
+median lands on.
+
+**Tests.** +3. `tests/webapp/test_sky.py::test_a_solve_the_stack_ruled_wrong_does_not_size_a_picture_on_the_sky_map`
+goes through the real endpoint and **fails before** (4.267° against the true 2.133°), verified by reverting the
+call site in a scratch copy; plus two in `tests/test_project.py` — the two readers answer off one shared frame
+and a target with nothing solved still says `None`, and the angle belongs to the frame whose scale was picked
+(median 4.0 of 3.0/4.0/5.0 → its own 2.0, not 1.0, 3.0 or a mean) with `None` for a solve that recorded no
+angle.
+
 ## 2026-09-30 (Builder) — a bad plate scale stops deciding what the whole app advises
 
 ### v0.489.0 — 🟠 BUG FIX (image quality + data integrity, PRIORITY 4): a sub dropped for a wrong-scale plate solve gets one more solve instead of being lost for good

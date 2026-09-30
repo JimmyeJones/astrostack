@@ -74,11 +74,27 @@ class SkyResponse(BaseModel):
 
 
 def _representative_pixscale_rotation(proj) -> tuple[float | None, float | None]:  # noqa: ANN001
-    """Pixel scale (arcsec/px) + rotation (deg) from a solved frame, if any."""
-    for f in proj.iter_frames():
-        if f.pixscale_arcsec:
-            return f.pixscale_arcsec, (f.rotation_deg or 0.0)
-    return None, None
+    """Pixel scale (arcsec/px) + rotation (deg) of this target's representative
+    solved frame, if any — the fallback that sizes a tile whose run has no stored
+    canvas WCS to read (see ``get_sky``).
+
+    It asks :meth:`~seestack.io.project.Project.solved_frame_scale_rotation`, i.e.
+    the **same** frame the rest of the app reads this target's field of view off,
+    for two reasons. One picture drawn at a size that disagrees with the framing
+    advice under it is the kind of contradiction this app removes rather than
+    explains. And the choice that method makes is one this walk could not: it
+    reads the *first* frame carrying a scale, oldest first, so a single sub whose
+    solve the stack has itself ruled wrong (``REJECT_REASON_BAD_SOLVE_PREFIX`` —
+    178 such rows on the owner's library, observer issue #965) sized the tile,
+    and a scope the owner has since changed never got a say at all.
+
+    An unrecorded rotation composes ``0.0``, which is what it has always meant
+    here: the tile is drawn on the canvas grid, unrotated.
+    """
+    rep = proj.solved_frame_scale_rotation()
+    if rep is None:
+        return None, None
+    return rep[0], (rep[1] or 0.0)
 
 
 def _png_size(path: str) -> tuple[int, int] | None:

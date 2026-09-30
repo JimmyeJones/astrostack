@@ -308,3 +308,56 @@ def test_a_run_that_never_recorded_a_capture_window_reports_none(
     img = client.get("/api/sky").json()["images"][0]
     assert img["capture_night_start"] is None
     assert img["capture_night_end"] is None
+
+
+def _first_frame_carries_a_condemned_solve(data_root, safe: str) -> None:
+    """Make the target's oldest sub carry a plate solve the stack has itself ruled
+    wrong, with every other sub agreeing on the real one."""
+    from seestack.io.project import REJECT_REASON_BAD_SOLVE_SCALE
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            frames = list(proj.iter_frames())
+            proj.update_frame(
+                frames[0].id, pixscale_arcsec=8.0, rotation_deg=37.0,
+                accept=False, reject_reason=REJECT_REASON_BAD_SOLVE_SCALE)
+            for f in frames[1:]:
+                proj.update_frame(f.id, pixscale_arcsec=4.0, rotation_deg=12.0)
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_a_solve_the_stack_ruled_wrong_does_not_size_a_picture_on_the_sky_map(
+        client, solved_library):
+    """FAIL-BEFORE: one condemned sub drew the tile at twice its true size.
+
+    A run with no stored canvas WCS to read — the six masters on the owner's own
+    disk that were written without one (observer #989), and any run whose master
+    has since been pruned — is placed from the *frames'* plate scale instead. That
+    fallback took the **first** frame carrying a scale, oldest first, with no
+    accept filter and no bad-solve filter: so a single sub the stack had already
+    flagged ``bad plate-solve (scale disagrees with the other frames)`` — leaving
+    the wrong ``pixscale_arcsec`` in the column, because nothing outside the solve
+    path clears one — decided how big and how turned that picture was drawn, while
+    the rest of the app was already answering from the median of the newest solved
+    rows with exactly those rows left out.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # fits_path=None, so the tile cannot be placed from a stored canvas WCS and
+    # takes the frame-scale fallback this test is about.
+    _add_stack_run_with_preview(solved_library, safe)
+    _first_frame_carries_a_condemned_solve(solved_library, safe)
+
+    images = client.get("/api/sky").json()["images"]
+    assert len(images) == 1
+    img = images[0]
+    # The 1920x1080 canvas at the real 4.0"/px — not the condemned 8.0, which
+    # drew it 4.27° x 2.40° instead of 2.13° x 1.20°.
+    assert img["width_deg"] == pytest.approx(1920 * 4.0 / 3600.0)
+    assert img["height_deg"] == pytest.approx(1080 * 4.0 / 3600.0)
+    assert img["rotation_deg"] == pytest.approx(12.0)
