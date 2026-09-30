@@ -1624,16 +1624,58 @@ class Project:
         The owner's library carries 178 rows with an implausible solve (observer
         issue #965), which is how many of them a deep target's newest 25 can hold.
 
-        Still **three columns and one query**, like :meth:`source_paths`: this is
-        asked from request handlers on a target with thousands of subs, and
-        building a ``FrameRow`` per frame to read three numbers off one of them is
-        the shape of cost this app has had to remove before. ``None`` when nothing
-        is solved yet.
+        Still **one query**, like :meth:`source_paths`: this is asked from request
+        handlers on a target with thousands of subs, and building a ``FrameRow``
+        per frame to read three numbers off one of them is the shape of cost this
+        app has had to remove before. ``None`` when nothing is solved yet.
+        """
+        rep = self._representative_solved_frame()
+        return None if rep is None else (rep[0], rep[1], rep[2])
+
+    def solved_frame_scale_rotation(self) -> tuple[float, float | None] | None:
+        """``(pixscale_arcsec, rotation_deg)`` of the **same** representative solved
+        frame :meth:`solved_frame_geometry` answers with, or ``None``.
+
+        For the caller that has to place a *picture* on the sky rather than judge
+        a field of view: it already knows the canvas it is sizing, so it needs the
+        scale and the angle, not the frame's own dimensions. It shares the
+        representative deliberately — "what telescope shot this?" must not get two
+        answers, and picking that frame is where the judgement lives (the newest
+        window, the median, and the rows the app has itself ruled wrong left out;
+        see :meth:`solved_frame_geometry`).
+
+        The rotation is that one frame's **own** angle rather than a median of the
+        window's, for the reason the triple above is one frame's too: a scale from
+        one sub and an angle from another describe a frame neither sub had.
+        ``None`` for ``rotation_deg`` is a real answer — a solve that recorded no
+        angle — and is deliberately not softened to ``0.0`` here, so the caller
+        decides what an unknown rotation means for it.
+        """
+        rep = self._representative_solved_frame()
+        return None if rep is None else (rep[0], rep[3])
+
+    def _representative_solved_frame(
+        self,
+    ) -> tuple[float, int, int, float | None] | None:
+        """``(pixscale_arcsec, width_px, height_px, rotation_deg)`` of the one
+        solved frame that stands for this target, or ``None``.
+
+        The single place the choice is made, so the two public readers above
+        cannot drift into two different answers about the same target. The rule,
+        and why it is this rule, is documented on
+        :meth:`solved_frame_geometry`.
+
+        The window requires ``width_px``/``height_px`` even for the caller that
+        does not read them: every ingested frame carries them (the loader takes
+        them off the array it just read, before anything is solved —
+        ``io/fits_loader``), so no real row is excluded by it, and one shared
+        representative is worth more than a second window that could pick a
+        different frame.
         """
         assert self._conn is not None
         prefix = REJECT_REASON_BAD_SOLVE_PREFIX
         rows = self._conn.execute(
-            "SELECT pixscale_arcsec, width_px, height_px FROM frames "
+            "SELECT pixscale_arcsec, width_px, height_px, rotation_deg FROM frames "
             "WHERE pixscale_arcsec IS NOT NULL AND pixscale_arcsec > 0 "
             "AND width_px IS NOT NULL AND height_px IS NOT NULL "
             "AND (reject_reason IS NULL "
@@ -1641,12 +1683,20 @@ class Project:
             "ORDER BY id DESC LIMIT ?",
             (len(prefix), prefix, GEOMETRY_SAMPLE_FRAMES),
         ).fetchall()
-        usable: list[tuple[float, int, int]] = []
+        usable: list[tuple[float, int, int, float | None]] = []
         for row in rows:
             try:
-                usable.append((float(row[0]), int(row[1]), int(row[2])))
+                scale, width, height = float(row[0]), int(row[1]), int(row[2])
             except (TypeError, ValueError):
                 continue
+            # An unreadable angle is "no angle recorded", never a reason to drop
+            # the row: it would change which frame the median picks, and the
+            # scale — the number the pick is made on — is fine.
+            try:
+                rotation = None if row[3] is None else float(row[3])
+            except (TypeError, ValueError):
+                rotation = None
+            usable.append((scale, width, height, rotation))
         if not usable:
             return None
         # Sorted from a newest-first list and stable, so equal scales keep their

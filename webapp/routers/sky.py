@@ -30,6 +30,7 @@ from seestack.previewcrop import UNKNOWN as CROP_UNKNOWN
 from seestack.previewcrop import PreviewCrop, crop_pixel_box, preview_crop_json
 from webapp import deps
 from webapp.capture_nights import capture_night_range
+from webapp.field_fulls import canvas_supersampling
 from webapp.preview_orient import baked_north_up_deg, recovered_preview_crop
 
 router = APIRouter(tags=["sky"])
@@ -74,11 +75,27 @@ class SkyResponse(BaseModel):
 
 
 def _representative_pixscale_rotation(proj) -> tuple[float | None, float | None]:  # noqa: ANN001
-    """Pixel scale (arcsec/px) + rotation (deg) from a solved frame, if any."""
-    for f in proj.iter_frames():
-        if f.pixscale_arcsec:
-            return f.pixscale_arcsec, (f.rotation_deg or 0.0)
-    return None, None
+    """Pixel scale (arcsec/px) + rotation (deg) of this target's representative
+    solved frame, if any — the fallback that sizes a tile whose run has no stored
+    canvas WCS to read (see ``get_sky``).
+
+    It asks :meth:`~seestack.io.project.Project.solved_frame_scale_rotation`, i.e.
+    the **same** frame the rest of the app reads this target's field of view off,
+    for two reasons. One picture drawn at a size that disagrees with the framing
+    advice under it is the kind of contradiction this app removes rather than
+    explains. And the choice that method makes is one this walk could not: it
+    reads the *first* frame carrying a scale, oldest first, so a single sub whose
+    solve the stack has itself ruled wrong (``REJECT_REASON_BAD_SOLVE_PREFIX`` —
+    178 such rows on the owner's library, observer issue #965) sized the tile,
+    and a scope the owner has since changed never got a say at all.
+
+    An unrecorded rotation composes ``0.0``, which is what it has always meant
+    here: the tile is drawn on the canvas grid, unrotated.
+    """
+    rep = proj.solved_frame_scale_rotation()
+    if rep is None:
+        return None, None
+    return rep[0], (rep[1] or 0.0)
 
 
 def _png_size(path: str) -> tuple[int, int] | None:
@@ -197,8 +214,16 @@ def get_sky(request: Request) -> SkyResponse:
                 if extent is not None:
                     width_deg, height_deg, rotation = extent
                 elif pixscale:
-                    width_deg = run.canvas_w * pixscale / 3600.0
-                    height_deg = run.canvas_h * pixscale / 3600.0
+                    # A *frame's* plate scale describes a native camera pixel, and
+                    # `canvas_w`/`canvas_h` count canvas pixels — four of them per
+                    # camera pixel on a 2× drizzle. Divide the run's own
+                    # super-sampling out, the way `field_fulls_of_sky` already does
+                    # for the same reason, or a drizzled picture is drawn that many
+                    # times too big. Not drizzled → 1.0 → unchanged.
+                    canvas_pixscale = pixscale / canvas_supersampling(
+                        run.options_json)
+                    width_deg = run.canvas_w * canvas_pixscale / 3600.0
+                    height_deg = run.canvas_h * canvas_pixscale / 3600.0
                 else:
                     # No stored WCS and no plate-solved frame → can't size it. Skip.
                     continue

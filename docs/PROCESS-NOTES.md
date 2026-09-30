@@ -1,5 +1,78 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (Builder, second run of the day) — two bugs in four lines, and a clean whole-app dogfood pass
+
+*(Builder, branch `claude/magical-wright-olpyzx` → **v0.489.1**, **v0.489.2**. Baseline on `origin/main` at
+80ff844: **6992 passed, 2 skipped**, 12m20s with the BLAS cap and `-n 8 --dist worksteal`,
+`/tmp/pytest-of-root` cleared first. Green, and the same count the previous run finished on.)*
+
+### How the run found its work: the backlog had none ready, so the last run's *class* was the lead
+
+"Bugs (fix these first)" holds no unclaimed actionable entry: what is left is leads gated on a read of the
+owner's own library (the drizzled-noise-ratio share, the batch memory budget, the solve-time refusal's retry
+bill), design decisions already costed and stood down with numbers, and unreachable defensive notes. The
+GitHub inbox is drained too — #1015's one in-repo ask shipped as v0.488.2, and #878/#880/#903 are each waiting
+on the owner rather than on code. So the run took the previous run's own parting sentence as its lead: *a
+rejection is a claim about a frame, and the numbers the frame still carries are not withdrawn by it.*
+
+**Sweeping for the other readers of that class was mostly reassuring, and that is worth recording so nobody
+re-sweeps it.** Every DB-level reader of a solve-derived column either filters `accepted_only=True`
+(`library._median_radec`, `Project.accepted_solved_pointings` behind the panel map, `reference.py`,
+`stacker`'s own frame lists) or was already fixed (`solved_frame_geometry`, v0.488.7). **One did neither:**
+`webapp/routers/sky.py::_representative_pixscale_rotation` walked `iter_frames()` oldest-first and took the
+**first** row carrying a `pixscale_arcsec` — no `accept` filter, no bad-solve filter, no median.
+
+### The two bugs, and why the second was the more interesting one
+
+Both live in the same four-line fallback — the branch that sizes a sky-map tile when the run has no stored
+canvas WCS to read.
+
+1. **v0.489.1** — *which frame*. One condemned solve at the front of a target drew the picture at twice its
+   true size (measured through the real endpoint: 4.267° × 2.400° against 2.133° × 1.200°), while the framing
+   verdict beside it was already answering off the median of the newest solved rows with those rows excluded.
+   Fixed by sharing the representative rather than by adding a second rule: both readers are now thin wrappers
+   on one private `_representative_solved_frame`.
+2. **v0.489.2** — *the arithmetic itself*, found only because fixing (1) meant reading the line under it.
+   `canvas_w × pixscale` multiplies **canvas** pixels by a **native camera** pixel's scale, so a 2×-drizzled
+   picture was drawn twice as wide and twice as tall as its sky. **The app already knew this** —
+   `field_fulls_of_sky`'s docstring states it in as many words and that module has divided drizzle out since it
+   shipped. The bug was not a missing insight; it was one path that never got the insight the rest of the app
+   had. *Generalisable: when a module's docstring argues for a correction, grep for the other places that do
+   the same multiplication.*
+
+The stand-down direction is what makes (2) safe on the hot path: `StackOptions.drizzle` ships off and nothing
+turns it on, so every walk-away and interactive run divides by 1.0 and is placed byte for byte where it was —
+pinned by its own test, which passes with or without the fix by design.
+
+### Dogfood: a whole-app `--mosaic` pass, CLEAN
+
+`scripts/agent-dogfood.sh --mosaic`, run **before** the suite (§7). Auto's trim on the generated 2×2 is
+**7.9 %** of the canvas (the §1 bar is ~15 %); nothing overflowing and no console errors at 1440 px or 420 px on
+either target; tallest page `/targets/Sample_M42_mosaic_2_2` at 3673 px on a phone, which is the existing
+baseline's shape.
+
+Read as one paragraph, the sentences hold together on both samples. On the mosaic, next-best-move ("another
+pass or two over the same mosaic evens out the thinner part"), the readiness card ("goal ~7.3 h, about 4 fields
+of sky"), the panel map ("a little behind at the top-right… it evens out on its own") and the framing verdict
+("most of it is already in this picture, though — until you're happy with the depth, more passes over the panels
+you already have do more for it than a wider grid") all point the same way, and the one figure that could read
+as a second goal — *"~18 h"* for a 3×3 — carries v0.451.1's clause naming it as the whole grid from scratch.
+**No new finding; the open mosaic-effort lead is unchanged and still gated on the owner's own library.**
+
+### Process deviations, honestly
+
+* **Nothing was marked "In progress"** (§11, §12). Both bugs were Builder-found and not in the backlog to
+  claim, so there was nothing to move — but the claim is also a publication, and a run that files no claim
+  gives other agents no warning. `origin/main` was re-checked before each commit and before the merge and did
+  not move.
+* **The baseline ran with `-n 8`, not the documented `-n 4`**, on a 4-core box: load average peaked over 12 and
+  the suite took 12m20s, i.e. no better than the recorded ~11–14 min. Not worth repeating; `-n 4` is the
+  documented number for a reason.
+* **`pytest-xdist` is not in the venv after `scripts/agent-setup.sh`** and `-n` then fails with
+  `unrecognized arguments`, which `docs/AGENT-ENVIRONMENT.md` already says (it is deliberately not a project
+  dependency). Recorded only because the failure arrives as a pytest *usage* error whose output looks nothing
+  like a summary — exactly the shape the redirect-not-pipe rule exists to catch.
+
 ## 2026-09-30 (Builder run) — the bad-plate-scale chain, followed to its end
 
 *(Builder, branch `agent/builder-run` → **v0.488.6**, **v0.488.7**, **v0.489.0**, merged as PR #1021.

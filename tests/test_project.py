@@ -961,3 +961,75 @@ def test_the_field_survives_a_solves_own_jitter(tmp_path):
             200.0, 150.0, field=frame_field_from_solve(4.0, 1920, 1080))
     finally:
         proj.close()
+
+
+def test_the_scale_and_the_rotation_come_off_one_shared_representative(tmp_path):
+    """:meth:`Project.solved_frame_scale_rotation` answers off the *same* frame
+    :meth:`Project.solved_frame_geometry` does.
+
+    Two readers of "what telescope shot this?" that pick their own frame can
+    disagree about one target — which is what the sky map's own walk did (it read
+    the oldest frame carrying a scale, rejections and all). Sharing the pick means
+    a picture cannot be drawn at a size the framing advice under it contradicts.
+    """
+    from seestack.io.project import (
+        REJECT_REASON_BAD_SOLVE_SCALE,
+        FrameRow,
+        Project,
+    )
+
+    proj = Project.create(tmp_path / "t", "T")
+    try:
+        # The oldest sub carries a solve the stack has itself ruled wrong — twice
+        # the real scale, and still sitting in the column because nothing outside
+        # the solve path clears one.
+        proj.add_frame(FrameRow(
+            source_path="bad.fit", width_px=1920, height_px=1080,
+            pixscale_arcsec=8.0, rotation_deg=37.0, accept=False,
+            reject_reason=REJECT_REASON_BAD_SOLVE_SCALE))
+        for i in range(12):
+            proj.add_frame(FrameRow(
+                source_path=f"g{i}.fit", width_px=1920, height_px=1080,
+                pixscale_arcsec=4.0, rotation_deg=12.0))
+
+        assert proj.solved_frame_geometry() == (4.0, 1920, 1080)
+        assert proj.solved_frame_scale_rotation() == (4.0, 12.0)
+
+        # Nothing solved at all → no answer rather than a wrong one, so the
+        # caller keeps whatever it does without one.
+        empty = Project.create(tmp_path / "u", "U")
+        try:
+            empty.add_frame(FrameRow(source_path="u.fit", width_px=1920,
+                                     height_px=1080))
+            assert empty.solved_frame_scale_rotation() is None
+        finally:
+            empty.close()
+    finally:
+        proj.close()
+
+
+def test_the_angle_belongs_to_the_frame_whose_scale_was_picked(tmp_path):
+    """One frame's own pair, never a scale from one sub and an angle from another
+    — the same reason the triple above is one frame's. And a solve that recorded
+    no angle answers ``None`` rather than a fabricated ``0.0``, so the caller
+    decides what an unknown rotation means for it."""
+    from seestack.io.project import FrameRow, Project
+
+    proj = Project.create(tmp_path / "t", "T")
+    try:
+        for scale, rotation in ((3.0, 1.0), (5.0, 3.0), (4.0, 2.0)):
+            proj.add_frame(FrameRow(
+                source_path=f"f{scale}.fit", width_px=1920, height_px=1080,
+                pixscale_arcsec=scale, rotation_deg=rotation))
+        # Median scale is 4.0, so the angle is 2.0 — not 1.0, 3.0 or their mean.
+        assert proj.solved_frame_scale_rotation() == (4.0, 2.0)
+    finally:
+        proj.close()
+
+    unangled = Project.create(tmp_path / "v", "V")
+    try:
+        unangled.add_frame(FrameRow(source_path="n.fit", width_px=1920,
+                                    height_px=1080, pixscale_arcsec=4.0))
+        assert unangled.solved_frame_scale_rotation() == (4.0, None)
+    finally:
+        unangled.close()

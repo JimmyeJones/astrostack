@@ -8,8 +8,13 @@ from seestack.io.library import Library
 from seestack.io.project import StackRunRow
 
 
-def _add_stack_run_with_preview(data_root, safe: str) -> None:
-    """Give one target a plate-scale + a stack run with a real preview file."""
+def _add_stack_run_with_preview(data_root, safe: str, *,
+                                options_json: str = "{}") -> None:
+    """Give one target a plate-scale + a stack run with a real preview file.
+
+    ``options_json`` is the run's stored stack options — the default ``"{}"`` is a
+    plain un-drizzled run; pass a drizzled one to exercise the canvas-vs-native
+    pixel scale the frame-scale fallback has to divide out."""
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -28,7 +33,7 @@ def _add_stack_run_with_preview(data_root, safe: str) -> None:
                 output_basename="master", fits_path=None, tiff_path=None,
                 preview_path=str(preview), n_frames_used=3,
                 canvas_h=1080, canvas_w=1920, coverage_min=1, coverage_max=3,
-                options_json="{}",
+                options_json=options_json,
             ))
         finally:
             proj.close()
@@ -308,3 +313,116 @@ def test_a_run_that_never_recorded_a_capture_window_reports_none(
     img = client.get("/api/sky").json()["images"][0]
     assert img["capture_night_start"] is None
     assert img["capture_night_end"] is None
+
+
+def _first_frame_carries_a_condemned_solve(data_root, safe: str) -> None:
+    """Make the target's oldest sub carry a plate solve the stack has itself ruled
+    wrong, with every other sub agreeing on the real one."""
+    from seestack.io.project import REJECT_REASON_BAD_SOLVE_SCALE
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            frames = list(proj.iter_frames())
+            proj.update_frame(
+                frames[0].id, pixscale_arcsec=8.0, rotation_deg=37.0,
+                accept=False, reject_reason=REJECT_REASON_BAD_SOLVE_SCALE)
+            for f in frames[1:]:
+                proj.update_frame(f.id, pixscale_arcsec=4.0, rotation_deg=12.0)
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_a_solve_the_stack_ruled_wrong_does_not_size_a_picture_on_the_sky_map(
+        client, solved_library):
+    """FAIL-BEFORE: one condemned sub drew the tile at twice its true size.
+
+    A run with no stored canvas WCS to read — the six masters on the owner's own
+    disk that were written without one (observer #989), and any run whose master
+    has since been pruned — is placed from the *frames'* plate scale instead. That
+    fallback took the **first** frame carrying a scale, oldest first, with no
+    accept filter and no bad-solve filter: so a single sub the stack had already
+    flagged ``bad plate-solve (scale disagrees with the other frames)`` — leaving
+    the wrong ``pixscale_arcsec`` in the column, because nothing outside the solve
+    path clears one — decided how big and how turned that picture was drawn, while
+    the rest of the app was already answering from the median of the newest solved
+    rows with exactly those rows left out.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # fits_path=None, so the tile cannot be placed from a stored canvas WCS and
+    # takes the frame-scale fallback this test is about.
+    _add_stack_run_with_preview(solved_library, safe)
+    _first_frame_carries_a_condemned_solve(solved_library, safe)
+
+    images = client.get("/api/sky").json()["images"]
+    assert len(images) == 1
+    img = images[0]
+    # The 1920x1080 canvas at the real 4.0"/px — not the condemned 8.0, which
+    # drew it 4.27° x 2.40° instead of 2.13° x 1.20°.
+    assert img["width_deg"] == pytest.approx(1920 * 4.0 / 3600.0)
+    assert img["height_deg"] == pytest.approx(1080 * 4.0 / 3600.0)
+    assert img["rotation_deg"] == pytest.approx(12.0)
+
+
+def _every_frame_solved_at(data_root, safe: str, pixscale: float) -> None:
+    """One agreed plate scale across the target, so the tile's size is decided by
+    the arithmetic under test rather than by which frame is representative."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            for f in proj.iter_frames():
+                proj.update_frame(f.id, pixscale_arcsec=pixscale, rotation_deg=0.0)
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_a_drizzled_picture_is_not_drawn_that_many_times_too_big(
+        client, solved_library):
+    """FAIL-BEFORE: a 2x-drizzled run with no stored canvas WCS was placed at 2x
+    its true size on the sky.
+
+    ``canvas_w``/``canvas_h`` count **canvas** pixels, and a drizzled canvas has
+    ``drizzle_scale`` of them per camera pixel along each axis — the app's own
+    shared definition (``field_fulls_of_sky``: "a 2x drizzled single-field canvas
+    (4x the pixels of a native frame) doesn't read as 4 fields of sky"). The
+    fallback that sizes a tile from a *frame's* plate scale multiplied the two
+    together anyway, so a 2x drizzle drew the picture twice as wide and twice as
+    tall as the sky it covers — overlapping its neighbours on the map and
+    disagreeing with the same run's Aladin placement, which reads the master's own
+    canvas WCS and is unaffected.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack_run_with_preview(
+        solved_library, safe,
+        options_json='{"drizzle": true, "drizzle_scale": 2.0}')
+    _every_frame_solved_at(solved_library, safe, 4.0)
+
+    img = client.get("/api/sky").json()["images"][0]
+    # 1920 canvas px at 2x drizzle is 960 camera px of sky, at 4.0"/px.
+    assert img["width_deg"] == pytest.approx(960 * 4.0 / 3600.0)
+    assert img["height_deg"] == pytest.approx(540 * 4.0 / 3600.0)
+    # …and the Aladin WCS built from that width agrees with it.
+    assert img["wcs"] is not None
+    assert abs(img["wcs"]["CD1_1"]) == pytest.approx(
+        img["width_deg"] / img["wcs"]["NAXIS1"])
+
+
+def test_an_undrizzled_run_is_sized_exactly_as_before(client, solved_library):
+    """The other direction: the run that is not drizzled — every walk-away and
+    interactive stack, since ``StackOptions.drizzle`` ships off — divides by 1.0
+    and is placed byte for byte where it was. Malformed options say the same."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _add_stack_run_with_preview(solved_library, safe, options_json="not json{")
+    _every_frame_solved_at(solved_library, safe, 4.0)
+
+    img = client.get("/api/sky").json()["images"][0]
+    assert img["width_deg"] == pytest.approx(1920 * 4.0 / 3600.0)
+    assert img["height_deg"] == pytest.approx(1080 * 4.0 / 3600.0)
