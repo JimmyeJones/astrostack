@@ -1,5 +1,73 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (audit run B, D2) — notes moved out of "Bugs (fix these first)"
+
+*Notes, owner answers and closed-not-fixed traces that sat in the Bugs section, moved here whole so that
+section holds open bugs only (AGENTS.md §2). Text as it stood on 2026-09-30.*
+
+### (c) of the #965 solve-refusal LEAD — `n_roughly_aligned` NULL on all 690 runs, ⚪ CLOSED WITH THE GREP (Builder 2026-09-26)
+
+  **(c) ~~`n_roughly_aligned` is NULL on all 690 of the owner's stack runs~~ — ⚪ CLOSED WITH THE GREP, and
+  it was never going to show any of this** *(Builder 2026-09-26, while shipping v0.475.3 — the grep this
+  point asked for, done)*. The column **is** written: `stacker` stamps `NROUGHAL` and persists
+  `n_roughly_aligned` under `eff.subpixel_refine and not eff.drizzle and refine_active`, deliberately
+  omitting it otherwise so that "absent" reads as *"refine didn't run"* rather than a reassuring zero. It is
+  NULL on all 690 because **`StackOptions.subpixel_refine` defaults `False`** and nothing turns it on — it is
+  a hand-set **advanced** field on the Stack form (`schemas.py`), so every one of those runs had refine off,
+  and NULL is the correct record. **And the premise under it is wrong too:** "roughly aligned" is the
+  *refine* step's own cap being exceeded (`align.align_one`'s `roughly_aligned_ids`), not a wrong-scale plate
+  solve — a frame with an implausible WCS reprojects at the wrong scale, which is what v0.473.1 now catches;
+  it does not read as "rough". So this column would have been silent on the 178 frames even with refine on.
+  Nothing to build here. *(The one thing that did come out of the grep is a separate, shipped bug: the
+  `soft_stars` health note was prescribing those non-existent subs to the reader — v0.475.3.)*
+
+### 📋 Owner answers to the fourth audit's open questions (2026-09-11) — moved out of Bugs, where a notes block does not belong
+
+- **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
+  question is closed unanswerable. Read before prioritising the audit's items.**
+  - **The pre-D1 saved-recipe crop (⭐ item below — ✅ IT HAS SINCE SHIPPED, don't go looking for it; all three
+    surfaces closed in v0.416.0 + v0.417.0, entries in [`SHIPPED.md`](SHIPPED.md), and the order dependency
+    below is therefore already satisfied): he sees no blurry mosaic cards.** Asked to open his Library
+    and look, his answer was *"don't see anything immediately"*. **The likely reason is in Owner Facts:
+    `auto_edit_on_autostack` has been OFF on his install**, so the walk-away chain never auto-edited anything —
+    a stored recipe only exists where he used the editor or "Process target" **by hand**. So the bug is **real
+    and still worth fixing** (the audit reproduced it in the shipped image over a real v0.277 volume), but its
+    blast radius *on this owner* is small, and it is **not** the emergency the audit's placement implies.
+    **Re-prioritise accordingly — and note the order dependency:** it becomes materially *more* important the
+    moment `auto_edit_on_autostack` is turned on, which is an approved-and-pending change. **Fix it before that
+    flips**, not after. Absence of a visible symptom is not proof of absence — he looked quickly, at cards, not
+    at every target.
+  - **Root-owned files under `library/targets/` — low impact, confirmed.** The container runs as root, so
+    everything it writes is root-owned. Asked whether he browses that share from Windows, he said he browses
+    **only to upload new subs** — i.e. he writes into `incoming/` over SMB (TrueNAS-owned) and has no need to
+    read or write the app's own `library/targets/` tree from a client. **Keep the finding open as hygiene, drop
+    its priority**; it is not blocking him and a UID/GID change to a live install is exactly the kind of
+    migration §9 says to be careful with.
+  - **Which version he upgraded from: unanswerable, stop asking.** *"don't remember"*, and the upgrade has
+    already happened, so the pre-upgrade schema and config are gone. **Do not spend a run reconstructing it.**
+    Anything that genuinely needs it should be re-derived from what is on disk now (run records, schema
+    version, `config.json` keys) rather than from his memory.
+
+### From the 'Minor / low-priority' list — closed-as-already-defended (`_cache_stale`, re-traced 2026-09-07) and the two non-bugs from the 2026-09-05 mosaic/output audit
+
+  - ~~`seestack/io/ingest.py:93-103` `_cache_stale` refreshes on source *shrink* too, not just growth: the
+    docstring justifies it as "source grew after it was cached" but the `st_size != st_size` test is symmetric,
+    so a source later truncated/replaced smaller than its cache overwrites a good Stage-1 cache and resets that
+    frame's QC.~~ — **CLOSED as already-defended, not fixed; re-traced 2026-09-07 so nobody spends a slot on it.**
+    `_cache_stale` is symmetric and stays that way, because the harmful half is caught **before** it is reached.
+    A shrunk source means `fp_changed` → `content_changed`, and `_source_incomplete(src)` (`ingest.py:338`) runs
+    first: it *loads the pixel data*, so a mid-rewrite truncation fails to read and the whole frame is skipped
+    with `skip_reason="still copying (incomplete rewrite)"` — nothing touched, cache intact, re-checked once the
+    source settles. A source that shrank and is still a **complete, readable** FITS is a genuinely different,
+    smaller capture at a reused path, and refreshing the cache is then the *right* answer (it is the second case
+    `_refresh_frame_metadata`'s docstring names). The only residue is a pre-fingerprint row from a library
+    upgraded and not yet re-scanned, where `stored_fp is None` skips the guard for exactly one scan before the
+    fingerprint is backfilled — and its worst outcome is a re-QC. Do not "fix" the symmetry: making it
+    growth-only would strip the content-swap refresh that keeps a new capture from stacking at the old sky
+    position. (Confidence: re-traced against the current code.)
+  - *(two non-bugs from the 2026-09-05 mosaic/output QA audit, kept with the v0.354.1 entry so they are not
+    re-investigated — see that entry's text in SHIPPED.md; recorded here as a sweep note)*
+
 ## 2026-09-30 (Builder, the run after that one) — the full suite is the gate, and it said no twice to a change the slice had called green
 
 *(Builder, branch `agent/new-light-set-aside` → **v0.492.8** + **v0.492.9**. Baseline on `origin/main` at

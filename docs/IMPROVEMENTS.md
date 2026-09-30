@@ -127,48 +127,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   178 until then. A read-only pass that counts them per target (the same median-and-consensus rule, no writes)
   would at least let the Target page say so. Keep it read-only: clearing a stored `wcs_json` outside the solve
   path is the thing that turns (b) into (a)'s re-solve bill without (a)'s decision.
-  **(c) ~~`n_roughly_aligned` is NULL on all 690 of the owner's stack runs~~ — ⚪ CLOSED WITH THE GREP, and
-  it was never going to show any of this** *(Builder 2026-09-26, while shipping v0.475.3 — the grep this
-  point asked for, done)*. The column **is** written: `stacker` stamps `NROUGHAL` and persists
-  `n_roughly_aligned` under `eff.subpixel_refine and not eff.drizzle and refine_active`, deliberately
-  omitting it otherwise so that "absent" reads as *"refine didn't run"* rather than a reassuring zero. It is
-  NULL on all 690 because **`StackOptions.subpixel_refine` defaults `False`** and nothing turns it on — it is
-  a hand-set **advanced** field on the Stack form (`schemas.py`), so every one of those runs had refine off,
-  and NULL is the correct record. **And the premise under it is wrong too:** "roughly aligned" is the
-  *refine* step's own cap being exceeded (`align.align_one`'s `roughly_aligned_ids`), not a wrong-scale plate
-  solve — a frame with an implausible WCS reprojects at the wrong scale, which is what v0.473.1 now catches;
-  it does not read as "rough". So this column would have been silent on the 178 frames even with refine on.
-  Nothing to build here. *(The one thing that did come out of the grep is a separate, shipped bug: the
-  `soft_stars` health note was prescribing those non-existent subs to the reader — v0.475.3.)*
-
-- ~~**🟠 BUG (autonomy / library hygiene, Builder 2026-09-17, reproduced before it was fixed) — a folder of
-  darks under `incoming/` becomes a light target, in the one place the app itself told the owner to put
-  them.**~~ — **✅ SHIPPED v0.455.0.** Entry cut to [`SHIPPED.md`](SHIPPED.md), one-liner under "Shipped".
-  The short version, kept here only because the *class* is worth remembering: the Calibration page's build
-  form is placeheld `/data/incoming/darks` and asks for "a Seestar `Dark` folder on your NAS", and
-  `GET /api/calibration/incoming` is a whole feature premised on calibration folders living under
-  `incoming/` — while `seestack/io/scanner.py` had no notion of a calibration frame at all, so exactly those
-  folders were ingested as targets ("Darks 10s", 6 lights, on the Library wall, in the campaign stats, in the
-  planner, chipped "Not stretched yet", stackable). Two halves of one app disagreeing about what the same
-  files are. Fixed by giving the scan `discover.classify_frames` — literally the rule the build offer is
-  decided by — so the set the offer lists and the set the scan passes over are one set by construction.
-
-- ~~**🟠 BUG (image quality + trust, Builder 2026-09-18, reproduced before it was fixed) — a target is not
-  necessarily one exposure, and the master-dark advisory assumed it was: the same subs, the same dark, and
-  the app either warned or said nothing depending on which frame was picked as the reference.**~~ —
-  **✅ SHIPPED v0.456.0.** Entry cut to [`SHIPPED.md`](SHIPPED.md), one-liner under "Shipped". The short
-  version, kept here only because the *class* is worth remembering: `stacker.run_stack` asked
-  `CalibrationMasters.calibration_warnings` about `ref.exposure_s` — the **reference frame's** exposure —
-  with a comment saying it "stands in for the (uniform) session". Nothing makes a session uniform: shoot a
-  target at 10 s one night and 30 s the next and it is one target with two exposures in it. Then
-  `pick_reference_frame`, which chooses on quality and pointing and has never heard of exposure, silently
-  decided whether the advisory fired at all — and when it did fire it said the pedestal was wrong "on every
-  frame", which was false for the subs the dark actually matched. Reproduced on a real `run_stack`:
-  `calibration_warnings == []` on a 6-sub target (four at 10 s, two at 30 s) with a 10 s dark, while the
-  30 s subs got that dark subtracted **unscaled**. The class: *a representative value is a claim that the
-  set is uniform, and nothing in the data enforces it.* Sibling surfaces that take the same shortcut, in
-  case a future run is in them: `pipeline._auto_bind_for_target` and `routers/calibration.py`'s
-  `calibration-suggestions` both take the **median** exposure.
+  **(c) `n_roughly_aligned` NULL on all 690 of the owner's runs — ⚪ closed with the grep, Builder 2026-09-26:**
+  the column *is* written, only under `subpixel_refine` (an advanced field nothing turns on), and "roughly
+  aligned" is the refine cap, not a wrong plate scale — so it would have been silent on the 178 frames anyway.
+  Nothing to build; the full reasoning moved to [`PROCESS-NOTES.md`](PROCESS-NOTES.md) (2026-09-30, "moved out
+  of Bugs").
 
 - **LEAD (Builder 2026-09-19, filed while shipping v0.468.0 — the half of that fix that reaches the
   *unattended* path, and the one an agent should not blind-build) — the auto-binder judges a master dark by
@@ -204,31 +167,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   median — that one is a strict improvement in both directions and is probably the right first slice;
   **(c)** the half-range charge, only with a before/after on real masters. (a) and (b) are independent of
   each other and of (c).
-  **✅ (a) SHIPPED v0.469.1, built exactly as the shape describes.** New `calibration._temp_range_span` +
-  `_match_rank`: the order masters are tried in is now `(match distance, temperature span)`, so among masters
-  the acquisition numbers cannot separate, the one that was actually shot at the temperature it is stamped
-  with beats one that merely averages to it. **Not** a distance term, deliberately — `_match_distance` also
-  feeds the confidence gates and `master_coverage`, so charging a blended master extra distance is the thing
-  the lead says could strip calibration off a target that has it today. A tie-break can only reorder two
-  masters that are already level. Applied at all four places that rank (`recommend_masters`,
-  `auto_bind_master_ids`' dark/flat/bias candidate sorts, `_recommend_flat_dark`, `existing_master_like`) and
-  at none of the three that gate. One-sided like everything else here: a master built before v0.468.0 recorded
-  no range, scores 0 and keeps its place. **What is still open is (c)**, unchanged and still gated on a
-  before/after against real masters.
-  **✅ (b) SHIPPED v0.469.0 — the gain half only; read what was deliberately left out.** New pure
-  `apply.dominant_gain` (sharing `distinct_gains`' own grouping via `_gain_groups`, so "is this a second
-  setting?" still has one answer) now supplies the representative gain to all three places that took a median
-  of it — `pipeline._confident_master_binding`, the Stack form's `calibration-suggestions`, and the coverage
-  roll-up's target signature — so the page, the form and the walk-away run cannot describe one target three
-  ways. The lead's arithmetic was reproduced as the regression test: two darks at gain 80 and gain 140, subs
-  split 3/3 between 80 and 200, and the gain-140 dark that matches **none** of them wins on the old median.
-  **The temperature half (`light_temps_c`) was considered and deliberately not built**, and that is a
-  judgement rather than an omission: a gain is a discrete *setting*, so a midpoint between two of them is a
-  value the camera was never at — a temperature is continuous and a Seestar's sensor is uncooled, so a value
-  between two nights' readings is one the sensor really passed through. There is no "dominant" temperature to
-  reach for, and `apply.py`'s own constant comment already argues the same way (*"a temperature… earns a
-  tolerance wide enough to cover a night"*). Re-open it only with a shape that is not "the mode of a
-  continuous quantity".
+  **(a) shipped v0.469.1** (masters are ranked `(match distance, temperature span)`, a tie-break that can never
+  strip calibration) and **(b) shipped v0.469.0** (the gain half — `apply.dominant_gain` at all three sites; the
+  temperature half was deliberately *not* built, a temperature being continuous). Both paragraphs moved to
+  [`SHIPPED.md`](SHIPPED.md) 2026-09-30. **Still open: (c)**, the half-range charge, gated on a before/after against
+  real masters. Do not blind-flip it.
 
 - **LEAD, MEASURED (Builder 2026-09-19, filed with v0.471.2/v0.471.3 — the readers of the same class those two
   fixes deliberately did NOT take, because each needs an *engine* signature decision rather than a router-local
@@ -265,232 +208,13 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   id and re-reading that one row, which is one extra query against 132 MB. **(c)** `stack_health` is the big one
   and should not be attempted without deciding what a "frame" means to it first; it is also the one whose 145.6 MB
   is worth the most.
-  **✅ (b) SHIPPED v0.471.5, and it needed no projection at all — read why before picking (a).** The dilemma the
-  shape describes is a false one, because it assumes the lever is *what is read*. It is not: (c) measured the same
-  run that these reads **stream**, so the cost is what the caller **keeps** — and `best_frame` is a `min()`, i.e.
-  it keeps exactly one frame. The whole 132 MB was the endpoint's own `list(...)` plus the function's internal
-  `eligible` filter list. Both are gone: `best_frame` takes an `Iterable` and streams a strict-`<` running minimum
-  (identical tie-break — `min()` keeps the first frame at a winning key, and so does `<`), the endpoint hands over
-  `iter_frames(accepted_only=True)` itself, and `n_accepted` is `Project.count(accepted_only=True)` rather than a
-  `len()` of rows built to be discarded. **1,181 ms / 135.3 MB → 858 ms / ~0 MB**, same pick, same count. It still
-  returns a `FrameRow`, so no caller changed and no record type was needed.
-  **↳ Which downgrades (a).** It already streams (peak ~0, as the table says), the endpoint's own comment records
-  44 ms per 5,000 frames when the files are present, and the 1,594 ms measured above is a fixture where **none**
-  exists — so a projection there buys the row building only, on the one entry with nothing to retain. Probably
-  not worth a slot; check the stat half against a healthy install before spending one.
-  **Do not turn this into a sweep.** Each entry above is its own measurement and its own decision, and the two
-  already fixed were worth fixing because the change stopped at the router. A blanket "make everything take
-  tuples" would trade a readable engine API for a number nobody has asked about on a healthy-sized library.
-  **✅ (c) SHIPPED v0.471.4 — the biggest one, and the decision the lead asked for was made rather than dodged.**
-  What a "frame" means to `stack_health` turns out to be **seven small fields and one bit**, enumerated by
-  reading every attribute the three functions touch: `accept`, `reject_reason`, `fwhm_px`,
-  `eccentricity_median`, `exposure_s`, `gain`, `id` — and `wcs_json`, which is only ever asked *is it there?*.
-  So the answer is a record, not a tuple and not a changed signature: new `project.FrameHealth` +
-  `Project.iter_health_frames`, with `FrameRow.solved` added as a property so the one derived bit has a single
-  definition and the engine functions can be handed either kind and cannot tell the difference (their
-  annotations take a `stackhealth.GradedFrame` union). Every existing caller passes whole rows exactly as
-  before. Measured on the same 35,894-sub fixture: **1,180 ms / 144.0 MB → 541 ms / 9.8 MB**, field-for-field
-  identical, notes and darks-guide identical. Tests +16; the endpoint guard and the no-row-objects guard both
-  **fail before** (scratch reverts, run).
-  **One thing the lead assumed and the build measured — worth knowing before picking (a) or (b).** I first
-  answered the bit in SQL (`wcs_json IS NOT NULL AND wcs_json <> ''`) on the theory that reading the header to
-  test it "defeats the purpose". **It does not, and that machinery was removed before it shipped:** the read
-  *streams*, so at most one header is alive at a time — measured **269 ms against 256 ms**, with the **same
-  peak**. The whole 144 MB was never the reading, it was the **retaining**: 35,894 `FrameRow`s each holding
-  their own header, all at once. So the lever on these endpoints is *what the caller keeps*, not what the SELECT
-  names, and a narrow projection buys nothing where the caller already streams — which is exactly what the lead
-  records about `reject-summary` (a), whose `count_unreadable_frames` streams and costs ~0.
-
-- **🟠 OPEN REMAINDER of observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903) — a restack
-  still *changes* each target's displayed picture; v0.447.2 only stopped it being silent.** *(Pillar: trust —
-  PRIORITY 1-adjacent; size **L**, and not a drive-by. Filed by the Scout 2026-09-16 with three fix options;
-  option (1) shipped as **v0.447.2**, option (2) declined, option (3) re-sized — reasons below. Full mechanism,
-  the traced code paths and the owner's 44-of-77 pixel measurements are in [`SHIPPED.md`](SHIPPED.md) under
-  v0.447.2.)*
-  **↳ SEVERITY BOUND, observer re-measure 2026-09-21 (Scout logged 2026-09-25) — the open remainder is confined
-  to *machine* auto-edits; hand edits are protected.** With a `reprocess_all` at target 45/95, the observer
-  found 21 targets newly displaced from an edited run to a recipe-less newest run — and **all 21 are
-  machine-made** (9 carry an `editor_auto_baked_look` stamp, 12 an `editor_auto_note` without one); **none is a
-  hand-made recipe**, which `pipeline._picture_is_auto_finished` stands down on. So the guard (v0.448.1) is doing
-  what it was built to do: it preserves the *current* displayed state and does not *restore* a pre-flattening
-  finished run, which is precisely what option (3) below is for. The displaced renders are all re-derivable Auto
-  output, so the harm ceiling here is "the wall shows a linear stack instead of an Auto render until re-run",
-  not "the owner's own editing is lost". Do not re-prioritise this up on the strength of the 21-target count.
-  **✅ THE EXISTING DAMAGE HAS A REPAIR — v0.479.3 (owner-requested 2026-09-26).** Settings → Maintenance →
-  "Give back pictures a restack flattened" (`webapp/refinish.py`, `pipeline.submit_refinish_pictures`) re-applies
-  Auto to a flat displayed run **only** where the newest older finished picture carries our `editor_auto_baked_look`
-  stamp; hand-finished, never-finished, cover-pinned and auto-edit-off targets are left alone and named. What
-  remains open below is prevention by cover semantics (option 3), unchanged.
-  **The mechanism in one line:** `current_picture_path` resolves cover → newest-with-a-preview, and
-  `cover_stack_run_id` is NULL on all 89 of the owner's targets — so a restack, being newest, becomes the
-  picture, and with the batch's auto-edit switch off that picture is a flat linear stack. v0.447.2 made the
-  dialog say so, with the count (`reprocess_status.finished_pictures`), and v0.448.0 made the Library wall say
-  which targets are in that state. Neither *prevents* it.
-  **(2) — default the reprocess auto-edit from `settings.auto_edit_on_autostack` — DECLINED, don't re-file.**
-  The owner's `auto_edit_on_autostack` is **off** (Owner Facts), so seeding the switch from it would leave his
-  dialog byte-identical and change nothing about this bug; on an install where it *is* on it flips a visible
-  switch's default, which is a behaviour change bought for no measured benefit. (1) already gives every install
-  the choice explicitly, which is what (2) was reaching for.
-  **(3) — pin the cover on supersede — still open, and NOT the small structural fix it looks like.** A cover
-  pinned when a restack supersedes an edited run is *permanent*: `current_picture_path` prefers it over every
-  later run, so the target that stops regressing today stops updating tomorrow, and the owner's next night's
-  stack silently never becomes the picture. That is the same class of surprise pointing the other way. Any
-  workable shape therefore needs an **unpin rule** (clear the auto-pin as soon as the target has a newer run
-  that is itself finished), which is state the cover column does not carry — a manual pin and an auto-pin are
-  the same NULL-or-int today, and §9 forbids repurposing the existing column's meaning. So (3) is really "an
-  auto-cover with provenance" and wants its own design pass.
-  **Cheaper alternative — ✅ ITS LARGER HALF SHIPPED AS v0.448.1; read this before re-picking it.** The idea
-  was: carry the superseded run's finish onto the fresh run when the batch restacks a target whose displayed
-  picture was finished, leaving cover semantics alone entirely. v0.448.1 ships that for the subset where it is
-  unambiguously right — a picture the **app itself** baked (`editor_auto_baked_look` stamped on the run
-  `finishedpicture.displayed_picture_run` picks, no cover pinned) gets a fresh Auto edit, via
-  `pipeline._picture_is_auto_finished` → the existing `_auto_edit_process_run`, reported as `kept_finished`.
-  Re-deriving Auto rather than copying the old recipe verbatim is deliberate there: the whole point of a
-  reprocess is the *new* engine's pixels, and Auto fitted to them is what the app would have produced anyway.
-  **What is still open is the hand-edited subset** — a recipe somebody saved themselves, which has no baked
-  stamp. Copying it verbatim is the only way to preserve *their* look, and that is not a drive-by: a saved
-  `geometry.crop` is expressed against the old canvas, and the over-trim machinery
-  (`webapp/stale_crop.py`, `mosaicTrim.ts`) exists because a crop that no longer fits its coverage bound is a
-  real failure mode. So this slice needs the crop re-derived or re-validated against the fresh run's coverage
-  map, plus a test per direction. The wall chip (v0.448.0) is what makes the remaining cases visible meanwhile.
-  **(3) is unchanged by v0.448.1** — nothing was pinned and the cover column's meaning is untouched.
-  **⚠ BUILDER FINDING 2026-09-17, while shipping v0.448.1 — the hand-edited slice has a SECOND gate this entry
-  does not name, and it is the harder one.** The crop is the gate everyone sees: a saved `geometry.crop` is
-  expressed against the canvas it was cropped on, and `webapp/stale_crop.py` exists because a crop that no longer
-  fits its coverage bound is a real failure mode. That one is *solvable* — the border rule can re-derive the rect
-  against the fresh run's own coverage map, which is exactly what the editor's "re-trim this" offer already does.
-  The gate nobody has named is the **tone chain**: a hand-tuned stretch, black point or curve is fitted to *one
-  master's* noise floor and histogram, and the whole point of a reprocess is that the new master's are different
-  (deeper, cleaner, possibly a different canvas and a different `photometric_normalize` outcome). Replaying that
-  curve verbatim can clip a core it used to hold, or leave a sky it used to lift — and unlike the crop there is no
-  existing measurement that says whether it did. So "copy the recipe forward" is **not** the safe half of this
-  entry; it is the half that needs a way to *check* the replayed look before it becomes the target's picture.
-  Sketch worth costing: replay it, then compare the result against the same two measurements the unattended
-  auto-edit already records for its own output (`AUTO_EDIT_SKYCAST_PREFIX` sky cast, `AUTO_EDIT_HIGHLIGHT_PREFIX`
-  blown-core fraction) and stand down to "leave it linear, the wall chip will say so" when either is worse than
-  the run being superseded. That keeps the promise the entry is about without guessing. Do NOT ship a verbatim
-  copy without it.
-  **✅ CLOSED 2026-09-17 by the Builder who built the carry and then measured its premise — the hand-edited
-  slice has nothing to carry, and both gates above are moot. Do not re-open it; the finding it produced
-  shipped as v0.449.0.** I implemented the verbatim copy with the crop gate the entry asks for (canvas-shape
-  check + `stale_crop` re-validation against the fresh run's own coverage, 21 tests, both gates fail-before),
-  then probed the premise on the running app and **abandoned it unmerged**. The premise is that a restack
-  flattens the picture a hand editor was looking at. It does not, because **there was never a stretched
-  picture to flatten**: `routers.editor.put_recipe` writes the recipe row to the project DB and *nothing
-  else* — **no path re-renders a preview on Save** — so a run carrying a hand-saved recipe is still showing
-  `_write_preview_png`'s plain autostretch of the linear master. Measured, not reasoned: saving a recipe
-  through the real endpoint leaves the preview PNG's sha1 **unchanged**, and the same run's listing reports
-  `unexported_edit: true`, which is the app's own words for the same fact. It also matches the observer's
-  measurement on the owner's library — his 42 saved recipes carry 3–70 % crops and **0 of 77 live previews are
-  cropped**, i.e. none of those recipes is in the bytes. So a carry would not have preserved a picture; it
-  would have put a look on the wall that had never been there, unprompted, in a batch operation.
-  **The tone-chain gate above is closed by the same measurement** — there is no displayed hand-tuned look
-  whose fidelity is at stake — and it was good judgement on a premise nobody had checked, which is why the
-  measurement is recorded here rather than the disagreement.
-  **What the probe *did* find is a real bug on three shipped surfaces, and it is fixed:** the same
-  false premise lived in `finishedpicture.run_is_a_finished_picture`, which counted a saved recipe as a
-  finished picture — so **saving an edit made the "Not stretched yet" chip vanish** from the Library wall and
-  the Gallery, and shrank the reprocess warning's count, on a card whose bytes had not changed. Shipped as
-  **v0.449.0**: a preview is finished when something *baked* it (an export's own pixels, or
-  `preview_display_space`), which is the mark `_unexported_edit` already reads, so the two stop contradicting
-  each other about one run. Entry in [`SHIPPED.md`](SHIPPED.md).
-  **One genuinely open leftover, filed small and honestly optional (S, autonomy — PRIORITY 2):** after a
-  reprocess, the user's saved recipe stays on the superseded run, so getting their look onto the new pixels
-  means re-doing it in the editor. Copying the recipe onto the fresh run **without re-rendering its preview**
-  would save that — the wall is unchanged either way (still the autostretch, still correctly chipped), so it
-  changes no displayed pixel and the tone-chain judgement happens where it belongs, in front of the user in
-  the editor. It would, correctly, make the fresh run report `unexported_edit`. Worth doing only if the owner
-  asks; it is a convenience, not a regression fix, and this entry has already cost two runs.
-
-- **🟠 BUG (autonomy / data-integrity, Scout 2026-09-14 — mechanism traced end-to-end from observer issue
-  [#878](https://github.com/JimmyeJones/astrostack/issues/878)) — a mosaic's raw-subs folder is minted as a
-  SECOND, hash-suffixed target because `make_safe_name("<T> (mosaic)")` collides with the on-device-output
-  target's `<T>_mosaic`, so the same subs are QC'd, solved and stacked twice.** *(Pillar: autonomy —
-  PRIORITY 2; size L; **architectural + touches on-disk layout — do not blind-take it**. Severity: medium
-  — no image is wrong, but 76 % of the owner's frames (41,732 of 54,681) are double-registered, doubling
-  CPU/disk on a box with a recorded OOM history, and the Library shows two entries per mosaic. Confidence:
-  **mechanism TRACED and arithmetic-verified**; owner-side counts **measured** by the observer.)*
-  **✅ OWNER SAID YES 2026-09-25 to reconciling the 11 existing pairs (sign-off item 16) — that half of this
-  entry is now buildable.** Merge each `<T>_mosaic-<hex>` / `<T>_mosaic_sub` pair through
-  `seestack/io/merge.py::carry_stack_runs` (v0.460.0), so no stack run, saved recipe or picture is lost, keeping
-  the more complete target. Where the more complete twin is the one classified single-field (`<T> mosaic_sub`,
-  below), keep its *data* but land it in the correctly-classified `(mosaic)` target: the answer is about keeping
-  frames and pictures, not a name. One-off and idempotent — a no-op on a library with no such pairs — and §10
-  holds absolutely: nothing under `incoming/` is written, moved or deleted. Pin it on a synthetic library with
-  the same shape (both naming mechanisms), and read the reverted-fix test failing before claiming it.
-  **Root cause, confirmed by computing the hashes:** `mosaic_target_name` names a mosaic subs folder
-  `<T>_mosaic_sub/` → display `"<T> (mosaic)"`, and `make_safe_name("<T> (mosaic)")` collapses the spaces
-  and parens to `_` and strips them, yielding safe stem `<T>_mosaic` — *identical* to the safe stem of the
-  Seestar's on-device output folder `<T>_mosaic/` (display `"<T>_mosaic"`, safe `<T>_mosaic`). Since the
-  output folder is ingested as its own target (see #880), `<T>_mosaic` is already owned by a *different*
-  display name, so `Library._allocate_safe_name` (`seestack/io/library.py:427`) disambiguates with
-  `sha1("<T> (mosaic)")[:8]` → `<T>_mosaic-<hex>`. Verified: `sha1("73 Leonis (mosaic)")[:8] == "328c48ae"`
-  and `sha1("Alphecca (mosaic)")[:8] == "c7bed385"`, both exactly matching the observer's minted targets.
-  The 11 targets all being created in one 2026-07-25 3-minute window is the convention-upgrade re-scan that
-  first applied `"<T> (mosaic)"` naming to folders an older scan had ingested under their raw folder name
-  (`<T>_mosaic_sub` → display `"<T> mosaic_sub"` → safe `<T>_mosaic_sub`) — which is the OTHER member of each
-  pair the observer lists. **Second, correctness-adjacent consequence Scout adds:** the *old* duplicate
-  (`<T>_mosaic_sub`, named `"<T> mosaic_sub"`) does **not** end in `" (mosaic)"`, so
-  `is_mosaic_target_name` (`seestack/io/scanner.py:87`) classifies it as a **single field** and stacks the
-  mosaic subs in single-field mode — a genuinely wrong stack sitting in the library, not just clutter.
-  **Code location:** `seestack/io/library.py:446` (`_allocate_safe_name` collision → hash suffix),
-  `library.py:195` (`make_safe_name` lossy collapse of `" (mosaic)"`≡`"_mosaic"`), `scanner.py:82`
-  (`mosaic_target_name`), `scanner.py:113` (`_seestar_target_name`). **Repro:** `sha1("<T> (mosaic)")[:8]`
-  reproduces every `-<hex>` suffix; and `make_safe_name("X (mosaic)") == make_safe_name("X_mosaic")` for any
-  X. **Why NOT a drive-by:** the obvious fix — give a mosaic target a distinct safe stem — changes on-disk
-  paths for existing installs (§9 forbids), and de-duplicating the 11 existing pairs is a merge migration
-  that must never touch `incoming/` (§10) and must keep the more-complete target. **Note the strong link to
-  #880:** if the bare `<T>_mosaic/` on-device output were skipped at ingest (as single-field `<T>/` output
-  already is), the stem `<T>_mosaic` would be free and the subs target would claim it cleanly with no hash
-  suffix — so fixing #880's classification gap *prevents this collision going forward* (it does not un-mint
-  the existing 11). Sensible first slice for the Builder: (1) make `_seestar_output_bases` recognise the
-  mosaic output naming so `<T>_mosaic/` is skipped, closing recurrence; then (2) a separate, owner-sign-off
-  merge pass for the existing duplicates. Do NOT ship a `make_safe_name` change that moves live folders.
-  **⚠ BUILDER VERIFICATION 2026-09-14 (branch `claude/sweet-babbage-f0hdap`) — THE NAMED FIRST SLICE IS
-  ALREADY IN THE CODE; do not build it.** Run against `_apply_seestar_convention` directly, with
-  `["<T>_mosaic_sub", "<T>_mosaic", "M 42_sub", "M 42"]` as the drop: units `['<T> (mosaic)', 'M 42']`,
-  skipped `[('<T>_mosaic', 'device_output'), ('M 42', 'device_output')]`. The bare-folder sibling test is
-  `(parent, low + _SUB_SUFFIX) in sibling_names` (`scanner.py`), and `"<T>_mosaic" + "_sub"` *is*
-  `"<T>_mosaic_sub"` — so a mosaic's device output sitting beside its subs folder has been skipped all
-  along, by the single-field rule, without anyone noticing it covered both. **Recurrence is therefore
-  already closed**, and the 11 minted duplicates are pre-convention leftovers rather than a live leak.
-  `classify_seestar_junk_target` already offers one-click removal for exactly that shape too — it carries
-  an explicit `is_mosaic = low.endswith(_MOSAIC_SUFFIX)` branch with its own wording ("its own stacked
-  image of each mosaic panel") and checks the `<T>_mosaic_sub` sibling on disk. **What is genuinely still
-  open here is (2)** — de-duplicating the 11 existing pairs, which this entry already routes to owner
-  sign-off — **— and that is all.** *(Corrected later the same run, by the Builder who wrote the paragraph
-  above: I had carried the Scout's "stacked in single-field mode" half forward as the one piece worth a
-  slot, and it does not hold either.* **The stack does not consult the target's name.** `is_mosaic_target_name`
-  has exactly two consumers — `objectinfo.py:352`'s `allow_extent_match` and the merge suggester's
-  mosaic/single split at `routers/targets.py:193` — and neither is the stacker. Mosaic mode is decided
-  **geometrically, from the frames' own plate-solved footprints**: `mosaic.py:330`,
-  `is_mosaic = union_area > AUTO_UNION_AREA_RATIO * ref_area` (1.3x, i.e. footprint centres spanning more
-  than ~15 % of the FOV), and that is what `run_stack` persists as the run's `is_mosaic`. So a legacy
-  `<T>_mosaic_sub`-named target holding real mosaic subs **stacks as a mosaic anyway**; what its name
-  actually costs is a merge suggestion that may offer to combine it with its single field, and a weaker
-  object-extent match — both display-level, neither a wrong picture. There is **no wrong stack in this
-  entry**.)* The one place
-  `_seestar_output_bases` really does skip mosaics is the **healing** companion, for output frames an old
-  scan merged *into* a `_sub` target — a different population from these, which sit in their own bare
-  targets.
-  **↳ THE RECONCILIATION IS NOW OFFERED IN THE APP, Builder 2026-09-27 (v0.482.1 + v0.482.2).** The pairs were
-  invisible to library hygiene because the base lookup computed a safe name the hash-suffixed base does not have
-  (v0.482.1, its own bug); with that fixed, each twin that carries pictures is offered **Combine into `<T> (mosaic)`**
-  on the Library's cleanup card, through `merge_targets_result` (v0.482.2). **What is left is the owner clicking it** —
-  so this entry closes on the next observer reading that shows the 11 pairs gone, not on more code.
-  **↳ OBSERVER CONFIRMS RECURRENCE IS DORMANT ON LIVE DATA, Scout 2026-09-19** (from issue #878's
-  2026-09-17 follow-up; the observer re-measured the whole library after ingestion resumed). The duplicated
-  set is **41,732 frames, byte-identical across four readings**, while the denominator grew by 5,885 newly
-  ingested frames — so the falling rate (76.3 % → 68.9 %) is pure dilution, not new duplication. Grouped by
-  capture night, the mechanism **last fired 2026-07-03**; the 18 nights and 18,681 distinct frames since
-  (including all 5,885 post-stall ones) carry **zero** double-registration. A control rules out "the shape is
-  gone": `IC_360` and `IC_360_sub` still both exist and still share 583 `source_path`s, yet `IC_360` has since
-  taken 3,299 new frames from the very `_sub` folder its twin is named for and **none** landed in the twin. So
-  the duplicating *shape* is present and the duplicating *behaviour* is not — which corroborates the Builder's
-  in-code verification above that the sibling-skip rule already closes recurrence. **The only work left is the
-  one-off reconciliation of the 11 historical hash-suffixed pairs, and it is owner-sign-off** (it merges
-  targets / rewrites on-disk layout, §9, and must never touch `incoming/`, §10) — now filed as **gate 16** in
-  "Needs owner sign-off" so the owner can see where the decision lives. No urgency from accumulation.
+  **(b) shipped v0.471.5** (`best_frame` streams a running minimum: 1,181 ms / 135 MB → 858 ms / ~0 MB) and
+  **(c) shipped v0.471.4** (`project.FrameHealth` + `iter_health_frames`: 1,180 ms / 144 MB → 541 ms / 9.8 MB);
+  both paragraphs moved to [`SHIPPED.md`](SHIPPED.md) 2026-09-30. **What is left is (a), downgraded:**
+  `count_unreadable_frames` already streams (peak ~0) and the 1,594 ms above is a fixture where *no* file exists,
+  so a projection buys only the row building — check the stat half against a healthy install before spending a
+  slot. **Do not turn this into a sweep**: the lever measured is what the caller *keeps*, not what the SELECT
+  names.
 
 - **⚪ REMAINDER of observer issue [#880](https://github.com/JimmyeJones/astrostack/issues/880) — the raw Python
   exception repr is *stored* as a `reject_reason`.** *(Pillar: friendliness — size S–M, but **do not carry it as
@@ -505,35 +229,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `project.py:1319`) and buys the owner nothing visible — worth doing only if one of those files is open anyway.
   **The rest of #880 is shipped and is not this entry's business:** its (b) consequence — accepted-but-unreadable
   frames failing 61 batch reprocesses — as **v0.483.1**, and the batch summary that would not say why as
-  **v0.483.2**; (c) was answered by the #878 note above (the sibling-skip rule already closes recurrence). Full
+  **v0.483.2**; (c) was answered by the #878 entry (now in [`SHIPPED.md`](SHIPPED.md); the sibling-skip rule already closes recurrence). Full
   history of all three in [`SHIPPED.md`](SHIPPED.md). **`accept` staying True on the *retryable* first QC failure
   is deliberate and stays** (`solve/runner.py:336-342` spells out the carve-out): one transient NAS blip must
   never un-accept a good sub, and v0.483.1 deliberately did not change it.
-
-- **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
-  question is closed unanswerable. Read before prioritising the audit's items.**
-  - **The pre-D1 saved-recipe crop (⭐ item below — ✅ IT HAS SINCE SHIPPED, don't go looking for it; all three
-    surfaces closed in v0.416.0 + v0.417.0, entries in [`SHIPPED.md`](SHIPPED.md), and the order dependency
-    below is therefore already satisfied): he sees no blurry mosaic cards.** Asked to open his Library
-    and look, his answer was *"don't see anything immediately"*. **The likely reason is in Owner Facts:
-    `auto_edit_on_autostack` has been OFF on his install**, so the walk-away chain never auto-edited anything —
-    a stored recipe only exists where he used the editor or "Process target" **by hand**. So the bug is **real
-    and still worth fixing** (the audit reproduced it in the shipped image over a real v0.277 volume), but its
-    blast radius *on this owner* is small, and it is **not** the emergency the audit's placement implies.
-    **Re-prioritise accordingly — and note the order dependency:** it becomes materially *more* important the
-    moment `auto_edit_on_autostack` is turned on, which is an approved-and-pending change. **Fix it before that
-    flips**, not after. Absence of a visible symptom is not proof of absence — he looked quickly, at cards, not
-    at every target.
-  - **Root-owned files under `library/targets/` — low impact, confirmed.** The container runs as root, so
-    everything it writes is root-owned. Asked whether he browses that share from Windows, he said he browses
-    **only to upload new subs** — i.e. he writes into `incoming/` over SMB (TrueNAS-owned) and has no need to
-    read or write the app's own `library/targets/` tree from a client. **Keep the finding open as hygiene, drop
-    its priority**; it is not blocking him and a UID/GID change to a live install is exactly the kind of
-    migration §9 says to be careful with.
-  - **Which version he upgraded from: unanswerable, stop asking.** *"don't remember"*, and the upgrade has
-    already happened, so the pre-upgrade schema and config are gone. **Do not spend a run reconstructing it.**
-    Anything that genuinely needs it should be re-derived from what is on disk now (run records, schema
-    version, `config.json` keys) rather than from his memory.
 
 > **Open bugs and nothing else** (the three-file rule, AGENTS.md §2). The 227 resolved
 > entries and 24 QA sweep records this section used to carry were cut to
@@ -543,54 +242,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > the target of any "see above" / "see below" in the entries below that no longer resolves
 > here.
 
-- **🟠 FIXTURES THAT CANNOT EXHIBIT THEIR BUG (fourth external audit, 2026-09-10 — both reproduced by reverting
-  the fix in a scratch script; see PROCESS-NOTES).**
-  ~~(1) `test_the_sky_stays_put_at_every_stack_depth[very-deep]`~~ and
-  ~~(2) `test_a_ragged_mosaic_still_gets_its_fringe_trimmed`~~ — **BOTH FIXED v0.417.1** (Builder 2026-09-10),
-  each verified by reverting the production fix in a scratch script and watching the test go red, which it now
-  does and did not before. (1) `displayspace.assert_shadow_clip` now replays the **pre-fix** `_sky_mode`
-  histogram — all finite values over `[p0.5, median]`, 128 bins — and requires bin 0 to *win* it, so the guard
-  checks the clip **dominates** rather than merely exists; and the depth ladder gained an explicit
-  `exhibits_a1` flag, because the measured boundary is between 0.001 (pre-fix rel. error 0.996) and 0.0008
-  (0.114): the three rungs at and above 0.001 now assert the strong guard, and `very-deep` is kept but labelled
-  as coverage of the *fix*, never of the bug. The test had also been leading with a hand-rolled
-  `clipped_fraction(st) > 0.005` instead of the shared guard, which is how it drifted. (2) now asserts the rect
-  **equals** `(5/400, 5/400, 395/400, 395/400)` — the border rule's own answer, measured — with the ~95 % kept
-  fraction a consequence rather than the check; on the reverted rule it was 0.902, inside the old
-  `0.90 < kept < 0.99` window.
-  ~~**(3, note only)** the v20/v21 fixtures in
-  `tests/test_project_schema_drift.py` are today's `SCHEMA_SQL` minus one or two columns, which
-  `_reconcile_table_columns` restores even with the migration steps deleted~~ — **FIXED v0.418.2**
-  (Builder 2026-09-11), and the entry is now CLOSED. Reproduced first: both tests passed with their
-  `if from_version < 21` / `< 22` blocks **deleted outright**. Two things were wrong, and only one of
-  them was the fixture. The *observation* was that a purely additive nullable-column migration and
-  the runtime backfill produce the same schema, so `_disable_the_runtime_backfill` now switches the
-  net off and makes the migration the only thing that can satisfy the assertions. The *fixture* is now
-  a frozen DDL literal instead of `SCHEMA_SQL` minus the new columns — which is the half that buys
-  something durable: a derived fixture grows every column the schema grows, so it can never be missing
-  one, whereas a frozen one goes red the moment a column reaches `SCHEMA_SQL` with no `ALTER` step.
-  Verified against all three cases, including a synthetic new column with no migration — the v0.119.8
-  live-install brick, red in this suite for the first time. Full entry in [`SHIPPED.md`](SHIPPED.md).
-
-- **⚪ A-MINOR — verified smaller items from the same audit, batch these into cleanup passes.** ~~No validator
-  stops `library_root` being set **inside** `incoming_dir` (after which every correctly-scoped `rmtree`
-  resolves inside the raw tree — *not* the owner's current state, but one settings edit away)~~ *(shipped
-  v0.327.8, see above)*; ~~the scanner's
-  bare-`<T>/` skip is **silent** even when the folder holds thousands of FITS (the owner's `NGC 6888` 4,815 vs
-  `NGC 6888_SUB` 3,110 is exactly that shape)~~ *(shipped v0.329.2, see below)*; ~~the plate-solve-failed screen shows a
-  blocking banner and, in the same row, a "?" popover calling unsolved subs "usually harmless"~~ *(shipped
-  v0.328.1, see below)*; ~~the Stack
-  page prints the **raw engine error** where every other page uses `friendlyJobError`~~ *(shipped v0.328.0,
-  see below)*; ~~the frames table prints raw
-  UTC under a hero that says "Shot &lt;local night&gt;"~~ *(shipped v0.328.5, see below)*;
-  ~~"nights" means **6-hour sessions** on the Nights card
-  but **calendar nights** in captions~~ *(shipped v0.329.1, see below)*;
-  ~~three hand-mirrored "is this a genuine run" predicates~~ *(shipped v0.338.1 — and they **did** disagree;
-  see the note directly below)*;
-  `POST /api/targets` has **no frontend caller**; ~~share and print JPEGs use 4:2:0 chroma subsampling~~
-  *(shipped v0.328.0, see below)*; the "full
-  data" TIFF anchors its white point on the single brightest surviving pixel *(traced 2026-09-03 — the
-  mechanism is confirmed, but read the note below before "fixing" it)*.
+- **⚪ A-MINOR — the two still-open small items from the fourth audit (the seven that shipped moved to
+  [`SHIPPED.md`](SHIPPED.md) 2026-09-30):** `POST /api/targets` has **no frontend caller**; and the "full data"
+  TIFF anchors its white point on the single brightest surviving pixel *(traced 2026-09-03 — the mechanism is
+  confirmed, but read the earlier trace in the moved entry before "fixing" it)*. Batch into a cleanup pass.
 
 - **⚪ MEASURED RESIDUAL OF D1's FOURTH INSTALMENT (Builder 2026-09-09, filed with the v0.399.3/v0.399.4 fix
   that closed the rest) — the border rule still over-crops a **weighted** coverage map on a minority of fully
@@ -653,76 +308,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   offsets themselves (the smoother reduces it), so any further work should measure the **visible plateau/edge
   structure** the smoother creates, not the raw step. (M, image quality — PRIORITY 1/4.)
 
-- **Minor / low-priority (traced, filed for completeness — fix only if touching these files):**
-  - ~~`seestack/stack/output.py:654` (+400, 413, 428, 446, 525) every float→uint export **truncates**
-    instead of rounding, biasing every exported pixel downward by ~½ a step.~~ — **FIXED v0.354.1** (all six
-    sites now go through one shared `output.pack_unit`, which `np.rint`s; the entry, the measurements and the
-    test re-reasoning are in [`SHIPPED.md`](SHIPPED.md)). **Two non-bugs from the same 2026-09-05 mosaic/output
-    QA audit are kept here so they aren't re-investigated:** `output.py` `_write_coverage_fits` writes a **2-D**
-    coverage map verbatim without the `.astype(np.float32)` its 3-D branch and `_write_frame_coverage_fits` both
-    apply — a double-size FITS if a float64 2-D map ever reached it, which the production accumulators never
-    emit; and `_same_map`'s `np.array_equal` returns False on identical-NaN maps, moot because coverage maps are
-    0-filled, never NaN.
-  - ~~**LEAD — the same truncating pack lives in `seestack/render/`, on the *display* side.**~~ —
-    **FIXED v0.354.2**, and wider than the lead framed it: fifteen hand-spelled sites across
-    `seestack/render/`, `seestack/printexport.py`, `seestack/stack/stacker.py`, `webapp/routers/`,
-    `webapp/pipeline.py` and `webapp/video.py` now go through `output.pack_unit`, with a drift test that
-    greps the tree so a sixteenth can't appear silently. Two of them — `printexport.render_print` and the
-    Moon still's 16-bit TIFF — were *exports* the v0.354.1 sweep had missed because they live outside
-    `stack/output.py`. Entry in [`SHIPPED.md`](SHIPPED.md).
-  - `seestack/stack/weighting.py:97` the FWHM factor computes `(best_fwhm / f.fwhm_px) ** 2` with a Python float, so a
-    pathologically tiny `fwhm_px` would raise `OverflowError` (before `np.clip` can clamp it) rather than saturate.
-    **Unreachable on real data** — every writer of `fwhm_px` traces to `median_fwhm`, which persists only values in
-    (0.5, 20) or None, and overflow needs `fwhm_px < ~1.5e-154` (a crash reproduces only at ~1e-300). Defensive-only:
-    cast to `np.float64`/guard the ratio if the file is touched. (Cosmetic — unreachable; confidence: traced + repro'd
-    at the unreachable boundary.) — **FIXED v0.367.1**: the ratio is computed in `np.float64` under
-    `errstate(over="ignore")`, so it saturates to `inf` and clips to the 1.0 the formula already wants.
-    Regression `tests/test_engine_defensive_guards.py::test_a_pathologically_tiny_fwhm_saturates_instead_of_crashing_the_stack`. _(Found by the 2026-07-24 weighting audit.)_
-  - `seestack/stack/align.py` (subpixel-refine cap, ~line 400/490) the guard `|dy| > CAP or |dx| > CAP` does **not**
-    reject a NaN shift (NaN fails both comparisons → the shift is applied). **Unreachable** — the correlation patches
-    are NaN-filled to finite before `phase_cross_correlation`, and finite inputs never return a NaN shift (a featureless
-    overlap returns a finite spurious `(-0.7,-0.7)` whose ≤5px NaN edge-ring is exactly consumed by the
-    `pad=SUBPIXEL_SHIFT_CAP_PX=5` window). Defensive-only: rewrite as `not (abs(dy) <= CAP and abs(dx) <= CAP)` so a NaN
-    is treated as "too large" and skipped, belt-and-suspenders, if the file is touched. (Cosmetic — unreachable;
-    confidence: traced.) — **FIXED v0.367.1**, at *both* sites (`_apply_subpixel_shift` and the windowed one).
-    Regression `tests/test_engine_defensive_guards.py::test_a_nan_subpixel_shift_is_refused_rather_than_smeared_over_the_frame`
-    (patches `skimage.registration.phase_cross_correlation` to return a NaN shift; fails before — `nd_shift`
-    wiped the whole frame to NaN). _(Found by the 2026-07-24 align audit.)_
-  - `seestack/stack/align.py::extract_reference_patch` fills NaNs with `np.nanmedian(luma)`, which on an **all-NaN**
-    patch emits a RuntimeWarning and returns NaN — so the shared reference patch would be entirely NaN and every
-    frame's sub-pixel refine would silently correlate against nothing (each `phase_cross_correlation` returning a
-    meaningless shift, or the call failing and the frame stacking unrefined). **Unreachable in practice** — the
-    patch is the *centre* of the reference frame's own aligned array, which is finite by construction; a fully
-    uncovered centre would mean the reference didn't land on its own canvas. Defensive-only: fall back to `0.0`
-    when the median isn't finite, if the file is touched. (Cosmetic — unreachable; confidence: traced.)
-    — **ALREADY FIXED** (found done while sweeping this batch, v0.367.1): `extract_reference_patch` computes
-    `fill = float(np.median(luma[finite])) if finite.any() else 0.0`. Struck so nobody re-picks it.
-    _(Found by the 2026-08-07 align/accumulator audit, which otherwise traced clean: the windowed and full-canvas
-    accumulator adds, the min/max k-set insertion and its ±inf identities, the mosaic canvas RA-unwrap and outlier
-    passes, the photometric scale/weight composition, and the reproject inset/pad arithmetic all held.)_
-  - `webapp/routers/storage.py:193` `prune_stack_runs` closes `proj` then `lib` in a **single** `finally` (not
-    nested like `gallery.py`/`storage.py::get_storage`), so if `proj.close()` itself raised, `lib.close()` would
-    be skipped and the Library handle would leak. Trigger is essentially unreachable (`sqlite3.Connection.close()`
-    does not raise in practice), so this is a consistency nit, not a live leak — nest the two closes if the file is
-    touched. (Cosmetic; confidence: traced.) — **FIXED v0.367.1**: nested, matching `get_storage`/`gallery.py`.
-  - `seestack/solve/runner.py:204-218` the "unreadable plate solution" self-heal branch's comment claims recording a
-    `reject_reason` makes the frame "stop being re-offered," but `build_solve_arglist` (`runner.py:166`) skips frames
-    only on truthy `wcs_json` — nothing gates on `reject_reason`, so a consistently-unparseable `.wcs` sidecar is
-    re-solved every scan (identical to the ordinary transient-failure branch it says it "mirrors"). The re-offer
-    behaviour is itself harmless/safe (a transient corruption recovers on retry); only the comment over-promises. Fix
-    the comment (or, if genuinely un-recoverable, gate the skip on the stored reason) if the file is touched.
-    (Cosmetic — comment vs behaviour; confidence: traced.) — **FIXED v0.367.1** the comment, not the behaviour:
-    re-offering is deliberate and correct here (an unreadable sidecar is usually transient), and
-    `build_solve_arglist` says so explicitly — so the comment now states what the branch actually buys (the frame
-    is no longer stored as *solved-yet-unusable*) instead of promising a skip nothing implements.
-  - `seestack/stack/reference.py:42-44` `pick_reference_frame` filters candidates on `ra_center_deg is not None` but,
-    unlike `pointings.py:78-80`, does not also require `math.isfinite` — so a hypothetical NaN centre would propagate
-    into the unwrap/median/score and pick an arbitrary reference. Effectively unreachable (a successful solve writes a
-    finite `wcs_json` + centre; a failure leaves `wcs_json` NULL and is filtered by the `f.wcs_json` clause), so this
-    is a defensive consistency nit, not a live bug — add the `isfinite` guard to match `pointings.py` if the file is
-    touched. (Cosmetic; confidence: traced.) — **FIXED v0.367.1**. Regression
-    `tests/test_engine_defensive_guards.py::test_a_nan_pointing_never_becomes_the_reference_frame` (fails before:
-    the NaN frame was picked, and a NaN-only list returned a frame instead of `None`).
+- **Minor / low-priority (traced, filed for completeness — fix only if touching these files).** *(Nine
+  fixed sub-items and two closed-not-fixed notes moved out 2026-09-30 — [`SHIPPED.md`](SHIPPED.md) and
+  [`PROCESS-NOTES.md`](PROCESS-NOTES.md); the four below are what is still open.)*
   - `seestack/post/skymap.py:266` the **offline** galactic-plane fallback (astropy absent) draws the Milky Way
     curve with a linear-in-sin approximation that is up to ~29° off in declination. In this deployment astropy is
     a hard dependency, so the exact `except` branch is dead code and never renders — noted only so a future
@@ -731,37 +319,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
     counted `added` (L84) before the cache block, and when `old_cache.exists()` is False it does `missing += 1`
     while the frame is **still merged** (usable via `source_path`, `cached_path=None`). So the counter reports
     "added-but-cache-missing", not "skipped". Reporting-only; no data loss. (Cosmetic; confidence: traced.)
-  - ~~`seestack/io/ingest.py:93-103` `_cache_stale` refreshes on source *shrink* too, not just growth: the
-    docstring justifies it as "source grew after it was cached" but the `st_size != st_size` test is symmetric,
-    so a source later truncated/replaced smaller than its cache overwrites a good Stage-1 cache and resets that
-    frame's QC.~~ — **CLOSED as already-defended, not fixed; re-traced 2026-09-07 so nobody spends a slot on it.**
-    `_cache_stale` is symmetric and stays that way, because the harmful half is caught **before** it is reached.
-    A shrunk source means `fp_changed` → `content_changed`, and `_source_incomplete(src)` (`ingest.py:338`) runs
-    first: it *loads the pixel data*, so a mid-rewrite truncation fails to read and the whole frame is skipped
-    with `skip_reason="still copying (incomplete rewrite)"` — nothing touched, cache intact, re-checked once the
-    source settles. A source that shrank and is still a **complete, readable** FITS is a genuinely different,
-    smaller capture at a reused path, and refreshing the cache is then the *right* answer (it is the second case
-    `_refresh_frame_metadata`'s docstring names). The only residue is a pre-fingerprint row from a library
-    upgraded and not yet re-scanned, where `stored_fp is None` skips the guard for exactly one scan before the
-    fingerprint is backfilled — and its worst outcome is a re-QC. Do not "fix" the symmetry: making it
-    growth-only would strip the content-swap refresh that keeps a new capture from stacking at the old sky
-    position. (Confidence: re-traced against the current code.)
   - `seestack/io/scanner.py:123` + `ingest.py:143` a symlinked duplicate subdir double-ingests: if `root`
     contains both a real subdir and a symlink to it, both pass `is_dir()` and become separate targets/projects,
     and the per-project `realpath` dedup (built only from that project's own frames) doesn't catch the same
     physical raws landing in a second project. Only harmful if the user later stacks both. (Edge case; traced.)
-  - ~~`seestack/bg/per_frame.py:289-297` `_subtract_background_cpu` on the **stack path** (`errors=None`): if one
-    channel's `Background2D` fit fails it's skipped while the others subtract, then `_zero_sky_per_channel` runs —
-    a per-channel-asymmetric result that could introduce a faint colour cast.~~ — **FIXED v0.173.2** (Builder
-    2026-07-23, branch `claude/pensive-faraday-tfvkyx`; regression-tested). The stack path now fits all three
-    channels *before* subtracting and, if any channel's ladder fit fails, degrades to **no** subtraction (leaves
-    the gradients) rather than a per-channel-asymmetric one — matching the editor path's already-documented
-    reasoning ("don't leave a partial per-channel subtraction that would colour-shift the image"). A per-frame
-    colour cast is coherent and does not average out in the stack, so all-or-nothing is the correct degradation.
-    Regression `tests/test_bg_modes.py::test_stack_path_bails_on_a_single_channel_fit_failure_no_colour_cast`
-    (monkeypatches the ladder to fail on channel 0 only; asserts the frame is returned unchanged — fail-before it
-    partial-subtracted G/B). Additive; no config/DB/API/on-disk change. Severity: image-quality/correctness, Low
-    (only on a degenerate fit, now rare given the robust ladder). (Confidence: traced + regression-tested.)
   - `seestack/qc/streaks.py:107-112` `streak_count` **over-reports** a single continuous trail as 2–5 (one
     satellite/plane trail fragments into several collinear `probabilistic_hough_line` segments; `line_gap=8` +
     `disk(1)` dilation don't re-merge them). Reproduced (Scout 2026-07-23, adversarial QC audit): a clean diagonal
@@ -817,7 +378,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   scratchpad (`wcs_repro.py`).)_
 
 - **⚪ LEAD (Builder 2026-09-30, filed while shipping v0.492.4; its first half — the `restored_utc`
-  over-count — was reproduced and **SHIPPED as v0.492.8**, see [`SHIPPED.md`](SHIPPED.md). This is the
+  over-count — was reproduced and **shipped as v0.492.8**, see [`SHIPPED.md`](SHIPPED.md). This is the
   adjacent question that fix deliberately left) — "a re-stack would fold this in" is read as *solved*, and
   since v0.482.0/v0.484.0 the stacker can also place **unsolved** subs.** *(Pillar: trust — PRIORITY
   2-adjacent; size **S**; severity **none for the owner**, by the gate below. Confidence: traced in the code,
@@ -829,6 +390,18 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   exactly right for the owner's runs — but on an install that turns it on, the note and the batch both
   **under-reach**. **Gate the decision on that option, not on a new threshold**, and note the direction: this
   one can only make the app say *less* than it could, which is the safe way for an offer to be wrong.
+
+- **⚪ LEAD (audit run B, 2026-09-30, filed while shipping v0.492.11 — traced, not reproduced on a screen) — the
+  Target page's own *"N new subs since your last stack"* line still counts by capture time against the newest
+  reusable run.** *(Pillar: trust — PRIORITY 2-adjacent; size **S**; severity low: the Dashboard note, the
+  Settings count and the batch now agree with each other, and this is the one sibling that does not.)*
+  `countNewSubsSinceStack` in `routes/Target.tsx` reads the run listing and counts accepted+solved frames shot
+  after the newest `reusable` run — exactly the reading v0.492.11 replaced everywhere else (picture on the wall,
+  membership via `stack_run_frames`). On a Combined target with the merge's pin this line says *nothing* while the
+  Dashboard names the target. The clean shape is additive: have `GET …/stack-runs` carry each run's
+  `n_light_missing` (`Project.count_light_missing_from_run`, one indexed COUNT per run) and let the page read the
+  displayed run's number, keeping the restored-subs card's separate sentence as v0.492.3 intended. Not built this
+  run because `routes/Target.tsx` was outside the run's files.
 
 ---
 
@@ -3155,6 +2728,49 @@ uncached path costs every time (a cold one pays both, 1,116 ms), the 129 ms bein
 
 ### Infra / maintainability
 
+- **⚪ UNMERGED REMOTE BRANCHES — one-line verdicts (audit run B, B-F7, 2026-09-30). Nothing was deleted or
+  merged; the owner decides.** Measured with the full history fetched (this clone arrives shallow, and a
+  shallow `merge-base` made every branch look 100+ commits ahead — it is not): of the 80 remote branches
+  besides `main`/`stable`, **66 hold no commit that is not already on `main`** (their work merged by another
+  route; `git cherry origin/main <branch>` prints nothing) — safe to delete, none listed. The 14 with a
+  patch of their own:
+  - `claude/blissful-mccarthy-laygw6` (2026-09-30) — **in flight, Run A's**: the two failing regression tests
+    for the updater symlink escape + CSRF; leave it to that run.
+  - `claude/keen-darwin-ioh4nq` (2026-09-30) — **in flight, the Builder's**: v0.492.11 (`run_places_unsolved_subs`,
+    the second half of the `restored_utc` lead); merges on its own. `claude/keen-darwin-ry0wzd` is its
+    earlier state (v0.492.10, already merged as PR #1035) — delete.
+  - `agent/editor-hist-guides` (2026-07-04, 2 commits: tonal guides on the histogram, v0.71.2) — **superseded**:
+    `frontend/src/components/editor/tonalGuides.ts` exists on `main` under the same name.
+  - `claude/confident-dijkstra-np2zol` (2026-07-03, 6 editor fixes: curve-drag swap, recipe re-seed wiping undo,
+    overlay mislabel, Levels "Reset points") — **superseded**: `curveDrag.ts`, `levelsReset.ts` and the
+    re-seed guard are all on `main`.
+  - `claude/happy-franklin-5gojpd` (2026-07-04: a11y overlay-zoom, background-op failure surfacing, sharpen NaN
+    flake, v0.69.10–.12) — **superseded**: each is recorded shipped in `SHIPPED.md` under those versions.
+  - `claude/happy-franklin-8syhyg` (v0.72.1/.2: exports marked display-space; "Auto curve" names its goal) —
+    **superseded**: `display_space` is load-bearing across 57 files on `main`; `seestack/edit/curve.py` exists.
+  - `claude/happy-franklin-ed2vz2` (v0.69.13–.15: keyboard-operable curve points, letterboxed trim rect, deconv
+    preview understatement) — **superseded**: `deconvPreview.ts`, `mosaicTrim.ts` and the a11y entries are on
+    `main`.
+  - `claude/happy-franklin-iv26wx` (v0.69.20–v0.70.1: Auto trims a mosaic's ragged border; summary names it) —
+    **superseded** by `mosaicTrim.ts` + the "What Auto did" trim (v0.70.x and every later fix to it).
+  - `claude/happy-franklin-w7wd1m` (v0.72.0: data-driven "Auto curve") — **superseded**: `seestack/edit/curve.py`
+    on `main`, 21 `SHIPPED.md` mentions.
+  - `claude/kind-mccarthy-afpnt0` (2026-07-23, v0.180.2: streak-reconcile stranding, stack-defaults path leak,
+    left-out badge) — **superseded**: all three are in `SHIPPED.md` (v0.180.x line) and the reconcile is on
+    `main`.
+  - `claude/pensive-faraday-4vpc3q` (2026-07-14, v0.121.3–v0.122.1: isolate a target that fails to open in
+    auto-stack/reprocess-all; upload target from a dropped folder; em-dash for an unmeasured Sky value) —
+    **superseded** for the first two (`test_reprocess_all_isolates_a_failing_target`; `UploadFits` derives the
+    target); the em-dash is cosmetic and the frames table has since been rewritten (v0.455.2). Delete.
+  - `claude/pensive-faraday-56xh8m` (v0.121.3: "Last night" card across UTC midnight) — **superseded**
+    (`LastNightCard` UTC-midnight fix is in `SHIPPED.md`, 3 mentions).
+  - `claude/history-stretch` (2026-05-29, 7 lines: render the History **Adjust** live preview at a smaller
+    `size` while dragging) — **worth a look, tiny**: the only branch whose idea is not on `main` (no `size`
+    param on `stackRenderUrl`). Priority 3 polish on a deprioritised surface; re-do by hand against today's
+    `History.tsx` rather than merging a May branch.
+  - Everything else (`agent/*`, `fix/*`, `fix-ci-qt-plugin`, `manual/frame-auto-grading`, the other `claude/*`
+    branches from May–July) — **fully contained in `main`**; delete at will.
+
 - ~~**LEAD (Builder 2026-09-17) — no dogfood pass has ever held the owner's *scale*, and the probe measures
   the one dimension that hides it.**~~ — **✅ SHIPPED v0.455.3** the same run, as
   `scripts/agent-dogfood.sh --deep` + `scripts/dogfood_deep.mjs`. Entry cut to [`SHIPPED.md`](SHIPPED.md),
@@ -3797,7 +3413,7 @@ outright bug in existing behaviour, never to add capability.
     check under "Image quality" — a log read, no code change unless it fails.
 14. ~~**Three yes/no's on residue from shipped features**~~ — **ANSWERED 2026-09-25:** noise picture yes, auto-apply preset yes, 9:16 clip no, plus a new owner request (a capture-date progression video). See the 2026-09-25 block above.
 15. ~~**One offline dependency: `astroalign`?**~~ — **ANSWERED YES 2026-09-25.** The WCS-free fallback entry under "Autonomy" is ungated.
-16. ~~**De-duplicate the 11 historical mosaic target pairs ([#878](https://github.com/JimmyeJones/astrostack/issues/878))**~~ — **ANSWERED YES 2026-09-25.** Buildable; constraints on the #878 entry under "Bugs".
+16. ~~**De-duplicate the 11 historical mosaic target pairs ([#878](https://github.com/JimmyeJones/astrostack/issues/878))**~~ — **ANSWERED YES 2026-09-25.** Buildable, and **offered in the app since v0.482.1/.2** (Library → cleanup card → "Combine into `<T> (mosaic)`"); the constraints are on the #878 entry, now in [`SHIPPED.md`](SHIPPED.md). **Closes on your click**, not on more code.
 
 17. **Should agent commits be cryptographically *signed*, and with what key?**
     *(Filed 2026-09-27 by the Builder, after a session-level git hook asked for something AGENTS.md §8/§10
@@ -3821,6 +3437,16 @@ outright bug in existing behaviour, never to add capability.
     list; the guard against a personal email leaking into published history (§10's real concern) is already
     in place and independent of this.
 
+
+18. **Copy a hand-saved editor recipe onto a restacked run (without re-rendering its preview) — only if you
+    want it.** *(Filed 2026-09-30 by audit run B, moved out of the #903 entry when v0.492.12 closed it; a
+    convenience, not a regression fix — the wall is unchanged either way.)* After a restack your saved recipe
+    stays on the run you edited, so getting your look onto the new, deeper pixels means redoing it in the
+    editor. Copying the recipe onto the fresh run would save that: the preview would still be the plain
+    autostretch (so the "Not stretched yet" chip and `unexported_edit` stay honest) and the tone-chain judgement
+    would happen where it belongs, in front of you in the editor — a saved crop is re-validated against the new
+    run's coverage there already. Size S. Two earlier runs were spent on the larger version of this; this is the
+    small one. Say yes or no; nobody builds it unasked.
 - ~~**Satellite/aircraft-trail forecast for the Tonight planner (opt-in; needs a data source).**~~ —
   **DECLINED 2026-09-08 by the owner's standing LOCAL policy (AGENTS.md §1 Owner Facts, Q4); struck
   2026-09-11 as that answer instructed.** Predicting passes needs current orbital elements (TLEs) and a
@@ -3854,6 +3480,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **⚪ D2 (audit run B, 2026-09-30) — "Bugs (fix these first)" cut back to open bugs only, as AGENTS.md §2 says:** the two struck-through shipped entries (v0.455.0, v0.456.0), the fixtures entry (v0.417.1 + v0.418.2), the shipped halves of two open leads ((a)+(b) of the auto-binder lead, (b)+(c) of the FrameRow lead), the seven shipped A-MINOR items, the nine FIXED sub-items of the minor list, the whole #903 remainder (closed by v0.492.12) and the whole #878 entry (code side shipped v0.482.1/.2; closes on the owner's click, gate 16) moved **whole** to [`SHIPPED.md`](SHIPPED.md) under "moved out of Bugs"; the 📋 owner-answers block (2026-09-11), the closed-with-the-grep (c) of the #965 lead and the closed-not-fixed `_cache_stale` note moved to [`PROCESS-NOTES.md`](PROCESS-NOTES.md). Every open item kept its place, with a one-line pointer where a part moved. Enforced from now on by `.github/workflows/docs-budget.yml` + `tests/test_process_docs_budget.py` (D1).
 - **✅ v0.492.10** — 🟠 **FLAKY TEST fixed** (test-only; no production code): the three `Settings → Stacking → Memory` tests in `frontend/src/routes/Settings.test.tsx` waited for the card's own chrome (`getByText("Memory")`, rendered off `getSettings`/`optionsSchema`) and then read the RAM figures and advisories **synchronously** — but those come from `getSystem`, a *different* mocked query, so the read was a race on microtask ordering. CI lost it on an intermediate head of PR #1034 (`Frontend build + tests`, run 36749881941, *"Unable to find … /Budget is higher than this machine's available RAM/"*). **Proved nondeterministic rather than assumed:** the job passed on the next head and `git diff --stat 6378a18 ba924ed -- frontend/` is **empty** — identical bytes, both outcomes — and that branch never touched `frontend/`. Reproduced deterministically by resolving `getSystem` 25 ms late, which fails **two** of the three (the sibling's positive assertion was racy too, just luckier); all three pass with the fix under the same delay. Fix is three `getBy`→`findBy` changes, one of which also stops a `queryByText(...).toBeNull()` passing **vacuously** (before the data loads the advisory is absent for the wrong reason). Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.492.9** — INFRA / the quality bar itself: **the documented suite command needs a plugin nothing installs.** `docs/AGENT-ENVIRONMENT.md` documents `-n 4 --dist worksteal` as *the* way to run the suite (*~11 minutes instead of ~75*), but `pytest-xdist` was in neither `pyproject.toml` nor `scripts/agent-setup.sh` — and a missing pytest plugin is a **usage error**, not a degrade: `unrecognized arguments: -n --dist worksteal`, an `inifile:`/`rootdir:` block, **exit 4, nothing collected**, which the same document's trap warns reads exactly like a green run. It has cost two unattended runs a suite start (the previous one landed its `pip install` in the *system* site-packages, because `source scripts/agent-setup.sh` does not survive into the next `Bash` call). `pytest-timeout` is in the `dev` extra for precisely this reason and says so, so `pytest-xdist>=3.5` joins it with the reasoning written down, plus a contract test over **both** asserting they are in the extra and in neither case in the base dependencies — the image and the `Image contract` job install `.[web]`, never `.[dev]`, so nothing the owner deploys gains a byte. Tests +1, **fail-before** by scratch revert. No engine, webapp, frontend, config, schema, on-disk, API or default change. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.492.8** — 🟠 BUG FIX (trust / autonomy, PRIORITY 2), the first half of the `restored_utc` LEAD filed with v0.492.4, reproduced and fixed: **a sub set aside *after* the picture that used it is still in that picture.** `qc.grading.apply_grade_report` can reject a frame an earlier stack combined (a re-grade on a bigger population moves the percentile cut) and `apply_grade_reaccepts` then stamps a `restored_utc` later than that stack — so `Project.count_light_missing_from_stack` (the Dashboard's new-light note, v0.492.0's "Bring my pictures up to date" scope, the counts its dialog quotes) and `restorednudge.restored_since_stack` both read the sub as *missing* from a picture whose pixels contain it. Reachable with **no new light at all** (a sensitivity change, or the Target page's own `auto-grade/apply` followed by the next scan), so it is a false *"this picture is behind"* that costs hours of NAS CPU producing the identical picture — and it clears itself afterwards, so nobody is told. New additive `frames.rejected_utc`, added **without** a `SCHEMA_VERSION` bump (like `seam_residual` / `duration_s`) so a rollback can still open a project this build touched — two existing `test_an_old_build_can_still_read_a_project_this_build_wrote` guards say so and went red on the first draft's bump — and stamped **centrally in `Project.update_frame`** — the only `UPDATE frames` statement in the codebase, so no reject path can forget it — and only on a genuine accepted → set-aside transition, read off the pre-update `accept` inside the same statement (`CASE WHEN accept = 1`), so re-writing a reason on an already-aside frame leaves the stamp alone. Both readers now ask `rejected_utc < run < restored_utc`; `restored_frame_stamps` becomes `restored_frame_windows` returning `RestoredWindow`. **One-sided everywhere**: no stamp (legacy row, rejected at ingest) keeps today's answer byte for byte, a tie counts, and an unparseable set-aside is ignored rather than trusted — the other direction would silence a real nudge. `restored_utc` itself untouched, per the lead's own instruction. Also out of `frames_fingerprint` (new `_FINGERPRINT_PROVENANCE_COLS`): hashing a set-aside stamp cost `estimate_cache` its ~1 s hit on a reject-then-re-accept, and loses nothing, because every change the stamps accompany is already visible through `accept` — an *exclusion* list, so a later column is hashed unless named and forgetting only over-invalidates. No config, on-disk, default, schema-version or API-shape change; the `ALTER` is ungated and has its own frozen-DDL test. Tests +17, **fail-before shown for all five pieces** by scratch revert. The adjacent `star_match_unsolved` question is left open in the backlog, gated on that option. Full entry in [`SHIPPED.md`](SHIPPED.md).

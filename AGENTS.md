@@ -183,7 +183,10 @@ item ships or closes, **cut the whole entry** to `docs/SHIPPED.md` (newest first
 by version + date) and leave a one-line `✅ v0.xxx.y <what>` under Shipped.
 `docs/PROCESS-NOTES.md` takes process notes, collision diaries and QA sweep records
 (**including clean ones**) — **never** a priority section. Delete an "In progress" claim
-when you release it.
+when you release it. **This is enforced on every PR by `.github/workflows/docs-budget.yml`
+(`tests/test_process_docs_budget.py`): "Bugs" holds open bugs only, `docs/IMPROVEMENTS.md` may not grow by
+more than ~40 lines unless the change files a Bugs entry marked reproduced/measured, and the two record
+files stay under a ceiling — archive the oldest entries to `docs/archive/`, never delete.**
 
 **Batching:** closely related small changes share a branch as separate commits; unrelated
 changes get their own branch/PR. If a task turns out huge, ship the first safe slice and

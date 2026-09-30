@@ -1,0 +1,55 @@
+name: Docs budget
+
+# The docs-growth rule (AGENTS.md §2, "the three-file rule"), enforced —
+# separately from ci.yml on purpose, so a docs-only PR gets its verdict in
+# seconds and the rule can be tuned without touching the test job.
+#
+# Three checks, all in tests/test_process_docs_budget.py, each with its fix
+# path in the failure message:
+#   (a) "Bugs (fix these first)" holds open bugs only;
+#   (b) a PR may not grow docs/IMPROVEMENTS.md by more than ~40 lines unless it
+#       files a Bugs entry marked reproduced/measured (the growth check needs
+#       the PR's base, hence DOCS_BUDGET_BASE; on a push to main it is skipped
+#       and (a)/(c) still run);
+#   (c) docs/PROCESS-NOTES.md and docs/SHIPPED.md stay under generous absolute
+#       ceilings (archive the oldest entries to docs/archive/ when hit).
+#
+# Like ci.yml this is a visible signal, not a merge block (no branch
+# protection). A red run here is the next run's first docs task.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: docs-budget-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  budget:
+    name: Docs budget (three-file rule)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The growth check diffs against the PR's base commit.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest only
+        # The test imports nothing from the project, so the whole engine and
+        # its numeric stack stay out of this job.
+        run: python -m pip install --quiet pytest
+      - name: Three-file rule
+        env:
+          DOCS_BUDGET_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+        # --noconftest: tests/conftest.py imports numpy for the engine suite's
+        # fixtures, which this standalone test does not need.
+        run: |
+          python -m pytest -q --noconftest -p no:cacheprovider tests/test_process_docs_budget.py
