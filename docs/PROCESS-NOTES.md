@@ -76,6 +76,27 @@ enclosing `try` between it and the loop body): **one hit, and it is not the clas
 project should indeed fail the job it was asked to do. Everything else is guarded. Recorded so nobody
 re-sweeps it.
 
+### Flake observed and diagnosed, not fixed — `test_stats_and_system_agree_with_storage_on_free_disk` under `-n 4`
+
+The pre-merge suite came back `1 failed` in `tests/webapp/test_storage.py`, a file this run's diff does not
+touch — the shape `docs/AGENT-ENVIRONMENT.md` says to re-run alone before believing. It passed alone,
+**15/15**, twice.
+
+It is not a drift guard like the `test_derived_light.py` case that trap was written for; it is a genuine
+**race against the disk**. The test reads `disk.free_bytes` from `/api/storage`, `/api/stats` and
+`/api/system` in three separate requests and requires them within **50 MB**, "same filesystem, moments
+apart". Under `-n 4` the other three workers are writing `tmp_path` data the whole time — a full suite
+leaves ~7 GB in `/tmp/pytest-of-root` — so the three live reads genuinely disagree: measured
+**24,741,265,408 / 24,597,266,432 / 24,597,233,664**, a spread of **144 MB**, i.e. 2.9× the tolerance.
+The endpoints are consistent; the disk moved between them.
+
+**Agent-local, not a CI risk:** `.github/workflows/ci.yml` runs the suite **sequentially** (no `-n`), so
+only a parallel agent run can see it. Left unfixed deliberately — the obvious "widen the tolerance" is
+exactly the weakening AGENTS.md forbids, and the honest fix is to make the assertion about the three
+endpoints *agreeing with one reading of the disk* rather than with each other across three moments, which is
+a change to what the test means and wants its own slot. Recorded with the numbers so the next run that meets
+it can recognise it in one grep instead of re-measuring.
+
 Two supporting facts checked on the way, both worth not re-deriving: `Project.update_frame` holds the
 **only** `UPDATE frames` statement in the codebase (which is why the new stamp is one line and no reject
 path can forget it), and SQLite evaluates every `UPDATE` right-hand side against the **pre-update** row, so
