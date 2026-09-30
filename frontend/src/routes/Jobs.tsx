@@ -175,6 +175,11 @@ export function reprocessSummary(r: Record<string, unknown>): {
   const rescanned = Number(r.rescanned ?? 0);
   const autoEdited = Number(r.auto_edited ?? 0);
   const keptFinished = Number(r.kept_finished ?? 0);
+  const keptDisplayed = Number(r.kept_displayed ?? 0);
+  const keptNames = Array.isArray(r.kept_displayed_targets)
+    ? (r.kept_displayed_targets as unknown[]).map(String).filter(Boolean)
+    : [];
+  const coverAdvanced = Number(r.cover_advanced ?? 0);
   const failedArr = Array.isArray(r.failed) ? r.failed : [];
   // ``name`` is the display name the backend now sends beside the safe one; an
   // older backend sends only ``target``, and then that is what the list shows.
@@ -227,6 +232,27 @@ export function reprocessSummary(r: Record<string, unknown>): {
     } else if (keptFinished > 0) {
       line += " to keep finished pictures finished";
     }
+  }
+  // A picture the owner finished by hand is never replaced by a batch: it stays
+  // on the wall (pinned) and the deeper restack waits in History, where the
+  // Target page offers it as a cleaner cover. Named, because "restacked N" alone
+  // would leave him wondering why those cards did not change (issue #903, the
+  // other way round).
+  if (keptDisplayed > 0) {
+    const which = keptNames.length > 0 && keptNames.length <= 4
+      ? ` (${keptNames.join(", ")})`
+      : "";
+    line += keptDisplayed === 1
+      ? ` — kept 1 picture you finished yourself on the wall${which}; its deeper restack is in History`
+      : ` — kept ${keptDisplayed} pictures you finished yourself on the wall${which}; their deeper restacks are in History`;
+  }
+  // A cover the app itself had pinned (a Combine keeping the deep picture over
+  // a carried one-night stack) is lifted once the deeper run exists, so the
+  // fresh picture is the one shown. Silent when none was.
+  if (coverAdvanced > 0) {
+    line += coverAdvanced === 1
+      ? " — 1 target now shows its new, deeper picture in place of a cover the app had pinned"
+      : ` — ${coverAdvanced} targets now show their new, deeper pictures in place of covers the app had pinned`;
   }
   if (skipped > 0) line += ` — ${skipped} already up to date`;
   if (failed.length) line += ` — ${failed.length} failed`;

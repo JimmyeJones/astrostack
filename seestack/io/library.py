@@ -936,6 +936,18 @@ class Library:
                 and dest.cover_stack_run_id is None):
             self.set_target_cover(dest.safe_name, shown_before)
             pinned = True
+            # Say it was *this* code that pinned, and why (``seestack.coverpin``):
+            # a pin the app placed must advance when the reason for it is gone —
+            # the next deeper stack of this target is made to be shown, and a
+            # bulk restack asks this record before deciding whether the pin is
+            # the owner's to keep or the app's to lift.
+            from seestack.coverpin import PIN_REASON_MERGE, mark_app_pin
+
+            proj = Project.open(self.target_dir(dest))
+            try:
+                mark_app_pin(proj, shown_before, PIN_REASON_MERGE)
+            finally:
+                proj.close()
 
         self.refresh_target_stats(dest.safe_name)
         return MergeTargetsResult(total_added, total_runs, pinned)

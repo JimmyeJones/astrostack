@@ -399,3 +399,167 @@ def test_the_library_note_is_the_union_of_the_target_page_s_own_two_numbers(
     data = _waiting(client)
     assert data["items"][0]["n_new_subs"] == page_new + page_restored
     assert data["items"][0]["stacked_utc"] == newest_genuine["timestamp_utc"]
+
+
+# ------------------------------------- the picture on the wall is measured ---
+#
+# 2026-09-30 audit, C-F1. The run measured used to be the *newest genuine* one,
+# whatever the target was showing. After a Combine that is the one-night stack
+# carried in — its own recent timestamp, a subset of the subs — so the one target
+# a Combine exists to deepen answered "nothing missing", and the same reading was
+# wrong for any pinned older cover. The picture on the wall is the one measured
+# now, and where a run recorded which subs it was offered, "missing" is
+# membership rather than a clock (``tests/test_stack_run_frames.py``).
+
+def _give_a_picture(data_root, safe, ts, *, options_json=REAL_OPTS,
+                    basename="master") -> int:
+    """A run with its files on disk, so a merge carries it and the wall shows it."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            out = proj.project_dir / "output"
+            out.mkdir(parents=True, exist_ok=True)
+            (out / f"{basename}.fits").write_bytes(safe.encode())
+            (out / f"{basename}_preview.png").write_bytes(b"png:" + safe.encode())
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc=ts, output_basename=basename,
+                fits_path=str(out / f"{basename}.fits"), tiff_path=None,
+                preview_path=str(out / f"{basename}_preview.png"),
+                n_frames_used=3, canvas_h=10, canvas_w=10,
+                coverage_min=1, coverage_max=1, options_json=options_json,
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        return run_id
+    finally:
+        lib.close()
+
+
+def _combine(data_root, into, source):
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        return lib.merge_targets_result(into, [source])
+    finally:
+        lib.close()
+
+
+def test_a_combined_target_is_named_with_the_other_nights_subs(client, solved_library):
+    """The audit's case. Both nights were stacked after every sub was shot, so
+    by the clock neither picture is missing anything; the Combine pins the deep
+    target's own picture, which has never seen the second night's subs."""
+    _give_a_picture(solved_library, "M_42", AFTER)
+    _give_a_picture(solved_library, "NGC_7000", MID)
+    assert _waiting(client)["count"] == 0
+
+    result = _combine(solved_library, "M_42", "NGC_7000")
+    assert result.pictures_kept == 1 and result.picture_pinned is True
+
+    data = _waiting(client)
+    assert data["count"] == 1
+    (item,) = data["items"]
+    assert item["safe"] == "M_42"
+    assert item["n_new_subs"] == 3           # the second night, all of it
+    assert item["stacked_utc"] == AFTER      # the picture on the wall, not the carried run
+    # …and the Settings count the batch quotes agrees, so the note and the
+    # "Bring my pictures up to date" dialog cannot name different targets.
+    status = client.get("/api/reprocess-status").json()
+    assert status["new_light"] == 1
+    assert status["new_light_subs"] == 3
+
+
+def test_a_combined_target_showing_the_carried_picture_is_missing_its_own_night(
+        client, solved_library):
+    """The other way round: the deep folder had never been stacked, so the
+    carried one-night picture is what the wall shows — and it is missing every
+    sub the target already held."""
+    _give_a_picture(solved_library, "NGC_7000", AFTER)
+    _combine(solved_library, "M_42", "NGC_7000")
+
+    data = _waiting(client)
+    assert data["count"] == 1
+    (item,) = data["items"]
+    assert item["safe"] == "M_42"
+    assert item["n_new_subs"] == 3
+    assert item["stacked_utc"] == AFTER
+
+
+def test_a_pinned_older_cover_is_the_picture_measured(client, solved_library):
+    """A cover the owner pinned outranks the newest run on every wall surface,
+    so it is the picture that can fall behind — and the newest run being up to
+    date is no answer about it."""
+    older = _give_a_picture(solved_library, "M_42", BEFORE)
+    _give_a_picture(solved_library, "M_42", AFTER, basename="master_2")
+    assert _waiting(client)["count"] == 0     # newest picture has everything
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        lib.set_target_cover("M_42", older)
+    finally:
+        lib.close()
+    data = _waiting(client)
+    assert data["count"] == 1
+    assert data["items"][0]["n_new_subs"] == 3
+    assert data["items"][0]["stacked_utc"] == BEFORE
+
+
+def test_an_export_on_the_wall_is_measured_as_the_stack_it_was_rendered_from(
+        client, solved_library):
+    """An export re-renders an existing picture; the picture it *is* is the run
+    it derives from, and that is what falls behind."""
+    origin = _give_a_picture(solved_library, "M_42", BEFORE)
+    _give_a_picture(solved_library, "M_42", AFTER, basename="master_edit",
+                    options_json=json.dumps({"editor_recipe": {"ops": []},
+                                             "derived_from": origin}))
+    data = _waiting(client)
+    assert data["count"] == 1
+    assert data["items"][0]["run_id"] == origin
+    assert data["items"][0]["stacked_utc"] == BEFORE
+
+
+def test_an_export_that_does_not_say_what_it_derives_from_resolves_to_the_nearest_stack(
+        client, solved_library):
+    """An export recorded before ``derived_from`` existed is a re-render of the
+    newest stack older than it — never a reset of the clock."""
+    _give_a_picture(solved_library, "M_42", BEFORE)
+    _give_a_picture(solved_library, "M_42", AFTER, basename="master_edit",
+                    options_json=EDITOR_OPTS)
+    data = _waiting(client)
+    assert data["count"] == 1
+    assert data["items"][0]["stacked_utc"] == BEFORE
+
+
+def test_a_picture_the_batch_kept_on_the_wall_is_not_nagged_about(client, solved_library):
+    """A cover the bulk restack pinned to keep a hand-finished picture is not
+    the owner's choice of picture — the deeper run it kept in History is what is
+    measured, or every batch would re-name the target, restack it, keep it, and
+    never stop. A pin he made himself (no record) is still the picture measured."""
+    from seestack.coverpin import PIN_REASON_KEPT_FINISHED, mark_app_pin
+
+    kept = _give_a_picture(solved_library, "M_42", BEFORE)
+    _give_a_picture(solved_library, "M_42", AFTER, basename="master_2")
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        lib.set_target_cover("M_42", kept)
+        proj = lib.open_target("M_42")
+        try:
+            mark_app_pin(proj, kept, PIN_REASON_KEPT_FINISHED)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert _waiting(client)["count"] == 0         # the deeper picture has it all
+
+    # The owner re-pins the same run by hand: the record no longer matches
+    # (a fresh pin is his), and the kept picture is measured again.
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            proj.delete_meta("cover_pinned_by_app")
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert _waiting(client)["count"] == 1
