@@ -1,5 +1,64 @@
 # Shipped — the record
 
+## 2026-09-30 (owner session) — one-click updates, and the restore that would have deleted new subs
+
+### v0.490.0 — ✨ FEATURE (owner request): one-click updates from Settings
+
+**The ask** (owner, 2026-09-30): "a simple button to update the app". Updating meant SSH and
+`sudo scripts/deploy.sh`.
+
+**Why it is two halves.** The app runs inside the container an update rebuilds, so it cannot do the
+update itself — and giving it the Docker socket would make anyone who can open the page (no password by
+default) root on the NAS. So the page only **asks**: `POST /api/updates/{check,apply,rollback}` writes
+`state/updater/request.json` (`webapp/routers/updates.py`). `scripts/update_agent.py` — stdlib Python, run
+every minute by a TrueNAS cron job as root, set up once with `sudo python3 scripts/update_agent.py --install`
+— validates the request field by field (three actions, an id, a time, restore yes/no + RESTORE; anything else
+refused and consumed), then runs the same `deploy.sh -y origin/stable` or `rollback.sh --yes [--restore-data]`
+a person would, and reports in `state/updater/status.json` with a heartbeat the page reads as
+missing / ok / stale. An update always installs `origin/stable`: the page cannot name a ref.
+Every POST takes a JSON body — `apply` must name the version the owner was shown — because the app has
+no password by default and a bodiless POST is one any web page he visits could send cross-site; a JSON body
+needs a CORS preflight the app never grants, and FastAPI parses a body only when it is declared JSON.
+`--install` copies the helper out of the clone (into the deploy state folder, so a rollback to a version
+without it keeps it running) and refuses if the clone or the helper would sit inside ASTRO_DATA, where the
+container could edit a file root runs.
+
+**Owner's answers** (asked 2026-09-30): the NAS fetches from GitHub **only when he presses Check or Update** —
+no scheduled check, keeping to the app-stays-local rule; and **Go back** is on the card, with typed RESTORE
+when the older version cannot read the newer database.
+
+**The card** (`frontend/src/components/UpdatesCard.tsx`, top of Settings → Maintenance): the running version;
+setup steps when no helper has reported; a pointer at the cron job when it went quiet; "ready to install" with
+Update when a check found a newer `stable`; "Updating — this page reconnects by itself" while the app is down,
+then a reload onto the new version's own page; the helper's message and log tail when something failed.
+
+**Pinned by** `tests/test_update_agent.py` (23, against a real git origin with stub deploy/rollback scripts),
+`tests/webapp/test_updates.py` (15, including that a bodiless, form or text/plain POST queues nothing, that every request the page writes passes the helper's
+validator and that the observer token cannot reach any of it), and `UpdatesCard.test.tsx` (10).
+
+### v0.489.3 — 🔴 BUG FIX (§10, data safety): `rollback.sh --restore-data` rolled back `incoming/` too
+
+**What was wrong.** `scripts/rollback.sh` (v0.479.3) restored a ZFS backup with `zfs rollback <dataset>@<snap>`.
+`deploy.sh` only takes that snapshot when the data folder *is* its own dataset — and `incoming/` is inside that
+folder. So on the owner's layout, rolling back with `--restore-data` would have deleted every raw sub copied into
+`incoming/` after the update, which is the one folder AGENTS.md §10 forbids touching and holds the only copy of
+those subs. The script's own comment said incoming/ was "never touched". The tar path had a quieter flaw: it
+extracted older databases next to the newer app's `-wal` files, which SQLite would then replay onto them.
+
+**The fix.** `scripts/lib/restore-data.sh` is now the only restore. It reads the snapshot through its read-only
+view (`<mountpoint>/.zfs/snapshot/<name>/`, reachable whether or not `snapdir` is visible) or unpacks the tar to a
+temp dir, deletes the current `*.sqlite-wal/-shm/-journal` under `library/` and `state/`, and copies back only
+`*.sqlite*` and `config.json` under those two folders — a file list filtered by path, not trusted from the backup.
+`rollback.sh` also gained `--yes` so the update helper can run it without a terminal.
+
+**How it was found.** While wiring a one-click "Go back" button to `rollback.sh` — which would have put this one
+click away. It had never run: the owner has not deployed with the script yet.
+
+**Pinned by** `tests/test_restore_data.py` (5): both backup kinds restore the databases and leave `incoming/`
+byte-for-byte as it was, including a sub added after the backup; an archive carrying `incoming/` still cannot
+write there; a missing snapshot or empty archive restores nothing (WAL included); and `rollback.sh` no longer
+contains `zfs rollback` — that last one fails against the old script.
+
 ## 2026-09-30 (Builder, second run of the day) — the picture on the sky map is sized by the app's own answer, not by one arbitrary sub
 
 ### v0.489.2 — 🟡 BUG FIX (trust, PRIORITY 3): a drizzled picture is no longer drawn that many times too big on the sky map

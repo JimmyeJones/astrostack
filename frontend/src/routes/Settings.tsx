@@ -17,6 +17,7 @@ import {
 import { dependencyMet } from "../api/depends";
 import { compassPoint } from "../tonight";
 import { RefinishPicturesCard } from "../components/RefinishPicturesCard";
+import { UpdatesCard } from "../components/UpdatesCard";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
 import { AmbientSettings } from "../components/AmbientSettings";
 import { NightSkySettings } from "../components/NightSkySettings";
@@ -1130,6 +1131,7 @@ export function SettingsView() {
     ),
     maintenance: (
       <Stack>
+        <UpdatesCard />
         <Maintenance />
         <RefinishPicturesCard />
         <Paper withBorder p="lg">
