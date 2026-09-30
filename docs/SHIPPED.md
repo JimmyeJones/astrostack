@@ -1,5 +1,64 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder, later the same day) — one unreadable target took out the whole maintenance page
+
+### v0.492.4 — 🟠 BUG FIX (friendliness / robustness, PRIORITY 3), Builder-found and reproduced: the three library-wide read-outs on Settings had no per-target guard, so one broken `project.sqlite` 500'd all of them at once
+
+*(Found by reading the class rather than the entry — `webapp/pipeline.py`'s cross-target roll-ups against the
+same loops everywhere else in the app. Filed and fixed in one run, so it never entered "Bugs (fix these
+first)". All four tests fail before, by scratch revert against unmodified `main`.)*
+
+**The bug.** `webapp/pipeline.py` holds three library-wide read-only roll-ups — `reprocess_status`,
+`auto_cast_summary`, `auto_highlight_summary` — and each walks **every** target's own SQLite:
+
+```python
+for entry in lib.list_targets():
+    proj = lib.open_target(entry.safe_name)   # ← unguarded
+    try:
+        ...
+    finally:
+        proj.close()
+```
+
+`Library.open_target` → `Project.open` raises on a truncated or malformed `project.sqlite`, on a
+`user_version` a newer build wrote, and on a target directory a mount took away mid-read; `iter_stack_runs`,
+`get_meta` and the new `count_light_missing_from_stack` can raise after a clean open for the same reasons.
+Nothing caught any of it, so the exception went straight out through the endpoint as a **500**.
+
+**Why that is worse than one missing number.** All three land on **one page**. `GET /api/reprocess-status`
+feeds Settings → Maintenance (the three-way reprocess scope of v0.492.0, its target and sub counts, and the
+#903 finished-picture warning) **and** the navbar's outdated-targets badge, which every page in the app
+mounts; `auto_cast_summary` and `auto_highlight_summary` are the two Auto read-outs directly below it. So a
+single unreadable target blanked the reprocess scope, both Auto read-outs and the upgrade badge **together** —
+i.e. the page that exists to *run maintenance* went dark exactly when something needed maintaining, with
+nothing on screen to say which target was at fault. The badge fails silently by design (`data?.outdated ?? 0`
+renders nothing), so the reader is not even told the count is missing.
+
+**And the app had already decided this question everywhere else.** Every other cross-target reader skips the
+one broken target and answers for the rest, most of them saying so in the comment:
+`routers/gallery.py` (*"one broken project must not 500 the wall"*, ×3), `routers/sky.py` (×2),
+`routers/overtrim.py`, `routers/newsubs.py` — the sibling of this very feature, added with v0.492.0 —
+`routers/incominglag.py`, `refinish.py`, and `routers/storage.py`, whose comment names the convention
+outright. These three were simply never brought into line; v0.492.3 then added a per-target `COUNT` to one of
+them, widening the surface.
+
+**The fix.** New `pipeline._skip_unreadable_target(what, safe)` — one place for the reasoning and one log line
+(`log.warning(..., exc_info=True)`, the only report a roll-up can make: it has no per-target row to hang a
+message on) — and all three loops now guard the open **and** the reads, skipping that target and carrying on.
+In `reprocess_status` the skipped target still counts in `total_targets` (it exists) and lands in **no**
+bucket, exactly as a never-stacked target already does, so `outdated + up_to_date ≤ total_targets` keeps the
+meaning it had. Nothing else moved: same response keys, same numbers on a healthy library.
+
+**Tests +4 in `tests/webapp/test_reprocess_all.py`**, one per read-out plus one end-to-end through the real
+endpoint (200, not 500), with the failure injected at `Project.open` for exactly one target — the same
+monkeypatch the sibling test in `tests/webapp/test_new_subs_waiting.py` uses, because that is the call all
+three reach a project through. **All four fail before** (scratch revert of `webapp/pipeline.py` to
+`origin/main`, run: `4 failed`).
+
+**Upgrade-safe.** No config key, no schema change, no migration, no on-disk change, no default flip, no API
+shape change (the response gains and loses nothing); a library with no broken target behaves identically.
+`ruff` unchanged — the same 11 pre-existing findings in `webapp/pipeline.py` before and after.
+
 ## 2026-09-30 (Builder, the run after that) — the one-click catch-up could not reach the subs the app itself had just handed back
 
 ### v0.492.3 — 🟠 BUG FIX (autonomy, PRIORITY 2), Builder-found and reproduced: "new light" meant *light shot since*, so the library-wide catch-up was blind to a sub the app set aside and put back
