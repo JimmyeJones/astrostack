@@ -16,6 +16,7 @@ inside each worker and returns only plain data.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 
@@ -40,6 +41,147 @@ log = logging.getLogger(__name__)
 # field drift while still dramatically localising the search.
 SIBLING_HINT_RADIUS_DEG = 5.0
 
+
+#: Project-meta key holding the frame ids :func:`reconcile_bad_solve_frames` has
+#: already given a second solve. The bound that makes that reconcile safe to run
+#: unattended: without it, a frame whose re-solve lands on the *same* wrong scale
+#: is rejected by the next stack, reconciled by the next scan, and re-solved
+#: forever — 178 fast ASTAP runs per scan on the owner's library, on exactly the
+#: nights he walked away.
+#:
+#: In ``project_meta`` (a key/value table that already exists, so this is additive
+#: by construction and a build predating the key simply reads ``None``) rather
+#: than on the frame, deliberately: ``restored_utc`` looks like the column for it
+#: and is not, because auto-grade and the unreadable reconcile write it too — a
+#: sub auto-grade put back in August would silently never get its one retry.
+BAD_SOLVE_RETRIED_META_KEY = "bad_solve_retried_frame_ids"
+
+#: Never remember more than this many ids. The realistic count is 0; the owner's
+#: measured worst case is 178 (observer issue #965). A library that somehow
+#: produced tens of thousands has a solver problem no retry can fix, and at that
+#: point declining to grow the ledger is the safe direction: the reconcile simply
+#: stops offering retries.
+_MAX_RETRIED_IDS = 5000
+
+
+def _read_retried_ids(project) -> set[int]:
+    """The ledger, tolerant of anything that is not the JSON list we wrote."""
+    raw = project.get_meta(BAD_SOLVE_RETRIED_META_KEY)
+    if not raw:
+        return set()
+    try:
+        loaded = json.loads(raw)
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(loaded, list):
+        return set()
+    out: set[int] = set()
+    for v in loaded:
+        try:
+            out.add(int(v))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def reconcile_bad_solve_frames(project) -> list[int]:
+    """Give a sub the stack dropped for a wrong-scale plate solve one more solve.
+
+    Observer issue [#965]. ``run_stack`` excludes a sub whose solved plate scale
+    disagrees with its neighbours (``stack/mosaic._plate_scale_outlier_indices``),
+    flags it ``accept = 0`` and stamps
+    :data:`~seestack.io.project.REJECT_REASON_BAD_SOLVE_SCALE`. That is right —
+    such a frame reprojects at the wrong scale and contaminates the stack — but it
+    is also **terminal**, and nothing said so:
+
+    * ``build_solve_arglist`` skips it twice over, on its truthy ``wcs_json`` (the
+      wrong solve is still in the column; nothing outside the solve path clears
+      one) and on ``accept = 0`` with a reason that is not ``solve_failed:``;
+    * nothing re-accepts it — :func:`~seestack.qc.grading.apply_grade_reaccepts`
+      only reconsiders ``auto:grade`` rejections.
+
+    So a night the solver was flaky costs the owner those subs *permanently*, in
+    every future stack, with no path back — and the observer's own control says
+    the flake is not deterministic: the same bytes solved correctly on the other
+    attempt. The owner's library carries **178** such rows.
+
+    What this does is the one thing that can help and the least that will: clear
+    the solution the app has itself measured to be wrong
+    (:meth:`~seestack.io.project.Project.reset_frame_solution`) and lift the
+    rejection, so the frame is an ordinary accepted-unsolved sub and the solve
+    pass it is already running picks it up. Nothing on disk is touched
+    (``AGENTS.md`` §10) and no picture changes: an unsolved sub cannot reach a
+    stack, so the frame is out of the stack either way until it solves *and*
+    agrees.
+
+    **Bounded to one retry per frame, ever**, by
+    :data:`BAD_SOLVE_RETRIED_META_KEY`. That is what makes it safe to run
+    unattended: a re-solve that lands on the same wrong scale is re-rejected by
+    the next stack, and without the ledger the pair would loop — a fast ASTAP run
+    per bad frame per scan, on the walk-away nights this has to be cheap on. The
+    id is written down **before** the frame is touched, so a crash mid-reconcile
+    costs the retry rather than repeating it.
+
+    **Only the wrong-*scale* rejection**, not its displaced-footprint sibling. A
+    scale error is the shape the observer measured as a flake; a footprint far
+    from the group is much more often a genuine stray — a sub from another target
+    in the folder — which would re-solve to the same wrong place and be rejected
+    again, for one wasted solve. Also left alone: a frame the user has graded by
+    hand (``user_override``), whose decision automation must never undo, and a
+    frame whose file is not on disk (nothing to re-solve, and
+    :meth:`~seestack.io.project.Project.set_missing_frames_aside` owns that case).
+
+    Returns the ids actually put back; empty — and no write at all — on any
+    install where no stack has ever dropped a frame for its scale, which is most
+    of them.
+    """
+    from seestack.io.project import (
+        REJECT_REASON_BAD_SOLVE_SCALE,
+        restoration_stamp,
+    )
+
+    candidates = [
+        f for f in project.frames_rejected_for(REJECT_REASON_BAD_SOLVE_SCALE)
+        if f.id is not None and not f.user_override
+    ]
+    if not candidates:
+        return []
+    retried = _read_retried_ids(project)
+    todo = [f for f in candidates
+            if f.id not in retried and readable_frame_path(f) is not None]
+    if not todo:
+        return []
+    if len(retried) + len(todo) > _MAX_RETRIED_IDS:
+        # The ledger is what bounds the retries; refusing to grow it past the cap
+        # stops offering them rather than losing track of the ones already spent.
+        log.warning(
+            "Not re-solving %d frame(s) with a disagreeing plate scale: the "
+            "retry ledger is at its %d-id cap.", len(todo), _MAX_RETRIED_IDS,
+        )
+        return []
+    # Written first: a crash between here and the updates below costs a retry
+    # rather than repeating one on every scan.
+    project.set_meta(
+        BAD_SOLVE_RETRIED_META_KEY,
+        json.dumps(sorted(retried | {f.id for f in todo})),
+    )
+    stamp = restoration_stamp()
+    put_back: list[int] = []
+    for f in todo:
+        # Clear the wrong solve *before* lifting the rejection, so the moment the
+        # frame is accepted again it carries no WCS a stack could reproject. The
+        # other order would leave a crash-interrupted frame accepted with the bad
+        # solution still on it.
+        project.reset_frame_solution(f.id)
+        project.update_frame(f.id, accept=True, reject_reason=None,
+                             restored_utc=stamp)
+        put_back.append(f.id)
+    log.info(
+        "Offering %d sub(s) a second plate solve: the stack dropped them because "
+        "their solved scale disagreed with their neighbours, and that solve has "
+        "been cleared so they can be located again.", len(put_back),
+    )
+    return put_back
 
 def _fov_deg_for_frame(fits_path: str, fallback_fov_deg: float) -> float:
     """The FOV (degrees) to hand ASTAP for this frame.

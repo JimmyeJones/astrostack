@@ -1382,6 +1382,7 @@ def run_qc_and_solve(
         apply_solve_result_to_db,
         build_sibling_retry_arglist,
         build_solve_arglist,
+        reconcile_bad_solve_frames,
         solve_one,
     )
 
@@ -1426,6 +1427,17 @@ def run_qc_and_solve(
             summary["unreadable_reaccepted"] = len(readable_again)
 
     if run_solve and not _stopped(should_stop):
+        # A sub the stack dropped because its solved *scale* disagreed with its
+        # neighbours is out of every future stack for good: it keeps the wrong
+        # ``wcs_json`` (so plate-solve skips it) and the rejection (so nothing
+        # re-accepts it). The observer's control says that flake is not
+        # deterministic (#965), so clear the solve the app measured to be wrong and
+        # let this pass have another go — once per frame, ever. Before the arglist
+        # is built, so the frames it puts back are in this pass rather than the
+        # next one; a no-op on any install where no stack ever dropped one.
+        resolve_again = reconcile_bad_solve_frames(project)
+        if resolve_again:
+            summary["bad_solve_resolve_offered"] = len(resolve_again)
         solve_args = build_solve_arglist(project, use_hint=use_solve_hints)
         # build_solve_arglist reads astap_path/fov/timeout from project meta
         # (usually unset for freshly-scanned targets) — override each with the

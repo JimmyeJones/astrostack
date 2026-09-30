@@ -2,6 +2,80 @@
 
 ## 2026-09-30 (Builder) — a bad plate scale stops deciding what the whole app advises
 
+### v0.489.0 — 🟠 BUG FIX (image quality + data integrity, PRIORITY 4): a sub dropped for a wrong-scale plate solve gets one more solve instead of being lost for good
+
+*(Builder-found while verifying the two entries below — reproduced through a real `run_stack` before it was
+fixed. Not from the backlog; it does, however, retire one of the two halves of the 2026-08-17 "the
+outlier-exclusion pass's rejections are PERMANENT with no reconcile path" hardening note, whose own premise
+— "not currently firing for the owner" — predates v0.473.1.)*
+
+**What the repro showed.** `run_stack` excludes a sub whose solved plate scale disagrees with its neighbours
+(`stack/mosaic._plate_scale_outlier_indices`, v0.473.1), flags it `accept = 0` and stamps
+`REJECT_REASON_BAD_SOLVE_SCALE`. Excluding it is right — it would reproject at the wrong scale and contaminate
+the picture. What nothing said is that the flag is **terminal**, and by two independent routes at once:
+
+```
+accept: False | reason: bad plate-solve (scale disagrees with the other frames)
+wcs_json present: True                  ← so build_solve_arglist skips it ("already solved")
+re-offered to the solver: False | queue: []
+```
+
+* `build_solve_arglist` skips any frame with a **truthy `wcs_json`** — and the wrong solve is still sitting in
+  the column, because nothing outside the solve path clears one;
+* it *also* skips a rejected frame whose reason is not `solve_failed:` (deliberately — re-solving a sub someone
+  dropped is wasted ASTAP time);
+* and nothing re-accepts it: `qc.grading.apply_grade_reaccepts` only ever reconsiders `auto:grade` rejections.
+
+So a night the solver was flaky costs those subs from **every future stack, permanently**. And the flake is not
+deterministic: the observer's own control on issue
+[#965](https://github.com/JimmyeJones/astrostack/issues/965) is that the same bytes solved correctly on the
+other attempt. His library carries **178** of these rows — integration time he paid a clear night for, thrown
+away by a solver hiccup, with no path back and nothing on any screen saying so.
+
+**What shipped.** New `seestack/solve/runner.py::reconcile_bad_solve_frames(project)`, called from
+`scanner.run_qc_and_solve`'s solve phase **before** `build_solve_arglist` is built, so the frames it puts back
+are solved in *this* pass rather than the next one. It does the one thing that can help and the least that will:
+
+* clears the solution the app has itself measured to be wrong, through the existing
+  `Project.reset_frame_solution` — `wcs_json`, `ra_center_deg`, `dec_center_deg`, `pixscale_arcsec` **and**
+  `rotation_deg`, because all five came out of the same solve and v0.488.7 has just shown what a stale
+  `pixscale_arcsec` costs;
+* lifts the rejection (`accept = 1`, reason cleared, `restored_utc` stamped so a picture stacked before this
+  moment is still recognisable as having been made without the sub);
+* **in that order**, deliberately: a crash between the two leaves a frame that is still rejected and now
+  unsolved, which the next scan reconciles again, rather than an accepted frame still carrying the bad solution.
+
+**No picture can change in the meantime.** Between the retry and a successful solve the frame is accepted *and*
+unsolved, and `run_stack` combines only frames that are both — pinned by a test that re-stacks after the
+reconcile and gets the same ten frames. Nothing under `incoming/` is read, written, moved or deleted (§10).
+
+**Bounded to one retry per frame, ever — this is the part that makes it safe to run unattended.** A re-solve
+that lands on the *same* wrong scale is re-rejected by the next stack, so retry and rejection would loop: one
+fast ASTAP run per bad frame per scan, 178 of them on the owner's library, on exactly the nights he walked away.
+The ledger is a JSON list of frame ids under a new `project_meta` key (`BAD_SOLVE_RETRIED_META_KEY`) — the table
+already exists, so this is additive by construction and a build predating the key simply reads `None` — written
+**before** the frames are touched, so a crash costs the retry rather than repeating it, and capped at 5,000 ids
+(past the cap it stops offering retries rather than losing track of the ones already spent).
+`restored_utc` looks like the column for this bound and is **not**: auto-grade and the unreadable reconcile
+write it too, so a sub auto-grade put back in August would silently never get its one retry.
+
+**Deliberately narrow, on three axes.** Only the wrong-**scale** rejection, not its displaced-footprint sibling
+— a footprint far from the group is much more often a genuine stray (a sub from another target in the folder),
+which would re-solve to the same wrong place and be dropped again for one wasted solve. Never a
+`user_override` sub: automation does not undo a person's decision. Never a frame whose file is not on disk —
+there is nothing to re-solve, and `Project.set_missing_frames_aside` owns that case.
+
+**Tests.** +7 in `tests/test_bad_solve_retry.py`, all driven through a real `run_stack` that does the
+rejecting: the retry itself (the queue is empty before it and holds the frame after, with all five solve
+columns cleared), that no picture moves in between, the once-ever ledger (re-solve wrong → re-rejected →
+second call returns nothing), the three stand-downs, and the scanner wiring (`bad_solve_resolve_offered = 1`
+and `solve_total = 1` in the same pass). **Four fail before**, verified by emptying the candidate list in a
+scratch copy; the three that pass either way are the stand-downs, which is what they are for.
+
+**Upgrade safety.** No `SCHEMA_VERSION` bump (the `project_meta` table is years old), no config key, no on-disk
+layout change, no default flipped for an existing install — the reconcile is a no-op on any library where no
+stack has ever dropped a frame for its scale, and writes nothing at all there.
+
 ### v0.488.7 — 🟠 BUG FIX (trust, PRIORITY 3): a solve the stack has already ruled wrong stops voting on which telescope you own
 
 *(Builder-found while verifying the v0.488.6 entry above — reproduced through a real `run_stack` on the
