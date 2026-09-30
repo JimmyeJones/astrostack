@@ -1,5 +1,203 @@
 # Shipped — the record
 
+## 2026-09-30 (Builder) — a bad plate scale stops deciding what the whole app advises
+
+### v0.489.0 — 🟠 BUG FIX (image quality + data integrity, PRIORITY 4): a sub dropped for a wrong-scale plate solve gets one more solve instead of being lost for good
+
+*(Builder-found while verifying the two entries below — reproduced through a real `run_stack` before it was
+fixed. Not from the backlog; it does, however, retire one of the two halves of the 2026-08-17 "the
+outlier-exclusion pass's rejections are PERMANENT with no reconcile path" hardening note, whose own premise
+— "not currently firing for the owner" — predates v0.473.1.)*
+
+**What the repro showed.** `run_stack` excludes a sub whose solved plate scale disagrees with its neighbours
+(`stack/mosaic._plate_scale_outlier_indices`, v0.473.1), flags it `accept = 0` and stamps
+`REJECT_REASON_BAD_SOLVE_SCALE`. Excluding it is right — it would reproject at the wrong scale and contaminate
+the picture. What nothing said is that the flag is **terminal**, and by two independent routes at once:
+
+```
+accept: False | reason: bad plate-solve (scale disagrees with the other frames)
+wcs_json present: True                  ← so build_solve_arglist skips it ("already solved")
+re-offered to the solver: False | queue: []
+```
+
+* `build_solve_arglist` skips any frame with a **truthy `wcs_json`** — and the wrong solve is still sitting in
+  the column, because nothing outside the solve path clears one;
+* it *also* skips a rejected frame whose reason is not `solve_failed:` (deliberately — re-solving a sub someone
+  dropped is wasted ASTAP time);
+* and nothing re-accepts it: `qc.grading.apply_grade_reaccepts` only ever reconsiders `auto:grade` rejections.
+
+So a night the solver was flaky costs those subs from **every future stack, permanently**. And the flake is not
+deterministic: the observer's own control on issue
+[#965](https://github.com/JimmyeJones/astrostack/issues/965) is that the same bytes solved correctly on the
+other attempt. His library carries **178** of these rows — integration time he paid a clear night for, thrown
+away by a solver hiccup, with no path back and nothing on any screen saying so.
+
+**What shipped.** New `seestack/solve/runner.py::reconcile_bad_solve_frames(project)`, called from
+`scanner.run_qc_and_solve`'s solve phase **before** `build_solve_arglist` is built, so the frames it puts back
+are solved in *this* pass rather than the next one. It does the one thing that can help and the least that will:
+
+* clears the solution the app has itself measured to be wrong, through the existing
+  `Project.reset_frame_solution` — `wcs_json`, `ra_center_deg`, `dec_center_deg`, `pixscale_arcsec` **and**
+  `rotation_deg`, because all five came out of the same solve and v0.488.7 has just shown what a stale
+  `pixscale_arcsec` costs;
+* lifts the rejection (`accept = 1`, reason cleared, `restored_utc` stamped so a picture stacked before this
+  moment is still recognisable as having been made without the sub);
+* **in that order**, deliberately: a crash between the two leaves a frame that is still rejected and now
+  unsolved, which the next scan reconciles again, rather than an accepted frame still carrying the bad solution.
+
+**No picture can change in the meantime.** Between the retry and a successful solve the frame is accepted *and*
+unsolved, and `run_stack` combines only frames that are both — pinned by a test that re-stacks after the
+reconcile and gets the same ten frames. Nothing under `incoming/` is read, written, moved or deleted (§10).
+
+**Bounded to one retry per frame, ever — this is the part that makes it safe to run unattended.** A re-solve
+that lands on the *same* wrong scale is re-rejected by the next stack, so retry and rejection would loop: one
+fast ASTAP run per bad frame per scan, 178 of them on the owner's library, on exactly the nights he walked away.
+The ledger is a JSON list of frame ids under a new `project_meta` key (`BAD_SOLVE_RETRIED_META_KEY`) — the table
+already exists, so this is additive by construction and a build predating the key simply reads `None` — written
+**before** the frames are touched, so a crash costs the retry rather than repeating it, and capped at 5,000 ids
+(past the cap it stops offering retries rather than losing track of the ones already spent).
+`restored_utc` looks like the column for this bound and is **not**: auto-grade and the unreadable reconcile
+write it too, so a sub auto-grade put back in August would silently never get its one retry.
+
+**Deliberately narrow, on three axes.** Only the wrong-**scale** rejection, not its displaced-footprint sibling
+— a footprint far from the group is much more often a genuine stray (a sub from another target in the folder),
+which would re-solve to the same wrong place and be dropped again for one wasted solve. Never a
+`user_override` sub: automation does not undo a person's decision. Never a frame whose file is not on disk —
+there is nothing to re-solve, and `Project.set_missing_frames_aside` owns that case.
+
+**Tests.** +7 in `tests/test_bad_solve_retry.py`, all driven through a real `run_stack` that does the
+rejecting: the retry itself (the queue is empty before it and holds the frame after, with all five solve
+columns cleared), that no picture moves in between, the once-ever ledger (re-solve wrong → re-rejected →
+second call returns nothing), the three stand-downs, and the scanner wiring (`bad_solve_resolve_offered = 1`
+and `solve_total = 1` in the same pass). **Four fail before**, verified by emptying the candidate list in a
+scratch copy; the three that pass either way are the stand-downs, which is what they are for.
+
+**Upgrade safety.** No `SCHEMA_VERSION` bump (the `project_meta` table is years old), no config key, no on-disk
+layout change, no default flipped for an existing install — the reconcile is a no-op on any library where no
+stack has ever dropped a frame for its scale, and writes nothing at all there.
+
+### v0.488.7 — 🟠 BUG FIX (trust, PRIORITY 3): a solve the stack has already ruled wrong stops voting on which telescope you own
+
+*(Builder-found while verifying the v0.488.6 entry above — reproduced through a real `run_stack` on the
+existing `#965` fixture before it was fixed. Not from the backlog.)*
+
+**What the repro showed.** `run_stack` excludes a sub whose solved plate scale disagrees with its neighbours
+(`stack/mosaic._plate_scale_outlier_indices`, v0.473.1), flags it `accept = 0` and writes the sentence
+*"bad plate-solve (scale disagrees with the other frames)"*. Run on the 11-frame fixture with one frame's scale
+pushed +9.45 %:
+
+```
+accept: False | reason: bad plate-solve (scale disagrees with the other frames)
+wcs_json present: True
+pixscale still stored: 5.4725          ← the number the stack just called wrong
+solved_frame_geometry now: (5.4725, 480, 320)
+```
+
+The rejection is a row in the same table, and **nothing clears the wrong solve** — clearing a stored
+`wcs_json` outside the solve path is deliberately not done. `Project.solved_frame_geometry`'s query filtered on
+neither `accept` nor the reason, so the app's own written record of *"this measurement is wrong"* was still in
+the newest-`GEOMETRY_SAMPLE_FRAMES` window voting on the field of view that `framing_hint`, `mosaic_plan`,
+`field_fill` and `background_mode_hint` are all a comparison against — on the Target page's object card and
+every Tonight-planner and week-plan row.
+
+**Why v0.488.5's median does not already cover it.** A median survives a *minority* of wrong rows. These rows
+arrive together — one night of false solves, or one reprocess flagging a batch — and the owner's library
+carries **178** of them (observer issue [#965](https://github.com/JimmyeJones/astrostack/issues/965)), which is
+seven times the whole 25-row window. Thirteen of them are a majority of it on their own, and then the median
+*is* the wrong number.
+
+**What shipped.** `solved_frame_geometry` excludes rows whose `reject_reason` starts with the stacker's own
+bad-plate-solve prefix. Three new constants in `seestack/io/project.py`, beside the reject reasons the rest of
+the app writes (`REJECT_REASON_SEESTAR_OUTPUT`, `_FILE_MISSING`, `_QC_ERROR_FINAL`):
+
+* `REJECT_REASON_BAD_SOLVE_PREFIX = "bad plate-solve ("`,
+* `REJECT_REASON_BAD_SOLVE_SCALE` and `REJECT_REASON_BAD_SOLVE_FOOTPRINT`, the two sentences themselves — two
+  different things for the owner to go and look at, which is why v0.473.1 gave them their own wording,
+
+now read by `stacker.run_stack` where they were literals, so the writer and the reader cannot drift apart. The
+match uses the `substr(reject_reason, 1, ?) = ?` idiom `Project.frames_rejected_for` already uses rather than
+`LIKE`, so there is no escaping question.
+
+**Keyed on the reason, not on `accept` — deliberately, and pinned in both directions.** A sub dropped for soft
+stars, cloud or by hand measured its plate scale perfectly well, and on a target whose newest window is mostly
+rejects it is the only vote there is; the rows excluded here are the ones rejected **because** this very number
+disagreed with its neighbours.
+
+**Upgrade safety.** The reason strings are the prose v0.473.1 already writes, not a new `auto:` code: rows
+carrying them are already on disk, and `frontend/src/rejectReason.ts` falls through to them verbatim for the
+Frames-table badge, so renaming would have broken both (§9). No config key, schema, on-disk path, default or
+API shape is touched, and it is still three columns and one query.
+
+**Tests.** +2 in `tests/test_project.py`: thirteen bad-solve-rejected rows at half the scale fail to move a
+12-frame target's field, and a target holding *only* such rows answers `None` (the caller keeps
+`framing.FALLBACK_FIELD`) rather than the wrong number; plus the other direction — 25 rows all rejected
+`auto:grade:fwhm_px` still answer. **The first fails before**, verified by reverting the query's two clauses in
+a scratch copy.
+
+### v0.488.6 — 🟡 BUG FIX (trust, PRIORITY 3): the library-wide frame field is a consensus, not the first hit
+
+*(The `LEAD` filed by the Builder on 2026-09-29 while shipping v0.488.5 — the half of that fix that was a
+different question.)*
+
+**What it was.** v0.488.5 made *one target's* answer robust: `Project.solved_frame_geometry` returns the
+triple at the **median** plate scale of the newest `GEOMETRY_SAMPLE_FRAMES = 25` solved rows, so no single
+plate solve decides what field of view a target was shot at. The **library-wide** probe was untouched.
+`webapp/frame_field.py::library_frame_field` walked targets newest-activity-first and returned the **first**
+one that yielded a physically-sensible field, and `install_frame_field` caches that for the life of the
+process. The Tonight planner and the week plan badge every catalogue row at once, so they have no "this
+target" to refine it with — they got whichever target the walk reached first. The only guard between one
+implausible solve and every one of those rows was
+`seestack.framing.frame_field_from_solve`'s 3′–1200′ sanity band, which is ~400× wide: a solve wrong by 2×
+sails straight through it. The owner's own library carries **178** rows with an implausible solve (observer
+issue [#965](https://github.com/JimmyeJones/astrostack/issues/965)), and the engine already has a rule for
+dropping that shape from a canvas (`stack/mosaic._plate_scale_outlier_indices`).
+
+**Why it was built rather than deferred again.** The entry's own first line said *check cheaply whether the
+owner's library holds more than one frame geometry at all, and close it with the number if not*. That check
+is a `SELECT DISTINCT` over his project DBs — a read no in-repo agent has, and one the observer has not filed.
+What the entry *also* said is that the shape to build if the check came back positive is "a consensus across
+the probed targets rather than first-past-the-post" — and that shape turns out to be **one-sided on a
+one-telescope install**, which is the whole population this app is for: every probed target reports the same
+field, so the median *is* the first answer and the result is byte-identical. It only moves where the first
+answer disagrees with the library, which is exactly the failure being fixed. So there is nothing for the
+number to decide, and waiting for it was buying nothing.
+
+**What shipped.** New pure `frame_field.consensus_field(fields)`:
+
+* the **median of the answers**, returned as *one probed target's own* `FrameField` rather than an average of
+  them — a long edge from one telescope beside a short edge from another would describe a frame neither had.
+  The element is picked with the same `(n - 1) // 2`-of-a-stable-sort rule
+  `Project.solved_frame_geometry` picks its triple with, deliberately, so the two rules that answer "which
+  telescope?" at the two scales cannot drift apart;
+* **below `_FIELD_CONSENSUS_MIN = 3` answers, nothing moves.** One or two targets cannot outvote anything, and
+  preferring the smaller of two fields would be a behaviour change bought with nothing. `fields[0]` — today's
+  answer — is returned, and an empty list is still `None` (the caller keeps `FALLBACK_FIELD`, i.e. a fresh
+  install is unchanged).
+
+`library_frame_field` now collects answers instead of returning the first, stopping at
+`_FIELD_CONSENSUS_TARGETS = 5` of them. **The cost ceiling is unchanged and that is the point of the number:**
+the walk has always been willing to open all `_MAX_TARGETS_PROBED = 8` projects when nothing answered, so five
+is inside a bill this polled path already paid, and it is paid **once per process** because a successful answer
+is cached for the life of it. A consensus that differs from the newest target's answer is logged once, with
+both fields named — either a telescope change part-way through, or a solve this library should not be trusting.
+
+**The trade, written down in the docstring so nobody re-derives it.** An owner who changes telescope has one
+recent target on the new optics and several older ones on the old, and the median says "old" until the new one
+is the majority. That is the right answer for a *library-wide* default — the question is about the library, not
+about the newest night — and the surface where the distinction bites, a target's own card, does not use this:
+`target_frame_field` asks that target's own frames first and only falls back here (v0.488.x).
+
+**Tests.** +5 in `tests/webapp/test_frame_field_consensus.py`, against a real `Library`/`Project` on disk (five
+targets, 30 solved frames each, `last_activity_utc` stamped so the probe's order is the test's): the regression
+(four targets agree, the **newest** carries a 2× solve, and the library answers 107.7′ × 71.8′ rather than
+215′), the two-answer stand-down, the cost pin (eight answering targets → exactly five opens), and the two
+purity claims (the answer is an element of the input; empty stays `None`). **Two fail before** — verified by
+reverting `library_frame_field` to first-past-the-post in a scratch copy and watching them go red.
+
+**Upgrade safety.** No config key, no schema, no on-disk path, no default and no API shape is touched; the
+module is read-only over the project DBs it opens.
+
+
 ## 2026-09-29 (Builder, sixth) — one plate solve was deciding which telescope the app thinks you own
 
 ### v0.488.5 — 🟠 BUG FIX (autonomy + trust, PRIORITY 2/3): the frame field is read from the newest solved *frames*, not the newest solved *frame*

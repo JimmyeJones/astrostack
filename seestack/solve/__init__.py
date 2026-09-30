@@ -5,6 +5,7 @@ from seestack.solve.runner import (
     SolveResult,
     apply_solve_result_to_db,
     build_solve_arglist,
+    reconcile_bad_solve_frames,
     solve_one,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "SolveResult",
     "apply_solve_result_to_db",
     "build_solve_arglist",
+    "reconcile_bad_solve_frames",
     "solve_one",
 ]
