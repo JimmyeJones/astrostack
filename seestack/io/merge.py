@@ -100,11 +100,26 @@ def merge_projects(
     """
     dest_cache = CacheManager(destination.project_dir)
     dest_cache.ensure_dirs()
+    # Before a single foreign sub lands: pin down which subs each of the
+    # destination's own pictures had a chance at. A run recorded before the
+    # offered-sub table existed has no record, and the capture-time rule that
+    # stands in for one reads a merged-in sub — shot before the run, never
+    # restored — as light the picture already has. Frozen now, while the rule is
+    # still true of this project, the run stays measurable after the merge
+    # (:meth:`Project.freeze_unrecorded_stack_run_frames`).
+    destination.freeze_unrecorded_stack_run_frames()
     # Dedup on the canonical (realpath) key, symmetrically to ingest — a change
     # of path spelling for one physical file (a symlinked NAS mount, a relative
     # vs absolute scan root) must not merge the same frame twice → double-weighted
     # in the stack. Mirrors the ingest fix; stored source_path is never rewritten.
-    existing_sources = {_dedup_key(f.source_path) for f in destination.iter_frames()}
+    # The map (key → destination id) rather than a set, so a carried picture's
+    # offered-sub record can be re-keyed onto the destination's ids, duplicates
+    # included: a sub both nights already held maps to the row it already has.
+    dest_id_by_key: dict[str, int] = {
+        _dedup_key(f.source_path): f.id
+        for f in destination.iter_frames() if f.id is not None
+    }
+    existing_sources = set(dest_id_by_key)
 
     for src_dir in source_dirs:
         src_path = Path(src_dir)
@@ -127,6 +142,7 @@ def merge_projects(
                     new_row = _frame_without_id(frame)
                     new_id = destination.add_frame(new_row)
                     existing_sources.add(key)
+                    dest_id_by_key[key] = new_id
                     added += 1
                     # Copy the cached file if available.
                     if copy_cached_files and frame.cached_path:
@@ -141,7 +157,8 @@ def merge_projects(
                                 log.warning("cache copy failed: %s", exc)
                         else:
                             missing += 1
-            carried = (carry_stack_runs(destination, src_project)
+            carried = (carry_stack_runs(destination, src_project,
+                                        dest_id_by_key=dest_id_by_key)
                        if copy_stack_runs else CarryResult(0, 0))
             meta_carried = (carry_target_meta(destination, src_project)
                             if copy_target_meta else ())
@@ -312,12 +329,14 @@ class CarryResult:
     lost: int
 
 
-def carry_stack_runs(destination: Project, source: Project) -> CarryResult:
+def carry_stack_runs(destination: Project, source: Project, *,
+                     dest_id_by_key: dict[str, int] | None = None) -> CarryResult:
     """Copy ``source``'s finished pictures into ``destination``.
 
     A stack run is a history row *plus* an output file set *plus* whatever the
-    web layer annotated it with (the saved edit recipe first). All three travel,
-    because the caller that asks for this —
+    web layer annotated it with (the saved edit recipe first) *plus* the record
+    of which subs it was offered. All four travel, because the caller that asks
+    for this —
     :meth:`seestack.io.library.Library.merge_targets` — deletes the source
     target's folder immediately afterwards, and its Library nudge promises the
     user that *"nothing is deleted"*.
@@ -339,6 +358,18 @@ def carry_stack_runs(destination: Project, source: Project) -> CarryResult:
     half-done job. The caller decides, and
     :meth:`seestack.io.library.Library.merge_targets_result` decides by **not
     deleting that source folder**, which keeps the promise either way.
+
+    **The offered-sub record travels re-keyed.** ``dest_id_by_key`` maps a sub's
+    dedup key (:func:`seestack.io.ingest._dedup_key` of its ``source_path``) to
+    its id *in the destination*, which :func:`merge_projects` builds as it copies
+    the frames. A carried run's record is its source ids translated through that
+    map, so in the destination the run is measured against exactly the subs it
+    saw — and every sub the destination already held reads as light it never
+    had, which is what a carried night's picture is missing. A source run with no
+    record is frozen first (:meth:`Project.freeze_unrecorded_stack_run_frames`):
+    the source still holds only its own subs, so the capture-time rule is still
+    the truth there. Without the map (an older caller) nothing is recorded and
+    the run is measured the way it always was.
     """
     from seestack.stack.output import (
         OUTPUT_DIRNAME,
@@ -353,6 +384,15 @@ def carry_stack_runs(destination: Project, source: Project) -> CarryResult:
     dst_out.mkdir(parents=True, exist_ok=True)
     meta = _per_run_meta(source)
     tag = Path(source.project_dir).name
+    src_id_to_dest: dict[int, int] = {}
+    if dest_id_by_key is not None:
+        source.freeze_unrecorded_stack_run_frames()
+        for frame in source.iter_frames():
+            if frame.id is None:
+                continue
+            dest_id = dest_id_by_key.get(_dedup_key(frame.source_path))
+            if dest_id is not None:
+                src_id_to_dest[frame.id] = dest_id
     copied = 0
     lost = 0
     for run in reversed(runs):                      # iter_stack_runs is newest first
@@ -402,5 +442,9 @@ def carry_stack_runs(destination: Project, source: Project) -> CarryResult:
         ))
         for prefix, value in meta.get(run.id if run.id is not None else -1, ()):
             destination.set_meta(f"{prefix}{new_id}", value)
+        if dest_id_by_key is not None and run.id is not None:
+            offered = source.stack_run_frame_ids(run.id) or ()
+            destination.set_stack_run_frames(
+                new_id, (src_id_to_dest[i] for i in offered if i in src_id_to_dest))
         copied += 1
     return CarryResult(copied, lost)
