@@ -67,6 +67,64 @@ section holds open bugs only (AGENTS.md §2). Text as it stood on 2026-09-30.*
     position. (Confidence: re-traced against the current code.)
   - *(two non-bugs from the 2026-09-05 mosaic/output QA audit, kept with the v0.354.1 entry so they are not
     re-investigated — see that entry's text in SHIPPED.md; recorded here as a sweep note)*
+## 2026-09-30 (Builder) — two runs rescued the same stranded PR at the same time, and the fixture trap that makes a gate-test vacuous
+
+*(Builder, branch `claude/keen-darwin-ioh4nq` → **v0.492.11**. Baseline on `origin/main` at `4dc89d3`:
+**7,106 passed, 2 skipped** in 12:39. Final on `b2731da` + this work: **7,117/2** in 12:04.)*
+
+### The collision was not over a backlog item. It was over an open PR of someone's own.
+
+At the start of this run `list_pull_requests` showed **#1035** open with a real, verified frontend fix (three
+Memory-card tests racing `getSystem`) claiming **v0.492.8** — a number already on `main` and already tagged,
+because the *same previous run* had opened #1035, then opened #1036 with two other versions, and merged #1036
+first. So #1035 could never merge as written: CI's *Version bump is sane* job refuses a released number. It
+also was not recorded in `docs/IMPROVEMENTS.md` as an unmerged branch, which is the loss AGENTS.md §8 keeps a
+warning about.
+
+So this run rescued it — cherry-picked both commits onto a fresh branch, re-verified the fail-before, renumbered
+to v0.492.10, pushed. **And in the ~40 minutes that took, the other session rescued it too**, by merging
+`origin/main` into its own branch, re-bumping to v0.492.10 and merging #1035. Both arrived at the identical
+version number for the identical diff. Caught by the `git fetch` §11 requires **right before merging**, not by
+anything earlier: the branch was rebuilt on the new `main` with only this run's own work, and the duplicate
+v0.492.10 commit was dropped rather than unioned — two copies of one `SHIPPED.md` section is worse than none.
+
+**What §11 does not currently say, and this cost the cheaper half of an hour.** Its collision rules are about
+*backlog items*: claim in the backlog, grep `main` for the item's code nouns, prefer an item not claimed on a
+branch pushed within two hours. None of that reaches an **open PR whose author is another live run**, which is
+a stronger claim than a backlog line — the work is not just claimed, it is finished and pushed. Two cheap
+habits fall out:
+
+* **Before adopting an open PR, check whether its branch is still moving** (`git log -1 --format=%ci` on the
+  remote branch, and whether the PR has commits newer than the collision you think you are fixing). A branch
+  touched in the last couple of hours is a live run, and the §11 two-hour rule applies to it as much as to a
+  backlog claim.
+* **A run that opens two PRs is its own collision risk.** The version on a pushed-but-unmerged PR is a claim
+  your *own* later PR can steal, and then neither can merge without a re-bump. Choose the second PR's version
+  above whatever the first is holding, not merely above `main`'s.
+
+Nothing was lost either way — the fix is on `main` once, under one number — and re-verifying its fail-before
+was not wasted: a cherry-pick across a merge is exactly where a fix quietly stops doing anything. Injecting a
+25 ms `getSystem` delay into `renderSettingsWith` gave **2 failed / 1 passed** with the `findBy` changes
+reverted and **3 passed** with them in place, which is the recorded claim reproduced rather than believed. (The
+one that passes either way is the vacuous `queryByText(...).toBeNull()`, which is its own argument for the fix.)
+
+### The finding worth keeping: a negative gate-test on a fixture that cannot show the difference
+
+v0.492.11 gates the *solved* half of the "is this picture behind the light I own?" bar on the run's own
+`star_match_unsolved`. Three of its new tests were first written against run stamps (`MID`, `AFTER`) that
+**postdate the synthetic frames' own `DATE-OBS`** (2024-09-12) — and a target measured against such a run has
+nothing waiting **whatever the bar is**. The positive case failed and exposed it. The two negative cases would
+have **passed without the gate ever being read**.
+
+> **The shape to grep for:** a test that proves a *gate* by asserting the narrow outcome, on a fixture where
+> some **other** clause of the same query already forces that outcome. The negative half of a gate test is
+> evidence only if the fixture would give the *wide* answer with the gate flipped. Write that into the
+> fixture's own comment — these three now do — because the next reader cannot see it from the assertion.
+
+This is the same defect as the vacuous `toBeNull()` in the rescued frontend fix, in Python and a day apart,
+which is why it is filed as a class rather than as two incidents. Both were caught by the same move: write the
+positive and the negative halves against **one** fixture, so a fixture that cannot show the difference fails
+the positive half immediately instead of silently passing the negative one.
 
 ## 2026-09-30 (Builder, the run after that one) — the full suite is the gate, and it said no twice to a change the slice had called green
 

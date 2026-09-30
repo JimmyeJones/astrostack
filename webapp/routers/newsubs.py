@@ -14,12 +14,19 @@ the one you have to visit per target to reach. That is the same gap
 ``/api/gallery/unexported-edits`` was built to close for saved-but-unexported
 edits, and this is its sibling for un-stacked light.
 
-**One bar, and the same "which run?" rule as the Target page.** A sub counts
+**One bar, and the picture on the wall is the one measured.** A sub counts
 only if a re-stack would actually combine it — accepted **and** solved — and the
-run it is measured against is the newest *genuine* one (an editor export or a
-channel combine does not reset the clock, via the shared
+run it is measured against is the genuine stack behind the target's **displayed**
+picture: the pinned cover if there is one, else the newest run with a preview,
+resolved through an editor export to the stack it was rendered from (an export
+or a channel combine does not reset the clock, via the shared
 :func:`webapp.run_options.run_has_reusable_options` the Target page's
-``reusable`` flag already comes from).
+``reusable`` flag already comes from). It used to be the newest genuine run
+regardless of what was shown, and after a Combine that is a one-night stack
+carried in with its own timestamp — so the deep target the Combine existed to
+make deeper was the one target this note could never name
+(:func:`new_light_since_picture`). That same run also says whether "solved" is part of the bar at all:
+see :func:`webapp.run_options.run_places_unsolved_subs`.
 
 **Where this is deliberately *wider* than the Target page's own nudge, and why.**
 That nudge says *"N new subs since your last stack"* and counts by **capture**
@@ -46,9 +53,10 @@ rule, and since v0.492.0 the "Bring my pictures up to date" reprocess scope
 that names the targets and the batch that restacks them cannot be about
 different targets.
 
-Deliberately cheap: per target, one ``stack_runs`` read that stops at the newest
-genuine row, and — only for a target that has one — a single indexed ``COUNT``
-(:meth:`seestack.io.project.Project.count_light_missing_from_stack`). A target
+Deliberately cheap: per target, one ``stack_runs`` read (a target's run rows are
+a few dozen at most; the owner's whole library holds under a thousand), and —
+only for a target that has a picture — a single indexed ``COUNT``
+(:meth:`seestack.io.project.Project.count_light_missing_from_run`). A target
 that has never been stacked costs the first read alone and is skipped: this note
 is about a picture that has fallen behind, and "you have never stacked this" is a
 different sentence that other surfaces already say.
@@ -60,7 +68,12 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from webapp import deps
-from webapp.run_options import run_has_reusable_options
+from webapp.finishedpicture import displayed_picture_run
+from webapp.run_options import (
+    derived_from_run_id,
+    run_has_reusable_options,
+    run_places_unsolved_subs,
+)
 
 router = APIRouter(tags=["new-subs"])
 
@@ -72,7 +85,8 @@ NEW_SUBS_WAITING_MAX = 12
 class NewSubsWaitingItem(BaseModel):
     safe: str
     target_name: str
-    #: The newest genuine stack run — the picture that has fallen behind.
+    #: The genuine stack run behind the displayed picture — the picture that has
+    #: fallen behind.
     run_id: int | None = None
     stacked_utc: str = ""
     #: How many subs that picture combined, so the note can say what the
@@ -93,7 +107,50 @@ class NewSubsWaitingResponse(BaseModel):
     items: list[NewSubsWaitingItem] = []
 
 
-def new_light_since_picture(proj, runs):  # noqa: ANN001
+def picture_measured_for_new_light(runs, cover_stack_run_id=None):  # noqa: ANN001
+    """The genuine stack run a target's **displayed** picture is made of, or
+    ``None`` when the target has no genuine stack at all.
+
+    ``runs`` is the target's stack runs **newest first**. The displayed picture
+    is :func:`webapp.finishedpicture.displayed_picture_run`'s answer — the pinned
+    cover, else the newest run with a preview — and it is resolved to a *stack*:
+
+    * a genuine run is itself;
+    * an editor export is the run it was rendered from (``derived_from``), or,
+      for an export recorded before that field existed, the newest genuine run
+      not newer than it — an export re-renders pixels an earlier stack
+      combined, and never folds in a sub;
+    * a target with no preview at all (a run whose preview was pruned, a
+      never-previewed batch) falls back to the newest genuine run, which is the
+      answer every caller had before the displayed picture was consulted.
+
+    Why the displayed picture and not the newest genuine run: after a Combine
+    the newest genuine run is the one-night stack carried in, with its own
+    (recent) timestamp and a subset of the target's subs, while the picture the
+    merge pinned to keep on the wall is the older, deeper one. Measuring the
+    newest run answered "0 missing" for the one target a Combine exists to
+    deepen. The same reading was wrong for any pinned cover: the note is about
+    the picture the owner is looking at, so that is the one measured.
+    """
+    runs = list(runs)
+    shown = displayed_picture_run(runs, cover_stack_run_id)
+    if shown is None:
+        return next((r for r in runs
+                     if run_has_reusable_options(r.options_json)), None)
+    if run_has_reusable_options(shown.options_json):
+        return shown
+    origin = derived_from_run_id(shown.options_json)
+    if origin is not None:
+        source = next((r for r in runs
+                       if r.id == origin and run_has_reusable_options(r.options_json)),
+                      None)
+        if source is not None:
+            return source
+    older = runs[runs.index(shown) + 1:]
+    return next((r for r in older if run_has_reusable_options(r.options_json)), None)
+
+
+def new_light_since_picture(proj, runs, cover_stack_run_id=None):  # noqa: ANN001
     """``(the picture that has fallen behind, how many subs it is missing)``.
 
     **This is the one definition of "this target has new light."** It is a named
@@ -118,18 +175,57 @@ def new_light_since_picture(proj, runs):  # noqa: ANN001
     can, which is what lets the one library-wide offer reach those targets instead
     of sending the owner through them one at a time.
 
-    ``runs`` is the target's stack runs **newest first**, and the walk stops at
-    the newest *genuine* one, so passing the iterator keeps the read cheap. A
-    target whose newest runs are all editor exports walks past them, which is the
-    point: an export is a re-render of an existing picture and never folds in a
-    sub. ``(None, 0)`` when there is no genuine stack at all — "you have never
-    stacked this" is a different sentence other surfaces already say, and there
-    is nothing to count "after".
+    **The run measured is the one behind the displayed picture**
+    (:func:`picture_measured_for_new_light`), and **"missing" is membership
+    where the run recorded which subs it was offered**
+    (:meth:`~seestack.io.project.Project.count_light_missing_from_run`), the
+    capture-time rule only where it did not. Both halves exist for the same
+    shape: a Combine carries a one-night stack into the deep target with its own
+    recent timestamp, the merge pins the deep target's own picture so the wall
+    keeps showing it, and every sub of the other night was shot *before* that
+    picture and never restored — so measured by the newest run and by the clock,
+    the one target the Combine existed to deepen answered "nothing missing", the
+    Dashboard note stayed silent, and "Bring my pictures up to date" skipped it.
+    A carried night, a set-aside night and a pinned older cover are the same
+    failure with different names, and they are the cases the tests pin.
+
+    ``runs`` is the target's stack runs **newest first**; ``cover_stack_run_id``
+    is the target's pinned cover, if any (the registry row's own value — pass it
+    when you have it, so the picture measured is the one shown). ``(None, 0)``
+    when there is no genuine stack at all — "you have never stacked this" is a
+    different sentence other surfaces already say, and there is nothing to
+    count "after".
+
+    **The "and solved" half of the bar has one exception, and the run itself says
+    whether it applies.** Since v0.482.0 the stacker can place a sub *no plate
+    solve could locate*, by matching its star patterns to the reference — that is
+    what ``StackOptions.star_match_unsolved`` is for, on a faint or star-poor field
+    where ASTAP fails on most subs and the picture is the handful that happened to
+    solve. It is off by default and hand-set, so for the owner's runs the solved
+    bar is exactly right; on an install that turns it on, a target whose whole
+    shortfall is un-located subs read as **nothing waiting** and this note could
+    never name it. So the bar is taken from the run being measured against
+    (:func:`webapp.run_options.run_places_unsolved_subs`) — the run a reprocess
+    reuses the settings of, i.e. the settings the re-stack would in fact use.
     """
-    run = next((r for r in runs if run_has_reusable_options(r.options_json)), None)
+    runs = list(runs)
+    if cover_stack_run_id is not None:
+        from seestack.coverpin import PIN_REASON_KEPT_FINISHED, app_pin_reason
+
+        # A pin the bulk restack placed to keep a hand-finished picture on the
+        # wall while the deeper run went into History. The owner has not chosen
+        # that picture over the deeper one — the app kept it for him — so the
+        # light to measure is what the deeper, newest picture is missing:
+        # otherwise every batch would re-name the target, restack it again, keep
+        # the picture again, and never stop. The cover nudge on the Target page
+        # is what offers him the deeper run.
+        if app_pin_reason(proj, cover_stack_run_id) == PIN_REASON_KEPT_FINISHED:
+            cover_stack_run_id = None
+    run = picture_measured_for_new_light(runs, cover_stack_run_id)
     if run is None:
         return None, 0
-    return run, proj.count_light_missing_from_stack(run.timestamp_utc)
+    return run, proj.count_light_missing_from_run(
+        run, include_unsolved=run_places_unsolved_subs(run.options_json))
 
 
 def scan_new_subs_waiting(lib) -> list[NewSubsWaitingItem]:  # noqa: ANN001
@@ -146,7 +242,9 @@ def scan_new_subs_waiting(lib) -> list[NewSubsWaitingItem]:  # noqa: ANN001
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
-            run, n_new = new_light_since_picture(proj, proj.iter_stack_runs())
+            run, n_new = new_light_since_picture(
+                proj, proj.iter_stack_runs(),
+                getattr(t, "cover_stack_run_id", None))
         except Exception:  # noqa: BLE001 — one broken project must not 500 the note
             continue
         finally:

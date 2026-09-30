@@ -473,6 +473,16 @@ item**; a claim in the backlog is a *publication, not a lock*.
 - Keep branches small and single-topic; claim an item by moving it to **In progress**
   with your branch name in the commit that starts it; release it when you finish or
   abandon it.
+- **An open PR is a stronger claim than a backlog line, including your own.** *(Added
+  2026-09-30, after three collisions of one class — details in `docs/PROCESS-NOTES.md`.)*
+  Adopting somebody's stranded PR is good work (§8's "a finished, tested fix sat unmerged"
+  is about exactly that), but check first whether its branch is still moving: a head
+  pushed within ~2 hours is a live run and the two-hour rule applies to it as it does to a
+  claim. And **a run that opens a second PR competes with its own first one** — the
+  version on a pushed-but-unmerged PR is a claim your later PR can steal, after which
+  neither can merge without a re-bump, so choose the second one's number above whatever
+  the first is holding, not merely above `main`'s. An open PR of your own that the run
+  ends without merging is a branch left unmerged: it goes in the backlog like any other.
 
 **Right before you merge:**
 - **Sync, then re-test** — merge `origin/main` and re-run the full suite even if the

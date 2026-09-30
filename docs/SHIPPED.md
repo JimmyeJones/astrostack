@@ -105,7 +105,7 @@ pointer. Newest-first order is not kept inside this heading — the blocks are i
   names, and a narrow projection buys nothing where the caller already streams — which is exactly what the lead
   records about `reject-summary` (a), whose `count_unreadable_frames` streams and costs ~0.
 
-### The open remainder of observer #903 (option 3, cover semantics) — CLOSED by v0.492.12 (`seestack/coverpin.py`, an auto-cover with provenance); the entry's whole history
+### The open remainder of observer #903 (option 3, cover semantics) — CLOSED by v0.492.13 (`seestack/coverpin.py`, an auto-cover with provenance); the entry's whole history
 
 - **🟠 OPEN REMAINDER of observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903) — a restack
   still *changes* each target's displayed picture; v0.447.2 only stopped it being silent.** *(Pillar: trust —
@@ -436,6 +436,196 @@ pointer. Newest-first order is not kept inside this heading — the blocks are i
     (monkeypatches the ladder to fail on channel 0 only; asserts the frame is returned unchanged — fail-before it
     partial-subtracted G/B). Additive; no config/DB/API/on-disk change. Severity: image-quality/correctness, Low
     (only on a degenerate fit, now rare given the robust ladder). (Confidence: traced + regression-tested.)
+## 2026-09-30 (audit run B) — v0.492.13: a bulk restack never makes a finished picture look worse without the owner choosing it
+
+### 🟠 BUG FIX (trust — PRIORITY 1-adjacent; the 2026-09-30 audit's C-F4, MEDIUM, the #903 shape; closes the open remainder of observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903) — option (3), "an auto-cover with provenance") — `seestack/coverpin.py`, `pipeline._displayed_picture_state`, `_settle_cover_after_restack`, `reprocess_status.hand_finished*`, Settings → Maintenance
+
+**The two holes.** `reprocess_all` records each restack as a *new* run, and the newest run is the picture every
+wall surface shows. v0.448.1's carry-forward (`_picture_is_auto_finished`) re-finishes a picture **the app
+baked**; it deliberately stands down on a picture the owner finished **by hand** (Auto's look is no evidence of
+what he wanted), so **(a)** with "also auto-edit" off — the default — such a picture was replaced on the wall by
+the flat fresh run, which is exactly how 44 of his pictures went flat in 2026-09, from the other author. And
+**(b)** on a Combined target the merge pins the deep target's own picture so the carried one-night stack
+cannot take its place (v0.480.x) — a pin the registry cannot tell from the owner's, so the deeper run the batch
+then made was **never displayed**, and the guard returned `False` on any pin at all.
+
+**The fix, in three parts.** (1) **Provenance for the app's own pins** — new engine module
+`seestack/coverpin.py`: a `project_meta` record `{"run_id", "reason"}` beside the pin, valid **only while it
+names the run actually pinned**, so the owner's later "Set as cover" (or clearing it) retires the record with no
+code on his path having to know; every doubt reads as *his* pin. The registry's `cover_stack_run_id` keeps its
+meaning byte for byte (§9). `Library.merge_targets_result` marks its pin `merge`. (2) **The batch settles the
+cover after each restack** (`_settle_cover_after_restack`, from a `DisplayedPicture` read *before* the restack):
+a cover the **owner** pinned is never touched; a picture **finished by hand** (finished per `finishedpicture`
+and no `editor_auto_baked_look` stamp) **stays on the wall** — pinned if it was not, recorded `kept_finished`,
+reported in `kept_displayed` with the names — whatever the switch says; a cover the **app** pinned advances
+(the pin is lifted, the fresh deeper run is the picture, `cover_advanced`), unless it protected a finished
+picture and the fresh run's own finish failed. `_picture_is_auto_finished` no longer refuses on a pin, so a
+pinned auto-finished picture lends its finish to the run that may replace it. (3) **The nag loop is closed
+where it would start**: `newsubs.new_light_since_picture` measures a `kept_finished`-pinned target against its
+newest picture (the deeper one in History), so the note does not re-name a target the batch deliberately kept,
+restack it again, and keep it again forever; the Target page's cover nudge is what offers the deeper run.
+
+**Screens.** Settings → Maintenance: the #903 sentence turns from a *warning* ("they will show a flat,
+unstretched stack") into the **promise** with its count — "N of these targets show pictures you finished
+yourself. They stay on the wall exactly as they are, and their deeper restack waits in History…" — on the
+`hand_finished` / `_stale_only` / `_new_light_only` counts `reprocess_status` now sends (additive), shown with
+the switch on too (auto-editing the new result does not replace his work), and repeated in the confirm dialog.
+**Arriving on "Bring my pictures up to date" now defaults the auto-edit switch on** — for that visit only,
+nothing in `config.json` is written, the switch stays in view — because that scope exists to turn a night's
+subs into a *picture* with one click; the two engine scopes keep their off default. The Jobs page's batch line
+says "kept N pictures you finished yourself on the wall (names); their deeper restacks are in History" and "N
+targets now show their new, deeper pictures in place of covers the app had pinned". Nothing removed.
+
+**Upgrade safety.** Additive meta key, additive response keys, additive job-summary keys carried through a
+yielding slice; no config, schema-version, on-disk or default-behaviour change (the switch default is a
+page-load state, not a setting). An older build ignores the record and keeps the pin.
+
+Tests +14 Python (`tests/test_coverpin.py` +2; the merge marker; the note's kept-pin rule; nine batch cases in
+`tests/webapp/test_reprocess_all.py`: hand-finished kept with the switch off and on, a merge pin advanced on an
+auto-finished and on a flat picture, kept when the fresh finish fails, a merge pin on a hand-finished picture
+re-recorded as kept, an owner's pin never touched, the status counts, the yield carry) and +9 frontend
+(warning wording per scope, the new-light default on/off, the summary line). **Fail-before**: 12 red on the
+previous commit with `coverpin.py` copied in so the imports resolve. One existing assertion changed
+deliberately: a pinned auto-finished picture now answers `True` to `_picture_is_auto_finished`.
+
+## 2026-09-30 (audit run B) — v0.492.12: "new light" is measured against the picture on the wall, by membership
+
+### 🟠 BUG FIX (autonomy / trust — PRIORITY 2; the 2026-09-30 audit's C-F1, HIGH) — `stack_run_frames`, `Project.count_light_missing_from_run`, `newsubs.picture_measured_for_new_light`, `merge.carry_stack_runs`
+
+**The claim that was wrong.** `newsubs.new_light_since_picture` — *"the one definition of 'this target has
+new light'"*, behind the Dashboard note, v0.492.0's **"Bring my pictures up to date"** scope and the counts
+its dialog quotes — measured the target's **newest genuine run**, by capture time. After a Combine
+(`seestack/io/merge.py` carries each source night's picture in **with its original timestamp**) the newest
+genuine run is the one-night stack of the folder combined in: a recent stamp and a *subset* of the target's
+subs. Every sub of the other night was shot before it and never restored, so `count_light_missing_from_stack`
+answered **0** — the one target a Combine exists to deepen was the one target the note could never name and
+the batch always skipped, while the merge's own pin kept the older, deeper picture on the wall. The same
+reading was wrong for any pinned cover, a set-aside night, or a run that is a subset for any reason.
+
+**Two fixes, one definition.** (1) **The run measured is the picture on the wall**
+(`picture_measured_for_new_light`): the pinned cover, else the newest run with a preview, resolved through an
+editor export to the stack it was rendered from (`derived_from`, else the nearest older genuine run), falling
+back to the newest genuine run only when nothing has a preview at all. (2) **"Missing" is membership, not a
+clock.** New unversioned aux table `stack_run_frames(run_id, frame_id)` records which subs a run was
+**offered** — every accepted, located sub the stacker built its list from, taken *before* the lucky-imaging cut
+and any alignment failure, so a sub the run saw and dropped itself is not "light the owner is missing" (a
+re-stack would drop it again; counting it would offer hours of NAS CPU for an identical picture). `run_stack`
+writes it beside the history row; `Project.count_light_missing_from_run` counts accepted+located subs **not in
+the set** where a record exists and falls back to the capture-time rule where none does. A Combine
+**freezes** every unrecorded run's set from the capture-time rule *before* a foreign sub lands
+(`freeze_unrecorded_stack_run_frames` — at that moment the two rules agree, and afterwards they do not), then
+carries each source run's record **re-keyed** onto the destination's frame ids through the dedup map
+`merge_projects` already builds (`carry_stack_runs(dest_id_by_key=…)`; duplicates map to the row the
+destination already has). So after a Combine the deep night's picture is missing exactly the other night's
+subs and the carried picture exactly the deep night's — pinned on a fixture where every sub predates every
+stack, i.e. where the clock reads 0 for both.
+
+**Upgrade safety (§9).** The table is created on every open through `_AUX_TABLES_SQL`, the same rule the
+registry's `merged_folders` follows, with **no `SCHEMA_VERSION` bump** (the rollback guard is asserted in the
+new test file): an older build never asks about it. A run recorded before this exists is measured exactly as
+before until it is restacked or a Combine freezes it. `delete_stack_run` takes the record with the row. No
+config, on-disk, default or API-shape change; `NewSubsWaitingItem.run_id`/`stacked_utc` now describe the
+picture on the wall, which is what the note's sentence always claimed.
+
+**What this does *not* reach, said plainly.** A target combined **before** this shipped has no records and
+no freeze happened; its displayed picture is measured by the clock. That still names it wherever the deep
+picture was stacked before the other night was shot (the common shape), and stays blind only where the deep
+stack post-dates the other night's capture — one restack, or the next Combine, records the set and closes it.
+The Target page's own *"N new subs since your last stack"* line still counts by capture time against the
+newest reusable run (deliberately separate sentences, per v0.492.3); a lead is filed to hand it this rule.
+
+Tests +14 (`tests/test_stack_run_frames.py` +9: round-trip, no-bump upgrade, membership vs clock, the freeze,
+a real `run_stack` with `lucky_fraction`, the two-night Combine, a shared sub, a stacker-recorded run travelling
+as recorded, the no-map older caller; `tests/webapp/test_new_subs_waiting.py` +5: the Combine, the carried
+picture displayed, a pinned older cover, an export via `derived_from`, an export without one). **Fail-before**:
+12 of the 14 red on `origin/main` in a scratch worktree with only the tests copied in.
+## 2026-09-30 (Builder) — v0.492.11: "a re-stack would fold this in" read *solved* unconditionally
+
+### 🟠 BUG FIX (trust — PRIORITY 2-adjacent) — the second half of the `restored_utc` LEAD filed with v0.492.4, closed on the gate the lead named
+
+*(Builder 2026-09-30. Filed as a lead the same day by the run that shipped v0.492.8, traced but not
+reproduced; reproduced and fixed here. Severity is **none for the owner**, and the entry said so — which is
+why what follows is careful to change nothing for him.)*
+
+**The two questions and the one bar.** Three surfaces ask *"is this picture behind the light I own?"*: the
+library-wide note `GET /api/new-subs-waiting`, v0.492.0's "Bring my pictures up to date" scope (which asks the
+same `new_light_since_picture`), and the per-target `GET …/restored-subs` card. All three answer it through
+two `Project` reads, and both required a plate solve:
+
+```
+count_light_missing_from_stack:  WHERE accept = 1 AND wcs_json IS NOT NULL AND wcs_json <> '' …
+restored_frame_windows:          WHERE accept = 1 AND restored_utc IS NOT NULL AND wcs_json IS NOT NULL
+```
+
+with the same reasoning written above each: *"accepted **and** solved — the two things a re-stack needs from a
+frame"*. That reasoning has been out of date since **v0.482.0/v0.484.0**: with
+`StackOptions.star_match_unsolved` on, `run_stack` places subs **no plate solve could locate**, by matching
+their star patterns to the reference (`_star_matched_unsolved_frames`, one anchor per panel on a mosaic since
+v0.484.0). Placing un-located subs *is what the option is for* — its own comment says so: on a faint or
+star-poor field ASTAP fails on most subs and "hundreds of good subs sit unused and the picture is the handful
+that happened to solve."
+
+**So the failure is not "the count is one low".** It is that on an install with the option on, a target whose
+**whole** shortfall is un-located subs answers `0`, is therefore not named by the library-wide note at all,
+and is skipped by the batch that note links to — the one install where the missing light is most of the light,
+and the one surface built to find it cannot see it. That is precisely the class of shortfall the option exists
+to recover.
+
+**Gated on the option, never on a threshold** — the lead's own instruction, and the right one. The star-match
+path is capped at `STAR_MATCH_MAX_UNSOLVED` (400) per run and refuses any sub whose stars do not clearly
+match, so how many subs a re-stack would actually rescue is **not knowable from the `frames` table**.
+Modelling that cap in a `COUNT` would be a second, worse copy of the stacker's rule, drifting the moment the
+matcher changes. "Is this install even trying to place un-located subs?" is one bit, and the run recorded it.
+
+**What changed.**
+
+* `Project.count_light_missing_from_stack(ts, *, include_unsolved=False)` and
+  `Project.restored_frame_windows(*, include_unsolved=False)` — keyword-only, **defaulting to today's SQL**,
+  so every ordinary install's answer is byte for byte what it was. The flag drops *only* the solved clause;
+  `accept = 1`, the capture-time test, the restoration window and the `rejected_utc` guard v0.492.8 added are
+  all untouched, and a test walks each of them under the flag to say so.
+* New `webapp.run_options.run_places_unsolved_subs(options_json)`. It lives beside
+  `run_has_reusable_options` deliberately: that module exists because "what settings did this run use?" had
+  three hand-written spellings that disagreed, and this is a fourth question of the same kind.
+* Both callers read it off **the run being measured against** — `new_light_since_picture`'s newest genuine
+  run, and `target_restored_subs`' `runs[0]`. That is the run whose options a reprocess reuses
+  (`pipeline._last_stack_options_for_target`), so *"what would stacking this again fold in?"* is answered with
+  the settings it would in fact be stacked with, rather than with the app's defaults or with some older run's.
+  An editor export supplies no settings and does not reset the clock, so the "which run?" and "which bar?"
+  questions walk past it to the *same* row — pinned by a test, because reading the timestamp off one run and
+  the rules off another is the drift this shape invites.
+
+**Strict `is True`, and that is the whole safety argument.** A run that recorded no settings, an editor
+recipe, the string `"yes"`, the integer `1`, or nothing at all all read as **off**. The option defaults
+`False` and is a hand-set advanced field, so the owner's runs are unaffected; and where the helper is unsure
+it errs toward the narrow bar, which keeps the mistake on the side the bug already made — an offer that says
+**less** than it could. An offer that over-promises is the one that becomes a nag, which is the standard
+`restorednudge` and `newsubs` were both written to.
+
+**One token that was a genuine second spelling.** `restored_frame_windows` tested `wcs_json IS NOT NULL`,
+while `FrameRow.solved` — the module's own named definition of *"did the plate solve locate this sub?"* — is
+`bool(wcs_json)`. An empty string would have been promised by this one query and read as unsolved by every
+other reader. No writer stores `''` today; the fix is that the two spellings of one bit can no longer
+disagree if it ever does.
+
+**Tests +10**, and the fail-before was *shown*, not asserted — the production files were reverted to
+`origin/main` in place with the new tests kept, and four of the new tests failed (plus the helper's own file
+erroring at import); the empty-`wcs_json` guard was failed separately by restoring that one clause. The
+remaining new tests are one-directional guards that must pass in both states: a solved restored sub still
+counts under star-matching, a sub the **user** set aside is still not promised, an older run's option does not
+speak for a newer run, and a non-`True` value reads as off.
+
+**A fixture trap worth recording, because three of these tests would have been vacuous.** The synthetic
+frames carry `DATE-OBS` of 2024-09-12, and `MID`/`AFTER` in these files postdate that — so a target measured
+against a run stamped `MID` has nothing waiting **whatever the bar is**, and a test built on it passes without
+the gate ever being read. Caught because the first draft's positive case failed for that reason; the three
+affected fixtures now use two stamps that both *predate* the frames, so the run's options are the only thing
+separating the two outcomes, and the reasoning is written into the fixture's own comment.
+
+**Upgrade safety.** No new column, no `SCHEMA_VERSION` change, no migration, no config field, no on-disk
+path, no flipped default, and no API shape change — the endpoints' response models are untouched and both new
+parameters are keyword-only with the old behaviour as their default. A rollback reads the same rows and gives
+the same answers.
 
 ## 2026-09-30 (Builder, same run as v0.492.6/.7) — v0.492.10: a flaky frontend test, caught by CI on this run's own PR and proved nondeterministic rather than assumed
 

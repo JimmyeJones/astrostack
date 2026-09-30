@@ -1626,6 +1626,16 @@ export interface ReprocessStatus {
   /** The same count restricted to a "only targets with new light" batch. */
   finished_pictures_new_light_only?: number;
   /**
+   * Of each `finished_pictures*` count, how many the owner finished *by hand*
+   * (a finished picture the app did not bake). A batch keeps those on the wall
+   * — pinned, with the deeper restack in History — rather than replacing them,
+   * so the dialog says so instead of warning about a flat stack that will not
+   * happen. Optional: an older backend sends none, and the dialog is silent.
+   */
+  hand_finished?: number;
+  hand_finished_stale_only?: number;
+  hand_finished_new_light_only?: number;
+  /**
    * The "Bring my pictures up to date" scope's own size: how many targets have
    * shot accepted-and-solved subs since their picture was made, and how many
    * such subs there are in all. The confirm dialog quotes both before it queues
