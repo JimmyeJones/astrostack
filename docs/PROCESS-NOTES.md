@@ -1,5 +1,106 @@
 # Process notes & QA sweep records
 
+## 2026-10-01 (Builder, branch `claude/keen-darwin-i30cpz`) — v0.492.20, and the pass where the bundled sample said 0.01 % about a real 3 % bug
+
+*(Baseline = `origin/main` at `67df2c7` (`__version__` 0.492.19): **7246 passed, 3 skipped**, 15m10s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green, so a
+finding was distinguishable from a pre-existing failure.)*
+
+### How the item was chosen, since "Bugs (fix these first)" is dry
+
+Every open Bugs entry is gated on the owner's data or carries a measured stand-down ("do not blind-flip", "not
+worth building", "only if the owner reports it"), and the `READY` grep returns nothing live — so there was no
+entry to claim. Per AGENTS.md §3 the run went to PRIORITY 1 and looked for a **new** bug in the shape the file's
+own history names: *Auto must measure the picture its own recipe produces.* v0.409.0 made that true of the sky
+gradient and v0.410.0 of the mosaic's panel steps, both at the recipe's **first** ops. `auto_recipe`'s **last**
+op — `geometry.crop` to `trim_crop` — is the same argument at the other end, and nobody had made it there. The
+fix is v0.492.20; the full entry is in [`SHIPPED.md`](SHIPPED.md).
+
+### The trap: the bundled `--mosaic` sample said there was nothing here
+
+The first thing this run did after tracing the mechanism was measure it on the real thing — the bundled
+`--mosaic` sample, stacked for real (21 subs, 907×615 union canvas, trim 7.9 %). It answered:
+
+| | sky | σ | `target_bg` | saturation | sharpen |
+|---|---|---|---|---|---|
+| whole canvas (today) | 0.0031 | 0.000634 | 0.238750 | 1.2477 | 0.500 |
+| kept rectangle | 0.0031 | 0.000625 | 0.238776 | 1.2478 | 0.500 |
+
+**σ inflated 1.4 %, the stretch target moved 0.01 %, the op list identical** — and a draft of this entry was
+already written as a *stand-down*, "traced, real, and below the churn bar". It was wrong, and two numbers are
+why:
+
+1. **The sample's fringe is 7.9 % of the canvas but only 3.1 % of the *finite* pixels** — 60.7 % of it is
+   uncovered NaN, which every estimator on this path already ignores. The lever is the fringe's share of the
+   **finite** population, never of the canvas, and nothing in the app reports the former.
+2. **Its sky is dark enough (0.0031) that `target_bg = clip(0.24 − sky·0.4, 0.14, 0.24)` sits against its own
+   0.24 ceiling.** The one number the bug moves is clamped in that sample, so the sample cannot show the
+   movement whatever the fringe does.
+
+What settled it was sweeping the *trim fraction* on a canvas ragged the way a union canvas is ragged (perimeter
+mostly uncovered, the covered remainder one to three subs deep and `sqrt(depth)` grainier, `trim_crop` taken
+from the real `largest_covered_rect` rather than written by hand). The error in the stretch target is roughly
+linear in the fringe's finite share and is **already 1.8–3.3 % inside the regime AGENTS.md calls healthy**
+(a trim under ~15 %), rising to 8.0 % at a 36 % trim — the same order as the v0.410.0 bug this is a sibling of,
+and above the ~2 % decimation-parity floor the rest of this app lives with. The table is in `SHIPPED.md`.
+
+**The lesson, and it is the opposite of the usual one.** The standing instruction is to distrust a synthetic and
+believe the sample shaped like the owner's data. Here the sample was the *less* informative witness, because the
+quantity under test was **clamped** in it and the population under test was **3 %** of it. So: before reading a
+real-sample "no effect" as "no bug", check that the sample can move the number at all — is the output at a clamp,
+and what share of the measured population does the mechanism actually reach? Both are one line to compute and
+neither is visible in the result.
+
+### The fixture-shape half, which is why three instalments walked past it
+
+`tests/test_auto_noise_measure.py`'s mosaic scene is a **full rectangle** — all four panels covered edge to edge,
+zero uncovered pixels — so `largest_covered_rect` returns `None` on its coverage map and Auto's own
+`geometry.crop` never runs on it. The property the file pins ("the same stack, laid out as a mosaic, measures the
+same sky level") is therefore true there and silent about a ragged canvas, which is every mosaic the owner
+actually stacks. Same lesson as `tests/shapes.py` (v0.391.1), one level up: that file taught a fixture to state
+what its **panels** can vouch for; this one needed it to state what its **canvas** can. It now asserts both, and
+carries a `_ragged` canvas beside the rectangular one.
+
+### Collateral worth keeping
+
+* The loupe's window render (`webapp/routers/editor.py::_render_loupe_png`) deliberately passes **no**
+  `coverage`/`frame_coverage`, which is correct only because all three `background.*` ops declare
+  `additive_field=True` and are replayed from `frozen_deltas` instead of re-fitted. Read while tracing this;
+  noted so that a *fourth* background op which forgets that flag is recognised as the bug it would be — on a
+  window it would silently re-fit, or decline, against a map it does not have.
+* `auto_recipe` measures the image in **three** places, not one — `analyze_proxy`, `suggest_denoise_strength`
+  and `classify_target` — and the first draft of the fix narrowed only the first. All three now take the same
+  region; a fourth measurement added later must go through `_measured_region` too or the recipe becomes a blend
+  of two pictures again.
+
+### One instruction disagreement, resolved in AGENTS.md's favour (§AGENTS.md preamble)
+
+The harness supplied an attribution trailer naming the **model** (`Co-Authored-By: Claude Opus 5 <…>`).
+AGENTS.md §10 says plainly: *"never put a model identifier in commits, code or logs."* AGENTS.md wins, and the
+repo's own history agrees — every commit on `main` carries `Co-Authored-By: Claude <noreply@anthropic.com>`. That
+is what this run used.
+
+### Verification
+
+Full suite on the change: **7260 passed, 3 skipped**, 14m50s (baseline 7246 + 14 new items). The new tests'
+**6 behavioural claims fail on `origin/main`**, shown in a `git worktree` carrying only the new test file; the
+other four are structural (the fixture-shape assertion, `auto_crop` off, single-field byte-identity, the
+declined rectangle) and pass both ways by design.
+
+Rather than a second full dogfood on the fixed tree, the **production path itself** was re-run against the first
+pass's own scratch install — `editor.build_auto_recipe_for_run`, `build_auto_analysis_for_run` and
+`build_preset_suggestion_for_run` on all three real stacked samples. No exception; trim 7.9 % (mosaic),
+6.5 % (full-size mosaic), none (single field); nine ops on each mosaic, seven on the field; the reported
+`trim_fraction` unchanged. That exercises every line this change touches on real coverage siblings, which a
+25-minute browser pass would not have added to.
+
+### Dogfood
+
+`scripts/agent-dogfood.sh --mosaic --editor --big` — mosaic trim **7.9 %** (well under the ~15 % that would be
+D1-shaped), the full-size check live on the 1693×1150 canvas at proxy 1/2, the panel map and the five health
+sentences coherent read as one paragraph, every op in the 21-item Add menu re-rendering the preview, nothing
+overflowing and no console errors.
+
 ## 2026-10-01 (Builder) — a live PR is a live claim: the top Bugs entry was taken mid-run, and the §11 re-fetch is what caught it
 
 **What happened.** The run opened on a `main` whose four top Bugs entries were all gated on the owner's data,

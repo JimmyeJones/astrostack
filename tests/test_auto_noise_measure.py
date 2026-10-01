@@ -25,12 +25,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from seestack.edit.coverage_trim import largest_covered_rect
 from seestack.edit.pipeline import apply_recipe
 from seestack.edit.presets import (
     _AUTO_CHROMA_MAX,
     _delevelled_luminance,
     _detrended_luminance,
     _noise_fraction,
+    analyze_auto_inputs,
     analyze_proxy,
     auto_recipe,
 )
@@ -510,3 +512,223 @@ def test_a_genuinely_bright_sky_mosaic_is_still_reported_as_bright():
     bright = _scene(0.05, seed=11, mosaic=True)
     assert analyze_proxy(bright, _panel_coverage())["sky"] > 0.2
     assert _mosaic_target_bg(bright, _panel_coverage()) < 0.16
+
+
+# ...and the fringe the recipe *deletes* is not the picture it makes (v0.492.x)
+#
+# v0.409.0 took the sky gradient out of the plane the level is read from and
+# v0.410.0 the mosaic's panel steps, both because `background.final_gradient` and
+# `background.level_coverage` are Auto's own *first* ops: those features are gone
+# before `tone.stretch` sees a pixel, so measuring them is measuring a picture
+# the recipe does not produce. Auto's **last** op is the same argument at the
+# other end — `geometry.crop` to the largest well-covered rectangle deletes the
+# union canvas's ragged border — and it had not been made there.
+#
+# The fixture above is why it hid: `_scene(mosaic=True)`'s canvas is a full
+# rectangle, every panel covered edge to edge, so there is nothing for a trim to
+# cut and the two measurements coincide by construction (the test right below
+# states that, so the next reader does not have to re-derive it). Give the scene
+# the ragged border a real union canvas has and they do not.
+# --------------------------------------------------------------------------
+
+#: Depth a fringe pixel of `_ragged` is covered to, drawn from 1..3 — against the
+#: panels' 6..15. Grain goes as 1/sqrt(depth), so the fringe really is several
+#: times grainier than the picture inside it, which is the whole point.
+_FRINGE_DEPTH_MAX = 4
+
+#: Share of the fringe band that is *covered at all*. The rest is NaN. 39 % is
+#: what the bundled `--mosaic` sample's own trim region measures, so the fixture
+#: is ragged the way a union canvas is ragged rather than the way a band is.
+_FRINGE_COVERED_SHARE = 0.39
+
+
+def _ragged(seed: int = 13, *, sigma: float = 0.004, band: int = 10):
+    """``(rgb, coverage, trim_crop)`` for the mosaic scene on the ragged canvas a
+    real mosaic stacks onto: a perimeter band that is mostly **uncovered** (NaN),
+    whose covered remainder is thin — one to three subs where the panels have six
+    to fifteen — and therefore ``sqrt(depth)`` grainier. ``trim_crop`` is the real
+    ``largest_covered_rect`` answer for that coverage map, not a hand-written
+    rectangle, so the test and the app agree about what is being thrown away.
+    """
+    from scipy.ndimage import uniform_filter
+
+    img = _scene(sigma, seed=seed, mosaic=True)
+    cov = _panel_coverage()
+    edge = np.zeros((H, W), bool)
+    edge[:band, :] = edge[-band:, :] = True
+    edge[:, :band] = edge[:, -band:] = True
+    rng = np.random.default_rng(seed + 7717)
+    # A spatially-correlated keep mask, so the covered part of the fringe is a
+    # ragged outline rather than salt-and-pepper (which `largest_covered_rect`
+    # would read quite differently).
+    field = uniform_filter(rng.random((H, W)).astype(np.float32), size=9)
+    keep = edge & (field <= np.quantile(field[edge], _FRINGE_COVERED_SHARE))
+    img[edge & ~keep] = np.nan
+    cov[edge & ~keep] = 0.0
+    depth = rng.integers(1, _FRINGE_DEPTH_MAX, size=int(keep.sum())).astype(np.float32)
+    cov[keep] = depth
+    panel_depth = float(np.median(_PANEL_FRAMES))
+    img[keep] += (rng.normal(0.0, 1.0, (int(keep.sum()), 3))
+                  * (sigma * np.sqrt(panel_depth / depth))[:, None]).astype(np.float32)
+    return img, cov, largest_covered_rect(cov)
+
+
+def _ragged_target_bg(img, cov, trim, **kw) -> float:
+    """The grey Auto aims a ragged mosaic's sky at, off its own recipe."""
+    rec = auto_recipe(img, median_fwhm=2.5, is_mosaic=True, trim_crop=trim,
+                      coverage=cov, **kw)
+    return float(next(op.params["target_bg"] for op in rec.ops
+                      if op.id == "tone.stretch"))
+
+
+def test_the_mosaic_scene_is_a_full_rectangle_and_cannot_see_a_border_trim():
+    """Why every test above is silent about the border: this file's mosaic canvas
+    has **no uncovered pixel**, so ``largest_covered_rect`` declines on it and
+    Auto's own ``geometry.crop`` never runs. Stated as an assertion rather than a
+    comment, in the spirit of ``tests/shapes.py``: a mosaic fixture that does not
+    say what its *canvas* can vouch for cannot vouch for it.
+    """
+    cov = _panel_coverage()
+    assert int((cov <= 0).sum()) == 0
+    assert largest_covered_rect(cov) is None
+    # ...while the ragged one below really is trimmable.
+    _img, ragged_cov, trim = _ragged()
+    assert int((ragged_cov <= 0).sum()) > 0
+    assert trim is not None
+
+
+def test_the_border_auto_crops_away_does_not_set_the_stretch_target():
+    """The headline: the same stack, on a canvas carrying the ragged border Auto's
+    own last op deletes, must aim its stretch at the same grey.
+
+    Before this, the fringe was measured and the target grey landed **3.1 %** off
+    the identical stack's at a 10 % trim (0.2243 against 0.2312) — 1.8 % at a 6 %
+    trim, 3.3 % at 14 %, 8.0 % at 36 %. Two mechanisms, both in the fringe: it is
+    several times grainier (thin coverage), and its coverage counts are *overlap*
+    counts rather than panel identities, so one fringe bin spans several panels
+    and ``_delevelled_luminance`` cannot flatten it — the panel steps v0.410.0
+    removed survive inside the strip.
+    """
+    single = _target_bg(_scene(0.004, seed=13))
+    img, cov, trim = _ragged(seed=13)
+    assert _ragged_target_bg(img, cov, trim) == pytest.approx(single, rel=0.015)
+
+
+@pytest.mark.parametrize("band", [6, 14])
+def test_the_border_does_not_set_the_stretch_target_at_other_depths(band):
+    """The same claim either side of the measured band, so the fix is a rule and
+    not a constant tuned to one fixture."""
+    single = _target_bg(_scene(0.004, seed=13))
+    img, cov, trim = _ragged(seed=13, band=band)
+    assert trim is not None
+    assert _ragged_target_bg(img, cov, trim) == pytest.approx(single, rel=0.015)
+
+
+def test_the_border_does_not_darken_the_finished_one_click_picture():
+    """And the consequence the owner would see, on the shape he actually shoots:
+    the finished one-click picture's own sky, the recipe's own crop included.
+
+    Measured at a 10 % trim: **p30 0.1854 against the identical stack's 0.1899
+    (-2.4 %)** before, 0.1913 (+0.7 %) after.
+    """
+    img, cov, trim = _ragged(seed=13, band=10)
+    rec = auto_recipe(img, median_fwhm=2.5, is_mosaic=True, trim_crop=trim,
+                      coverage=cov)
+    out = apply_recipe(img, rec, EditContext(coverage=cov, frame_coverage=cov))
+    sky = float(np.nanpercentile(out[..., :3].mean(axis=2), 30.0))
+    assert sky == pytest.approx(_finished_sky(_scene(0.004, seed=13)), rel=0.015)
+
+
+def test_auto_builds_the_recipe_the_kept_picture_itself_would_get():
+    """The whole fix as one equality, and the strongest form the claim has: the
+    recipe Auto builds for a ragged canvas it is going to crop must be *exactly*
+    the recipe it builds when handed the cropped picture directly — same ops,
+    same measured params — plus the crop that gets it there.
+
+    That covers the grain half the stretch-target tests above do not: the denoise
+    strength, the denoise↔sharpen crossfade weights and the chroma smoother's
+    strength are all read from the same ``sky_sigma``, and a fringe covered once
+    or twice over is several times grainier than the picture inside it. The σ this
+    fixture's fringe added was enough to put ``detail.denoise`` on a picture whose
+    own grain does not ask for it — the neighbour of the owner-reported
+    "multicolour grid" (``detail.chroma_denoise``) at the top of this file.
+    """
+    img, cov, trim = _ragged(seed=13, sigma=0.012, band=14)
+    h, w = img.shape[:2]
+    x0, y0, x1, y1 = trim
+    rows = slice(int(round(y0 * h)), int(round(y1 * h)))
+    cols = slice(int(round(x0 * w)), int(round(x1 * w)))
+
+    ragged = auto_recipe(img, median_fwhm=2.5, is_mosaic=True, trim_crop=trim,
+                         coverage=cov)
+    kept = auto_recipe(img[rows, cols], median_fwhm=2.5, is_mosaic=True,
+                       coverage=cov[rows, cols])
+    assert [(o.id, o.params) for o in ragged.ops if o.id != "geometry.crop"] == [
+        (o.id, o.params) for o in kept.ops]
+    # ...and the crop is the one op that is not in both, by construction.
+    assert [o.id for o in ragged.ops][-1] == "geometry.crop"
+
+
+def test_with_auto_crop_off_the_whole_canvas_is_measured_again():
+    """The rule is "measure what the recipe keeps", not "measure the middle": with
+    the owner's border-trim preference off, the fringe stays in his picture, so it
+    is part of what Auto has to answer for."""
+    img, cov, trim = _ragged(seed=13)
+    off = auto_recipe(img, median_fwhm=2.5, is_mosaic=True, trim_crop=trim,
+                      coverage=cov, auto_crop=False)
+    whole = auto_recipe(img, median_fwhm=2.5, is_mosaic=True, trim_crop=None,
+                        coverage=cov)
+    assert [(o.id, o.params) for o in off.ops] == [
+        (o.id, o.params) for o in whole.ops]
+
+
+def test_a_single_field_stacks_auto_is_untouched_by_the_narrowing():
+    """Upgrade safety as a property: no trim rectangle, nothing narrowed — a
+    single-field stack gets byte-for-byte the recipe it got before this existed."""
+    img = _scene(0.004, seed=13)
+    assert [(o.id, o.params) for o in auto_recipe(img, median_fwhm=2.5).ops] == [
+        (o.id, o.params)
+        for o in auto_recipe(img, median_fwhm=2.5, trim_crop=None).ops]
+
+
+def test_a_rectangle_with_nothing_in_it_is_declined_not_measured():
+    """A sky level read off a few hundred pixels is worse than one read off a
+    canvas with a fringe in it, so a degenerate rectangle — and one that keeps
+    everything — both fall back to the whole canvas."""
+    img, cov, _trim = _ragged(seed=13)
+    whole = _ragged_target_bg(img, cov, None)
+    assert _ragged_target_bg(img, cov, (0.5, 0.5, 0.51, 0.51)) == pytest.approx(
+        whole, rel=1e-9)
+    assert _ragged_target_bg(img, cov, (0.0, 0.0, 1.0, 1.0)) == pytest.approx(
+        whole, rel=1e-9)
+
+
+@pytest.mark.parametrize("bad", [
+    (0.0, 0.0, float("nan"), 1.0),
+    (float("inf"), 0.0, 1.0, 1.0),
+    ("a", 0.0, 1.0, 1.0),
+    None,
+])
+def test_a_rectangle_that_is_not_four_finite_numbers_is_declined(bad):
+    """This sits on the editor's Auto button, so an unusable rectangle degrades to
+    today's whole-canvas measurement rather than raising a 500 at a user. (A
+    rectangle of the wrong *length* is a different line — ``auto_recipe``'s own
+    unpack where it emits the crop — and is left exactly as it was; the only
+    caller, ``editor._trim_rect_for_run``, always answers four values.)"""
+    img, cov, _trim = _ragged(seed=13)
+    assert _ragged_target_bg(img, cov, bad) == pytest.approx(
+        _ragged_target_bg(img, cov, None), rel=1e-9)
+
+
+def test_analyze_auto_inputs_reports_the_region_the_recipe_measured():
+    """The reported cues exist to explain the recipe, so they have to come off the
+    same pixels — otherwise the "What Auto did" note quotes a sky level the
+    stretch target it sits beside cannot be derived from."""
+    img, cov, trim = _ragged(seed=13)
+    cues = analyze_auto_inputs(img, median_fwhm=2.5, is_mosaic=True,
+                               trim_crop=trim, coverage=cov)
+    kept = analyze_auto_inputs(_scene(0.004, seed=13), median_fwhm=2.5)
+    assert cues["sky"] == pytest.approx(kept["sky"], abs=0.004)
+    # ...and what it says was trimmed is still the whole rectangle's share.
+    assert cues["trim_fraction"] == pytest.approx(
+        round(1.0 - (trim[2] - trim[0]) * (trim[3] - trim[1]), 3))
