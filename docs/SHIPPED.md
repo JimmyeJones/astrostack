@@ -436,6 +436,38 @@ pointer. Newest-first order is not kept inside this heading — the blocks are i
     (monkeypatches the ladder to fail on channel 0 only; asserts the frame is returned unchanged — fail-before it
     partial-subtracted G/B). Additive; no config/DB/API/on-disk change. Severity: image-quality/correctness, Low
     (only on a degenerate fit, now rare given the robust ladder). (Confidence: traced + regression-tested.)
+## 2026-09-30 (audit run B) — v0.492.16: a sub the bootstrap rescue placed says so
+
+### ⚪ TRUST / PROVENANCE (the 2026-09-30 audit's C-F6, LOW) — `frames.wcs_source`, `WCS_SOURCE_STAR_MATCH` / `WCS_SOURCE_REGISTERED`, `Project.update_frame`, `bootstrap.bootstrap_solve`
+
+**What was missing.** The bootstrap rescue (`seestack/solve/bootstrap.py`) writes a WCS into `frames.wcs_json`
+for subs no plate solve located — composed from a neighbour's stars (v0.481.0's star match) or slid from the
+reference by a phase-correlation shift — and nothing recorded that those rows were *derived* rather than
+*measured*. A wrong star lock therefore read back as a solve, forever, with no way to find which subs it had
+placed: every reader of `wcs_json` (`build_solve_arglist`, the stacker, the frames table) treats a truthy value
+as "ASTAP found it".
+
+**The record.** New additive column `frames.wcs_source`: `star_match` / `registered` for the two ways the
+rescue places a sub, **NULL for the solver and for every row written before the column existed** — "unknown"
+and "measured by the solver" are deliberately one answer, because the column exists to mark the derived rows.
+`bootstrap_solve` stamps it beside the WCS it propagates, from `propagate_wcs`'s own `star_placed` bit (which
+members the match *really* placed, not which had a transform). **Reset centrally**: `Project.update_frame` is
+the only `UPDATE frames` in the codebase, so a write of `wcs_json` that names no source resets it to NULL —
+the solver's own write, `reset_frame_solution` and any path written later can never leave a stale
+`star_match` beside a real solve. The stack-time star match (`StackOptions.star_match_unsolved`) writes nothing
+to the DB by design (its docstring says why) and is unchanged.
+
+**Upgrade safety.** Added exactly like `rejected_utc`: an ungated `ALTER` in `_migrate_schema` for any older
+DB, `_reconcile_table_columns` for one already stamped current, **no `SCHEMA_VERSION` bump** (asserted), so a
+rollback still opens every project. Hashed by `frames_fingerprint` (it only changes alongside `wcs_json`, so
+no cache-key cost). Not yet on any screen — a frames-table chip is a small follow-up for whoever next touches
+`routers/targets.py` / the frames listing; the DB record is what the audit asked for.
+
+Tests +5 (`tests/test_wcs_source.py`: the migration from a frozen schema-22 DDL with the runtime backfill
+off, the self-heal on a current DB, the no-bump guard, the central reset rule, and the rescue end to end —
+every propagated sub carries a source, the `star_match` count equals `n_star_matched`, untouched subs carry
+none). **Fail-before**: the module errors at import on `origin/main` (the constants do not exist) and the
+central-rule test fails on the missing column.
 ## 2026-09-30 (audit run A, security) — v0.492.15: a page on any other site could run the whole library, and the build form took any path on the NAS
 
 ### v0.492.15 — 🔴 SECURITY FIX (C-F2, MEDIUM but the broadest exposure): every state-changing endpoint was triggerable cross-site
