@@ -14,7 +14,6 @@ from fastapi.responses import FileResponse
 from seestack.activity_calendar import night_date_of
 from seestack.io.project import (
     FrameRow,
-    count_unreadable_frames,
     readable_frame_path,
 )
 from seestack.qc.bulk_select import worst_frames_by_metric
@@ -261,11 +260,13 @@ def reject_summary(safe: str, request: Request) -> dict:
         # poll — lets the Target page say so while it's still actionable.
         # Measured: 44 ms for 5 000 present frames (139 ms if every one is gone,
         # which costs two stats each), so it stays well inside a page load even on
-        # the owner's deepest target.
+        # the owner's deepest target. Asked of the project rather than of its rows
+        # (``Project.count_unreadable_frames``) so a deep target's plate-solve
+        # headers are never read for a question about two path columns.
         # Deliberately kept *out* of ``summary``: it's a transient storage state
         # (reconnect the drive and it's gone), not a reason a frame was dropped,
         # and folding it into the buckets would double-count QC errors.
-        n_missing_files = count_unreadable_frames(proj.iter_frames(accepted_only=True))
+        n_missing_files = proj.count_unreadable_frames(accepted_only=True)
         # Would "Try harder to locate these" do anything on this target? The
         # answer is the deep-image rescue's own engagement gate, asked here
         # rather than mirrored in the frontend, so the button can never be
