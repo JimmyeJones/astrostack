@@ -16,9 +16,12 @@ on:
 # A newer push to the same PR branch cancels its in-flight run. Never on main:
 # there every merge is a separate change that needs its own verdict, and a
 # cancelled run is neither red nor green (6 of 25 main runs were cancelled
-# before this changed, 2026-09-26 audit).
+# before this changed, 2026-09-26 audit). Main's group is the commit itself,
+# not the branch: with one group per branch only one run could wait, so a
+# third merge in quick succession cancelled the second's queued run and its
+# verdict was lost (2026-09-30 audit, B-F5).
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -33,43 +36,65 @@ jobs:
         # The backstop to the pre-push hook scripts/agent-setup.sh installs: by
         # the time this runs the commit is already public, so its job is to make
         # a leak loud, not to prevent it. Checks only the commits this PR/push
-        # adds, so the 22 historical ones do not fail every run.
+        # adds, so the 22 historical ones do not fail every run — but never
+        # nothing: both ends of the range are verified first (the `before` of a
+        # push event is unusable after a force-push, and an unreadable range
+        # used to exit 0 — audit 2026-09-30, B-F3), and when the recorded base
+        # cannot be used the range falls back to the merge base with the base
+        # branch (a PR) or to everything no release tag carries yet (a push).
         env:
+          EVENT: ${{ github.event_name }}
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
-            scripts/check-commit-identity.sh -1 "$HEAD_SHA"
+          set -euo pipefail
+          git rev-parse -q --verify "$HEAD_SHA^{commit}" >/dev/null || { echo "::error::head $HEAD_SHA is not in this checkout"; exit 1; }
+          if [ -n "$BASE" ] && git rev-parse -q --verify "$BASE^{commit}" >/dev/null; then
+            range="$BASE..$HEAD_SHA"
+          elif [ "$EVENT" = pull_request ]; then
+            git fetch --quiet origin "$BASE_REF"
+            range="$(git merge-base "origin/$BASE_REF" "$HEAD_SHA")..$HEAD_SHA"
           else
-            scripts/check-commit-identity.sh "$BASE..$HEAD_SHA"
+            range="$HEAD_SHA --not --tags"
           fi
+          echo "checking: $range"
+          # shellcheck disable=SC2086 — the fallback is several rev-list words
+          scripts/check-commit-identity.sh $range
 
   version:
     name: Version bump is sane
-    if: github.event_name == 'pull_request'
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: A changed version must go up, and must not already be taken
-        # A PR that ships code bumps __version__; one that only touches docs may
-        # leave it. Either way it may never go backwards or reuse a released
-        # number (v0.448.0 and v0.453.3 were each issued twice before this).
+      - name: Code changes bump the version; a version is never reused or backwards
+        # scripts/check-version-bump.sh holds the rules (and tests/test_version_bump_check.py
+        # runs them against scratch repositories). This step only picks what to
+        # judge the head against: on a PR its recorded base AND main as it is
+        # *now* — the recorded base SHA can be stale, which is how two PRs each
+        # bumped 0.492.4 -> 0.492.5 and the second was never tagged (audit
+        # 2026-09-30, B-F2). On a push to main, the commit before the push (B-F4).
         env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
-          v() { git show "$1:webapp/__init__.py" | grep -oP '__version__\s*=\s*"\K[^"]+'; }
-          base="$(v "$BASE")"; head="$(v "$HEAD_SHA")"
-          echo "base $base -> PR $head"
-          [ "$base" = "$head" ] && { echo "unchanged"; exit 0; }
-          if [ "$(printf '%s\n%s\n' "$base" "$head" | sort -V | tail -1)" != "$head" ]; then
-            echo "::error::__version__ went backwards ($base -> $head)"; exit 1
+          set -euo pipefail
+          refs=()
+          if [ "$EVENT" = pull_request ]; then
+            git fetch --quiet origin "$BASE_REF"
+            if [ -n "$BASE" ] && git rev-parse -q --verify "$BASE^{commit}" >/dev/null; then refs+=("$BASE"); fi
+            refs+=("origin/$BASE_REF")
+          elif [ -n "$BASE" ] && git rev-parse -q --verify "$BASE^{commit}" >/dev/null; then
+            refs+=("$BASE")
+          else
+            refs+=("$HEAD_SHA^1")
           fi
-          if git rev-parse -q --verify "refs/tags/v$head" >/dev/null; then
-            echo "::error::v$head is already a released version — bump from the latest main"; exit 1
-          fi
+          scripts/check-version-bump.sh "$HEAD_SHA" "${refs[@]}"
 
   python:
     name: Python tests
