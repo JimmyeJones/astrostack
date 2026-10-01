@@ -95,6 +95,114 @@ schema version, migration, on-disk path, endpoint, response shape or default cha
   *does* guard the `Project.open` but not the per-run DB reads after it (`iter_stack_runs`,
   `_representative_pixscale_rotation`), so a DB that opens cleanly but errors mid-query would still 500 the
   whole Sky Map — same one-line guard, a rarer trigger than the certain-raise newer-schema open above.
+## 2026-10-01 (Builder) — v0.492.21: "are my subs still on disk?" stopped reading every sub's plate solution
+
+### v0.492.21 — 🟠 PERFORMANCE / memory-class BUG FIX (AGENTS.md §10 — this box has an OOM history): the last open shape **(a)** of the measured FrameRow-projection LEAD, closed by doing what the lead asked and measuring it first
+
+*(Builder, branch `agent/narrow-unreadable-count`. The lead had **downgraded** (a) and left an explicit
+instruction — "check the stat half against a healthy install before spending a slot" — so the slot started with
+the measurement, not with the edit. Bugs held no other entry a Builder may blind-build: the other open items are
+gated on the owner's data, carry measured stand-downs, or are marked "don't build until it's someone's actual
+problem".)*
+
+**The question.** "Is this sub's file still on disk?" — the Dashboard's library-wide missing-files roll-up, the
+Target page's own missing-files count, and the walk-away readability preflight all ask it. `count_unreadable_frames`
+takes *frames*, so each of those three built a `FrameRow` — `SELECT *` — per sub, to read `cached_path` and
+`source_path` off it. On a solved sub the biggest column is the plate solution (`wcs_json`, a FITS header *text* of
+~25 eighty-character cards), and this question never looks at it. The walk-away preflight was the worst of the
+three: it filtered `if f.wcs_json`, i.e. it read each header **to test whether the header is there**.
+
+**Measured first, on a synthetic project the size of the owner's deepest target** (35,894 subs, ~2 kB of
+`wcs_json` each, **every file present** — the healthy install the lead said to check, not the all-gone fixture the
+original 1,594 ms came from; best of 3, uncontended):
+
+| walk | before | after |
+|---|---|---|
+| accepted only | 2,324 ms | **1,410 ms** |
+| accepted **and** solved | 2,181 ms | **1,276 ms** |
+| the same walk with the `stat()` removed | 873 ms | **117 ms** |
+
+So the lead was right on both counts it was downgraded for — the `stat()`s dominate what is left, and a projection
+buys the row building only — and that row building is **~750 ms per deep target**, a third to two-fifths of the
+whole call. Peak allocation is ~0 either way: these reads already stream, which is exactly what the lead recorded,
+and is why this is a latency fix and not a memory one. It matters most on the **roll-up**, which opens every target
+that has accepted frames and pays it once per target, on a Dashboard fetch.
+
+**The change.** New `Project.count_unreadable_frames(*, accepted_only=False, solved_only=False)`:
+`SELECT cached_path, source_path FROM frames` with the two bars built as SQL fragments (the idiom
+`restored_frame_windows` already uses), each row judged by the **one existing** `first_existing_frame_path`, so
+"which file is this frame?" keeps a single definition. `solved_only` is `count_accepted_solved`' own predicate —
+`wcs_json IS NOT NULL AND wcs_json <> ''` — which is the engine's `if f.wcs_json` truthiness test exactly, empty
+string included. No `ORDER BY`: a count cannot see one. The three callers switch to it
+(`routers/stats._collect_missing_files`, `routers/frames`, `pipeline._solved_accepted_unreadable`); the
+module-level `count_unreadable_frames` is **untouched**, because `stacker.py` already holds the real rows it is
+about to stack.
+
+**Not a sweep**, as the entry instructed in bold: only the three sites of that one call. The other whole-row
+`iter_frames(accepted_only=True)` readers in `webapp/` were deliberately left alone — each is its own measurement
+and its own decision.
+
+**One naming hazard dealt with rather than left.** `Project.count_accepted_unreadable` already exists and counts
+something else entirely — subs whose *FITS* would not parse during QC. Both docstrings now say so in both
+directions; the populations do not overlap by construction.
+
+**Tests +6, all six fail-before**, verified in a `git worktree` of `origin/main` carrying only the new test files:
+four engine tests (the three flag shapes asserted *against the row-based expressions they replace*, the blank-`wcs_json`
+case, the dangling-cache case, the empty project) and two **caller-level** guards that sabotage
+`Project.iter_frames` and assert the answer is still right — the roll-up's through the real endpoint, the
+preflight's through `pipeline._solved_accepted_unreadable`. The idiom each replaced could not have survived either.
+Nothing loosened, skipped or rewritten.
+
+**Upgrade safety (§9).** One additive method, two additive keyword arguments on it, three call sites. No config
+key, settings field, schema version, migration, on-disk path, endpoint, response shape or default changed; no new
+dependency; `incoming/` untouched. Full suite green; `ruff` count on the touched files unchanged (75 before, 75
+after — pre-existing debt, none added).
+
+**The entry this closes, moved here whole (the three-file rule, §2).** Shapes (b) and (c) shipped as v0.471.5 and
+v0.471.4 and were moved on 2026-09-30; with (a) shipped the entry is closed and leaves "Bugs (fix these first)".
+
+- **LEAD, MEASURED (Builder 2026-09-19, filed with v0.471.2/v0.471.3 — the readers of the same class those two
+  fixes deliberately did NOT take, because each needs an *engine* signature decision rather than a router-local
+  edit) — three more of the Target page's own fetches build a `FrameRow` for every sub of the target, and two of
+  them `list()` it, so on the owner's deepest target one visit costs ~280 MB and ~3.8 s in endpoints nobody has
+  changed.** *(Pillar: performance + memory safety — AGENTS.md §10, this box has an OOM history; size **M to
+  write, M to be sure of**; severity low-to-medium. Confidence: **measured this run** on a synthetic project of
+  35,894 subs carrying ~2 kB of `wcs_json` each, best of 3 on this box.)*
+  **The class.** A `FrameRow` is `SELECT *`, and the biggest column on a solved sub is its plate solution —
+  `wcs_json` is a FITS header *text* of ~25 eighty-character cards. Every endpoint that wants a handful of small
+  fields off a deep target pays for that column. v0.471.1 fixed `/frames` (it was read eighteen times per visit),
+  v0.471.2 the Stack form's `calibration-suggestions` and the Calibration page's coverage roll-up, v0.471.3
+  `/sky-brightness` and `/restack-gain`. `Project.iter_frame_columns` is the primitive the rest would use.
+  **What is left, measured:**
+
+  | endpoint | time | peak allocation | what it actually needs |
+  |---|---|---|---|
+  | `…/best-frame` | 1,057 ms | **132.4 MB** | `best_frame(frames)` → `id`, `fwhm_px`, `star_count`, `timestamp_utc` |
+  | `…/stack-health` | 1,153 ms | **145.6 MB** | `stack_health(run, frames)` + `recommended_dark_spec(frames)` + `stamped_noise_measurement(proj, run, frames)` |
+  | `…/reject-summary` | 1,594 ms | ~0 (streams) | `count_unreadable_frames(frames)` → `cached_path`, `source_path` |
+
+  **Why it is a lead and not a drive-by.** The two fixed in v0.471.3 were purely router-local: the router built
+  its own small objects out of the fields, so the change stopped at the router. These three hand the frames to
+  **engine** functions, so each is a question about that function's input type, not about the read — and
+  `stack_health` is three functions over one list, on the priority-1 card. Changing an engine signature that other
+  callers share is exactly the speculative refactor AGENTS.md §10 says not to do on its own.
+  **Shapes worth costing, cheapest first.** **(a)** `count_unreadable_frames` is the easy one and the only one
+  that is *not* about memory: it reads two path fields, its caller is the only caller, and it could take
+  `(cached_path, source_path)` tuples. **Check first** that it is worth it — the 1,594 ms above is against a
+  fixture where **no file exists**, which costs two `stat()`s per frame, and the endpoint's own comment records
+  44 ms per 5,000 frames when they are all present; so on a healthy install the stat half is ~320 ms and the row
+  building is the rest. **(b)** `best_frame` returns *the frame*, and its caller reads four fields off the
+  returned one — so a narrow projection means either returning a tuple (and changing every caller) or keeping the
+  id and re-reading that one row, which is one extra query against 132 MB. **(c)** `stack_health` is the big one
+  and should not be attempted without deciding what a "frame" means to it first; it is also the one whose 145.6 MB
+  is worth the most.
+  **(b) shipped v0.471.5** (`best_frame` streams a running minimum: 1,181 ms / 135 MB → 858 ms / ~0 MB) and
+  **(c) shipped v0.471.4** (`project.FrameHealth` + `iter_health_frames`: 1,180 ms / 144 MB → 541 ms / 9.8 MB);
+  both paragraphs moved to [`SHIPPED.md`](SHIPPED.md) 2026-09-30. **What is left is (a), downgraded:**
+  `count_unreadable_frames` already streams (peak ~0) and the 1,594 ms above is a fixture where *no* file exists,
+  so a projection buys only the row building — check the stat half against a healthy install before spending a
+  slot. **Do not turn this into a sweep**: the lever measured is what the caller *keeps*, not what the SELECT
+  names.
 
 ## 2026-10-01 (Builder) — v0.492.20: Auto measured the ragged border its own last op deletes
 

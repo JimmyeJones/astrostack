@@ -996,6 +996,41 @@ def test_auto_stack_holds_back_when_subs_are_unreadable(solved_library, monkeypa
         lib.close()
 
 
+def test_the_readability_preflight_never_builds_a_frame_row_per_sub(solved_library):
+    """The preflight asks two path columns and a bit; it must not read the header.
+
+    ``_solved_accepted_unreadable`` is on the walk-away path and is asked of a
+    target with thousands of subs, where a ``FrameRow`` per sub meant reading each
+    one's plate solution to test *whether it has one*. It now asks
+    ``Project.count_unreadable_frames(accepted_only=True, solved_only=True)``,
+    whose solved bar is that same truthiness test in SQL — pinned here by making
+    the whole-row read fail, which the expression it replaced could not survive.
+    """
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _solved_ids(proj)
+            assert len(ids) >= 2, "fixture must carry solved subs to lose"
+            _unread(proj, ids[:1])
+            assert pipeline._solved_accepted_unreadable(proj) == 1
+
+            def _boom(*_a, **_k):
+                raise AssertionError("the preflight must not read whole rows")
+
+            proj.iter_frames = _boom  # type: ignore[method-assign]
+            assert pipeline._solved_accepted_unreadable(proj) == 1
+            del proj.iter_frames
+            _reread(proj, ids[:1])
+            assert pipeline._solved_accepted_unreadable(proj) == 0
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
 def test_auto_stack_still_fires_when_every_sub_is_readable(solved_library, monkeypatch):
     """The guard is gated on there being unreadable files at all, so a healthy
     target — every install with its subs on disk — behaves exactly as before,
