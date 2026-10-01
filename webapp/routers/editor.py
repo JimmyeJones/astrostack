@@ -1549,7 +1549,16 @@ def _loupe_geometry_problem(rec: Recipe) -> str | None:
       place. Auto puts its ``geometry.crop`` last, after every tone and detail op,
       so the ordinary path is unaffected — this only fires on a hand-built recipe
       that reorders them.
+
+      **A geometry op that is at its own defaults moves nothing, and is not one of
+      these.** All three default to a no-op (a whole-frame rectangle, 0°, scale
+      1.0), so a Crop, Rotate or Resize added from the Add menu and not yet aimed
+      — or a crop dragged back out to the full frame — left this refusing the
+      priority-1 control while naming a crop or resize the recipe did not have.
+      :func:`~seestack.edit.ops.geometry.reshapes_frame` is the question, and it is
+      deliberately conservative: only a *certain* no-op changes the answer.
     """
+    from seestack.edit.ops.geometry import reshapes_frame
     from seestack.previewcrop import UNKNOWN
 
     if preview_crop_of_recipe(rec) is UNKNOWN:
@@ -1561,7 +1570,7 @@ def _loupe_geometry_problem(rec: Recipe) -> str | None:
         if not op.enabled:
             continue
         if op.id.startswith("geometry."):
-            seen_geometry = True
+            seen_geometry = seen_geometry or reshapes_frame(op.id, op.params)
         elif seen_geometry and (spec := get_op(op.id)) is not None and spec.additive_field:
             return ("This recipe crops or resizes before its background pass, so "
                     "the full-size view can't line up with the preview. Move the "
