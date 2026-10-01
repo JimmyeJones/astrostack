@@ -8,6 +8,13 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 
 ## Front of the queue
 
+0. **One OPEN verified bug now heads "Bugs (fix these first)" and outranks the rest of this page** (Scout
+   2026-10-01, reproduced): `targets.py::cleanup_suggestions`/`merge_suggestions` open each candidate's
+   project with no `try/except`, so one newer-schema (§9 rollback) or corrupt DB 500s the whole Library
+   cleanup/merge card — the fix is the one-line guard `gallery`/`stats`/`storage`/`newsubs` already use. Size
+   **S**; left for the Builder (§5 wants a fail-before test). Repro + a weaker `sky.py::get_sky` lead in the
+   entry.
+
 1. **The editor (PRIORITY 1).** Judge Auto/editor on a tiled mosaic at the owner's scale
    (`--mosaic --editor --big`), never the 6-frame field. Its bug backlog is drained and re-audits
    come back clean, but AGENTS.md is explicit: **do not believe "well-hardened"** — a "What Auto did"
@@ -22,8 +29,8 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
    surviving delta costs +3–4 % sky chroma noise, so **do not re-pick it** except with a per-archetype
    data-driven rule.
 
-3. **Open observer issues (all verified, filed, and awaiting the last mile — re-triaged 2026-09-30 Scout, no
-   new issue since 2026-09-25):** #878 (the app now offers the reconcile; closes on a reading that shows the 11
+3. **Open observer issues (all verified, filed, and awaiting the last mile — re-triaged 2026-10-01 Scout, no
+   new issue since 2026-09-25, each still awaiting an owner click/reading):** #878 (the app now offers the reconcile; closes on a reading that shows the 11
    pairs gone — a click, not code), #880 (both live halves shipped v0.483.1/.2; only (a), the exception repr
    *stored* as a reject reason, is left — filed ⚪ storage hygiene, deliberately **not** a PRIORITY 3
    item), #903 (prevention by cover semantics still open; existing damage has a one-off repair,
@@ -52,6 +59,10 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
   capture-nights, deepening/noise-delta reels) were swept 2026-09-30 (Scout) — CLEAN**, details in
   `docs/PROCESS-NOTES.md`. A `--mosaic --editor --big` dogfood the same day read clean (Auto trim 7.9 %, cards
   coherent, no overflow/console errors). Don't re-run these before a finding says to.
+- **Rotation item (4), the webapp routers, was swept 2026-10-01 (Scout) — ONE reproduced bug** (item 0
+  above), **the rest CLEAN** (full list + §10/path-traversal all clean in `docs/PROCESS-NOTES.md`); a
+  `--mosaic` dogfood the same day read clean (trim 7.9 %). Rotation now cycles back to (1), preview↔export
+  parity. Don't re-sweep the routers before a finding says to.
 - **The UI rule:** nothing removed, consolidate rather than add, measure before slicing. Tallest
   pages and baselines: `docs/PROCESS-NOTES.md`, "DOGFOOD BASELINE".
 - **A beginner feature on a regular cadence** from "Features that serve real workflows". **The one buildable

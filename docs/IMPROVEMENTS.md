@@ -82,6 +82,39 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **BUG, REPRODUCED (Scout 2026-10-01, QA sweep of the webapp routers — rotation item (4)) — two Library
+  nudge endpoints open every candidate target's project with no degrade-don't-500 guard, so one project DB
+  stamped with a newer schema (an in-place upgrade then rolled back to `stable`, §9) — or one corrupt at
+  open — makes the whole card 500 instead of skipping the one target.** *(Pillar: friendliness +
+  upgrade-safety — PRIORITY 3; size **S**; severity low-to-medium. Confidence: `cleanup-suggestions`
+  **reproduced** returning HTTP 500 against a scratch library with one target's `PRAGMA user_version` bumped
+  above `SCHEMA_VERSION` while `/api/gallery` degraded to 200 on the same data; `merge-suggestions` traced to
+  the byte-identical loop.)*
+  `webapp/routers/targets.py::cleanup_suggestions` (the loop at ~L328) and `merge_suggestions` (~L194) call
+  `webapp/library_hygiene.py::junk_verdict` / `confirm_duplicate_of_base`, both of which `lib.open_target(...)`
+  a candidate's project — with **no** `try/except` around the per-target body (only `finally: lib.close()`).
+  `Project._check_schema` (`seestack/io/project.py:742`) **raises `RuntimeError`** when a project's
+  `user_version > SCHEMA_VERSION` ("newer than this Seestack build … Upgrade Seestack to open"), so that
+  exception propagates and 500s the whole endpoint. `gallery.py:286`, `stats.py`, `storage.py` and
+  `newsubs.py` all wrap the identical `Project.open` in `except Exception: continue` with a comment naming
+  this exact image-rollback case; these two routers are the odd ones out, and their own module/function
+  docstrings even promise the degrade-don't-500 behaviour they do not implement.
+  **Owner-shaped trigger.** `junk_verdict` opens any target under `junk_output_examine_cap()` (512 frames);
+  `confirm_duplicate_of_base` opens every `*_sub` / `*_mosaic_sub` target with a matching base — i.e. exactly
+  the 11 `_mosaic_sub` duplicates of observer issue
+  [#878](https://github.com/JimmyeJones/astrostack/issues/878). One of those with a rolled-back or corrupt DB
+  takes out both the Library's cleanup and merge nudge cards at once, on a box upgraded in place (§9). It does
+  not touch pixels or `incoming/`; it is a resilience/friendliness defect.
+  **Fix (small, obviously-safe; the Scout left it for the Builder because §5 wants a fail-before test on each
+  endpoint).** Wrap the per-target call in each loop in `try/except Exception: continue` exactly as
+  `newsubs.scan_new_subs_waiting` does (or guard the `lib.open_target` inside the two hygiene helpers), and add
+  a regression test that bumps `user_version` on one target's project and asserts the endpoint returns 200 with
+  the good targets still listed — the repro shape is in the 2026-10-01 PROCESS-NOTES sweep record and fails
+  before / passes after. **Related, weaker lead (traced, NOT reproduced):** `sky.py::get_sky` (~L160–282)
+  *does* guard the `Project.open` but not the per-run DB reads after it (`iter_stack_runs`,
+  `_representative_pixscale_rotation`), so a DB that opens cleanly but errors mid-query would still 500 the
+  whole Sky Map — same one-line guard, a rarer trigger than the certain-raise newer-schema open above.
+
 - **LEAD (Builder 2026-09-25, filed while shipping v0.473.1 — the two halves of observer issue
   [#965](https://github.com/JimmyeJones/astrostack/issues/965) that fix deliberately left) — refuse an
   implausible solve at *solve* time, and heal the rows already carrying one.** *(Pillar: image quality —
