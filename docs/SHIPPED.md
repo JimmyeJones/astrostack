@@ -81,6 +81,110 @@ restored-card precedence; `countNewSubsSinceStack`'s three unit tests go with th
 pinned server-side). **Fail-before:** 6 of 6 py red on `origin/main` in a scratch worktree with only the test
 file copied in, and 5 fe red against `main`'s own `Target.tsx`.
 
+## 2026-09-30 (Builder) — v0.492.18: a drizzled stack's "cut your noise ~N×" badge read 11–16 % worse than the stack was
+
+### 🟠 BUG FIX (trust — PRIORITY 1-adjacent) — the `_measure_noise_ratio` LEAD filed with v0.475.0, closed by measuring the thing it asked about, with the opposite answer
+
+*(Builder 2026-09-30. Filed 2026-09-25 as the top entry of "Bugs (fix these first)". The lead's own gate was
+**"check first, cheaply: what share of the owner's runs actually drizzle, and at what scale"** — answered from
+the repo's own record, then the premise underneath it was re-measured and came out **backwards**.)*
+
+**What the lead said, and why its number was an artefact.** `_measure_noise_ratio` reads the sub at native
+resolution and the master at its own, and the lead's ground-truth measurement on
+`tests/test_noise_ratio_correlated.py`'s fixtures was a ratio of **7.88 on a 2×-drizzled master against 6.98
+native** for the identical 36 frames — so it proposed that the drizzled badge reads ~13 % **high**, that ~13 %
+of it is resampling, and that the fix might be to bin the master down to the sub's pixel area. Two things are
+wrong with that, and both matter:
+
+* that fixture stands a **2× bilinear upsample** in for the drizzle kernel, and an interpolation *blurs*, which
+  makes a master's per-pixel σ **fall**. Drizzle does not interpolate — it deposits each input pixel as a
+  shrunken drop (`pixfrac`) onto a finer grid — so the real kernel makes a master's per-pixel σ **rise**: a
+  finer pixel gathers a smaller share of every frame's light. Measured through
+  `seestack.stack.drizzle_path.DrizzleStacker` itself, at the app's own `pixfrac=0.8` / `square` defaults, with
+  the noiseless scene riding the identical geometry so `noisy − clean` *is* the noise:
+
+  | canvas | master σ (truth) | badge, as shipped | badge, area-matched |
+  |---|---|---|---|
+  | ×1 (native) | 0.001308 | **6.33** | — |
+  | ×1.5 | 0.001434 | **5.89** | 6.45 |
+  | ×2 | 0.001504 | **5.61** | 6.34 |
+  | ×3 | 0.001601 | **5.34** | 6.34 |
+
+  So the sign is the other way round: the same 36 frames that cut 6.33× of the noise were reported as cutting
+  **5.61×** on a ×2 canvas and **5.34×** on a ×3 one. The estimator is not at fault — it reads each master to
+  within 5 % of its own truth on both — the *sampling* was.
+
+* and the direction is what makes it worth a slot rather than a footnote. `stackhealth.noise_vs_expected` only
+  ever acts on this number when it comes in **low**, against `NOISE_EXPECTED_LOW_FRACTION`·√N. The margin that
+  0.7 was given was measured on the native path (a healthy stack reads 1.05·√N); a ×2 canvas spends a quarter of
+  it and a ×3 canvas a third, on a run that is perfectly healthy. A false *"your stack is noisier than its
+  frames should have bought"* is the same class of false alarm v0.331.2 fixed by silence.
+
+**The gate, answered.** The lead wanted to know whether the owner drizzles before anything was built. He does:
+`stacker.rejection_reach`'s own note says so in as many words (*"a drizzled run has exactly the same gap, and
+the owner drizzles mosaics"*), and Owner Facts has him as a heavy mosaic user. So this is his path, and
+`StackOptions.drizzle_scale`'s default of **1.5** is the canvas he gets when he turns it on — the −7 % row.
+
+**What shipped.** `seestack/qc/noise_ratio.noise_ratio` takes a new keyword-only `stack_supersampling` (how many
+stack pixels there are per sub pixel along one axis) and averages the stack side down by
+`area_match_block(...)` — a plain `_block_mean` over whole pixels — before measuring, so both sides describe one
+patch of sky per pixel. `webapp/routers/stack._measure_noise_ratio` takes the same number as a fourth argument
+and the reveal endpoint reads it from the **run's own recorded options** via the existing
+`field_fulls.canvas_supersampling`; `stacker` persists the *effective* options, so a scale the memory guard
+lowered is the one this reads.
+
+**Rounded to whole pixels, and that is the measured choice rather than the convenient one.** A block is whole
+pixels, so a ×1.5 canvas is matched with a block of 2. The worst residual that leaves anywhere on the ladder is
+**3 %** (at ×1.25 and ×2.5, where the rounding buys nothing), against the 11–16 % of doing nothing. Two
+alternatives were built and measured and are **worse**, so do not re-pick them: an **exact** area-weighted
+resample by the fractional factor lands +4 to +7 % out, because its fractional weights smear neighbouring
+pixels the drizzle kernel has already correlated — the very thing the estimator's lag walk is there to measure;
+and matching by a **rational** factor (bin the master by *p*, the sub by *q*, with *p/q* = the scale) is far
+worse still (5.25 at ×1.5, 3.26 at ×1.25), because the two sides have different correlation lengths, so binning
+the sub is not the mirror of binning the master.
+
+**One-sided by construction — a non-drizzled library keeps every number it has.** `area_match_block` returns
+**1** for 1.0, for `None`, for anything non-finite, for anything below 1.0 (the clamp `field_fulls._supersampling`
+already applies) and for a value that will not parse, and a block of 1 does nothing at all. `StackOptions.drizzle`
+defaults **off** and is a hand-set advanced field, so this is every run in the owner's library and every existing
+expectation in the suite: pinned by a test that asserts the ratio is *identical* across `1.0 / None / 0.0 / 0.5 /
+NaN`.
+
+**NaN stays "no coverage".** The block mean is a plain `mean`, not a `nanmean`, so a block straddling the edge of
+the coverage comes out NaN and is dropped by the estimator's own finite mask. Averaging over whatever part of
+such a block happens to be covered would quietly put a differently-sampled pixel into the estimate, and a mosaic
+canvas is full of them.
+
+**The stamp is re-measured, not re-read.** `_NOISE_RATIO_CACHE_VERSION` 2 → 3, because the fingerprint covers the
+two *inputs* and not the estimator that read them — so every number a drizzled library has already stamped is a
+miss and heals on the one request that needs it. A native run's stamp would read the same either way and only
+misses because one version covers the whole payload.
+
+**Three records brought into line, so the next run is not misled the way this one nearly was.** The
+`qc/noise_ratio` module docstring's "Identical sampling" rule becomes **"Matched pixel area"** with the kernel's
+own numbers; its `+119 %` figure is relabelled as being about the **upsample**, not about drizzle;
+`tests/test_noise_ratio_correlated.py`'s docstring now says what its stand-in is *not* faithful about and points
+at the new module; and `stackhealth.NOISE_EXPECTED_LOW_FRACTION`'s calibration comment records that a drizzled
+run now lands at the same 1.05·√N the 0.7 was chosen against.
+
+**Tests.** +22. New `tests/test_noise_ratio_drizzle.py` drives the real `DrizzleStacker` against ground truth:
+that the fixture *exhibits* the bug in the kernel's direction (the drizzled master really is >10 % noisier per
+pixel, and the estimator agrees with the truth on both sides, so what follows is about sampling and not about σ);
+that the uncorrected badge reads a drizzled stack ≥7 % worse; that the area-matched one agrees with the native
+badge to 4 %; the native no-op across five unusable inputs; `area_match_block` over sixteen inputs including the
+cap; and that a partly-uncovered block is dropped rather than part-averaged. Plus two in
+`tests/webapp/test_one_sub_vs_stack.py` pinning the **wiring** — a run recording `drizzle: true, drizzle_scale:
+2.0` hands 2.0 to the measurement and one recording `drizzle: false, drizzle_scale: 1.5` hands 1.0 — because a
+correction the engine never receives fixes nothing. **Fail-before shown by scratch worktree revert** on the
+central one (`test_matching_the_pixel_area_gives_one_number_for_one_stack`, red with the block mean neutralised);
+the rest are fixture-validity and stand-down guards, which is what they are for.
+
+**Upgrade safety.** No config key, no `SCHEMA_VERSION` bump, no migration, no on-disk layout change, no default
+flipped, no endpoint or response shape changed — the response is the same `{"ratio", "expected_verdict",
+"expected_frames", "expected_basis", "is_mosaic"}`, and on a library that has never drizzled every field of it is
+byte-identical. `noise_ratio`'s new argument is keyword-only with a no-op default, so
+`render/noisedelta.py`'s caller (master-vs-master on one canvas shape, where both sides are equally sampled by
+its own `pixel_exact` precondition) is untouched and correct as it stands.
 ## 2026-09-30 (audit run A, release pipeline) — v0.492.17: an unreadable range passed the email guard, and two changes could ship under one version number
 
 ### v0.492.17 — 🔴 INFRA / the guard that keeps a personal email out of a public history (B-F3 HIGH, B-F6 LOW)

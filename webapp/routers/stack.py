@@ -33,7 +33,7 @@ from webapp.capture_nights import (
     cumulative_night_steps,
 )
 from webapp.derived_light import stacking_field_fulls, with_inherited_light_facts
-from webapp.field_fulls import native_frame_shape
+from webapp.field_fulls import canvas_supersampling, native_frame_shape
 from webapp.preview_orient import (
     baked_north_up_deg,
     preview_geometry_out,
@@ -3614,14 +3614,22 @@ def _crop_origin(h: int, w: int, size: int = _NOISE_CROP_PX) -> tuple[int, int]:
     return max(0, (h - size) // 2), max(0, (w - size) // 2)
 
 
-def _measure_noise_ratio(fits_path: str, sub_path: str, pattern: str) -> float | None:
+def _measure_noise_ratio(fits_path: str, sub_path: str, pattern: str,
+                         supersampling: float = 1.0) -> float | None:
     """Background-noise reduction factor between one sub and the linear master.
 
-    Loads both on the **linear**, **native-resolution** scale (never the display
-    PNGs, never one box-averaged and the other strided — either would distort the
-    ratio), bounds each to an equal central crop for memory, and returns their
-    σ ratio. ``None`` when the master is a tone-mapped editor/display-space export
-    (its linear σ is meaningless) or either side can't be measured. Threadpool-safe.
+    Loads both on the **linear** scale (never the display PNGs, whose non-linear
+    stretch would distort the ratio), bounds each to an equal central crop for
+    memory, and returns their σ ratio. ``None`` when the master is a tone-mapped
+    editor/display-space export (its linear σ is meaningless) or either side
+    can't be measured. Threadpool-safe.
+
+    ``supersampling`` is the run's canvas scale — how many master pixels there
+    are per sub pixel along one axis, from
+    :func:`webapp.field_fulls.canvas_supersampling`. A drizzled master's pixels
+    are finer than the sub's and therefore *noisier*, so handing that number on
+    is what keeps a drizzled run from reading 11–16 % worse than it is; ``1.0``
+    (every non-drizzled run) measures exactly the pixels it always did.
     """
     import numpy as np
     from astropy.io import fits as _fits
@@ -3682,7 +3690,7 @@ def _measure_noise_ratio(fits_path: str, sub_path: str, pattern: str) -> float |
     except Exception:  # noqa: BLE001 — best-effort; the badge just omits the number
         return None
 
-    return noise_ratio(sub_rgb, stack_rgb)
+    return noise_ratio(sub_rgb, stack_rgb, stack_supersampling=supersampling)
 
 
 def _measure_crop_depth(fits_path: str) -> int | None:
@@ -3786,8 +3794,11 @@ NOISE_RATIO_META_PREFIX = "noise_ratio:"
 # change to :mod:`seestack.qc.noise_ratio` itself has to be declared here or a
 # whole library keeps serving numbers the old one produced. 2 = the decorrelated
 # second-difference estimator (v0.475.0): every stamp written by the lag-1 one is
-# a miss, and heals on the one request that needs it.
-_NOISE_RATIO_CACHE_VERSION = 2
+# a miss, and heals on the one request that needs it. 3 = the stack side averaged
+# down to the sub's pixel area on a drizzled run, so the numbers a *drizzled*
+# library has stamped are re-measured; a native run's stamp would read the same
+# either way, and only misses because one version covers the whole payload.
+_NOISE_RATIO_CACHE_VERSION = 3
 
 
 def _noise_ratio_fingerprint(fits_path: str, ref_id: int | None) -> dict[str, Any] | None:
@@ -3946,6 +3957,13 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
         # withholds on the NULL an older run carries. Read here so every return
         # path below has it.
         is_mosaic = run.is_mosaic
+        # How many master pixels there are per sub pixel: 1.0 on every
+        # non-drizzled run, the run's own effective ``drizzle_scale`` when it
+        # drizzled (``stacker`` persists the *effective* options, so a scale the
+        # memory guard lowered is the one recorded here). The measurement needs
+        # it because a finer master pixel is a noisier one — see
+        # :func:`_measure_noise_ratio`.
+        supersampling = canvas_supersampling(run.options_json)
         ref = _pick_reference_sub(proj)
         ref_id = getattr(ref, "id", None) if ref is not None else None
         src = readable_frame_path(ref) if ref is not None else None
@@ -3981,7 +3999,8 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
         if not have_master or not src or not Path(src).exists():
             return _answer(None, None)
         ratio = await run_in_threadpool(
-            _measure_noise_ratio, str(fits_path), str(src), pattern)
+            _measure_noise_ratio, str(fits_path), str(src), pattern,
+            supersampling)
 
     # The crop depth is only ever *used* by a mosaic, so a single field never
     # opens the coverage sibling at all. A mosaic reads it once — a windowed read

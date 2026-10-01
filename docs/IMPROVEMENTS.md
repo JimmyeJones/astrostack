@@ -82,26 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **LEAD, MEASURED (Builder 2026-09-25, filed while shipping v0.475.0 — the one thing that fix measured and
-  deliberately did not change) — the reveal's two sides are not identically sampled when the master is
-  drizzled, so part of the "stacking cut your noise ~N×" number is the drizzle kernel rather than the
-  stacking.** *(Pillar: trust — PRIORITY 1-adjacent; size **S to decide, M to be sure of**; severity low —
-  the number is now physically honest about the pixels it measures, and the question is whether those are the
-  pixels the sentence is about. Confidence: **measured this run** against ground truth on a real
-  debayer+warp+drizzle fixture; how often the owner's runs drizzle is **not** measured.)*
-  `_measure_noise_ratio` reads the sub at native resolution and the master at **its own**, and the module
-  docstring's "Identical sampling" rule is exactly about not doing that. On a 2× drizzle the master's pixels
-  cover a quarter of the area, and the warp + kernel smooth them, so its per-pixel σ falls **further** than
-  averaging alone can explain: ground truth on the v0.475.0 fixtures is a ratio of **7.88** on a 2×-drizzled
-  master against **6.98** native, for the identical 36 frames and a √N of 6.00. No information is gained —
-  the pixels are smaller and correlated — but ~13 % of the drizzled badge is resampling.
-  **Do not "fix" this by re-inflating the estimator**: v0.475.0's numbers are correct *for the pixels the
-  master has*, and `tests/test_noise_ratio_correlated.py` pins them against ground truth. The question is a
-  design one — should the comparison be pixel-**area**-matched (bin the master down by the drizzle scale
-  before measuring, so both sides describe one patch of sky), and if so what does the √N yardstick then mean?
-  **Check first, cheaply:** what share of the owner's runs actually drizzle, and at what scale. If most are
-  1×, this is a footnote and should be **closed with the number** rather than built.
-
 - **LEAD (Builder 2026-09-25, filed while shipping v0.473.1 — the two halves of observer issue
   [#965](https://github.com/JimmyeJones/astrostack/issues/965) that fix deliberately left) — refuse an
   implausible solve at *solve* time, and heal the rows already carrying one.** *(Pillar: image quality —
@@ -1320,7 +1300,7 @@ problems. Dogfood it every big-picture run and fix root causes.
   walk-away stack wastes itself.** (S–M, autonomy/friendliness/trust) *(Scout-filed 2026-07-09, traced.)*
   **Interactive slice SHIPPED v0.101.0 (Target page) + v0.102.0 (Stack form):** the pre-flight detection +
   amber warning on both surfaces a user reaches before stacking. A new pure `detectMixedPointings(frames)`
-  helper (`components/target/mixedPointings.ts`, mirroring `countQcUncheckable`/`countNewSubsSinceStack`)
+  helper (`components/target/mixedPointings.ts`, mirroring `countQcUncheckable`)
   single-linkage-clusters the accepted+solved subs' RA/Dec at a 3° link distance (wrap/pole-safe via unit
   vectors; a contiguous mosaic stays one cluster, two well-separated targets split), and both the Target page
   (v0.101.0) and the Stack form itself (v0.102.0, right next to the Stack button) show an orange "This batch
@@ -3454,6 +3434,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **✅ v0.492.18** — 🟠 BUG FIX (trust, PRIORITY 1-adjacent), the `_measure_noise_ratio` LEAD filed with v0.475.0, closed by re-measuring its own premise — which came out **backwards**: **a drizzled stack's "stacking cut your noise ~N×" badge read 11–16 % *worse* than the stack was.** The lead had it reading ~13 % *high* and blamed resampling, but its ground truth came from a fixture that stands a **bilinear upsample** in for the drizzle kernel — an interpolation blurs, so it makes a master's per-pixel σ fall, while the real kernel deposits shrunken `pixfrac` drops onto a finer grid and makes it **rise**: a finer pixel gathers a smaller share of every frame's light. Measured through `stack.drizzle_path.DrizzleStacker` itself, the same 36 frames read **6.33× native, 5.89× at ×1.5, 5.61× at ×2, 5.34× at ×3** — and *low* is the one direction `stackhealth.noise_vs_expected` acts on, so a ×2 canvas spent a quarter of the margin `NOISE_EXPECTED_LOW_FRACTION` was given on a perfectly healthy run. The lead's gate ("does he drizzle?") is answered by the repo's own record — `stacker.rejection_reach` says *"the owner drizzles mosaics"*. `qc.noise_ratio.noise_ratio` takes a keyword-only `stack_supersampling` and averages the stack side down by `area_match_block` before measuring; the reveal endpoint reads it off the run's **own** recorded options (`field_fulls.canvas_supersampling`, the *effective* scale). Every scale comes back within 3 % of native. **Rounded to whole pixels deliberately** — an exact fractional resample measures +4 to +7 % out (its weights smear pixels the kernel already correlated) and a rational match that bins the *sub* too is far worse (5.25 at ×1.5), so do not re-pick either. **One-sided:** a block of 1 for 1.0/`None`/non-finite/<1.0/unparseable, and `StackOptions.drizzle` defaults off, so every run in the owner's library is byte-identical (pinned). NaN stays "no coverage" — a plain `mean`, so a part-covered block is dropped, not part-averaged. `_NOISE_RATIO_CACHE_VERSION` 2 → 3 so a drizzled library re-measures. Tests +22 (`tests/test_noise_ratio_drizzle.py`, real kernel + ground truth; **fail-before by scratch worktree revert**), plus two wiring tests. No config, schema, migration, on-disk, default or API-shape change. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.492.17** — 🔴 INFRA / the release pipeline (audit 2026-09-30, B-F2..B-F6): **an unreadable range passed the email guard, and two changes could ship under one version number.** `scripts/check-commit-identity.sh` captured `git rev-list` (exit 2 on a bad range, never 0), scans the message body and trailers for email-shaped strings under the same allowlist (a `Co-authored-by:` trailer was a vector; `react@18.2.0`, `root@nas`, `logo@2x.png` are not addresses), and CI's `identity` job verifies both ends and falls back to the merge base or to "everything untagged" rather than `-1 HEAD`. New `scripts/check-version-bump.sh` (CI's `version` job, now on pushes to main too) refuses a code change without a bump, a version already on *current* main (fetched — the recorded base is stale by the second merge), a backwards one, and a tagged one; `scripts/release-tags.sh` goes red on the same and tags every transition since the last tag so lost or reordered runs never lose one; `ci.yml` groups main runs per commit and `release-tags.yml` queues (`queue: max`). `tests/test_commit_identity_check.py` + `tests/test_version_bump_check.py` run both scripts against scratch repositories, all fail-before.
 - **⚪ D2 (audit run B, 2026-09-30) — "Bugs (fix these first)" cut back to open bugs only, as AGENTS.md §2 says:** the two struck-through shipped entries (v0.455.0, v0.456.0), the fixtures entry (v0.417.1 + v0.418.2), the shipped halves of two open leads ((a)+(b) of the auto-binder lead, (b)+(c) of the FrameRow lead), the seven shipped A-MINOR items, the nine FIXED sub-items of the minor list, the whole #903 remainder (closed by v0.492.13) and the whole #878 entry (code side shipped v0.482.1/.2; closes on the owner's click, gate 16) moved **whole** to [`SHIPPED.md`](SHIPPED.md) under "moved out of Bugs"; the 📋 owner-answers block (2026-09-11), the closed-with-the-grep (c) of the #965 lead and the closed-not-fixed `_cache_stale` note moved to [`PROCESS-NOTES.md`](PROCESS-NOTES.md). Every open item kept its place, with a one-line pointer where a part moved. Enforced from now on by `.github/workflows/docs-budget.yml` + `tests/test_process_docs_budget.py` (D1).
 - **✅ v0.492.16** — ⚪ TRUST / PROVENANCE (2026-09-30 audit **C-F6**): **a sub the bootstrap rescue placed by star matching now says so.** New additive `frames.wcs_source` (`star_match` / `registered`; NULL = the plate solver or a pre-column row), stamped by `bootstrap_solve` from `propagate_wcs`'s `star_placed` bit and **reset centrally** in `Project.update_frame` whenever `wcs_json` is written without a source, so a later real solve never keeps a stale provenance. Ungated `ALTER` + reconcile, **no `SCHEMA_VERSION` bump** (guard asserted). Tests +5, fail-before shown. Entry in [`SHIPPED.md`](SHIPPED.md).
