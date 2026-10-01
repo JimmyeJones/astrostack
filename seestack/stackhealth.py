@@ -267,6 +267,16 @@ NOISE_EXPECTED_MIN_FRAMES = 10
 # per-pixel σ further than averaging alone — and the same stack with 10 % of its
 # noise shared across the canvas reads **0.33**. The gap is wider there than on
 # the independent-pixel sweep, not narrower.
+#
+# **And a drizzled run now lands in the same place**, which it did not before
+# (2026-09-30, measured through the real kernel —
+# ``tests/test_noise_ratio_drizzle.py``): ``qc.noise_ratio`` averages the master
+# down to the sub's pixel area, so a ×2 and a ×3 canvas both read **6.34** against
+# a native 6.33, where they used to read 5.61 and 5.34 — **0.94 and 0.89 of the
+# yardstick**, spending a quarter and a third of the margin this 0.7 was given on
+# a run that is perfectly healthy. A finer master pixel
+# is a noisier one; before the correction the canvas, not the frames, was moving
+# the number the nudge is read from.
 NOISE_EXPECTED_LOW_FRACTION = 0.7
 
 

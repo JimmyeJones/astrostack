@@ -383,8 +383,13 @@ def test_before_after_honours_the_saved_custom_stretch(client, solved_library):
 
 # --- "stacking cut your noise ~N×" number -----------------------------------
 
-def _register_run_with_master(data_root, safe: str, master_path: Path) -> int:
-    """Register a run whose master FITS is the file at ``master_path``."""
+def _register_run_with_master(data_root, safe: str, master_path: Path,
+                              options_json: str = "{}") -> int:
+    """Register a run whose master FITS is the file at ``master_path``.
+
+    ``options_json`` is the run's recorded settings — the default ``"{}"`` is a
+    run that was not drizzled, which is what every caller but the two
+    supersampling tests wants."""
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -394,7 +399,7 @@ def _register_run_with_master(data_root, safe: str, master_path: Path) -> int:
                 output_basename="master", fits_path=str(master_path), tiff_path=None,
                 preview_path=None, n_frames_used=42,
                 canvas_h=320, canvas_w=480, coverage_min=1, coverage_max=42,
-                options_json="{}", total_exposure_s=1260.0,
+                options_json=options_json, total_exposure_s=1260.0,
             ))
         finally:
             proj.close()
@@ -1091,3 +1096,70 @@ def test_saving_from_adjust_stops_the_run_claiming_a_recipe_preview(
             proj.close()
     finally:
         lib.close()
+
+
+# ---- a drizzled run is measured at the sub's pixel area ------------------
+#
+# A drizzled master's pixels are finer than the sub's and therefore *noisier*
+# (each gathers a smaller share of every frame's light), so measuring one as it
+# sits reads the stack 11–16 % worse than it is — see
+# ``tests/test_noise_ratio_drizzle.py``, which measures that against ground truth
+# through the real kernel. The engine takes the correction as an argument; these
+# two pin the wiring, i.e. that the *run's own* recorded canvas scale is what
+# reaches it, because a number the engine never receives fixes nothing.
+
+
+def _supersampling_seen(monkeypatch) -> list[float]:
+    """Record the ``supersampling`` every measurement is made with."""
+    from webapp.routers import stack as stack_router
+
+    real = stack_router._measure_noise_ratio
+    seen: list[float] = []
+
+    def spy(fits_path, sub_path, pattern, supersampling=1.0):
+        seen.append(supersampling)
+        return real(fits_path, sub_path, pattern, supersampling)
+
+    monkeypatch.setattr(stack_router, "_measure_noise_ratio", spy)
+    return seen
+
+
+def test_a_drizzled_run_hands_its_own_canvas_scale_to_the_measurement(
+        client, solved_library, monkeypatch):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "drizzled.fits"
+    finally:
+        lib.close()
+    _write_linear_master(master, sigma=2.0)
+    run_id = _register_run_with_master(
+        solved_library, safe, master,
+        json.dumps({"drizzle": True, "drizzle_scale": 2.0}))
+    seen = _supersampling_seen(monkeypatch)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise")
+    assert r.status_code == 200
+    assert seen == [2.0]
+
+
+def test_a_run_that_was_not_drizzled_is_measured_exactly_as_before(
+        client, solved_library, monkeypatch):
+    """Every run in the owner's library — ``StackOptions.drizzle`` defaults off —
+    so this is the case that must not move. ``drizzle: false`` with a scale still
+    recorded beside it is the shape the Stack form actually persists."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "native.fits"
+    finally:
+        lib.close()
+    _write_linear_master(master, sigma=2.0)
+    run_id = _register_run_with_master(
+        solved_library, safe, master,
+        json.dumps({"drizzle": False, "drizzle_scale": 1.5}))
+    seen = _supersampling_seen(monkeypatch)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise")
+    assert r.status_code == 200
+    assert seen == [1.0]

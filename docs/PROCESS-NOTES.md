@@ -1,5 +1,60 @@
 # Process notes & QA sweep records
 
+## 2026-09-30 (Builder) — a fixture can be faithful about *whether* a bug exists and wrong about its **sign**, and the lead it produced pointed the fix the right way for the wrong reason
+
+*(Builder, branch `claude/keen-darwin-1bg1wt` → **v0.492.18**. Baseline on `origin/main` at `ab9a6c6`:
+**7,117 passed, 2 skipped** in 14:08. Final, after merging `7c6b59f` (PR #1039): **7,166/2** in 14:35.)*
+
+### The class, which is new here and is the reverse of the one this repo already guards
+
+`docs/IMPROVEMENTS.md` has carried a whole section on **fixtures that cannot exhibit their bug** — a test that
+is green because its data has no way to be red. This run hit the mirror image: a fixture that exhibits
+*something*, loudly and reproducibly, that is **not what the production path does**, and a lead written off its
+numbers in good faith.
+
+`tests/test_noise_ratio_correlated.py` measures the σ estimator against ground truth on pixels the pipeline has
+correlated. It uses the *real* debayer and the *real* registration warp, and for drizzle it uses
+`scipy.ndimage.zoom(order=1)` — labelled in its own docstring as "standing in for the drizzle kernel". That
+substitution is the whole finding. A bilinear upsample is an **interpolation**, so it blurs, so it makes a
+master's per-pixel σ **fall**. Drizzle is not an interpolation — it deposits each input pixel as a shrunken
+`pixfrac` drop onto a finer grid — so the real kernel makes σ **rise**. Same word, opposite sign.
+
+The v0.475.0 lead read 7.88 (drizzled) against 6.98 (native) off that fixture and concluded the badge reads
+**~13 % high** on a drizzled run, with ~13 % of it resampling. Driven through
+`seestack.stack.drizzle_path.DrizzleStacker` itself at the app's own `pixfrac=0.8`/`square` defaults, the same
+36 frames read **6.33 native, 5.89 at ×1.5, 5.61 at ×2, 5.34 at ×3** — 11–16 % **low**. And *low* is the one
+direction anything acts on (`stackhealth.noise_vs_expected`), so the fixture's sign error was also a severity
+error: it said the bug pushed toward silence when it pushes toward a false alarm.
+
+**The tell, for next time.** The fixture named its own substitution *and* the docstring of the module under test
+repeated the substitution's number (`+119 % on a drizzled one`) as if it were about drizzle. A stand-in that has
+been quoted as the thing it stands in for has stopped being a stand-in. Both are relabelled now, and
+`tests/test_noise_ratio_drizzle.py` exists so the kernel has a fixture of its own.
+
+### Two things the build measured that the lead could not have known, and both are closed
+
+The lead offered the fix as a question — *"should the comparison be pixel-**area**-matched?"* — and the first probe
+said yes for a reason that turned out to be luck. Binning the bilinear-upsampled master by 2 happened to land on
+the native reading at a 160²-crop fixture, because the *native* estimate there was 13 % over its own truth
+(small-crop MAD noise). At 288² the same trick made the drizzled number **worse** (7.74 → 7.90). The lesson is
+narrow and useful: **a probe that compares two estimates has to be sized so both are converged**, or the
+agreement it reports can be one side's sampling error.
+
+The two rejected shapes are measured and recorded in `SHIPPED.md` under v0.492.18, so neither is re-picked: an
+**exact** fractional area-weighted resample is +4 to +7 % out (its fractional weights smear pixels the kernel has
+already correlated — the thing the estimator's lag walk is *measuring*), and a **rational** match that bins the
+sub by *q* as well as the master by *p* is far worse (5.25 at ×1.5, 3.26 at ×1.25), because the two sides have
+different correlation lengths, so binning the sub is not the mirror of binning the master. A rounded **integer**
+block on the master alone leaves 3 % at worst.
+
+### On the gate the lead set
+
+It said *"check first, cheaply: what share of the owner's runs actually drizzle, and at what scale. If most are
+1×, this is a footnote."* That number is not obtainable from this repo — but the answer to the question behind it
+was already **in** the repo, in prose, beside a different constant: `stacker.rejection_reach`'s comment says *"a
+drizzled run has exactly the same gap, and the owner drizzles mosaics"*. Worth remembering when a gate asks for
+an observation: grep the code's own comments for it before concluding it needs the owner.
+
 ## 2026-09-30 (audit run B, D2) — notes moved out of "Bugs (fix these first)"
 
 *Notes, owner answers and closed-not-fixed traces that sat in the Bugs section, moved here whole so that

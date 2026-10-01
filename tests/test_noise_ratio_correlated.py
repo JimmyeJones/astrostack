@@ -8,6 +8,13 @@ the sub reaches :func:`seestack.qc.noise_ratio.noise_ratio` through
 :func:`~seestack.io.fits_loader.bilinear_debayer`, and the master through a
 registration warp and, on most runs, a drizzle kernel.
 
+The drizzle half of that is a **bilinear upsample standing in for the kernel**,
+and it is not faithful about the thing ``tests/test_noise_ratio_drizzle.py``
+measures: an interpolation blurs, so it makes a master's per-pixel σ *fall*,
+while the real kernel deposits shrunken drops onto a finer grid and makes it
+*rise*. Read as coverage of the **estimator** on correlated pixels, which is what
+it is for; go there for anything about what a drizzled canvas does to the badge.
+
 These build that pipeline and check the measurement against the σ that is
 **actually** in the picture — obtainable because the same scene is pushed through
 the same warps with and without noise, so their difference *is* the noise. Each
