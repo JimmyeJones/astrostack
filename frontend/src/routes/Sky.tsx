@@ -436,6 +436,15 @@ export function MyMap({ savable = true }: { savable?: boolean } = {}) {
     ? describeSkyCoverage(coverage.data.deg2, coverage.data.sky_fraction,
                           coverage.data.n_pictures, coverage.data.summed_deg2)
     : "";
+  // This picture is drawn on the server — the whole sky, every target's finished
+  // picture masked and placed — so the first view of it is *seconds*, not frames.
+  // Until it arrives the panel is a bare dark rectangle, and the coverage line
+  // along the bottom has already filled in with real numbers, so the blank reads
+  // as broken rather than busy. Say which it is. (Measured on the two-picture
+  // dogfood sample: 2.0 s cold, 1.0 s warm — even a cache hit re-walks the
+  // library to validate its fingerprint first, and both ends scale with how many
+  // targets the owner has.)
+  const [mapState, setMapState] = useState<"drawing" | "ready" | "failed">("drawing");
   return (
     <div
       style={{
@@ -447,8 +456,29 @@ export function MyMap({ savable = true }: { savable?: boolean } = {}) {
       <img
         src={api.myMapUrl()}
         alt="An all-sky map built from your own pictures"
-        style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+        onLoad={() => setMapState("ready")}
+        onError={() => setMapState("failed")}
+        // Hidden by opacity rather than `display`/`visibility` deliberately: the
+        // map stays in the accessibility tree either way, and a failed <img>
+        // would otherwise sit there as a broken-image glyph beside the sentence
+        // explaining it.
+        style={{
+          maxWidth: "100%", maxHeight: "100%", objectFit: "contain",
+          opacity: mapState === "failed" ? 0 : 1,
+        }}
       />
+      {mapState === "drawing" ? (
+        <Group gap="xs" style={{ position: "absolute" }}>
+          <Loader size="sm" />
+          <Text size="sm" c="dimmed">Drawing your map…</Text>
+        </Group>
+      ) : null}
+      {mapState === "failed" ? (
+        <Text size="sm" c="dimmed" ta="center" style={{ position: "absolute", maxWidth: 420 }}>
+          Your map couldn&apos;t be drawn just now. Your pictures are fine — reload
+          the page to try again.
+        </Text>
+      ) : null}
       {/* A map of everywhere you've been is a pride picture, and pride pictures
           get posted. A right-click or a long-press already saved it, but neither
           *invites* it and neither gives the file a name worth keeping — this is
@@ -456,8 +486,11 @@ export function MyMap({ savable = true }: { savable?: boolean } = {}) {
           what it is and when it was true. */}
       {/* …but only when there is a map to save. On a fresh install this stage is
           a bare grid — the page's own "No stacked images yet" alert says so —
-          and offering to save it hands the beginner a dated file of nothing. */}
-      {savable ? (
+          and offering to save it hands the beginner a dated file of nothing.
+          A map that failed to *draw* is the same offer with the same answer, so
+          it is withheld there too; while it is still drawing the button stays,
+          because the download renders the same bytes the <img> is waiting on. */}
+      {savable && mapState !== "failed" ? (
         <Button
           size="compact-xs" variant="light"
           leftSection={<IconDownload size={14} />}

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -90,6 +90,44 @@ describe("MyMap", () => {
     expect(img.getAttribute("src")).toBe("/api/sky/my-map.png");
     // Named for what it is, so a screen reader doesn't just say "image".
     expect(img.getAttribute("alt")).toMatch(/your own pictures/i);
+  });
+
+  it("says it is drawing the map rather than showing a blank panel", () => {
+    // The map is rendered server-side — the whole sky, every picture placed and
+    // masked — and measured at 2.0 s cold / 1.0 s warm on a *two*-picture
+    // library, both ends scaling with the target count. Before this, that wait
+    // was an empty dark rectangle with the coverage line already filled in
+    // underneath it, which reads as broken rather than busy.
+    renderMyMap();
+    expect(screen.getByText(/drawing your map/i)).toBeInTheDocument();
+    // …and the map is still there, still loading, not swapped out for a spinner:
+    // hiding it would make the browser throw the request away.
+    expect(screen.getByRole("img").getAttribute("src")).toBe(api.myMapUrl());
+  });
+
+  it("drops the placeholder the moment the map actually arrives", () => {
+    // Asserted in both directions on purpose: "the placeholder is gone" is
+    // trivially true of a page that never had one, so the before-state is what
+    // makes this a test of the handover rather than of nothing.
+    renderMyMap();
+    expect(screen.getByText(/drawing your map/i)).toBeInTheDocument();
+    fireEvent.load(screen.getByRole("img"));
+    expect(screen.queryByText(/drawing your map/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("img")).toBeInTheDocument();
+  });
+
+  it("says so in plain words when the map cannot be drawn", () => {
+    // The other end of the same blank: a 500 or a dropped request used to leave
+    // the broken-image glyph and nothing else, under a "Save this map" button
+    // offering to download it.
+    renderMyMap();
+    fireEvent.error(screen.getByRole("img"));
+    expect(screen.getByText(/couldn.t be drawn just now/i)).toBeInTheDocument();
+    // It reassures about the thing a beginner would actually fear.
+    expect(screen.getByText(/your pictures are fine/i)).toBeInTheDocument();
+    expect(screen.queryByText(/drawing your map/i)).not.toBeInTheDocument();
+    // Nothing to save, so nothing is offered — same rule as the fresh install.
+    expect(screen.queryByRole("link", { name: /save this map/i })).not.toBeInTheDocument();
   });
 
   it("invites the owner to keep it, from the bytes already on screen", () => {
