@@ -1,5 +1,75 @@
 # Process notes & QA sweep records
 
+## 2026-10-01 (Scout, branch `claude/funny-shannon-a9f162`) — QA sweep of the webapp routers (rotation item (4)): one REPRODUCED resilience bug filed, rest clean; issue inbox triaged (all four awaiting owner); `--mosaic` dogfood clean
+
+*(Baseline = `origin/main` at `a155850` (`__version__` 0.492.20): **7260 passed, 3 skipped**, 20m41s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first,
+`pytest-xdist` installed into the run's own `.venv`. Green, so a finding is distinguishable from a
+pre-existing failure. The `xdist`-not-a-project-dep trap and the "`source .venv/bin/activate` or you get
+`No module named numpy`" trap both fired once each at the start — logged here only because they cost two
+restarts; AGENTS.md §7 already names them.)*
+
+### Rotation bookkeeping
+
+FOCUS/PROCESS-NOTES record (2) the peak-vs-per-panel pixel-threshold class swept 2026-09-28, (1)
+scale-dependent preview↔export parity 2026-09-29, (3) ASTAP/ffmpeg filesystem side effects 2026-09-30 — all
+CLEAN. Next in AGENTS.md's order is **(4) the webapp routers**, which is this run. After it the rotation
+cycles back to (1). The core engine was **not** re-swept (AGENTS.md forbids re-sweeping `stack`/`calibrate`
+until a new bug is found there); I only *read* the owner-scale primitives the routers lean on
+(`Project.count_light_missing_from_run` is a single indexed `COUNT` behind the `stack_run_frames` PK; no
+materialisation), which the rule permits.
+
+### The sweep — ONE reproduced bug, filed under "Bugs (fix these first)"
+
+Method: three parallel read-only adversarial audits (owner-scale routers; library-wide + freshest code;
+upload/video/editor/stack at the router layer), plus my own reads of `newsubs.py`, `overtrim.py`,
+`crop_health_for_run` and the engine primitives. Axes: wrong results, memory/scale on the owner's depth
+(35,894 subs) and mosaic shapes, NaN→zero, broken-project resilience, and §10 (`incoming/` read-only).
+
+**Finding (reproduced):** `targets.py::cleanup_suggestions` and `merge_suggestions` open each candidate
+target's project (via `library_hygiene.junk_verdict` / `confirm_duplicate_of_base`) with **no**
+`try/except` around the per-target body, while `gallery.py:286`, `stats.py`, `storage.py` and `newsubs.py`
+all wrap the identical `Project.open` in `except Exception: continue` — and `Project._check_schema`
+(`project.py:742`) *raises `RuntimeError`* on a `user_version > SCHEMA_VERSION` DB (a newer-schema project
+left by an in-place upgrade then rolled back to `stable`, §9) or a corrupt one. So one such target 500s the
+whole Library cleanup/merge card instead of skipping it. Reproduced with a standalone script: a scratch
+library whose first target's `project.sqlite` had `PRAGMA user_version` bumped above `SCHEMA_VERSION` made
+`GET /api/targets/cleanup-suggestions` return **HTTP 500** while `GET /api/gallery` (same call, guarded)
+returned **200** on identical data. `merge-suggestions` shares the byte-identical loop and the same helpers;
+it did not fire in the far-apart two-target fixture because its loop only opens the *members of a same-object
+cluster*, and clustering needs plate-solved registry centres my scan-only fixture did not populate — but the
+owner's targets are solved and his 11 `_mosaic_sub` duplicates (observer issue #878) are exactly such a
+cluster. Repro script shape (reusable for the Builder's fail-before test): build two tiny targets with the
+scanner, bump `PRAGMA user_version = SCHEMA_VERSION + 1` on one project DB, then hit the endpoint through a
+`TestClient(raise_server_exceptions=False)`. The fix is the one-line `except Exception: continue` guard the
+four sibling routers already use; left for the Builder because §5 wants a fail-before regression test on each
+endpoint. A weaker, traced-only sibling is noted in the same Bugs entry: `sky.py::get_sky` guards the open
+but not the per-run DB reads after it.
+
+**Clean (no verified bug):** `newsubs.py` (reference per-project skip pattern; `runs.index(shown)` safe
+because `displayed_picture_run` only ever returns a member of `runs`), `overtrim.py`, `crop_health_for_run`,
+`stats.py`, `gallery.py`, `plan.py`, `lifelist.py`, `wishlist.py`, `calibration.py`, `incominglag.py`,
+`updates.py` (no runtime network; POSTs require a Pydantic body), `system.py`, and the router layer of
+`upload.py` / `video.py` / `sample.py` / `settings.py` / `editor.py` / `stack.py`. **§10 is clean across the
+whole set** — the only writer under `incoming/` is `upload.py`'s sanctioned create-new (`mkstemp` + `os.replace`,
+existing files skipped never overwritten); ffmpeg streams to a stdout PIPE and never `-y`s a source; sample
+FITS land in the library target tree; calibration master paths are resolved server-side from ids, client
+`*_path` keys stripped on PUT/import. Path-traversal clean (basenames sanitised at the write sink; zip members
+confined; capture ids re-derived server-side). Two already-known non-bugs re-confirmed, not re-filed: the
+`FrameRow` materialisation class (now streaming on the three endpoints the old lead named; auto-grade and the
+bulk reject actions in `frames.py` are *new* instances of the same class but remain the documented lead's
+"needs an engine-signature decision", so noted, not filed), and the `merge`/`cleanup` double library walk
+(the measured perf-watch item, `SHIPPED.md`).
+
+### Dogfood — `scripts/agent-dogfood.sh --mosaic`, CLEAN
+
+EXIT 0, no console errors, no overflow, no failed request. Mosaic Auto would trim **7.9 %** of the canvas
+(the ~15 % bug line is well clear). Read the mosaic's cards as one paragraph: the panel map, `grain_uneven`,
+`seams_flat`, next-best-move and the framing verdict all agree — the top-right panel is ~30 s behind a ~1 min
+typical and self-corrects, the grain difference is depth not a sky step (seams flat), and ~75 % of Orion is
+framed — coherent, a beginner can hold them at once. Consistent with the 2026-09-28/-09-30 clean dogfoods;
+not a new finding.
+
 ## 2026-10-01 (Builder, branch `claude/keen-darwin-i30cpz`) — v0.492.20, and the pass where the bundled sample said 0.01 % about a real 3 % bug
 
 *(Baseline = `origin/main` at `67df2c7` (`__version__` 0.492.19): **7246 passed, 3 skipped**, 15m10s with
