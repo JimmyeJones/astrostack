@@ -114,6 +114,14 @@ CREATE TABLE IF NOT EXISTS frames (
     dec_hint_deg        REAL,
     -- plate solve
     wcs_json            TEXT,                   -- serialized astropy WCS header
+    -- who placed this sub on the sky: NULL = the plate solver (or a row written
+    -- before the column existed); 'star_match' = the bootstrap rescue composed
+    -- it from a neighbour's stars; 'registered' = the bootstrap slid a
+    -- neighbour's solution by a phase-correlation shift. Reset to NULL by any
+    -- write of wcs_json that does not say otherwise (``Project.update_frame``),
+    -- so a later real solve never keeps a stale provenance. Added without a
+    -- SCHEMA_VERSION bump (rollable), like rejected_utc.
+    wcs_source          TEXT,
     ra_center_deg       REAL,
     dec_center_deg      REAL,
     pixscale_arcsec     REAL,
@@ -238,6 +246,12 @@ class FrameRow:
     ra_hint_deg: float | None = None
     dec_hint_deg: float | None = None
     wcs_json: str | None = None
+    # Who placed this sub on the sky — see :data:`WCS_SOURCE_STAR_MATCH` and
+    # :data:`WCS_SOURCE_REGISTERED`. ``None`` is the plate solver, and every row
+    # written before the column existed. Provenance for a WCS the app *derived*
+    # rather than measured, so a wrong star lock can be traced to the frames it
+    # placed instead of read back as a solve.
+    wcs_source: str | None = None
     ra_center_deg: float | None = None
     dec_center_deg: float | None = None
     pixscale_arcsec: float | None = None
@@ -478,12 +492,25 @@ _INSERT_COLS = [
     "timestamp_utc", "exposure_s", "gain", "sensor_temp_c",
     "width_px", "height_px", "bayer_pattern",
     "ra_hint_deg", "dec_hint_deg",
-    "wcs_json", "ra_center_deg", "dec_center_deg", "pixscale_arcsec", "rotation_deg",
+    "wcs_json", "wcs_source", "ra_center_deg", "dec_center_deg", "pixscale_arcsec",
+    "rotation_deg",
     "fwhm_px", "star_count", "sky_adu_median", "eccentricity_median", "transparency_score",
     "streak_detected", "streak_count", "streak_cx", "streak_cy",
     "mosaic_panel_id",
     "accept", "reject_reason", "user_override", "restored_utc", "rejected_utc",
 ]
+
+#: ``frames.wcs_source`` values — who placed a sub whose WCS the app *derived*.
+#: The plate solver writes none (``NULL``), which is also what every row written
+#: before the column existed carries, so "unknown" and "measured by the solver"
+#: are deliberately one answer: the column exists to mark the *derived* rows.
+#: The bootstrap rescue (:mod:`seestack.solve.bootstrap`) stamps
+#: ``star_match`` on a member it placed by matching its star pattern to the
+#: reference, and ``registered`` on one it placed by sliding the reference's
+#: solution by a phase-correlation shift. A stack-time star match
+#: (``StackOptions.star_match_unsolved``) writes nothing to the DB, by design.
+WCS_SOURCE_STAR_MATCH = "star_match"
+WCS_SOURCE_REGISTERED = "registered"
 
 # The two ``frames`` columns :meth:`Project.frames_fingerprint` leaves out.
 #
@@ -1070,6 +1097,17 @@ class Project:
                 "ALTER TABLE frames ADD COLUMN rejected_utc TEXT")
         except sqlite3.OperationalError:
             pass  # already present
+        # Who placed a sub on the sky when it was not the plate solver — the
+        # bootstrap rescue's provenance (``WCS_SOURCE_*``). Same rule as
+        # ``rejected_utc`` directly above: no ``SCHEMA_VERSION`` bump, so the
+        # upgrade stays rollable; ungated, so it runs for every older DB and
+        # no-ops once present. Every existing row stays NULL, which reads as
+        # "the solver, or before we recorded this" — the honest answer.
+        try:
+            self._conn.execute(
+                "ALTER TABLE frames ADD COLUMN wcs_source TEXT")
+        except sqlite3.OperationalError:
+            pass  # already present
         # Which generation of the seam estimator wrote ``seam_residual``. Added
         # **without** a ``SCHEMA_VERSION`` bump, like ``duration_s`` and the
         # ``grain_*`` columns, so a build that has never heard of it can still
@@ -1200,10 +1238,19 @@ class Project:
         this is the only ``UPDATE frames`` statement in the codebase, so one
         stamp cannot be forgotten by a reject path written later. It costs no
         extra read — the transition test is part of the same statement.
+
+        **A write of ``wcs_json`` that says nothing about ``wcs_source`` resets
+        it to NULL**, for the same reason: the solver, the content-changed reset
+        and any path written later all replace the solution here, and a stale
+        ``star_match`` left beside a real solve would trace a wrong lock to the
+        wrong frames. Only a writer that *derived* the WCS names its source
+        (:mod:`seestack.solve.bootstrap`).
         """
         if not fields:
             return
         assert self._conn is not None
+        if "wcs_json" in fields and "wcs_source" not in fields:
+            fields = {**fields, "wcs_source": None}
         cols = ", ".join(f"{k} = ?" for k in fields)
         values = [_to_db(v) for v in fields.values()]
         stamp_sql = ""
@@ -3185,6 +3232,7 @@ def _row_to_frame(row: sqlite3.Row) -> FrameRow:
         ra_hint_deg=row["ra_hint_deg"],
         dec_hint_deg=row["dec_hint_deg"],
         wcs_json=row["wcs_json"],
+        wcs_source=row["wcs_source"],
         ra_center_deg=row["ra_center_deg"],
         dec_center_deg=row["dec_center_deg"],
         pixscale_arcsec=row["pixscale_arcsec"],
