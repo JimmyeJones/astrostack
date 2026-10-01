@@ -2,13 +2,18 @@ import { describe, it, expect } from "vitest";
 
 import {
   MIN_CROP_FRAC, FULL_CROP, applyCropDrag, bigCropNote, cropDragBlockedReason,
-  cropFromParams, cropHandlePositions, cropKeptLabel, cropToParams, existingCropUid, isFullFrame,
+  cropFromParams, cropHandlePositions, cropKeptLabel, cropToParams, existingCropUid,
+  geometryOpReshapesFrame, isFullFrame,
   pointerFraction, type CropDragStart, type CropHandle,
 } from "./cropDrag";
 import type { OpInstance } from "../../api/client";
 
 const op = (uid: string, id: string, enabled = true): OpInstance =>
   ({ uid, id, enabled, params: {} } as OpInstance);
+
+const opP = (uid: string, id: string, params: Record<string, unknown>,
+             enabled = true): OpInstance =>
+  ({ uid, id, enabled, params } as OpInstance);
 
 const start = (handle: CropHandle, crop = FULL_CROP, fx = 0, fy = 0): CropDragStart =>
   ({ handle, crop, fx, fy });
@@ -205,8 +210,62 @@ describe("existingCropUid", () => {
   });
 });
 
+describe("geometryOpReshapesFrame", () => {
+  // Every geometry op defaults to a no-op — a whole-frame rectangle, 0°,
+  // scale 1.0 — so one straight off the Add menu moves nothing. Mirrors
+  // `tests/test_edit_geometry_noop.py`, which pins the same table against the
+  // real ops in Python.
+  it("says no for each op at its own defaults", () => {
+    expect(geometryOpReshapesFrame(op("c", "geometry.crop"))).toBe(false);
+    expect(geometryOpReshapesFrame(op("r", "geometry.rotate"))).toBe(false);
+    expect(geometryOpReshapesFrame(op("z", "geometry.resize"))).toBe(false);
+    expect(geometryOpReshapesFrame(opP("r", "geometry.rotate", { angle: 0 })))
+      .toBe(false);
+    expect(geometryOpReshapesFrame(opP("z", "geometry.resize", { scale: 1 })))
+      .toBe(false);
+    expect(geometryOpReshapesFrame(
+      opP("c", "geometry.crop", { x0: 0, y0: 0, x1: 1, y1: 1 }))).toBe(false);
+  });
+
+  it("says yes once the op is actually aimed", () => {
+    expect(geometryOpReshapesFrame(
+      opP("c", "geometry.crop", { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 }))).toBe(true);
+    expect(geometryOpReshapesFrame(opP("r", "geometry.rotate", { angle: 7.5 })))
+      .toBe(true);
+    expect(geometryOpReshapesFrame(opP("z", "geometry.resize", { scale: 0.5 })))
+      .toBe(true);
+  });
+
+  it("uses the engine's own thresholds, not a second set", () => {
+    expect(geometryOpReshapesFrame(opP("r", "geometry.rotate", { angle: 0.0009 })))
+      .toBe(false);
+    expect(geometryOpReshapesFrame(opP("r", "geometry.rotate", { angle: 0.01 })))
+      .toBe(true);
+    expect(geometryOpReshapesFrame(opP("z", "geometry.resize", { scale: 1.0005 })))
+      .toBe(false);
+    expect(geometryOpReshapesFrame(opP("z", "geometry.resize", { scale: 1.01 })))
+      .toBe(true);
+  });
+
+  it("treats what it can't be sure of as reshaping (the safe direction)", () => {
+    expect(geometryOpReshapesFrame(opP("r", "geometry.rotate", { angle: "x" })))
+      .toBe(true);
+    expect(geometryOpReshapesFrame(opP("z", "geometry.resize", { scale: "x" })))
+      .toBe(true);
+  });
+
+  it("is not about tone ops", () => {
+    expect(geometryOpReshapesFrame(op("t", "tone.saturation"))).toBe(false);
+  });
+});
+
 describe("cropDragBlockedReason", () => {
   const crop = op("c", "geometry.crop");
+  // The ops after the subject must carry *real* settings to block: a Rotate or
+  // Resize at its defaults moves nothing (`geometryOpReshapesFrame`).
+  const rotate = opP("r", "geometry.rotate", { angle: 7.5 });
+  const resize = opP("z", "geometry.resize", { scale: 0.5 });
+  const crop2 = opP("c2", "geometry.crop", { x0: 0.1, y0: 0.1, x1: 0.9, y1: 0.9 });
 
   it("allows dragging when the crop is the last geometry op", () => {
     expect(cropDragBlockedReason(
@@ -214,25 +273,29 @@ describe("cropDragBlockedReason", () => {
   });
 
   it("allows dragging when the other geometry ops come before it", () => {
-    expect(cropDragBlockedReason(
-      [op("r", "geometry.rotate"), op("z", "geometry.resize"), crop], "c")).toBeNull();
+    expect(cropDragBlockedReason([rotate, resize, crop], "c")).toBeNull();
   });
 
   it("declines when a rotate or resize sits after it", () => {
-    expect(cropDragBlockedReason([crop, op("r", "geometry.rotate")], "c"))
-      .toContain("Rotate or Resize");
-    expect(cropDragBlockedReason([crop, op("z", "geometry.resize")], "c"))
-      .toBeTruthy();
+    expect(cropDragBlockedReason([crop, rotate], "c")).toContain("Rotate or Resize");
+    expect(cropDragBlockedReason([crop, resize], "c")).toBeTruthy();
   });
 
   it("declines when a SECOND crop sits after it — the bypassed render would "
      + "then show that crop's output, not this crop's input", () => {
-    expect(cropDragBlockedReason([crop, op("c2", "geometry.crop")], "c")).toBeTruthy();
+    expect(cropDragBlockedReason([crop, crop2], "c")).toBeTruthy();
   });
 
   it("ignores a disabled geometry op after it (it reshapes nothing)", () => {
-    expect(cropDragBlockedReason([crop, op("r", "geometry.rotate", false)], "c"))
-      .toBeNull();
+    expect(cropDragBlockedReason(
+      [crop, { ...rotate, enabled: false }], "c")).toBeNull();
+  });
+
+  it("ignores a geometry op after it that is still at its defaults — it has "
+     + "been added but not aimed, so it moves nothing", () => {
+    expect(cropDragBlockedReason([crop, op("r", "geometry.rotate")], "c")).toBeNull();
+    expect(cropDragBlockedReason([crop, op("z", "geometry.resize")], "c")).toBeNull();
+    expect(cropDragBlockedReason([crop, op("c2", "geometry.crop")], "c")).toBeNull();
   });
 
   it("answers null for an op that isn't in the list", () => {

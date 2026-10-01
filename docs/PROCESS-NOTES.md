@@ -1,5 +1,103 @@
 # Process notes & QA sweep records
 
+## 2026-10-01 (Builder, branch `claude/keen-darwin-5zv8nn`) — v0.492.27: the bug the tests were pinning, and two measurements that said "no advisory needed"
+
+*(Baseline = `origin/main` at `b9a6933` (`__version__` 0.492.25): **7282 passed, 3 skipped**, 13m56s with
+`OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green,
+so a finding was distinguishable from a pre-existing failure.)*
+
+### "Bugs (fix these first)" held nothing ungated for the fourth run running
+
+Same entries, same conclusion as the three runs before it, so this is a pointer rather than a re-derivation:
+see the 2026-10-01 (`claude/keen-darwin-ok7w8n`) record above for the list. The beginner-feature section is
+empty and `docs/FOCUS.md` says not to manufacture one. The one lead the previous runs left — the `#965`
+solve-time refusal — still needs a retry-success rate off the owner's box. So the slot went where §1 points
+first: **the editor**, and within it the rotation's own next item, scale-dependent preview↔export parity.
+
+### Three hunts, two of them clean — and the clean ones are the point of writing this down
+
+**(1) The sixth preview↔export advisory that isn't needed.** Five editor controls carry a "the preview does not
+show what the export will do" caption (deconvolution, sharpen, denoise-bilateral, hot pixels, star reduction).
+`stars.boost_nebula` is the sixth scale-dependent op — it drives the **same** `star_mask` footprint as
+`stars.reduce`, and `star_reduce_differs_on_proxy`'s own docstring says so — and it has no advisory. Measured
+(synthetic Seestar field, 600 stars at σ 1.27 px, 1200×1600, proxy steps 2/3/4/6/8 × `size` 1/2/4/8/12,
+preview lift ÷ export lift on the pixels the proxy samples):
+
+| population | ratio preview ÷ export |
+|---|---|
+| overall | **0.990 – 1.019** |
+| background (the op's actual claim) | **0.990 – 1.019** |
+| star pixels (≈0.1 % of the canvas) | 0.888 – 1.043 |
+
+Worst absolute divergence anywhere: **0.023 of full scale**, typically ≤0.010. Compare the ops that *earned* a
+caption: star reduction 0.63–1.58×, sharpen about a fifth of the export, bilateral denoise up to 2×; and the
+ones explicitly not flagged, wavelet/TV denoise, agree "to within 3 %". **So the gap in the advisory list is
+correct, and the reason is structural rather than lucky:** the op's effect is a wide-area gamma lift weighted by
+`1 − mask`, and `1 − mask` is ≈1 over the overwhelming majority of pixels whatever the footprint — the
+footprint only moves the thin collar of pixels adjacent to a star, where the op's weight is near zero by
+design. **Do not file this as a missing advisory.** A sixth caption would cost the editor a line and tell the
+owner nothing.
+
+**(2) Every editor op against the NaN = "no coverage" invariant, and against identity-at-zero — clean.** All
+21 registered ops, applied at their defaults *and* with their strength sliders at zero, at `proxy_scale` 1 and
+4, on a ragged union canvas (four uncovered corners + one interior hole, 3.9 % uncovered): **no op invented
+coverage, none lost it, none raised.** The identity sweep came back clean too once the harness' own two faults
+were removed — it fed display-space ops a fixture holding 48 pixels above 1.0 (so their documented clip to
+[0, 1] read as a non-identity), and it assumed `tone.saturation`'s off value is 0.0 when the op's identity is
+**1.0**. Worth remembering as a harness lesson, not a code one: *a sweep over an op registry has to take each
+op's own "off" value from its schema, and has to respect the stage contract its fixture is pretending to be in.*
+
+**(3) The finding.** `webapp/routers/editor.py::_loupe_geometry_problem` and
+`frontend/src/components/editor/cropDrag.ts::cropDragBlockedReason` both treat *an enabled geometry op* as *the
+frame has been reshaped* — and all three geometry ops **default to a no-op**. Full write-up in
+[`SHIPPED.md`](SHIPPED.md); what is worth keeping here is how it was found and why it had survived.
+
+### The lever: three functions mirror the ops' no-op guards, and two do not
+
+The grep that found it was not for a symptom but for a **shape**: *who asks "did a geometry op run?" and does
+it mirror that op's own no-op guard?* Five sites. `preview_crop_of_recipe` mirrors them (and says so in a
+comment), `geometry_pixel_steps` mirrors them (*"Mirror `_rotate`'s own no-op guards"*, in the code),
+`apply_geometry_to_map` applies the ops themselves so it mirrors them for free — and the two that answer a
+*user-facing refusal* were the two that did not. **When most callers of a rule carry an explicit mirror of it
+and one does not, that one is the bug, and the mirrors are the specification.** It cost one grep.
+
+### The Add menu's stage-aware insertion hides one half of it and not the other — worth checking, not assuming
+
+Reachability was checked rather than asserted, and it is not symmetric. `insertOnCorrectSide` places a
+`linear` op just **before** the enabled stretch and a `nonlinear` op just **after** it; every `background.*`
+pass is `linear` and every geometry op is `nonlinear`. So with a stretch enabled the Add menu *cannot* produce
+the geometry-then-background order the loupe refusal keys on — that half needs **no enabled stretch** (which is
+exactly the empty recipe an un-edited run opens with, so "add Rotate, add Gradient removal" is the whole repro),
+a stretch the user disabled, or a drag-reorder. The drag-to-crop half has no such shield: each new `nonlinear`
+op is inserted at `stretch + 1`, *ahead* of the geometry ops added before it, so **Rotate then Crop** puts the
+rotate after the crop with a stretch enabled, and **Crop then Rotate** does it without one.
+
+**Generalisable:** a guard like `insertOnCorrectSide` that keeps ops in a sane order is also a *filter on which
+wrong states are reachable*, and it filters the two halves of one bug differently. Writing "a beginner hits
+this by…" without tracing that filter would have put a repro in the record that does not reproduce — and the
+next run would have read the entry, failed to see it on Auto's recipe, and concluded the entry was wrong.
+
+### Why the tests were green: a helper whose default params are exactly the no-op
+
+`cropDrag.test.ts`'s `op()` helper builds `{ uid, id, enabled, params: {} }`. Three tests used it for the op
+that is supposed to *block* dragging — so they asserted "a Rotate after this crop blocks it" while handing the
+rotate the params that make it do nothing. The suite was pinning the bug, in tests whose names describe the
+correct behaviour. **Generalisable, and the sharper half of this run:** a fixture helper that omits params is
+not neutral — it supplies the schema defaults, and for a whole class of ops the schema default *is* the
+disabled state. So **a test that asserts an op has an effect must set that op's params explicitly**, and a
+helper that makes it cheap not to is a place where a test can quietly assert the opposite of its own name. The
+Python side of the same feature escaped for exactly this reason: `test_editor_loupe.py` wrote
+`{"angle": 5.0}` and `{"x0": 0.1, …}` by hand, so it never pinned the no-op case either way.
+
+### And it is invisible to the tooling that exists for this screen
+
+`--editor` drives every op the Add menu offers **one at a time** (`scripts/dogfood_editor.mjs`), which is the
+right design for "does each op render?" and structurally cannot see this: the bug needs **two** ops in one
+recipe, in one order (a geometry op, then a `background.*` pass). A `--mosaic --editor --big` pass had run
+clean earlier the same day and reported all five advisories live — correctly. **The gap worth remembering is
+the shape, not the flag:** the editor's refusals are conditions on *pairs* of ops, and nothing in this repo's
+tooling builds a recipe out of more than one hand-chosen op.
+
 
 
 ## 2026-10-01 (Builder, branch `claude/keen-darwin-ok7w8n`) — v0.492.26: a `--mosaic --editor --big` dogfood, CLEAN, and the one thing it printed was the probe's own blind spot

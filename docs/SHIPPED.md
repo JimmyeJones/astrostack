@@ -1,5 +1,92 @@
 # Shipped — the record
 
+## 2026-10-01 (Builder) — v0.492.27: a geometry op at its own defaults reshapes nothing, and two editor surfaces that said otherwise
+
+### v0.492.27 — 🟠 BUG FIX (PRIORITY 1, the editor): `seestack/edit/ops/geometry.py::reshapes_frame`, wired into `editor._loupe_geometry_problem` and `cropDrag.ts::cropDragBlockedReason`
+
+*(Builder, branch `claude/keen-darwin-5zv8nn`. Baseline `origin/main` at `b9a6933` (`__version__` 0.492.25):
+**7282 passed, 3 skipped**, 13m56s — green, so a finding was distinguishable from a pre-existing failure.
+Taken because "Bugs (fix these first)" again held nothing ungated (the fourth run to read it top to bottom and
+reach that conclusion; the list is in [`PROCESS-NOTES.md`](PROCESS-NOTES.md)) and the beginner-feature section
+is empty with FOCUS saying not to manufacture one — so the slot went where §1 points first, the editor, and the
+rotation's own next item, scale-dependent preview↔export parity.)*
+
+**The bug.** All three geometry ops **default to a no-op**: `geometry.crop` to the whole-frame rectangle,
+`geometry.rotate` to 0°, `geometry.resize` to scale 1.0. That is deliberate and load-bearing — an op added
+from the editor's Add menu must not move the picture before the user has aimed it, and `_crop` / `_rotate` /
+`_resize` each carry the guard that returns the image untouched. But two surfaces read *"the recipe has an
+enabled geometry op"* as *"the frame has been reshaped"*, so each switched itself off over an op that was doing
+nothing, and each said so in a sentence that was **false about the user's own recipe**:
+
+* **"Check it at full size" (the loupe) refused outright.** `_loupe_geometry_problem`'s second refusal exists
+  for a real case — a crop or resize *upstream* of an additive `background.*` pass moves the origin the
+  replayed sky field remembers — but it set `seen_geometry = True` for any enabled geometry op. Add a Rotate to
+  see what it does, leave it at 0°, then add "Gradient removal", and the priority-1 control answered *"This
+  recipe crops or resizes before its background pass… Move the crop after the background steps"* about a recipe
+  that crops and resizes nothing. **It bites only where the loupe is offered at all — `proxy_scale > 1`, i.e.
+  the decimated mosaic canvas that is this owner's everyday state** (`loupe_info` declines a small stack
+  earlier, on its own correct grounds).
+* **Drag-to-crop declined.** `cropDragBlockedReason` refuses while another enabled geometry op sits *after* the
+  crop being dragged, because the rectangle is drawn over the with-this-op-bypassed render and a later reshape
+  breaks that equivalence. A later op still at its defaults breaks nothing, and the refusal — *"Dragging is off
+  while another Crop, Rotate or Resize sits after this one — move this crop last"* — sent the beginner back to
+  the four fractional sliders that `cropDrag.ts` exists to replace.
+
+**How a beginner reaches each half — checked, because the Add menu's stage-aware insertion hides one of them.**
+`insertOnCorrectSide` puts a `linear` op just *before* the enabled stretch and a `nonlinear` op just *after* it;
+all three `background.*` passes are `linear` and all three geometry ops are `nonlinear`. So:
+
+* **The loupe half needs no enabled stretch, or a reorder.** With a stretch enabled the Add menu can never
+  produce geometry-then-background at all. Without one every added op is simply appended in the order added —
+  and **an un-edited run's recipe is empty, which is the state the editor opens in** — so *add Rotate, leave it
+  at 0°, add "Gradient removal"* reproduces it exactly; so does disabling the stretch, and so does dragging the
+  list (which is the case the refusal's own docstring was written for). Plus `proxy_scale > 1`.
+* **The drag-to-crop half is reachable straight from the Add menu either way.** With a stretch, each new
+  `nonlinear` op lands at `stretch + 1` — *ahead* of the ones added before it — so **Rotate first, then Crop**
+  leaves the rotate after the crop; with no stretch ops append, so **Crop first, then Rotate** does the same.
+  The rotate is at 0° in both.
+
+**The fix is one shared question, asked where the ops' own guards are.** New pure `reshapes_frame(op_id,
+params)` next to `GEOMETRY_OP_IDS`, `crop_bounds` and `resize_shape`, so it is derived from the same arithmetic
+the ops use rather than a second copy of it (the module's own stated rule): the rotate and resize branches are
+each op's guard verbatim, and the crop branch goes through `previewcrop.make_crop` — the one implementation of
+the clamp/sort + "ignore a degenerate rectangle" rule, plus `is_full` — which is exactly the pair of tests
+`preview_crop_of_recipe` already applies. Mirrored in TypeScript as `cropDrag.ts::geometryOpReshapesFrame`,
+with each side's doc naming the other.
+
+**Deliberately conservative, and that is what makes it safe.** It answers from the params alone, so it says
+"reshapes" for everything it cannot be certain of at *every* canvas size — a crop too thin to survive
+`crop_bounds`' 2-px floor, a resize that rounds back to the same pixels, a rotate of a sliver, a non-finite or
+unparseable value. Each of those keeps today's answer; **only a certain no-op changes it**, so a caller can
+only ever gain a correct offer and never lose a correct refusal. No threshold was invented: every number in it
+is a number the ops already use.
+
+**Why it survived — the tests pinned it, with the no-op params.** `cropDrag.test.ts`'s three "declines when a
+rotate or resize sits after it" / "declines when a SECOND crop sits after it" cases all built their blocking op
+through a helper that supplies `params: {}` — i.e. precisely the defaults that make the op a no-op — so the
+suite asserted the wrong behaviour while describing the right intent. Those three now carry **real** settings
+(7.5°, scale 0.5, a 0.1–0.9 rectangle), which keeps each test's stated intent and strengthens it; nothing was
+weakened, skipped or removed. It is also structurally invisible to `--editor`, which adds each op from the Add
+menu **one at a time**: this needs two ops in one recipe, in one order.
+
+**Tests +23 items.** New `tests/test_edit_geometry_noop.py` (10 cases, parametrised over all three ops) asserts
+the claim *and* applies the op to check the pixels really did not move — so the predicate cannot drift away
+from the ops it mirrors. `tests/webapp/test_editor_loupe.py` gains a 6-way caller-level parametrisation
+(`loupe-info` **and** the window itself, which 409'd), **all six fail-before** with the false sentence in the
+assertion message. `cropDrag.test.ts` gains the predicate's own table plus the three defaults cases, with the
+`cropDragBlockedReason` fail-before shown by reverting that one line.
+
+**No upgrade surface touched at all:** no config key, settings field, schema version, migration, on-disk path,
+endpoint, response shape, stored recipe or default. A recipe already saved renders identically — this changes
+only whether two controls are *offered*, and `reshapes_frame` is new code nothing else reads.
+
+**Two things measured and stood down on the way, both recorded in [`PROCESS-NOTES.md`](PROCESS-NOTES.md) so
+they are not re-derived:** `stars.boost_nebula` is the one scale-dependent editor op with no preview↔export
+advisory, and measured it does not need one (0.99–1.02× of the export overall and on the background, against
+the 0.63–1.58× that earned `stars.reduce` its caption); and a sweep of **every** registered editor op for the
+NaN = "no coverage" invariant and for an exact identity at zero strength, on a ragged mosaic canvas, came back
+clean.
+
 
 ## 2026-10-01 (Builder) — v0.492.25: a table lost from a current-version DB heals on open, in both schema stores
 

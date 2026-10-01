@@ -25,6 +25,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 from astropy.io import fits
 from PIL import Image
 
@@ -177,6 +178,41 @@ def test_a_crop_after_the_background_pass_is_fine(client, built_library):
     info = client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe-info",
                       params={"recipe": ok}).json()
     assert info["available"] is True
+
+
+@pytest.mark.parametrize("geom", [
+    {"uid": "cr", "id": "geometry.crop", "enabled": True, "params": {}},
+    {"uid": "cr", "id": "geometry.crop", "enabled": True,
+     "params": {"x0": 0.0, "y0": 0.0, "x1": 1.0, "y1": 1.0}},
+    {"uid": "ro", "id": "geometry.rotate", "enabled": True, "params": {}},
+    {"uid": "ro", "id": "geometry.rotate", "enabled": True,
+     "params": {"angle": 0.0}},
+    {"uid": "rz", "id": "geometry.resize", "enabled": True, "params": {}},
+    {"uid": "rz", "id": "geometry.resize", "enabled": True,
+     "params": {"scale": 1.0}},
+], ids=["crop-empty", "crop-full", "rotate-empty", "rotate-zero",
+        "resize-empty", "resize-one"])
+def test_a_geometry_op_at_its_defaults_does_not_refuse_the_check(
+        client, built_library, geom):
+    """A Crop, Rotate or Resize fresh from the Add menu reshapes nothing.
+
+    All three default to a no-op — a whole-frame rectangle, 0°, scale 1.0 — and
+    the ops themselves return the image untouched, so the replayed sky field
+    lands exactly where it was measured and the window is answerable. Refusing
+    here told the reader *"this recipe crops or resizes before its background
+    pass… move the crop after the background steps"* about a recipe that does
+    neither, and took the priority-1 "check it at full size" control away on the
+    decimated canvas that is the only place it is ever offered.
+    """
+    run_id = _big(client, built_library, basename="noopgeom")
+    rec = _enc([geom, *FLAT_RECIPE])
+    info = client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe-info",
+                      params={"recipe": rec}).json()
+    assert info["reason"] is None
+    assert info["available"] is True
+    # …and the window itself renders rather than 409ing.
+    assert client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe",
+                      params={"recipe": rec}).status_code == 200
 
 
 def test_a_refusal_the_user_can_undo_is_marked_apart_from_one_they_cannot(

@@ -116,6 +116,57 @@ def _resize(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 GEOMETRY_OP_IDS = ("geometry.crop", "geometry.rotate", "geometry.resize")
 
 
+def reshapes_frame(op_id: str, params: dict | None) -> bool:
+    """Whether an *enabled* geometry op really moves pixels, from its params alone.
+
+    Each of the three ops carries its own "this is a no-op" guard — :func:`_crop`
+    ignores a degenerate or whole-frame rectangle, :func:`_rotate` returns the
+    image below ~1e-3°, :func:`_resize` returns it at scale 1.0 — and every one of
+    those guards fires on the op's **own defaults**: a Crop, Rotate or Resize
+    fresh from the editor's Add menu reshapes nothing until the user aims it. So
+    anything that reads "the recipe has an enabled geometry op" as "the frame has
+    been reshaped" is wrong about exactly the op a beginner is most likely to be
+    holding, and switches itself off naming a crop or resize the recipe does not
+    have.
+
+    **Conservative, and shape-free.** It answers from the params only, so it says
+    "reshapes" for anything it cannot be certain of at *every* canvas size — a
+    crop too thin to survive :func:`crop_bounds`' 2-px floor, a resize that rounds
+    back to the same pixels, a rotate of a sliver, a value that will not parse.
+    Each of those keeps today's answer; only the certain no-ops change. A caller
+    can therefore only ever gain a correct offer, never lose a correct refusal.
+
+    Mirrored in TypeScript by ``cropDrag.ts::geometryOpReshapesFrame`` for the
+    editor's drag-to-crop refusal; change the two together.
+    """
+    if op_id not in GEOMETRY_OP_IDS:
+        return False
+    if not isinstance(params, dict):
+        return True  # a hand-edited recipe: assume it reshapes
+    if op_id == "geometry.rotate":
+        try:
+            angle = float(params.get("angle", 0.0))
+        except (TypeError, ValueError):
+            return True
+        return not abs(angle) < 1e-3          # _rotate's own branch, verbatim
+    if op_id == "geometry.resize":
+        try:
+            scale = float(params.get("scale", 1.0))
+        except (TypeError, ValueError):
+            return True
+        return not (abs(scale - 1.0) < 1e-3 or scale <= 0)   # resize_shape's
+    # geometry.crop. ``make_crop`` applies the same clamp/sort and the same
+    # "ignore a degenerate rectangle" rule :func:`crop_bounds` does, and a
+    # whole-frame rectangle crops nothing — the pair of tests
+    # ``preview_crop_of_recipe`` already uses, reached through the one
+    # implementation rather than a second copy of the arithmetic.
+    from seestack.previewcrop import make_crop
+
+    crop = make_crop(params.get("x0", 0.0), params.get("y0", 0.0),
+                     params.get("x1", 1.0), params.get("y1", 1.0))
+    return crop is not None and not crop.is_full
+
+
 def geometry_pixel_steps(recipe, shape: tuple[int, int],
                          proxy_scale: float = 1.0) -> list[tuple] | None:
     """Replay a recipe's *enabled geometry ops* as pixel-space steps, so a caller

@@ -199,6 +199,45 @@ export function existingCropUid(ops: OpInstance[]): string | null {
   return (crops.find((o) => o.enabled) ?? crops[0])?.uid ?? null;
 }
 
+/** Whether a geometry op *as configured* actually moves pixels.
+ *
+ * Mirrors `seestack/edit/ops/geometry.py::reshapes_frame` — change the two
+ * together. All three geometry ops default to a no-op (a whole-frame rectangle,
+ * 0°, scale 1.0), which is on purpose: an op added from the Add menu must not
+ * move the picture before it has been aimed. So "the recipe has an enabled
+ * geometry op" is not the same question as "the frame has been reshaped", and
+ * asking the first while answering the second switches a control off naming a
+ * crop or resize the recipe does not have.
+ *
+ * Conservative, like its Python twin: anything it cannot be certain of at every
+ * canvas size (a non-finite angle, an unparseable scale) counts as reshaping, so
+ * a caller only ever gains a correct offer and never loses a correct refusal.
+ *
+ * Not {@link reshapesFrame} in `splitCompare.ts`, which asks the id-only
+ * question "could this op change the frame's shape" for the per-op split. Pure. */
+export function geometryOpReshapesFrame(op: OpInstance): boolean {
+  if (!op.id.startsWith("geometry.")) return false;
+  const p = (op.params ?? {}) as Record<string, unknown>;
+  if (op.id === "geometry.rotate") {
+    const angle = Number(p.angle ?? 0);
+    return !(Math.abs(angle) < 1e-3);          // `_rotate`'s own branch
+  }
+  if (op.id === "geometry.resize") {
+    const scale = Number(p.scale ?? 1);
+    return !(Math.abs(scale - 1) < 1e-3 || scale <= 0);   // `resize_shape`'s
+  }
+  if (op.id !== "geometry.crop") return true;  // an unknown geometry op: assume so
+  // `cropFromParams` is the clamp/sort mirror of `crop_bounds`; a degenerate or
+  // whole-frame rectangle is one `_crop` ignores. The epsilon is the engine's
+  // (`PreviewCrop.is_full`), not `isFullFrame`'s 0.999 — that one is a caption
+  // tolerance for this module's own UI, and a crop keeping 99.95 % of the frame
+  // still moves the origin the bypassed render is read in.
+  const crop = cropFromParams(p);
+  const w = crop.x1 - crop.x0, h = crop.y1 - crop.y0;
+  if (!(w > 0 && h > 0)) return false;
+  return !(w >= 1 - 1e-6 && h >= 1 - 1e-6);
+}
+
 /** Why dragging can't be offered for this crop op, or `null` when it can.
  *
  * The rectangle is drawn over the render of the recipe with *this* op bypassed,
@@ -210,10 +249,13 @@ export function existingCropUid(ops: OpInstance[]): string | null {
 export function cropDragBlockedReason(ops: OpInstance[], uid: string): string | null {
   const i = ops.findIndex((o) => o.uid === uid);
   if (i < 0) return null;
-  // *Any* enabled geometry op after this one breaks the equivalence, a second
-  // crop included: the bypassed render would then show that crop's output rather
-  // than this one's input.
-  const after = ops.slice(i + 1).some((o) => o.enabled && o.id.startsWith("geometry."));
+  // Any enabled geometry op after this one that *actually reshapes the frame*
+  // breaks the equivalence, a second crop included: the bypassed render would
+  // then show that crop's output rather than this one's input. One still at its
+  // defaults moves nothing (see {@link geometryOpReshapesFrame}), and refusing
+  // for it took drag-to-crop away over a Rotate the user had not yet aimed.
+  const after = ops.slice(i + 1).some(
+    (o) => o.enabled && geometryOpReshapesFrame(o));
   if (after) {
     return "Dragging is off while another Crop, Rotate or Resize sits after this "
       + "one — move this crop last, or use the sliders below.";
