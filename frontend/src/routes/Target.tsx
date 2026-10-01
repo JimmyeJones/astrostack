@@ -100,35 +100,16 @@ function medianOf(xs: number[]): number {
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-// Parse an ISO timestamp to epoch ms, forcing a naive (no-offset) string to UTC
-// so a browser in a non-UTC zone doesn't shift it. Frame DATE-OBS and stack-run
-// timestamps are both stored timezone-aware ("…+00:00"), but a fits header can
-// fall back to a raw naive string, so normalise defensively. NaN on unparseable.
-function parseUtcMs(s: string): number {
-  const hasTz = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(s);
-  return Date.parse(hasTz ? s : s + "Z");
-}
-
-// Count accepted, plate-solved frames captured *after* the target's most recent
-// genuine stack ran — i.e. subs the current master doesn't yet include. Powers
-// the "N new subs since your last stack — restack?" nudge for the multi-night
-// Seestar workflow (drop another night in, the old master silently no longer
-// reflects all your data). Only accepted+solved frames count, so a pile of
-// rejected/unsolved new subs never nags; returns 0 when there's no genuine
-// stack timestamp to compare against.
-export function countNewSubsSinceStack(
-  frames: Frame[],
-  latestStackUtc: string | null | undefined,
-): number {
-  if (!latestStackUtc) return 0;
-  const stackMs = parseUtcMs(latestStackUtc);
-  if (Number.isNaN(stackMs)) return 0;
-  return frames.filter((f) => {
-    if (!f.accept || !f.solved || !f.timestamp_utc) return false;
-    const t = parseUtcMs(f.timestamp_utc);
-    return !Number.isNaN(t) && t > stackMs;
-  }).length;
-}
+// `countNewSubsSinceStack` and its `parseUtcMs` helper lived here from v0.90.0
+// until the server took the rule over: the "N subs missing from your current
+// picture" line now reads `GET /api/targets/<safe>/new-light`, which is the one
+// function the Dashboard note and the catch-up batch also ask
+// (`webapp/routers/newsubs.py::new_light_since_picture`). Two spellings of one
+// question is how they came to disagree — this page counted by capture time
+// against the newest `reusable` run, and on a Combined target with the merge's pin
+// neither half of that is the picture on the wall. Pinned server-side in
+// `tests/webapp/test_new_subs_waiting.py`, which re-derives the reading removed
+// here and asserts it is the one that was wrong.
 
 // Count frames that couldn't be quality-checked at all — QC raised on them
 // (unreadable/corrupt/truncated FITS), so they carry a `qc_error:…` reject
@@ -415,6 +396,23 @@ export function TargetView() {
   const restoredSubs = useQuery({
     queryKey: ["restored-subs", safe],
     queryFn: () => api.restoredSubs(safe).catch(() => null),
+    enabled: !!safe,
+    staleTime: 30_000,
+    retry: false,
+  });
+  // How much light the picture *on the wall* is missing — the server's own
+  // answer, through the one function the Dashboard's "you've shot more of these"
+  // note and the "Bring my pictures up to date" batch also ask
+  // (`newsubs.new_light_since_picture`). This page used to work it out here, from
+  // the frame list and the run listing: accepted+solved frames captured after the
+  // newest `reusable` run. That is two readings away — the clock instead of
+  // membership, and the newest genuine run instead of the displayed picture — and
+  // a Combine diverges on both at once, so the Dashboard named the target while
+  // this page said nothing. Null on an older backend or a failed fetch, which
+  // renders nothing (exactly what the old reading did with no runs).
+  const newLight = useQuery({
+    queryKey: ["new-light", safe],
+    queryFn: () => api.targetNewLight(safe).catch(() => null),
     enabled: !!safe,
     staleTime: 30_000,
     retry: false,
@@ -774,18 +772,27 @@ export function TargetView() {
     return !latestRun || acceptedUnsolved;
   }, [solveSetup, list, latestRun]);
 
-  // Multi-night nudge: the target already has a stack, but accepted+solved subs
-  // have arrived *since* it ran, so the current master no longer reflects all
-  // the user's data. Compare against the newest *genuine* stack run's timestamp
-  // (an editor-export/combine run — `reusable === false` — doesn't reset the
-  // clock). Only shown when there's nothing more pressing to do first
-  // (`needsProcessing`/`solveSetup` take precedence). Read-only detection; the
-  // one-click reuses the same Process chain.
+  // Multi-night nudge: the target already has a picture, but it doesn't contain
+  // every sub the target holds — another night was dropped in, a folder was
+  // combined into this one, or the app put subs back it had set aside. The number
+  // is the server's (`newLight`, above), so it cannot disagree with the Dashboard
+  // note or the catch-up batch. Only shown when there's nothing more pressing to
+  // do first (`needsProcessing`/`solveSetup` take precedence). Read-only
+  // detection; the one-click reuses the same Process chain.
   const newSubsSinceStack = useMemo(() => {
     if (needsProcessing || solveSetup) return 0;
-    const latestGenuine = runs.data?.find((r) => r.reusable);
-    return countNewSubsSinceStack(list, latestGenuine?.timestamp_utc);
-  }, [needsProcessing, solveSetup, runs.data, list]);
+    return newLight.data?.n_new_subs ?? 0;
+  }, [needsProcessing, solveSetup, newLight.data]);
+  // Which of the two "stack it again" notes speaks. The restored card names *why*
+  // the picture is thin — subs the app set aside and put back, the one shortfall a
+  // capture clock structurally cannot see — and that is the better sentence when a
+  // restoration is the *whole* of it. When more is missing than came back (last
+  // night's subs as well), the wider note is the honest one: naming only the
+  // restorations would understate what a re-stack folds in. With no answer from
+  // either side this is true, so an older backend keeps the card it used to show.
+  const restoredIsWholeStory =
+    restoredSubs.data != null
+    && restoredSubs.data.n_restored >= newSubsSinceStack;
 
   // "Is it enough yet?" — judge this target's accumulated integration against a
   // sane per-object-type goal so a beginner gets a plain-language answer to "do
@@ -1004,15 +1011,22 @@ export function TargetView() {
               </Group>
             </Alert>
           ) : null },
-          { key: "new-subs", priority: NOTICE_PRIORITY.advisory, node: newSubsSinceStack > 0 ? (
+          /* "Your picture doesn't include everything you've shot." The count is
+              the server's, measured against the picture on the wall, so it also
+              covers the shapes a capture clock cannot see — a combined folder's
+              night, a pinned older cover. Suppressed while the restored card has
+              the whole story to tell, so the two can never both offer the same
+              button. */
+          { key: "new-subs", priority: NOTICE_PRIORITY.advisory,
+            node: newSubsSinceStack > 0 && !restoredIsWholeStory ? (
             <Alert color="blue" variant="light" icon={<IconStack2 size={18} />}
-              title={`${newSubsSinceStack} new sub${newSubsSinceStack === 1 ? "" : "s"} since your last stack`}>
+              title={`${newSubsSinceStack} sub${newSubsSinceStack === 1 ? "" : "s"} missing from your current picture`}>
               <Text size="sm">
-                {newSubsSinceStack === 1 ? "A frame has" : `${newSubsSinceStack} frames have`}{" "}
-                been accepted and solved since this target was last stacked, so the
-                current master doesn't include{" "}
-                {newSubsSinceStack === 1 ? "it" : "them"} yet. Restack to fold in the
-                new data.
+                {newSubsSinceStack === 1 ? "A frame is" : `${newSubsSinceStack} frames are`}{" "}
+                accepted and located, but the picture you're looking at wasn't made
+                with {newSubsSinceStack === 1 ? "it" : "them"} — so it's thinner
+                than your own data. Restack to fold{" "}
+                {newSubsSinceStack === 1 ? "it" : "them"} in.
               </Text>
               <Group gap="xs" mt="xs">
                 <Button size="xs" variant="filled" color="blue"
@@ -1049,9 +1063,9 @@ export function TargetView() {
               shot before the stack. Suppressed while that note is up, since it
               already offers the same one-click restack. Self-hides otherwise. */
           { key: "restored-subs", priority: NOTICE_PRIORITY.advisory,
-            node: newSubsSinceStack > 0
-              ? null
-              : <RestoredSubsNote safe={safe} back={restoredSubs.data} /> },
+            node: restoredIsWholeStory
+              ? <RestoredSubsNote safe={safe} back={restoredSubs.data} />
+              : null },
           /* "This picture can't say which night it's from" — an offer to
               re-stack a picture made before the app recorded when its subs were
               shot, named as the gain rather than as a version. Suppressed while
@@ -1064,7 +1078,7 @@ export function TargetView() {
           { key: "restack-gain", priority: NOTICE_PRIORITY.advisory,
             node: newSubsSinceStack > 0 || restoredSubs.data
               ? null
-              : <RestackGainNote safe={safe} /> },
+              : <RestackGainNote safe={safe} /> },  /* either of the two above */
           /* "Capture may have stopped" — subs were arriving steadily and then
               stopped, mid-session. A warning rather than an advisory because it
               is only actionable while the night is still running; it self-hides

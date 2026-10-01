@@ -28,18 +28,26 @@ make deeper was the one target this note could never name
 (:func:`new_light_since_picture`). That same run also says whether "solved" is part of the bar at all:
 see :func:`webapp.run_options.run_places_unsolved_subs`.
 
-**Where this is deliberately *wider* than the Target page's own nudge, and why.**
-That nudge says *"N new subs since your last stack"* and counts by **capture**
-time, which is the right sentence beside the picture; the sibling card next to it
-(``GET …/restored-subs``, :mod:`seestack.restorednudge`) separately says *"some of
-your subs came back after this picture was made"*. Two precise sentences, because
-on one target the *reason* the picture is behind is worth saying. This endpoint is
-the library-wide roll-up and its question is only *which* pictures are behind, so
-it is their **union** — see :func:`new_light_since_picture`. Keeping it at "shot
-since" left the one library-wide offer unable to reach a target whose whole
-shortfall was a restoration, which is the shape
-:func:`seestack.solve.runner.reconcile_bad_solve_frames` creates by design. A
-test pins the union against both of the Target page's own numbers.
+**The Target page asks the same question of one target, through the same rule**
+(``GET /api/targets/{safe}/new-light``, :func:`get_target_new_light`). It used to
+spell the rule itself, in TypeScript — *"accepted + solved frames captured after
+the newest ``reusable`` run"* — and that is two readings away from this one: the
+clock instead of membership, and the newest genuine run instead of the picture on
+the wall. On a Combined target both diverge at once (the newest genuine run is the
+carried one-night stack; the picture is the merge's pin), so this endpoint named
+the target on the Dashboard while the target's own page said nothing. One
+function, so the roll-up and the line beside the picture cannot disagree.
+
+**What stays deliberately separate is the *reason*, not the number.** The sibling
+card (``GET …/restored-subs``, :mod:`seestack.restorednudge`) says *"some of your
+subs came back after this picture was made"*, which is the shape
+:func:`seestack.solve.runner.reconcile_bad_solve_frames` creates by design and the
+one a capture-time test structurally cannot see. Beside one picture that reason is
+worth saying, so the page gives that card the slot whenever a restoration is the
+*whole* of the shortfall, and uses this wider number when there is more missing
+than came back — naming only the restorations would then understate what a
+re-stack folds in. A test pins the roll-up against both of the Target page's own
+numbers.
 
 **It offers; it never acts.** Re-stacking is hours of CPU on a NAS, so this
 endpoint is read-only and there is no batch button *here*: each named target
@@ -47,11 +55,12 @@ links to its own Stack form, where the estimate and the settings live, and the
 one library-wide offer the note carries is a **link** to Settings → Maintenance,
 where the confirm dialog and the counts are.
 
-**One definition, three surfaces now.** :func:`new_light_since_picture` is the
-rule, and since v0.492.0 the "Bring my pictures up to date" reprocess scope
-(``new_light_only``) and the counts its dialog quotes ask it too — so the note
-that names the targets and the batch that restacks them cannot be about
-different targets.
+**One definition, four surfaces now.** :func:`new_light_since_picture` is the
+rule; since v0.492.0 the "Bring my pictures up to date" reprocess scope
+(``new_light_only``) and the counts its dialog quotes ask it too, and the Target
+page's own note asks it through :func:`get_target_new_light` — so the note that
+names the targets, the line beside the picture and the batch that restacks them
+cannot be about different targets.
 
 Deliberately cheap: per target, one ``stack_runs`` read (a target's run rows are
 a few dozen at most; the owner's whole library holds under a thousand), and —
@@ -95,6 +104,32 @@ class NewSubsWaitingItem(BaseModel):
     #: Accepted + solved subs this picture does not contain — captured after
     #: ``stacked_utc``, or set aside while it was made and since put back.
     n_new_subs: int = 0
+
+
+class NewLightOut(BaseModel):
+    """The one-target reading of the same question, for the Target page's own
+    *"your picture doesn't include everything you've shot"* note.
+
+    Exactly :func:`new_light_since_picture`'s answer, which is the point: the
+    Dashboard note, "Bring my pictures up to date" and the line beside the
+    picture itself now ask one function, so the library-wide roll-up can never
+    name a target whose own page says there is nothing waiting. That is the bug
+    this exists to close — the page counted by *capture time* against the *newest
+    reusable* run, and on a Combined target with the merge's pin neither half of
+    that is the picture on the wall.
+
+    Shaped like the sibling nudges the same page draws (``RestoredSubsOut``,
+    ``RestackGainOut``): the run measured, what it was made of, and the number.
+    """
+
+    #: The genuine stack run behind the displayed picture — the one measured.
+    run_id: int
+    #: When that run stacked, so the note can date the picture it names.
+    timestamp_utc: str
+    #: How many subs it combined, i.e. what a re-stack would grow *from*.
+    n_frames_used: int
+    #: Accepted + located subs that picture does not contain.
+    n_new_subs: int
 
 
 class NewSubsWaitingResponse(BaseModel):
@@ -278,4 +313,44 @@ def get_new_subs_waiting(request: Request) -> NewSubsWaitingResponse:
         count=len(found),
         total_new_subs=sum(it.n_new_subs for it in found),
         items=found[:NEW_SUBS_WAITING_MAX],
+    )
+
+
+@router.get("/api/targets/{safe}/new-light", response_model=NewLightOut | None)
+def get_target_new_light(safe: str, request: Request) -> NewLightOut | None:
+    """**"Your picture doesn't include everything you've shot."** One target.
+
+    The per-target half of this module, and the reason it lives here rather than
+    beside the Target page's other nudges in :mod:`webapp.routers.targets`:
+    :func:`new_light_since_picture` is *the* definition of "this target has new
+    light", and a second spelling of it is exactly how two surfaces end up
+    answering one question differently. The page used to spell it itself, in
+    TypeScript, as "accepted + solved frames captured after the newest
+    ``reusable`` run" — so a Combined target, whose newest genuine run is the
+    carried one-night stack and whose picture is the merge's pin, was named by
+    the Dashboard while its own page said nothing.
+
+    ``null`` when there is nothing to say: no genuine stack to measure against
+    (*"you have never stacked this"* is another surface's sentence), or a picture
+    that already contains every sub the target has — which is the common case.
+    Read-only; it never starts a stack. Cheap by the same accounting as the
+    library-wide scan, for one target: one ``stack_runs`` read and one indexed
+    ``COUNT``.
+    """
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        entry = lib.find_target(safe)
+        run, n_new = new_light_since_picture(
+            proj, proj.iter_stack_runs(),
+            getattr(entry, "cover_stack_run_id", None))
+    finally:
+        proj.close()
+        lib.close()
+    if run is None or n_new <= 0 or run.id is None:
+        return None
+    return NewLightOut(
+        run_id=run.id,
+        timestamp_utc=run.timestamp_utc,
+        n_frames_used=run.n_frames_used or 0,
+        n_new_subs=n_new,
     )

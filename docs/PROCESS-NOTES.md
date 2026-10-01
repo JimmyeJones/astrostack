@@ -1,5 +1,44 @@
 # Process notes & QA sweep records
 
+## 2026-10-01 (Builder) — a live PR is a live claim: the top Bugs entry was taken mid-run, and the §11 re-fetch is what caught it
+
+**What happened.** The run opened on a `main` whose four top Bugs entries were all gated on the owner's data,
+and on one open PR — **#1041**, a complete, tested fix for the *first* of those entries (the drizzled noise
+badge), whose head had last moved **2 h 20 min** earlier and which was blocked only on a version collision
+(it claimed v0.492.16, which `main` had already released as something else). That reads exactly like the
+stranded PR §8 says is good work to adopt: a finished fix nobody will merge. The run reviewed its whole diff,
+decided to adopt it, and then — per §11, *"re-fetch `origin/main` before starting each task"* — fetched once
+more before touching anything. In that window the branch had been **pushed again**, re-bumped to v0.492.18.
+Its run was alive the whole time; the two-hour silence was a gap between pushes, not an ending.
+
+**The cost and the lesson.** The cost was one diff review, which is cheap. What would not have been cheap is
+the other branch: two runs merging the same change under two version numbers, which is the collision class
+`docs/PROCESS-NOTES.md` already carries three instances of. **The two-hour rule is evidence, not a verdict** —
+a long-running task (this one had a ~20-minute suite between pushes) is quiet for exactly as long as its
+slowest step, so "last push > 2 h ago" is weaker than it looks on a repo whose gate is a full suite. The
+re-fetch immediately before the first line of work is what made the difference, and it is worth doing even
+when a decision was reached minutes earlier on freshly-fetched data.
+
+**Also worth recording: the version a live PR holds is part of the claim.** #1041 ended the window holding
+v0.492.18 without having merged it, so this run took **v0.492.19** rather than the next number above `main`'s
+0.492.17 — §11's "choose the second one's number above whatever the first is holding". Taking .18 would have
+left neither PR mergeable without a re-bump.
+
+**The task actually shipped** was the one open Bugs entry that was *not* gated: the Target page's own
+"new subs" line (v0.492.19 — see [`SHIPPED.md`](SHIPPED.md)). Worth noting for the next run that the entry
+prescribed a shape — *"have `GET …/stack-runs` carry each run's `n_light_missing` and let the page read the
+displayed run's number"* — that could not be built as written without the page re-spelling
+`displayed_picture_run` in TypeScript, i.e. re-creating in the fix the very drift the bug is an instance of.
+The entry's *second* sentence ("keeping the restored-subs card's separate sentence") is what settled it: a
+per-target endpoint over the same function satisfies both, a per-run field on the listing satisfies neither.
+**A backlog entry's prescribed shape is a lead like any other; its stated constraints outrank it.**
+
+**Suite timing on this box, for the next run's planning:** full `pytest -q -n 4` with the BLAS caps was
+**19 m 35 s** / 7,218 passed (4 cores, 15 GB). `npx vitest run src/routes/Target.test.tsx` alone is ~60 s warm
+and ~156 s cold. Progress percentages early in a pytest run badly under-predict the total — this run misread
+40 % at 8 minutes as 40 % at 37 minutes and nearly cut its own scope in half over it. Read the clock, not the
+felt duration.
+
 ## 2026-09-30 (audit run B, D2) — notes moved out of "Bugs (fix these first)"
 
 *Notes, owner answers and closed-not-fixed traces that sat in the Bugs section, moved here whole so that

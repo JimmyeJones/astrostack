@@ -17,19 +17,21 @@ import { formatStampDate } from "../format";
  * before the subs returned, so it is thinner than the owner's own data, and with
  * auto-stack off nothing will ever notice.
  *
- * The "N new subs since your last stack" nudge structurally cannot see this: it
- * compares each sub's *capture* time against the stack, and a restored sub was
- * shot long before the picture was made — usually on the very night it is made
- * of. So this is the one surface that can say so, and it says it from the
- * server's own record of *when* each sub came back (`frames.restored_utc`)
- * rather than from a count comparison, which would nag forever on any target
- * whose run legitimately combined fewer frames than it was offered.
+ * Its sibling note counts what the picture is *missing*, which now includes a
+ * restored sub — but it cannot say that a restoration is *why*, and that reason is
+ * worth saying beside one picture. So this card keeps the slot whenever a
+ * restoration is the whole of the shortfall, and it says it from the server's own
+ * record of *when* each sub came back (`frames.restored_utc`) rather than from a
+ * count comparison, which would nag forever on any target whose run legitimately
+ * combined fewer frames than it was offered. (Until v0.492.x the sibling counted
+ * by *capture* time, so it could not see this case at all: a restored sub was shot
+ * long before the picture was made — usually on the very night it is made of.)
  *
  * It only ever offers — re-stacking is hours of CPU on a NAS — and it self-hides
  * the moment the re-stack lands. The verdict is fetched by the page rather than
  * here, because the page also uses it to decide which of the two "stack it
- * again" notes speaks; `null`/`undefined` (an older backend, a failed fetch, or
- * simply nothing to say) renders nothing.
+ * again" notes speaks (`restoredIsWholeStory`); `null`/`undefined` (an older
+ * backend, a failed fetch, or simply nothing to say) renders nothing.
  */
 export function RestoredSubsNote(
   { safe, back }: { safe: string; back: RestoredSubs | null | undefined },

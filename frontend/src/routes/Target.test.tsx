@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TargetView, countNewSubsSinceStack, countQcUncheckable, describeObject, mosaicGradingNote, rejectReasonLabel } from "./Target";
+import { TargetView, countQcUncheckable, describeObject, mosaicGradingNote, rejectReasonLabel } from "./Target";
 import * as client from "../api/client";
 import type { Frame, Target } from "../api/client";
 import { formatCaptureNights } from "../format";
@@ -953,31 +953,13 @@ describe("TargetView readiness card", () => {
   });
 });
 
-describe("countNewSubsSinceStack", () => {
-  const F = (o: Partial<Frame>) => mkFrame(1, o);
-  it("returns 0 without a stack timestamp to compare against", () => {
-    expect(countNewSubsSinceStack([F({})], null)).toBe(0);
-    expect(countNewSubsSinceStack([F({})], undefined)).toBe(0);
-  });
-  it("counts only accepted+solved frames captured after the stack", () => {
-    const stack = "2026-02-01T00:00:00+00:00";
-    const frames = [
-      F({ id: 1, timestamp_utc: "2026-02-02T00:00:00+00:00" }),                 // new: counts
-      F({ id: 2, timestamp_utc: "2026-01-31T00:00:00+00:00" }),                 // older: no
-      F({ id: 3, timestamp_utc: "2026-02-03T00:00:00+00:00", solved: false }),  // unsolved: no
-      F({ id: 4, timestamp_utc: "2026-02-03T00:00:00+00:00", accept: false }),  // rejected: no
-      F({ id: 5, timestamp_utc: null }),                                        // no time: no
-    ];
-    expect(countNewSubsSinceStack(frames, stack)).toBe(1);
-  });
-  it("normalises a naive frame timestamp to UTC (no timezone shift)", () => {
-    // Frame has no offset, stack does; both denote the same instant, so a frame
-    // one second later must count as exactly one new sub regardless of the
-    // runner's local timezone.
-    const frames = [F({ timestamp_utc: "2026-02-01T00:00:01" })];
-    expect(countNewSubsSinceStack(frames, "2026-02-01T00:00:00+00:00")).toBe(1);
-  });
-});
+// `countNewSubsSinceStack`'s unit tests lived here until the server took the
+// rule over (`GET /api/targets/<safe>/new-light`). The reading they pinned —
+// accepted+solved frames captured after the newest `reusable` run — is
+// re-derived and shown to be the wrong one in
+// `tests/webapp/test_new_subs_waiting.py`, beside the rule that replaced it.
+// What is still this file's to pin is the *page*: that it shows the server's
+// number, and which of the two "stack it again" notes speaks.
 
 describe("countQcUncheckable", () => {
   const F = (o: Partial<Frame>) => mkFrame(1, o);
@@ -1435,16 +1417,39 @@ describe("TargetView mixed-pointings callout", () => {
   });
 });
 
-describe("TargetView new-subs-since-stack nudge", () => {
-  it("nudges a restack when accepted+solved subs arrived after the last stack", async () => {
+// The number behind this note is the server's since the rule moved there: one
+// function answers the Dashboard's "you've shot more of these" note, the catch-up
+// batch and this line, so they cannot name different numbers (the page used to
+// count accepted+solved frames shot after the newest `reusable` run, which on a
+// Combined target with the merge's pin was silent while the Dashboard spoke). So
+// what is left to pin here is the page: that it shows what the server sent, that
+// it stays quiet on `null`, and which of the two "stack it again" notes speaks.
+function mkNewLight(
+  o: Partial<client.NewLight> = {},
+): client.NewLight {
+  return {
+    run_id: 1, timestamp_utc: "2026-01-01T00:00:00+00:00",
+    n_frames_used: 3, n_new_subs: 1, ...o,
+  };
+}
+
+function mkRestored(
+  o: Partial<client.RestoredSubs> = {},
+): client.RestoredSubs {
+  return {
+    run_id: 1, timestamp_utc: "2026-01-01T00:00:00+00:00",
+    n_frames_used: 3, n_restored: 1, ...o,
+  };
+}
+
+describe("TargetView missing-subs nudge", () => {
+  it("nudges a restack with the number the server measured", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ reusable: true, timestamp_utc: "2026-01-01T00:00:00+00:00" }),
     ]);
-    vi.spyOn(client.api, "listFrames").mockResolvedValue([
-      mkFrame(1, { timestamp_utc: "2026-01-01T00:00:00+00:00" }),
-      mkFrame(2, { timestamp_utc: "2026-02-05T00:00:00+00:00" }),  // a new night
-    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(mkNewLight());
     const process = vi
       .spyOn(client.api, "processTarget")
       .mockResolvedValue({ job_id: "j1" });
@@ -1452,12 +1457,40 @@ describe("TargetView new-subs-since-stack nudge", () => {
     renderTarget();
 
     const btn = await screen.findByRole("button", { name: "Restack" });
-    expect(screen.getByText("1 new sub since your last stack")).toBeInTheDocument();
+    expect(
+      screen.getByText("1 sub missing from your current picture"),
+    ).toBeInTheDocument();
     btn.click();
     await waitFor(() => expect(process).toHaveBeenCalledWith("M_42"));
   });
 
-  it("stays quiet when every accepted+solved frame predates the stack", async () => {
+  it("names the shortfall of a target whose own frames all predate the stack", async () => {
+    // The regression this note was re-wired for: a Combine carries a one-night
+    // stack in with its own recent timestamp and the merge pins the deep target's
+    // picture, so *every* frame is older than the newest run and the page's old
+    // capture-time reading said nothing. The server measures membership against
+    // the picture on the wall, and the page says what it is told.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ reusable: true, timestamp_utc: "2026-06-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1, { timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+      mkFrame(2, { timestamp_utc: "2026-01-02T00:00:00+00:00" }),
+      mkFrame(3, { timestamp_utc: "2026-01-03T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(
+      mkNewLight({ n_new_subs: 3 }));
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("3 subs missing from your current picture"),
+      ).toBeInTheDocument());
+  });
+
+  it("stays quiet when the server says the picture has everything", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ reusable: true, timestamp_utc: "2026-03-01T00:00:00+00:00" }),
@@ -1466,30 +1499,56 @@ describe("TargetView new-subs-since-stack nudge", () => {
       mkFrame(1, { timestamp_utc: "2026-01-01T00:00:00+00:00" }),
       mkFrame(2, { timestamp_utc: "2026-02-01T00:00:00+00:00" }),
     ]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(null);
 
     renderTarget();
 
     await waitFor(() =>
       expect(screen.getByText("3/3 accepted")).toBeInTheDocument());
-    expect(screen.queryByText(/new sub/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/missing from your current picture/))
+      .not.toBeInTheDocument();
   });
 
-  it("ignores an editor-export run (non-reusable) when finding the last stack", async () => {
-    // A later editor-export run must not reset the 'new subs' clock: the genuine
-    // stack is old, and a newer accepted+solved sub still counts.
+  it("gives the slot to the restored card when a restoration is the whole shortfall", async () => {
+    // Beside one picture the *reason* is worth saying, and a sub that came back
+    // is the one shortfall a capture clock structurally cannot see.
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
-      mkRun({ id: 2, reusable: false, timestamp_utc: "2026-02-10T00:00:00+00:00" }),
-      mkRun({ id: 1, reusable: true, timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+      mkRun({ reusable: true, timestamp_utc: "2026-01-01T00:00:00+00:00" }),
     ]);
-    vi.spyOn(client.api, "listFrames").mockResolvedValue([
-      mkFrame(1, { timestamp_utc: "2026-02-05T00:00:00+00:00" }),
-    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(
+      mkNewLight({ n_new_subs: 2 }));
+    vi.spyOn(client.api, "restoredSubs").mockResolvedValue(
+      mkRestored({ n_restored: 2 }));
 
     renderTarget();
 
     await waitFor(() =>
-      expect(screen.getByText("1 new sub since your last stack")).toBeInTheDocument());
+      expect(screen.getByTestId("restored-subs-note")).toBeInTheDocument());
+    expect(screen.queryByText(/missing from your current picture/))
+      .not.toBeInTheDocument();
+  });
+
+  it("keeps the wider note when more is missing than came back", async () => {
+    // Naming only the restorations would understate what a re-stack folds in.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ reusable: true, timestamp_utc: "2026-01-01T00:00:00+00:00" }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(
+      mkNewLight({ n_new_subs: 9 }));
+    vi.spyOn(client.api, "restoredSubs").mockResolvedValue(
+      mkRestored({ n_restored: 2 }));
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("9 subs missing from your current picture"),
+      ).toBeInTheDocument());
+    expect(screen.queryByTestId("restored-subs-note")).not.toBeInTheDocument();
   });
 });
 
@@ -1514,17 +1573,18 @@ describe("TargetView older-stack restack offer", () => {
       expect(screen.getByTestId("restack-gain-note")).toBeInTheDocument());
   });
 
-  it("stands down while the 'new subs' note is already offering a restack", async () => {
+  it("stands down while the missing-subs note is already offering a restack", async () => {
     // Two restack offers stacked on one page is exactly the banner-piling the
-    // owner complained about — and the new-subs one is the more pressing, since
-    // its restack fixes the dates too.
+    // owner complained about — and the missing-subs one is the more pressing,
+    // since its restack fixes the dates too.
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ reusable: true, timestamp_utc: "2026-01-01T00:00:00+00:00" }),
     ]);
     vi.spyOn(client.api, "listFrames").mockResolvedValue([
-      mkFrame(1, { timestamp_utc: "2026-02-05T00:00:00+00:00" }),  // a new night
+      mkFrame(1, { timestamp_utc: "2026-02-05T00:00:00+00:00" }),
     ]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(mkNewLight());
     vi.spyOn(client.api, "restackGain").mockResolvedValue({
       run_id: 1, timestamp_utc: "2026-01-01T00:00:00+00:00",
       n_frames_used: 200, n_frames_ready: 512,
@@ -1534,7 +1594,9 @@ describe("TargetView older-stack restack offer", () => {
     renderTarget();
 
     await waitFor(() =>
-      expect(screen.getByText("1 new sub since your last stack")).toBeInTheDocument());
+      expect(
+        screen.getByText("1 sub missing from your current picture"),
+      ).toBeInTheDocument());
     expect(screen.queryByTestId("restack-gain-note")).toBeNull();
   });
 });
@@ -1591,14 +1653,20 @@ describe("TargetView restored-subs restack offer", () => {
     expect(screen.queryByTestId("restack-gain-note")).toBeNull();
   });
 
-  it("stands down while the 'new subs' note is already offering a restack", async () => {
+  it("stands down when more is missing from the picture than came back", async () => {
+    // The restored card names *why* the picture is thin and keeps the slot when a
+    // restoration is the whole of it — but here last night's subs are missing too,
+    // and naming only the 12 that came back would understate what a re-stack folds
+    // in. So the wider note speaks and this one stands down.
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ id: 1, reusable: true, timestamp_utc: "2026-01-01T00:00:00+00:00" }),
     ]);
     vi.spyOn(client.api, "listFrames").mockResolvedValue([
-      mkFrame(1, { timestamp_utc: "2026-02-05T00:00:00+00:00" }),  // a new night
+      mkFrame(1, { timestamp_utc: "2026-02-05T00:00:00+00:00" }),
     ]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(
+      mkNewLight({ n_new_subs: 20 }));
     vi.spyOn(client.api, "restoredSubs").mockResolvedValue({
       run_id: 1, timestamp_utc: "2026-01-01T00:00:00+00:00",
       n_frames_used: 200, n_restored: 12,
@@ -1607,7 +1675,9 @@ describe("TargetView restored-subs restack offer", () => {
     renderTarget();
 
     await waitFor(() =>
-      expect(screen.getByText("1 new sub since your last stack")).toBeInTheDocument());
+      expect(
+        screen.getByText("20 subs missing from your current picture"),
+      ).toBeInTheDocument());
     expect(screen.queryByTestId("restored-subs-note")).toBeNull();
   });
 });

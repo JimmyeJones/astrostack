@@ -16,9 +16,12 @@ const NAMED = 3;
  * "You've shot more of these since their pictures were made" — the library-wide
  * half of a nudge that has only ever existed per target.
  *
- * The Target page has said *"N new subs since your last stack — restack?"* since
- * v0.90.0, and it is the right sentence for someone already looking at the
- * picture that has fallen behind. But with auto-stack off (the owner's setting)
+ * The Target page has carried a per-target version of this since v0.90.0 — now
+ * *"N subs missing from your current picture"* — and it is the right sentence for
+ * someone already looking at the picture that has fallen behind. Both read one
+ * server-side rule (`newsubs.new_light_since_picture`), so the two can never name
+ * different numbers; until that was so, this note could name a Combined target
+ * whose own page said nothing. But with auto-stack off (the owner's setting)
  * and a target per object across many nights, the question after a night's
  * capture is *which* target to open — and the only surface that knew was the one
  * you had to open to find out. So a picture could sit months behind its own data

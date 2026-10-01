@@ -803,11 +803,30 @@ export interface RestackGain {
   missing_night_count: boolean;
 }
 
+/** Subs the target's **displayed** picture does not contain — accepted and
+ *  located, so a re-stack would really fold them in. The one-target reading of
+ *  the rule the Dashboard's "you've shot more of these" note and "Bring my
+ *  pictures up to date" ask (`webapp/routers/newsubs.py::new_light_since_picture`),
+ *  so the three can never name different numbers. The page used to compute this
+ *  itself from the frame list — capture time against the newest `reusable` run —
+ *  which on a Combined target with the merge's pin was silent while the Dashboard
+ *  named the target. `null` when the picture has every sub, or the target has
+ *  never been stacked. */
+export interface NewLight {
+  /** The genuine stack run behind the picture on the wall — the one measured. */
+  run_id: number;
+  timestamp_utc: string;
+  /** How many subs that picture combined, i.e. what a re-stack grows *from*. */
+  n_frames_used: number;
+  /** How many accepted, located subs it does not contain. */
+  n_new_subs: number;
+}
+
 /** Subs the app set aside on its own and later put back — *after* this target's
  *  newest picture was stacked, so the picture was made without them. The
- *  counterpart of "N new subs since your last stack" for the case that one can't
- *  see: a restored sub was *shot* before the stack ran. `null` when nothing came
- *  back since, which is every healthy install. */
+ *  counterpart of `NewLight` above for the one thing a *count* cannot say — that a
+ *  restoration is why the picture is thin. `null` when nothing came back since,
+ *  which is every healthy install. */
 export interface RestoredSubs {
   run_id: number;
   timestamp_utc: string;
@@ -2575,12 +2594,11 @@ export interface UnexportedEditItem {
   timestamp_utc: string;
 }
 
-// One target whose newest picture no longer includes every sub it has: subs
-// accepted and plate-solved that the stack does not contain — shot after it ran,
-// or set aside while it was being made and since put back by the app itself. That
-// makes it deliberately *wider* than the Target page's own "N new subs since your
-// last stack" nudge, which counts by capture time and has a sibling card for the
-// restored case; the reasoning is on `/api/new-subs-waiting`. Every field is
+// One target whose displayed picture no longer includes every sub it has: subs
+// accepted and located that the stack does not contain — shot after it ran, or set
+// aside while it was being made and since put back by the app itself. Exactly the
+// number the target's own page shows (`NewLight`), because both come off one
+// server-side rule; the reasoning is on `/api/new-subs-waiting`. Every field is
 // optional-safe (defaulted server-side) so an older backend simply reports nothing.
 export interface NewSubsWaitingItem {
   safe: string;
@@ -3581,6 +3599,11 @@ export const api = {
   // set-aside subs back after the newest stack ran. `null` means say nothing.
   restoredSubs: (safe: string) =>
     req<RestoredSubs | null>(`/api/targets/${safe}/restored-subs`),
+  // "Your picture doesn't include everything you've shot" — the subs the
+  // *displayed* picture is missing, through the same rule the Dashboard note and
+  // the catch-up batch ask. `null` means say nothing.
+  targetNewLight: (safe: string) =>
+    req<NewLight | null>(`/api/targets/${safe}/new-light`),
   stackHealth: (safe: string, runId?: number) =>
     req<StackHealth | null>(
       `/api/targets/${safe}/stack-health` +
