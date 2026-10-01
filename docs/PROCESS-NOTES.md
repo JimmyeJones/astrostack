@@ -1,5 +1,78 @@
 # Process notes & QA sweep records
 
+## 2026-10-01 (Builder, branches `agent/narrow-unreadable-count` + `agent/hygiene-degrade-not-500`) — v0.492.21 + v0.492.22: a downgraded lead measured rather than taken on faith, and a hand-off taken the day it was filed
+
+*(Baseline = `origin/main` at `a155850`/`fe8e6e9` (`__version__` 0.492.20): **7260 passed, 3 skipped**, 13m02s with
+`OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green,
+so a finding was distinguishable from a pre-existing failure.)*
+
+### The two traps AGENTS.md §7 names both fired, in the order it predicts
+
+`source scripts/agent-setup.sh` does **not** survive into the next `Bash` call, so the first suite start died on
+`ModuleNotFoundError: No module named 'numpy'` — and `pip install pytest-xdist` without the venv had gone to the
+system site-packages, so `.venv/bin/python -m pytest -n 4` then failed on the missing plugin. Both are already in
+§7 and in `docs/AGENT-ENVIRONMENT.md`; logged only because they cost two restarts, exactly as the previous run
+logged them. **The fix each time is the same: call `.venv/bin/python` and `.venv/bin/pip` explicitly** rather than
+relying on an activation that ended with the previous tool call.
+
+### Why "Bugs (fix these first)" had no blind-buildable entry, and what was done instead
+
+Read top to bottom: the open items are a solve-time refusal gated on an unmeasured retry bill, the auto-binder's
+half-range charge gated on real masters, the `#880` repr marked *do not carry as PRIORITY 3*, the weighted-coverage
+border rule marked *probably not worth building*, two hardening notes marked *don't build until it is someone's
+actual problem*, a colour-chain bisect gated on an owner report, and the sky-atlas rotation sign gated on a real
+solved frame. The one entry with a concrete, ungated remainder was the **FrameRow-projection LEAD's shape (a)** —
+and it carried its own instruction: *"check the stat half against a healthy install before spending a slot."* So
+the slot opened with the measurement, not the edit.
+
+**The measurement, and it settled the question in favour of building.** 35,894-sub synthetic, every file present
+(the healthy install; the original 1,594 ms came from a fixture where *none* existed), best of 3, uncontended:
+
+| walk | before | after |
+|---|---|---|
+| accepted only | 2,324 ms | 1,410 ms |
+| accepted **and** solved | 2,181 ms | 1,276 ms |
+| the same walk with the `stat()` removed | 873 ms | 117 ms |
+
+So the lead was right on both counts it had been downgraded for — the `stat()`s dominate the remainder, and the
+projection buys the row building only — and **that row building is ~750 ms per deep target**, which is a third to
+two-fifths of the whole call, paid once per target with accepted frames on the Dashboard's missing-files roll-up.
+The lesson generalises: *"a projection buys nothing where the caller already streams"* (v0.471.4's note) is true
+about **peak memory** and false about **latency** — deserialising a 2 kB text column 35,894 times costs real
+seconds whether or not the rows are retained. A future entry in this class should say which of the two it means.
+
+**First measurement was taken under load and is not the one in the entry.** The first run of the benchmark
+overlapped the baseline suite (`-n 4`, four busy cores) and read 2,625 ms → 1,366 ms, with the
+`accepted+solved` walk coming out *faster* than the plain one — arithmetically impossible, since it is the same
+work plus a filter. That impossibility is what flagged the contention; the numbers above were re-taken on an idle
+box. **A performance number measured beside a running suite is not a number.**
+
+### The second task was a hand-off, not a collision
+
+The §11 re-fetch before starting found PR #1047 — a Scout `docs:` commit from minutes earlier filing a
+**reproduced** `cleanup_suggestions`/`merge_suggestions` 500-on-bad-project bug. Under §11's "a freshly filed
+entry is the hot one" that would normally mean *take another*, but the entry's own text says the Scout *"left it
+for the Builder because §5 wants a fail-before test on each endpoint"* and hands over the repro recipe. An
+explicit hand-off is the opposite of a claim, so it was taken, and the Scout's recipe (bump `PRAGMA user_version`
+above `SCHEMA_VERSION` on one target's project DB) produced all three fail-before reds on the first try. **Worth
+generalising: a filing that names the next agent and supplies the repro is a hand-off; the two-hour rule is about
+entries that look like someone is still working on them.**
+
+**One scope decision inside it.** The same entry carries a *traced, not reproduced* sibling — `sky.py::get_sky`'s
+per-run reads after a guarded open. It was deliberately left, and not for lack of time: the certain-raise shape
+fixed in the two routers happens **at open**, so it can never reach those reads, and only a DB that opens cleanly
+and then errors mid-query can. Nothing in the repo produces one, so a regression test would be green for the
+reason §8 warns about. It stays filed as a lead whose **first step is finding the trigger**.
+
+### Shipping two changes in one run, and the version arithmetic §11 warns about
+
+PR #1048 (v0.492.21) was pushed before PR #1049 was branched, so #1049 took **0.492.22** — above what the first PR
+was *holding*, not merely above `main`'s 0.492.20. After #1048 merged, syncing #1049 conflicted on exactly the
+three files §11 predicts: `webapp/__init__.py` (take the higher, do not re-bump), and `docs/IMPROVEMENTS.md` +
+`docs/SHIPPED.md` (**union, newest first** — neither side deleted). Full suite re-run after the sync: 7269 passed,
+3 skipped. The order that made this cheap was *push the first PR before branching the second*, so the second
+never had to guess which number was taken.
+
 ## 2026-10-01 (Scout, branch `claude/funny-shannon-a9f162`) — QA sweep of the webapp routers (rotation item (4)): one REPRODUCED resilience bug filed, rest clean; issue inbox triaged (all four awaiting owner); `--mosaic` dogfood clean
 
 *(Baseline = `origin/main` at `a155850` (`__version__` 0.492.20): **7260 passed, 3 skipped**, 20m41s with
