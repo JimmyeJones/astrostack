@@ -1,5 +1,94 @@
 # Process notes & QA sweep records
 
+## 2026-10-01 (Builder, branch `claude/keen-darwin-v85rmq`) — v0.492.23: the lead whose gate was "find a trigger first", and what finding it was worth
+
+*(Baseline = `origin/main` at `205843c` (`__version__` 0.492.22): **7269 passed, 3 skipped**, 15m24s with
+`OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green, so a
+finding was distinguishable from a pre-existing failure. After: **7273 passed, 3 skipped**, 14m49s.)*
+
+### "Bugs (fix these first)" had exactly one ungated entry, and its gate was a research question
+
+Read top to bottom, every other open entry carries a stand-down with numbers or a gate only the owner's data can
+open: the #965 solve-time refusal (unmeasured retry bill), the auto-binder's half-range charge (needs real
+masters), the #880 repr (marked *do not carry as PRIORITY 3*), the weighted-coverage border rule (*probably not
+worth building*), two hardening notes (*don't build until it is someone's actual problem*), the colour-chain
+bisect (owner-report gated), the TIFF white point (*do not blind-flip the anchors*; needs a real deep OSC stack)
+and the sky-atlas rotation sign (needs a real solved frame). The one remaining item was the `sky.py::get_sky`
+lead, and its instruction was **"before building this one, find a trigger"** — so the slot opened on the
+research, not on the edit. **That is the right way to spend a slot on a traced-not-reproduced entry**, and the
+filing was right to refuse to ship a fix whose test would have been green for no reason.
+
+### The trigger was hiding inside the lead's own premise
+
+The lead (and the v0.492.22 commit that left it) reasoned: the certain-raise shape is `_check_schema` refusing a
+newer `user_version`, that happens **at open**, `sky.py` already guards the open, therefore only "a DB that opens
+and then errors" reaches these reads, and *"nothing in the repo produces one"*. Every step is true. The step that
+points at the answer is the one nobody turned around: **`Project.open` never reads a row.** It reads page 1, the
+pragma, `sqlite_master` and `PRAGMA table_info` per reconciled table. So anything wrong with the *data* pages is
+invisible to it.
+
+Measured, on a 300-run `project.sqlite` (22 interior 4 KiB pages), overwriting one page at a time:
+
+| outcome | pages |
+|---|---|
+| **opens clean, first `SELECT` raises `database disk image is malformed`** | **14** |
+| raises at open (the shape already guarded) | 2 |
+| harmless | 6 |
+
+A bad block, a power loss mid-write or a partially-flushed copy on a NAS produces that. **It needs no image
+rollback at all, so on the owner's box this shape is more reachable than the one the siblings were fixed for.**
+Two other candidate shapes were tested and rejected for the fixture: truncating the file raised *at open* (page 1's
+own integrity check), and a competing writer holding `BEGIN EXCLUSIVE` did not block the reader at all, so
+`busy_timeout` never expired and no `database is locked` arose.
+
+**Generalisable:** *"nothing in the repo produces that state"* is a statement about the repo's **fixtures**, not
+about the owner's hardware. Before filing a resilience bug as unreproducible, ask what the production code
+*doesn't* read — the gap between "what `open` validates" and "what the next call touches" is where this class
+lives, and it is a gap a plain read of the two functions shows.
+
+### Finding the trigger tripled the finding
+
+With a trigger in hand the file was swept for the *pattern* rather than the lead's line numbers, and `sky.py`
+carries the same hole three times, not once: `get_sky` (`GET /api/sky`), `_my_map_pictures`
+(`GET /api/sky/my-map.png`) and `_sky_coverage_inputs` (`GET /api/sky/coverage`) — each guarding `Project.open`
+and then putting its `iter_stack_runs()` in a bare `try`/`finally` with no `except`. The second is an `<img>`, so
+its 500 reached the owner as a broken picture with nothing to click, and the third is the number printed beside
+that same map. **A filing that names one site names the site it was looking at; the class is worth a grep before
+the fix.**
+
+The grep also produced a *negative* result worth keeping, so the next run does not re-derive it: `gallery.py`'s
+best-pictures wall (`GET /api/gallery/best`) reads `native_frame_shape(proj)` outside its guard and looks like a
+fourth site, but that helper catches its own DB errors and returns `None` by design. It is fine. `stats.py` (five
+loops), `storage.py`, `newsubs.py`, `upload.py` and `calibration.py` all put their reads inside the guarded
+`try` — **`sky.py` was the only file in `webapp/` that guarded the open and left the reads bare.**
+
+### A fixture that asserts its own precondition
+
+Both fixtures go through `_opens_then_errors(project_dir)`, which *checks* that `Project.open` succeeds and the
+read raises, instead of assuming it. Without that, a fixture that quietly raised at open would have "proved"
+guards that the four sibling walks already survive — green for the wrong reason, which is precisely what the lead
+refused to ship. It also means a future `_check_schema` that heals either state makes the fixture **fail loudly**
+rather than leaving a dead test behind. Cheap, and it caught a real bug in the first draft: `pytest.fail` raises
+`Failed`, which derives from `BaseException`, so the helper's `except Exception` did not catch it.
+
+### Housekeeping: a stranded PR merged
+
+PR #1050 (docs-only, the previous run's own record) was green on all six checks and had sat unmerged for ~4 hours
+— past §11's two-hour window, so not a live run. Merged per §8 ("a finished, tested fix sat unmerged for two
+weeks because nobody wrote it down") before branching, so this run's `PROCESS-NOTES.md` addition could not collide
+with it. **Checking the open-PR list for strandees is worth the one call at the start of a run**, and merging one
+first is cheaper than unioning the same file twice.
+
+### Filed as a lead, not built
+
+`_check_schema` self-heals a missing *column* on every open and explicitly punts a missing *table* to a
+"base-schema recreate" that only runs when `user_version` is **behind** — so a current-version DB missing a table
+opens and then raises `no such table`, which is the second fixture here. Running `SCHEMA_SQL`'s
+`CREATE TABLE IF NOT EXISTS` on every open would close it additively (`_AUX_TABLES_SQL` already runs there, same
+class of cost), but it is on the hot open path every cross-target page pays per target, so it wants a measurement
+first. Not worth a slot on its own; recorded in the `SHIPPED.md` entry too.
+
+
 ## 2026-10-01 (Builder, branches `agent/narrow-unreadable-count` + `agent/hygiene-degrade-not-500`) — v0.492.21 + v0.492.22: a downgraded lead measured rather than taken on faith, and a hand-off taken the day it was filed
 
 *(Baseline = `origin/main` at `a155850`/`fe8e6e9` (`__version__` 0.492.20): **7260 passed, 3 skipped**, 13m02s with

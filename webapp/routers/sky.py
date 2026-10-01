@@ -277,6 +277,14 @@ def get_sky(request: Request) -> SkyResponse:
                     run_id=run.id,
                     wcs=wcs,
                 ))
+            except Exception:  # noqa: BLE001 — a broken project must not 500 the sky map
+                # The *other* half of the guard above, and the one that needs no
+                # rollback to fire: ``Project.open`` reads page 1, the pragma and
+                # the schema — never a row — so a DB with one corrupt data page
+                # (a bad block, an interrupted write) opens cleanly and raises
+                # ``database disk image is malformed`` here instead. One target's
+                # placement, like the open, not every target's.
+                continue
             finally:
                 if proj is not None:
                     proj.close()
@@ -409,6 +417,11 @@ def _my_map_pictures(lib) -> tuple[list, dict]:  # noqa: ANN001, ANN202
                  and r.canvas_w and r.canvas_h),
                 None,
             )
+        except Exception:  # noqa: BLE001 — one broken project must not lose the map
+            # Same shape as the open above: a DB whose schema reads fine can
+            # still raise on its first *row*. This one is an ``<img>``, so the
+            # 500 arrived as a broken picture with nothing to click.
+            continue
         finally:
             proj.close()
         if run is None:
@@ -557,6 +570,11 @@ def _sky_coverage_inputs(lib) -> tuple[list[str], str]:  # noqa: ANN001, ANN202
                  if r.fits_path and Path(r.fits_path).exists()),
                 None,
             )
+        except Exception:  # noqa: BLE001 — one broken project must not lose the stat
+            # Same shape as the open above, and the stat sits *beside* the map:
+            # one unreadable DB must cost the sky this target covers, not the
+            # whole number.
+            continue
         finally:
             proj.close()
         if run is None:

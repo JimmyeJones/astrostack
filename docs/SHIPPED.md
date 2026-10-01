@@ -1,5 +1,85 @@
 # Shipped — the record
 
+## 2026-10-01 (Builder) — v0.492.23: a project DB that opens cleanly and *then* errors no longer takes the whole Sky surface with it
+
+### v0.492.23 — 🟠 BUG FIX (friendliness — PRIORITY 3): the lead at the head of "Bugs", its missing trigger found, and two more sites than it named
+
+*(Builder, branch `claude/keen-darwin-v85rmq`. The entry was the only open, ungated item in "Bugs (fix these
+first)"; its gate was **"before building this one, find a trigger"**, so that is where the slot opened.)*
+
+**The gate, and what it was hiding.** v0.492.22 fixed the two *reproduced* halves of the Scout's 2026-10-01
+filing (`targets.py::cleanup_suggestions` / `merge_suggestions`) and deliberately left the third, `sky.py`,
+because the certain-raise shape the first two had — `Project._check_schema` refusing a newer `user_version`
+after a §9 rollback — happens **at open**, and `sky.py` already guards the open. The lead's conclusion was
+therefore that only "a DB that opens and then errors" could reach those reads and that *"nothing in the repo
+produces one"*. That conclusion was incomplete, not wrong, and the premise it rests on is the thing that
+points at the trigger: **`Project.open` never reads a row.** It reads page 1, `PRAGMA user_version`,
+`sqlite_master`, and `PRAGMA table_info` per reconciled table (`_check_schema` → `_reconcile_table_columns`).
+
+**So the trigger is one bad page.** Overwrite a single interior 4 KiB *data* page of `project.sqlite` and the
+open succeeds exactly as before, while the first `SELECT` raises `sqlite3.DatabaseError: database disk image is
+malformed`. Measured on a 300-run project DB (22 interior pages): **14 pages give open-clean-then-read-raises,
+2 raise at open, 6 are harmless.** A bad block, a power loss mid-write, or a partially-flushed copy on the
+owner's NAS produces that state, and nothing about it needs an image rollback — so this shape is *more*
+reachable on his box than the one the siblings were fixed for, not less. (The other deterministic shape, kept
+for the test fixture because it needs no SQLite internals: a project missing a whole table. `_reconcile_table_columns`
+reconciles *columns* and deliberately `continue`s on a table that is absent entirely — its comment says
+"handled by the base-schema recreate", which only runs when `user_version` is **behind**, so never for a
+current DB. Open succeeds; the first read raises `no such table`.)
+
+**And the lead named one site out of three.** With a trigger in hand the file was swept for the pattern
+rather than the line number, and `sky.py` has the same hole three times — the open guarded, the reads after it
+in a bare `try`/`finally` with **no `except`**:
+
+| site | endpoint | the unguarded read |
+|---|---|---|
+| `get_sky` (~L160–282) | `GET /api/sky` — the Sky Map's dome | `proj.iter_stack_runs()`, `_representative_pixscale_rotation` → `proj.solved_frame_scale_rotation()` |
+| `_my_map_pictures` (~L405) | `GET /api/sky/my-map.png` — "Where you've been" | `proj.iter_stack_runs()` |
+| `_sky_coverage_inputs` (~L554) | `GET /api/sky/coverage` — the deg² read-out beside that map | `proj.iter_stack_runs()` |
+
+The second one matters more than its size suggests: it is an `<img>` on the page, so the 500 reached the owner
+as a **broken picture with nothing to click** rather than as an error he could read. And the third sits
+directly beside it, so one unreadable project took out the map *and* the number under it at once.
+
+**The fix — three `except Exception: continue` guards, which is what every sibling already does.** Checked
+rather than assumed: `gallery.py` (both cross-target loops), `stats.py` (five loops), `storage.py`,
+`newsubs.py`, `upload.py` and `calibration.py` each either put the reads **inside** the same `try` as the open
+or give them their own `except`. `sky.py` was the only file in `webapp/` that guarded the open and then left
+the reads bare. Skipping is also right on its own terms, as it is for the siblings: a tile placed on the sky,
+a picture drawn on the all-sky map, and a square-degree total are all *claims*, and none of them is a claim to
+make about a target whose rows could not be read. Silent, like `sky.py`'s own open-guard three lines above it
+and like `stats`/`storage`/`newsubs`/`upload`/`calibration` — rather than adding a module logger for three skips.
+
+**Verified NOT a sibling of this, so a later run does not re-derive it:** `gallery.py`'s best-pictures wall
+(`GET /api/gallery/best`) *does* read `native_frame_shape(proj)` outside its guard, but that helper catches its
+own DB errors and returns `None` by design ("a broken DB must not sink a card"), and nothing else in that block
+touches the project. The wall is fine.
+
+**Tests — `tests/webapp/test_sky_broken_project.py`, +4, all four fail-before** (red on this branch before the
+guards, each with the real exception escaping the endpoint: three `sqlite3.OperationalError: no such table:
+stack_runs`, one `sqlite3.DatabaseError: database disk image is malformed`). One per endpoint on the
+deterministic missing-table fixture, plus one on the realistic corrupt-page fixture through `GET /api/sky`.
+Every test puts a **good** target beside the broken one and asserts the good one still comes back, because "no
+500" is only half the contract — the owner must still get the picture the app could answer about. Both fixtures
+assert their own precondition through `_opens_then_errors` (open must succeed, the read must raise), so a future
+`_check_schema` that heals either state makes the fixture fail loudly instead of leaving a test green for the
+wrong reason — which is the failure mode the lead was right to refuse to ship into. The corrupt-page fixture
+restores the original bytes and walks to the next page rather than hard-coding a page number a future schema
+would move.
+
+**Scope.** Three `except` clauses and their comments in `webapp/routers/sky.py`; one new test file. No config
+key, settings field, `SCHEMA_VERSION`, migration, on-disk path, endpoint, response shape or default changed; no
+new dependency; `incoming/` untouched; a healthy library's three endpoints answer byte-for-byte as before (the
+guards are unreachable unless a read raises). Full suite green. `ruff` count on the touched file unchanged.
+
+**Filed as a lead, not built (no §9 risk, but it is a real latent hole):** `_check_schema` self-heals missing
+*columns* on every open and explicitly punts a missing *table* to a "base-schema recreate" that only runs when
+`user_version` is behind. Running `SCHEMA_SQL`'s `CREATE TABLE IF NOT EXISTS` on every open would close it
+additively — `_AUX_TABLES_SQL` already runs there, so it is the same class of cost — but it touches the hot
+open path that every cross-target page pays per target, so it wants a measurement first and is not worth a slot
+on its own.
+
+
 ## 2026-10-01 (Builder) — v0.492.22: one project this build cannot open no longer takes the whole Library nudge with it
 
 ### v0.492.22 — 🟠 BUG FIX (friendliness + §9 upgrade-safety, PRIORITY 3): the reproduced entry the Scout filed and handed over the same day, `cleanup_suggestions` / `merge_suggestions` degrade instead of 500ing
