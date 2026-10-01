@@ -1,7 +1,7 @@
 # Process notes & QA sweep records
 
 
-## 2026-10-01 (Builder, branch `claude/keen-darwin-ok7w8n`) — v0.492.24: a gate that dissolved when it was measured, and the sibling the filing had not looked for
+## 2026-10-01 (Builder, branch `claude/keen-darwin-ok7w8n`) — v0.492.25: a gate that dissolved when it was measured, and the sibling the filing had not looked for
 
 *(Baseline = `origin/main` at `bfff252` (`__version__` 0.492.23): **7273 passed, 3 skipped**, 15m14s with
 `OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green, so
@@ -58,7 +58,18 @@ and was inverted: it now asserts the heal, and backs a fifth test.
 Without the assertion, this run would have silently made three guard tests vacuous — green against a DB that no
 longer has the defect — and nothing would have said so.
 
-## 2026-10-01 (Builder, branch `claude/keen-darwin-v85rmq`) — v0.492.23: the lead whose gate was "find a trigger first", and what finding it was worth
+### Collision #n: two runs took 0.492.24, and the version was the only thing that collided
+
+A parallel run merged **v0.492.24** (`routes/Sky.tsx`'s "My map" drawing state, found by its own dogfood) during
+this run's post-change suite, so §11's "choose the version number at merge time, from the latest `main`" fired:
+main's value was taken and this became **v0.492.25**. The code did not overlap at all — `seestack/io/` against
+`frontend/src/routes/` — and the three docs files unioned cleanly, which is the shape §11 predicts. One thing the
+union needed by hand: the other run had *renamed* the v0.492.23 `PROCESS-NOTES.md` heading (to "v0.492.23 +
+v0.492.24"), so a plain keep-both left the old and new heading stacked on consecutive lines. **A union is the
+right default for an append-only docs file, but check the seam for a line the other side rewrote rather than
+added** — two headings in a row is the visible tell.
+
+## 2026-10-01 (Builder, branch `claude/keen-darwin-v85rmq`) — v0.492.23 + v0.492.24: the lead whose gate was "find a trigger first", and the bug the dogfood found once the backlog was dry
 
 *(Baseline = `origin/main` at `205843c` (`__version__` 0.492.22): **7269 passed, 3 skipped**, 15m24s with
 `OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green, so a
@@ -136,6 +147,32 @@ PR #1050 (docs-only, the previous run's own record) was green on all six checks 
 weeks because nobody wrote it down") before branching, so this run's `PROCESS-NOTES.md` addition could not collide
 with it. **Checking the open-PR list for strandees is worth the one call at the start of a run**, and merging one
 first is cheaper than unioning the same file twice.
+
+### The second task came from the dogfood, not the backlog — and the backlog is why
+
+After v0.492.23 the "Bugs" section has **no ungated entry left**: everything in it carries a stand-down with
+numbers or a gate only the owner's data can open (listed above). §2 says that is a fine place to stop — *"if the
+backlog is dry, do a dogfood pass and file what you find"* — so the `--mosaic` pass that was going to be run
+anyway, to check v0.492.23's own three surfaces on real data, became the source of the second task.
+
+**It paid off on the first screenshot.** `desktop_sky_my_map.png`: card header, tab strip, explanatory paragraph,
+"Save this map" button and the coverage line *"your 2 pictures cover 1.0 square degrees…"* all painted, around a
+**completely empty black panel**. `phone_sky_my_map.png`, taken later in the same pass, renders the map fine.
+That difference is the whole diagnosis — cold cache vs warm — and it is the kind of thing only a screenshot
+shows, because every request in the log returned 200 and the probe's own verdict was *"nothing overflowing, no
+console errors"*. **A pass that only greps its log for errors would have called this clean.**
+
+Then measured rather than assumed, because a screenshot is a *timing* claim: against the dogfood install,
+`my-map.png` is **2.03 s cold and 1.04 s warm**, while the `coverage` stat printed underneath it answers in
+**0.06 s**. So the caption is confidently full of numbers while the picture it describes is still a dark
+rectangle — and the warm second is paid on *every* visit, because validating the cache re-walks the library.
+Both ends scale with the target count. Fixed as v0.492.24.
+
+**Worth generalising:** the probe reports what the app *errored* on; the screenshots are what it *looked like*.
+This bug produced no error anywhere — no 500, no console message, no failed request — and lived entirely in the
+gap between "the request is in flight" and "the page says so". AGENTS.md §7 already says to read what the app
+says as one paragraph rather than asking "did anything error?"; this is that instruction paying for itself, and
+the paragraph to read includes the **blank** parts.
 
 ### Filed as a lead, not built
 

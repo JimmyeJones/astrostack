@@ -11,7 +11,7 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 0. **✅ SHIPPED — that bug and its lead are both closed; "Bugs (fix these first)" holds nothing ungated again**
    (Builder, same day): `cleanup_suggestions`/`merge_suggestions` as **v0.492.22**, the `sky.py` lead — three
    endpoints, not one — as **v0.492.23**, and the missing-*table* self-heal that lead left behind as
-   **v0.492.24** (in `Library` too, where it costs every page). Three runs have now read Bugs top to bottom and
+   **v0.492.25** (in `Library` too, where it costs every page). Three runs have now read Bugs top to bottom and
    found every remaining entry gated or stood down with numbers; the list is in `docs/PROCESS-NOTES.md` so the
    next run need not re-derive it. **The Scout owes this page its next re-cut.**
 
