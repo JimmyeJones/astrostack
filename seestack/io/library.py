@@ -146,6 +146,29 @@ def _authoritative_target_columns() -> list[tuple]:
 _EXPECTED_TARGET_COLUMNS = _authoritative_target_columns()
 
 
+def _authoritative_registry_tables() -> frozenset[str]:
+    """Every table :data:`_REGISTRY_SCHEMA_SQL` defines, read from the schema
+    itself — the registry's twin of ``project.py``'s ``_authoritative_tables``,
+    derived the same way so it cannot drift. SQLite's own ``sqlite_sequence``
+    (implicit from ``AUTOINCREMENT``) is not ours to re-create.
+    """
+    ref = sqlite3.connect(":memory:")
+    try:
+        ref.executescript(_REGISTRY_SCHEMA_SQL)
+        return frozenset(
+            r[0]
+            for r in ref.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        )
+    finally:
+        ref.close()
+
+
+_EXPECTED_REGISTRY_TABLES = _authoritative_registry_tables()
+
+
 @dataclass
 class TargetEntry:
     """Registry row for one target."""
@@ -336,6 +359,76 @@ class Library:
         assert self._conn is not None
         self._conn.executescript(_AUX_TABLES_SQL)
 
+    def _recreate_missing_tables(self) -> set[str]:
+        """Re-create any table :data:`_REGISTRY_SCHEMA_SQL` defines that this
+        registry has lost, and return their names — an empty set, and no write at
+        all, for the healthy registry every ordinary open sees.
+
+        The same hole :meth:`seestack.io.project.Project._recreate_missing_tables`
+        closes, in the store where it costs more. :meth:`_ensure_columns` repairs a
+        missing *column* on every open but returns early on a table that is absent
+        entirely ("handled by the base-schema recreate"), and that recreate is
+        :meth:`_check_schema`'s **older-version** branch — so a registry already
+        stamped *current* that lost ``targets`` opened cleanly and then raised
+        ``no such table: targets`` on every page, because every page starts from
+        ``list_targets()``. One bad block or an interrupted write on the NAS is
+        enough; no image rollback is needed.
+
+        Additive and rollable: pure ``CREATE … IF NOT EXISTS`` from the
+        authoritative schema, nothing dropped or rewritten, and no
+        ``LIBRARY_SCHEMA_VERSION`` bump — so the previous image still opens the
+        registry afterwards (AGENTS.md §9). A registry too damaged to answer the
+        one ``sqlite_master`` read keeps exactly today's behaviour: a self-heal
+        never turns an open that works into one that raises.
+        """
+        assert self._conn is not None
+        try:
+            have = {
+                r[0]
+                for r in self._conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            missing = set(_EXPECTED_REGISTRY_TABLES) - have
+            if not missing:
+                return set()
+            log.warning(
+                "Library registry %s is stamped at the current schema but is "
+                "missing table(s) %s; re-creating them from the base schema",
+                self.registry_path, ", ".join(sorted(missing)),
+            )
+            self._conn.executescript(_REGISTRY_SCHEMA_SQL)
+            return missing
+        except sqlite3.Error as exc:
+            log.warning("Could not re-create missing registry tables in %s: %s",
+                        self.registry_path, exc)
+            return set()
+
+    def _readopt_after_registry_heal(self) -> None:
+        """Re-register the target folders still on disk, after ``targets`` came
+        back empty.
+
+        :meth:`open` already does exactly this when the registry **file** is
+        missing (``_init_schema`` then :meth:`_adopt_existing_projects`), on the
+        reasoning that the registry is a derived index and the per-target folders
+        under ``targets/`` are the data. A dropped ``targets`` table is the same
+        situation, so it gets the same remedy rather than leaving the owner with a
+        library that opens and is empty — on a box whose raws have no second copy
+        (AGENTS.md §10), "I can still see my targets" is the difference between a
+        scare and a loss. What lived only in the lost table — notes, tags, the
+        pinned cover run — cannot come back; the targets, their subs and their
+        pictures can.
+
+        Best-effort: :meth:`_adopt_existing_projects` already skips a folder it
+        cannot open, and a failure here must not turn a healed open back into a
+        raise.
+        """
+        try:
+            self._adopt_existing_projects()
+        except Exception as exc:  # noqa: BLE001 — a self-heal never fails an open
+            log.warning("could not re-adopt the target folders after re-creating "
+                        "the targets table in %s: %s", self.registry_path, exc)
+
     def _ensure_columns(self) -> None:
         """Additively add any column the authoritative registry schema defines
         but an on-disk ``targets`` table lacks — never drops, renames or
@@ -375,6 +468,11 @@ class Library:
         assert self._conn is not None
         v = self._conn.execute("PRAGMA user_version").fetchone()[0]
         if v == LIBRARY_SCHEMA_VERSION:
+            # A table lost entirely heals *before* the column backfill, which
+            # returns early on a table that is not there — see
+            # :meth:`_recreate_missing_tables`.
+            if _TARGETS_TABLE in self._recreate_missing_tables():
+                self._readopt_after_registry_heal()
             self._ensure_columns()
             self._ensure_aux_tables()
             return

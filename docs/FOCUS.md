@@ -8,12 +8,12 @@ backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 
 ## Front of the queue
 
-0. **One OPEN verified bug now heads "Bugs (fix these first)" and outranks the rest of this page** (Scout
-   2026-10-01, reproduced): `targets.py::cleanup_suggestions`/`merge_suggestions` open each candidate's
-   project with no `try/except`, so one newer-schema (§9 rollback) or corrupt DB 500s the whole Library
-   cleanup/merge card — the fix is the one-line guard `gallery`/`stats`/`storage`/`newsubs` already use. Size
-   **S**; left for the Builder (§5 wants a fail-before test). Repro + a weaker `sky.py::get_sky` lead in the
-   entry.
+0. **✅ SHIPPED — that bug and its lead are both closed; "Bugs (fix these first)" holds nothing ungated again**
+   (Builder, same day): `cleanup_suggestions`/`merge_suggestions` as **v0.492.22**, the `sky.py` lead — three
+   endpoints, not one — as **v0.492.23**, and the missing-*table* self-heal that lead left behind as
+   **v0.492.25** (in `Library` too, where it costs every page). Three runs have now read Bugs top to bottom and
+   found every remaining entry gated or stood down with numbers; the list is in `docs/PROCESS-NOTES.md` so the
+   next run need not re-derive it. **The Scout owes this page its next re-cut.**
 
 1. **The editor (PRIORITY 1).** Judge Auto/editor on a tiled mosaic at the owner's scale
    (`--mosaic --editor --big`), never the 6-frame field. Its bug backlog is drained and re-audits

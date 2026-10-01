@@ -226,6 +226,31 @@ def _authoritative_columns() -> dict[str, list[tuple]]:
 _EXPECTED_COLUMNS = _authoritative_columns()
 
 
+def _authoritative_tables() -> frozenset[str]:
+    """Every table :data:`SCHEMA_SQL` defines, read from the schema itself.
+
+    Derived the way :func:`_authoritative_columns` derives its columns — a
+    throwaway in-memory DB — so the set can never drift from the schema the way a
+    hand-written tuple would. SQLite's own bookkeeping (``sqlite_sequence``,
+    created implicitly by ``AUTOINCREMENT``) is not ours to re-create.
+    """
+    ref = sqlite3.connect(":memory:")
+    try:
+        ref.executescript(SCHEMA_SQL)
+        return frozenset(
+            r[0]
+            for r in ref.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name NOT LIKE 'sqlite_%'"
+            ).fetchall()
+        )
+    finally:
+        ref.close()
+
+
+_EXPECTED_TABLES = _authoritative_tables()
+
+
 @dataclass
 class FrameRow:
     """One frame record. Mirrors the ``frames`` table."""
@@ -750,6 +775,10 @@ class Project:
         # by a build that had never heard of one gains it here, and a build that
         # has never heard of it loses nothing (see ``_AUX_TABLES_SQL``).
         self._conn.executescript(_AUX_TABLES_SQL)
+        # A whole table lost from an up-to-date DB heals here too, and before the
+        # column backfill below — which skips a table that is not there at all.
+        # See :meth:`_recreate_missing_tables`.
+        self._recreate_missing_tables()
         # Always reconcile columns, even at the current version. The
         # version-specific migration steps only ALTER the columns they knew
         # about, so a project created before a *frames* column was added — but
@@ -759,6 +788,58 @@ class Project:
         # backfill closes that gap for good and self-heals such a DB on open;
         # for an up-to-date project every column already exists, so it's a no-op.
         self._reconcile_table_columns()
+
+    def _recreate_missing_tables(self) -> set[str]:
+        """Re-create any table :data:`SCHEMA_SQL` defines that this DB has lost,
+        and return their names — an empty set, and not a single write, for the
+        healthy DB every ordinary open sees.
+
+        The sibling of :meth:`_reconcile_table_columns` one level up. That
+        backfill repairs a missing *column* on every open, but deliberately skips
+        a table that is absent entirely on the grounds that the base-schema
+        recreate handles it — and that recreate lives in :meth:`_migrate_schema`,
+        which only runs when the stamped ``user_version`` is **behind**. So a DB
+        already stamped *current* that lost a table never healed at all: it opened
+        cleanly (``open`` reads page 1, the pragma and the schema — never a row)
+        and then raised ``no such table`` on every read, for good. One bad block,
+        a power loss mid-write or a partially-flushed copy on a NAS is enough to
+        produce that; it needs no image rollback, which is what makes it more
+        reachable on this owner's box than the newer-``user_version`` shape the
+        cross-target walks are guarded for.
+
+        Additive and rollable, like every other self-heal here: the script is pure
+        ``CREATE … IF NOT EXISTS`` from the authoritative schema, nothing is
+        dropped or rewritten, and there is no ``SCHEMA_VERSION`` bump — so the
+        previous Docker image still opens the DB afterwards (AGENTS.md §9).
+
+        Cost on a healthy open is one ``sqlite_master`` read, which is why this can
+        run unconditionally rather than behind a flag or a version check. And a DB
+        too damaged to answer even that keeps exactly today's behaviour: a
+        self-heal must never turn an open that works into one that raises, the same
+        promise :meth:`_reconcile_table_columns` makes about its own ``ALTER``s.
+        """
+        assert self._conn is not None
+        try:
+            have = {
+                r[0]
+                for r in self._conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            missing = set(_EXPECTED_TABLES) - have
+            if not missing:
+                return set()
+            log.warning(
+                "Project %s is stamped at the current schema but is missing "
+                "table(s) %s; re-creating them from the base schema",
+                self.db_path, ", ".join(sorted(missing)),
+            )
+            self._conn.executescript(SCHEMA_SQL)
+            return missing
+        except sqlite3.Error as exc:
+            log.warning("Could not re-create missing tables in %s: %s",
+                        self.db_path, exc)
+            return set()
 
     def _reconcile_table_columns(self) -> None:
         """Additively add any column the authoritative :data:`SCHEMA_SQL`

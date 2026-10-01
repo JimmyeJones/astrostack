@@ -14,6 +14,11 @@ opens without complaint and raises ``sqlite3.DatabaseError: database disk image
 is malformed`` on the first ``SELECT``. A bad block or an interrupted write on a
 NAS produces exactly that, and :func:`_corrupt_one_data_page` below builds it.
 
+The other hand-built way in — dropping a table from a DB stamped at the current
+version — is no longer one: ``Project._recreate_missing_tables`` repairs it on
+open. So the guards are tested on the damage nothing can repair, and the repair
+has its own test at the bottom of this file.
+
 Each test puts a good target beside the broken one, because "no 500" is only half
 the contract: the owner must still get the picture the app *could* answer about.
 """
@@ -115,14 +120,18 @@ def _opens_then_errors(project_dir: Path) -> bool:
 
 
 def _drop_stack_runs(data_root, safe: str) -> None:
-    """Make one target's project open-but-unreadable, deterministically.
+    """Drop one target's ``stack_runs`` table, leaving the DB stamped *current*.
 
-    ``_check_schema`` reconciles *columns* on every open and deliberately skips a
-    table that is absent entirely ("handled by the base-schema recreate" — which
-    only runs when ``user_version`` is behind, so never for this DB). So the open
-    succeeds and the first ``SELECT`` raises ``no such table``. Done by hand
-    because no supported code path produces it, exactly as
-    ``test_cleanup_suggestions._stamp_newer_schema`` does for the sibling shape.
+    This used to be the deterministic way **into** the opens-then-errors shape:
+    ``_check_schema`` reconciled columns on every open and skipped a table that was
+    absent entirely ("handled by the base-schema recreate" — which only ran when
+    ``user_version`` was behind, so never for this DB). ``Project.
+    _recreate_missing_tables`` now re-creates it from the authoritative schema
+    instead, so this is the deterministic way into a DB that **heals** — which is
+    what :func:`test_a_dropped_table_is_healed_rather_than_left_to_the_guards`
+    pins, and why the three guard tests above use :func:`_corrupt_one_data_page`:
+    a bad data page is the shape real hardware produces and the one nothing can
+    repair.
     """
     db = _db_path(data_root, safe)
     conn = sqlite3.connect(db)
@@ -131,7 +140,10 @@ def _drop_stack_runs(data_root, safe: str) -> None:
         conn.commit()
     finally:
         conn.close()
-    assert _opens_then_errors(db.parent), "fixture is not the opens-then-errors shape"
+    assert not _opens_then_errors(db.parent), (
+        "a dropped table is expected to heal on open now — see "
+        "Project._recreate_missing_tables"
+    )
 
 
 def _corrupt_one_data_page(data_root, safe: str) -> None:
@@ -175,7 +187,7 @@ def test_sky_map_skips_the_unreadable_project_and_still_places_the_other(
     _make_run(solved_library, bad, crval1=200.0)
     assert len(client.get("/api/sky").json()["images"]) == 2
 
-    _drop_stack_runs(solved_library, bad)
+    _corrupt_one_data_page(solved_library, bad)
     r = client.get("/api/sky")
     assert r.status_code == 200
     assert [im["safe"] for im in r.json()["images"]] == [good]
@@ -190,7 +202,7 @@ def test_my_map_png_skips_the_unreadable_project_and_still_renders(
     _make_run(solved_library, bad)
     assert client.get("/api/sky/my-map.png").status_code == 200
 
-    _drop_stack_runs(solved_library, bad)
+    _corrupt_one_data_page(solved_library, bad)
     r = client.get("/api/sky/my-map.png")
     assert r.status_code == 200
     assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
@@ -208,7 +220,7 @@ def test_sky_coverage_skips_the_unreadable_project_and_still_counts_the_other(
     _make_run(solved_library, bad, crval1=200.0)
     assert client.get("/api/sky/coverage").json()["n_pictures"] == 2
 
-    _drop_stack_runs(solved_library, bad)
+    _corrupt_one_data_page(solved_library, bad)
     body = client.get("/api/sky/coverage").json()
     assert body["n_pictures"] == 1
     assert body["deg2"] == pytest.approx(_H * _W * _PX_DEG2, rel=1e-6)
@@ -232,3 +244,42 @@ def test_one_corrupt_data_page_is_the_real_trigger_behind_those_guards(
     r = client.get("/api/sky")
     assert r.status_code == 200
     assert [im["safe"] for im in r.json()["images"]] == [good]
+
+
+def test_a_dropped_table_is_healed_rather_than_left_to_the_guards(
+        client, solved_library):
+    """The other end of the contract: a DB that *can* be repaired is.
+
+    Dropping a table at the current schema version was the hand-built way into the
+    guards above, because nothing healed it — the open succeeded and every read
+    raised ``no such table`` for good. It is now repaired on open, so this target
+    never reaches a guard at all: it is a readable project again, with the run rows
+    that went with the table gone and nothing else lost.
+    """
+    good, bad = _two_targets(client)
+    _make_run(solved_library, good)
+    _make_run(solved_library, bad, crval1=200.0)
+    assert len(client.get("/api/sky").json()["images"]) == 2
+
+    _drop_stack_runs(solved_library, bad)
+    r = client.get("/api/sky")
+    assert r.status_code == 200
+    # Nothing left to place for the healed target, so the dome shows the other —
+    # but the difference from the guards above is that its project now *reads*.
+    assert [im["safe"] for im in r.json()["images"]] == [good]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(bad)
+        try:
+            assert list(proj.iter_stack_runs()) == []
+            proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-02T00:00:00Z",
+                output_basename="again", fits_path=None, tiff_path=None,
+                preview_path=None, n_frames_used=9, canvas_h=_H, canvas_w=_W,
+                coverage_min=0, coverage_max=9, options_json="{}",
+            ))
+            assert [x.output_basename for x in proj.iter_stack_runs()] == ["again"]
+        finally:
+            proj.close()
+    finally:
+        lib.close()

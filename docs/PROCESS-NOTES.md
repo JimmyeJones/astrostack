@@ -1,5 +1,74 @@
 # Process notes & QA sweep records
 
+
+## 2026-10-01 (Builder, branch `claude/keen-darwin-ok7w8n`) — v0.492.25: a gate that dissolved when it was measured, and the sibling the filing had not looked for
+
+*(Baseline = `origin/main` at `bfff252` (`__version__` 0.492.23): **7273 passed, 3 skipped**, 15m14s with
+`OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green, so
+a finding was distinguishable from a pre-existing failure.)*
+
+### "Bugs (fix these first)" was read top to bottom again, and again held nothing ungated
+
+Same conclusion as the two previous runs, for the same entries, so this is recorded once rather than re-derived:
+the #965 solve-time refusal (unmeasured retry bill), the auto-binder's half-range charge (c) (needs real
+masters), the #880 repr (*do not carry as PRIORITY 3*), the weighted-coverage border rule (*probably not worth
+building*), two hardening notes (*don't build until it is someone's actual problem*), the colour-chain bisect
+(owner-report gated), the two A-MINOR items, the four minor/low-priority traces (*fix only if touching these
+files*) and the sky-atlas rotation sign (needs a real solved frame). `docs/FOCUS.md`'s item 0 was already shipped
+(v0.492.22/.23) and is now a one-line pointer. The beginner-feature section is empty and FOCUS says not to
+manufacture one. **So the slot went to the one concrete lead left**, which the previous run had filed with an
+explicit gate: *"wants a measurement first and is not worth a slot on its own."*
+
+### The measurement said the lead's own proposal was the expensive half
+
+The lead wanted `SCHEMA_SQL`'s `CREATE TABLE IF NOT EXISTS` run on **every** open, and deferred itself because
+that is the hot path every cross-target page pays once per target. On a 5,000-frame / 300-run `project.sqlite`,
+best of 5 × 300, idle box: a whole `Project.open` is **0.346 / 0.427 ms** (two runs of the same code — that
+spread is the noise floor), `executescript(SCHEMA_SQL)` alone is **0.1918 ms**, and the `sqlite_master` table
+listing that merely *detects* a missing table is **0.0043 ms** — 45× cheaper, and over an order of magnitude
+below the noise. After the change the same open measures **0.387 / 0.396 ms**.
+
+**Generalisable, and the opposite of the usual lesson:** this gate did not need a verdict, it needed a cheaper
+question. A deferred "is X affordable on the hot path?" is worth re-reading for whether X is the only way to get
+the answer — here the expensive act (recreate) only ever has to happen in the case the cheap act (look) has
+already identified, so the cost on the healthy path is the look, not the act. The lead's instinct was sound; its
+*design* was what made it unaffordable.
+
+### A filing names the site it was looking at — this time the sibling was in another file
+
+v0.492.23's own lesson ("the class is worth a grep before the fix") paid out again, one level up. The lead was
+written about `Project`; `Library._ensure_columns` carries the identical early return on an absent table, with the
+identical comment, and its base-schema recreate is likewise the older-version branch only. **The registry half is
+the worse one:** a project missing `stack_runs` costs one target, while a registry missing `targets` means every
+page raises, because every page starts from `list_targets()`. It also admits a repair the project half does not —
+`Library.open` *already* re-adopts the on-disk target folders when the registry **file** is missing, so a dropped
+`targets` table is the same situation with the same remedy, and the heal calls it.
+
+### A test that was built to fail loudly did
+
+`test_sky_broken_project.py::_drop_stack_runs` built its opens-then-errors DB by dropping a table, and v0.492.23
+wrote into its docstring that *"a future `_check_schema` that heals either state makes the fixture fail loudly
+rather than leaving a dead test behind."* It did, on the first run of the related files — three reds naming the
+fixture's own assertion, not the endpoints. Its three guard tests moved to `_corrupt_one_data_page` (the shape
+real hardware produces, and the one nothing can repair) and were **re-verified still failing at `6bf8cd3^`**,
+i.e. without the v0.492.23 guards, so the migration provably is not a weakening. The dropped-table fixture stayed
+and was inverted: it now asserts the heal, and backs a fifth test.
+
+**Worth keeping:** a fixture that asserts its own precondition is what makes a change like this cheap and safe.
+Without the assertion, this run would have silently made three guard tests vacuous — green against a DB that no
+longer has the defect — and nothing would have said so.
+
+### Collision #n: two runs took 0.492.24, and the version was the only thing that collided
+
+A parallel run merged **v0.492.24** (`routes/Sky.tsx`'s "My map" drawing state, found by its own dogfood) during
+this run's post-change suite, so §11's "choose the version number at merge time, from the latest `main`" fired:
+main's value was taken and this became **v0.492.25**. The code did not overlap at all — `seestack/io/` against
+`frontend/src/routes/` — and the three docs files unioned cleanly, which is the shape §11 predicts. One thing the
+union needed by hand: the other run had *renamed* the v0.492.23 `PROCESS-NOTES.md` heading (to "v0.492.23 +
+v0.492.24"), so a plain keep-both left the old and new heading stacked on consecutive lines. **A union is the
+right default for an append-only docs file, but check the seam for a line the other side rewrote rather than
+added** — two headings in a row is the visible tell.
+
 ## 2026-10-01 (Builder, branch `claude/keen-darwin-v85rmq`) — v0.492.23 + v0.492.24: the lead whose gate was "find a trigger first", and the bug the dogfood found once the backlog was dry
 
 *(Baseline = `origin/main` at `205843c` (`__version__` 0.492.22): **7269 passed, 3 skipped**, 15m24s with

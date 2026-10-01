@@ -1,5 +1,80 @@
 # Shipped — the record
 
+
+## 2026-10-01 (Builder) — v0.492.25: a table lost from a current-version DB heals on open, in both schema stores
+
+### v0.492.25 — 🟠 BUG FIX (§9 upgrade-safety / resilience on the owner's live box): `Project._recreate_missing_tables` + `Library._recreate_missing_tables`
+
+*(Builder, branch `claude/keen-darwin-ok7w8n`. Baseline `origin/main` at `bfff252` (`__version__` 0.492.23):
+**7273 passed, 3 skipped**, 15m14s. Taken because "Bugs (fix these first)" again held no ungated entry — every
+open item carries a stand-down with numbers or a gate only the owner's data can open — and this was the one
+concrete lead left, filed by the previous run with an explicit "wants a measurement first".)*
+
+**The bug, and it is the same bug twice.** Both schema stores self-heal a missing **column** on every open —
+`Project._reconcile_table_columns` and `Library._ensure_columns`, both written for the v0.119.8 live-install
+brick — and both skip a table that is absent *entirely*, with the same comment: *"table absent entirely —
+handled by the base-schema recreate"*. But that recreate is `Project._migrate_schema`'s
+`if has_frames is None: executescript(SCHEMA_SQL)` and `Library._check_schema`'s older-version branch, and
+**both only run when the stamped version is behind**. So a DB already stamped *current* that loses a table was
+never healed by anything: `open` reads page 1, `PRAGMA user_version` and the schema and never touches a row, so
+it succeeds — and then every read of the lost table raises `no such table`, for good.
+
+It needs no image rollback to reach, which is what makes it more reachable on this owner's box than the
+newer-`user_version` shape the cross-target walks are guarded for: one bad block, a power loss mid-write or a
+partially-flushed copy on a NAS is enough. It is also exactly the shape `tests/webapp/test_sky_broken_project.py`
+had to build **by hand** for v0.492.23, with a comment saying no supported code path produces it.
+
+**The registry half is the worse one, and the lead had not noticed it.** A project missing `stack_runs` costs one
+target (and v0.492.22/.23's guards now make the rest of the library degrade around it). A *registry* missing
+`targets` costs the whole app, because every page starts from `list_targets()`. So that heal does one thing more:
+when `targets` is among the tables it re-created, it calls `_adopt_existing_projects()` — re-registering the
+target folders still on disk, which is **exactly** what `Library.open` already does when the registry *file* is
+missing. The registry is a derived index; the per-target folders are the data. Notes, tags and the pinned cover
+run lived only in the lost table and cannot come back; the targets, their subs and their pictures can.
+
+**The measurement the lead was gated on, and it changed the design.** The lead proposed running `SCHEMA_SQL`'s
+`CREATE TABLE IF NOT EXISTS` on *every* open ("`_AUX_TABLES_SQL` already runs there, so it is the same class of
+cost") and deferred it because that is the hot open path every cross-target page pays once per target. Measured
+on a 5,000-frame / 300-run `project.sqlite`, best of 5 × 300 iterations, idle box:
+
+| per `Project.open` | ms |
+|---|---|
+| whole `Project.open` on `origin/main` | 0.346 / 0.427 (two runs) |
+| whole `Project.open` after this change | 0.387 / 0.396 (two runs) |
+| the detection alone (`sqlite_master` table listing) | **0.0043** |
+| the lead's own proposal (`executescript(SCHEMA_SQL)`) | **0.1918** |
+
+So the lead's instinct was right — a blanket recreate is **45× the detection** and over half of a whole open —
+and the gate dissolves rather than needing a verdict: **detect first, recreate only when something is actually
+missing.** The difference between before and after is smaller than the difference between two runs of the same
+code.
+
+**Scope and safety.** `_authoritative_tables()` / `_authoritative_registry_tables()` derive the expected table
+set from the authoritative schema through a throwaway in-memory DB — the trick `_authoritative_columns` already
+uses, so the set cannot drift — excluding SQLite's own implicit `sqlite_sequence`. Both heals are additive and
+**rollable**: pure `CREATE … IF NOT EXISTS`, nothing dropped or rewritten, and **no `SCHEMA_VERSION` /
+`LIBRARY_SCHEMA_VERSION` bump**, so the previous Docker image still opens the DB afterwards (§9 — a bump is what
+turns a rollback into a bricked install). Both swallow `sqlite3.Error` and return "nothing healed": a self-heal
+must never turn an open that works into one that raises, the same promise `_reconcile_table_columns` already
+makes about its own `ALTER`s, and the v0.492.22/.23 guards are what handle the picture from there. No config key,
+settings field, migration, on-disk path, endpoint, response shape or default changed; no new dependency;
+`incoming/` untouched; a healthy library behaves byte-for-byte as before (pinned: the helper returns an empty set
+and writes nothing).
+
+**Tests: +8 in `tests/test_schema_table_self_heal.py`, all eight fail before** (scratch `git worktree` at
+`origin/main` carrying only the new file) — four of them with the bug's own exception (`no such table:
+stack_runs` / `project_meta` / `targets`), four with the method simply not existing. Each fixture **asserts its
+own precondition**, that the drop left the version stamped *current*, because at an older version both stores
+already rebuild the base schema and a fixture that quietly left the version behind would have proved a path that
+was never broken.
+
+**And one existing fixture failed loudly, exactly as it was designed to.**
+`test_sky_broken_project.py::_drop_stack_runs` built the opens-then-errors shape by dropping a table, and its
+docstring said a future `_check_schema` that healed the state should make it *"fail loudly rather than leave a
+dead test behind"*. It did. Its three guard tests moved to `_corrupt_one_data_page` — the shape real hardware
+produces and the one nothing can repair — and were **re-verified still failing without the v0.492.23 guards**
+(worktree at `6bf8cd3^`), so the migration is not a weakening. The drop-a-table fixture stayed, inverted: it now
+asserts the DB *heals*, and backs a fifth test that the target reads and writes runs again afterwards.
 ## 2026-10-01 (Builder) — v0.492.24: "My map" says it is drawing, instead of showing a blank panel under a confident caption
 
 ### v0.492.24 — 🟠 BUG FIX (friendliness — PRIORITY 3): a measured multi-second blank with no loading state, found by dogfooding
@@ -147,7 +222,10 @@ guards are unreachable unless a read raises). Full suite green. `ruff` count on 
 `user_version` is behind. Running `SCHEMA_SQL`'s `CREATE TABLE IF NOT EXISTS` on every open would close it
 additively — `_AUX_TABLES_SQL` already runs there, so it is the same class of cost — but it touches the hot
 open path that every cross-target page pays per target, so it wants a measurement first and is not worth a slot
-on its own.
+on its own. **→ CLOSED by v0.492.25** (next run, the same day): the measurement said the lead's own proposal
+was the expensive half (0.192 ms against a 0.35 ms `Project.open`), so the heal detects first — one
+`sqlite_master` listing at 0.0043 ms — and the same hole turned out to exist in `Library` too, where it costs
+the whole app rather than one target.
 
 
 ## 2026-10-01 (Builder) — v0.492.22: one project this build cannot open no longer takes the whole Library nudge with it
