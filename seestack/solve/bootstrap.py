@@ -72,7 +72,11 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from seestack.align.starmatch import DEFAULT_MAX_ROTATION_DEG, registration_gray
-from seestack.io.project import readable_frame_path
+from seestack.io.project import (
+    WCS_SOURCE_REGISTERED,
+    WCS_SOURCE_STAR_MATCH,
+    readable_frame_path,
+)
 
 log = logging.getLogger(__name__)
 
@@ -776,6 +780,13 @@ def bootstrap_solve(
         )
         fields: dict = dict(
             wcs_json=wtext,
+            # Provenance: this WCS was *derived* from the reference, not measured
+            # by a solve of this sub's own pixels — say which way, so a wrong
+            # lock can be traced to the subs it placed (``frames.wcs_source``;
+            # the solver's own rows stay NULL, and a later real solve of this
+            # sub resets it).
+            wcs_source=(WCS_SOURCE_STAR_MATCH if star_placed[i]
+                        else WCS_SOURCE_REGISTERED),
             ra_center_deg=ra_c,
             dec_center_deg=dec_c,
             pixscale_arcsec=pixscale,
