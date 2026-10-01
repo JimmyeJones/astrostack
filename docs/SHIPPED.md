@@ -1,5 +1,75 @@
 # Shipped — the record
 
+## 2026-10-01 (Builder) — v0.492.24: "My map" says it is drawing, instead of showing a blank panel under a confident caption
+
+### v0.492.24 — 🟠 BUG FIX (friendliness — PRIORITY 3): a measured multi-second blank with no loading state, found by dogfooding
+
+*(Builder, branch `claude/keen-darwin-v85rmq`, second task of the run. Found by the `--mosaic` dogfood pass that
+was run to check v0.492.23's own surfaces — not from the backlog.)*
+
+**What the probe caught.** The desktop screenshot of Sky Map → **My map** shows the card header, the
+`Real sky / Stars / My map` tab strip, the explanatory paragraph, the "Save this map" button **and** the coverage
+line along the bottom — *"Your 2 pictures cover 1.0 square degrees — about 5 full Moons' worth of sky, and 0.002%
+of the whole sky"* — around a **completely empty black panel**. The phone screenshot, taken later in the same
+pass, renders the map correctly. That difference is the diagnosis: the desktop shot was taken on a cold cache and
+the phone shot on a warm one.
+
+**Measured, because a screenshot is a timing claim and timing claims need numbers.** Against the dogfood install
+(`ASTROSTACK_DATA` pointed at its scratch data, two pictures):
+
+| request | time |
+|---|---|
+| `GET /api/sky/my-map.png`, cached | **1.04 s** |
+| `GET /api/sky/my-map.png`, cache dropped | **2.03 s** |
+| `GET /api/sky/coverage`, cache dropped | 0.06 s |
+
+Two things follow. The map is **seconds**, not frames — it is a matplotlib render of the whole sky with every
+target's picture masked and placed. And even the *warm* path costs a second, because it re-walks the library
+(one `stat` per target's newest run) to validate the fingerprint before it serves the cached bytes. Both ends
+scale with how many targets the owner has, and he has many — so this is not a cold-start curiosity, it is what
+the tab does **every time he opens it**.
+
+**Why the blank is worse than a slow picture.** `/api/sky/coverage` answers in 60 ms, so the sentence *under* the
+empty panel has already filled in with real numbers while the panel itself is still dark, and "Save this map" is
+already on offer above it. Everything on screen says the map is there; the only thing missing is the map. A
+beginner reads that as a broken feature, which is precisely the "good empty/error states" item in AGENTS.md §1's
+priority 3 — and the one failure mode a loading state exists to prevent.
+
+**The fix — `routes/Sky.tsx::MyMap`, one three-state overlay inside the panel that was already there.**
+
+* `drawing` (the initial state): a Mantine `Loader` and *"Drawing your map…"*, centred over the panel.
+* `ready` (`onLoad`): the overlay goes, the map is the only thing in the panel — byte-identical to today once
+  the picture has arrived.
+* `failed` (`onError`): *"Your map couldn't be drawn just now. Your pictures are fine — reload the page to try
+  again."* The second sentence is deliberate: the thing a beginner fears when a picture of their own work fails
+  to appear is that the work is gone.
+
+Two deliberate details. The `<img>` is hidden on failure with **`opacity: 0`**, not `display: none` or
+`visibility: hidden`: those remove it from the accessibility tree (and would have broken the existing
+`getByRole("img")` assertion by *weakening* what the page exposes), while `opacity` only stops the broken-image
+glyph sitting beside the sentence that explains it. And the `<img>` is never unmounted while loading, because
+swapping it for a spinner would make the browser throw away the request it is waiting on.
+
+**"Save this map" is withheld only in the `failed` state.** The button already had a rule — a fresh install's
+bare grid is not a map worth handing someone as a dated file — and a map that failed to draw is the same offer
+with the same answer. While it is still *drawing* the button stays, because the download renders the same bytes
+the `<img>` is waiting on and would succeed.
+
+**The UI rule (§1): nothing removed, nothing added as a new always-on surface.** The whole change lives inside
+the existing map panel; no card, no banner, no route. Every destination stays exactly where it was.
+
+**Tests — `frontend/src/routes/Sky.test.tsx`, +3, all three fail-before** in a `git worktree` of this branch's
+pre-fix tree carrying only the new test file (2 failed → strengthened → 3 failed). The handover test asserts the
+placeholder is present **before** the `load` event as well as absent after it, because "the placeholder is gone"
+is trivially true of a page that never had one — the first draft passed vacuously on the unfixed tree, which is
+exactly the green-for-the-wrong-reason shape v0.492.23's entry was also written against.
+
+**Scope.** `frontend/src/routes/Sky.tsx` and its test only. No backend file touched, no config key, settings
+field, `SCHEMA_VERSION`, migration, on-disk path, endpoint, response shape or default changed; no new
+dependency (`Loader`, `Group` and `Text` were already imported in this file); `incoming/` untouched. Frontend
+gate from `frontend/`: `tsc --noEmit` clean, `vitest run` **4,543 passed / 296 files**, `vite build` clean.
+
+
 ## 2026-10-01 (Builder) — v0.492.23: a project DB that opens cleanly and *then* errors no longer takes the whole Sky surface with it
 
 ### v0.492.23 — 🟠 BUG FIX (friendliness — PRIORITY 3): the lead at the head of "Bugs", its missing trigger found, and two more sites than it named
