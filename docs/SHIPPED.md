@@ -1,5 +1,101 @@
 # Shipped — the record
 
+## 2026-10-01 (Builder) — v0.492.22: one project this build cannot open no longer takes the whole Library nudge with it
+
+### v0.492.22 — 🟠 BUG FIX (friendliness + §9 upgrade-safety, PRIORITY 3): the reproduced entry the Scout filed and handed over the same day, `cleanup_suggestions` / `merge_suggestions` degrade instead of 500ing
+
+*(Builder, branch `agent/hygiene-degrade-not-500`. Taken because the Scout's own filing says it left the fix
+for the Builder — §5 wants a fail-before test on each endpoint — so it is a hand-off, not a live claim.)*
+
+**The bug.** `webapp/routers/targets.py::cleanup_suggestions` and `merge_suggestions` ask
+`webapp/library_hygiene.py::junk_verdict` and `confirm_duplicate_of_base` about each candidate target, and
+both helpers `lib.open_target(...)` that target's project. `Project._check_schema` **raises
+`RuntimeError`** when a project's `user_version > SCHEMA_VERSION` — the §9 shape: an install upgraded in
+place and then rolled back to `stable` leaves a project written by the newer build — and on a corrupt DB
+too. Neither loop had a `try/except` around the per-target body, so one such target returned **HTTP 500**
+for the whole card, while `gallery.py`, `stats.py`, `storage.py` and `newsubs.py` all wrap the *identical*
+`Project.open` in `except Exception: continue`, several with a comment naming this exact rollback case.
+These two were the odd ones out, and their own docstrings promised the degrade they did not implement.
+
+**The fix — three guards, one per project-opening call.** In `cleanup_suggestions`, around `junk_verdict`
+and around `confirm_duplicate_of_base`; in `merge_suggestions`, around the per-member survivor test, which
+cost it its generator expression and became an explicit loop. Each skips the one target.
+
+**Skipping is the right answer on its own terms, not just the cheap one.** What these endpoints produce are
+*claims*: "remove this, the other target already has the frames" and "combine these two". Neither is a claim
+to make about a target whose frames could not be read, so the member a guard drops is a member that should
+not have been offered. That is why the guard goes here rather than inside the two helpers, where returning
+`None` for `confirm_duplicate_of_base` would have left an unreadable member standing *in* the merge offer.
+
+**Owner-shaped trigger**, from the Scout's filing: `junk_verdict` opens any target under
+`junk_output_examine_cap()` (512 frames), and `confirm_duplicate_of_base` opens every `*_sub` /
+`*_mosaic_sub` target with a matching base — i.e. exactly the 11 `_mosaic_sub` duplicates of observer issue
+[#878](https://github.com/JimmyeJones/astrostack/issues/878). One of those with a rolled-back or corrupt DB
+took out the Library's cleanup *and* merge cards at once, on a box upgraded in place.
+
+**Tests +3, all three fail-before** (verified in a `git worktree` of `origin/main` carrying only the two test
+files, each failing with the entry's own `RuntimeError: Project schema version 23 is newer than this
+Seestack build (22)`):
+
+* `test_a_project_this_build_cannot_open_is_skipped_not_500ed` — the `junk_verdict` guard: a plainly-named
+  one-frame target gets `PRAGMA user_version = SCHEMA_VERSION + 1`, and the junk row the card *could* answer
+  (a `_video` target, decided by name without opening anything) is still there.
+* `test_an_unreadable_duplicate_base_is_skipped_not_500ed` — the `confirm_duplicate_of_base` guard, with the
+  stamped DB on the **base** of a `*_sub` duplicate; the duplicate is correctly left unoffered.
+* `test_a_cluster_member_this_build_cannot_open_is_dropped_not_500ed` — the merge nudge: three nights of one
+  object, one unreadable, and the offer comes back naming the other two.
+
+`_stamp_newer_schema` writes the pragma by hand with `sqlite3`, because no supported code path produces that
+state — which is the point of testing it. Nothing loosened, skipped or rewritten.
+
+**Deliberately NOT taken: the entry's weaker sibling.** `sky.py::get_sky` guards its `Project.open` but not
+the per-run reads after it (`iter_stack_runs`, `_representative_pixscale_rotation`). It is **traced, not
+reproduced**, and the reason matters: the certain-raise shape fixed here happens *at open*, so it can never
+reach those reads — only a DB that opens cleanly and then errors mid-query can, and nothing in the repo
+produces one. It stays filed as a lead whose first step is finding that trigger, because a regression test
+with no repro proves nothing (§8: "a regression test whose fixture cannot show the bug is green for the same
+reason" a checkout is).
+
+**Upgrade safety (§9).** Three `try/except` guards in two router functions. No config key, settings field,
+schema version, migration, on-disk path, endpoint, response shape or default changed; no new dependency;
+`incoming/` untouched. Full suite green.
+
+**The entry this closes, moved here whole (the three-file rule, §2)** — its `sky.py` half stays open in
+"Bugs (fix these first)" as a trimmed lead:
+
+- **BUG, REPRODUCED (Scout 2026-10-01, QA sweep of the webapp routers — rotation item (4)) — two Library
+  nudge endpoints open every candidate target's project with no degrade-don't-500 guard, so one project DB
+  stamped with a newer schema (an in-place upgrade then rolled back to `stable`, §9) — or one corrupt at
+  open — makes the whole card 500 instead of skipping the one target.** *(Pillar: friendliness +
+  upgrade-safety — PRIORITY 3; size **S**; severity low-to-medium. Confidence: `cleanup-suggestions`
+  **reproduced** returning HTTP 500 against a scratch library with one target's `PRAGMA user_version` bumped
+  above `SCHEMA_VERSION` while `/api/gallery` degraded to 200 on the same data; `merge-suggestions` traced to
+  the byte-identical loop.)*
+  `webapp/routers/targets.py::cleanup_suggestions` (the loop at ~L328) and `merge_suggestions` (~L194) call
+  `webapp/library_hygiene.py::junk_verdict` / `confirm_duplicate_of_base`, both of which `lib.open_target(...)`
+  a candidate's project — with **no** `try/except` around the per-target body (only `finally: lib.close()`).
+  `Project._check_schema` (`seestack/io/project.py:742`) **raises `RuntimeError`** when a project's
+  `user_version > SCHEMA_VERSION` ("newer than this Seestack build … Upgrade Seestack to open"), so that
+  exception propagates and 500s the whole endpoint. `gallery.py:286`, `stats.py`, `storage.py` and
+  `newsubs.py` all wrap the identical `Project.open` in `except Exception: continue` with a comment naming
+  this exact image-rollback case; these two routers are the odd ones out, and their own module/function
+  docstrings even promise the degrade-don't-500 behaviour they do not implement.
+  **Owner-shaped trigger.** `junk_verdict` opens any target under `junk_output_examine_cap()` (512 frames);
+  `confirm_duplicate_of_base` opens every `*_sub` / `*_mosaic_sub` target with a matching base — i.e. exactly
+  the 11 `_mosaic_sub` duplicates of observer issue
+  [#878](https://github.com/JimmyeJones/astrostack/issues/878). One of those with a rolled-back or corrupt DB
+  takes out both the Library's cleanup and merge nudge cards at once, on a box upgraded in place (§9). It does
+  not touch pixels or `incoming/`; it is a resilience/friendliness defect.
+  **Fix (small, obviously-safe; the Scout left it for the Builder because §5 wants a fail-before test on each
+  endpoint).** Wrap the per-target call in each loop in `try/except Exception: continue` exactly as
+  `newsubs.scan_new_subs_waiting` does (or guard the `lib.open_target` inside the two hygiene helpers), and add
+  a regression test that bumps `user_version` on one target's project and asserts the endpoint returns 200 with
+  the good targets still listed — the repro shape is in the 2026-10-01 PROCESS-NOTES sweep record and fails
+  before / passes after. **Related, weaker lead (traced, NOT reproduced):** `sky.py::get_sky` (~L160–282)
+  *does* guard the `Project.open` but not the per-run DB reads after it (`iter_stack_runs`,
+  `_representative_pixscale_rotation`), so a DB that opens cleanly but errors mid-query would still 500 the
+  whole Sky Map — same one-line guard, a rarer trigger than the certain-raise newer-schema open above.
+
 ## 2026-10-01 (Builder) — v0.492.20: Auto measured the ragged border its own last op deletes
 
 ### v0.492.20 — 🟠 BUG FIX (PRIORITY 1, the editor's one-click Auto on a mosaic): the third instalment of "Auto must measure the picture its own recipe produces"

@@ -82,38 +82,19 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **BUG, REPRODUCED (Scout 2026-10-01, QA sweep of the webapp routers — rotation item (4)) — two Library
-  nudge endpoints open every candidate target's project with no degrade-don't-500 guard, so one project DB
-  stamped with a newer schema (an in-place upgrade then rolled back to `stable`, §9) — or one corrupt at
-  open — makes the whole card 500 instead of skipping the one target.** *(Pillar: friendliness +
-  upgrade-safety — PRIORITY 3; size **S**; severity low-to-medium. Confidence: `cleanup-suggestions`
-  **reproduced** returning HTTP 500 against a scratch library with one target's `PRAGMA user_version` bumped
-  above `SCHEMA_VERSION` while `/api/gallery` degraded to 200 on the same data; `merge-suggestions` traced to
-  the byte-identical loop.)*
-  `webapp/routers/targets.py::cleanup_suggestions` (the loop at ~L328) and `merge_suggestions` (~L194) call
-  `webapp/library_hygiene.py::junk_verdict` / `confirm_duplicate_of_base`, both of which `lib.open_target(...)`
-  a candidate's project — with **no** `try/except` around the per-target body (only `finally: lib.close()`).
-  `Project._check_schema` (`seestack/io/project.py:742`) **raises `RuntimeError`** when a project's
-  `user_version > SCHEMA_VERSION` ("newer than this Seestack build … Upgrade Seestack to open"), so that
-  exception propagates and 500s the whole endpoint. `gallery.py:286`, `stats.py`, `storage.py` and
-  `newsubs.py` all wrap the identical `Project.open` in `except Exception: continue` with a comment naming
-  this exact image-rollback case; these two routers are the odd ones out, and their own module/function
-  docstrings even promise the degrade-don't-500 behaviour they do not implement.
-  **Owner-shaped trigger.** `junk_verdict` opens any target under `junk_output_examine_cap()` (512 frames);
-  `confirm_duplicate_of_base` opens every `*_sub` / `*_mosaic_sub` target with a matching base — i.e. exactly
-  the 11 `_mosaic_sub` duplicates of observer issue
-  [#878](https://github.com/JimmyeJones/astrostack/issues/878). One of those with a rolled-back or corrupt DB
-  takes out both the Library's cleanup and merge nudge cards at once, on a box upgraded in place (§9). It does
-  not touch pixels or `incoming/`; it is a resilience/friendliness defect.
-  **Fix (small, obviously-safe; the Scout left it for the Builder because §5 wants a fail-before test on each
-  endpoint).** Wrap the per-target call in each loop in `try/except Exception: continue` exactly as
-  `newsubs.scan_new_subs_waiting` does (or guard the `lib.open_target` inside the two hygiene helpers), and add
-  a regression test that bumps `user_version` on one target's project and asserts the endpoint returns 200 with
-  the good targets still listed — the repro shape is in the 2026-10-01 PROCESS-NOTES sweep record and fails
-  before / passes after. **Related, weaker lead (traced, NOT reproduced):** `sky.py::get_sky` (~L160–282)
-  *does* guard the `Project.open` but not the per-run DB reads after it (`iter_stack_runs`,
-  `_representative_pixscale_rotation`), so a DB that opens cleanly but errors mid-query would still 500 the
-  whole Sky Map — same one-line guard, a rarer trigger than the certain-raise newer-schema open above.
+- **LEAD, TRACED (Scout 2026-10-01, the weaker sibling the v0.492.22 fix deliberately did NOT take) —
+  `sky.py::get_sky` guards the `Project.open` but not the per-run DB reads after it, so a project that opens
+  cleanly and then errors mid-query still 500s the whole Sky Map.** *(Pillar: friendliness — PRIORITY 3; size
+  **S**; severity low. Confidence: traced, **not reproduced** — which is why it was left: the certain-raise
+  shape its two siblings had is `Project._check_schema` refusing a newer-schema DB at *open*, and that cannot
+  reach these reads at all.)* `webapp/routers/sky.py` (~L160–282) wraps the open, then calls `iter_stack_runs`
+  and `_representative_pixscale_rotation` outside the guard. The two **reproduced** halves —
+  `targets.py::cleanup_suggestions` and `merge_suggestions` — shipped as **v0.492.22**, whose
+  [`SHIPPED.md`](SHIPPED.md) entry carries the whole original filing including the repro recipe. **Before
+  building this one, find a trigger:** a DB that opens and then errors is the only shape that reaches it, so a
+  fixture has to produce one (truncate the file under an open handle, drop a table the read needs) or the
+  regression test §5 wants proves nothing. The fix itself is the same one-line `except Exception` the four
+  sibling routers use.
 
 - **LEAD (Builder 2026-09-25, filed while shipping v0.473.1 — the two halves of observer issue
   [#965](https://github.com/JimmyeJones/astrostack/issues/965) that fix deliberately left) — refuse an
@@ -3467,6 +3448,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **✅ v0.492.22** — 🟠 BUG FIX (friendliness + §9 upgrade-safety, PRIORITY 3), the **reproduced** entry the Scout filed and explicitly handed over the same day: **two Library nudge endpoints opened every candidate target's project with no degrade-don't-500 guard.** `targets.py::cleanup_suggestions` and `merge_suggestions` call `library_hygiene.junk_verdict` / `confirm_duplicate_of_base`, both of which `lib.open_target(...)` — and `Project._check_schema` **raises** on a DB stamped by a newer build (upgraded in place, then rolled back to `stable`) or a corrupt one, so one such target 500ed the whole card while `gallery`, `stats`, `storage` and `newsubs` all degraded to 200 on identical data. Three `except Exception: continue` guards — one per project-opening call, the one in `merge_suggestions` costing the survivor test its generator expression. **Skipping is also the right answer on its own terms:** "remove this, the other one has the frames" and "combine these" are not claims to make about a target whose frames could not be read. Owner-shaped trigger: his 11 `_mosaic_sub` duplicates (observer [#878](https://github.com/JimmyeJones/astrostack/issues/878)) are exactly such a cluster. Tests +3 (one per guard), **all three fail-before** with the entry's own `RuntimeError` in an `origin/main` worktree. The entry's **weaker, traced-only** sibling — `sky.py::get_sky`'s per-run reads — was deliberately NOT taken and stays filed as a lead with the trigger it needs first. No config, schema, migration, on-disk, default or API-shape change. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **✅ v0.492.20** — 🟠 BUG FIX (PRIORITY 1, the editor's one-click Auto on a mosaic), found and measured this run: **Auto measured the ragged border its own last op deletes.** `auto_recipe` appends `geometry.crop` to `trim_crop` as its last op, yet read the sky level, σ, denoise strength, crossfade, saturation and archetype off the **whole** union canvas — the third instalment of v0.409.0/v0.410.0's rule at the other end of the same recipe. The fringe is thin-coverage (several times grainier) and its coverage counts are *overlap* counts, not panel identities, so one bin spans several panels and `_delevelled_luminance` cannot flatten it. Measured on the four-panel scene with a real ragged border: the stretch target sat **+1.8 % / +3.1 % / +3.3 %** off the identical stack's at a 6 / 10 / 14 % trim (8.0 % at 36 %), and the finished picture's own sky **−2.4 %**. New `presets._measured_region` narrows the image *and* the coverage map to the kept rectangle for `auto_recipe` and `analyze_auto_inputs`, tied to the crop actually being emitted — so `auto_crop` off measures the whole canvas again and a single-field stack is byte-identical (both pinned). The bundled `--mosaic` sample moves 0.01 % and is **blind** to this (fringe = 3.1 % of the finite pixels, `target_bg` at its clamp) — see [`PROCESS-NOTES.md`](PROCESS-NOTES.md). Tests +14 items (10 functions), **6 fail-before** by scratch-worktree revert. No config, schema, migration, on-disk, API-shape or stored-recipe change. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **✅ v0.492.18** — 🟠 BUG FIX (trust, PRIORITY 1-adjacent), the `_measure_noise_ratio` LEAD filed with v0.475.0, closed by re-measuring its own premise — which came out **backwards**: **a drizzled stack's "stacking cut your noise ~N×" badge read 11–16 % *worse* than the stack was.** The lead had it reading ~13 % *high* and blamed resampling, but its ground truth came from a fixture that stands a **bilinear upsample** in for the drizzle kernel — an interpolation blurs, so it makes a master's per-pixel σ fall, while the real kernel deposits shrunken `pixfrac` drops onto a finer grid and makes it **rise**: a finer pixel gathers a smaller share of every frame's light. Measured through `stack.drizzle_path.DrizzleStacker` itself, the same 36 frames read **6.33× native, 5.89× at ×1.5, 5.61× at ×2, 5.34× at ×3** — and *low* is the one direction `stackhealth.noise_vs_expected` acts on, so a ×2 canvas spent a quarter of the margin `NOISE_EXPECTED_LOW_FRACTION` was given on a perfectly healthy run. The lead's gate ("does he drizzle?") is answered by the repo's own record — `stacker.rejection_reach` says *"the owner drizzles mosaics"*. `qc.noise_ratio.noise_ratio` takes a keyword-only `stack_supersampling` and averages the stack side down by `area_match_block` before measuring; the reveal endpoint reads it off the run's **own** recorded options (`field_fulls.canvas_supersampling`, the *effective* scale). Every scale comes back within 3 % of native. **Rounded to whole pixels deliberately** — an exact fractional resample measures +4 to +7 % out (its weights smear pixels the kernel already correlated) and a rational match that bins the *sub* too is far worse (5.25 at ×1.5), so do not re-pick either. **One-sided:** a block of 1 for 1.0/`None`/non-finite/<1.0/unparseable, and `StackOptions.drizzle` defaults off, so every run in the owner's library is byte-identical (pinned). NaN stays "no coverage" — a plain `mean`, so a part-covered block is dropped, not part-averaged. `_NOISE_RATIO_CACHE_VERSION` 2 → 3 so a drizzled library re-measures. Tests +22 (`tests/test_noise_ratio_drizzle.py`, real kernel + ground truth; **fail-before by scratch worktree revert**), plus two wiring tests. No config, schema, migration, on-disk, default or API-shape change. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.492.17** — 🔴 INFRA / the release pipeline (audit 2026-09-30, B-F2..B-F6): **an unreadable range passed the email guard, and two changes could ship under one version number.** `scripts/check-commit-identity.sh` captured `git rev-list` (exit 2 on a bad range, never 0), scans the message body and trailers for email-shaped strings under the same allowlist (a `Co-authored-by:` trailer was a vector; `react@18.2.0`, `root@nas`, `logo@2x.png` are not addresses), and CI's `identity` job verifies both ends and falls back to the merge base or to "everything untagged" rather than `-1 HEAD`. New `scripts/check-version-bump.sh` (CI's `version` job, now on pushes to main too) refuses a code change without a bump, a version already on *current* main (fetched — the recorded base is stale by the second merge), a backwards one, and a tagged one; `scripts/release-tags.sh` goes red on the same and tags every transition since the last tag so lost or reordered runs never lose one; `ci.yml` groups main runs per commit and `release-tags.yml` queues (`queue: max`). `tests/test_commit_identity_check.py` + `tests/test_version_bump_check.py` run both scripts against scratch repositories, all fail-before.

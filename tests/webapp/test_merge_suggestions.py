@@ -324,3 +324,54 @@ def test_a_mosaic_sub_duplicate_is_dropped_when_its_base_is_hash_suffixed(
     assert out_safe == "M_44_mosaic"
     assert base_safe.startswith("M_44_mosaic-")
     assert client.get("/api/targets/merge-suggestions").json() == []
+
+
+# ---- a project this build refuses to open must not take the nudge down -------
+
+def _stamp_newer_schema(lib: Library, safe: str) -> None:
+    """Stamp one target's project DB with a schema *newer* than this build's — the
+    §9 shape (upgraded in place, then rolled back to ``stable``) that makes
+    ``Project._check_schema`` raise ``RuntimeError`` on open. Done by hand on the
+    DB because no supported code path produces it, which is the point."""
+    import sqlite3
+
+    from seestack.io.project import SCHEMA_VERSION
+
+    entry = lib.find_target(safe)
+    assert entry is not None
+    conn = sqlite3.connect(lib.target_dir(entry) / "project.sqlite")
+    try:
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_a_cluster_member_this_build_cannot_open_is_dropped_not_500ed(
+        client, data_root: Path):
+    """One unreadable member must cost its own row in the offer, not the nudge.
+
+    The nudge asks ``confirm_duplicate_of_base`` and ``junk_verdict`` of **every
+    member of a same-object cluster** — both of which open that member's project
+    — so a project this build refuses to open (§9: upgraded in place, then rolled
+    back) propagated a ``RuntimeError`` and 500ed the whole card. Dropping the
+    member is the safe degrade: a target the app cannot read is not one to
+    propose combining. The two readable nights are still offered, which is what
+    makes this an answer rather than silence.
+    """
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _make_target(lib, "M31 night 1", *M31)
+        _make_target(lib, "M31 night 2", M31[0] + 0.01, M31[1] - 0.01)
+        broken = _make_target(lib, "M31 night 3", M31[0] - 0.01, M31[1] + 0.01)
+        _stamp_newer_schema(lib, broken)
+    finally:
+        lib.close()
+
+    r = client.get("/api/targets/merge-suggestions")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    safes = {t["safe"] for t in body[0]["targets"]}
+    assert safes == {"M31_night_1", "M31_night_2"}
+    assert broken not in safes
