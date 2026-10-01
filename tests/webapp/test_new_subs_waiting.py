@@ -709,3 +709,130 @@ def test_a_picture_the_batch_kept_on_the_wall_is_not_nagged_about(client, solved
     finally:
         lib.close()
     assert _waiting(client)["count"] == 1
+
+
+# ------------- …and the Target page's own line, through the same function ---
+
+# Until v0.492.x the line beside the picture — *"N new subs since your last
+# stack"* — was computed in the browser, from the frame list and the run listing,
+# as "accepted + solved frames captured after the newest ``reusable`` run". That
+# is two readings away from the rule above: the clock instead of membership, and
+# the newest genuine run instead of the picture on the wall. A Combine diverges on
+# both at once, so the Dashboard named the target while the target's own page said
+# nothing. `GET /api/targets/{safe}/new-light` is the same function's answer for
+# one target; `_page_note` below is what the page now reads, and `_old_browser_
+# reading` re-derives the TypeScript it replaced, so the gap is in the test rather
+# than in a changelog.
+
+def _page_note(client, safe="M_42"):
+    r = client.get(f"/api/targets/{safe}/new-light")
+    assert r.status_code == 200
+    return r.json()
+
+
+def _old_browser_reading(client, safe="M_42") -> int:
+    """``countNewSubsSinceStack``, re-derived from the payloads it read."""
+    runs = client.get(f"/api/targets/{safe}/stack-runs").json()
+    newest_genuine = next((r for r in runs if r["reusable"]), None)
+    if newest_genuine is None:
+        return 0
+    frames = client.get(f"/api/targets/{safe}/frames").json()
+    rows = frames["frames"] if isinstance(frames, dict) else frames
+    return sum(
+        1 for f in rows
+        if f.get("accept") and f.get("solved") and f.get("timestamp_utc")
+        and f["timestamp_utc"] > newest_genuine["timestamp_utc"]
+    )
+
+
+def test_the_target_page_s_own_line_names_a_combined_targets_missing_night(
+        client, solved_library):
+    """The bug, and the fix, in one test.
+
+    Both nights were stacked after every sub was shot and the Combine pins the
+    deep target's own picture, so the browser's capture-time reading against the
+    newest genuine run sees **nothing** — while the Dashboard names the target
+    with all three of the carried night's subs.
+    """
+    _give_a_picture(solved_library, "M_42", AFTER)
+    _give_a_picture(solved_library, "NGC_7000", MID)
+    _combine(solved_library, "M_42", "NGC_7000")
+
+    assert _old_browser_reading(client) == 0      # what the page used to say
+
+    note = _page_note(client)
+    assert note is not None
+    assert note["n_new_subs"] == 3
+    assert note["timestamp_utc"] == AFTER         # the picture on the wall
+
+
+def test_the_target_page_and_the_library_roll_up_cannot_disagree(
+        client, solved_library):
+    """One function, so the two surfaces answer with the same number, the same
+    run and the same date — on the fixture where the old reading diverged."""
+    _give_a_picture(solved_library, "M_42", AFTER)
+    _give_a_picture(solved_library, "NGC_7000", MID)
+    _combine(solved_library, "M_42", "NGC_7000")
+
+    (item,) = _waiting(client)["items"]
+    note = _page_note(client)
+    assert (note["n_new_subs"], note["run_id"], note["timestamp_utc"]) == (
+        item["n_new_subs"], item["run_id"], item["stacked_utc"])
+    assert note["n_frames_used"] == item["n_frames_used"]
+
+
+def test_the_target_page_measures_the_pinned_older_cover_it_is_showing(
+        client, solved_library):
+    """A cover the owner pinned is the picture that can fall behind, and the
+    newest run being up to date is no answer about it."""
+    older = _give_a_picture(solved_library, "M_42", BEFORE)
+    _give_a_picture(solved_library, "M_42", AFTER, basename="master_2")
+    assert _page_note(client) is None             # newest picture has everything
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        lib.set_target_cover("M_42", older)
+    finally:
+        lib.close()
+    note = _page_note(client)
+    assert note is not None
+    assert (note["run_id"], note["n_new_subs"]) == (older, 3)
+
+
+def test_the_target_page_says_nothing_when_the_picture_has_every_sub(
+        client, solved_library):
+    """The common case: one stack, nothing shot since, nothing put back."""
+    _add_run(solved_library, "M_42", AFTER)
+    assert _page_note(client) is None
+
+
+def test_the_target_page_says_nothing_about_a_target_never_stacked(
+        client, solved_library):
+    """*"You have never stacked this"* is another surface's sentence — this one
+    is about a picture that has fallen behind, and there is no picture."""
+    assert _page_note(client) is None
+
+
+def test_a_restored_sub_the_clock_cannot_see_is_in_the_page_s_number(
+        client, solved_library):
+    """The widening v0.492.3 gave the library-wide note now reaches the line
+    beside the picture too. The *reason* stays the restored card's to say — the
+    page gives it the slot when a restoration is the whole shortfall — but the
+    number the page holds is the honest one either way."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            frame = next(iter(proj.iter_frames()))
+            proj.update_frame(frame.id, restored_utc=RESTORED_AFTER_EVERYTHING)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    _add_run(solved_library, "M_42", AFTER)
+
+    assert _old_browser_reading(client) == 0      # a restored sub was shot before
+    note = _page_note(client)
+    assert note is not None and note["n_new_subs"] == 1
+    back = client.get("/api/targets/M_42/restored-subs").json()
+    assert back["n_restored"] == 1                # and the card still says why

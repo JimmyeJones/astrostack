@@ -464,11 +464,12 @@ class RestoredSubsOut(BaseModel):
     """Subs the app set aside on its own and later put back — *after* this
     target's newest picture was stacked, so the picture was made without them.
 
-    The counterpart of the "N new subs since your last stack" nudge for the case
-    that one structurally cannot see: a restored sub was *shot* long before the
-    stack ran, so a capture-time comparison never notices it. ``null`` whenever
-    nothing came back after the newest run, which is every healthy install (see
-    :func:`seestack.restorednudge.restored_since_stack`).
+    The counterpart of the "N subs missing from your current picture" nudge for the
+    one thing a *count* cannot say — that a restoration is **why** the picture is
+    thin. (Until that nudge read the server's own rule it could not see this case at
+    all: it compared capture times, and a restored sub was shot long before the
+    stack ran.) ``null`` whenever nothing came back after the newest run, which is
+    every healthy install (see :func:`seestack.restorednudge.restored_since_stack`).
     """
 
     run_id: int

@@ -1,5 +1,86 @@
 # Shipped — the record
 
+## 2026-10-01 (Builder) — v0.492.19: the line beside the picture was the last surface still counting "new light" by the clock
+
+### v0.492.19 — 🟠 BUG FIX (trust / autonomy, PRIORITY 2-adjacent): the open LEAD filed with v0.492.12, and the last of the four surfaces to join one rule
+
+*(Filed as a lead by audit run B on 2026-09-30 — traced, not reproduced on a screen, because
+`routes/Target.tsx` was outside that run's files. Reproduced here first, on both sides, before anything
+changed.)*
+
+**The bug.** `webapp/routers/newsubs.py::new_light_since_picture` is, by its own docstring, *"the one
+definition of this target has new light"*, and after v0.492.3 and v0.492.12 three surfaces asked it: the
+Dashboard's *"you've shot more of these"* note, the **"Bring my pictures up to date"** reprocess scope
+(`new_light_only`), and the counts that scope's confirm dialog quotes. The fourth — the line the owner
+actually reads, beside the picture — did not. `countNewSubsSinceStack` in `frontend/src/routes/Target.tsx`
+computed its own answer in the browser: accepted **and** solved frames whose capture time is later than the
+newest run carrying `reusable`. That is **two** readings away from the rule:
+
+* the **clock** instead of **membership** — a sub can be missing from a picture without having been shot
+  after it (v0.492.3's finding, and the shape `reconcile_bad_solve_frames` creates by design: 178 restored
+  rows on the owner's library, observer [#965](https://github.com/JimmyeJones/astrostack/issues/965)); and
+* the **newest genuine run** instead of the **picture on the wall** — after a Combine the newest genuine run
+  is the carried one-night stack, with its own recent timestamp, while the merge pins the deep target's own
+  older picture (v0.492.12's finding).
+
+A Combine diverges on **both at once**, and that is the case the lead names: every sub of the carried night
+was shot *before* the newest genuine run, so the browser's count was **0** while the Dashboard named the
+target with all of them. The owner opens the target the Dashboard sent him to and the page says nothing is
+waiting.
+
+**Reproduced before the fix, on both sides.** `_old_browser_reading` in
+`tests/webapp/test_new_subs_waiting.py` re-derives the removed TypeScript from the very payloads it read
+(`/stack-runs` + `/frames`), so the gap is pinned in a test rather than described in a changelog: on the
+Combine fixture it asserts **0** — and that assertion **passes on `origin/main`**, which is the bug — while
+the new endpoint answers 3.
+
+**The fix — the rule moves server-side, it is not re-spelled.** New `GET /api/targets/{safe}/new-light`
+(`newsubs.get_target_new_light`, returning `NewLightOut | None`) hands `new_light_since_picture` one target's
+runs and its pinned cover and returns what it says: the run measured, what that run combined, and the count.
+It lives in `newsubs.py` beside the rule rather than with the Target page's other nudges in
+`routers/targets.py` precisely because a second spelling is what this bug *was* — the drift
+`webapp/run_options.py` was created to undo. `null` when there is nothing to say: no genuine stack (*"you
+have never stacked this"* is another surface's sentence) or a picture that already holds every sub. The page
+reads it and `countNewSubsSinceStack` + its `parseUtcMs` helper are **deleted**, with a comment where they
+stood naming what replaced them, so the next agent's grep lands on the rule and not on a second copy.
+
+**The wording follows the number.** *"N new subs since your last stack"* was accurate only for the capture
+clock; a carried night's subs were shot before the run they are missing from. The note now says **"N subs
+missing from your current picture"** — *"accepted and located, but the picture you're looking at wasn't made
+with them — so it's thinner than your own data"* — which is true of every shape the server counts and is
+plainer English besides (PRIORITY 3).
+
+**What stays deliberately separate is the *reason*, not the number.** v0.492.3 kept the restored card
+(`GET …/restored-subs`, `seestack/restorednudge.py`) as its own sentence on purpose: beside one picture, *why*
+it is thin is worth saying, and a restoration is the one shortfall the clock structurally could not see. The
+wider number now covers that case, so the card would have been unreachable had the old suppression
+(`newSubsSinceStack > 0 ? null : card`) stayed. The page instead gives the card the slot whenever a
+restoration is the **whole** of the shortfall (`restoredIsWholeStory`, `n_restored >= n_new_subs`) and uses
+the wider note when more is missing than came back — naming only the 12 that returned when 20 are missing
+would understate what a re-stack folds in. With neither side answering (an older backend, a failed fetch) the
+comparison is true, so the card behaves exactly as it did. The `restack-gain` note's stand-down is unchanged:
+either of the two above silences it.
+
+**Upgrade safety (§9).** A **new** endpoint and a new response model; no existing response shape changed, no
+field renamed or removed, no config key, no `SCHEMA_VERSION` bump, no migration, no on-disk change, no
+default flipped. The page's query is `.catch(() => null)` with `retry: false`, the same shape as its
+`restored-subs` sibling, so a browser held against an older backend renders nothing rather than erroring —
+which is what the old reading did with no runs. Cost per target-page visit is the library-wide scan's cost for
+one target: one `stack_runs` read and one indexed `COUNT` (`Project.count_light_missing_from_run`).
+
+**What this does *not* reach, said plainly.** A target combined **before** v0.492.12 shipped has no
+`stack_run_frames` records, so its displayed picture is still measured by the clock — one restack, or the next
+Combine, records the set and closes it. That is v0.492.12's own stated residual and this change neither widens
+nor narrows it; it only makes the Target page inherit whichever answer the rule gives.
+
+Tests **+6 py** (`tests/webapp/test_new_subs_waiting.py`: the Combine case against the re-derived old
+reading, parity with the library-wide roll-up on run/date/count, a pinned older cover, the two `null` cases,
+and a restored sub the clock cannot see) and **+2 fe** net (`routes/Target.test.tsx`: the page shows the
+server's number, the all-frames-predate-the-stack shape, quiet on `null`, and both sides of the
+restored-card precedence; `countNewSubsSinceStack`'s three unit tests go with the function, their reading now
+pinned server-side). **Fail-before:** 6 of 6 py red on `origin/main` in a scratch worktree with only the test
+file copied in, and 5 fe red against `main`'s own `Target.tsx`.
+
 ## 2026-09-30 (Builder) — v0.492.18: a drizzled stack's "cut your noise ~N×" badge read 11–16 % worse than the stack was
 
 ### 🟠 BUG FIX (trust — PRIORITY 1-adjacent) — the `_measure_noise_ratio` LEAD filed with v0.475.0, closed by measuring the thing it asked about, with the opposite answer

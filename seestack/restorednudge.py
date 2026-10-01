@@ -11,10 +11,12 @@ The gap is what happens *next*. The target's published picture was stacked
 before the sub came back, and the owner's live settings have ``auto_stack`` off,
 so nothing re-stacks and nothing says anything. They are left looking at a
 picture that is quietly thinner than their own data, with no reason on screen to
-press Stack again. The "N new subs since your last stack" nudge cannot see this
-case at all: it compares each sub's *capture* time against the stack, and a
-restored sub was shot long before the picture was made — often on the very night
-it is made of.
+press Stack again. The sibling nudge beside it counts what the picture is
+*missing*, which since v0.492.x includes a restored sub — but a count cannot say
+that a restoration is **why**, and that is the reason worth giving beside one
+picture. (While that nudge counted by *capture* time it could not see this case at
+all: a restored sub was shot long before the picture was made — often on the very
+night it is made of.)
 
 So this module answers one question, from one fact:
 
