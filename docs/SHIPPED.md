@@ -1,5 +1,83 @@
 # Shipped — the record
 
+## 2026-10-01 (Builder) — v0.492.20: Auto measured the ragged border its own last op deletes
+
+### v0.492.20 — 🟠 BUG FIX (PRIORITY 1, the editor's one-click Auto on a mosaic): the third instalment of "Auto must measure the picture its own recipe produces"
+
+*(Found by this run, reproduced and measured before anything changed; "Bugs (fix these first)" held no
+entry a Builder may blind-build, so the hunt went to PRIORITY 1 and to the one end of the Auto chain
+v0.409.0 and v0.410.0 had not reached.)*
+
+**The bug.** `seestack/edit/presets.py::auto_recipe` appends `geometry.crop` to `trim_crop` — the
+largest well-covered rectangle of a mosaic's coverage map — as its **last** op, so the ragged,
+low-coverage fringe of the union canvas is deleted from the one-click result. Every number Auto derives
+from the image was nevertheless read off the **whole** canvas, fringe included: `analyze_proxy`'s sky
+level and σ, `suggest_denoise_strength`, the `_noise_fraction` denoise↔sharpen crossfade, the saturation
+term, and the `classify_target` archetype the Adaptive-Auto taste profile is keyed on. Auto was choosing
+the goal for one picture by measuring another — exactly what v0.409.0 (the sky gradient) and v0.410.0
+(the mosaic's panel steps) fixed at the *first* ops of the same recipe, for the same reason.
+
+**Two mechanisms, pushing the same way.** The fringe is covered once or twice where the interior is
+covered a dozen times, so its grain is several times the kept picture's — and a minority is not something
+a median/MAD rejects, only something it is dragged by. And its coverage counts are *overlap* counts rather
+than panel identities, so one fringe bin spans several panels, `_delevelled_luminance` subtracts a single
+median from it, and the per-panel steps v0.410.0 removed **survive inside the strip**.
+
+**Measured** on `tests/test_auto_noise_measure.py`'s own four-panel scene given the ragged border a real
+union canvas has (mostly uncovered, the covered remainder thin and correspondingly grainier), as how far
+the stretch's target grey sat from the identical stack's:
+
+| trim | fringe's share of the *finite* pixels | `target_bg` | error |
+|---|---|---|---|
+| 5.9 % | 2.4 % | 0.2267 vs 0.2309 | **+1.8 %** |
+| 9.8 % | 4.1 % | 0.2243 vs 0.2312 | **+3.1 %** |
+| 13.6 % | 5.8 % | 0.2239 vs 0.2314 | **+3.3 %** |
+| 19.1 % | 8.4 % | 0.2193 vs 0.2312 | +5.4 % |
+| 36.4 % | 18.3 % | 0.2130 vs 0.2301 | +8.0 % |
+
+…and the finished picture with it: at a 10 % trim its own sky read **p30 0.1854 against the identical
+stack's 0.1899 (−2.4 %)**, 0.1913 (+0.7 %) after. The grain half moved too — the fringe's σ was enough to
+put `detail.denoise` onto a picture whose own grain does not ask for it, next door to the
+`detail.chroma_denoise` that is the owner's reported "multicolour grid".
+
+**The fix.** New `presets._measured_region(rgb, coverage, trim_crop)` returns views into the rectangle the
+crop keeps — image *and* coverage map, so the map still describes the pixels being measured — and
+`auto_recipe` and `analyze_auto_inputs` take their measurements from it. It is tied to the crop actually
+being emitted, which is the rule the two earlier instalments established: **the steps are measured out
+where the recipe takes them out.** So with the owner's `auto_crop_border` preference **off** the fringe
+stays in his picture and is measured again (pinned), and a single-field stack — no `trim_crop` ever passed
+— is byte-for-byte what it was (pinned). It declines to the whole canvas on a degenerate or tiny
+rectangle (`_MEASURE_MIN_SIDE_PX`, 32) and on one that keeps everything, and passes a mismatched coverage
+map straight through, exactly as `_delevelled_luminance` already ignores it.
+
+**Deliberately not changed: the preset-suggestion chip.** `webapp/routers/editor.py::build_preset_suggestion_for_run`
+calls `classify_target` on the whole proxy and does not resolve a trim rectangle at all. The chip is a
+read-only *hint* whose worst case is a wasted click, it is a second endpoint with its own tests, and
+widening this change to reach it would have put a second surface's behaviour in the same commit. The
+archetype that Auto itself consults — the one keyed to the Adaptive-Auto taste profile, inside
+`auto_recipe` — *is* narrowed here, which is the half that can change a picture.
+
+**The bundled `--mosaic` sample is blind to this, and that is a property of the sample.** Stacked for
+real (21 subs, 907×615 union canvas, trim 7.9 %) the measurement moves **0.01 %** — because its fringe is
+only **3.1 %** of the finite population (60 % of it is uncovered NaN, which every estimator on this path
+already ignores) and its sky is dark enough that `target_bg` sits against its own 0.24 clamp. Recorded
+in `docs/PROCESS-NOTES.md` so the next run does not read that 0.01 % as "no bug": the lever is the
+fringe's share of the **finite** pixels, not of the canvas.
+
+**Why the fixture hid it for three instalments.** `_scene(mosaic=True)`'s canvas is a full rectangle —
+all four panels covered edge to edge — so `largest_covered_rect` declines on it and Auto's own crop never
+runs. The file now *asserts* that about itself, in the spirit of `tests/shapes.py` (v0.391.1): a mosaic
+fixture that does not state what its **canvas** can vouch for cannot vouch for it.
+
+**Tests** +14 test items (10 functions) in `tests/test_auto_noise_measure.py` (a `_ragged` canvas whose `trim_crop` is the real
+`largest_covered_rect` answer, not a hand-written rectangle), of which **6 fail before** — verified by a
+`git worktree` checkout of `origin/main` carrying only the new test file. The strongest is an exact
+equality: the recipe built for a ragged canvas equals, op for op and param for param, the recipe built
+from the cropped picture itself, plus the crop that gets there. Nothing loosened, nothing skipped. No
+config key, settings field, schema version, migration, on-disk path, endpoint or response shape changed,
+and no stored recipe is touched — only what a *fresh* Auto measures, which is computed from the image on
+every press.
+
 ## 2026-10-01 (Builder) — v0.492.19: the line beside the picture was the last surface still counting "new light" by the clock
 
 ### v0.492.19 — 🟠 BUG FIX (trust / autonomy, PRIORITY 2-adjacent): the open LEAD filed with v0.492.12, and the last of the four surfaces to join one rule

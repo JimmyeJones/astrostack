@@ -665,6 +665,94 @@ def classify_target(rgb: np.ndarray | None,
     }
 
 
+# --- the picture Auto makes, not the fringe its own last op deletes ----------
+
+#: The smallest side, in proxy pixels, a trim rectangle must have before Auto
+#: measures *inside* it. Below this there is not enough picture left to read a
+#: sky level or a grain estimate off honestly, and the whole canvas — ragged
+#: fringe and all — is the better of two imperfect answers.
+#: ``coverage_trim.largest_covered_rect`` never answers anything this small on a
+#: real union canvas; the floor is here so a degenerate rectangle degrades
+#: instead of measuring nonsense.
+_MEASURE_MIN_SIDE_PX = 32
+
+
+def _measured_region(
+    rgb: np.ndarray | None,
+    coverage: np.ndarray | None,
+    trim_crop: tuple[float, float, float, float] | None,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """``(rgb, coverage)`` narrowed to the rectangle Auto's own crop keeps.
+
+    **Auto has to measure the picture it is about to make.** v0.409.0 took the sky
+    gradient out of the plane the stretch target is read from and v0.410.0 the
+    mosaic's panel steps, both for one reason: ``background.final_gradient`` and
+    ``background.level_coverage`` are Auto's own *first* ops, so those features
+    are gone before ``tone.stretch`` sees a pixel and measuring them is measuring
+    a picture the recipe does not produce. ``auto_recipe``'s **last** op is the
+    same argument at the other end — ``geometry.crop`` to ``trim_crop`` deletes
+    the union canvas's ragged, low-coverage border — and it was not made there:
+    the sky level and σ (:func:`analyze_proxy`), the denoise strength
+    (:func:`~seestack.edit.noise.suggest_denoise_strength`), the
+    denoise↔sharpen crossfade, the saturation term and the
+    :func:`classify_target` archetype the taste profile is keyed on were all read
+    off the whole canvas, fringe included.
+
+    That fringe is a genuinely different picture from the one that survives, in
+    two ways that push together: its pixels are covered once or twice where the
+    interior is covered a dozen times, so its grain is several times the kept
+    picture's; and its coverage counts are *overlap* counts rather than panel
+    identities, so one fringe bin spans several panels,
+    :func:`_delevelled_luminance` subtracts a single median from it, and the
+    per-panel steps v0.410.0 removed survive inside the strip.
+
+    Measured on this module's own four-panel scene given the ragged border a real
+    union canvas has (mostly uncovered, the covered remainder thin and
+    correspondingly noisier), as how far the stretch's target grey sits from the
+    identical stack's: **+1.8 % at a 6 % trim, +3.1 % at 10 %, +3.3 % at 14 %**,
+    rising to +8.0 % at a 36 % trim. The bundled ``--mosaic`` sample is blind to
+    it (0.01 %) and that is a property of the sample, not of the bug — its fringe
+    is only 3.1 % of the finite population and its sky is dark enough that
+    ``target_bg`` sits at its own clamp ceiling. Details in
+    ``docs/PROCESS-NOTES.md`` (2026-10-01).
+
+    Declines, returning its inputs unchanged, when there is nothing to narrow (no
+    crop is going to run, or the rectangle keeps the whole canvas) and when there
+    is nothing honest to narrow to (a degenerate or tiny rectangle). A coverage
+    map that does not match the image is passed through untouched, exactly as
+    :func:`_delevelled_luminance` already ignores it.
+    """
+    if rgb is None or trim_crop is None:
+        return rgb, coverage
+    arr = np.asarray(rgb)
+    if arr.ndim < 2:
+        return rgb, coverage
+    h, w = arr.shape[:2]
+    # A rectangle that isn't four finite numbers is declined rather than raised
+    # on: this sits on the editor's Auto button, and the honest degradation is
+    # today's whole-canvas measurement, not a 500.
+    try:
+        x0, y0, x1, y1 = (float(v) for v in trim_crop)
+    except (TypeError, ValueError):
+        return rgb, coverage
+    if not all(np.isfinite(v) for v in (x0, y0, x1, y1)):
+        return rgb, coverage
+    c0, c1 = sorted((int(round(x0 * w)), int(round(x1 * w))))
+    r0, r1 = sorted((int(round(y0 * h)), int(round(y1 * h))))
+    c0, c1 = max(0, min(c0, w)), max(0, min(c1, w))
+    r0, r1 = max(0, min(r0, h)), max(0, min(r1, h))
+    if (c1 - c0) < _MEASURE_MIN_SIDE_PX or (r1 - r0) < _MEASURE_MIN_SIDE_PX:
+        return rgb, coverage
+    if (c1 - c0) >= w and (r1 - r0) >= h:
+        return rgb, coverage  # nothing is being trimmed away
+    cov = coverage
+    if cov is not None:
+        cov_arr = np.asarray(cov)
+        if cov_arr.ndim >= 2 and cov_arr.shape[:2] == (h, w):
+            cov = cov_arr[r0:r1, c0:c1]
+    return arr[r0:r1, c0:c1], cov
+
+
 def auto_recipe(rgb: np.ndarray | None = None,
                 median_fwhm: float | None = None,
                 is_mosaic: bool = False,
@@ -742,8 +830,12 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # out — ``background.level_coverage`` is emitted on a mosaic and nowhere
     # else — so ``is_mosaic`` decides both, in one place. A single-field stack's
     # Auto is byte-for-byte what it was, whatever map the caller supplies.
+    # Measure the picture this recipe actually produces: when the border trim at
+    # the bottom of this function is going to run, the fringe it deletes is not
+    # part of it (see :func:`_measured_region`).
+    m_rgb, m_cov = _measured_region(rgb, coverage, trim_crop if auto_crop else None)
     if rgb is not None:
-        a = analyze_proxy(rgb, coverage if is_mosaic else None)
+        a = analyze_proxy(m_rgb, m_cov if is_mosaic else None)
         sky_sigma = float(a["sky_sigma"])
         noise_frac = _noise_fraction(sky_sigma)
         # Darker sky → lift a little more (higher target grey), brighter → less.
@@ -763,7 +855,7 @@ def auto_recipe(rgb: np.ndarray | None = None,
             # the crossfade weight so it eases in across the band.
             from seestack.edit.noise import suggest_denoise_strength
 
-            _, suggested = suggest_denoise_strength(rgb)
+            _, suggested = suggest_denoise_strength(m_rgb)
             base = suggested if suggested is not None else 0.5
             denoise_strength = round(base * noise_frac, 3)
             # The *colour* half of the same problem, on the same crossfade: what a
@@ -791,7 +883,7 @@ def auto_recipe(rgb: np.ndarray | None = None,
         # Per-object-type taste: classify this image (galaxy/nebula/cluster) so a
         # bias learned on one archetype only shifts that archetype. An unclassified
         # image (cls None) falls back to the global taste — see auto_prefs.
-        object_type = (classify_target(rgb, coverage if is_mosaic else None)
+        object_type = (classify_target(m_rgb, m_cov if is_mosaic else None)
                        .get("cls") if rgb is not None else None)
         adj = auto_prefs.apply_profile(
             prefs,
@@ -885,10 +977,12 @@ def analyze_auto_inputs(
     each op, surfaced so the user sees Auto tuned itself to *their* data (not a
     fixed op list). Pure; reuses the exact same analysis ``auto_recipe`` consumes
     (``analyze_proxy`` + ``_noise_fraction`` + the FWHM→radius map + the trim
-    rect), so the numbers reported here match the recipe it actually built —
-    including ``coverage``, which must be passed here whenever it is passed to
-    :func:`auto_recipe` or the reported sky level describes a different plane from
-    the one the recipe's stretch target was chosen on.
+    rect) **on the same pixels** — the rectangle the recipe's own border trim
+    keeps (:func:`_measured_region`) — so the numbers reported here match the
+    recipe it actually built, including ``coverage``, which must be passed here
+    whenever it is passed to :func:`auto_recipe` or the reported sky level
+    describes a different plane from the one the recipe's stretch target was
+    chosen on.
 
     Every field is optional/nullable so it degrades gracefully: ``sky``/noise are
     ``None`` when the proxy can't be measured, ``median_fwhm`` is ``None`` when no
@@ -918,8 +1012,11 @@ def analyze_auto_inputs(
     # out — ``background.level_coverage`` is emitted on a mosaic and nowhere
     # else — so ``is_mosaic`` decides both, in one place. A single-field stack's
     # Auto is byte-for-byte what it was, whatever map the caller supplies.
+    # Mirrors ``auto_recipe``: the cues explain the recipe, so they are read off
+    # the same pixels it measured (see :func:`_measured_region`).
+    m_rgb, m_cov = _measured_region(rgb, coverage, trim_crop if auto_crop else None)
     if rgb is not None:
-        a = analyze_proxy(rgb, coverage if is_mosaic else None)
+        a = analyze_proxy(m_rgb, m_cov if is_mosaic else None)
         sky_sigma = float(a["sky_sigma"])
         out["sky"] = round(float(a["sky"]), 3)
         out["sky_sigma"] = round(sky_sigma, 4)
