@@ -597,3 +597,98 @@ def test_the_mosaic_twin_that_carries_pictures_is_offered_the_combine(
     # And the nudge clears: the on-device output junk offer is all that is left.
     after = client.get("/api/targets/cleanup-suggestions").json()
     assert [s["safe"] for s in after] == ["M_44_mosaic"]
+
+
+# ---- a project this build refuses to open must not take the card down --------
+
+def _stamp_newer_schema(lib: Library, safe: str) -> None:
+    """Stamp one target's project DB with a schema *newer* than this build's.
+
+    The §9 shape the guard exists for: an install upgraded in place and then
+    rolled back to ``stable`` leaves a project written by the newer build, and
+    ``Project._check_schema`` **raises** ``RuntimeError`` rather than guessing at
+    columns it has never heard of. Done by hand on the DB because no supported
+    code path produces it — which is the point.
+    """
+    import sqlite3
+
+    from seestack.io.project import SCHEMA_VERSION
+
+    entry = lib.find_target(safe)
+    assert entry is not None
+    conn = sqlite3.connect(lib.target_dir(entry) / "project.sqlite")
+    try:
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_a_project_this_build_cannot_open_is_skipped_not_500ed(client, data_root: Path):
+    """One unreadable target must cost its own row, not the whole nudge.
+
+    ``junk_verdict`` opens every target small enough to plausibly be on-device
+    output, and this one raises on the open. Four sibling routers (`gallery`,
+    `stats`, `storage`, `newsubs`) already wrap the identical ``Project.open`` in
+    ``except Exception: continue``; before the fix this one did not, so the card
+    came back 500 and the owner lost the junk row it *could* answer.
+    """
+    incoming = data_root / "dump"
+    vid = incoming / "Lunar_video"
+    vid.mkdir(parents=True)
+    real = incoming / "M 42"
+    real.mkdir(parents=True)
+    broken_dir = incoming / "NGC 7000"
+    broken_dir.mkdir(parents=True)
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        # Junk by *name*, so its verdict never opens a project — it is the row
+        # that proves the endpoint still did its job.
+        _add_target(lib, "Lunar_video", [vid / "clip_000.fit"])
+        _add_target(lib, "M 42", [real / f"Light_{i:03d}.fit" for i in range(6)])
+        broken = _add_target(lib, "NGC 7000", [broken_dir / "Light_000.fit"])
+        _stamp_newer_schema(lib, broken)
+    finally:
+        lib.close()
+
+    r = client.get("/api/targets/cleanup-suggestions")
+    assert r.status_code == 200
+    safes = [s["safe"] for s in r.json()]
+    assert "Lunar_video" in safes
+    assert broken not in safes  # unreadable ⇒ never offered for removal
+    assert "M_42" not in safes
+
+
+def test_an_unreadable_duplicate_base_is_skipped_not_500ed(client, data_root: Path):
+    """The other project-opening call in the same loop.
+
+    ``confirm_duplicate_of_base`` opens the *base* target as well, to check it
+    really owns every one of the duplicate's frames. A base this build cannot
+    open therefore raised from a second place, and the honest degrade is to leave
+    the duplicate unoffered — "remove this, the other one has the frames" is not
+    a claim to make about a target whose frames could not be read.
+    """
+    incoming = data_root / "dump"
+    base_dir = incoming / "NGC 7000"
+    base_dir.mkdir(parents=True)
+    dup_dir = incoming / "NGC 7000_sub"
+    dup_dir.mkdir(parents=True)
+    vid = incoming / "Lunar_video"
+    vid.mkdir(parents=True)
+    shared = [base_dir / f"Light_{i:03d}.fit" for i in range(4)]
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        _add_target(lib, "Lunar_video", [vid / "clip_000.fit"])
+        base = _add_target(lib, "NGC 7000", shared)
+        dup = _add_target(lib, "NGC 7000_sub", shared)
+        _stamp_newer_schema(lib, base)
+    finally:
+        lib.close()
+
+    r = client.get("/api/targets/cleanup-suggestions")
+    assert r.status_code == 200
+    safes = [s["safe"] for s in r.json()]
+    assert "Lunar_video" in safes
+    assert dup not in safes

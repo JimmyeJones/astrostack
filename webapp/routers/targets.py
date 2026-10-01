@@ -194,13 +194,24 @@ def merge_suggestions(request: Request) -> list[MergeSuggestionOut]:
         for g in groups:
             by_name = {m.name: m for m in g.members}
             by_safe = {m.safe_name: m for m in g.members}
-            survivors.extend(
-                m for m in g.members
-                if confirm_duplicate_of_base(
-                    lib, m, find_duplicate_base(m.name, by_name, by_safe),
-                ) is None
-                and junk_verdict(lib, m) is None
-            )
+            for m in g.members:
+                # Both helpers **open this member's project**, and
+                # ``Project._check_schema`` *raises* on a DB stamped by a newer
+                # build — an install upgraded in place and then rolled back to
+                # ``stable`` (§9) — as it does on a corrupt one. Unguarded, one
+                # such target 500s the whole nudge. Skip the one member instead,
+                # exactly as ``newsubs.scan_new_subs_waiting``, ``gallery``,
+                # ``stats`` and ``storage`` already do around the identical open.
+                # Skipping drops it from the offer, which is the safe direction: a
+                # target the app cannot read is not one to propose combining.
+                try:
+                    if (confirm_duplicate_of_base(
+                            lib, m, find_duplicate_base(m.name, by_name, by_safe),
+                        ) is None
+                            and junk_verdict(lib, m) is None):
+                        survivors.append(m)
+                except Exception:  # noqa: BLE001 — one broken project must not 500 the nudge
+                    continue
         # Re-cluster what survived rather than patching the old groups: the
         # centre and the "all within N′" figure must describe the targets
         # actually being offered, and dropping a member can legitimately split a
@@ -350,7 +361,17 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
                 ))
                 continue
             # --- (1) output/capture junk (cheap: only small targets opened) ---
-            verdict = junk_verdict(lib, entry)
+            # ``junk_verdict`` opens the project of any target small enough to
+            # plausibly be on-device output, and that open raises on a DB stamped
+            # by a newer build (§9: upgraded in place, then rolled back) or on a
+            # corrupt one. Skip that target rather than 500 the card — the guard
+            # four sibling routers already put around the identical open. Skipping
+            # is also the right answer on its own terms: a target the app could
+            # not read is not one to offer removing.
+            try:
+                verdict = junk_verdict(lib, entry)
+            except Exception:  # noqa: BLE001 — one broken project must not 500 the card
+                continue
             if verdict is not None:
                 out.append(CleanupSuggestionOut(
                     safe=entry.safe_name,
@@ -367,9 +388,18 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
             # ``<T> (mosaic)`` target — reach the project-opening confirmation.
             if duplicate_base_safe(entry.name) is None:
                 continue
-            dup = confirm_duplicate_of_base(
-                lib, entry, find_duplicate_base(entry.name, by_name, by_safe),
-            )
+            # The second project-opening call in this loop: it opens the *base*
+            # as well, to check it really owns every one of this target's frames.
+            # A base this build cannot open therefore raised from here too, and
+            # the honest degrade is to leave the duplicate unoffered — "remove
+            # this, the other one has the frames" is not a claim to make about a
+            # target whose frames could not be read.
+            try:
+                dup = confirm_duplicate_of_base(
+                    lib, entry, find_duplicate_base(entry.name, by_name, by_safe),
+                )
+            except Exception:  # noqa: BLE001 — one broken project must not 500 the card
+                continue
             if dup is None:
                 continue
             # The base owns *every* one of these subs, so nothing real is lost and
