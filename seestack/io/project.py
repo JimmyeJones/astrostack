@@ -2098,13 +2098,71 @@ class Project:
         read", not "not located in the sky yet" — so the breakdown must attribute
         it to the unreadable bucket (and never nudge a plate-solve on it). The
         ``wcs_json IS NULL`` guard keeps it definitionally within the unsolved set
-        (a rare frame that errored in QC yet later solved is not double-counted)."""
+        (a rare frame that errored in QC yet later solved is not double-counted).
+
+        Distinct from :meth:`count_unreadable_frames`, whose "unreadable" is
+        about the **file** not being on disk rather than its contents not
+        parsing — the two names are close and the populations do not overlap by
+        construction."""
         assert self._conn is not None
         return self._conn.execute(
             "SELECT COUNT(*) FROM frames "
             "WHERE accept = 1 AND wcs_json IS NULL "
             "AND reject_reason LIKE 'qc_error%'"
         ).fetchone()[0]
+
+    def count_unreadable_frames(self, *, accepted_only: bool = False,
+                                solved_only: bool = False) -> int:
+        """How many of this target's frames have **neither** on-disk path present
+        right now — :func:`count_unreadable_frames`' question, asked of the
+        database instead of of rows the caller already holds.
+
+        Nothing to do with :meth:`count_accepted_unreadable`, which counts the
+        subs whose *FITS* could not be parsed during QC. This one is about the
+        **file**: the row survives its bytes going away (a cleared Stage-1 cache
+        over an offline share, an unmounted drive, files moved), and the answer
+        changes by itself when the share comes back.
+
+        The ``stat()`` per frame is inherent and is paid either way; what this
+        saves is the **rows**. The module-level function takes frames, so a
+        caller holding only a project built a ``FrameRow`` per sub to read two
+        path columns off it — and the biggest column on a solved sub is the plate
+        solution (``wcs_json``, a FITS header *text* of ~25 eighty-character
+        cards) that this question never looks at. Measured on a synthetic project
+        the size of the owner's deepest target (35,894 subs, every file present,
+        best of 3): **2,324 ms → 1,410 ms** accepted-only and **2,181 ms →
+        1,276 ms** accepted-and-solved, for the identical number. The remainder
+        is the stats, which dominate what is left: the same walk with the stat
+        taken out is 873 ms over whole rows against 117 ms over the two columns,
+        so the row building this drops is ~750 ms of it. It matters most on the
+        library dashboard's missing-files roll-up, which pays that for **every**
+        target that has accepted frames.
+
+        ``accepted_only`` mirrors :meth:`iter_frames`. ``solved_only`` adds the
+        plate-solved bar :meth:`count_accepted_solved` uses — empty-string
+        ``wcs_json`` excluded as well as NULL, so it matches the engine's own
+        ``if f.wcs_json`` truthiness test exactly — for the caller asking about
+        the subs a stack would actually try to combine.
+
+        The rule itself is not restated here: each row is judged by
+        :func:`first_existing_frame_path`, which is :func:`readable_frame_path`
+        over the two columns, so "which file is this frame?" keeps one
+        definition. No ``ORDER BY``: a count cannot see one, and leaving it out
+        is one sort a deep target does not pay for.
+        """
+        assert self._conn is not None
+        bars = []
+        if accepted_only:
+            bars.append("accept = 1")
+        if solved_only:
+            bars.append("wcs_json IS NOT NULL AND wcs_json <> ''")
+        where = (" WHERE " + " AND ".join(bars)) if bars else ""
+        n = 0
+        for row in self._conn.execute(
+                f"SELECT cached_path, source_path FROM frames{where}"):
+            if first_existing_frame_path(row[0], row[1]) is None:
+                n += 1
+        return n
 
     def count_accepted_unsolved_tried(self) -> int:
         """Count accepted, still-unsolved frames the **solver has already tried**.

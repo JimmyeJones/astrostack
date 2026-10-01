@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from seestack.io.project import (
     FrameRow,
+    Project,
     count_unreadable_frames,
     first_existing_frame_path,
     readable_frame_path,
@@ -149,3 +150,102 @@ def test_count_unreadable_frames_counts_only_the_ones_with_no_file(tmp_path):
 
 def test_count_unreadable_frames_is_zero_for_an_empty_list():
     assert count_unreadable_frames([]) == 0
+
+
+# ---- the same count, asked of the project instead of of its rows -------------
+
+def _project_with(tmp_path, specs):
+    """A real project whose frames are ``(file_exists, accept, solved)`` triples.
+
+    ``cached_path`` always points at a file that does not exist, so each frame's
+    readability is decided by its source alone — the dangling-cache shape this
+    whole module is about.
+    """
+    subs = tmp_path / "in"
+    subs.mkdir(exist_ok=True)
+    proj = Project.create(tmp_path / "proj", name="M 31")
+    for i, (exists, accept, solved) in enumerate(specs):
+        src = subs / f"sub{i:03d}.fit"
+        if exists:
+            src.write_bytes(b"s")
+        proj.add_frame(FrameRow(
+            source_path=str(src),
+            cached_path=str(subs / f"cache{i:03d}.fit"),  # never written
+            bayer_pattern="RGGB",
+            wcs_json=solved,
+            accept=accept,
+        ))
+    return proj
+
+
+_SOLVED = '{"CRVAL1": 10.0}'
+
+# (file on disk, accepted, wcs_json) — covers every combination the two flags
+# can select, so each shape below is asserted against a different population.
+_SPECS = [
+    (True, True, _SOLVED),     # readable, accepted, solved
+    (False, True, _SOLVED),    # gone, accepted, solved
+    (False, True, None),       # gone, accepted, never solved
+    (False, True, ""),         # gone, accepted, blank sidecar (= not solved)
+    (False, False, _SOLVED),   # gone, rejected, solved
+    (True, False, None),       # readable, rejected, unsolved
+]
+
+
+def test_project_count_unreadable_frames_matches_the_row_based_count(tmp_path):
+    """The narrow read answers exactly what building every ``FrameRow`` answered.
+
+    Asserted for all three shapes the callers use, against the very expressions
+    they used before — the roll-up's ``accepted_only``, the walk-away preflight's
+    accepted-and-solved, and the unfiltered whole table.
+    """
+    proj = _project_with(tmp_path, _SPECS)
+    try:
+        assert proj.count_unreadable_frames(accepted_only=True) == \
+            count_unreadable_frames(proj.iter_frames(accepted_only=True)) == 3
+        assert proj.count_unreadable_frames(accepted_only=True, solved_only=True) == \
+            count_unreadable_frames(
+                f for f in proj.iter_frames(accepted_only=True) if f.wcs_json) == 1
+        assert proj.count_unreadable_frames() == \
+            count_unreadable_frames(proj.iter_frames()) == 4
+    finally:
+        proj.close()
+
+
+def test_project_count_unreadable_frames_reads_only_the_two_path_columns(tmp_path):
+    """The whole point: it must not build a row per sub to read two paths.
+
+    Pinned by making the row-building read itself fail — a narrow count cannot
+    notice, and the old expression could not have survived it.
+    """
+    proj = _project_with(tmp_path, _SPECS)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("count_unreadable_frames must not read whole rows")
+
+    try:
+        proj.iter_frames = _boom  # type: ignore[method-assign]
+        assert proj.count_unreadable_frames(accepted_only=True) == 3
+        assert proj.count_unreadable_frames(accepted_only=True, solved_only=True) == 1
+    finally:
+        del proj.iter_frames
+        proj.close()
+
+
+def test_project_count_unreadable_frames_counts_a_dangling_cache_as_readable(tmp_path):
+    """A frame whose cache is gone but whose source is there is *not* unreadable —
+    the fallback this module exists for, through the project-level count."""
+    proj = _project_with(tmp_path, [(True, True, _SOLVED), (True, True, _SOLVED)])
+    try:
+        assert proj.count_unreadable_frames(accepted_only=True) == 0
+    finally:
+        proj.close()
+
+
+def test_project_count_unreadable_frames_is_zero_on_an_empty_project(tmp_path):
+    proj = Project.create(tmp_path / "proj", name="M 31")
+    try:
+        assert proj.count_unreadable_frames() == 0
+        assert proj.count_unreadable_frames(accepted_only=True, solved_only=True) == 0
+    finally:
+        proj.close()

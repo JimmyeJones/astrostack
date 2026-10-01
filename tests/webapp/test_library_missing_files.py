@@ -173,3 +173,27 @@ def test_response_shape(client, built_library, field):
     frontend never has to guess at a partial payload."""
     body = client.get("/api/library/missing-files").json()
     assert isinstance(body[field], int)
+
+
+def test_the_roll_up_never_builds_a_frame_row_per_sub(client, built_library,
+                                                      data_root, monkeypatch):
+    """The whole library's worth of this question must not cost a row per sub.
+
+    The roll-up opens *every* target with accepted frames and stats each one's
+    subs, so it is the one caller that pays the row building more than once per
+    page. It asks ``Project.count_unreadable_frames`` — two path columns, no
+    plate-solve header — and this pins that by making the whole-row read fail:
+    the answer is unchanged, where the ``count_unreadable_frames(iter_frames(…))``
+    idiom it replaced could not have produced one at all.
+    """
+    from seestack.io.project import Project
+
+    _unlink_accepted(data_root, "M_42", 2)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("the missing-files roll-up must not read whole rows")
+
+    monkeypatch.setattr(Project, "iter_frames", _boom)
+    body = client.get("/api/library/missing-files").json()
+    assert body["n_missing"] == 2
+    assert [t["safe"] for t in body["targets"]] == ["M_42"]

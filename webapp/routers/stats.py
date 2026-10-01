@@ -580,7 +580,7 @@ def _collect_missing_files(lib, targets) -> LibraryMissingFilesOut:
     """Count, across the whole library, accepted frames with neither their cache
     nor their source on disk right now. A broken project is skipped, never 500s
     the dashboard — the same rule the other roll-ups follow."""
-    from seestack.io.project import Project, count_unreadable_frames
+    from seestack.io.project import Project
 
     rows: list[MissingFilesTargetOut] = []
     n_missing = 0
@@ -593,7 +593,7 @@ def _collect_missing_files(lib, targets) -> LibraryMissingFilesOut:
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
-            missing = count_unreadable_frames(proj.iter_frames(accepted_only=True))
+            missing = proj.count_unreadable_frames(accepted_only=True)
             accepted = proj.count(accepted_only=True)
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
             continue

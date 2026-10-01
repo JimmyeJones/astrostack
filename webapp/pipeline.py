@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from seestack.io.library import Library
 from seestack.io.project import (
-    count_unreadable_frames,
     first_existing_frame_path,
 )
 from seestack.io.scanner import ScanResult, run_qc_and_solve, scan_and_organize
@@ -3119,10 +3118,12 @@ def _solved_accepted_unreadable(proj: Any) -> int:
 
     One ``stat()`` per solved+accepted frame — the same check the worker makes
     per frame anyway — so callers keep it off the every-scan path and only ask
-    when the answer is about to change a decision.
+    when the answer is about to change a decision. The solved bar is the
+    database's (``Project.count_unreadable_frames(solved_only=True)``), which is
+    the engine's own ``if f.wcs_json`` truthiness test in SQL: the alternative
+    read a whole ``FrameRow`` per sub to test the presence of its largest column.
     """
-    return count_unreadable_frames(
-        f for f in proj.iter_frames(accepted_only=True) if f.wcs_json)
+    return proj.count_unreadable_frames(accepted_only=True, solved_only=True)
 
 
 def _detect_mixed_pointings(proj: Any) -> MixedPointings | None:
