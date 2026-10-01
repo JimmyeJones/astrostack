@@ -190,6 +190,97 @@ _READONLY_GET_PATHS = frozenset({
 })
 
 
+# Methods that change state. A cross-site page can make a browser send any of
+# these at the app with no CORS preflight (an auto-submitting <form>), so they
+# are the ones the site check below guards; a GET can be embedded in an <img>
+# and refusing it would gain nothing.
+_STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+_CROSS_SITE_DETAIL = (
+    "This request came from another site, so AstroStack refused it. Open "
+    "AstroStack in its own tab and try again.")
+
+
+def _origin_host(url: str, default_port: int | None = None) -> tuple[str, int] | None:
+    """``(hostname, port)`` of an ``Origin``/``Referer`` value, the port made
+    explicit — from the scheme, or from ``default_port`` for a bare ``Host``
+    value. ``None`` when it names no host (``null``, junk)."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url.strip())
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        return None
+    if not host or parts.scheme not in ("http", "https"):
+        return None
+    if port is None:
+        port = default_port if default_port is not None else (443 if parts.scheme == "https" else 80)
+    return host.lower(), port
+
+
+def _request_hosts(request, default_port: int) -> set[tuple[str, int]]:  # noqa: ANN001
+    """The names this request was addressed to: ``Host``, and ``X-Forwarded-Host``
+    when a reverse proxy rewrote the former. A page on another site cannot set
+    the forwarded header without a preflight, so accepting it opens nothing.
+    A value with no port means the port the *source's* scheme implies."""
+    out: set[tuple[str, int]] = set()
+    for name in ("host", "x-forwarded-host"):
+        raw = request.headers.get(name)
+        if not raw:
+            continue
+        # The first entry when a proxy chain appended its own.
+        parsed = _origin_host(f"http://{raw.split(',', 1)[0].strip()}", default_port)
+        if parsed:
+            out.add(parsed)
+    return out
+
+
+def cross_site_reason(request) -> str | None:  # noqa: ANN001
+    """Why a state-changing request is a cross-site one, or ``None`` to allow it.
+
+    The app has no password by default, and a password would not help here: a
+    browser resends cached Basic credentials on a cross-site form submission. So
+    this is checked *before* the password, once, for every state-changing
+    method, from what the browser itself says about where the request came from:
+
+    * ``Sec-Fetch-Site`` — set by the browser and unforgeable from a page.
+      ``cross-site`` is refused outright; ``same-origin`` and ``none`` (a typed
+      URL, a bookmark) are allowed outright, which also keeps a reverse proxy
+      that rewrites ``Host`` working; ``same-site`` falls through to the check
+      below.
+    * ``Origin``, else ``Referer`` — must name the host and port this request
+      was addressed to (``Host``, or ``X-Forwarded-Host`` behind a proxy). Every
+      browser sends ``Origin`` on a cross-site POST; ``Origin: null`` (a
+      sandboxed frame) names no host and is refused.
+
+    A request carrying none of the three — curl, the observer's scripts, the
+    owner's own tooling — is allowed: that is the standard trade for an app
+    whose API is also driven from a shell, and a browser never sends a
+    state-changing request with none of them. (Audit 2026-09-30, C-F2.)
+    """
+    if request.method not in _STATE_CHANGING_METHODS:
+        return None
+    fetch_site = (request.headers.get("sec-fetch-site") or "").strip().lower()
+    if fetch_site == "cross-site":
+        return "Sec-Fetch-Site: cross-site"
+    if fetch_site in ("same-origin", "none"):
+        return None
+    for name in ("origin", "referer"):
+        raw = request.headers.get(name)
+        if raw is None:
+            continue
+        source = _origin_host(raw)
+        if source is None:
+            return f"{name.title()}: {raw.strip()[:80] or '(empty)'}"
+        # A bare Host means the port the source's scheme implies (80 or 443).
+        implied = 443 if raw.strip().lower().startswith("https:") else 80
+        if source not in _request_hosts(request, implied):
+            return f"{name.title()} names {source[0]}:{source[1]}, not this app"
+        return None
+    return None
+
+
 def _install_auth_gate(app: FastAPI) -> None:
     from starlette.responses import JSONResponse
 
@@ -197,6 +288,14 @@ def _install_auth_gate(app: FastAPI) -> None:
 
     @app.middleware("http")
     async def _auth_gate(request, call_next):  # noqa: ANN001
+        # The site check goes first: it does not depend on whether a password is
+        # set, and a cross-site request must never get as far as the password
+        # check, whose answer the browser would supply for the victim.
+        why = cross_site_reason(request)
+        if why is not None:
+            log.warning("refused a cross-site %s %s (%s)", request.method,
+                        request.url.path, why)
+            return JSONResponse({"detail": _CROSS_SITE_DETAIL}, status_code=403)
         store = getattr(request.app.state, "settings_store", None)
         if store is not None and request.url.path not in _AUTH_OPEN_PATHS:
             settings = store.get()

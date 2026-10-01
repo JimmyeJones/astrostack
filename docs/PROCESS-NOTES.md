@@ -2,7 +2,7 @@
 
 ## 2026-09-30 (Builder) — a fixture can be faithful about *whether* a bug exists and wrong about its **sign**, and the lead it produced pointed the fix the right way for the wrong reason
 
-*(Builder, branch `claude/keen-darwin-1bg1wt` → **v0.492.16**. Baseline on `origin/main` at `ab9a6c6`:
+*(Builder, branch `claude/keen-darwin-1bg1wt` → **v0.492.18**. Baseline on `origin/main` at `ab9a6c6`:
 **7,117 passed, 2 skipped** in 14:08. Final, after merging `7c6b59f` (PR #1039): **7,166/2** in 14:35.)*
 
 ### The class, which is new here and is the reverse of the one this repo already guards
@@ -40,7 +40,7 @@ the native reading at a 160²-crop fixture, because the *native* estimate there 
 narrow and useful: **a probe that compares two estimates has to be sized so both are converged**, or the
 agreement it reports can be one side's sampling error.
 
-The two rejected shapes are measured and recorded in `SHIPPED.md` under v0.492.16, so neither is re-picked: an
+The two rejected shapes are measured and recorded in `SHIPPED.md` under v0.492.18, so neither is re-picked: an
 **exact** fractional area-weighted resample is +4 to +7 % out (its fractional weights smear pixels the kernel has
 already correlated — the thing the estimator's lag walk is *measuring*), and a **rational** match that bins the
 sub by *q* as well as the master by *p* is far worse (5.25 at ×1.5, 3.26 at ×1.25), because the two sides have
@@ -55,6 +55,117 @@ was already **in** the repo, in prose, beside a different constant: `stacker.rej
 drizzled run has exactly the same gap, and the owner drizzles mosaics"*. Worth remembering when a gate asks for
 an observation: grep the code's own comments for it before concluding it needs the owner.
 
+## 2026-09-30 (audit run B, D2) — notes moved out of "Bugs (fix these first)"
+
+*Notes, owner answers and closed-not-fixed traces that sat in the Bugs section, moved here whole so that
+section holds open bugs only (AGENTS.md §2). Text as it stood on 2026-09-30.*
+
+### (c) of the #965 solve-refusal LEAD — `n_roughly_aligned` NULL on all 690 runs, ⚪ CLOSED WITH THE GREP (Builder 2026-09-26)
+
+  **(c) ~~`n_roughly_aligned` is NULL on all 690 of the owner's stack runs~~ — ⚪ CLOSED WITH THE GREP, and
+  it was never going to show any of this** *(Builder 2026-09-26, while shipping v0.475.3 — the grep this
+  point asked for, done)*. The column **is** written: `stacker` stamps `NROUGHAL` and persists
+  `n_roughly_aligned` under `eff.subpixel_refine and not eff.drizzle and refine_active`, deliberately
+  omitting it otherwise so that "absent" reads as *"refine didn't run"* rather than a reassuring zero. It is
+  NULL on all 690 because **`StackOptions.subpixel_refine` defaults `False`** and nothing turns it on — it is
+  a hand-set **advanced** field on the Stack form (`schemas.py`), so every one of those runs had refine off,
+  and NULL is the correct record. **And the premise under it is wrong too:** "roughly aligned" is the
+  *refine* step's own cap being exceeded (`align.align_one`'s `roughly_aligned_ids`), not a wrong-scale plate
+  solve — a frame with an implausible WCS reprojects at the wrong scale, which is what v0.473.1 now catches;
+  it does not read as "rough". So this column would have been silent on the 178 frames even with refine on.
+  Nothing to build here. *(The one thing that did come out of the grep is a separate, shipped bug: the
+  `soft_stars` health note was prescribing those non-existent subs to the reader — v0.475.3.)*
+
+### 📋 Owner answers to the fourth audit's open questions (2026-09-11) — moved out of Bugs, where a notes block does not belong
+
+- **📋 OWNER ANSWERS TO THE FOURTH AUDIT'S OPEN QUESTIONS (2026-09-11) — two findings get *smaller*, one
+  question is closed unanswerable. Read before prioritising the audit's items.**
+  - **The pre-D1 saved-recipe crop (⭐ item below — ✅ IT HAS SINCE SHIPPED, don't go looking for it; all three
+    surfaces closed in v0.416.0 + v0.417.0, entries in [`SHIPPED.md`](SHIPPED.md), and the order dependency
+    below is therefore already satisfied): he sees no blurry mosaic cards.** Asked to open his Library
+    and look, his answer was *"don't see anything immediately"*. **The likely reason is in Owner Facts:
+    `auto_edit_on_autostack` has been OFF on his install**, so the walk-away chain never auto-edited anything —
+    a stored recipe only exists where he used the editor or "Process target" **by hand**. So the bug is **real
+    and still worth fixing** (the audit reproduced it in the shipped image over a real v0.277 volume), but its
+    blast radius *on this owner* is small, and it is **not** the emergency the audit's placement implies.
+    **Re-prioritise accordingly — and note the order dependency:** it becomes materially *more* important the
+    moment `auto_edit_on_autostack` is turned on, which is an approved-and-pending change. **Fix it before that
+    flips**, not after. Absence of a visible symptom is not proof of absence — he looked quickly, at cards, not
+    at every target.
+  - **Root-owned files under `library/targets/` — low impact, confirmed.** The container runs as root, so
+    everything it writes is root-owned. Asked whether he browses that share from Windows, he said he browses
+    **only to upload new subs** — i.e. he writes into `incoming/` over SMB (TrueNAS-owned) and has no need to
+    read or write the app's own `library/targets/` tree from a client. **Keep the finding open as hygiene, drop
+    its priority**; it is not blocking him and a UID/GID change to a live install is exactly the kind of
+    migration §9 says to be careful with.
+  - **Which version he upgraded from: unanswerable, stop asking.** *"don't remember"*, and the upgrade has
+    already happened, so the pre-upgrade schema and config are gone. **Do not spend a run reconstructing it.**
+    Anything that genuinely needs it should be re-derived from what is on disk now (run records, schema
+    version, `config.json` keys) rather than from his memory.
+
+### From the 'Minor / low-priority' list — closed-as-already-defended (`_cache_stale`, re-traced 2026-09-07) and the two non-bugs from the 2026-09-05 mosaic/output audit
+
+  - ~~`seestack/io/ingest.py:93-103` `_cache_stale` refreshes on source *shrink* too, not just growth: the
+    docstring justifies it as "source grew after it was cached" but the `st_size != st_size` test is symmetric,
+    so a source later truncated/replaced smaller than its cache overwrites a good Stage-1 cache and resets that
+    frame's QC.~~ — **CLOSED as already-defended, not fixed; re-traced 2026-09-07 so nobody spends a slot on it.**
+    `_cache_stale` is symmetric and stays that way, because the harmful half is caught **before** it is reached.
+    A shrunk source means `fp_changed` → `content_changed`, and `_source_incomplete(src)` (`ingest.py:338`) runs
+    first: it *loads the pixel data*, so a mid-rewrite truncation fails to read and the whole frame is skipped
+    with `skip_reason="still copying (incomplete rewrite)"` — nothing touched, cache intact, re-checked once the
+    source settles. A source that shrank and is still a **complete, readable** FITS is a genuinely different,
+    smaller capture at a reused path, and refreshing the cache is then the *right* answer (it is the second case
+    `_refresh_frame_metadata`'s docstring names). The only residue is a pre-fingerprint row from a library
+    upgraded and not yet re-scanned, where `stored_fp is None` skips the guard for exactly one scan before the
+    fingerprint is backfilled — and its worst outcome is a re-QC. Do not "fix" the symmetry: making it
+    growth-only would strip the content-swap refresh that keeps a new capture from stacking at the old sky
+    position. (Confidence: re-traced against the current code.)
+  - *(two non-bugs from the 2026-09-05 mosaic/output QA audit, kept with the v0.354.1 entry so they are not
+    re-investigated — see that entry's text in SHIPPED.md; recorded here as a sweep note)*
+## 2026-09-30 (audit run A — security and the release pipeline) — the 2026-09-30 audit's C-F2, C-F5, B-F2..B-F6, and a clean sweep of `scripts/` for the A1/A2 class
+
+*(Audit run A, branch `claude/new-session-qz9mr2`. Baseline on `origin/main` at 4dc89d3: **7106 passed,
+2 skipped**, 15m47s under `-n 4`. Green. Run B works the library and process findings in parallel; this run
+stayed inside `webapp/main.py`, `webapp/routers/calibration.py`, `scripts/`, the two workflows and tests.)*
+
+### Sweep: root-run host scripts following links the container can plant — **clean**
+
+v0.492.5 fixed the class in `scripts/update_agent.py` (A1) and `scripts/lib/restore-data.sh` (A2). The
+audit asked whether any instance remained in `scripts/`; the three other host-side scripts were read for
+every write that starts from a path under ASTRO_DATA:
+
+- `deploy.sh` — its only ASTRO_DATA read is the tar backup: `find library state -name '*.sqlite*' -o -name
+  config.json` without `-L`/`-H` (a starting-point link is not followed, a linked folder is not descended)
+  piped to `tar --null -czf … --files-from=-` without `-h`, so a planted *file* link named `x.sqlite` is stored
+  **as a link**, never dereferenced; the archive lands in the owner's `~/.astrostack-deploy`, outside
+  ASTRO_DATA. Reads, no writes.
+- `restore-data.sh` — the file list is `find "$top" -type f` (a link is not `-type f`, in the snapshot view
+  and in the extracted tar alike), every path component under DATA is `-L`-checked before any write, the WAL
+  delete is `-type f` under a non-link top, and the copy is `cp -p --remove-destination` (a link at the
+  destination is unlinked, not written through). The app is stopped for the whole restore.
+- `rollback.sh` — writes nothing under ASTRO_DATA; it delegates to `restore-data.sh`.
+
+Nothing to fix. The audit's own three tests are in `tests/test_updater_symlink_escape.py`, with the one
+that expected `ensure_queue` to carry on changed to expect v0.492.5's refusal (see `SHIPPED.md`, v0.492.15).
+
+### `queue: max` — verified before use
+
+The audit suggested `queue: max` for the tagging workflow's concurrency block and asked that it be
+verified. It exists: GitHub's changelog of 2026-05-07 ("concurrency groups now allow larger queues") —
+up to 100 pending runs per group, FIFO, not combinable with `cancel-in-progress: true` (a validation
+error), which `release-tags.yml` never set. `ci.yml` could not take it (its `cancel-in-progress` is an
+expression that is true on PRs), so main's runs there group per commit instead. Both scripts were also
+run against the real history: `check-commit-identity.sh HEAD --not --tags` and `check-version-bump.sh
+HEAD origin/main` pass, and a dry run of `release-tags.sh` on `main` reports "Created 0 tags; 1 already
+existed" — the walk stops at the tip's own tag as designed.
+
+### The audit's CSRF test, and why it was changed rather than made to pass
+
+It posted with **no headers** and expected 403 — which would have refused curl, the observer's scripts and
+`scripts/agent-dogfood.sh`'s own probes. A browser sends `Origin` on every cross-site POST (and
+`Sec-Fetch-Site` on all of them), so the refusal is keyed on those, and the no-header case is pinned as
+*allowed*. Fail-before was shown in a `git worktree` of `origin/main` (never `stash` while a suite runs —
+the 2026-09-30 note above): 13 refusals red on main, 12 allowances green on both.
 ## 2026-09-30 (Builder) — two runs rescued the same stranded PR at the same time, and the fixture trap that makes a gate-test vacuous
 
 *(Builder, branch `claude/keen-darwin-ioh4nq` → **v0.492.11**. Baseline on `origin/main` at `4dc89d3`:
