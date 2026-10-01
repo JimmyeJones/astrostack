@@ -1,6 +1,66 @@
 # Process notes & QA sweep records
 
 
+
+## 2026-10-01 (Builder, branch `claude/keen-darwin-ok7w8n`) — v0.492.26: a `--mosaic --editor --big` dogfood, CLEAN, and the one thing it printed was the probe's own blind spot
+
+*(Same run as v0.492.25, after that merged. `--mosaic --editor --big` plus a second `--big --editor` pass, on
+`main` at `b9a6933`.)*
+
+### The pass, and what it covered
+
+- **Three page probes** — the field sample, the 2×2 mosaic and the full-size mosaic — all **"nothing overflowing,
+  no console errors"** except the single hit below, which was on the field pass only.
+- **`--big` reached the decimated preview**: canvas 1693×1150 shrunk to 1/2, `full-size check available=True`,
+  the loupe followed a click on the navigator, its "where in your picture" line tracked the move, the split
+  divider explained itself, and all five preview↔export advisories were live (the sharpen-understates one named
+  its own radius).
+- **Three editor drives clean**: all 21 Add-menu ops re-rendered the live preview, plus Undo and Redo, on the
+  field run, the mosaic run **and** the full-size run — the last being the one that matters for parity, since it
+  is the only decimated preview. Auto trim on the mosaic: **7.9 %**, the standing baseline (§1's bug bar is ~15 %).
+- **Mosaic coaching read coherently** as one paragraph: the panel map, readiness card, next-best-move and
+  framing verdict all pointed at the same thin top-right panel with the same "about 30 s behind, it evens out"
+  conclusion, and the full-size target's framing verdict correctly flipped to "nicely framed" where the 2×2 one
+  says "bigger than this mosaic".
+
+**Process trap worth recording:** the first pass was wrapped in `timeout 1500`, which killed it **mid-`--big`
+editor drive** — after five ops, i.e. before `Sharpen`, `Deconvolution` and `Star reduction`, exactly the
+parity-sensitive ones the flag exists to reach. The log ends in a playwright `Target page … has been closed`
+stack that reads like a browser crash; the tell is `EXIT=124`. **A dogfood with `--big --editor` wants ~35
+minutes, so do not cap it** — and read the `EXIT=` before reading the traceback.
+
+### The one hit was Mantine's spinner, not the app
+
+`[desktop] /sky [My map]: OVERFLOW <span> 22px box vs 26px content — (mantine-Loader-root)`, on the cold-cache
+pass while the map was still drawing, and absent from both later probes of the same page.
+
+**Measured, against Mantine's own `Loader.css` in a standalone fixture, sampling 40 frames of the animation:**
+
+| `<Loader size=…>` | box | worst scrollWidth | flagged |
+|---|---|---|---|
+| xs | 18 px | 22 px (+4) | 28/40 samples |
+| sm | 22 px | 27 px (+5) | 33/40 |
+| md | 36 px | 43 px (+7) | 37/40 |
+
+The oval loader is a **childless** span (so the probe's leaves-only rule reaches it) whose `::after` is exactly
+`--loader-size` square under `animation: rotate`, and **scrollable overflow counts a descendant's transformed
+box** — so a rotating square sticks out by up to `(√2 − 1)·size`, zero only at the axis-aligned angles.
+`overflow: visible`, so nothing is clipped; the number changes every frame, so there is nothing to fix. The
+dogfood's 26 px sits inside the measured band for `sm`.
+
+So it is a false positive of the overflow rule, and a *recurring* one: it fires on any page a probe happens to
+catch with a spinner up, which is a function of cache temperature rather than of the page. `overflowingLeaves()`
+already carries three exclusions "each earned by a false positive on a real page"; this is the fourth, with the
+measurement in the comment so the next reader does not have to re-derive it.
+
+**Generalisable:** the overflow rule compares `scrollWidth` to `clientWidth`, and that comparison is about
+*scrollable* overflow — which includes transforms. Any animated transform inside a leaf will trip it, and none of
+those are layout bugs. If a second one ever shows up, the shape of the fix is the same: name it, measure it, and
+say in the comment why it is not clippable.
+
+**No product change, and none needed:** v0.492.24's `MyMap` loader is correct — it is Mantine's own component at
+its own size, inside the state that exists to say "drawing".
+
 ## 2026-10-01 (Builder, branch `claude/keen-darwin-ok7w8n`) — v0.492.25: a gate that dissolved when it was measured, and the sibling the filing had not looked for
 
 *(Baseline = `origin/main` at `bfff252` (`__version__` 0.492.23): **7273 passed, 3 skipped**, 15m14s with

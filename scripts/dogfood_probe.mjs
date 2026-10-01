@@ -258,8 +258,9 @@ function squeezedText({ minChars, minRatio }) {
 function overflowingLeaves() {
   // Exclusions, each earned by a false positive on a real page: a text input
   // scrolls its own value by design (Settings), a scrollbar thumb is *meant* to
-  // be narrower than its track (Logs), and anything inside a scroll container
-  // is being scrolled deliberately.
+  // be narrower than its track (Logs), anything inside a scroll container is
+  // being scrolled deliberately, and a spinner's own rotation is not an
+  // overflow (see the Loader note below).
   const SKIP_TAGS = new Set(["input", "textarea", "select", "svg", "path"]);
   const out = [];
   for (const el of document.querySelectorAll("body *")) {
@@ -271,6 +272,21 @@ function overflowingLeaves() {
     const s = getComputedStyle(el);
     if (s.textOverflow === "ellipsis") continue;      // deliberate truncation
     if (s.overflowX === "auto" || s.overflowX === "scroll") continue;
+    // A spinner mid-spin is not a layout bug. Mantine's oval `Loader` is a
+    // childless span whose `::after` is exactly `--loader-size` square and
+    // carries `animation: rotate`, and scrollable overflow counts a
+    // descendant's **transformed** box — so a square caught at anything but a
+    // right angle sticks out by up to (√2 − 1)·size. Measured against Mantine's
+    // own `Loader.css`, sampling 40 frames of the animation: xs 18 → 22 px,
+    // sm 22 → 27 px, md 36 → 43 px, flagged in 28–37 of the 40 samples and zero
+    // only at the axis-aligned angles. Nothing is clipped (the span is
+    // `overflow: visible`) and the number changes every frame, so there is no
+    // "fix" — and it fires on *any* page a probe happens to catch with a
+    // spinner up, which is how it arrived: /sky's "My map" panel reported
+    // "22px box vs 26px content" on a cold cache while the map was still
+    // drawing, and the two later probes of the same page were silent because
+    // the warm cache showed no spinner at all.
+    if (el.closest('[class*="mantine-Loader-"]')) continue;
     if (el.scrollWidth - el.clientWidth > 1) {
       out.push({
         tag: el.tagName.toLowerCase(),
