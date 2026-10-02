@@ -1,5 +1,121 @@
 # Process notes & QA sweep records
 
+## 2026-10-02 (Builder, branch `claude/dreamy-thompson-dy7k5j`) — three sweeps, two clean, and the finding was the sentence the app had already written for the *other* half of the same question (v0.492.28)
+
+*(Baseline = `origin/main` at `fb33eae` (`__version__` 0.492.27): **7299 passed, 3 skipped**, 12m32s with
+`OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green,
+and CI green on `main`, with no open PRs.)*
+
+### "Bugs (fix these first)" held nothing ungated for the fifth run running
+
+Pointer, not a re-derivation: the enumerated list is in the 2026-10-01 (`claude/keen-darwin-ok7w8n`) record
+above and the entries have not changed. The beginner-feature section is empty and `docs/FOCUS.md` says not to
+manufacture one. So the run spent its time on **where the cheapest new information was**, which is the lever
+that found v0.491.1: the dogfood configurations nobody had re-run.
+
+### Sweep 1 — `--mosaic --calibration`, the stalest configuration: CLEAN
+
+`--calibration` was last run **2026-09-19 at v0.471.7** — 21 versions ago, and the longest-unverified flag
+there is (`--incoming-lag` ties it; `--restack`/`--closing` are 2026-09-26, `--deep`/`--combine` 2026-09-30,
+`--mosaic --editor --big` the day before this run). EXIT 0, and the calibrated branch was genuinely reached
+rather than silently skipped:
+
+- the app discovered the seeded darks and flats in `incoming/` itself and built both through
+  `/api/calibration/incoming` (6 frames each, 480×320), `[run 1] masters actually applied:
+  {'dark_master_id': 1, 'flat_master_id': 2}`;
+- the calibration nudge correctly **withdrew**, and the health card's calibrated branch read
+  *"This looks like a solid stack — calibrated (dark+flat), round stars"* — with "even coverage" correctly
+  absent on the mosaic, whose grain the same card calls uneven;
+- `calibration-suggestions` and the defect census agreed with the registry (both masters score 1.0,
+  `confident` names both, 31 hot/dead pixels at 0.020 % with the repair offer rendering in its off state);
+- mosaic Auto would trim **7.9 %** of the canvas — the standing baseline, well under §1's ~15 % bug line;
+- both page probes: **"nothing overflowing, no console errors"**; page heights exactly at the recorded
+  baselines (`/life-list [Still to shoot]` 14,492 px on a phone, the mosaic target 3,673 px — the same figure
+  the 2026-09-19 pass recorded);
+- all five of the mosaic Target page's prescriptive cards read as one paragraph and point the same way
+  (top-right panel ~30 s behind, 23 % of the canvas 1.4× grainier, seams flat, 75 % of the object framed,
+  *"more passes over the panels you already have"*).
+
+### Sweep 2 — `--incoming-lag`, the other stalest configuration: CLEAN
+
+Run on its own rather than combined, because it retunes the watcher and seeds `incoming/` and would have
+muddled the calibration readout. EXIT 0, nothing overflowing, no console errors. It is the only flag that makes
+the Dashboard's **notice board** speak — the probe's own comment says a clean board "is a statement about a
+board with nothing on it" — and with the fault seeded it carried two inline notes that say different things
+and point the same way (the container's own missing-ASTAP note, and the lag note: *8 subs, 11 days, "nothing is
+lost — your subs are safe exactly where they are, and AstroStack never writes to that folder"*). The mixed
+state was reached too (`1 of them cannot be read at all`), and `importWaiting.ts::incomingLagUnreadable`'s
+mixed branch is the one that handles it — checked by reading, because the probe truncates the note at 400
+characters and the evidence is past the cut.
+
+### Sweep 3 — every **ordered pair** of editor ops in one recipe: CLEAN, and the gap it closes
+
+v0.492.27's record named this gap explicitly: *"the editor's refusals are conditions on pairs of ops, and
+nothing in this repo's tooling builds a recipe out of more than one hand-chosen op"* — `--editor` drives all 21
+one at a time by design. So: all **441 ordered pairs** of the 21 registered ops, at `proxy_scale` 1 and 4, on a
+ragged four-panel union canvas, against five contracts a pair can break and a single op cannot — an op error;
+the coverage/star-mask overlay's shape against the render's (a misaligned overlay is a visible bug);
+the ops' own `crop_bounds`/`resize_shape` helpers against the render; `geometry_pixel_steps` (which is what an
+editor export's FITS WCS is rewritten by) against the same reshape; `preview_crop_of_recipe` against what the
+render shows; and NaN = "no coverage" preserved exactly on every pair that does not reshape. **882 renders, 0
+findings.**
+
+**And the sweep was shown to be sensitive rather than reported clean on trust**, which is the part worth
+keeping. The geometry pairs really do reshape — crop→crop composes two crops to 289×307 and emits two `crop`
+steps, resize→crop chains 560×400 → 336×240 → 204×249, rotate→rotate expands to 535×657 — and planted defects
+trip the checks: an overlay built from a partial recipe (flagged), a stale recorded crop (the ±1 px tolerance
+is tight — 414 against 415), planted coverage loss and planted coverage invention. **One honest limit:** check
+3's `proxy_scale` dimension is *not* bitten at these canvas sizes, because `crop_bounds`' 2-px degeneracy floor
+never fires on a 74 %-wide crop. The shape-chaining dimension is exercised; the floor is not.
+
+**One harness artifact, checked and dismissed rather than "fixed".** The sweep printed
+`coverage_leveling.py:339: RuntimeWarning: invalid value encountered in cast` on
+`np.rint(cov2d).astype(np.int32)`. That is my scene setting the *coverage map* to NaN where uncovered, which no
+real coverage map does: `accumulator.py` and `output._write_coverage_fits` write **0** there, and the suite
+emits this warning nowhere. A NaN→int32 cast is undefined (INT_MIN on x86, 0 on ARM) but every consumer in that
+file is masked by `valid_pix = (cov_int > 0) & finite`, so both values are excluded identically. **No product
+bug; do not go and "harden" it.**
+
+### The finding: the app had already written this sentence, for the other half of the same question
+
+`background.level_coverage` is dead when an **aimed** geometry op sits above it — measured 0.142 of full scale
+on its own against **0.000000**, and 0.142 again with the same ops at their own defaults. The engine's skip is
+correct ("skip rather than crash"); the silence is the defect. Full write-up in [`SHIPPED.md`](SHIPPED.md).
+
+**The lever, and it is reusable.** The op's panel *already* carries a note for the **other** reason it can do
+nothing — a single-field stack has no panels to equalise — and the comment above it states the principle
+outright: *"tell the user rather than let the control silently do nothing."* So the question that found this
+was not "what is broken?" but **"this op can do nothing for two reasons; the app says so for one — which
+one?"** An op with a documented silence is a place to count the silences. Generalising: wherever a surface
+explains one branch of its own no-op, enumerate the branches.
+
+**Why it had survived, three ways, and each is a shape rather than an accident.**
+
+1. **The warning family that owns this vocabulary cannot reach it.** `stageConflicts.ts` holds the editor's
+   "this op is doing nothing, here is why, one click to fix" set — and `stageConflicts` returns `{}` whenever
+   no stretch op is enabled, which is *exactly* the recipe where a `nonlinear` geometry op can sit above a
+   `linear` pass unremarked. With a stretch enabled the geometry op is flagged for being on the wrong **side**,
+   which says nothing about the other op being dead and offers a fix aimed at the wrong one. **A guard whose
+   precondition is the thing that makes the bug reachable is not a guard.**
+2. **Nothing in the tooling builds two ops.** Same blind spot as v0.492.27, and this run's own pair sweep is
+   the instrument that should have caught it — except that it checks *contracts*, and "the op silently did
+   nothing" violates none of them. It reported `errors == []` for this very pair, correctly. **A pair sweep
+   over invariants cannot see an op that merely stops working**; that needs a per-op "did appending this op
+   change the picture?" measurement, which is the shape of the next sweep in this family and is not written.
+3. **The order is asserted and the consequence of breaking it never was.** `test_edit_engine.py` has long
+   asserted that Auto keeps `background.level_coverage` ahead of its own trim crop — so the repo *knew* the
+   order mattered. It pinned the right order and never pinned what the wrong one costs.
+
+### A third surface in v0.492.27's class, deliberately left alone — do not "fix" it
+
+`splitCompare.ts::reshapesFrame` is id-only (`"geometry.*"`), and it gates the per-op **"Without this op"** and
+**"Split this op"** buttons, whose tooltip then claims *"This op changes the frame's shape"* about an op at its
+own defaults — the same false sentence v0.492.27 removed from two other places. It was checked and **not**
+changed on purpose: a geometry op at its defaults is a no-op, so both halves of a per-op compare would be
+byte-identical pictures, and enabling the control would buy the reader nothing. Only the tooltip's wording is
+inaccurate, in a state where the control has nothing to show. Recorded here so the next run that greps this
+class does not spend a slot on it.
+
 ## 2026-10-01 (Builder, branch `claude/keen-darwin-5zv8nn`) — v0.492.27: the bug the tests were pinning, and two measurements that said "no advisory needed"
 
 *(Baseline = `origin/main` at `b9a6933` (`__version__` 0.492.25): **7282 passed, 3 skipped**, 13m56s with

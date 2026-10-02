@@ -1657,6 +1657,87 @@ def test_apply_geometry_to_map_rotate_fills_corners_with_nan():
     assert not np.isfinite(out[0, 0])  # a corner exposed by the rotation is NaN
 
 
+# ---- coverage leveling vs an upstream geometry op ---------------------------
+#
+# `_level_coverage` bins the image against the run's own coverage map, which is
+# captured at the stack canvas's geometry, so it carries a shape guard: an op
+# above it that has already reshaped the frame leaves the two unalignable and it
+# returns the image untouched ("skip rather than crash the whole render").
+#
+# These two pin that behaviour *as the premise of a sentence the editor says*.
+# `coverageLeveling.ts::strandedCoverageLevelingUids` tells the reader the op is
+# doing nothing and offers to move it to the top; if the engine ever learns to
+# transform the coverage map through the upstream geometry instead of skipping,
+# the first test below fails loudly and that sentence has to go rather than
+# quietly become false. Written the way the fixture lesson asks: the "it works"
+# half is asserted too, so neither test can pass because the op does nothing
+# everywhere.
+
+
+def _four_panel_step_scene(h: int = 60, w: int = 80):
+    """A four-panel canvas whose panels sit at different sky levels, plus the
+    coverage map that says where they are — the shape coverage leveling exists
+    for, and the only one on which "did it do anything?" is answerable."""
+    img = np.full((h, w, 3), 0.02, dtype=np.float32)
+    cov = np.zeros((h, w), dtype=np.float32)
+    quads = ((0, h // 2, 0, w // 2), (0, h // 2, w // 2, w),
+             (h // 2, h, 0, w // 2), (h // 2, h, w // 2, w))
+    for i, (r0, r1, c0, c1) in enumerate(quads):
+        img[r0:r1, c0:c1] += np.float32(0.004 * (i + 1))
+        cov[r0:r1, c0:c1] = np.float32(i + 1)   # four distinct coverage levels
+    return img, cov
+
+
+def _leveling_effect(ops: list[OpInstance]) -> float:
+    """How far coverage leveling moves the picture when appended to ``ops``."""
+    from seestack.edit.pipeline import apply_recipe
+
+    img, cov = _four_panel_step_scene()
+    leveling = OpInstance(id="background.level_coverage", params={"object_sigma": 2.0})
+
+    def render(op_list):
+        ctx = EditContext(proxy_scale=1.0, is_proxy=True, wcs=None,
+                          coverage=cov, frame_coverage=cov)
+        errors: list[str] = []
+        out = apply_recipe(img, Recipe(ops=validate_ops(op_list)), ctx,
+                           for_preview=True, errors=errors)
+        assert errors == [], errors   # a *silent* skip is the thing under test
+        return out
+
+    with_it, without = render([*ops, leveling]), render(list(ops))
+    assert with_it.shape == without.shape
+    finite = np.isfinite(with_it) & np.isfinite(without)
+    return float(np.abs(with_it[finite] - without[finite]).max())
+
+
+@pytest.mark.parametrize("geometry_op", [
+    OpInstance(id="geometry.crop", params={"x0": 0.12, "y0": 0.08,
+                                           "x1": 0.86, "y1": 0.93}),
+    OpInstance(id="geometry.rotate", params={"angle": 7.0, "expand": True}),
+    OpInstance(id="geometry.resize", params={"scale": 0.6}),
+])
+def test_coverage_leveling_is_skipped_silently_under_an_aimed_geometry_op(geometry_op):
+    """An *aimed* Crop/Rotate/Resize above it makes the op do nothing at all —
+    no error, no note, just an unchanged picture. This is what the editor's
+    "No effect while a Crop, Rotate or Resize sits above it" alert is about."""
+    assert _leveling_effect([geometry_op]) == 0.0
+
+
+@pytest.mark.parametrize("geometry_op", [
+    None,
+    OpInstance(id="geometry.crop", params={"x0": 0.0, "y0": 0.0,
+                                           "x1": 1.0, "y1": 1.0}),
+    OpInstance(id="geometry.rotate", params={"angle": 0.0, "expand": True}),
+    OpInstance(id="geometry.resize", params={"scale": 1.0}),
+])
+def test_coverage_leveling_still_works_under_a_geometry_op_at_its_own_defaults(geometry_op):
+    """…and all three geometry ops *at their own defaults* reshape nothing, so the
+    leveling still runs. The editor's alert keys on ``reshapes_frame`` rather than
+    on "a geometry op is enabled" for exactly this reason: a Crop, Rotate or
+    Resize fresh from the Add menu must not be reported as having killed it."""
+    assert _leveling_effect([] if geometry_op is None else [geometry_op]) > 0.0
+
+
 # ---- auto_recipe mosaic border trim -----------------------------------------
 
 def test_auto_recipe_appends_trim_crop_last_on_a_mosaic():

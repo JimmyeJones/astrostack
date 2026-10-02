@@ -3285,6 +3285,62 @@ describe("EditorView", () => {
     expect(screen.queryByText(/No effect on this stack/i)).not.toBeInTheDocument();
   });
 
+  // The *other* reason Coverage leveling can do nothing, and the one nothing
+  // used to say. It bins the image against the run's own coverage map, so once
+  // an op above it has really reshaped the frame the engine skips it outright —
+  // pinned in `tests/test_edit_engine.py` at 0.000000 of full scale against
+  // 0.142 on its own. The sibling note above exists on the principle that it is
+  // better to say so "rather than let the control silently do nothing"; this is
+  // the same sentence owed for the second reason, with the move that fixes it.
+
+  function mockStrandedLevelingEditor(cropParams: Record<string, number>) {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CROP, LEVEL_COVERAGE]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({
+      ops: [
+        { uid: "c1", id: "geometry.crop", enabled: true, params: cropParams },
+        { uid: "lc1", id: "background.level_coverage", enabled: true,
+          params: { object_sigma: 2 } },
+      ],
+      base_run_id: 3,
+    });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    // A mosaic, which is the only shape on which moving it is the real fix.
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0],
+        b: [0, 0, 0, 0], is_mosaic: true });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+  }
+
+  it("says Coverage leveling does nothing under an aimed Crop, and moves it on click", async () => {
+    mockStrandedLevelingEditor({ x0: 0.12, y0: 0.08, x1: 0.86, y1: 0.93 });
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Coverage leveling"));
+    expect(await screen.findByTestId("leveling-stranded")).toBeInTheDocument();
+    expect(screen.getByText(/sits above it/)).toBeInTheDocument();
+    // …and the one click moves it to the top, which clears the note.
+    fireEvent.click(screen.getByRole("button", { name: /Move it to the top/ }));
+    await waitFor(() =>
+      expect(screen.queryByTestId("leveling-stranded")).not.toBeInTheDocument());
+  });
+
+  it("stays silent when the Crop above it is still at its own defaults", async () => {
+    // v0.492.27's rule, a third time: all three geometry ops default to a no-op,
+    // so a Crop fresh from the Add menu has not reshaped anything and the
+    // leveling really is still working. Saying otherwise would switch a
+    // priority-1 control's panel to "no effect" while it had an effect.
+    mockStrandedLevelingEditor({ x0: 0, y0: 0, x1: 1, y1: 1 });
+
+    renderEditor();
+
+    fireEvent.click(await screen.findByText("Coverage leveling"));
+    await waitFor(() => expect(client.api.getHistogram).toHaveBeenCalled());
+    expect(screen.queryByTestId("leveling-stranded")).not.toBeInTheDocument();
+  });
+
   // --- background mode advice on a big emission nebula ---------------------
 
   function mockBackgroundOpEditor(hinted: boolean) {
