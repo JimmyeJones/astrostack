@@ -1,5 +1,89 @@
 # Process notes & QA sweep records
 
+## 2026-10-02 (Builder, branch `claude/dreamy-thompson-8mf0os`) — two sweeps of the "an op silently stops working" class, both CLEAN, and the instrument kept as a test (v0.492.29)
+
+*(Baseline = `origin/main` at `aea1a27` (`__version__` 0.492.28): **7306 passed, 3 skipped**, 15m34s with
+`OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green,
+CI green on `main`, no open PRs.)*
+
+### "Bugs (fix these first)" held nothing ungated for the sixth run running
+
+Pointer, not a re-derivation: the enumerated list is in the 2026-10-01 (`claude/keen-darwin-ok7w8n`) record and
+the entries have not changed. `docs/FOCUS.md` says the beginner-feature section is empty and not to manufacture
+one. So the slot went to the instrument the **previous** run's record said was missing by name.
+
+### Sweep 1 — per-op "did appending this op change the picture?", over ten reachable states: CLEAN
+
+The gap v0.492.28's record named: *"a pair sweep over invariants cannot see an op that merely stops working;
+that needs a per-op 'did appending this op change the picture?' measurement, which is the shape of the next
+sweep in this family and is not written."* Written, and run over all 21 registered ops × **ten** base states on
+a four-panel mosaic canvas with per-panel sky steps, uneven weighted depth, NaN corners, a nebula, green knots,
+stuck pixels and a light-pollution tilt: the empty recipe at export scale and at `proxy_scale` 4; a single-field
+coverage map; **no** coverage map; an `already_display` run (an editor export re-opened); after an explicit
+stretch; after each of an aimed `geometry.resize` / `crop` / `rotate`; and appended to the full one-click Auto
+recipe. 220 renders.
+
+**Three silent no-ops, and all three are already both deliberate and surfaced:**
+
+| op | state | moves | why it is not a finding |
+|---|---|---|---|
+| `detail.hot_pixels` | `proxy_scale` 4 | 0.000000 | `hot_pixels_skipped_on_proxy` — a star on a strided proxy *is* the signature of a defect; captioned by `hotPixelsPreview.ts` |
+| `background.level_coverage` | any aimed geometry op above it | 0.000000 | v0.492.28, shipped yesterday: the note + "Move it to the top" |
+| `background.level_coverage` | no coverage map in the context | 0.000000 | the op panel's single-field note, on `hist.is_mosaic === false` |
+
+Everything else moves by **1.4e-3 to 2.3e-1** of full scale in every state it is offered in. Two readings worth
+keeping because they look alarming and are not: `tone.curves` with real points moves only **9.5e-6** when **no
+stretch op is enabled** — it is running on linear data, where its own [0,1] curve has almost nothing to act on —
+but that state is exactly what the editor's `noStretch` alert already says in as many words (*"your tone &
+colour ops are running on un-stretched (linear) data"*), so the one recipe where `stageConflicts` is
+structurally blind is covered by its neighbour. And `stars.boost_nebula` at `amount` 1.0 moves the picture by
+**0.44** mean — the top of a slider whose default is 0.3, not a defect.
+
+**One narrow gap traced and deliberately NOT built.** The third row above is only surfaced because
+`hist.is_mosaic` is False in the state that produces it. A run whose coverage **sibling file is missing** while
+its persisted `run.is_mosaic` is True would reach the same dead control with `is_mosaic === true`, and neither
+panel note fires. Not filed as a bug: it needs a lost `_coverage.fits` beside an intact run record, it was not
+reproduced against a real run, and such a run has already lost the coverage overlay and the trim as well — the
+missing file is the thing to notice, not this op. Recorded so the next run that greps this class does not spend
+a slot on it.
+
+### Sweep 2 — per-*parameter* "does this slider do anything?", all 49 declared params × 2 scales: CLEAN
+
+The sibling blind spot: a per-op sweep cannot see a **parameter** that does nothing. 48 of the 49 are measurable
+(`tone.color_calibrate.mode` declares a single option). Each driven across
+its own declared range (min / mid / max; both booleans; every enum option; identity vs a real curve) with the op
+on the correct side of a stretch, at `proxy_scale` 1 and 4. **Five zero-spread rows, every one explained:**
+
+- `tone.stretch.target_bg` (both scales) — inert while `mode` is `asinh`, and it declares
+  `depends_on="mode=stf"`, so the form **disables the control**. Its siblings `stretch`/`black` carry the
+  mirror-image `depends_on="mode=asinh"`. The `depends_on` coverage on the editor's most important op is
+  complete, which is what would otherwise have made a live-but-dead slider reachable.
+- `geometry.rotate.expand` (both scales) — inert at `angle` 0, which is the op's own default and a no-op by
+  design (v0.492.27). A harness artifact of varying one param while the others sit at defaults, not a finding.
+- `detail.hot_pixels.sigma` at `proxy_scale` 4 — the whole op is skipped there (sweep 1, row 1).
+
+Everything else moves. Three rows are small but real and worth recording as the floor this class sits on:
+`detail.chroma_denoise.protect_stars` 5.5e-5, `tone.scnr.protect_noise` 1.6e-4, `tone.scnr.mode` 2.7e-4.
+
+### The deliverable, and why a test rather than a third harness
+
+Both sweeps above are one-off scripts, which is how the first two instalments of this class were run and is why
+each had to be re-derived. Sweep 1's measurement is now `tests/test_edit_op_effect.py` (47 items, **7.1 s**),
+with the exemption table keyed to *the surface that tells the user*, the reverse assertion that a documented
+skip is exactly `0.0`, a drift guard that a newly-registered op must be measured, and v0.492.28's own
+distinction pinned from the engine side. Sensitivity shown with six planted defects, each tripping exactly the
+assertion it should — details in [`SHIPPED.md`](SHIPPED.md). Sweep 2 is **not** kept as a test: its signal is
+`depends_on` coverage, which the form's own `api/depends.ts::dependencyMet` already owns (with its
+own vitest), and three of its five rows were artifacts of the one-param-at-a-time shape rather
+than facts about the app.
+
+### Kickoff disagreement — already filed, same resolution
+
+This session's attribution reminder again asked for a model identifier in the `Co-Authored-By:` trailer, which
+AGENTS.md §8/§10 forbid in commits, code or logs. AGENTS.md wins; the 2026-10-02 Scout record above filed this
+first and this run takes the same resolution (`Co-Authored-By: Claude <noreply@anthropic.com>` +
+`Claude-Session:`), noted here rather than re-filed.
+
 ## 2026-10-02 (Scout, branch `claude/funny-shannon-k8wyd3`) — rotation slot (1), scale-dependent preview↔export parity on a mosaic-size canvas: CLEAN; issue inbox triaged (all four awaiting owner)
 
 *(Baseline = `origin/main` at `a1e83f3` (`__version__` 0.492.28): **7306 passed, 3 skipped**, 14m35s with
