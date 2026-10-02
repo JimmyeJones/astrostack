@@ -1,5 +1,93 @@
 # Shipped — the record
 
+## 2026-10-02 (Builder) — v0.492.30: the cover nudge offered to put half a mosaic back on show, and called it the better picture
+
+### v0.492.30 — 🟡 BUG FIX (trust / friendliness, PRIORITY 1–3), Builder-found and reproduced through `run_stack` on the mosaic sample: **"Your newest stack came out grainier than an earlier one" fired on a mosaic that had just *grown*, and offered to pin the smaller picture — forever.**
+
+*(Builder, branch `claude/dreamy-thompson-vxe01m`. Baseline `origin/main` at `0abb947` (`__version__`
+0.492.29): **7352 passed, 4 skipped**, 16m38s with `OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist
+worksteal`, `/tmp/pytest-of-root` cleared first. Green, CI green on `main`, no open PRs. "Bugs (fix these
+first)" held nothing ungated for the seventh run running and the beginner-feature section is empty, so the run
+took `docs/FOCUS.md`'s own standing frontier: **"any threshold taken from a whole-target or peak number that
+is really per-panel"**.)*
+
+**The surface.** The Target page carries two mirror-image cover nudges (`seestack/covernudge.py`,
+`GET /api/targets/{safe}/cleanest-shot` and `…/grainier-newest`). With nothing pinned — the default — the
+cover *follows* the newest stack, so `grainier-newest` exists to catch a hazy night's restack quietly demoting
+a better picture on the Library tile, "My best pictures" and the montage wall. It says *"Your newest stack came
+out grainier than an earlier one"* and offers **"Show the better one instead"**, one tap, which **pins** the
+earlier run. A pin stays pinned forever.
+
+**The bug.** Both halves decide on one number: each run's stored `noise_sigma`. That figure is
+`seestack.edit.noise.estimate_noise_sigma`, normalised to **its own image's** robust range and measured over
+the **whole canvas** — so it answers *"how grainy is this picture?"*, not *"how deep is this target?"*. Across
+two canvases of **different sky** it is not a like-for-like comparison, and the module's own contract already
+says so for the other axis: it refuses to compare across run *kinds* ("an editor export's σ isn't measured on
+the same kind of image"). Nothing refused a comparison across *canvases*.
+
+So on the owner's own shooting shape — a heavy mosaic user, AGENTS.md §1 — the nudge fires when the mosaic
+**grows**: a new panel opens, holds a sub or two before the night ends, the target is restacked, and the wider
+canvas measures grainier for the thin new panel. The note then blames the sky (*"the sky was probably hazier
+that night"* — the branch taken whenever the newest run is **not** thinner by raw frame count, which a grown
+mosaic never is) and offers to put the **half-size** picture back on every showcase surface. Take the offer and
+the pin sticks: `cleanest_shot` only speaks again once the newest stack is 15 % *cleaner* than the pinned one,
+which a mosaic that keeps growing will not be — so the picture the owner is building would never show again.
+
+**Reproduced, not reasoned.** Real subsets of the bundled 2×2 mosaic sample (`webapp.sample_data`,
+`shape="mosaic"` — 4 panels, 6/6/6/3 subs, one shot through haze), each pair stacked twice through the actual
+`run_stack` and the stored rows handed to `grainier_newest`:
+
+| pair (before → after) | σ before | σ after | ratio | sky | verdict |
+|---|---|---|---|---|---|
+| 1 panel 6 deep → 2 panels, new one holding **1 sub** | 0.00074 | 0.00089 | 0.831 | 1.00 → 1.97 fields | **FIRES: "20 % more grain"**, offers the 1-panel picture |
+| 2 panels → all 4 | 0.00064 | 0.00063 | 1.016 | 1.98 → 3.63 | silent |
+| 1 panel → all 4 | 0.00074 | 0.00063 | 1.175 | 1.00 → 3.63 | silent |
+| 3 panels → all 4 (+ the thin hazy one) | 0.00060 | 0.00063 | 0.952 | 3.62 → 3.63 | silent |
+| **control** — same sky, half the subs set aside | 0.00063 | 0.00083 | 0.759 | 3.63 → 3.62 | FIRES: "31 % more grain" — the nudge's actual case |
+
+Two readings decide the fix. Growth alone is enough to fire (row 1), and a restack of the **same** sky moves
+the canvas by **0.3–0.6 %** (rows 4–5: 3.63 → 3.62 field-fulls) while one added panel is **+83 % to +263 %**.
+The two cases are three orders of magnitude apart, so they can be *separated* rather than tuned between.
+
+**The fix: never offer to replace the picture on show with one that covers materially less sky.** New
+`covernudge.MIN_SKY_SHARE = 0.9` and `_offer_loses_sky`, and both functions take an optional
+`sky_fields` map (run id → how many single-frame field-fulls of sky that canvas covers). `grainier_newest`
+applies it **per candidate** rather than to the verdict, so a smaller-canvas run is passed over and an earlier
+run of the *same* sky is still offered — the control row above is untouched, including its 31 %.
+`cleanest_shot` gets the mirror guard on the pinned side (a restack of fewer panels than the pinned mosaic is
+deeper per pixel and measures cleaner for it; "cleaner" is no reason to hide sky already shot), and the guard
+is **one-directional** — it never objects to a *bigger* picture.
+
+**Silence, deliberately, rather than a second sentence.** What that state actually needs is *"keep shooting the
+new panel"*, and the Target page already says it: `frontend/src/components/target/thinStack.ts` (*"Your N subs
+are spread across M fields of sky"*) and `nextBestMove.ts`, both of which are already per-pixel aware through
+`StackRun.field_fulls`. Adding a third sentence would duplicate them and add surface against AGENTS.md §1's UI
+rule; the wrong recommendation is what had to go.
+
+**One definition of "how much sky".** The endpoints read it from
+`webapp.derived_light.stacking_field_fulls` via a new `_run_sky_fields` helper — the same per-run figure the
+History listing and the Gallery card already carry (`StackRunOut.field_fulls`), so the nudge cannot disagree
+with the page it sits on, and a re-render resolves to its root stack's canvas exactly as it does there. The
+frame shape is one `LIMIT 1` read per target, inside the `try` the endpoints already open.
+
+**Engine invariant kept (§6):** `covernudge` gains no `webapp` import — the caller passes the numbers;
+`webapp.field_fulls` appears in docstrings only.
+
+**Upgrade-safe (§9):** no config, settings, schema, migration, on-disk, default, endpoint or response-*shape*
+change; both new keyword arguments are optional and omitting them is byte-for-byte today's behaviour, which is
+also what a run whose frame shape isn't recorded, a single field, and an unanswerable figure all get (`None` =
+"no opinion"). The one behaviour change is that two **advisory** endpoints now answer `null` in the case where
+their body was wrong — a value both notes already render as nothing.
+
+**Tests (+17; six fail before, each verified by neutering `_offer_loses_sky` in a scratch copy).**
+`tests/test_covernudge.py`: the reproduced growth case on both functions, the same-sky case still firing at its
+measured 31 %, the per-candidate filter skipping the smaller run and offering the same-sky one behind it, the
+`MIN_SKY_SHARE` boundary, the one-directional check, and **seven parametrised "no usable figure" cases** that
+pin the guard as unable to silence anything it cannot prove. `tests/webapp/test_target_grainier_newest.py` and
+`test_target_cleanest_shot.py`: the endpoint halves, which also prove the wiring — an all-`None` map would make
+them fail. Both files' `_register_run` helper now takes `canvas=(w, h)`, defaulting to the fixture's own native
+frame, i.e. exactly one field-full.
+
 ## 2026-10-02 (Builder) — v0.492.29: the per-op "did appending this op change the picture?" measurement, kept as a test; and two sweeps of that class, both clean
 
 ### v0.492.29 — 🔵 COVERAGE / the editor's own blind spot (PRIORITY 1 adjacent): `tests/test_edit_op_effect.py`
