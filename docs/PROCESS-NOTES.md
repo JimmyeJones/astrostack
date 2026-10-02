@@ -1,5 +1,94 @@
 # Process notes & QA sweep records
 
+## 2026-10-02 (Scout, branch `claude/funny-shannon-k8wyd3`) — rotation slot (1), scale-dependent preview↔export parity on a mosaic-size canvas: CLEAN; issue inbox triaged (all four awaiting owner)
+
+*(Baseline = `origin/main` at `a1e83f3` (`__version__` 0.492.28): **7306 passed, 3 skipped**, 14m35s with
+`OPENBLAS/OMP/MKL_NUM_THREADS=1`, `-n auto`, `/tmp/pytest-of-root` cleared first. Green, CI green on `main`, no
+open PRs.)*
+
+### Issue inbox — all four open issues still awaiting an owner click/reading, nothing newly actionable
+
+No issue has changed state since the 2026-10-01 triage (latest `updated_at` is #1015 at 2026-09-29; no new issue
+since 2026-09-25). Re-confirmed against the code, not copied forward: #878 (the reconcile is offered; closes on a
+reading that shows the 11 pairs gone — a click, not code), #880 (both live halves shipped v0.483.1/.2; only the
+exception-repr-stored-as-reject-reason remainder is open, filed ⚪ storage-hygiene, deliberately not a PRIORITY 3
+item), #903 (prevention by cover semantics still open; existing damage has the v0.479.3 one-off repair), #1015
+(the repo-side half — the version on `/api/health` — shipped v0.488.2; the owner left it open to close on a
+reading that confirms the pin, and the other half is an Observer-charter change out of this repo). Every one is
+blocked on the owner, none on code; nothing to file or close this run.
+
+### The sweep — rotation slot (1), ran on data shaped like the owner's, CLEAN
+
+The rotation cycled back to (1) after 2026-10-01's router sweep. Preview↔export parity was last swept 2026-09-29,
+and the editor's stretch/Auto path has changed since (v0.492.20 Auto-measured region, v0.492.27 geometry-reshape
+messaging, v0.492.28 coverage-leveling messaging), so it was re-run against the *current* one-click Auto recipe.
+
+Built a four-panel ragged mosaic at **3600×5400** (proxy step **4** — a real mosaic decimation, not a single
+field's step 1–2), with per-panel sky offsets, a warm sky tint distinct from the neutral stars, the OSC sensor
+cast, structured green knots, NaN gaps in two dropped corners, and **quality-weighted** coverage (so the weighted
+map splits a panel across a band of values while the honest `_framecov` sibling stays flat). Built the proxy with
+the real `build_proxy`, strided the coverage/frame-coverage siblings to the proxy grid exactly as
+`_proxy_coverage`/`_proxy_frame_coverage` do, built the recipe with the real `presets.auto_recipe`
+(`background.level_coverage` → `final_gradient` → `color_calibrate` → `denoise` → `stretch` → `scnr` →
+`saturation` → `curves` → `chroma_denoise`), and rendered it through `apply_recipe` on the proxy (preview ctx) and
+on the full canvas (export ctx, `proxy_scale=1`), then compared the export decimated onto the proxy grid.
+
+**Op-by-op localisation (sky pixels, display space):** every linear op *before* the stretch agrees to a mean
+|ΔP| of **0.0005** and a worst-per-panel sky-median step of **0.009** — i.e. coverage-leveling, the gradient,
+colour calibration and denoise bin and subtract identically on the proxy and the full canvas; no panel is leveled
+in one render and not the other. **All of the divergence enters at `tone.stretch`** and nowhere else (sky mean
+0.0005 → 0.0096, p99 → 0.049), which is the asinh stretch's *documented, known* resolution dependence
+(`render/thumbnail.py::AsinhStats` docstring: lo/hi/σ "depend on the resolution of the array they were measured
+on") — the preview measures `measure_stretch_stats` on the proxy and the export measures it fresh on the full
+canvas, since `ctx.fit` only carries proxy→proxy, never proxy→export.
+
+**Why that is the floor and not a bug.** Decimation here is *striding*, not area-averaging, so the measured stats
+barely move: full vs proxy `hi` identical (0.0874), `lo` 0.0103 vs 0.0131 (a small absolute shift on a 0.077
+range), per-channel normalised median within ~2–3 % and σ within ~4 %. The metric the existing parity test
+guarantees (<0.02) — the **global display-space channel median**, the grey the eye anchors to — came back at
+**|Δ| ≤ 0.0004 per channel** on the full Auto render at step 4. Well-sampled panels agree to **0.0002**. The only
+figure that looked large in a first pass (a 0.046 worst-panel median, a 0.17 worst-panel in the op-by-op table)
+was a small-sample / star-contaminated tail on a ragged perimeter panel, not a systematic step: it vanishes under
+a clean per-panel sky median. The stretch amplifying sub-percent linear differences in the steep near-black part
+of its curve is inherent to any decimated preview and is the same "≤2 % decimation-sampling floor" the pixel-scaled
+ops already document.
+
+**Sensitivity, not clean-on-trust:** the harness really does exercise the parity-breaking machinery — the recipe
+carries all nine Auto ops including the two mosaic-only passes, the coverage siblings are quality-weighted (so a
+weighted-vs-frame-count confusion would show as a residual per-panel step, and does not), and the op-by-op table
+pinpoints the stretch as the sole contributor rather than reporting a single blended number. Scripts kept in the
+session scratchpad (`parity_sweep.py`, `parity_incremental.py`, `stretch_diag.py`, `check_global.py`).
+
+**By-reading confirmation that the pixel-scaled ops are still all scaled:** every op with a pixel parameter routes
+it through `EditContext.scaled_px`/`_scaled_box` (sharpen radius, denoise spatial σ, deconv PSF, SCNR smoothing
+σ, chroma-denoise kernel, star-reduce erosion footprint, the star-mask opening footprint, the gradient box and
+dilate, the crop-degeneracy floor), and `tests/test_edit_proxy_parity.py` already pins each one on a mosaic
+fixture. Nothing new to pin.
+
+**Rotation now advances to slot (2): mosaic and walk-away divergence — any threshold taken from a whole-target or
+peak number that is really per-panel.** Don't re-run slot (1) before a finding says to.
+
+### Dogfood — `--mosaic --editor --big`: CLEAN
+
+EXIT 0. Full-size mosaic preview reached (`canvas 1693×1150, shrunk to 1/2`, `available=True`, so the five
+preview↔export advisories and the loupe are all live — the `--big` leg that matters for this run). Mosaic Auto
+would trim **7.9 %** (the standing baseline, well under §1's ~15 % line). All five server-side mosaic cards read
+as one paragraph and point the same way (top-right ~30 s behind, 23 % of the canvas 1.4× grainier, seams flat,
+rejection explained, "round stars"). Every phone/desktop page probe: **"nothing overflowing, no console errors"**,
+heights at the recorded baselines (`/life-list [Up tonight]` 7,183 px phone, `[Still to shoot]` 5,101 px desktop,
+`/tonight` variants 3.4–3.8 k). The editor drive added **16 of 21 ops** (Stretch → Deconvolution), each
+re-rendering cleanly, before the run ended on the **known benign playwright teardown** (`Target page … has been
+closed`), the same harness artifact prior records note — not a finding.
+
+### Kickoff disagreement filed (AGENTS.md intro) — attribution trailer vs the no-model-identifier rule
+
+This session's attribution reminder asked commits to end `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`
+— a model identifier. AGENTS.md §8/§10 (and this session's own system rule) forbid a model identifier in commits,
+code or logs; the `check-commit-identity.sh` hook enforces only the *email* allowlist, not the name. AGENTS.md
+wins, so this run's commit uses a model-agnostic `Co-Authored-By: Claude <noreply@anthropic.com>` + the
+`Claude-Session:` line, which satisfies the hook and the repo's trailer shape without naming a model. (Noting it
+because recent commits have varied — some carried `Claude Opus 5`.)
+
 ## 2026-10-02 (Builder, branch `claude/dreamy-thompson-dy7k5j`) — three sweeps, two clean, and the finding was the sentence the app had already written for the *other* half of the same question (v0.492.28)
 
 *(Baseline = `origin/main` at `fb33eae` (`__version__` 0.492.27): **7299 passed, 3 skipped**, 12m32s with

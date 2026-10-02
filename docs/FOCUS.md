@@ -1,83 +1,60 @@
 # Current focus — AstroStack
 
-*Last re-cut 2026-09-28 (Scout) — the previous page ran 25 lines over its own budget after a
-fortnight of same-day strikes, so this is a fresh cut, not an edit. **The Scout rewrites this page**
-whenever the front of the queue changes; it stays short (≤ 60 lines) and dated. Live rules are in
-`AGENTS.md`; the backlog is `docs/IMPROVEMENTS.md`. If this page and the backlog disagree, the
-backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
+*Last re-cut 2026-10-02 (Scout) — the previous page ran ~24 lines over its own ≤60-line budget, so this is a
+fresh cut, not an edit. **The Scout rewrites this page** whenever the front of the queue changes; it stays short
+(≤ 60 lines) and dated. Live rules are in `AGENTS.md`; the backlog is `docs/IMPROVEMENTS.md`. If this page and
+the backlog disagree, the backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 
 ## Front of the queue
 
-0. **✅ SHIPPED — that bug and its lead are both closed; "Bugs (fix these first)" holds nothing ungated again**
-   (Builder, same day): `cleanup_suggestions`/`merge_suggestions` as **v0.492.22**, the `sky.py` lead — three
-   endpoints, not one — as **v0.492.23**, and the missing-*table* self-heal that lead left behind as
-   **v0.492.25** (in `Library` too, where it costs every page). Three runs have now read Bugs top to bottom and
-   found every remaining entry gated or stood down with numbers; the list is in `docs/PROCESS-NOTES.md` so the
-   next run need not re-derive it. **The Scout owes this page its next re-cut.**
+0. **"Bugs (fix these first)" holds nothing ungated.** Every open entry there is gated on something only the
+   owner's data can supply, or stood down with numbers (the solve-refusal retry-rate lead, the half-range
+   calibration charge (c), the #880 storage-hygiene remainder, the weighted-coverage over-crop residual, the
+   watcher/exclusion hardening notes, the sky-atlas rotation-sign fallback). The enumerated list lives in
+   `docs/PROCESS-NOTES.md` so a run need not re-derive it. **Do not blind-flip a gated threshold or re-litigate
+   a stand-down that carries numbers.** Grep `docs/SHIPPED.md` before building — the backlog has repeatedly
+   carried items already shipped.
 
 1. **The editor (PRIORITY 1).** Judge Auto/editor on a tiled mosaic at the owner's scale
-   (`--mosaic --editor --big`), never the 6-frame field. Its bug backlog is drained and re-audits
-   come back clean, but AGENTS.md is explicit: **do not believe "well-hardened"** — a "What Auto did"
-   trim above ~15 % of the canvas is a bug, not a ragged edge.
+   (`--mosaic --editor --big`), never the 6-frame field. Its bug backlog is drained and re-audits come back
+   clean, but AGENTS.md is explicit: **do not believe "well-hardened"** — a "What Auto did" trim above ~15 %
+   of the canvas is a bug, not a ragged edge.
 
-2. **Owner-approved, buildable now** (answers of 2026-09-25) — **empty; everything shipped and cut to
-   [`SHIPPED.md`](SHIPPED.md).** astroalign single-field + mosaic (v0.482.0/v0.484.0), the cumulative-by-night
-   reel (v0.483.0) and the reel-from-history + once-stacked-reel offer (v0.486.0/v0.487.0), the noise-delta
-   picture (v0.479.0), the night-sky theme (v0.485.0), the 11 mosaic pairs now *offered* in the Library
-   (v0.482.1/.2). The one item that turned out not to be a build — auto-*apply* the classified preset — is
-   **⚪ CLOSED WITH THE NUMBER** (Builder 2026-09-29): `auto_recipe` already applies the archetype, and the only
-   surviving delta costs +3–4 % sky chroma noise, so **do not re-pick it** except with a per-archetype
-   data-driven rule.
+2. **Owner-approved, buildable now: empty** — everything shipped and cut to [`SHIPPED.md`](SHIPPED.md).
 
-3. **Open observer issues (all verified, filed, and awaiting the last mile — re-triaged 2026-10-01 Scout, no
-   new issue since 2026-09-25, each still awaiting an owner click/reading):** #878 (the app now offers the reconcile; closes on a reading that shows the 11
-   pairs gone — a click, not code), #880 (both live halves shipped v0.483.1/.2; only (a), the exception repr
-   *stored* as a reject reason, is left — filed ⚪ storage hygiene, deliberately **not** a PRIORITY 3
-   item), #903 (prevention by cover semantics still open; existing damage has a one-off repair,
-   v0.479.3), #1015 (observer read a code version the app never ran; its repo-side ask — the version on
-   `/api/health` — shipped v0.488.2, and the owner deliberately left it open to close on a reading that
-   confirms the pin; the other half is an Observer-charter change, out of this repo). **Nothing newly
-   actionable in the inbox this run — every open issue is awaiting an owner click/reading.**
+3. **Open observer issues — all four verified, filed, and awaiting the last mile (re-triaged 2026-10-02 Scout;
+   no new issue since 2026-09-25, none state-changed since 2026-09-29):** #878 (reconcile offered; closes on a
+   reading that shows the 11 pairs gone — a click, not code), #880 (both live halves shipped v0.483.1/.2; only
+   the exception-repr-stored-as-reject-reason remainder is open, filed ⚪ storage hygiene, deliberately **not**
+   a PRIORITY 3 item), #903 (prevention by cover semantics still open; existing damage has the v0.479.3 one-off
+   repair), #1015 (repo-side half — version on `/api/health` — shipped v0.488.2; owner left it open to close on
+   a reading that confirms the pin; the other half is an Observer-charter change, out of this repo). **Every
+   open issue is blocked on an owner click/reading, none on code.**
 
 ## Standing frontier (unchanged until a finding says otherwise)
 
 - **Mosaic-scale and walk-away behaviour is the open frontier**, not the single-field engine core.
-- **The single-field core is re-opened, narrowly.** Two Builder findings (v0.480.6: `output.py`
-  wrote a drizzle-off single-field master with no WCS at all; v0.483.3: the star matcher placed
-  nothing on a real-Seestar-sized sub) named one class — **a threshold/buffer/limit whose units are
-  *pixels*, tested only on a fixture an eighth of the real frame's size.** ↳ **The Scout swept that
-  class across `stack`/`calibrate`/`edit`/`render`/`qc` on 2026-09-28 — CLEAN** (details in
-  `docs/PROCESS-NOTES.md`): every such threshold is either normalised to the canvas (overlapgain's
-  ~400-px fold, coverage-leveling's stride scaling, the editor ops' `proxy_scale`), dominated by a
-  fraction term (`max(256, 8 % × n)`), or guarded by an identical-sampling check (noise-ratio,
-  noise-delta). ↳ **The sweep that one suggested — "what else does the engine write out, and what does
-  it put in the file?" — ran 2026-09-28 and is CLOSED with a finding; do not re-run it.** The FITS
-  *writers* are clean; one card's **value** was not — `REJREACH` stamped from `coverage_max`, the
-  deepest pixel, which on a mosaic is the corner where panels meet (v0.484.6; the class it generalises
-  to is in `docs/PROCESS-NOTES.md`).
-- **The ASTAP/ffmpeg filesystem-side-effect rotation slot + the fresh post-v0.480 code (updates, new-subs,
-  capture-nights, deepening/noise-delta reels) were swept 2026-09-30 (Scout) — CLEAN**, details in
-  `docs/PROCESS-NOTES.md`. A `--mosaic --editor --big` dogfood the same day read clean (Auto trim 7.9 %, cards
-  coherent, no overflow/console errors). Don't re-run these before a finding says to.
-- **Rotation item (4), the webapp routers, was swept 2026-10-01 (Scout) — ONE reproduced bug** (item 0
-  above), **the rest CLEAN** (full list + §10/path-traversal all clean in `docs/PROCESS-NOTES.md`); a
-  `--mosaic` dogfood the same day read clean (trim 7.9 %). Rotation now cycles back to (1), preview↔export
-  parity. Don't re-sweep the routers before a finding says to.
-- **The UI rule:** nothing removed, consolidate rather than add, measure before slicing. Tallest
-  pages and baselines: `docs/PROCESS-NOTES.md`, "DOGFOOD BASELINE".
-- **A beginner feature on a regular cadence** from "Features that serve real workflows". **The one buildable
-  entry the Scout re-stocked on 2026-09-30 — 🌟 "Bring my pictures up to date" — SHIPPED the same day as
-  v0.492.0** (a `new_light_only` scope on the hardened `reprocess_all` path, a three-way scope question in
-  Settings → Maintenance, and a pre-scoped **link** from the new-subs note). Its one open question is answered
-  in the entry: reversing the note's read-only stance was judged not to need the owner's word, because this
-  only *narrows* a batch he already runs and the note still never acts. **Do not re-pick it.** The section is
-  empty again, and the mature app makes obvious beginner features scarce — the annotation overlay, share
-  caption, print sizes, framing/mosaic advice and moon notes are all already shipped — so **do not manufacture
-  a marginal one (§4)**; grep `SHIPPED.md` before proposing another.
+- **Rotation state.** (1) preview↔export parity on a mosaic canvas — **swept CLEAN 2026-10-02 (Scout)**: the
+  full one-click Auto recipe renders proxy↔export with the global sky-anchor within |Δ|≤0.0004/channel at proxy
+  step 4; all divergence enters at `tone.stretch` (its documented resolution dependence, within the ≤2 %
+  decimation floor), every linear op before it agrees to ~0.0005, and every pixel-scaled op is still routed
+  through `scaled_px` (details in `docs/PROCESS-NOTES.md`). **Rotation now advances to (2): mosaic/walk-away
+  divergence — any threshold taken from a whole-target or *peak* number that is really per-panel.** (3)
+  ASTAP/ffmpeg filesystem side effects and (4) the webapp routers were swept 2026-09-30/2026-10-01 — don't
+  re-run (1), (3) or (4) before a finding says to.
+- **The single-field core is re-opened only narrowly** (two Builder findings named one class — a pixel-unit
+  threshold tested on an eighth-size fixture). That class was swept across `stack`/`calibrate`/`edit`/`render`/
+  `qc` on 2026-09-28 — CLEAN (details in `docs/PROCESS-NOTES.md`). Do **not** re-sweep `seestack/stack` or
+  `seestack/calibrate` until a new bug is found there (AGENTS.md).
+- **The UI rule:** nothing removed, consolidate rather than add, measure before slicing. Tallest pages and
+  baselines: `docs/PROCESS-NOTES.md`, "DOGFOOD BASELINE".
+- **A beginner feature on a regular cadence**, but the section is empty and the mature app makes obvious
+  beginner features scarce (annotation overlay, share caption, print sizes, framing/mosaic advice, moon notes,
+  "bring my pictures up to date" all shipped) — **do not manufacture a marginal one (§4)**; grep `SHIPPED.md`
+  before proposing another.
 
 ## How the owner gets builds now
 
-He deploys with `sudo scripts/deploy.sh` from the **`stable`** branch (advanced by
-`.github/workflows/stable.yml` to the newest `main` commit ≥ 3 days old with green CI) or from a
-release tag. So a fix reaches him days after it merges — ship the follow-up to your own change
-*before* that soak ends.
+He deploys with `sudo scripts/deploy.sh` from the **`stable`** branch (advanced by `.github/workflows/stable.yml`
+to the newest `main` commit ≥ 3 days old with green CI) or from a release tag. So a fix reaches him days after it
+merges — ship the follow-up to your own change *before* that soak ends.
