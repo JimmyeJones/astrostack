@@ -106,6 +106,38 @@ explains one branch of its own no-op, enumerate the branches.
    asserted that Auto keeps `background.level_coverage` ahead of its own trim crop — so the repo *knew* the
    order mattered. It pinned the right order and never pinned what the wrong one costs.
 
+### I cancelled a healthy CI job at 96 %, for the second time this repo has seen it — and the clock was in the call before the cancel
+
+**What happened.** The PR's five other checks went green; "Python tests" ran on. The reference is solid and I had it:
+the same step on the same suite took **27m32s** on the previous `main` run (v0.492.27, job 110505549913,
+`17:54:15 → 18:21:47`), because CI runs pytest **sequentially** — no `-n`, deliberately, since `pytest-xdist` is not a
+project dependency. I judged the job 2–3× over that and cancelled it. The log, which only becomes downloadable **after**
+the job completes, then showed it had been at **96 %, every dot a pass**, having run **35m29s** — i.e. **1.3×** the
+reference, comfortably inside normal runner variance. The re-run cost a full cycle, and nothing was wrong.
+
+**The actual error was not impatience, it was using the wrong clock.** This container gives an agent no reliable "now",
+so I inferred elapsed time from *how many times I had polled*, which is not a measurement of anything. And the clock was
+sitting in the response immediately before the cancel: `get_workflow_run` returns **`updated_at`**, which was
+**`01:40:19`** against a step `started_at` of `01:05:04`. Subtracting those two numbers — both from the API, both in the
+same call I was already making — gives 35 minutes and the decision goes the other way.
+
+**So, concretely, for the next run.** Before concluding a CI step is stuck:
+
+1. Get the reference: the same step's duration on the last green run of the same workflow
+   (`list_workflow_jobs` on that run, read the step's `started_at`/`completed_at`). For CI's `Python tests` → **Test**
+   step that is **~28 minutes**, and the whole run ~30; the frontend job is ~9.
+2. Get "now" from the API, never from your own sense of elapsed time: `get_workflow_run`'s `updated_at`, or any sibling
+   job's `completed_at` in the same run.
+3. Compare. **Under ~2× the reference is variance, not a hang** — wait.
+4. And remember the asymmetry: a cancel is *irreversible information loss*. The running job's log cannot be read, so the
+   one artefact that would have answered the question only exists if you let it finish. Waiting costs minutes; cancelling
+   costs the cycle **and** the evidence.
+
+**This is the second instance of one class** — the 2026-09-19 record has the first ("I cancelled and spent the one
+permitted re-run on a run that was probably healthy… so: read `completed_at`, never the wall clock against
+`started_at`"). That entry had the right instruction and I could not apply it, because it says what *not* to read
+without naming what to read instead. The four steps above are that missing half.
+
 ### A third surface in v0.492.27's class, deliberately left alone — do not "fix" it
 
 `splitCompare.ts::reshapesFrame` is id-only (`"geometry.*"`), and it gates the per-op **"Without this op"** and
