@@ -1,5 +1,65 @@
 # Shipped — the record
 
+## 2026-10-02 (Builder) — v0.492.29: the per-op "did appending this op change the picture?" measurement, kept as a test; and two sweeps of that class, both clean
+
+### v0.492.29 — 🔵 COVERAGE / the editor's own blind spot (PRIORITY 1 adjacent): `tests/test_edit_op_effect.py`
+
+*(Builder, branch `claude/dreamy-thompson-8mf0os`. Baseline `origin/main` at `aea1a27` (`__version__`
+0.492.28): **7306 passed, 3 skipped**, 15m34s with `OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4
+--dist worksteal`, `/tmp/pytest-of-root` cleared first. Green, CI green on `main`, no open PRs. "Bugs (fix
+these first)" held nothing ungated for the sixth run running and the beginner-feature section is empty, so the
+run went where the previous one said the cheapest new information was.)*
+
+**What this closes, in the previous run's own words.** v0.492.27 and v0.492.28 were both ops that silently
+**stopped working** rather than ops that broke a contract. The 2026-10-02 sweep over all 441 ordered op
+*pairs* reported `errors == []` for the very pair that carried v0.492.28, and was right to — "the op did
+nothing" violates none of the five invariants a pair sweep checks. Its record named the missing instrument:
+*"that needs a per-op 'did appending this op change the picture?' measurement, which is the shape of the next
+sweep in this family and is not written."* It is written now, and it is a **test** rather than a one-off
+harness, so it runs on every commit instead of once by hand.
+
+**What it pins.** For each of the 21 registered editor ops, with parameters chosen to be plainly non-trivial
+(*not* its defaults — several ops default to a deliberate no-op, which is what v0.492.27 was about), appending
+the op to a recipe must move the rendered picture by at least `1e-4` of full scale. On a **mosaic** canvas, at
+**both** render geometries — `proxy_scale` 1 (the export) and 4 (a decimated live preview at a stride the
+owner's canvases reach) — because an op that works on the export and is dead in the preview is the same defect
+in preview↔export clothing. 21 ops × 2 scales, plus three structural guards:
+
+- `_INERT_BY_DESIGN[(op id, scale)]` holds the one case that legitimately does nothing, keyed to **the surface
+  that tells the user so** — `detail.hot_pixels` on a decimated proxy, where a star is indistinguishable from
+  a stray pixel, skipped by `hot_pixels_skipped_on_proxy` and captioned by `hotPixelsPreview.ts`. An addition
+  here is a claim that the reader is told; making that claim explicit is the v0.492.28 lesson encoded.
+- …and the **other direction**: each documented inert case must be *exactly* `0.0`, so a skip that quietly
+  starts doing something fails too (the app would then be carrying an advisory that is no longer true).
+- a drift guard: every registered op id must appear in the effect table, so a newly-registered op cannot
+  simply go unmeasured — which is the state the editor was in for both findings above.
+- v0.492.28's finding pinned from the **engine** side: `background.level_coverage` moves the picture on its
+  own, moves it *identically* with each geometry op at its own defaults (v0.492.27's premise), and is exactly
+  `0.000000` with each one aimed. The editor's `strandedCoverageLevelingUids` note is built on that
+  distinction being true of the engine; nothing asserted it there.
+
+**The floor is a separation, not a tuning.** On this fixture the smallest live effect is
+`detail.chroma_denoise` on the ×4 proxy at mean **1.4e-3** of full scale and the single inert case is **0.0**
+exactly — the floor sits ~13× under the former and infinitely above the latter, with no case in between.
+
+**The fixture states its own claims** (`tests/shapes.py`, whose whole point is that the code was tested and
+the *fixture* was the wrong assumption): a 2×2 union canvas built the way a stack is — each panel a window
+onto **one** star catalog so an overlap holds the same stars, overlapping pixels the mean of their panels,
+coverage the **sum of per-frame weights** (`assert_weighted`) with **uneven** panel depth (6/6/6/3), a four-way
+corner at >3× a panel, a ragged outline (`assert_has_a_ragged_outline`) and NaN where nothing covers. On top of
+that, the structure each op needs something of: a light-pollution tilt, a nebula, the OSC sensor cast against a
+warmer sky, green blotches, stuck pixels, real grain.
+
+**Sensitivity shown, not asserted — six planted defects, each tripping exactly the assertion it should and
+nothing else:** `_hot_pixels` no longer skipping on the proxy (the inert-case test fails), `_hot_pixels` dead
+everywhere (the scale-1 effect test fails), `_level_coverage` dead everywhere (both its effect tests **and**
+the stranding test fail), `_level_coverage` no longer skipping a reshaped frame (the stranding test fails), an
+aimed `geometry.resize` dialled back to scale 1.0 (its reshape assertions fail), and the fixture's coverage
+made integral (the fixture's own claim fails in `tests/shapes.py`).
+
+**Cost: 7.1 s, 47 items.** Tests only — no engine, webapp, frontend, config, schema, migration, on-disk,
+default, endpoint or response-shape change, so §9 is untouched by construction.
+
 ## 2026-10-02 (Builder) — v0.492.28: the editor's other silent no-op, and the three clean sweeps that found it
 
 ### v0.492.28 — 🟠 BUG FIX (PRIORITY 1, the editor): `coverageLeveling.ts::strandedCoverageLevelingUids` + `moveCoverageLevelingToFront`, on the `background.level_coverage` op panel
