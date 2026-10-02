@@ -48,7 +48,8 @@ import { canNeutraliseSkyCast, neutraliseBackgroundOps, skyCastCaption }
   from "../components/editor/skyCast";
 import { autoColorCalCaption, colorCalProxyFallbackCaption } from "../components/editor/colorCal";
 import { previewScaleCaption } from "../components/editor/previewScale";
-import { prependCoverageLeveling } from "../components/editor/coverageLeveling";
+import { moveCoverageLevelingToFront, prependCoverageLeveling, strandedCoverageLevelingUids }
+  from "../components/editor/coverageLeveling";
 import { recentreCropRect, recentreKeptLabel } from "../components/editor/recentreCrop";
 import { PREVIEW_TOOLS, visiblePreviewTools } from "../components/editor/previewTools";
 import { PreviewToolGuide } from "../components/editor/PreviewToolGuide";
@@ -1209,6 +1210,15 @@ export function EditorView() {
     setOps((p) => p.map((o) =>
       degenerateLevels.includes(o.uid)
         ? { ...o, params: { ...o.params, black: 0, white: 1 } } : o));
+  // Coverage leveling bins the image against the run's own coverage map, so an
+  // op above it that has actually reshaped the frame leaves it unable to line
+  // the two up — the engine skips it rather than crash, and the control is then
+  // dead. Flag it and offer the one-click move to its canonical place at the
+  // front. Same reasoning as the single-field note on this op's own panel: say
+  // so rather than let the control silently do nothing.
+  const strandedLeveling = strandedCoverageLevelingUids(ops);
+  const unstrandLeveling = () =>
+    setOps((p) => moveCoverageLevelingToFront(p, strandedCoverageLevelingUids(p)));
   const grouped = useMemo(() => {
     const g: Record<string, EditOp[]> = {};
     (opsSchema.data ?? []).forEach((s) => { (g[s.group] ??= []).push(s); });
@@ -2735,6 +2745,33 @@ export function EditorView() {
                       coverage. This op equalises the sky across the panels of a
                       <b> mosaic</b>, where frames overlap unevenly.
                     </Text>
+                  </Alert>
+                ) : null}
+                {/* The *other* reason this op can do nothing, and the one nothing
+                    used to say. It bins the image against the run's own coverage
+                    map, so once an op above it has really reshaped the frame the
+                    two can't be aligned and the engine skips it (measured: 0.142
+                    of full scale on its own, 0.000000 with an aimed Crop/Rotate/
+                    Resize above it). Shown only on a mosaic, where moving it is
+                    the real fix — on a single field the note above is the honest
+                    answer and this one would be a second, misleading reason. */}
+                {selectedOp.id === "background.level_coverage"
+                  && hist.data?.is_mosaic === true
+                  && strandedLeveling.includes(selectedOp.uid) ? (
+                  <Alert color="orange" variant="light" py={6} mb="xs"
+                    data-testid="leveling-stranded"
+                    icon={<IconAlertTriangle size={16} />}>
+                    <Text size="xs" mb={6}>
+                      No effect while a <b>Crop</b>, <b>Rotate</b> or <b>Resize</b> sits
+                      above it. This op evens the sky out panel by panel, which it can
+                      only do on the picture's original shape — once something above has
+                      changed that shape, it is skipped. Move it to the top of the list
+                      and it works again.
+                    </Text>
+                    <Button size="compact-xs" variant="light" color="orange"
+                      onClick={unstrandLeveling}>
+                      Move it to the top
+                    </Button>
                   </Alert>
                 ) : null}
                 {specs[selectedOp.id].heavy && selectedOp.enabled ? (

@@ -1,5 +1,111 @@
 # Shipped — the record
 
+## 2026-10-02 (Builder) — v0.492.28: the editor's other silent no-op, and the three clean sweeps that found it
+
+### v0.492.28 — 🟠 BUG FIX (PRIORITY 1, the editor): `coverageLeveling.ts::strandedCoverageLevelingUids` + `moveCoverageLevelingToFront`, on the `background.level_coverage` op panel
+
+*(Builder, branch `claude/dreamy-thompson-dy7k5j`. Baseline `origin/main` at `fb33eae` (`__version__`
+0.492.27): **7299 passed, 3 skipped**, 12m32s — green, so a finding was distinguishable from a pre-existing
+failure. "Bugs (fix these first)" held nothing ungated for the fifth run running, and the beginner-feature
+section is empty with FOCUS saying not to manufacture one, so the run went looking: three sweeps, two of them
+clean, recorded in [`PROCESS-NOTES.md`](PROCESS-NOTES.md).)*
+
+**The bug.** `background.level_coverage` — "Coverage leveling", the one editor op that exists **for the
+owner's own shooting shape**, a mosaic whose panels overlap unevenly — silently does nothing when an enabled
+geometry op that has actually been aimed sits above it in the recipe. It levels the sky per coverage *level*,
+which it can only do by binning the image against the run's own coverage map, and that map is captured at the
+stack canvas's geometry. So `_level_coverage` (`seestack/edit/ops/background.py`) carries a shape guard: once
+something upstream has reshaped the frame the two can no longer be aligned, and it returns the image
+untouched — *"skip rather than crash the whole render"*, which is the right engine behaviour.
+
+The skip is not the bug. **The silence is.** The control is dead, the preview is unchanged, no error is
+raised, no note is recorded, and nothing anywhere says why.
+
+**Measured**, on a four-panel canvas with a real sky step between the panels (the only shape on which "did it
+do anything?" is answerable), as how far appending the leveling op moves the picture:
+
+| what sits above it | leveling's effect | |
+|---|---|---|
+| nothing | **0.142** of full scale | works |
+| `geometry.crop` aimed at 0.12–0.86 × 0.08–0.93 | **0.000000** | **dead** |
+| `geometry.rotate` at 7° | **0.000000** | **dead** |
+| `geometry.resize` at 0.6× | **0.000000** | **dead** |
+| `geometry.crop` / `rotate` / `resize` **at their own defaults** | **0.142** | works |
+
+**The app already answers this exact question — for the op's *other* silent no-op.** Selecting Coverage
+leveling on a single-field stack has said, since long before this run, *"No effect on this stack — it's a
+single-field image with even coverage"*, and the comment above it gives the reason in so many words: *"tell
+the user rather than let the control silently do nothing."* There are exactly two reasons this op can do
+nothing, that principle was already written down for one of them, and the second had no sentence at all.
+
+**And the family that exists for this is structurally blind to it.** `stageConflicts.ts` holds the editor's
+*"this op is doing nothing, here is why, and one click to fix it"* vocabulary — a second enabled stretch, a
+Levels op whose white point is below its black (*"the engine now treats it as identity (so the op silently
+does nothing)"*), an op on the wrong side of the stretch. None of them reaches this case, and
+`stageConflicts` in particular **cannot**: it returns `{}` whenever no stretch op is enabled, which is
+precisely the recipe in which a `nonlinear` geometry op sits above a `linear` pass with no other surface
+remarking on it. With a stretch enabled the geometry op is flagged for being on the wrong *side* — which says
+nothing about the leveling op being dead, and offers a fix aimed at the other op.
+
+**The fix.** A fourth member of that family, in the one place this op's "why is nothing happening?" answer
+already lives — its own panel, directly beside the single-field sibling:
+
+> No effect while a **Crop**, **Rotate** or **Resize** sits above it. This op evens the sky out panel by
+> panel, which it can only do on the picture's original shape — once something above has changed that shape,
+> it is skipped. Move it to the top of the list and it works again.
+
+…with a one-click **"Move it to the top"**. The front is this op's canonical home rather than merely
+somewhere earlier: it is where `prependCoverageLeveling` puts it when a preset is applied to a mosaic and
+where the one-click Auto recipe builds it, and `tests/test_edit_engine.py` has long asserted that Auto keeps
+it ahead of its own trim crop. Moving it there clears the stranding whatever put the geometry op above it, and
+leaves every other op's relative order alone.
+
+**Shown only on a mosaic.** On a single field the sibling note above is the honest answer and this one would
+be a second, misleading reason for the same silence — so it is gated on `is_mosaic`, which is the gate the
+rest of the UI already uses for this op. Conservative in the right direction: a non-mosaic run that somehow
+carries a coverage map loses a message rather than gaining a false one.
+
+**Keyed on v0.492.27's own predicate, a third caller.** `geometryOpReshapesFrame` (the TypeScript mirror of
+`seestack/edit/ops/geometry.py::reshapes_frame`) is the question, because the measurement above says so: a
+Crop, Rotate or Resize **at its own defaults** reshapes nothing and the leveling still runs, so asking "is
+there an enabled geometry op?" would have put "no effect" on a priority-1 control's panel while it was
+working — the exact defect v0.492.27 fixed in two other surfaces. Three tests fail against that naive
+predicate.
+
+**Nothing removed, no new surface** (the UI rule): one `Alert` inside the op panel that already existed,
+visible only when that op is selected *and* actually stranded.
+
+**Tests: +21 frontend, +7 Python.**
+
+* `coverageLeveling.test.ts` — the predicate's discrimination (three aimed ops named, three defaulted ops
+  not), Auto's own order silent, disabled ops on both sides ignored, multiple instances, a non-geometry op in
+  between; and the move's order-preservation, identity on an empty/unknown uid list, and non-mutation.
+  **Fail-before shown by planting the naive predicate in an `origin/main` worktree: exactly the three
+  "at its own defaults" tests fail.**
+* `Editor.test.tsx` — the note and its one-click fix end to end, and silence for a Crop still at its
+  defaults. **Fail-before shown on unmodified `origin/main`** (no `leveling-stranded` element exists).
+* `tests/test_edit_engine.py` — two parametrised tests that pin the **engine premise the sentence rests on**:
+  the op is skipped silently (no error collected) under each aimed geometry op, and still runs under each one
+  at its defaults. These cannot "fail before" because the engine is unchanged; their value is the inverse, and
+  it was verified rather than asserted — **planting a heal in `_level_coverage` that resamples the coverage map
+  onto the reshaped frame makes all three fail loudly**, so if the engine ever learns to align them this
+  sentence has to be removed instead of quietly becoming false (the fixture-asserts-its-own-precondition
+  discipline from v0.492.25). The "it still works" half is asserted too, so neither test can pass because the
+  op does nothing everywhere.
+
+**Stood down, with the numbers, rather than filed as an open bug: making the op *work* under an upstream
+geometry op.** `apply_geometry_to_map` already forward-transforms a coverage map through a recipe's geometry
+ops, so the machinery exists and the shapes would align. It was not built, for three reasons that are worth
+recording so nobody re-derives them: the op has no access to the recipe (only to `ctx`), so it needs either
+the recipe threaded in or a running transformed coverage maintained by the pipeline; it would change what an
+**already-saved** recipe of that shape renders, which is the one thing §9 forbids doing quietly; and the
+canonical order puts leveling first anyway — Auto builds it there, `prependCoverageLeveling` puts it there,
+and this change now offers to put it back there in one click. The slice that was worth shipping is the one
+that tells the truth about today's behaviour.
+
+**No engine, config, settings, schema, migration, on-disk, default, endpoint or response-shape change** —
+frontend and tests only.
+
 ## 2026-10-01 (Builder) — v0.492.27: a geometry op at its own defaults reshapes nothing, and two editor surfaces that said otherwise
 
 ### v0.492.27 — 🟠 BUG FIX (PRIORITY 1, the editor): `seestack/edit/ops/geometry.py::reshapes_frame`, wired into `editor._loupe_geometry_problem` and `cropDrag.ts::cropDragBlockedReason`
