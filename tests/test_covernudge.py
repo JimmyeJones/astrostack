@@ -12,7 +12,12 @@ import json
 
 import pytest
 
-from seestack.covernudge import CLEANER_RATIO, cleanest_shot, grainier_newest
+from seestack.covernudge import (
+    CLEANER_RATIO,
+    MIN_SKY_SHARE,
+    cleanest_shot,
+    grainier_newest,
+)
 from seestack.io.project import StackRunRow
 
 
@@ -189,3 +194,102 @@ def test_grainier_newest_percent_never_reports_zero():
     at = _run(2, sigma=0.0100 / CLEANER_RATIO)
     nudge = grainier_newest([at, _run(1, sigma=0.0100)], cover_run_id=None)
     assert nudge is not None and nudge.percent_grainier >= 1
+
+
+# --- the sky-extent guard ---------------------------------------------------
+#
+# Both nudges compare one number — each run's `noise_sigma`, which is normalised
+# to its own image's robust range and measured over the whole canvas — so they
+# can only compare two pictures of the SAME sky. Reproduced on the bundled 2x2
+# mosaic sample by stacking real subsets through `run_stack`: one panel six subs
+# deep (sigma 0.00074) and then a second panel holding a single sub (0.00089) is
+# "20 % more grain" and HALF THE SKY, and the nudge offered to put the one-panel
+# picture back on the Library tile, "My best pictures" and the montage wall —
+# where a pin stays forever, so the mosaic being built would never show again.
+# A restack of the same sky moved the canvas by 0.3 % over the same measurement,
+# which is why the two cases separate rather than needing a tuned threshold.
+
+
+def test_grainier_newest_does_not_offer_a_picture_that_covers_less_sky():
+    """The reproduced case: the newest stack is grainier because a new mosaic
+    panel has just opened, not because the night was worse."""
+    newest = _run(2, sigma=0.00089)          # two panels, the new one 1 sub deep
+    earlier = _run(1, sigma=0.00074)         # one panel, six subs deep
+    # Unguarded — what the app did before — it fires and offers the half-size one.
+    assert grainier_newest([newest, earlier], cover_run_id=None) is not None
+    # With each run's own sky extent to hand it says nothing.
+    assert grainier_newest([newest, earlier], cover_run_id=None,
+                           sky_fields={2: 1.97, 1: 1.00}) is None
+
+
+def test_grainier_newest_still_offers_an_earlier_run_of_the_same_sky():
+    """The nudge's actual case — haze, or a night most of whose subs were set
+    aside — is untouched: same canvas, so the sigmas compare like with like."""
+    newest = _run(2, sigma=0.00083, n_frames=11)
+    earlier = _run(1, sigma=0.00063, n_frames=21)
+    nudge = grainier_newest([newest, earlier], cover_run_id=None,
+                            sky_fields={2: 3.62, 1: 3.63})
+    assert nudge is not None and nudge.run_id == 1
+    assert nudge.percent_grainier == 31
+
+
+def test_grainier_newest_skips_the_smaller_candidate_and_keeps_looking():
+    """The filter sits on the candidate, not on the verdict: a cleaner run of
+    less sky is passed over, and a same-sky one behind it is still offered."""
+    newest = _run(3, sigma=0.0100)
+    smaller_but_cleanest = _run(2, sigma=0.0050)
+    same_sky = _run(1, sigma=0.0080)
+    nudge = grainier_newest([newest, smaller_but_cleanest, same_sky],
+                            cover_run_id=None,
+                            sky_fields={3: 3.60, 2: 1.00, 1: 3.58})
+    assert nudge is not None and nudge.run_id == 1
+
+
+@pytest.mark.parametrize("sky_fields", [
+    None,                        # every caller that does not pass the map
+    {},                          # an empty one reads the same way
+    {2: 3.6},                    # the candidate's own figure is missing
+    {2: 3.6, 1: None},           # …or unanswerable (no recorded frame shape)
+    {2: 3.6, 1: 0.0},            # …or a degenerate zero
+    {2: 3.6, 1: float("nan")},
+    {2: None, 1: 1.0},           # the picture on show is the unanswerable one
+])
+def test_grainier_newest_without_usable_sky_figures_is_unchanged(sky_fields):
+    """No opinion means today's behaviour, never a silenced nudge: this guard can
+    only ever remove an offer it can prove is smaller."""
+    runs = [_run(2, sigma=0.012), _run(1, sigma=0.008)]
+    assert grainier_newest(runs, cover_run_id=None,
+                           sky_fields=sky_fields) is not None
+
+
+def test_grainier_newest_sky_guard_boundary():
+    """Exactly ``MIN_SKY_SHARE`` of the sky on show still counts as the same
+    picture; a hair under it does not."""
+    runs = [_run(2, sigma=0.012), _run(1, sigma=0.008)]
+    at = {2: 10.0, 1: 10.0 * MIN_SKY_SHARE}
+    assert grainier_newest(runs, cover_run_id=None, sky_fields=at) is not None
+    under = {2: 10.0, 1: 10.0 * MIN_SKY_SHARE - 0.01}
+    assert grainier_newest(runs, cover_run_id=None, sky_fields=under) is None
+
+
+def test_cleanest_shot_does_not_promote_a_picture_that_covers_less_sky():
+    """The mirror: a stack of fewer panels than the pinned mosaic measures
+    cleaner for its own depth, and "cleaner" is no reason to hide shot sky."""
+    newest = _run(2, sigma=0.008, n_frames=40)
+    cover = _run(1, sigma=0.011, n_frames=80, ts="2026-04-01T00:00:00Z")
+    assert cleanest_shot([newest, cover], cover_run_id=1) is not None
+    assert cleanest_shot([newest, cover], cover_run_id=1,
+                         sky_fields={2: 1.00, 1: 3.63}) is None
+    # Same sky, so the ordinary "you kept adding subs" case still speaks.
+    shot = cleanest_shot([newest, cover], cover_run_id=1,
+                         sky_fields={2: 3.62, 1: 3.63})
+    assert shot is not None and shot.run_id == 2
+
+
+def test_cleanest_shot_may_promote_a_picture_that_covers_more_sky():
+    """The guard is one-directional — it never objects to a *bigger* picture."""
+    newest = _run(2, sigma=0.008)
+    cover = _run(1, sigma=0.011, ts="2026-04-01T00:00:00Z")
+    shot = cleanest_shot([newest, cover], cover_run_id=1,
+                         sky_fields={2: 3.63, 1: 1.00})
+    assert shot is not None and shot.run_id == 2

@@ -24,9 +24,12 @@ from seestack.io.project import StackRunRow
 
 def _register_run(data_root, safe: str, *, ts: str, sigma: float | None,
                   n_frames: int = 40, options: dict | None = None,
-                  preview: bool = True) -> int:
+                  preview: bool = True,
+                  canvas: tuple[int, int] = (480, 320)) -> int:
     """Add a stack run with a real 1×1 preview on disk. ``options=None`` writes a
-    genuine ``StackOptions`` payload; pass a bare dict for a non-genuine run."""
+    genuine ``StackOptions`` payload; pass a bare dict for a non-genuine run.
+    ``canvas`` is ``(w, h)`` and defaults to one native frame of the fixture's
+    subs (``FRAME_W``/``FRAME_H``), i.e. exactly one field-full of sky."""
     lib = Library.open_or_create(data_root / "library")
     try:
         proj = lib.open_target(safe)
@@ -39,7 +42,8 @@ def _register_run(data_root, safe: str, *, ts: str, sigma: float | None,
                 id=None, timestamp_utc=ts,
                 output_basename="master", fits_path=None, tiff_path=None,
                 preview_path=str(png), n_frames_used=n_frames,
-                canvas_h=320, canvas_w=480, coverage_min=1, coverage_max=n_frames,
+                canvas_w=canvas[0], canvas_h=canvas[1],
+                coverage_min=1, coverage_max=n_frames,
                 options_json=json.dumps(
                     options if options is not None else {"output_name": "m42"}),
                 noise_sigma=sigma,
@@ -142,3 +146,42 @@ def test_a_single_stack_says_nothing(client, solved_library):
 def test_unknown_target_404(client, solved_library):
     assert client.get(
         "/api/targets/does_not_exist/grainier-newest").status_code == 404
+
+
+def test_a_grown_mosaic_is_not_offered_its_own_smaller_picture(
+        client, solved_library):
+    """The endpoint reads each run's **sky extent** and refuses the swap that
+    would shrink the picture.
+
+    The state is the owner's own shooting shape: a panel is finished, a second
+    one opens and holds a sub or two, the target is restacked, and the wider
+    canvas measures grainier for the thin new panel. Reproduced on the bundled
+    2x2 mosaic sample through `run_stack` (one panel, sigma 0.00074 -> two
+    panels, 0.00089: "20 % more grain" over half the sky), which is where these
+    numbers come from. Before this guard the nudge offered to pin the one-panel
+    picture onto the Library tile, "My best pictures" and the montage wall — and
+    a pin stays pinned, so the mosaic being built would never show again.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _register_run(solved_library, safe, ts="2026-04-01T00:00:00Z",
+                  sigma=0.00074, n_frames=6, canvas=(480, 320))
+    _register_run(solved_library, safe, ts="2026-05-09T00:00:00Z",
+                  sigma=0.00089, n_frames=7, canvas=(891, 339))
+
+    assert client.get(f"/api/targets/{safe}/grainier-newest").json() is None
+
+
+def test_a_hazy_restack_of_the_same_mosaic_is_still_offered(
+        client, solved_library):
+    """The nudge's actual case survives the guard: same canvas (a restack moves
+    it by a fraction of a percent), so the two sigmas compare like with like."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    good = _register_run(solved_library, safe, ts="2026-04-01T00:00:00Z",
+                         sigma=0.00063, n_frames=21, canvas=(907, 615))
+    hazy = _register_run(solved_library, safe, ts="2026-05-09T00:00:00Z",
+                         sigma=0.00083, n_frames=11, canvas=(905, 615))
+
+    body = client.get(f"/api/targets/{safe}/grainier-newest").json()
+    assert body is not None
+    assert body["run_id"] == good and body["newest_run_id"] == hazy
+    assert body["percent_grainier"] == 31

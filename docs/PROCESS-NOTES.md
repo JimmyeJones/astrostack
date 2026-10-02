@@ -1,5 +1,100 @@
 # Process notes & QA sweep records
 
+## 2026-10-02 (Builder, branch `claude/dreamy-thompson-vxe01m`) — the cover nudge's two σ comparisons are not like-for-like across canvases (v0.492.30)
+
+*(Baseline = `origin/main` at `0abb947` (`__version__` 0.492.29): **7352 passed, 4 skipped**, 16m38s with
+`OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green,
+CI green on `main`, no open PRs.)*
+
+### "Bugs (fix these first)" held nothing ungated for the seventh run running
+
+Pointer, not a re-derivation: the enumerated list is in the 2026-10-01 (`claude/keen-darwin-ok7w8n`) record and
+the entries have not changed. The beginner-feature section is empty and `docs/FOCUS.md` says not to manufacture
+one. So the slot went to **the standing frontier that page names**: *"mosaic/walk-away divergence — any
+threshold taken from a whole-target or peak number that is really per-panel."*
+
+### Three places in that class were read and found already correct — worth recording so the next run skips them
+
+Each of these was the obvious suspect and each had already been given the per-pixel correction, with the
+reasoning in the code:
+
+- `stacker.coverage_thin_fraction` measures against `panel_coverage_level`, not the map's peak
+  (`COVERAGE_SHARES_VERSION = 2`), and `coverage_panel_depth` / `coverage_median_depth` exist beside it.
+- `portfolio._entry_coverage` caps `coverage_max` at `per_pixel_total(frames)`, naming the bundled 2×2
+  sample's own 21-vs-6 corner as the reason.
+- `qc/grading.py` grades the position-dependent metrics against each **pointing group's** own population, with
+  a per-panel safety rail under the target-wide cap, and `pipeline._auto_stack_panel_depth` /
+  `_auto_stack_readability_hold` both ask `typical_panel_depth` rather than the frame count.
+
+A fourth check was clean in a different way: every one of the **46** `Settings` fields is read somewhere outside
+`config.py`/`schemas.py` (lowest hit counts: `auto_ingest`, `auto_stack_settle_min`, `seestar_scan_subnet`,
+`seestar_known_ips`, `seestar_scan_interval_s` — one real reader each), so there is no dead knob in Settings.
+Not worth a test; recorded so the class is not re-swept.
+
+### The finding: the two surfaces that compare one run's grain to another's
+
+`seestack/covernudge.py` is the odd one out, and it is odd in the module's own terms. Both halves decide on
+each run's stored `noise_sigma` — normalised to **its own image's** robust range and measured over the **whole
+canvas** — and the module's docstring already refuses a comparison across run *kinds* for precisely that
+reason ("an editor export's σ isn't measured on the same kind of image"). Nothing refused one across
+**canvases**, so a *growing mosaic* — the owner's own shooting shape — reads as a worse night.
+
+Reproduced rather than reasoned: five pairs of real stacks of the bundled mosaic sample through `run_stack`,
+each pair's stored rows handed to `grainier_newest`. One panel six subs deep (σ 0.00074) → two panels with a
+single sub on the new one (0.00089) **fires** at "20 % more grain" over half the sky; the control (same sky,
+half the subs set aside) fires at 31 % and must keep doing so. Full table and the fix in
+[`SHIPPED.md`](SHIPPED.md).
+
+**Two numbers decided the shape of the fix, and they are three orders of magnitude apart:** a restack of the
+same sky moves the canvas by **0.3–0.6 %**, one added panel by **+83 % to +263 %**. That is what made a
+threshold (`MIN_SKY_SHARE = 0.9`) a *separation* rather than a tuning — the thing AGENTS.md §1 warns about when
+it says not to blind-flip a number.
+
+### Why silence and not a sentence
+
+The grown-mosaic state does need something said — *"keep shooting the new panel"* — and the Target page already
+says it twice, in `thinStack.ts` and `nextBestMove.ts`, both already per-pixel aware through
+`StackRun.field_fulls`. A third sentence would duplicate them and add always-on surface against the UI rule.
+What had to go was the **recommendation**, not the silence.
+
+### A negative result worth keeping: growth alone is usually *not* enough
+
+Three of the five pairs grew the canvas by 1.8–3.6× and stayed silent, because a panel added **with its own
+subs** does not lower the per-pixel depth — it adds sky at the same depth (2 panels → 4: subs/px 6.05 → 5.78,
+σ 0.00064 → 0.00063). The firing case needs the new panel to be *thin*, which is what a panel's first night
+is. So anyone re-testing this class should aim at the **first night of a new panel**, not at a finished mosaic:
+a pair built the obvious way comes back clean and would have closed the lead wrongly.
+
+### Dogfood — `--mosaic --restack`, the stalest flag on the owner's shape: CLEAN
+
+`--restack` was last run **2026-09-26** (v0.479.x), the longest-unverified flag there is alongside `--closing`
+and `--empty`, and it is the one that makes *every same-target two-run surface* exist — which is exactly the
+family this run's fix sits in. EXIT 0. Both passes (field sample and mosaic) report **nothing overflowing and
+no console errors**; the mosaic's Auto trim is **7.9 %** of the canvas, unchanged and well under the ~15 % that
+would be D1-shaped; page heights match the standing DOGFOOD BASELINE to the pixel on every row (phone
+`/life-list [Still to shoot]` 14492, `[Up tonight]` 7006, desktop 5101), so nothing was newly long enough to be
+this run's one UI slice.
+
+Read as one paragraph, the mosaic target's cards agree with each other **and** with the fix: next-best-move says
+*"another pass or two over the same mosaic evens out the thinner part"*, the readiness card says *"part of this
+one is thinner than the rest, and only more light evens that part out"*, and the panel map names the panel and
+the 30 s. That trio is the sentence `grainier-newest` now defers to instead of contradicting, which is the
+argument for silence rather than a fourth sentence.
+
+**One note on the flag itself, for the next run:** `--restack` stacks **thin first, then deep**, so its newest
+run is the *deeper* one and `grainier-newest` is silent by construction in that pass — the nudge this run fixed
+is not reachable through it in either direction. A pass that wanted to photograph either cover nudge would have
+to stack deep first. Recorded rather than changed: the flag's stated purpose is the deepening/noise-delta
+surfaces (`[reel] available=True over 2 stack(s), 3 → 6 subs`, `[noise-delta] ratio=1.658`), and reversing it
+would cost those.
+
+### Kickoff disagreement — already filed twice, same resolution
+
+This session's attribution reminder again asked for a model identifier in the `Co-Authored-By:` trailer, which
+AGENTS.md §8/§10 forbid in commits, code or logs. AGENTS.md wins; the 2026-10-02 Scout record filed this first,
+the 2026-10-02 Builder record took the same resolution, and so does this run
+(`Co-Authored-By: Claude <noreply@anthropic.com>` + `Claude-Session:`). Noted rather than re-filed.
+
 ## 2026-10-02 (Builder, branch `claude/dreamy-thompson-8mf0os`) — two sweeps of the "an op silently stops working" class, both CLEAN, and the instrument kept as a test (v0.492.29)
 
 *(Baseline = `origin/main` at `aea1a27` (`__version__` 0.492.28): **7306 passed, 3 skipped**, 15m34s with

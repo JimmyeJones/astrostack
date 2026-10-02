@@ -653,6 +653,30 @@ def target_autostack_thin_hold(
     return None
 
 
+def _run_sky_fields(proj, runs) -> dict[int, float | None]:  # noqa: ANN001
+    """How many single-frame field-fulls of sky each of ``runs`` covers, by id.
+
+    What :mod:`seestack.covernudge` needs to refuse a cover swap that would put a
+    materially smaller picture on show (:data:`seestack.covernudge.MIN_SKY_SHARE`).
+    Read off the same :func:`webapp.derived_light.stacking_field_fulls` the
+    History listing and the Gallery card already carry per run — one definition of
+    "how much sky is this picture", so the nudge cannot disagree with the page it
+    sits on. ``proj`` must still be open; the frame shape is one ``LIMIT 1`` read
+    for the whole target.
+
+    A run whose figure can't be answered maps to ``None``, which the guard reads
+    as "no opinion" — a single field, or a canvas whose native frame shape isn't
+    recorded, behaves exactly as it did before the guard existed.
+    """
+    from webapp.derived_light import stacking_field_fulls
+    from webapp.field_fulls import native_frame_shape
+
+    native_shape = native_frame_shape(proj)
+    by_id = {r.id: r for r in runs}
+    return {r.id: stacking_field_fulls(r, by_id, native_shape)
+            for r in runs if r.id is not None}
+
+
 @router.get("/{safe}/cleanest-shot", response_model=CleanestShotOut | None)
 def target_cleanest_shot(safe: str, request: Request) -> CleanestShotOut | None:
     """Offer to promote the newest stack to cover when it's materially cleaner
@@ -666,8 +690,10 @@ def target_cleanest_shot(safe: str, request: Request) -> CleanestShotOut | None:
     swaps the cover by itself.
 
     Compares like with like: only *genuine* stack runs (editor-export / combine
-    runs are skipped — their σ isn't measured on the same kind of image), and
-    only when both runs carry a usable noise σ. Read-only.
+    runs are skipped — their σ isn't measured on the same kind of image), only
+    when both runs carry a usable noise σ, and only when the promotion would not
+    put a materially smaller piece of sky on show than the pinned cover does
+    (:data:`seestack.covernudge.MIN_SKY_SHARE`). Read-only.
     """
     from seestack.covernudge import cleanest_shot
     from webapp.pipeline import _stack_options_from_run_json
@@ -676,12 +702,16 @@ def target_cleanest_shot(safe: str, request: Request) -> CleanestShotOut | None:
     try:
         entry = lib.find_target(safe)
         cover_id = entry.cover_stack_run_id if entry is not None else None
-        runs = [r for r in proj.iter_stack_runs()  # newest first
+        all_runs = list(proj.iter_stack_runs())  # newest first
+        runs = [r for r in all_runs
                 if _stack_options_from_run_json(r.options_json) is not None]
+        # …and how much sky each one covers, so a smaller picture is never
+        # offered as the better one (``MIN_SKY_SHARE``).
+        sky_fields = _run_sky_fields(proj, all_runs)
     finally:
         proj.close()
         lib.close()
-    shot = cleanest_shot(runs, cover_id)
+    shot = cleanest_shot(runs, cover_id, sky_fields=sky_fields)
     if shot is None:
         return None
     # Never offer a cover whose picture is gone: pinning it would leave every
@@ -829,8 +859,11 @@ def target_grainier_newest(safe: str, request: Request) -> GrainierNewestOut | N
     never pins anything by itself, and it can never speak at the same time as
     ``cleanest-shot``: that one needs a pin, this one needs none.
 
-    Compares like with like — only *genuine* stack runs — and only offers a run
-    whose picture is actually on disk. Read-only.
+    Compares like with like — only *genuine* stack runs, and only a run covering
+    as much sky as the newest one does
+    (:data:`seestack.covernudge.MIN_SKY_SHARE`: a growing mosaic is grainier for
+    its newest panel, and the half-size picture is not the better one) — and only
+    offers a run whose picture is actually on disk. Read-only.
     """
     from seestack.covernudge import grainier_newest
     from webapp.pipeline import _stack_options_from_run_json
@@ -840,12 +873,16 @@ def target_grainier_newest(safe: str, request: Request) -> GrainierNewestOut | N
         entry = lib.find_target(safe)
         cover_id = entry.cover_stack_run_id if entry is not None else None
         all_runs = list(proj.iter_stack_runs())  # newest first
+        # How much sky each run covers, so an earlier, smaller picture is never
+        # offered as the better one — a mosaic measures grainier for the panel it
+        # has just opened (``MIN_SKY_SHARE``).
+        sky_fields = _run_sky_fields(proj, all_runs)
     finally:
         proj.close()
         lib.close()
     runs = [r for r in all_runs
             if _stack_options_from_run_json(r.options_json) is not None]
-    nudge = grainier_newest(runs, cover_id)
+    nudge = grainier_newest(runs, cover_id, sky_fields=sky_fields)
     if nudge is None:
         return None
     # Only speak when the grainy newest stack is genuinely the picture on show.
