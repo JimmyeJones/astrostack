@@ -65,6 +65,29 @@ subs** does not lower the per-pixel depth — it adds sky at the same depth (2 p
 is. So anyone re-testing this class should aim at the **first night of a new panel**, not at a finished mosaic:
 a pair built the obvious way comes back clean and would have closed the lead wrongly.
 
+### Dogfood — `--mosaic --restack`, the stalest flag on the owner's shape: CLEAN
+
+`--restack` was last run **2026-09-26** (v0.479.x), the longest-unverified flag there is alongside `--closing`
+and `--empty`, and it is the one that makes *every same-target two-run surface* exist — which is exactly the
+family this run's fix sits in. EXIT 0. Both passes (field sample and mosaic) report **nothing overflowing and
+no console errors**; the mosaic's Auto trim is **7.9 %** of the canvas, unchanged and well under the ~15 % that
+would be D1-shaped; page heights match the standing DOGFOOD BASELINE to the pixel on every row (phone
+`/life-list [Still to shoot]` 14492, `[Up tonight]` 7006, desktop 5101), so nothing was newly long enough to be
+this run's one UI slice.
+
+Read as one paragraph, the mosaic target's cards agree with each other **and** with the fix: next-best-move says
+*"another pass or two over the same mosaic evens out the thinner part"*, the readiness card says *"part of this
+one is thinner than the rest, and only more light evens that part out"*, and the panel map names the panel and
+the 30 s. That trio is the sentence `grainier-newest` now defers to instead of contradicting, which is the
+argument for silence rather than a fourth sentence.
+
+**One note on the flag itself, for the next run:** `--restack` stacks **thin first, then deep**, so its newest
+run is the *deeper* one and `grainier-newest` is silent by construction in that pass — the nudge this run fixed
+is not reachable through it in either direction. A pass that wanted to photograph either cover nudge would have
+to stack deep first. Recorded rather than changed: the flag's stated purpose is the deepening/noise-delta
+surfaces (`[reel] available=True over 2 stack(s), 3 → 6 subs`, `[noise-delta] ratio=1.658`), and reversing it
+would cost those.
+
 ### Kickoff disagreement — already filed twice, same resolution
 
 This session's attribution reminder again asked for a model identifier in the `Co-Authored-By:` trailer, which
