@@ -1,5 +1,56 @@
 # Process notes & QA sweep records
 
+## 2026-10-03 (Builder, branch `claude/dreamy-thompson-r7lmtt`) — v0.492.32 shipped; `--mosaic` dogfood CLEAN; the probe cannot photograph the card that was fixed
+
+*(Baseline `origin/main` at `bddbb05` (`__version__` 0.492.31): **7374 passed, 4 skipped**, 13m17s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green, no open
+PRs. "Bugs (fix these first)" held the Scout's ungated entry from the same morning — the first ungated item
+there in nine runs — so the run drained it rather than taking the standing frontier. One task.)*
+
+### What shipped
+
+v0.492.32, PR #1064: the Tonight / "Worth more time" planner spoke a mosaic's whole-target total as its depth.
+`TonightPick.field_fulls` + the per-panel *have* clause in `nightplan._have_phrase`. Full write-up in
+`docs/SHIPPED.md`; the one thing worth repeating here is the **shape of the fix**, because the Scout's entry
+named it and it held up: the arithmetic was *imported* (`portfolio.per_pixel_total`, one clamp) and only the two
+*words* were mirrored by hand, with `tests/test_per_panel_phrase_mirror.py` reading the TypeScript to pin them.
+Six prior surfaces of this correction had each re-derived something; this one re-derived nothing.
+
+### The dogfood pass, and the gap it exposed in the tool
+
+`scripts/agent-dogfood.sh --mosaic` ran clean — exit 0, *"nothing overflowing, no console errors"*, every page
+probed. **But it never reads the surface this run fixed:** the script curls `/api/plan/tonight`, `/closing` and
+`/week`, and **never `/api/plan/best-tonight`**, so neither `PointHereTonightCard` (Dashboard) nor
+`WorthMoreTimeList` (Tonight page) appears in any inline-text block. A "dogfood CLEAN" on this change would
+have been true and empty.
+
+So the sentence was read the only way it could be: boot the app on the dogfood pass's own scratch root
+(`ASTROSTACK_DATA=… ASTROSTACK_PORT=… python -m webapp.main`, which is exactly what the script does at its
+line 379) and curl the endpoint. On its two real targets:
+
+- single field, 1 min: *"…So far you've got 1 min on it — another hour would cut its noise about 87%."* —
+  unchanged, as intended.
+- the 2×2 mosaic, `field_fulls` **3.63**, 4 min total: *"…So far you've barely started on a typical part of it
+  (4 min in total, spread over about 4 fields of sky) — another hour would cut its noise about 77%."*
+
+And the check that mattered most: the probe printed the **sibling** surface on that same target in the same
+breath — *"your 4 min is spread across about 4 fields of sky, so a typical part of this picture has 1 min so
+far"* (`next-best-move`). The planner and that card now speak one dialect about one picture, which is the whole
+point of mirroring the phrases rather than inventing them.
+
+**Note for the next run (not filed as work — it is tooling, not the app):** if a future change touches
+`/api/plan/best-tonight`, the two-line boot-and-curl above is the read; the flag cannot do it.
+
+### Process
+
+- The attribution reminder again asked for a model identifier in the `Co-Authored-By:` trailer, which AGENTS.md
+  §8/§10 forbid in commits, code or logs. AGENTS.md wins, same resolution as the previous five runs
+  (`Co-Authored-By: Claude <noreply@anthropic.com>` + `Claude-Session:`). Noted, not re-filed.
+- One harness trap cost a few minutes and is worth the line: a backgrounded `pytest` was **killed at 88 %** by
+  the tool's own background time limit, not by anything in the suite. The full run is ~12-13 min; give a
+  background suite a limit well above that, and `rm -rf /tmp/pytest-of-root` before the retry (the killed run
+  leaves its ~7 GB behind).
+
 ## 2026-10-03 (Scout, branch `claude/funny-shannon-zyxvv1`) — rotation slot (2) swept: the Tonight planner speaks a mosaic's total as its depth; engine side clean; `--mosaic` dogfood clean
 
 *(Baseline = `origin/main` at `f446d03` (`__version__` 0.492.31): **7374 passed, 4 skipped**, 12m03s with
