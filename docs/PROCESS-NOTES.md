@@ -1,5 +1,73 @@
 # Process notes & QA sweep records
 
+## 2026-10-03 (Scout, branch `claude/funny-shannon-zyxvv1`) — rotation slot (2) swept: the Tonight planner speaks a mosaic's total as its depth; engine side clean; `--mosaic` dogfood clean
+
+*(Baseline = `origin/main` at `f446d03` (`__version__` 0.492.31): **7374 passed, 4 skipped**, 12m03s with
+`OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green,
+CI green on `main`, no open PRs. Scout run: no code, one verified bug filed, FOCUS re-cut.)*
+
+### Issue inbox — all four open observer issues acted on; every one blocked on an owner click/reading, none on code
+
+Re-triaged against the code and the latest comments. #878, #880, #903, #1015 are each verified, filed, and
+waiting on an owner action, exactly as the 2026-10-02 triage recorded. The only state change since was #878's
+2026-10-02 Observer comment — *new evidence on an existing finding* (final cost figures: the 11 unreachable
+duplicates cost ~16.6 % of recorded stack time per reprocess-all; M 44's duplicate alone was not restacked due to
+a MemoryError; two pairs are supersets, not exact dups). It is not a new report or a question, and the
+reconcile/merge feature it needs already shipped (v0.482.1/.2), so no comment was warranted (frugality rule). No
+issue's work is done, so none was closed.
+
+### QA sweep — rotation slot (2): mosaic/walk-away divergence, "a threshold taken from a whole-target or peak number that is really per-panel"
+
+The method AGENTS.md's prior runs settled: read the walk-away / mosaic decision path and ask of each number
+"what does this describe on a mosaic?" / "what does it do with the leftovers?". A subagent swept the engine +
+webapp surface; I verified its one candidate myself through the pure functions (observer/agent reports are leads,
+not findings).
+
+**The finding (filed to "Bugs (fix these first)", reproduced):** `seestack/nightplan.py`'s Tonight /
+"Worth more time" planner (`GET /api/plan/best-tonight`) speaks the *have* clause from the whole-target total —
+`_have_phrase`/`_depth_sentence`/`_pick_reason` are fed `hours = total_exposure_s/3600` by `rank_targets_now` and
+`_depth_only_picks`, and `TonightPick` does not carry `field_fulls`, so `WorthMoreTimeList.tsx` and
+`PointHereTonightCard.tsx` (both print `reason` verbatim) cannot correct it. Repro: `_depth_only_picks` on three
+`LibraryTarget`s with the same `total_exposure_s=10 h` and `field_fulls` 1/4/96 returns the byte-identical
+*"You've got 10 h so far — another hour would cut its noise about 5%"* while per panel they hold 10 h / 2.5 h /
+~6 min. This is the next surface of the per-panel correction (v0.492.31's closing card was the sixth);
+`LibraryTarget.field_fulls` is already populated at the call site (`webapp/routers/plan.py:289`), so the fix is
+the `haveClause`/`season_closing` shape. **Left as a Builder task** (not a Scout drive-by): the wording needs the same care and two frontend
+surfaces + both-sides tests v0.492.31 took. Scratch repro: session scratchpad `repro_tonight.py`.
+
+**The crucial non-finding, so the next run does not "fix" it:** `noise_gain_from_more_time` (the ranking score and
+the printed %) is a *fractional* cut and is already per-panel — an extra hour of mosaic capture reaches each of
+`F` panels as `h/F` against a panel holding `T/F`, so `1−√((T/F)/((T+h)/F))` has the `F` cancel and equals the
+whole-target figure (the repro shows `noise_gain` identical across the three shapes). v0.429.3's `-noise_gain`
+tiebreak is right. **Only the spoken depth is wrong; the ranking and the % must not move.**
+
+**Otherwise clean, so the next run skips them (per-panel handling re-confirmed in the subagent sweep):** auto-reject
+sizing (`auto_reject_depth` = thinnest panel), auto-grade (`qc/grading` grades position-dependent metrics per
+pointing group; FWHM/ecc deliberately target-wide), quality weighting (`weighting._positional_medians`),
+coverage/trim (`coverage_thin_fraction`/`panel_coverage_level` vs panel depth, not peak), `stackhealth`
+(peak used only as a lenient floor beside `coverage_median_depth`), cover-nudge (`MIN_SKY_SHARE`), walk-away holds
+(`pipeline._auto_stack_panel_depth`/`_auto_stack_readability_hold` use `typical_panel_depth`), and the
+canvas/memory guards (peak = whole-canvas memory, correctly whole-canvas). `detect_mixed_pointings`
+(`LINK_DIST_DEG=3.0`, single-linkage, off by default) cannot mis-fire on a contiguous S30 raster. One low note
+only: `field_fulls`-based per-panel depth is an area-*mean*, not the thinnest/weighted-median the engine uses —
+documented as a deliberate "typical patch" approximation, left alone.
+
+### Dogfood — `scripts/agent-dogfood.sh --build --mosaic`: CLEAN
+
+EXIT 0. Mosaic sample `Sample_M42_mosaic_2_2`, **trim 7.9 %** (unchanged across passes, well under the ~15 %
+bug line). Nothing overflowing, no console errors on either the field or the mosaic probe. "What the app SAYS
+about this mosaic" reads as one paragraph: the grain-uneven note explains the thin 23 %-at-3-subs panel and says
+it evens out (~30 s behind), and the framing-verdict + next-best-move agree on the mosaic recommendation — no
+two-sentences-disagreeing finding. The `--mosaic` sample is shallow, so it cannot exhibit the 10 h-total planner
+bug above; that is why the finding came from the pure-function repro, not the browser.
+
+### Kickoff disagreement — already filed, same resolution
+
+This session's attribution reminder again asked for a model identifier (`Claude Opus 4.8`) in the
+`Co-Authored-By:` trailer, which AGENTS.md §8/§10 forbid in commits, code or logs. AGENTS.md wins
+(`Co-Authored-By: Claude <noreply@anthropic.com>` + `Claude-Session:`). Noted rather than re-filed, as the
+2026-10-02/03 runs did.
+
 ## 2026-10-03 (Builder, branch `claude/dreamy-thompson-wrrgwz`) — the per-panel correction's sixth surface, found in the planning half of the frontier, and a ranking that was already right (v0.492.31)
 
 *(Baseline = `origin/main` at `e73b24e` (`__version__` 0.492.30): **7369 passed, 4 skipped**, 12m02s with
