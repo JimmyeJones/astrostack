@@ -1176,7 +1176,19 @@ def _load_closing_sample(
 
     Neither target is stacked. The card reads the *library registry* (position and
     kept exposure), which ``refresh_target_stats`` fills, so a stack would cost a
-    dogfood pass a minute and change nothing on the screen under test.
+    dogfood pass a minute and — for everything this flag was built to photograph —
+    change nothing on the screen under test.
+
+    **One clause of that card is therefore out of reach of this flag, deliberately
+    and on the record.** "What you already have on it" is read per *panel* where
+    the target's newest stack spans more than one field
+    (``ClosingTarget.field_fulls``, ``frontend/src/closingSeason.ts``), and
+    field-fulls is measured off a stack run's canvas — so with nothing stacked the
+    pair always exercises the single-field wording. Pinned instead by
+    ``closingSeason.test.ts`` and ``tests/webapp/test_plan.py``. A pass that wanted
+    to *photograph* the mosaic wording would have to stack one of the two onto a
+    union canvas, which is a minute of pass time and a new page-height baseline for
+    ``/tonight``; recorded here rather than done so the next run chooses knowingly.
     """
     existing = _closing_sample_status(lib)
     if existing.loaded:

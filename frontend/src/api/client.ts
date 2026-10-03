@@ -213,6 +213,11 @@ export interface ClosingTarget {
   /** Fractional noise cut one more hour would buy — the same measure "Worth
    * more time" is ranked by. */
   noise_gain: number;
+  /** How many single-frame field-fulls of sky this target's newest stack covers,
+   * so `total_exposure_s` can be read per *panel* rather than per target. Absent
+   * / null on a single field, on a target with no stacked picture, and on an
+   * older backend — the line then quotes the total, as it always did. */
+  field_fulls?: number | null;
 }
 
 /** `GET /api/plan/closing` — "shoot these before they're gone". An empty

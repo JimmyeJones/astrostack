@@ -60,6 +60,55 @@ describe("closingTargetLine", () => {
     expect(closingTargetLine(row({ total_exposure_s: 0 })))
       .toContain("you haven't kept any of it yet");
   });
+
+  // --- the same clause on a mosaic ------------------------------------------
+  //
+  // "what you already have on it" is read as "can I let this one go?", and on a
+  // mosaic a target total is not that number. The season does not come round
+  // again for a year, so a barely-started raster read as finished costs the
+  // object rather than a sentence that can be corrected later.
+
+  it("reads the hours per panel on a mosaic, and keeps the total", () => {
+    // 10 h over a 2x2 no-overlap canvas (field_fulls 4.0, the figure
+    // tests/webapp/test_stack_run_field_fulls.py pins end-to-end) is 2.5 h on a
+    // typical panel — a target to keep shooting, not one to let go.
+    const line = closingTargetLine(
+      row({ total_exposure_s: 36000, field_fulls: 4.0 }));
+    expect(line).toContain("you have about 2.5 h on a typical part of it");
+    // Every fact the line carried is still on it: a row that looked like the app
+    // had mislaid 7.5 h would be a new untruth in place of the old one.
+    expect(line).toContain("(10 h in total, spread over about 4 fields of sky)");
+    expect(line).toContain("about 3 weeks left");
+    expect(line).toContain("last good night around");
+  });
+
+  it("does not retire a 12x8 raster on six minutes a panel", () => {
+    // The owner's own shooting shape, and where the substitution is two orders
+    // of magnitude: 10 h totalled over 96 fields of sky. "you have 10 h on it"
+    // is the sentence that loses him the object.
+    const line = closingTargetLine(
+      row({ total_exposure_s: 36000, field_fulls: 96.0 }));
+    expect(line).toContain("you have about 6 min on a typical part of it");
+    expect(line).toContain("spread over about 96 fields of sky");
+  });
+
+  it("is byte-for-byte unchanged on a single field and on an older backend", () => {
+    // The whole point of the fallback: no scale, a scale of exactly one, a
+    // garbled one, and a sub-unity one (which would *inflate* the depth — the
+    // direction that hides the bug) all keep today's sentence.
+    const plain = closingTargetLine(row());
+    expect(plain).toContain("you have 1.0 h on it");
+    for (const field_fulls of [null, undefined, 1, 0.4, NaN, -3]) {
+      expect(closingTargetLine(row({ field_fulls }))).toBe(plain);
+    }
+  });
+
+  it("still says nothing has been kept, however wide the canvas", () => {
+    // A mosaic with no kept integration must not read "about 0 s on a typical
+    // part of it" — the zero case is answered before any scaling.
+    expect(closingTargetLine(row({ total_exposure_s: 0, field_fulls: 9.0 })))
+      .toContain("you haven't kept any of it yet");
+  });
 });
 
 describe("closingHeadline", () => {

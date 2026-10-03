@@ -1,5 +1,100 @@
 # Shipped — the record
 
+## 2026-10-03 (Builder) — v0.492.31: "Shoot these before they're gone" retired a barely-started mosaic on its target total
+
+### v0.492.31 — 🟡 BUG FIX (friendliness / trust — PRIORITY 3, on the one card whose claim *expires*), Builder-found by reading, reproduced as a sentence: **the closing-season card quoted "you have 10 h on it" for a 2×2 at 2.5 h a panel and for a 12×8 at six minutes a panel — the identical line, two orders of magnitude apart.**
+
+*(Builder, branch `claude/dreamy-thompson-wrrgwz`. Baseline `origin/main` at `e73b24e` (`__version__`
+0.492.30): **7369 passed, 4 skipped**, 12m02s with `OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist
+worksteal`, `/tmp/pytest-of-root` cleared first. Green, CI green on `main`, no open PRs, the four open observer
+issues all still awaiting an owner click. "Bugs (fix these first)" held nothing ungated for the eighth run
+running and the beginner-feature section is empty, so the run again took `docs/FOCUS.md`'s standing frontier —
+**"any threshold taken from a whole-target or peak number that is really per-panel"** — and this time in the
+*walk-away/planning* half of it rather than the stacking half.)*
+
+**The surface.** `GET /api/plan/closing` → `ClosingSeasonCard` ("Shoot these before they're gone") is the one
+planning answer the app puts in front of the owner unasked, on the stated grounds that **it expires**: "once a
+target sets during your dark hours it's gone until the same season next year." Each row is one line, and
+`closingSeason.ts::closingTargetLine` is what turns the countdown into a decision — its own docstring said so:
+*"'About two weeks left' alone does not say whether to bother; 'about two weeks left · you have 22 min on it'
+does — and a target already 10 h deep reads, correctly, as one that can be let go."*
+
+**The bug is in that "correctly".** `total_exposure_s` is a target total, and "can I let this one go?" is a
+question about a *patch of sky*. On a mosaic the subs are spread across the raster, so the total describes the
+**sum** of the picture while the sentence describes a **part** — and the owner is a heavy mosaic user who
+shoots 5×5, 10×10 and 12×8 rasters. Reproduced as the rendered sentence, from the card's own pure function:
+
+| canvas | `field_fulls` | per panel | the line, before |
+|---|---|---|---|
+| single field | — | 10 h | `about 3 weeks left · you have 10 h on it · last good night around Mar 3` |
+| 2×2 | 4.0 | **2.5 h** | *(identical)* |
+| 3×3 | 9.0 | **1.1 h** | *(identical)* |
+| 12×8 | 96.0 | **6 min** | *(identical)* |
+
+One sentence for four pictures, the deepest of which holds a hundred times the light of the shallowest. And
+this is the card where being wrong is not a sentence to correct later: a row read as finished is a year of the
+object, because the season does not come round again.
+
+**It is the sixth surface of a correction this repo has already made five times, not a sixth definition of
+it.** `webapp/field_fulls.py` exists for exactly this substitution and
+`frontend/src/components/target/perPixel.ts` is, in its own words, "the one place the correction lives for the
+surfaces that *report* it" — already applied to the readiness goal, the Stack form's cautions
+(`samplesPerPixel`), the thin-stack badge, the walk-away floor (`auto_stack_min_frames`) and the Target page's
+coaching. The scale was **already annotated onto the row the planner is handed**: `/plan` calls
+`webapp.field_fulls.target_field_fulls` for every library target, and `LibraryTarget.field_fulls`'s own comment
+names this failure in the sibling surface — *"without it, a four-panel mosaic at 1 h/panel is told 'Plenty —
+try something new' when each panel is a quarter done."* `season_closing` was dropping it on the way out.
+
+**The fix.** `ClosingTarget` carries `field_fulls` straight through from the library row (additive, optional,
+`None` by default), and `closingTargetLine` reads the clause per panel where the canvas spans more than one
+field — in the idiom `samplesPerPixelPhrase` already uses on the Stack form: the depth **first** (what the
+decision needs), the total in parentheses (so the line never looks like the app has mislaid hours the Target
+page plainly shows), and the scale named.
+
+> `about 3 weeks left · you have about 2.5 h on a typical part of it (10 h in total, spread over about 4 fields of sky) · last good night around Mar 3`
+
+"**a typical part**", never "each part", because `perPixel` is a mean over the canvas — `A_TYPICAL_PART` is the
+shared constant the app already says this with. `fieldsOfSkyLabel` rounds the scale, because a canvas counts
+its uncovered corners as area and "about 4.3 fields" would read as a measurement.
+
+**Nothing moves for a single-field owner.** `perPixel`/`spansMoreThanOneField` read a missing, non-finite or
+sub-unity figure as 1.0 (a scale under one would *inflate* the depth, which is the direction that hides the
+bug), so `null`, `undefined`, `1`, `0.4`, `NaN` and `-3` all give the pre-fix line **byte-for-byte** — pinned
+as such. A target with no stacked picture and an older backend are the same case. The zero-integration row
+("you haven't kept any of it yet") is answered before any scaling, so a wide canvas with nothing kept cannot
+read "about 0 s on a typical part of it".
+
+**The ranking was read and deliberately left alone, and that is now pinned rather than merely intended.** The
+rows are tie-broken by `noise_gain_from_more_time` — and that figure is *already* per-panel: an extra hour on
+an `F`-field mosaic reaches each patch of sky as `h/F` while each patch already holds `T/F`, so
+`1 − √((T/F)/((T+h)/F))` has the `F` cancel and equals the figure computed from the totals. Rescaling the key
+would not correct an error, it would invent one, so `field_fulls` is annotation only: a test asserts that two
+libraries differing *only* in `field_fulls` report the same targets, in the same order, with the same
+`noise_gain`, and that v0.476.0's least-finished-first ordering survives. The arithmetic is now in
+`season_closing`'s docstring so the next run does not re-derive it. (`SEASON_MAX_TARGETS = 400` against the
+owner's 77 targets, so the selection cap never bites either.)
+
+**One honest gap, recorded rather than papered over.** `_load_closing_sample`'s docstring said a stack "would
+change nothing on the screen under test", which this fix makes false — field-fulls is measured off a stack
+run's canvas, and the dogfood pair is deliberately unstacked, so `--closing` always exercises the single-field
+wording and **cannot photograph the new sentence**. The docstring now says so and names the cost of closing
+the gap (stack one of the pair onto a union canvas: a minute of pass time and a new `/tonight` page-height
+baseline), so the next run chooses knowingly. The mosaic wording is pinned by tests on both sides instead.
+
+**Upgrade-safe (§9):** one optional dataclass field and one *added* response key — no rename, no shape change,
+no config, schema, migration, on-disk-layout or default change, and no endpoint removed. An older frontend
+ignores the new key; a newer frontend against an older backend gets the single-field wording.
+
+**Tests +9 — 5 Python (3 in `tests/test_nightplan.py`, 2 endpoint tests in `tests/webapp/test_plan.py`) and
+4 frontend — with fail-before shown for every one that should fail and *deliberately not* for the three that
+pin today's behaviour**, run in a `git worktree` at `origin/main` (not a `git stash` — AGENTS.md §7 names that
+trap by name): `KeyError: 'field_fulls'` on the endpoint, and the before-line `you have 10 h on it` where
+`you have about 2.5 h on a typical part of it` / `about 6 min on a typical part of it` is expected — the same
+received string for both, which is the bug stated as an assertion failure. Local suite **7374 passed, 4
+skipped** (12m30s) against a baseline of **7369 passed, 4 skipped**; frontend **4,569 tests / 296 files**,
+`tsc --noEmit` and `vite build` clean, all three run from `frontend/`. A `--closing` dogfood pass (the stalest
+flag, 15 versions unverified) came back **CLEAN** — record in [`PROCESS-NOTES.md`](PROCESS-NOTES.md).
+
 ## 2026-10-02 (Builder) — v0.492.30: the cover nudge offered to put half a mosaic back on show, and called it the better picture
 
 ### v0.492.30 — 🟡 BUG FIX (trust / friendliness, PRIORITY 1–3), Builder-found and reproduced through `run_stack` on the mosaic sample: **"Your newest stack came out grainier than an earlier one" fired on a mosaic that had just *grown*, and offered to pin the smaller picture — forever.**

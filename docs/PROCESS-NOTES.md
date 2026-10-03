@@ -1,5 +1,116 @@
 # Process notes & QA sweep records
 
+## 2026-10-03 (Builder, branch `claude/dreamy-thompson-wrrgwz`) — the per-panel correction's sixth surface, found in the planning half of the frontier, and a ranking that was already right (v0.492.31)
+
+*(Baseline = `origin/main` at `e73b24e` (`__version__` 0.492.30): **7369 passed, 4 skipped**, 12m02s with
+`OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. Green,
+CI green on `main`, **no open PRs**, the four open observer issues unchanged and all still awaiting an owner
+click or reading.)*
+
+### "Bugs (fix these first)" held nothing ungated for the eighth run running
+
+Pointer, not a re-derivation: the enumerated list is in the 2026-10-01 (`claude/keen-darwin-ok7w8n`) record and
+the entries have not changed. Two were re-read this run and both gates still hold — the half-range calibration
+charge (c) still wants a before/after on real masters, and the "full data" TIFF white point still wants
+`(p99.99 − p1)/(max − min)` on a real deep OSC stack. The beginner-feature section is empty and
+`docs/FOCUS.md` says not to manufacture one. So the slot went to the same standing frontier the last three
+runs took, but in its **other** half: not mosaic *stacking* divergence, mosaic/walk-away **planning**
+divergence.
+
+### Four places in the planning path were read; three were already correct, and the third is the interesting one
+
+Recorded so the next run skips them:
+
+- **`nightplan._depth_component` / `noise_gain_from_more_time`** — reads a target total and is nevertheless
+  *already* per-panel. An extra hour on an `F`-field mosaic reaches each patch of sky as `h/F` while each patch
+  already holds `T/F`, so `1 − √((T/F)/((T+h)/F))` has the `F` cancel and equals the figure computed from the
+  totals. **This is the one worth writing down**, because it looks exactly like the bug and is not: a run
+  "fixing" it would have rescaled a correct key. The arithmetic is now in `season_closing`'s docstring and
+  pinned by a test (two libraries differing only in `field_fulls` → same rows, same order, same `noise_gain`).
+- **`plan_week`'s `WEEK_MAX_TARGETS = 40` selection** — orders by total exposure and keeps the most invested.
+  Against the owner's 77 targets the cap *does* bite, but "which project should I push on?" is a question about
+  investment (nights spent), not about per-pixel finishedness, and the docstring argues exactly that. Not a
+  bug; left alone.
+- **`season_closing`'s `SEASON_MAX_TARGETS = 400`** — never bites at 77 targets, and already selects
+  least-finished-first (v0.476.0) rather than borrowing `plan_week`'s opposite key.
+- **`restackgain.py`** — reads frame counts, but its claim ("re-stacking would date this picture") is not
+  per-pixel in nature. Clean.
+
+### The finding: the one clause in the path that *is* a finishedness judgement
+
+`closingSeason.ts::closingTargetLine`, and its own docstring is the admission: *"'About two weeks left' alone
+does not say whether to bother; 'about two weeks left · you have 22 min on it' does — and a target already 10 h
+deep reads, correctly, as one that can be let go."* Four canvases, one sentence:
+
+| canvas | `field_fulls` | per panel | the line |
+|---|---|---|---|
+| single field | — | 10 h | `about 3 weeks left · you have 10 h on it · last good night around Mar 3` |
+| 2×2 | 4.0 | 2.5 h | *identical* |
+| 3×3 | 9.0 | 1.1 h | *identical* |
+| 12×8 | 96.0 | 6 min | *identical* |
+
+**Why this card and not another:** it is the only planning answer the app shows unasked, on the stated grounds
+that it expires. Everywhere else the per-panel substitution produces a sentence that can be corrected on the
+next clear night; here a row read as finished is a year of the object. The fix and the wording are in
+[`SHIPPED.md`](SHIPPED.md).
+
+### The lever worth keeping: the fix was already written, five surfaces over
+
+Nothing here is new arithmetic. `webapp/field_fulls.py` exists for this substitution,
+`frontend/src/components/target/perPixel.ts` calls itself "the one place the correction lives for the surfaces
+that *report* it", and the scale was **already annotated onto the row this function is handed** — `/plan` calls
+`target_field_fulls` for every library target, and `LibraryTarget.field_fulls`'s comment names the identical
+failure in the sibling surface. `season_closing` dropped it between the row it received and the row it
+returned. **So the cheap hunt for this class is not "where is a total compared to a threshold?" but "which
+surfaces are handed `field_fulls` and do not read it?"** — one grep for the consumer list, then one question
+per candidate. That question is the part worth keeping, because most candidates are **fine**: a surface
+printing a total is only wrong where the sentence makes a *per-pixel* claim, and plenty of them state a total
+as a total. Checked by hand this run and clean — `standouts.ts` ("Your biggest project — 12 h of
+integration") is a superlative about *investment*, which a mosaic genuinely does hold; `mosaicEffort.ts` is
+panel-aware and states its own assumption out loud; `restackgain.py`, as above. The one that failed the
+question is the one whose sentence is read as "can I let this go?", and as it happens the one whose claim
+cannot be corrected on the next clear night. **Not an exhaustive sweep** of every `formatIntegration` caller:
+the remainder are mostly night/session totals, where a total is the honest number.
+
+### A negative result on the search itself
+
+The obvious grep (`noise_sigma` and `coverage_max` consumers) came back clean on everything it reached:
+`stackhealth`'s two `coverage_max >= _COVERAGE_MIN_PEAK` gates read the *peak* deliberately and err
+**lenient** on a mosaic (the peak is ≥ one panel's depth, so the gate can never under-pass, and at panel depth
+1 the thin fraction is 0 anyway); `coverage_panel_depth`/`coverage_median_depth` are the provable counterparts
+and are the ones the live surfaces use; `grainProjection`/`integrationTrend` already read `field_fulls` and
+`grain_verdict`. The finding came out of the *consumer list*, not out of the thresholds.
+
+### Dogfood — `--closing`, the stalest flag, and the card under the change: CLEAN
+
+`--closing` was last run **2026-09-26** (v0.477.1), 15 versions back and the longest-unverified flag alongside
+`--empty`. EXIT 0, **nothing overflowing, no console errors**. Against the standing `--closing` baseline in
+this file (v0.477.1): `[phone] /tonight` **4,271 px** vs 4,301 px, `[phone] /glossary` **3,364 px** vs 3,364 px
+— i.e. nothing moved. The closing card renders both seeded rows, and `/tonight`'s prescribing column still
+holds as one paragraph: `plan-week` names the closing target and defers to it in as many words ("unlike the
+others here, that one doesn't come round again"), which is v0.445.0 still working.
+
+**And the flag cannot photograph this run's own fix — on the record, with the cost of closing the gap.** The
+closing pair is deliberately **unstacked** (`_load_closing_sample`: the card reads the library registry), and
+field-fulls is measured off a stack run's canvas — so the pair always exercises the single-field wording. That
+docstring claimed a stack "would change nothing on the screen under test", which this change makes false; it
+now says so and names the cost (stack one of the two onto a union canvas: a minute of pass time and a new
+`/tonight` baseline). Recorded rather than done, so the next run chooses knowingly. One useful consequence
+either way: the clean pass *is* the byte-for-byte check that a single-field owner's card did not move.
+
+### `/life-list [Up tonight]` at 7,183 px is the flag, not a regression
+
+Worth a line because it looks like one against the `--restack` record's 7,006 px. `--closing` seeds two extra
+library targets and the life list lists them; the standing instruction in this file is right — **compare a
+`--closing` pass only against another `--closing` pass.**
+
+### Kickoff disagreement — already filed three times, same resolution
+
+This session's attribution reminder again asked for a model identifier in the `Co-Authored-By:` trailer, which
+AGENTS.md §8/§10 forbid in commits, code or logs. AGENTS.md wins (`Co-Authored-By: Claude
+<noreply@anthropic.com>` + `Claude-Session:`). Filed by the 2026-10-02 Scout and both 2026-10-02 Builders;
+noted rather than re-filed.
+
 ## 2026-10-02 (Builder, branch `claude/dreamy-thompson-vxe01m`) — the cover nudge's two σ comparisons are not like-for-like across canvases (v0.492.30)
 
 *(Baseline = `origin/main` at `0abb947` (`__version__` 0.492.29): **7352 passed, 4 skipped**, 16m38s with

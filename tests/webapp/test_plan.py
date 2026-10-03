@@ -1606,3 +1606,77 @@ def test_closing_rejects_bad_when_and_bounds_the_horizon(client, solved_library)
                       params={"when": JAN_EVENING, "weeks": 0}).status_code == 422
     assert client.get("/api/plan/closing",
                       params={"when": JAN_EVENING, "weeks": 99}).status_code == 422
+
+
+def _attach_mosaic_stack(data_root: Path, safe: str, *, fields_across: int,
+                         total_exposure_s: float) -> None:
+    """Give a fixture target a stack run whose canvas spans ``fields_across``
+    native frames on each axis — the shape ``webapp.field_fulls`` reads a mosaic
+    off (canvas area / one native frame's area, drizzle divided out)."""
+    import json
+
+    from seestack.io.library import Library
+    from seestack.io.project import StackRunRow
+    from tests.webapp.conftest import FRAME_H, FRAME_W
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.add_stack_run(StackRunRow(
+                id=None,
+                timestamp_utc="2026-01-10T00:00:00Z",
+                output_basename="master",
+                fits_path=None, tiff_path=None, preview_path=None,
+                n_frames_used=1200,
+                canvas_h=FRAME_H * fields_across, canvas_w=FRAME_W * fields_across,
+                coverage_min=1, coverage_max=1200,
+                total_exposure_s=total_exposure_s,
+                options_json=json.dumps({"drizzle": False, "drizzle_scale": 1.0}),
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+    finally:
+        lib.close()
+
+
+def test_a_closing_mosaic_row_carries_the_sky_its_subs_were_spread_over(
+        client, solved_library):
+    """End-to-end: the card's "what you already have on it" has to be readable
+    per *panel*, so the scale has to survive the whole way out.
+
+    The row exists so the card can say whether a target leaving the sky is
+    barely started or finished, and that is a question about a patch of sky. On
+    a 2x2 canvas a target total is 4x what any patch of it received, and the
+    season does not come round again for a year — so a total read as "finished"
+    costs the object, not a sentence. ``field_fulls`` is already annotated onto
+    the library row the planner is handed (``/plan`` calls
+    ``webapp.field_fulls.target_field_fulls``); this pins that it reaches the
+    served row rather than being dropped there.
+    """
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    _attach_mosaic_stack(solved_library, "M_42", fields_across=2,
+                         total_exposure_s=36000.0)
+
+    rows = client.get("/api/plan/closing",
+                      params={"when": JAN_EVENING}).json()["targets"]
+    by_safe = {r["safe"]: r for r in rows}
+    assert "M_42" in by_safe, "Orion in mid-January is on its way out"
+    assert by_safe["M_42"]["field_fulls"] == 4.0
+    # Every other row is a single field and says so by saying nothing, which is
+    # what keeps a single-field owner's card byte-for-byte unchanged.
+    assert all(r["field_fulls"] is None
+               for safe, r in by_safe.items() if safe != "M_42")
+
+
+def test_a_closing_row_with_no_stacked_picture_serves_no_scale(
+        client, solved_library):
+    """The ordinary case for a target the owner has only just started, and the
+    one that makes the field safe to add: nothing stacked, nothing measured, so
+    the card quotes the total exactly as it always has."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    rows = client.get("/api/plan/closing",
+                      params={"when": JAN_EVENING}).json()["targets"]
+    assert rows, "Orion in mid-January is on its way out"
+    assert all("field_fulls" in r and r["field_fulls"] is None for r in rows)
