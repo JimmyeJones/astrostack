@@ -1,20 +1,20 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-03 (Scout) — the front of the queue changed: a new ungated verified bug is now top of
-"Bugs". **The Scout rewrites this page** whenever the front of the queue changes; it stays short (≤ 60 lines) and
-dated. Live rules are in `AGENTS.md`; the backlog is `docs/IMPROVEMENTS.md`. If this page and the backlog
+*Last edited 2026-10-03 (Builder) — item 0 went stale the moment it was drained: the one ungated bug it named
+**shipped as v0.492.32**. Corrected here rather than left, because the next run reads this page first and the
+backlog has repeatedly sent agents to build something already on `main`. **The Scout rewrites this page**
+whenever the front of the queue changes; it stays short (≤ 60 lines) and dated. Live rules are in `AGENTS.md`; the backlog is `docs/IMPROVEMENTS.md`. If this page and the backlog
 disagree, the backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 
 ## Front of the queue
 
-0. **One ungated verified bug is now top of "Bugs" — the first Builder work there in nine runs.** The Tonight /
-   "Worth more time" planner (`GET /api/plan/best-tonight`) speaks a mosaic's *whole-target* total as its depth
-   ("you've got 10 h so far" reads identically for a single field and a 12×8); reproduced through the pure
-   `nightplan` functions, filed 2026-10-03 (Scout). PRIORITY 3, low severity, S–M — the next surface of the
-   per-panel correction (v0.492.31's closing card was the sixth), with the datum (`field_fulls`) already on the row. **Everything else in "Bugs"
-   stays gated** on owner data or stood down with numbers (enumerated in `docs/PROCESS-NOTES.md`). **Do not
-   blind-flip a gated threshold or re-litigate a stand-down that carries numbers.** Grep `docs/SHIPPED.md` before
-   building — the backlog has repeatedly carried shipped items.
+0. **"Bugs (fix these first)" holds no ungated work again.** The one ungated entry — the Tonight / "Worth more
+   time" planner speaking a mosaic's *whole-target* total as its depth — **shipped as v0.492.32**
+   (`TonightPick.field_fulls` + the per-panel *have* clause in `nightplan._have_phrase`; the seventh surface of
+   the per-panel correction). What is left there is **two gated LEADs and the ⚪ notes**: gated on owner data, on
+   an unmeasured cost, or stood down with numbers (enumerated in `docs/PROCESS-NOTES.md`). **Do not blind-flip a gated
+   threshold or re-litigate a stand-down that carries numbers.** Grep `docs/SHIPPED.md` before building — the
+   backlog has repeatedly carried shipped items.
 
 1. **The editor (PRIORITY 1).** Judge Auto/editor on a tiled mosaic at the owner's scale
    (`--mosaic --editor --big`), never the 6-frame field. Its bug backlog is drained and re-audits come back
