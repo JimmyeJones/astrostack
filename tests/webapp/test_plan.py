@@ -1028,6 +1028,55 @@ def test_best_tonight_honours_the_limit_and_rejects_a_bad_when(client, solved_li
                       params={"when": "not-a-time"}).status_code == 422
 
 
+def test_a_best_tonight_mosaic_pick_speaks_its_depth_per_panel(
+        client, solved_library):
+    """End-to-end: the one claim on the card that decides whether to point there
+    has to be readable per *panel*, so the scale has to survive the whole way
+    out — and the sentence is built server-side, so this is the only place it
+    can be corrected.
+
+    Both cards that show it (``PointHereTonightCard``, ``WorthMoreTimeList``)
+    print ``reason`` verbatim, so a target total reaching the browser is a target
+    total shown to the owner: on a 2x2 that is 4x what any patch of sky received,
+    and he shoots 5x5, 10x10 and 12x8 rasters.
+    """
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    _attach_mosaic_stack(solved_library, "M_42", fields_across=2,
+                         total_exposure_s=36000.0)
+
+    body = client.get("/api/plan/best-tonight",
+                      params={"when": JAN_MIDNIGHT, "min_alt": 20}).json()
+    pick = next(p for p in body["picks"] if p["safe"] == "M_42")
+    assert pick["field_fulls"] == 4.0
+    # The fixture's own integration is 30 s of synth subs, so a quarter of it is
+    # seconds a panel — the branch that says so in words and keeps the total in
+    # the parentheses. (Which depth the fixture lands on is pinned exactly in
+    # `tests/test_nightplan.py`; what this test is for is that the scale reaches
+    # the sentence at all rather than being dropped on the way out.)
+    assert ("you've barely started on a typical part of it "
+            "(30 s in total, spread over about 4 fields of sky)") in pick["reason"]
+    # The placement half of the sentence is untouched.
+    assert "up right now" in pick["reason"]
+    # …and so is the percentage: it is already per panel (the F cancels), so it
+    # is still computed from, and agrees with, the totals the row carries.
+    assert 0.0 < pick["noise_gain"] <= 1.0
+    assert f"about {round(pick['noise_gain'] * 100)}%" in pick["reason"]
+
+
+def test_a_best_tonight_single_field_pick_still_quotes_its_total(
+        client, solved_library):
+    """The ordinary case, and the one that makes the field safe to add: nothing
+    stacked, nothing measured, so the sentence says what it always has."""
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/best-tonight",
+                      params={"when": JAN_MIDNIGHT, "min_alt": 20}).json()
+    assert body["picks"], "something of the owner's is up at Orion's transit"
+    for pick in body["picks"]:
+        assert "field_fulls" in pick and pick["field_fulls"] is None
+        assert "typical part" not in pick["reason"]
+        assert "fields of sky" not in pick["reason"]
+
+
 def test_best_tonight_goes_quiet_when_nothing_is_up(client, solved_library):
     """A floor nothing clears leaves an empty list, so the card can just hide
     itself instead of recommending something that isn't there."""

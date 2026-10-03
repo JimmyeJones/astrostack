@@ -1403,9 +1403,11 @@ def test_moon_interference_evaluates_during_darkness_not_page_load():
 
 # ---- "Best use of your scope right now" (rank_targets_now) -------------------
 
-def _lib(safe: str, name: str, ra: float, dec: float, hours: float) -> LibraryTarget:
+def _lib(safe: str, name: str, ra: float, dec: float, hours: float,
+         field_fulls: float | None = None) -> LibraryTarget:
     return LibraryTarget(safe=safe, name=name, ra_deg=ra, dec_deg=dec,
-                         frames_accepted=int(hours * 120), total_exposure_s=hours * 3600.0)
+                         frames_accepted=int(hours * 120), total_exposure_s=hours * 3600.0,
+                         field_fulls=field_fulls)
 
 
 def test_noise_gain_follows_the_root_n_maths_and_falls_with_depth():
@@ -1663,6 +1665,177 @@ def test_a_very_deep_target_is_not_told_an_hour_buys_about_0pc():
                  np_plan.rank_targets_now(LONDON, JAN_EVENING, [deep]).picks[0]):
         assert "0%" not in pick.reason
         assert "as deep as another hour can meaningfully make it" in pick.reason
+
+
+# ---- "what you already have on it", read per panel ---------------------------
+#
+# The planner's spoken depth is a target *total*. On the owner's rasters that is
+# one to two orders of magnitude more than any patch of sky received, and both
+# cards that show the sentence print it verbatim, so nothing downstream can
+# correct it. These pin the correction and — just as importantly — pin that the
+# single-field line did not move.
+
+# Three shapes of the same 10 h: a single field, a 2x2 and one of the owner's
+# 12x8 rasters. Per panel they hold 10 h, 2.5 h and about six minutes.
+_TEN_HOURS_SHAPES = ((None, "single field"), (4.0, "2x2"), (96.0, "12x8"))
+
+
+def test_the_planner_reads_a_mosaics_depth_per_panel_not_as_its_target_total():
+    """A 12x8 and a single field with the same total used to read the
+    byte-identical "You've got 10 h so far".
+
+    Which is the one claim on the card that decides whether to point there: the
+    12x8 holds about six minutes on any patch of sky and is the target actually
+    worth another hour, while the total retires it as the finished one. The
+    owner is a heavy mosaic user, so this fires on his real rows.
+    """
+    picks = {
+        shape: np_plan.rank_targets_now(None, JAN_EVENING, [
+            _lib("t", "T", 10.7, 41.3, hours=10.0, field_fulls=ff),
+        ]).picks[0]
+        for ff, shape in _TEN_HOURS_SHAPES
+    }
+    # The whole bug: one sentence per shape, not one sentence for all three.
+    assert len({p.reason for p in picks.values()}) == 3
+
+    # The single field quotes its total, in the words it always used.
+    assert picks["single field"].reason == (
+        "You've got 10 h so far — another hour would cut its noise about 5%.")
+    # The mosaics lead with the depth, keep the total, and name the scale — the
+    # idiom `season_closing`'s card already uses.
+    assert picks["2x2"].reason == (
+        "You've got about 2.5 h on a typical part of it so far "
+        "(10 h in total, spread over about 4 fields of sky) "
+        "— another hour would cut its noise about 5%.")
+    assert picks["12x8"].reason == (
+        "You've got about 6 min on a typical part of it so far "
+        "(10 h in total, spread over about 96 fields of sky) "
+        "— another hour would cut its noise about 5%.")
+
+
+def test_the_placed_pick_reads_its_depth_per_panel_too():
+    """The same clause, in the sentence the Dashboard card shows on an ordinary
+    night — the placement half is untouched, the depth half is corrected."""
+    reason = np_plan.rank_targets_now(LONDON, JAN_EVENING, [
+        _lib("m31", "M 31", 10.7, 41.3, hours=10.0, field_fulls=96.0),
+    ]).picks[0].reason
+
+    assert ("So far you've got about 6 min on a typical part of it "
+            "(10 h in total, spread over about 96 fields of sky)") in reason
+    # Everything the placed sentence said about the sky still reads the same.
+    assert "M 31 is" in reason and "° up right now" in reason
+    assert "stays shootable for another" in reason
+    # It names the target once, as it always did — the per-panel clause says
+    # "of it", not the catalogue name a second time.
+    assert reason.count("M 31") == 1
+
+
+def test_a_single_field_pick_is_byte_for_byte_what_it_always_was():
+    """The scale is annotation, and every way of not having one has to read as
+    "one field" — a missing figure (an older row, a target with no stacked
+    picture), 1.0, and the sub-unity and non-finite values the backend's own
+    clamp refuses. A scale under one would *inflate* the apparent depth, which
+    is the direction that hides the bug."""
+    baseline = np_plan.rank_targets_now(None, JAN_EVENING, [
+        _lib("t", "T", 10.7, 41.3, hours=10.0),
+    ]).picks[0].reason
+
+    for ff in (None, 1.0, 0.5, 0.0, -4.0, float("nan"), float("inf")):
+        for observer in (None, LONDON):
+            pick = np_plan.rank_targets_now(observer, JAN_EVENING, [
+                _lib("t", "T", 10.7, 41.3, hours=10.0, field_fulls=ff),
+            ]).picks[0]
+            assert "typical part" not in pick.reason, (ff, pick.reason)
+            assert "fields of sky" not in pick.reason, (ff, pick.reason)
+        assert np_plan.rank_targets_now(None, JAN_EVENING, [
+            _lib("t", "T", 10.7, 41.3, hours=10.0, field_fulls=ff),
+        ]).picks[0].reason == baseline, ff
+
+
+def test_the_scale_never_touches_the_ranking_or_the_noise_percentage():
+    """Annotation only. The percentage is **already** per panel: an extra hour on
+    an F-field mosaic reaches each patch as h/F and each patch holds T/F, so the
+    F cancels — which is also why `season_closing` annotates its rows instead of
+    rescaling the key it sorts by. Rescaling it here would have been the easy
+    wrong fix."""
+    picks = [
+        np_plan.rank_targets_now(None, JAN_EVENING, [
+            _lib("t", "T", 10.7, 41.3, hours=10.0, field_fulls=ff),
+        ]).picks[0]
+        for ff, _ in _TEN_HOURS_SHAPES
+    ]
+    assert len({p.noise_gain for p in picks}) == 1
+    assert len({p.score for p in picks}) == 1
+    assert len({p.hours_captured for p in picks}) == 1
+    # …and the figure the sentence prints is the one the ranking used.
+    assert all("about 5%" in p.reason for p in picks)
+
+    # The order of two mosaics of different shape is still the order of their
+    # totals, not of their panel counts.
+    order = [p.safe for p in np_plan.rank_targets_now(None, JAN_EVENING, [
+        _lib("deep", "Deep", 10.7, 41.3, hours=30.0, field_fulls=96.0),
+        _lib("thin", "Thin", 12.5, 41.5, hours=0.75, field_fulls=4.0),
+    ]).picks]
+    assert order == ["thin", "deep"]
+
+
+def test_a_mosaic_whose_panels_hold_under_a_minute_is_not_quoted_about_1_s():
+    """The under-a-minute guard, asked of the number the clause actually quotes.
+
+    A 2-minute total on a 96-field raster is about a second a panel, and
+    `format_duration` has nothing to say about a sub-second figure — so quoting
+    the per-panel depth there would print the empty string into the sentence,
+    which is the "0 min that reads as a bug" `_have_phrase` exists to avoid. It
+    says so in words and keeps the total in the parentheses, so nothing the line
+    carried is lost."""
+    reason = np_plan.rank_targets_now(None, JAN_EVENING, [
+        _lib("t", "T", 10.7, 41.3, hours=2.0 / 60.0, field_fulls=96.0),
+    ]).picks[0].reason
+
+    assert reason.startswith("You've barely started on a typical part of it "
+                             "(2 min in total, spread over about 96 fields of sky)")
+    assert " s on " not in reason and "  " not in reason
+
+
+def test_a_mosaic_with_nothing_captured_still_says_the_simple_true_thing():
+    """Zero is zero on every shape of canvas, so the scale has nothing to add and
+    the sentence must not grow a parenthesis saying "0 s in total"."""
+    for ff in (None, 96.0):
+        reason = np_plan.rank_targets_now(None, JAN_EVENING, [
+            _lib("t", "T", 10.7, 41.3, hours=0.0, field_fulls=ff),
+        ]).picks[0].reason
+        assert reason == ("You haven't captured anything here yet — its first "
+                          "hour will do more for it than any hour after.")
+
+
+def test_the_pick_carries_the_scale_its_sentence_was_written_with():
+    """Served alongside the corrected sentence, the way every other surface of
+    this correction carries its scale — the cards print `reason` verbatim, so
+    this is documentation of what the sentence means rather than a second
+    chance to compute it. Straight through from the library row: `None` stays
+    `None`, which is what an older backend and a single field both send."""
+    for ff in (None, 1.0, 4.0, 96.0):
+        for observer in (None, LONDON):
+            pick = np_plan.rank_targets_now(observer, JAN_EVENING, [
+                _lib("t", "T", 10.7, 41.3, hours=10.0, field_fulls=ff),
+            ]).picks[0]
+            assert pick.field_fulls == ff or (ff is None and pick.field_fulls is None)
+
+
+def test_the_fields_of_sky_phrase_is_a_rough_scale_not_a_measurement():
+    """Rounded to a whole field, and never below 2 — it is only ever printed
+    where the canvas really does span more than one, and "about 2.3 fields of
+    sky" reads as a measurement the figure cannot support (a ragged union canvas
+    counts its uncovered corners as area)."""
+    assert np_plan._fields_of_sky_phrase(1.5) == "about 2 fields of sky"
+    assert np_plan._fields_of_sky_phrase(2.25) == "about 2 fields of sky"
+    assert np_plan._fields_of_sky_phrase(4.0) == "about 4 fields of sky"
+    assert np_plan._fields_of_sky_phrase(96.3) == "about 96 fields of sky"
+    # The twin predicate decides when it is reached at all, through the one
+    # clamp rather than a second copy of its three conditions.
+    assert np_plan._spans_more_than_one_field(1.0001) is True
+    for ff in (None, 1.0, 0.5, 0.0, -4.0, float("nan"), float("inf")):
+        assert np_plan._spans_more_than_one_field(ff) is False, ff
 
 
 def test_best_tonight_is_empty_with_no_library_targets():
