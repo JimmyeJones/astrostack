@@ -82,6 +82,35 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 BUG (Scout 2026-10-03, reproduced through the pure `nightplan` functions) — the "Best use of your scope
+  right now" / "Worth more time" planner speaks a mosaic's *whole-target* total integration as its depth, so a
+  12×8 and a single field with the same total read the identical "you've got 10 h so far".** *(Pillar:
+  friendliness/trust — PRIORITY 3; severity low — the ranking and the noise-% are correct, only the spoken depth
+  is wrong; confidence HIGH — reproduced + traced end to end; size S–M, the v0.492.31 shape.)*
+  **Where.** `seestack/nightplan.py`: `_have_phrase` (~L2652) / `_depth_sentence` (~L2685) / `_pick_reason`
+  (~L2637) build *"you've got {total} so far — another hour would cut its noise about N%"*, fed `hours =
+  total_exposure_s / 3600` by `rank_targets_now` (~L2568-2579) and `_depth_only_picks` (~L2599-2612).
+  `TonightPick` (~L2412) carries `hours_captured` / `noise_gain` but **not** `field_fulls`, and `reason` is
+  rendered server-side — so neither the Tonight page's `WorthMoreTimeList.tsx:64` nor the Dashboard's
+  `PointHereTonightCard.tsx:77` (both print `reason` verbatim) can correct it. Served by
+  `GET /api/plan/best-tonight` (`webapp/routers/plan.py:457`), where the `LibraryTarget` **already** carries
+  `field_fulls` (`plan.py:289`, the same annotation the week/closing cards use) — the datum the fix needs is in
+  hand and simply dropped on this path.
+  **Repro.** `_depth_only_picks` on three `LibraryTarget`s with identical `total_exposure_s = 10 h` and
+  `field_fulls` 1 / 4 / 96 returns the byte-identical sentence *"You've got 10 h so far — another hour would cut
+  its noise about 5%"* for all three, while per panel they hold 10 h / 2.5 h / ~6 min. (Scratch repro in the
+  session scratchpad.) The owner is a heavy mosaic user, so this fires on his real rows, on two cards the app
+  shows unasked.
+  **The fix shape, and what must NOT move.** This is the next surface of the per-panel correction (v0.492.31's
+  closing card was the sixth): carry `field_fulls` onto `TonightPick` and scale the *have* clause per panel in
+  `season_closing`'s idiom — depth
+  first, total in parentheses, scale named, the shared `A_TYPICAL_PART` wording — with the single-field line left
+  byte-for-byte (a missing / ≤1 / non-finite `field_fulls` reads as 1.0). **Leave the ranking and the percentage
+  alone:** `noise_gain_from_more_time` is a *fractional* cut and already per-panel (the `F` cancels —
+  `season_closing`'s docstring proves it, and the repro shows `noise_gain` identical across the three shapes), and
+  v0.429.3's `-noise_gain` tiebreak is correct. A Builder task, not a Scout drive-by: the wording needs the same
+  care and the two frontend surfaces + both-sides tests that v0.492.31 took.
+
 - **LEAD (Builder 2026-09-25, filed while shipping v0.473.1 — the two halves of observer issue
   [#965](https://github.com/JimmyeJones/astrostack/issues/965) that fix deliberately left) — refuse an
   implausible solve at *solve* time, and heal the rows already carrying one.** *(Pillar: image quality —
