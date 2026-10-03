@@ -1851,6 +1851,27 @@ class ClosingTarget:
     #: Fractional noise cut one more hour would buy (:func:`noise_gain_from_more_time`)
     #: — the same measure "Worth more time" is ranked by, so the two agree.
     noise_gain: float
+    #: How many single-frame field-fulls of sky this target's newest stack covers
+    #: (:mod:`webapp.field_fulls`), carried straight through from
+    #: :attr:`LibraryTarget.field_fulls` so the card can read ``total_exposure_s``
+    #: **per panel** instead of per target.
+    #:
+    #: ``total_exposure_s`` above exists so the card can say "whether this is a
+    #: barely-started target or a finished one", and on a mosaic a target total is
+    #: not that number: the owner shoots 5x5, 10x10 and 12x8 rasters, where 10 h
+    #: totalled is 2.5 h a panel on a 2x2 and about six minutes a panel on a 12x8.
+    #: The same substitution has been corrected on the readiness goal, the Stack
+    #: form's cautions, the thin-stack badge, the walk-away floor and the Target
+    #: page's coaching (:mod:`webapp.field_fulls`,
+    #: ``frontend/src/components/target/perPixel.ts``); this is the figure that
+    #: lets the one card whose claim *expires* make it too.
+    #:
+    #: ``None`` for a target with no stacked picture yet, for a single field, and
+    #: on an older backend — the line then quotes the total, exactly as it always
+    #: did. It is annotation only: it never affects which targets are reported or
+    #: the order they come in (see :func:`season_closing` on why the ranking is
+    #: already scale-free).
+    field_fulls: float | None = None
 
 
 def season_closing(
@@ -1883,6 +1904,15 @@ def season_closing(
     Returned soonest-first, tie-broken by what another hour would buy
     (:func:`noise_gain_from_more_time`) so the least-finished of two targets
     leaving in the same week is named first, then by ``safe`` for determinism.
+
+    **That tie-break reads a target total and is nevertheless already per-panel,
+    which is why ``field_fulls`` annotates the row rather than rescaling the
+    key.** An extra hour spent on an ``F``-field mosaic reaches each patch of sky
+    as ``h/F``, and each patch already holds ``T/F``, so the fractional cut it
+    buys is ``1 - sqrt((T/F) / ((T + h)/F))`` — the ``F`` cancels and the figure
+    is exactly the one computed from the totals. The *displayed* "what you
+    already have on it" does not cancel, which is what
+    :attr:`ClosingTarget.field_fulls` is for.
 
     **Which targets are scanned, and why it is the mirror of :func:`plan_week`.**
     ``max_targets`` is :data:`SEASON_MAX_TARGETS`, a *cost* bound (see there),
@@ -1984,6 +2014,7 @@ def season_closing(
             last_night=samples[last_usable][1],
             total_exposure_s=exposure,
             noise_gain=round(noise_gain_from_more_time(exposure), 3),
+            field_fulls=t.field_fulls,
         ))
     out.sort(key=lambda c: (c.weeks_left, -c.noise_gain, c.safe))
     return out

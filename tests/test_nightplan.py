@@ -1203,6 +1203,75 @@ def test_season_closing_is_deterministic():
             == np_plan.season_closing(LONDON, tg, start_utc=when))
 
 
+# --- "what you already have on it", per panel ---------------------------------
+#
+# ``total_exposure_s`` is on the row so the card can say whether this is a
+# barely-started target or a finished one, and on a mosaic a target total is not
+# that number: the subs are spread across the raster, so 10 h totalled is 2.5 h
+# a panel on a 2x2 and about six minutes on a 12x8. The scale is already
+# annotated onto the library row the planner is handed; it was being dropped on
+# the way out, in the one card whose claim expires.
+
+
+def test_a_mosaic_row_carries_the_scale_its_library_row_was_annotated_with():
+    """The figure is handed to this function and has to reach the card.
+
+    A 2x2 no-overlap canvas is ``field_fulls == 4.0`` (pinned end-to-end by
+    ``tests/webapp/test_stack_run_field_fulls.py``), so a target with 10 h on it
+    has 2.5 h on a typical panel — the number the "can I let this one go?"
+    decision is really made on.
+    """
+    mosaic = LibraryTarget(
+        safe="m42", name="M42", ra_deg=_CLOSING_M42[0], dec_deg=_CLOSING_M42[1],
+        frames_accepted=1200, total_exposure_s=36000.0, field_fulls=4.0)
+    closing = np_plan.season_closing(
+        LONDON, [mosaic], start_utc=datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc))
+    assert [c.safe for c in closing] == ["m42"]
+    assert closing[0].field_fulls == 4.0
+    assert closing[0].total_exposure_s == 36000.0
+
+
+def test_a_single_field_row_reports_no_scale_at_all():
+    """``None`` rather than ``1.0``: the two are interchangeable downstream (see
+    ``webapp.field_fulls.target_field_fulls``), and a row that has never been
+    stacked has no canvas to have measured. The card then quotes the total,
+    which is what it always did."""
+    row = np_plan.season_closing(
+        LONDON, [_closing_target("m42", _CLOSING_M42)],
+        start_utc=datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc))[0]
+    assert row.field_fulls is None
+
+
+def test_the_scale_is_annotation_and_moves_neither_the_rows_nor_their_order():
+    """Pinned because it is a deliberate stand-down, not an omission.
+
+    The tie-break is ``noise_gain_from_more_time``, and that figure is *already*
+    per-panel: an extra hour on an F-field mosaic reaches each patch of sky as
+    ``h/F`` while each patch already holds ``T/F``, so the F cancels out of the
+    fractional cut. Rescaling the key would therefore not correct an error, it
+    would invent one — so two libraries differing only in ``field_fulls`` must
+    report the same targets, in the same order, with the same ``noise_gain``.
+    """
+    when = datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc)
+
+    def lib(field_fulls):
+        return [
+            LibraryTarget(safe="deep", name="DEEP", ra_deg=_CLOSING_M42[0],
+                          dec_deg=_CLOSING_M42[1], frames_accepted=900,
+                          total_exposure_s=27000.0, field_fulls=field_fulls),
+            LibraryTarget(safe="thin", name="THIN", ra_deg=_CLOSING_M42[0] + 0.5,
+                          dec_deg=_CLOSING_M42[1], frames_accepted=20,
+                          total_exposure_s=1200.0, field_fulls=field_fulls),
+        ]
+
+    plain = np_plan.season_closing(LONDON, lib(None), start_utc=when)
+    raster = np_plan.season_closing(LONDON, lib(96.0), start_utc=when)
+    assert [c.safe for c in plain] == [c.safe for c in raster]
+    assert [c.noise_gain for c in plain] == [c.noise_gain for c in raster]
+    # …and the least-finished of the pair is still named first, as v0.476.0 set.
+    assert plain[0].safe == "thin"
+
+
 # --- where a *demo* closing target would have to sit (dogfood tooling) --------
 #
 # ``closing_sky_position`` answers nothing the app asks. It exists because a

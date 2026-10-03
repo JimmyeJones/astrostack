@@ -4,6 +4,9 @@
 // Kept out of the component, like `planweek.ts` and `tonight.ts`, so the claims
 // it makes ("about three weeks left on M 42") are testable without a DOM.
 
+import {
+  A_TYPICAL_PART, fieldsOfSkyLabel, perPixel, spansMoreThanOneField,
+} from "./components/target/perPixel";
 import type { ClosingTarget, SeasonClosing } from "./api/client";
 import { formatIntegration } from "./format";
 
@@ -34,19 +37,55 @@ export function lastNightLabel(date: string): string {
 }
 
 /**
+ * "what you already have on it" — the clause that turns the countdown into a
+ * decision, in the units the decision is actually made in.
+ *
+ * "About two weeks left" alone does not say whether to bother; "about two weeks
+ * left · you have 22 min on it" does — and a target already 10 h deep reads,
+ * correctly, as one that can be let go.
+ *
+ * **On a mosaic a target total is not that number, and the error runs the wrong
+ * way.** The subs are spread across the raster, so the total describes the *sum*
+ * of the picture while "is this one I can let go?" is a question about a part:
+ * 10 h is 2.5 h a panel on a 2x2 and, on the 12x8 rasters the owner shoots,
+ * about six minutes. Quoting the total therefore retires a barely-started mosaic
+ * in the one card whose claim **expires** — the season it is counting down to
+ * does not come round again for a year, so a row read as "finished" is not a
+ * sentence to correct later but a year of the object lost.
+ *
+ * So where the canvas spans more than one field this leads with the per-panel
+ * figure and keeps every fact it carried, in the idiom
+ * ``samplesPerPixelPhrase`` already uses for the Stack form: the depth first
+ * (what the decision needs), the total in parentheses (so the line never looks
+ * like the app has lost hours the Target page plainly shows), and the scale
+ * named. The scale is the run's own ``field_fulls``, the same figure the
+ * readiness goal, the thin-stack badge and the Target page's coaching are
+ * already corrected by — this is the sixth surface of that correction, not a
+ * sixth definition of it.
+ *
+ * Single-field targets, a target with no stacked picture, and an older backend
+ * that sends no scale are **byte-for-byte** what they always were: ``perPixel``
+ * and ``spansMoreThanOneField`` both read a missing or sub-unity figure as 1.0,
+ * and a scale under one would *inflate* the apparent depth, which is the
+ * direction that hides the bug.
+ */
+function haveClause(t: ClosingTarget): string {
+  if (!(t.total_exposure_s > 0)) return "you haven't kept any of it yet";
+  const total = formatIntegration(t.total_exposure_s);
+  if (!spansMoreThanOneField(t.field_fulls)) return `you have ${total} on it`;
+  const depth = formatIntegration(perPixel(t.total_exposure_s, t.field_fulls));
+  return `you have about ${depth} on ${A_TYPICAL_PART} of it`
+    + ` (${total} in total, spread over ${fieldsOfSkyLabel(t.field_fulls)})`;
+}
+
+/**
  * One target's line: how long is left, and what you already have on it.
  *
- * The second half is what turns a countdown into a decision. "About two weeks
- * left" alone does not say whether to bother; "about two weeks left · you have
- * 22 min on it" does — and a target already 10 h deep reads, correctly, as one
- * that can be let go.
+ * See :func:`haveClause` for why the second half is read per panel on a mosaic.
  */
 export function closingTargetLine(t: ClosingTarget): string {
   const left = weeksLeftPhrase(t.weeks_left);
-  const have = t.total_exposure_s > 0
-    ? `you have ${formatIntegration(t.total_exposure_s)} on it`
-    : "you haven't kept any of it yet";
-  return `${left} · ${have} · last good night around ${lastNightLabel(t.last_night)}`;
+  return `${left} · ${haveClause(t)} · last good night around ${lastNightLabel(t.last_night)}`;
 }
 
 /**
