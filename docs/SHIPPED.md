@@ -1,5 +1,101 @@
 # Shipped — the record
 
+## 2026-10-03 (Builder) — v0.492.32: the Tonight planner spoke a mosaic's whole-target total as its depth
+
+### v0.492.32 — 🟡 BUG FIX (friendliness / trust — PRIORITY 3, on two cards the app shows unasked): **"Best use of your scope right now" / "Worth more time" said *"You've got 10 h so far"* for a single field and for a 12×8 raster holding about six minutes a panel — the byte-identical sentence, a hundredfold apart.**
+
+*(Builder, branch `claude/dreamy-thompson-r7lmtt`. Baseline `origin/main` at `bddbb05` (`__version__`
+0.492.31): **7374 passed, 4 skipped**, 13m18s with `OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`,
+`/tmp/pytest-of-root` cleared first. Green, no open PRs. This is the Scout's ungated entry filed the same day —
+the first ungated item in "Bugs (fix these first)" in nine runs — so the run drained it rather than taking the
+standing frontier again.)*
+
+**The surface.** `GET /api/plan/best-tonight` → `PointHereTonightCard` (Dashboard) and `WorthMoreTimeList`
+(Tonight page). It answers the question a beginner asks when the sky unexpectedly clears: *of the targets I've
+already started, which one is up right now and would most benefit from another hour?* One sentence per row,
+built server-side by `seestack/nightplan.py::_pick_reason` / `_depth_sentence` / `_have_phrase`, and **both
+cards print `reason` verbatim** — `WorthMoreTimeList.tsx:64` and `PointHereTonightCard.tsx:77` are a bare
+`<Text>{p.reason}</Text>`, so nothing downstream could have corrected it.
+
+**The bug.** `_have_phrase` was fed `hours = total_exposure_s / 3600`, a **target total**, and spoke it as the
+answer to "what have you got here?" — which is read as a claim about a *patch of sky*. On a mosaic the subs are
+spread across the raster, so the total describes the **sum** of the picture while the sentence describes a
+**part**, and the owner is a heavy mosaic user shooting 5×5, 10×10 and 12×8 rasters. Reproduced through the
+pure functions, three `LibraryTarget`s identical but for `field_fulls`:
+
+| canvas | `field_fulls` | per panel | the sentence, before |
+|---|---|---|---|
+| single field | — | 10 h | `You've got 10 h so far — another hour would cut its noise about 5%.` |
+| 2×2 | 4.0 | **2.5 h** | *(identical)* |
+| 12×8 | 96.0 | **~6 min** | *(identical)* |
+
+The error runs the flattering way, so it inverts the card's own advice: the 12×8 is the target with six minutes
+on any patch of sky — the one genuinely worth tonight — and the total presents it as the finished one.
+`TonightPick` carried `hours_captured` and `noise_gain` but **not** `field_fulls`, even though the
+`LibraryTarget` the planner is handed already carries it (`webapp/routers/plan.py:289`, the same annotation the
+week and closing cards read). The datum was in hand and dropped on this one path.
+
+**The fix.** `TonightPick.field_fulls` carries the scale straight through from the library row, and
+`_have_phrase` reads the *have* clause per panel where the canvas spans more than one field, in the idiom
+`frontend/src/closingSeason.ts::haveClause` already uses — depth first (what the decision needs), the total in
+parentheses (so the line never looks like the app has lost hours the Target page plainly shows), the scale
+named, and "**a typical part**", never "each part", because the figure is a canvas mean:
+
+| canvas | the sentence, after |
+|---|---|
+| single field | `You've got 10 h so far — another hour would cut its noise about 5%.` *(byte-for-byte)* |
+| 2×2 | `You've got about 2.5 h on a typical part of it so far (10 h in total, spread over about 4 fields of sky) — another hour would cut its noise about 5%.` |
+| 12×8 | `You've got about 6 min on a typical part of it so far (10 h in total, spread over about 96 fields of sky) — another hour would cut its noise about 5%.` |
+
+The placed path gets the same clause inside its own sentence (*"… stays shootable for another 3 h 20 m. So far
+you've got about 6 min on a typical part of it (10 h in total, …)"*) and still names the target exactly once.
+
+**Seventh surface of this correction, not a seventh definition.** The arithmetic is the imported
+`seestack.portfolio.per_pixel_total` — the clamp that refuses a scale below 1.0 keeps one definition — and
+`_spans_more_than_one_field` asks the question *through* it rather than repeating its three conditions. The two
+*words* (`_A_TYPICAL_PART`, `_fields_of_sky_phrase`) are hand-mirrored from
+`frontend/src/components/target/perPixel.ts` because a TS module cannot be imported from Python, and the new
+**`tests/test_per_panel_phrase_mirror.py`** is what stops that copy going stale: it reads the TypeScript, pins
+the literal, the `about N fields of sky` template, the round-and-floor-at-2 rule, and that
+`closingSeason.haveClause` still builds the idiom the planner mirrors. Reword either side and the suite goes
+red, instead of two cards speaking two dialects about the same picture two clicks apart.
+
+**The under-a-minute guard now asks the number the clause actually quotes.** A 2-minute total on a 96-field
+raster is about a second a panel, and `format_duration` returns `""` below a second — so quoting the per-panel
+depth there would have printed an empty string into the sentence, which is the *"0 min that reads as a bug"*
+`_have_phrase` exists to avoid. It says so in words and keeps the total in the parentheses: *"You've barely
+started on a typical part of it (2 min in total, spread over about 96 fields of sky)"*. Nothing the line carried
+is lost.
+
+**What was deliberately NOT touched, and why.** The ranking, the score and the noise-cut percentage. An extra
+hour on an `F`-field mosaic reaches each patch of sky as `h/F`, and each patch already holds `T/F`, so the
+fractional cut it buys is `1 − √((T/F)/((T + h)/F))` — **the `F` cancels**, and the figure
+`noise_gain_from_more_time` computes from the totals is exactly the per-panel one. (The same cancellation is
+why `season_closing` annotates its rows with the scale rather than rescaling the key it sorts by; its docstring
+carries the derivation.) Rescaling the percentage would have been the easy wrong fix, so a test pins that
+`noise_gain`, `score` and `hours_captured` are identical across all three canvas shapes and that two mosaics of
+different shape still order by their totals. v0.429.3's `-noise_gain` tiebreak is untouched.
+
+**Upgrade safety.** One optional dataclass field (defaulting `None`) and one added response key on a payload
+built by `asdict` — additive, so an older frontend ignores it and an older backend's absent key reads as "one
+field". No config, settings, schema, migration, on-disk-layout, default or API-shape change; nothing removed
+from either card. A single field, a target with no stacked picture, an older row with no scale, and the
+sub-unity / zero / negative / `NaN` / `∞` values the backend's own clamp refuses are all **byte-for-byte**
+unchanged on both planner paths — asserted against the pre-fix string, on both the placed and the depth-only
+path. A scale under one would *inflate* the apparent depth, which is the direction that hides the bug, so it is
+clamped rather than honoured.
+
+**Tests.** +8 in `tests/test_nightplan.py` (the three-shape regression, the placed path, the byte-for-byte
+single-field guard across seven no-scale values × both paths, the ranking/percentage/score invariance, the
+sub-minute panel, the zero-integration row, the carried scale, the rough-scale phrasing), +2 end-to-end in
+`tests/webapp/test_plan.py` (reusing the existing `_attach_mosaic_stack` 2×2 fixture: the scale reaches the
+served sentence, and every single-field pick still quotes its total), +3 in the new mirror test, +2 vitest (one
+per card, pinning that the per-panel sentence reaches the rendered row). **Fail-before shown by scratch
+revert** — un-threading the scale from the two `reason=` constructions reddens three of the new engine tests
+with the old `"You've got 2 min so far"` / `"You've got 10 h so far"` strings named in the diff. `ruff` debt on
+every touched file is unchanged (105 before, 105 after); the new file is clean. `tsc --noEmit`, `vitest run`
+(296 files, 4571 tests) and `vite build` all green from `frontend/`.
+
 ## 2026-10-03 (Builder) — v0.492.31: "Shoot these before they're gone" retired a barely-started mosaic on its target total
 
 ### v0.492.31 — 🟡 BUG FIX (friendliness / trust — PRIORITY 3, on the one card whose claim *expires*), Builder-found by reading, reproduced as a sentence: **the closing-season card quoted "you have 10 h on it" for a 2×2 at 2.5 h a panel and for a 12×8 at six minutes a panel — the identical line, two orders of magnitude apart.**

@@ -77,6 +77,24 @@ describe("WorthMoreTimeList", () => {
     expect(screen.queryByText(/Set your location in Settings/)).toBeNull();
   });
 
+  it("shows a mosaic's depth per panel, because the server writes that clause", async () => {
+    // The whole sentence is built server-side (`nightplan._have_phrase`) and
+    // printed verbatim here, so this row is where a target total would have
+    // reached the owner. On his 12x8 rasters "10 h" is about six minutes on any
+    // patch of sky — the opposite decision about where to point tonight. The
+    // scale rides along on the row so a future surface need not re-derive it.
+    const reason = "You've got about 6 min on a typical part of it so far "
+      + "(10 h in total, spread over about 96 fields of sky) "
+      + "— another hour would cut its noise about 5%.";
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload({
+      picks: [pick({ hours_captured: 10, noise_gain: 0.047, field_fulls: 96, reason })],
+    }));
+    renderList();
+    await waitFor(() =>
+      expect(screen.getByTestId("worth-more-time")).toBeInTheDocument());
+    expect(screen.getByText(reason)).toBeInTheDocument();
+  });
+
   it("shows nothing at all when there's nothing to rank", async () => {
     vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload({ picks: [] }));
     renderList();

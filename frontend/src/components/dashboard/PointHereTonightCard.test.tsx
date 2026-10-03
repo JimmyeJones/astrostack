@@ -110,6 +110,25 @@ describe("PointHereTonightCard", () => {
     expect(open).toHaveAttribute("href", "/targets/M_31");
   });
 
+  it("shows a mosaic's depth per panel, because the server writes that clause", async () => {
+    // The sentence is built server-side (`nightplan._have_phrase`) and printed
+    // verbatim, so this line is where a target total would have reached the
+    // owner — and "point here right now" is the decision it feeds. On a 12x8
+    // raster a 10 h total is about six minutes on any patch of sky, so the total
+    // retires the one target actually worth another hour.
+    const reason = "M 31 is 62° up right now and stays shootable for another "
+      + "3 h 20 m. So far you've got about 6 min on a typical part of it "
+      + "(10 h in total, spread over about 96 fields of sky) "
+      + "— another hour would cut its noise about 5%.";
+    vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload({
+      picks: [pick({ hours_captured: 10, noise_gain: 0.047, field_fulls: 96, reason })],
+    }));
+    renderCard();
+    await waitFor(() => expect(screen.getByText(reason)).toBeInTheDocument());
+    // The placement badge the card draws itself is unaffected by the scale.
+    expect(screen.getByText("62° up")).toBeInTheDocument();
+  });
+
   it("offers the runners-up without a second call to action", async () => {
     vi.spyOn(client.api, "getBestTonight").mockResolvedValue(payload({
       picks: [pick(), pick({ safe: "NGC_7000", name: "NGC 7000", score: 40 })],

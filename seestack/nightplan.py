@@ -46,6 +46,7 @@ from seestack.framing import (
     framing_hint,
     mosaic_plan,
 )
+from seestack.portfolio import per_pixel_total
 from seestack.sharecard import format_duration
 from seestack.target_difficulty import DifficultyHint, target_difficulty
 
@@ -2429,6 +2430,24 @@ class TonightPick:
     score: float
     # One plain-language sentence the UI can show verbatim.
     reason: str
+    # How many single-frame field-fulls of sky this target's newest stack covers
+    # (:mod:`webapp.field_fulls`), carried straight through from
+    # :attr:`LibraryTarget.field_fulls` so ``reason`` can read ``hours_captured``
+    # **per panel** instead of per target.
+    #
+    # The sentence is rendered server-side and both cards that show it print it
+    # verbatim (``PointHereTonightCard``, ``WorthMoreTimeList``), so neither
+    # could correct a target total on its own — and on the owner's rasters the
+    # two differ by one to two orders of magnitude. Served alongside the
+    # corrected sentence rather than instead of it, the way every other surface
+    # of this correction carries the scale it was made with.
+    #
+    # ``None`` for a target with no stacked picture yet, for a single field, and
+    # on an older backend — the sentence then quotes the total, exactly as it
+    # always did. It is annotation only: the ranking, the score and the
+    # noise-cut percentage never read it (see :func:`_depth_sentence` on why the
+    # percentage is already per panel).
+    field_fulls: float | None = None
 
 
 @dataclass
@@ -2576,7 +2595,9 @@ def rank_targets_now(
             noise_gain=round(gain, 3),
             score=score,
             reason=_pick_reason(t.name, alt_now, o.minutes_above_min_alt, hours,
-                                gain, placed_now=plan.dark_now, moon_spoil=spoil),
+                                gain, placed_now=plan.dark_now, moon_spoil=spoil,
+                                field_fulls=t.field_fulls),
+            field_fulls=t.field_fulls,
         ))
     picks.sort(key=lambda p: (-p.score, -(p.altitude_now_deg or 0.0)))
     plan.picks = picks[:max(0, int(limit))]
@@ -2609,7 +2630,9 @@ def _depth_only_picks(targets: list[LibraryTarget], limit: int) -> list[TonightP
             # No subject: this sentence is the whole reason, rendered on both
             # cards directly beneath the target's own name, so naming it here
             # printed a long catalogue name twice one line apart.
-            reason=_depth_sentence(hours, None, gain),
+            reason=_depth_sentence(hours, None, gain,
+                                   field_fulls=t.field_fulls),
+            field_fulls=t.field_fulls,
         ))
     # Break the tie on the *unsaturated* gain, so the order agrees with the
     # sentence both cards print above it ("ranked by how much another hour on
@@ -2636,21 +2659,72 @@ _MOON_WORTH_MENTIONING = 0.12
 
 def _pick_reason(name: str, altitude_deg: float, minutes_left: float,
                  hours_captured: float, gain: float, *, placed_now: bool,
-                 moon_spoil: float = 0.0) -> str:
+                 moon_spoil: float = 0.0,
+                 field_fulls: float | None = None) -> str:
     """The one plain-language sentence the card shows — no jargon, no numbers the
-    user can't act on."""
+    user can't act on.
+
+    ``field_fulls`` reaches only the "what you already have" clause, and only to
+    read it per panel on a mosaic — see :func:`_have_phrase`.
+    """
     where = (f"{name} is {round(altitude_deg)}° up right now" if placed_now
              else f"{name} climbs to {round(altitude_deg)}° tonight")
     window = _hours_phrase(minutes_left / 60.0)
-    depth = _depth_sentence(hours_captured, "it", gain, capitalise=False)
+    depth = _depth_sentence(hours_captured, "it", gain, capitalise=False,
+                            field_fulls=field_fulls)
     moon = (" The Moon is fairly close to it tonight, so expect a brighter sky."
             if moon_spoil >= _MOON_WORTH_MENTIONING else "")
     return (f"{where} and stays shootable for another {window}. "
             f"So far {depth}{moon}")
 
 
+# The per-panel vocabulary, for the one clause in this module that describes a
+# *part* of a canvas rather than the whole of it. The arithmetic is
+# :func:`seestack.portfolio.per_pixel_total` — imported, never re-derived, so the
+# clamp that refuses a scale below 1.0 has exactly one definition — and these are
+# the two *words* that go with it, mirrored from
+# ``frontend/src/components/target/perPixel`` (``A_TYPICAL_PART`` and
+# ``fieldsOfSkyLabel``) and pinned against it by
+# ``tests/test_per_panel_phrase_mirror.py``. The planner's sentence and the
+# closing card's sentence describe the same quantity about the same target, so
+# they must not become two dialects of it.
+#
+# "A typical part", never "each part": the figure is a canvas mean, and a mosaic
+# with one deep panel and eight thin ones has pixels on both sides of it (the
+# full argument is in ``perPixel.ts``).
+_A_TYPICAL_PART = "a typical part"
+
+
+def _spans_more_than_one_field(field_fulls: float | None) -> bool:
+    """True when a target total and its per-panel share are different numbers, so
+    a sentence about "what you have" has to say which of the two it means.
+
+    Asked *through* :func:`per_pixel_total` rather than by repeating its three
+    conditions, because they are the same question: a scale that divides a total
+    is exactly a scale that makes the total and a part differ. Missing,
+    non-finite and ``<= 1.0`` therefore all read as a single field — which is
+    every single-field target and every older row that carries no scale.
+    """
+    return per_pixel_total(1.0, field_fulls) < 1.0
+
+
+def _fields_of_sky_phrase(field_fulls: float | None) -> str:
+    """"about 4 fields of sky" — how much sky the canvas spans, for the clause
+    that has to explain why a total and a depth differ.
+
+    Rounded to a whole field (the precision is spurious — a ragged union canvas
+    counts its uncovered corners as area) and never below 2, exactly as
+    ``fieldsOfSkyLabel`` is, because it is only ever printed where the canvas
+    really does span more than one field. Only reached from behind
+    :func:`_spans_more_than_one_field`, so the value is a finite float above 1
+    and needs no second clamp.
+    """
+    return f"about {max(2, round(float(field_fulls or 1.0)))} fields of sky"
+
+
 def _have_phrase(hours: float, subject: str | None, *,
-                 capitalise: bool = True) -> str:
+                 capitalise: bool = True,
+                 field_fulls: float | None = None) -> str:
     """"You've got 45 min on M 31" — or, under a minute, words instead of a "0 min"
     that reads as a bug rather than a fact.
 
@@ -2661,10 +2735,55 @@ def _have_phrase(hours: float, subject: str | None, *,
     *"You've got 1 min on Sample: Orion Nebula (M42) — …"*. The placed path
     already avoids this the other way round — :func:`_pick_reason` passes
     ``"it"`` because its own opening clause has just said the name.
+
+    **On a mosaic a target total is not "what you have", and the error runs the
+    flattering way.** ``field_fulls`` is how many single-frame field-fulls of sky
+    the target's newest canvas covers (:attr:`LibraryTarget.field_fulls`,
+    :mod:`webapp.field_fulls`). The subs are spread across the raster, so the
+    total describes the *sum* of the picture while this clause is read as a claim
+    about a patch of it: 10 h is 2.5 h a panel on a 2x2 and, on the 12x8 rasters
+    the owner shoots, about six minutes. Without the scale a 12x8 and a single
+    field with the same total read the **byte-identical** "you've got 10 h so
+    far" on two cards the app shows unasked, and the mosaic — the one actually
+    worth another hour — reads as the finished one.
+
+    So where the canvas spans more than one field this leads with the per-panel
+    figure and keeps every fact it carried, in the idiom
+    :func:`season_closing`'s card already uses: the depth first (what the
+    decision needs), the total in parentheses (so the line never looks like the
+    app has lost hours the Target page plainly shows), and the scale named. Same
+    correction, same words, seventh surface — not a seventh definition.
+
+    A single field, a target with no stacked picture, and an older row that
+    carries no scale are **byte-for-byte** what they always were:
+    :func:`_spans_more_than_one_field` reads a missing or sub-unity figure as one
+    field, and a scale under one would *inflate* the apparent depth, which is the
+    direction that hides the bug.
     """
     if hours <= 0.0:
         text = ("you haven't captured anything here yet" if subject is None
                 else f"you haven't captured any of {subject} yet")
+    elif _spans_more_than_one_field(field_fulls):
+        total_s = hours * 3600.0
+        panel_s = per_pixel_total(total_s, field_fulls)
+        # ``subject or "it"``: the mosaic clause has to name *a part of* something,
+        # and where the sentence is rendered under the target's own name "of it"
+        # is the pronoun the closing card uses for the same reason.
+        part = f"{_A_TYPICAL_PART} of {subject or 'it'}"
+        spread = (f" ({format_duration(total_s)} in total, spread over "
+                  f"{_fields_of_sky_phrase(field_fulls)})")
+        if panel_s < 60.0:
+            # The under-a-minute guard below, asked of the number this clause
+            # actually quotes: on a 96-field raster a total that clears a minute
+            # is a panel that does not, and "about 1 s" is the "0 min" this
+            # function exists to avoid. The total still goes in the parentheses,
+            # so nothing the line carried is lost.
+            text = f"you've barely started on {part}{spread}"
+        elif subject is None:
+            text = (f"you've got about {format_duration(panel_s)} on {part} "
+                    f"so far{spread}")
+        else:
+            text = f"you've got about {format_duration(panel_s)} on {part}{spread}"
     elif hours * 60.0 < 1.0:
         text = ("you've barely started" if subject is None
                 else f"you've barely started on {subject}")
@@ -2683,7 +2802,8 @@ def _have_phrase(hours: float, subject: str | None, *,
 
 
 def _depth_sentence(hours: float, subject: str | None, gain: float, *,
-                    capitalise: bool = True) -> str:
+                    capitalise: bool = True,
+                    field_fulls: float | None = None) -> str:
     """"You've got 45 min on M 31 — another hour would cut its noise about 33%."
 
     One sentence, both halves: what the user has, and what one more hour buys.
@@ -2703,8 +2823,19 @@ def _depth_sentence(hours: float, subject: str | None, gain: float, *,
       rather than the (true, useful) "you're done here".
 
     Both ends now say the honest thing in words instead of a number.
+
+    ``field_fulls`` scales only the *have* half (:func:`_have_phrase`). **The
+    percentage is deliberately left alone, because it is already per panel.** An
+    extra hour on an ``F``-field mosaic reaches each patch of sky as ``h/F``, and
+    each patch already holds ``T/F``, so the fractional cut it buys is
+    ``1 - sqrt((T/F) / ((T + h)/F))`` — the ``F`` cancels and the figure is
+    exactly the one :func:`noise_gain_from_more_time` computes from the totals.
+    (The same cancellation is why :func:`season_closing` annotates its rows with
+    the scale rather than rescaling the key it ranks by.) Only the *displayed*
+    depth fails to cancel, which is the half this scales.
     """
-    have = _have_phrase(hours, subject, capitalise=capitalise)
+    have = _have_phrase(hours, subject, capitalise=capitalise,
+                        field_fulls=field_fulls)
     if hours <= 0.0:
         return f"{have} — its first hour will do more for it than any hour after."
     pct = round(gain * 100)

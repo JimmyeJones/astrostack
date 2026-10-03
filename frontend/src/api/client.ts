@@ -113,6 +113,16 @@ export interface TonightPick {
   score: number;
   // One plain-language sentence, shown verbatim.
   reason: string;
+  // How many single-frame field-fulls of sky this target's newest stack covers
+  // (`webapp/field_fulls.py`) — the scale `reason`'s "what you already have on
+  // it" clause was written with.
+  //
+  // The sentence is built server-side and both cards print it verbatim, so the
+  // correction cannot happen here; this is served alongside it so a surface that
+  // wants the figure itself need not re-derive it, exactly as `ClosingTarget`
+  // carries it. `null`/absent on a single field, on a target with no stacked
+  // picture, and on an older backend — the sentence then quotes the total.
+  field_fulls?: number | null;
 }
 
 /** `GET /api/plan/best-tonight` — "best use of your scope right now". */
