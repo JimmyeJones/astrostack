@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Go back to the version that was running before the last scripts/deploy.sh.
 #
-#   sudo scripts/rollback.sh                      # back to what deploy.sh recorded
-#   sudo scripts/rollback.sh v0.455.7             # back to an exact release tag
-#   sudo scripts/rollback.sh --restore-data       # …and put the data back as it was
-#   sudo scripts/rollback.sh --yes …              # no prompts (Settings → App updates)
+#   sudo bash scripts/rollback.sh                      # back to what deploy.sh recorded
+#   sudo bash scripts/rollback.sh v0.455.7             # back to an exact release tag
+#   sudo bash scripts/rollback.sh --restore-data       # …and put the data back as it was
+#   sudo bash scripts/rollback.sh --yes …              # no prompts (Settings → App updates)
 #
 # Code-only rollback is safe whenever the older version understands the newer
 # database format. When it does not (older code refuses a newer schema — see
@@ -26,11 +26,11 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 OWNER="${SUDO_USER:-$(stat -c %U .)}"
 g() { if [ "$OWNER" != root ]; then sudo -u "$OWNER" git "$@"; else git "$@"; fi; }
 COMPOSE=(docker compose --env-file .env -f docker/docker-compose.yml)
-STATE_DIR="$(eval echo "~$OWNER")/.astrostack-deploy"
+STATE_DIR="${ASTROSTACK_DEPLOY_STATE:-$(eval echo "~$OWNER")/.astrostack-deploy}"
 ASTRO_DATA="$(sed -n 's/^ASTRO_DATA=//p' .env | tail -1 | tr -d '"'"'")"
 
 if [ -z "$REF" ]; then
-  [ -f "$STATE_DIR/last-good" ] || die "no record of a previous deploy — name a version, e.g. sudo scripts/rollback.sh v0.455.7"
+  [ -f "$STATE_DIR/last-good" ] || die "no record of a previous deploy — name a version, e.g. sudo bash scripts/rollback.sh v0.455.7"
   REF="$(cut -d' ' -f1 "$STATE_DIR/last-good")"
 fi
 g fetch --quiet --tags origin || true
@@ -57,7 +57,7 @@ fi
 
 "${COMPOSE[@]}" stop
 if [ "$RESTORE" = 1 ]; then
-  scripts/lib/restore-data.sh "$ASTRO_DATA" "$BACKUP" || die "restore failed — the app is stopped. Start it again with: ${COMPOSE[*]} up -d"
+  bash scripts/lib/restore-data.sh "$ASTRO_DATA" "$BACKUP" || die "restore failed — the app is stopped. Start it again with: ${COMPOSE[*]} up -d"
 fi
 g -c advice.detachedHead=false checkout --quiet --detach "$TARGET"
 "${COMPOSE[@]}" up -d --build

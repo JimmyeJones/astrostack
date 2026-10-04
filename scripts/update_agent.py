@@ -351,7 +351,8 @@ class Agent:
         avail = self.available()
         if avail is None:
             raise Refused("There is no tested (stable) version to install yet.")
-        ok, tail = self.run_logged([str(self.clone / "scripts" / "deploy.sh"), "-y", STABLE_REF])
+        # Through bash, not exec: a no-exec dataset makes the script itself "Permission denied".
+        ok, tail = self.run_logged(["bash", str(self.clone / "scripts" / "deploy.sh"), "-y", STABLE_REF])
         if ok:
             self.refresh_self()
             return True, f"Updated to v{avail['version']}.", tail
@@ -363,8 +364,8 @@ class Agent:
             raise Refused("There is no earlier version recorded to go back to.")
         script = self.clone / "scripts" / "rollback.sh"
         if not script.exists():
-            raise Refused("This version predates one-click rollback; run sudo scripts/rollback.sh over SSH.")
-        cmd = [str(script), "--yes"] + (["--restore-data"] if restore else [])
+            raise Refused("This version predates one-click rollback; run sudo bash scripts/rollback.sh over SSH.")
+        cmd = ["bash", str(script), "--yes"] + (["--restore-data"] if restore else [])
         ok, tail = self.run_logged(cmd)
         if ok:
             return True, f"Rolled back to v{info['to_version']}.", tail

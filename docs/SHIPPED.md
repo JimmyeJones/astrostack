@@ -1,5 +1,38 @@
 # Shipped — the record
 
+## 2026-10-04 (owner session) — the owner's first deploy stopped the app and said nothing
+
+### v0.492.34 — 🔴 BUG FIX: `scripts/deploy.sh` died silently right after stopping the app
+
+**What happened.** The owner ran `sudo scripts/deploy.sh v0.492.20` on his NAS. It printed "Stopping the
+app…", stopped it, and returned to the prompt with no message. Reproduced exactly (exit 141, no output after
+"Stopping the app…"): the data folder's dataset was looked up with
+`zfs list -H -o name,mountpoint 2>/dev/null | awk '$2==m {print $1; exit}'`. On a TrueNAS box with hundreds of
+datasets (TrueNAS's own `ix-apps` docker layers alone are hundreds), `zfs list` is still writing when awk exits
+at the first match, so it dies of SIGPIPE; `set -o pipefail` makes that the assignment's status, `set -e` ends
+the script, and `2>/dev/null` hides why. The same lines had a worse latent bug: `zfs snapshot … && echo` left
+`SNAP` set when the snapshot failed, so the deploy carried on **with no backup at all**.
+
+Before that, his `sudo scripts/deploy.sh` said "Permission denied" although git stores the script `100755` —
+his clone sits on a no-exec dataset (or one checked out without the exec bit). `sudo bash scripts/deploy.sh`
+worked, so every script now runs the others through `bash`, and every instruction says `sudo bash …`.
+
+**The fix.**
+- `scripts/lib/zfs-dataset.sh` reads the whole `zfs list` into a variable before matching (tab-separated, a
+  trailing `/` ignored); a missing or failing `zfs` prints nothing.
+- `deploy.sh`: a snapshot that fails falls back to the tar copy of the databases and settings — never no
+  backup; an `ERR` trap prints the line and exit code, and after the app is stopped, `sudo docker start
+  astrostack`; `ASTROSTACK_DEPLOY_STATE` overrides the state folder (for tests).
+- `rollback.sh` runs `bash scripts/lib/restore-data.sh`; `update_agent.py` runs `bash deploy.sh` /
+  `bash rollback.sh` (it exec'd them directly, which would have hit the same "Permission denied").
+
+**Pinned by** `tests/test_deploy_script.py` (7): the real `deploy.sh` run end to end over a fake NAS (stub
+`docker`, `zfs`, `sudo`, `id`; a `zfs list` of 20,005 datasets) — snapshot taken and target checked out; a
+failed snapshot falls back to a tar that holds the databases and not `incoming/`; no `zfs` → tar; a failure
+after the stop names `sudo docker start astrostack`; `incoming/` untouched; the helper on the big listing.
+Against the previous `deploy.sh`, five fail — the first with exit 141 straight after "Stopping the app…",
+exactly the owner's screen.
+
 ## 2026-10-04 (Builder) — v0.492.33: the editor's preset chip called a canvas of nothing but stars a galaxy, and changed its mind when the canvas got bigger
 
 ### v0.492.33 — 🐛 BUG FIX (editor — **PRIORITY 1**): **the star/diffuse separator's footprint was a fixed 7×7 in *proxy* pixels, so it was narrower than a real Seestar star on an un-decimated canvas — and a different patch of sky on every canvas. Both bundled star-only mosaic samples were duly told *"Your image looks like a Galaxy (broadband)"*.**

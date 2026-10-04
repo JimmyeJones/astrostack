@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Upgrade the running AstroStack to an exact, known version — safely.
 #
-#   sudo scripts/deploy.sh            # deploy the `stable` branch (or main, if none yet)
-#   sudo scripts/deploy.sh v0.479.2   # deploy an exact release tag
-#   sudo scripts/deploy.sh -y ...     # skip the confirmation prompt
+#   sudo bash scripts/deploy.sh            # deploy the `stable` branch (or main, if none yet)
+#   sudo bash scripts/deploy.sh v0.479.2   # deploy an exact release tag
+#   sudo bash scripts/deploy.sh -y ...     # skip the confirmation prompt
+#
+# (`bash scripts/…` rather than `scripts/…`: some NAS datasets are mounted
+# no-exec, which turns the plain form into "Permission denied".)
 #
 # Why not `git pull && docker compose up --build`: `main` moves several times an
 # hour, so a pull deploys whatever it happens to be at that second (it moved
@@ -21,13 +24,28 @@ for a in "$@"; do case "$a" in -y|--yes) YES=1 ;; -h|--help) sed -n '2,15p' "$0"
 
 cd "$(dirname "$0")/.."
 die() { echo "ERROR: $*" >&2; exit 1; }
-[ "$(id -u)" = 0 ] || die "run with sudo: sudo scripts/deploy.sh ${REF}"
+
+# Nothing may end this script silently -- least of all after it has stopped the
+# app (2026-10-04: a failed `zfs list` pipe did exactly that, with stderr hidden).
+APP_STOPPED=0
+on_err() {
+  local rc=$? line=$1
+  echo >&2
+  echo "ERROR: the deploy stopped unexpectedly (line $line of scripts/deploy.sh, exit $rc)." >&2
+  if [ "$APP_STOPPED" = 1 ]; then
+    echo "The app is stopped. Start it again, as it was, with:" >&2
+    echo "  sudo docker start astrostack" >&2
+  fi
+}
+trap 'on_err $LINENO' ERR
+
+[ "$(id -u)" = 0 ] || die "run with sudo: sudo bash scripts/deploy.sh ${REF}"
 [ -f .env ] || die "no .env here — run this from your astrostack clone."
 
 OWNER="${SUDO_USER:-$(stat -c %U .)}"
 g() { if [ "$OWNER" != root ]; then sudo -u "$OWNER" git "$@"; else git "$@"; fi; }
 COMPOSE=(docker compose --env-file .env -f docker/docker-compose.yml)
-STATE_DIR="$(eval echo "~$OWNER")/.astrostack-deploy"; mkdir -p "$STATE_DIR"; chown "$OWNER" "$STATE_DIR" 2>/dev/null || true
+STATE_DIR="${ASTROSTACK_DEPLOY_STATE:-$(eval echo "~$OWNER")/.astrostack-deploy}"; mkdir -p "$STATE_DIR"; chown "$OWNER" "$STATE_DIR" 2>/dev/null || true
 
 ASTRO_DATA="$(sed -n 's/^ASTRO_DATA=//p' .env | tail -1 | tr -d '"'"'")"
 [ -n "$ASTRO_DATA" ] && [ -d "$ASTRO_DATA" ] || die "ASTRO_DATA in .env ('$ASTRO_DATA') is not a folder."
@@ -56,13 +74,18 @@ STAMP="$(date -u +%Y%m%dT%H%MZ)"
 echo "$CUR_SHA v$CUR_VER $STAMP" > "$STATE_DIR/last-good"   # what rollback.sh returns to by default
 
 echo "Stopping the app…"; "${COMPOSE[@]}" stop
+APP_STOPPED=1
 
+# A snapshot when the data folder is its own dataset; otherwise -- or if the
+# snapshot fails -- a copy of the databases and settings. Never no backup.
 SNAP=""
-if command -v zfs >/dev/null 2>&1; then
-  DATASET="$(zfs list -H -o name,mountpoint 2>/dev/null | awk -v m="$ASTRO_DATA" '$2==m {print $1; exit}')"
-  if [ -n "$DATASET" ]; then
+DATASET="$(bash scripts/lib/zfs-dataset.sh "$ASTRO_DATA")"
+if [ -n "$DATASET" ]; then
+  if zfs snapshot "$DATASET@astrostack-pre-v$NEW_VER-$STAMP"; then
     SNAP="$DATASET@astrostack-pre-v$NEW_VER-$STAMP"
-    zfs snapshot "$SNAP" && echo "Snapshot: $SNAP"
+    echo "Snapshot: $SNAP"
+  else
+    echo "The ZFS snapshot failed — backing up the databases and settings instead."
   fi
 fi
 if [ -z "$SNAP" ]; then
@@ -86,8 +109,8 @@ for _ in $(seq 60); do
 done; echo
 if [ "$s" != healthy ]; then
   echo "The app did not come up healthy (status: $s). Logs: docker logs --tail 80 astrostack"
-  echo "Roll back with:  sudo scripts/rollback.sh"
+  echo "Roll back with:  sudo bash scripts/rollback.sh"
   exit 1
 fi
 echo "Done: running $(docker exec astrostack python -c 'import webapp;print(webapp.__version__)'). Backup: $SNAP"
-echo "If anything looks wrong:  sudo scripts/rollback.sh"
+echo "If anything looks wrong:  sudo bash scripts/rollback.sh"

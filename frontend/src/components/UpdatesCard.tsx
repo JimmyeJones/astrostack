@@ -179,7 +179,7 @@ export function UpdatesCard() {
             </Text>
             <Text size="xs" c="dimmed">
               Why a helper: the app runs inside the container an update rebuilds, so it can only
-              ask. The helper does the update the same way <Code>sudo scripts/deploy.sh</Code> does,
+              ask. The helper does the update the same way <Code>sudo bash scripts/deploy.sh</Code> does,
               and only reaches the internet when you press Check or Update here.
             </Text>
           </Stack>

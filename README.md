@@ -252,7 +252,7 @@ has **Go back** to undo the last update.
 
 ```bash
 cd astrostack
-sudo scripts/deploy.sh
+sudo bash scripts/deploy.sh
 ```
 
 That deploys the **`stable`** version — a build that has been on `main` for at
@@ -262,9 +262,9 @@ install, **stops the app, backs up your data** (a ZFS snapshot when your data
 folder is its own dataset, otherwise a copy of the databases and settings),
 builds, and waits until the app reports healthy.
 
-- **A specific version:** `sudo scripts/deploy.sh v0.479.2` (every release is a
+- **A specific version:** `sudo bash scripts/deploy.sh v0.479.2` (every release is a
   git tag).
-- **Undo the last update:** `sudo scripts/rollback.sh`. If the older version
+- **Undo the last update:** `sudo bash scripts/rollback.sh`. If the older version
   can't read the newer database format, it will say so and ask you to add
   `--restore-data`, which puts back the backup taken before the update (and
   loses anything the app wrote since). Your raw subs in `incoming/` are never
