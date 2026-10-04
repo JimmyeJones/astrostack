@@ -66,6 +66,20 @@ itself draws.
    that asserts it was handed a `proxy_scale`. Where a caller swallows exceptions on purpose, its test
    doubles have to be strict, because nothing else will be.
 
+### Disagreement filed (AGENTS.md preamble: "If this document and your kickoff prompt disagree, **this document wins**")
+
+**The kickoff prompt named a single designated branch** (`claude/dreamy-thompson-13dxg3`) and said to "NEVER
+push to a different branch without explicit permission". **AGENTS.md §8 step 1 says**
+`git checkout -B agent/<topic> origin/main`, adds that "a harness branch is fine **if it is based on current
+`origin/main`**", and §2/§8 require *one topic per branch* with each task merged on its own. The two cannot
+both hold for a run that ships more than one thing, and the harness branch is handed over at session start
+rather than cut from the `origin/main` the run actually fetches. This run followed AGENTS.md: `agent/builder-run`
+for v0.492.33 (PR #1066, merged) and `agent/docs-classify-confidence` for the docs-only follow-up. Both were
+cut from the `origin/main` the run had just fetched, both were merged by the run, and the repo auto-deletes
+the head branch — so nothing is left stranded either way. Recorded, not re-argued: the previous two runs used
+their harness branches, which §8's "a harness branch is fine" also permits. **Neither choice is a problem; the
+instruction that forbids the other one is.**
+
 ### Cost note
 
 The suite is 16 minutes here and the dogfood pass ~75; they cannot overlap (the script rebuilds
