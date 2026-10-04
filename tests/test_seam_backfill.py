@@ -16,14 +16,25 @@ import pytest
 
 pytest.importorskip("astropy")
 
-from seestack.bg.coverage_leveling import level_by_coverage, measure_seam_residual
+from seestack.bg.coverage_leveling import (
+    SEAM_ESTIMATOR_GENERATION,
+    level_by_coverage,
+    measure_seam_residual,
+)
 from seestack.coverage_backfill import (
     _SEAM_MAX_STEP,
     _seam_read_step,
     backfill_seam_residual,
 )
 from seestack.io.project import Project, StackRunRow
-from seestack.stackhealth import seam_verdict
+from seestack.stackhealth import _SEAM_SCALE_FIXED_IN, seam_verdict
+
+
+# A version string that dates a fixture's seam figure as written by **today's**
+# estimator, derived from the bar itself rather than typed — see the same comment
+# in ``tests/test_stackhealth.py``. Every estimator generation moves the bar, and
+# a literal silently turns these fixtures into *undated* runs on the next bump.
+CURRENT_SCALE_VERSION = ".".join(str(p) for p in _SEAM_SCALE_FIXED_IN)
 
 
 def _run(**kw) -> StackRunRow:
@@ -37,7 +48,7 @@ def _run(**kw) -> StackRunRow:
         # so a fixture that left it unset would be an *undated* run — which is
         # the superseded-scale case, not the ordinary one. The tests that want
         # that case name an old version explicitly.
-        engine_version="0.446.4",
+        engine_version=CURRENT_SCALE_VERSION,
     )
     base.update(kw)
     return StackRunRow(**base)
@@ -382,7 +393,7 @@ def test_a_re_measured_figure_is_not_measured_twice(tmp_path, monkeypatch):
     proj, run_id = _project_with_run(
         tmp_path, _run(fits_path=str(tmp_path / "whatever.fits"),
                        seam_residual=0.42, engine_version="0.287.2",
-                       seam_scale=2))
+                       seam_scale=SEAM_ESTIMATOR_GENERATION))
     try:
         row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
         assert backfill_seam_residual(proj, row) == pytest.approx(0.42)

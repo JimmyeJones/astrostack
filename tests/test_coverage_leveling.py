@@ -630,6 +630,90 @@ def test_one_stranded_coverage_level_is_caught():
     assert seamed.ratio > 1.5 > flat.ratio, (flat, seamed)
 
 
+# ---------------------------------------------------------------------------
+# ...and the figure has to mean the same thing on two canvas sizes.
+#
+# Found by ``scripts/dogfood_scale_pair.py`` on the two bundled mosaic samples
+# and then measured on the real pipeline: the bundled mosaic stacked at three
+# sensors (240x160 / 480x320 / 900x600 panels, star counts scaled to hold the
+# on-sky density, every other thing about the four panels identical) read
+# **0.4520 -> 0.7075 -> 0.8685** on union canvases of 457 / 907 / 1693 px, i.e.
+# monotone and across ``_SEAM_FLAT_RATIO`` — so the biggest canvas lost the "the
+# panels of this mosaic evened out" note about a picture whose panels had evened
+# out. The panel *bodies* agreed on all three to within half an ADU on a grain of
+# sigma 9-13; what moved was how many 0.2%-of-the-canvas levels cleared
+# ``min_pixels_per_level`` and were then allowed to set the whole range
+# (10 readable levels on the smallest canvas, 19 on the biggest). The same three
+# canvases read 0.0616 / 0.0931 / 0.0000 once the range is trimmed by share.
+
+def _sliver_scene(h, w, stars, *, share=0.0025, offset=20.0, level=9, seed=3):
+    """A correctly-leveled 4-panel canvas plus one *stranded sliver*: a thin
+    coverage level holding ``share`` of the canvas, offset by ``offset`` ADU.
+
+    The sliver is the shape the real pipeline produces at the ragged fringe and
+    at a four-way overlap corner — a level too thin for its sky estimate to mean
+    much, sitting several ADU off the bodies after the final gradient pass. Its
+    size is given as a *share* so the same sky can be built at two sensor sizes
+    and differ in nothing else: ``stars`` scales with the area to hold the on-sky
+    density, exactly as ``webapp.sample_data``'s two mosaic samples do.
+    """
+    rgb, cov = _panel_scene(h=h, w=w, stars=stars, seed=seed)
+    out = level_by_coverage(rgb.copy(), cov, frame_coverage=cov)
+    cols = max(1, int(round(w * 0.05)))
+    rows = max(1, int(round(share * h * w / cols)))
+    cov = cov.copy()
+    cov[h // 3:h // 3 + rows, w // 2:w // 2 + cols] = level
+    out[cov == level] += np.float32(offset)
+    return out, cov
+
+
+def test_a_sliver_reads_the_same_on_a_canvas_nine_times_the_size():
+    """The regression: one sky, one sliver, two sensors — one verdict.
+
+    Both canvases hold the same four panels, the same leveled bodies and the same
+    stranded sliver at **0.25 % of the canvas**, offset by the same 20 ADU. The
+    only difference is the sensor, so the sliver's pixel *count* differs 9x (150
+    against 1350) while its share does not — and ``min_pixels_per_level`` is an
+    absolute count, so it fell below the floor on the small canvas and cleared it
+    on the big one. That alone used to flip the verdict: **flat** on the small
+    canvas and **check** (16.4 grain-widths) on the big one, about the same sky.
+    """
+    from seestack.bg.coverage_leveling import measure_seam_residual
+
+    rgb_s, cov_s = _sliver_scene(200, 300, 38)
+    rgb_b, cov_b = _sliver_scene(600, 900, 338)
+    small = measure_seam_residual(rgb_s, cov_s, frame_coverage=cov_s)
+    big = measure_seam_residual(rgb_b, cov_b, frame_coverage=cov_b)
+    assert small is not None and big is not None
+    # The fixture is the case it says it is: the sliver really does straddle
+    # ``min_pixels_per_level`` while holding the same share of each canvas.
+    assert int((cov_s == 9).sum()) < 200 < int((cov_b == 9).sum())
+    assert seam_verdict(round(small.ratio, 4)) == "flat", small
+    assert seam_verdict(round(big.ratio, 4)) == "flat", big
+
+
+def test_a_level_big_enough_to_see_still_sets_the_seam_verdict():
+    """The other half, and the bar stated as a test rather than as a comment: the
+    trim is a share of the canvas, so a level that is *some of the picture* keeps
+    its full vote however thin it looks.
+
+    Same scene and the same 20 ADU offset as above, with the stranded level grown
+    to ``_SEAM_TRIM_SHARE`` of the canvas — one percent, which is about one panel
+    of the 12x8 raster the owner shoots (``tests/shapes.py``). It is still caught,
+    and loudly (around 6 grain-widths). Measured across the bar on this scene:
+    0.25 % and 0.5 % read flat, 1 % / 2 % / 3 % / 4 % all read check.
+    """
+    from seestack.bg.coverage_leveling import (
+        _SEAM_TRIM_SHARE,
+        measure_seam_residual,
+    )
+
+    rgb, cov = _sliver_scene(600, 800, 300, share=_SEAM_TRIM_SHARE)
+    seamed = measure_seam_residual(rgb, cov, frame_coverage=cov)
+    assert seamed is not None
+    assert seam_verdict(round(seamed.ratio, 4)) == "check", seamed
+
+
 def test_a_single_coverage_level_has_no_seam_to_measure():
     """An ordinary single-field stack has one coverage level, so there is no
     join to compare — the measurement declines to invent a verdict (and costs
@@ -832,14 +916,19 @@ def test_a_real_step_on_a_deep_dithered_mosaic_is_still_caught():
 def _generation_1_ratio(monkeypatch, rgb, cov) -> float:
     """What the **pre-v0.313.1** estimator would have written for this canvas.
 
-    Generation 1 was the identical function with no slack at all — a plain
-    ``max(v) − min(v)`` over the per-level sky modes — so setting ``_SEAM_SE_Z``
-    to zero *is* that estimator rather than an imitation of it, over the same
-    levels, the same object mask and the same yardstick.
+    Generation 1 was the identical function with no slack and no trim at all — a
+    plain ``max(v) − min(v)`` over the per-level sky modes — so zeroing
+    ``_SEAM_SE_Z`` (the generation-2 slack) and ``_SEAM_TRIM_SHARE`` (the
+    generation-3 share trim) *is* that estimator rather than an imitation of it,
+    over the same levels, the same object mask and the same yardstick. Both
+    constants have to go: each later generation only ever subtracts from the same
+    range, so leaving one in place would measure a half-generation that never
+    shipped and understate what the owner's old rows actually say.
     """
     from seestack.bg import coverage_leveling as cl
 
     monkeypatch.setattr(cl, "_SEAM_SE_Z", 0.0)
+    monkeypatch.setattr(cl, "_SEAM_TRIM_SHARE", 0.0)
     try:
         result = cl.measure_seam_residual(rgb, cov)
         assert result is not None

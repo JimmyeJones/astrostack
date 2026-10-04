@@ -1,7 +1,7 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-04 (Builder — item 0 corrected, it named a bug that is now on `main`; the Scout's own
-2026-10-04 text is otherwise untouched). `--mosaic` dogfood and the ASTAP/ffmpeg sweep both CLEAN (records in
+*Last edited 2026-10-04 (Builder — item 0 and the seam paragraph corrected, both named a bug that is now on
+`main`; the Scout's own 2026-10-04 text is otherwise untouched). `--mosaic` dogfood and the ASTAP/ffmpeg sweep both CLEAN (records in
 `docs/PROCESS-NOTES.md`). **The Scout rewrites this page** when
 the front of the queue changes; it stays short and dated. If this page and the backlog disagree, the backlog's
 "Bugs (fix these first)" wins and this page is stale — fix it.*
@@ -9,6 +9,15 @@ the front of the queue changes; it stays short and dated. If this page and the b
 ## Front of the queue
 
 0. **"Bugs (fix these first)" holds no ungated code work — everything in it is a gated LEAD or a ⚪ note.**
+   🟠 **The seam finding shipped as v0.492.37** (Builder 2026-10-04): `measure_seam_residual` was not scale-free
+   — the bundled mosaic at three sensors read 0.4520 → 0.7075 → 0.8685 on 457 / 907 / 1693 px of the *same* sky,
+   so the biggest canvas lost the "the panels of this mosaic evened out" note. The bodies agreed on all three to
+   within half an ADU; what moved was how many 0.2–0.9 %-of-the-canvas slivers cleared the absolute
+   `min_pixels_per_level` and were then allowed to set the whole `max − min`. The range is now **trimmed by share
+   of the canvas**, not by pixel count: a level covering ≥ 1 % always votes at full value, and `share = 0` *is*
+   the old range, so the bump of `SEAM_ESTIMATOR_GENERATION` (2 → 3) stays one-sided by construction. The
+   per-level *floor* the entry warned about was built first and is measured wrong — it blinds the deep-dither
+   catch — and the two bars are untouched. After: 0.0616 / 0.0931 / 0.0000.
    🟡 **#1063 shipped as v0.492.35** (Builder 2026-10-04): the incoming-lag note went silent on the owner's
    double-registered folders because `imported_by_folder` *summed* a folder's tally across targets, so #878's
    duplicates pushed it past the files on disk and `waiting <= 0` dropped the folder — 30 of 54 drop folders
@@ -57,13 +66,12 @@ the front of the queue changes; it stays short and dated. If this page and the b
   v0.492.36** (`scripts/dogfood_scale_pair.py`, step 4a-ter of the dogfood pass) **and it found two things on
   its first run, both filed under "Bugs"**: `seam_residual` moves 0.6998 → 1.2218 on the same sky through a
   bigger sensor and loses the "panels evened out" note, and `sky_sigma`'s move turned out to be the proxy
-  *stride* rather than the canvas. **The seam one is the front of the queue now, and it is unusually well
-  prepared**: the reproduction recipe is in its entry (the real pipeline at three sensors with the app's own
-  options — 0.6461 → 0.7492 → 1.0008, 5.6/13.4/42.9 s), and the obvious fix is **measured wrong** — a share
-  floor on which levels vote fixes the repro and leaves the controls byte-identical, but blinds
-  `test_a_real_step_on_a_deep_dithered_mosaic_is_still_caught`, because a dither ramp fragments a panel *body*
-  into thin levels. Band adjacent levels instead; do not re-pick the floor, and do not flip either bar.
-  So question 5 is **answered where it could be asked, and the queue now holds the consequences.**
+  *stride* rather than the canvas. **The seam one is now SHIPPED as v0.492.37** (item 0 above):
+  the entry's reproduction recipe held (0.4520 → 0.7075 → 0.8685 here, 10/35/100 s), the share *floor* it warned
+  about was indeed measured wrong, and what works is the same bar applied as a **trim of the range** rather than a
+  per-level veto — a group of thin levels that together clears 1 % of the canvas still sets the extreme, which is
+  what keeps the deep-dither catch alive. Neither bar was flipped. `sky_sigma` stays a ⚪ lead (it is the stride,
+  not the canvas). So question 5 is **answered where it could be asked, and its consequences are drained.**
   Next user of the rig: the pair differs in canvas extent *and* proxy stride at once, so ask any `MOVED` line
   of one master at two strides before calling it a canvas bug.
   Caveat for whoever takes it: the raw cues move ~30 % relative while the verdicts hold, so any future

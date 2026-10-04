@@ -315,11 +315,12 @@ def backfill_seam_residual(project: Project,
     seam residual to lose.
 
     **A figure on a superseded scale is re-measured rather than returned**, and
-    that is the other half of this function's reason to exist. v0.313.1 changed
-    what ``seam_residual`` means (see
+    that is the other half of this function's reason to exist. v0.313.1 and
+    v0.492.37 each changed what ``seam_residual`` means (see
     :data:`seestack.bg.coverage_leveling.SEAM_ESTIMATOR_GENERATION`), and a row
-    written before it is never revisited, so a library that has been shooting for
-    a while holds both scales at once and nothing says which is which. Reading it
+    written before the latest of them is never revisited, so a library that has
+    been shooting for a while holds several scales at once and nothing says which
+    is which. Reading it
     on the safe side — :func:`seestack.stackhealth.stored_seam_verdict` — costs
     the older rows their "check", so this is what gives it back: the same
     measurement over the same master and coverage map the run already wrote, at

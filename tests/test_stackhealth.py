@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from seestack.bg.coverage_leveling import SEAM_ESTIMATOR_GENERATION
 from seestack.io.project import FrameHealth, FrameRow, StackRunRow
 from seestack.stackhealth import (
     CLEAN_BACKGROUND_SIGMA,
+    _SEAM_SCALE_FIXED_IN,
     background_reads_clean,
     recommended_dark_spec,
     run_option_flag,
@@ -13,6 +15,15 @@ from seestack.stackhealth import (
     stored_seam_verdict,
     uneven_grain_verdict,
 )
+
+# A version string that dates a fixture's seam figure as written by **today's**
+# estimator, derived from the bar itself rather than typed. Every generation of
+# that estimator moves the bar (``SEAM_ESTIMATOR_GENERATION``), and a hard-coded
+# version silently turns every fixture in this file into an *undated* run on the
+# next bump — i.e. quietly exercises ``stored_seam_verdict``'s cautious path in
+# tests that are about something else. That has happened once (v0.492.37); this
+# is so it cannot happen again.
+CURRENT_SCALE_VERSION = ".".join(str(p) for p in _SEAM_SCALE_FIXED_IN)
 
 
 def _run(**kw) -> StackRunRow:
@@ -30,7 +41,7 @@ def _run(**kw) -> StackRunRow:
         # every fixture an *undated* run, i.e. exercise the cautious path in
         # tests that are about something else; the old-scale cases say so
         # explicitly instead.
-        engine_version="0.446.4",
+        engine_version=CURRENT_SCALE_VERSION,
     )
     base.update(kw)
     return StackRunRow(**base)
@@ -1078,7 +1089,8 @@ def test_an_old_run_whose_panels_matched_keeps_its_compliment():
 def test_a_run_stacked_since_the_fix_is_read_exactly_as_before():
     """The common case, and the one that must not move: a figure on today's
     scale is read by today's thresholds, unchanged."""
-    fresh = _run(is_mosaic=True, seam_residual=2.4, engine_version="0.401.1")
+    fresh = _run(is_mosaic=True, seam_residual=2.4,
+                 engine_version=CURRENT_SCALE_VERSION)
     note = _note(stack_health(fresh, [_frame() for _ in range(20)]), "seams")
     assert note is not None
     assert "2.4" in note.message
@@ -1090,7 +1102,8 @@ def test_a_re_measured_figure_is_believed_whatever_stacked_the_run():
     joins were measured from the master it already wrote — and the figure's own
     stamp has to win, or healing one would achieve nothing."""
     healed = _run(is_mosaic=True, seam_residual=2.4,
-                  engine_version="0.287.2", seam_scale=2)
+                  engine_version="0.287.2",
+                  seam_scale=SEAM_ESTIMATOR_GENERATION)
     note = _note(stack_health(healed, [_frame() for _ in range(20)]), "seams")
     assert note is not None
 
@@ -1111,20 +1124,30 @@ def test_a_figure_nobody_can_date_is_read_on_the_safe_side():
 
 
 def test_the_scale_boundary_is_the_release_that_moved_the_number():
-    """Pinned as a version comparison, not a string one: 0.313.1 is current and
-    0.313.0 is not, and a two-part or four-part version still orders."""
-    assert seam_scale_is_current(None, "0.313.1")
-    assert seam_scale_is_current(None, "0.313.2")
-    assert seam_scale_is_current(None, "0.446.4")
+    """Pinned as a version comparison, not a string one: the release that last
+    moved the number is current and its immediate predecessor is not, and a
+    two-part or four-part version still orders.
+
+    Written against ``_SEAM_SCALE_FIXED_IN`` rather than against the literal of
+    the day, because this test's subject is the *ordering*, and the boundary has
+    moved twice now (v0.313.1, then v0.492.37 — the share trim that stopped a
+    sliver setting a whole canvas's verdict).
+    """
+    major, minor, patch = _SEAM_SCALE_FIXED_IN
+    assert seam_scale_is_current(None, f"{major}.{minor}.{patch}")
+    assert seam_scale_is_current(None, f"{major}.{minor}.{patch + 1}")
+    assert seam_scale_is_current(None, f"{major}.{minor + 1}.0")
     assert seam_scale_is_current(None, "1.0.0")
-    assert not seam_scale_is_current(None, "0.313.0")
-    assert not seam_scale_is_current(None, "0.312.9")
+    assert not seam_scale_is_current(None, f"{major}.{minor}.{patch - 1}")
+    assert not seam_scale_is_current(None, f"{major}.{minor - 1}.9")
     assert not seam_scale_is_current(None, "0.287.2")
     assert not seam_scale_is_current(None, "0.99.99")
     # A recorded generation wins outright, either way.
-    assert seam_scale_is_current(2, "0.287.2")
-    assert not seam_scale_is_current(1, "0.446.4")
-    assert seam_scale_is_current(3, None)      # a future generation is not older
+    assert seam_scale_is_current(SEAM_ESTIMATOR_GENERATION, "0.287.2")
+    assert not seam_scale_is_current(SEAM_ESTIMATOR_GENERATION - 1,
+                                     f"{major}.{minor}.{patch}")
+    # A future generation is not older.
+    assert seam_scale_is_current(SEAM_ESTIMATOR_GENERATION + 1, None)
 
 
 def test_the_reading_rule_is_the_same_one_every_surface_uses():
@@ -1132,7 +1155,7 @@ def test_the_reading_rule_is_the_same_one_every_surface_uses():
     so the rule is stated once. Asserted directly so a caller that starts
     re-typing it is a failing test rather than a second opinion."""
     assert stored_seam_verdict(2.4, None, "0.287.2") is None
-    assert stored_seam_verdict(2.4, None, "0.401.1") == "check"
+    assert stored_seam_verdict(2.4, None, CURRENT_SCALE_VERSION) == "check"
     assert stored_seam_verdict(0.3, None, "0.287.2") == "flat"
     assert stored_seam_verdict(1.2, None, "0.287.2") is None   # already silent
     assert stored_seam_verdict(None, None, "0.287.2") is None
