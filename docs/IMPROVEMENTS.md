@@ -82,85 +82,54 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟠 VERIFIED AND MEASURED ON TWO REAL STACKED CANVASES (Builder 2026-10-04, the first finding the
-  v0.492.36 scale-pair rig printed) — `seam_residual` is not scale-invariant: the same sky, the same four
-  panels and the same real step read **0.6998** on the 907 px mosaic sample and **1.2218** on the 1686 px
-  one, which crosses `_SEAM_FLAT_RATIO` and loses the "the panels of this mosaic evened out" note
-  entirely.** *(Pillar: trust / friendliness — PRIORITY 3, on the editor-adjacent "How's my stack?" card;
-  size **M to fix, L to be sure of**; severity medium **and rising with canvas size**; confidence: the move
-  is reproduced, and the mechanism measured, on real stacked data — see the two negative fixture results
-  below before you start.)*
-  **Repro.** `scripts/agent-dogfood.sh --mosaic --big`, then read `stack_runs.seam_residual` on each
-  target's newest run (or the rig's own `stack-health` line: `seams_flat/good/-` is present on the small
-  canvas and absent on the big one). `seam_verdict` calls < 1.0 "flat", ≥ 1.5 "check" and the band between
-  them deliberately **silent**, so the bigger canvas says nothing at all.
-  **What was measured** (`measure_seam_residual` re-run on both masters with its internals printed). The
-  **panel-body** coverage levels — the ones that are what the note is about — agree on both canvases and sit
-  within ~0.5 ADU of zero on a grain of σ ≈ 9–13: levelling worked. The whole spread comes from **small-n
-  levels**: on the small canvas level 21 (n=493) reads +8.97 ADU and level 15 (n=749) +4.75; on the big one
-  levels 18/19 (n=416/310) read +8.41/+9.99 and level 21 (n=3858) +10.07. And **which of those levels gets
-  a vote is a fixed pixel count** — `min_pixels_per_level=200`, scaled for the proxy *stride* by
-  `_level_context` (deliberately, so a proxy picks the same levels the export would) but **not** for the
-  canvas's *extent*. A sliver's pixel count grows with the panel perimeter, so a bigger sensor admits more
-  of them: 10 readable levels on the small canvas against 20 on the big one. The standard-error slack that
-  v0.313.1 added shrinks as 1/√n too, so it does not hold the figure still either (raw max−min moves
-  1.0883σ → 1.6902σ; slack-corrected 0.6998 → 1.2218).
-  **Why it matters more than one lost reassurance.** The owner's own mosaics are ~3494×2470 and up, ~6.5×
-  the big sample's area, so more slivers again clear the gate and the figure climbs further — past 1.5 it
-  stops being silence and becomes the **wrong warning** ("faint seams may show once it's stretched… the
-  editor's background tools can even it out further") about a canvas whose panels did even out.
-  **▶ THE FIXTURE EXISTS — the reproduction recipe, so no run re-derives it.** Three synthetic attempts
-  failed first and are not worth repeating: a hand-built ragged coverage map reads 0.687 → 0.585 (the
-  *wrong* way), the same with per-level noise σ ∝ 1/√coverage and real 4 px Gaussian stars reads
-  2.13 → 1.88, and `_panel_scene` cannot show it at all (4 equal panels, no slivers). What **does**
-  reproduce it is the real pipeline with the app's **own option set** — read it off any run's
-  `options_json`; `background_flatten` with its 128-px box is load-bearing, and without it the figure is
-  wild and non-monotonic (8.6 / 0.57 / 4.76). Build the bundled mosaic through `sample_data`'s own writers
-  at three sensors (240×160 / 480×320 / 900×600, stars scaled to hold the on-sky density: 50 / 200 / 700),
-  `run_stack(mosaic_canvas="auto", …)`, read `SEAMRES` off the master: **0.6461 → 0.7492 → 1.0008** on
-  canvases of 457 / 907 / 1693 px, i.e. monotone and across `_SEAM_FLAT_RATIO`, in **5.6 s / 13.4 s /
-  42.9 s** of stacking. A cheaper fail-before on one canvas: lowering `min_pixels_per_level` admits more
-  thin levels the way a bigger sensor does, and on the small master the figure walks 0.6406 → 0.8817 as it
-  goes 800 → 10.
-  **⚠️ AND THE OBVIOUS FIX IS MEASURED WRONG — do not re-pick it.** Restricting the *vote* to levels
-  holding ≥ 2 % of the covered canvas (yardstick left over every level, which makes it strictly one-sided,
-  which is the property `stored_seam_verdict` needs) **does** fix the repro — 0.0847 / 0.0 / 0.0163, four
-  voting levels each, one answer on all three canvases — and leaves `_panel_scene`'s controls byte-identical
-  (0.519 levelled / 2.0542 stranded / 15.6576 unlevelled). It was built, run, and **reverted**, because the
-  suite found what the repro could not: it **blinds `test_a_real_step_on_a_deep_dithered_mosaic_is_still_caught`**.
-  A dither ramp fragments a panel **body** into many thin levels, so on a heavily-dithered canvas — the
-  owner's own shape — a level's share of the canvas is *not* a proxy for "is this a body", and a genuinely
-  stranded body stops being caught. `test_coverage_grain.py::test_the_grain_step_is_invisible_to_the_seam_measurement`
-  goes silent for the same reason. So the shape needed is **grouping adjacent coverage levels into bands**
-  (or a pixel-count-weighted robust range in place of the max−min) rather than a floor — and that re-opens
-  `_SEAM_FLAT_RATIO` / `_SEAM_VISIBLE_RATIO`, which carry their own measurements (0.56 with a nebula, 0.02
-  without, 1.39/2.08 stranded, 15.7 unlevelled). **Do not flip either bar**; the fault is in what the figure
-  means, not where the bar is.
-  **The generation machinery is ready and its cost is known.** `SEAM_ESTIMATOR_GENERATION` + the `seam_scale`
-  column date a stored figure, `stored_seam_verdict` reads an older one on the safe side (a "flat" holds, a
-  "check" goes silent), and `coverage_backfill.backfill_seam_residual` re-measures a superseded row from the
-  master it already wrote. Keep the yardstick untouched and the bump is one-sided by construction. Budget for
-  it: bumping the generation also moves `_SEAM_SCALE_FIXED_IN` and flips five existing "is this scale current"
-  assertions in `test_stackhealth.py` plus three seam-note tests whose rows are dated by `engine_version` —
-  all correct consequences, none of them weakening, but they are the work.
-- **⚪ MEASURED LEAD (Builder 2026-10-04, the second finding the v0.492.36 rig printed — filed as a lead,
-  not a bug, because no bundled sample shows it misfiring) — `analyze_proxy`'s `sky_sigma` is a function of
-  the proxy **stride**, and `noisy` compares it against a fixed `0.02`, so whether Auto calls a picture
-  noisy can depend on the canvas size.** *(Pillar: autonomy / editor — PRIORITY 1–2; size **M**; severity
-  low **on today's data** and unknown on the owner's; confidence: measured, and the canvas was ruled out as
-  the cause.)*
-  The rig reported `sky_sigma` 0.0004 (small mosaic) vs 0.0007 (full-size). Asking **one** master at three
-  strides shows it is the decimation, not the sky: small 0.000429 / 0.000651 / 0.000736 and full-size
-  0.000438 / 0.000666 / 0.000774 at steps 1 / 2 / 4 — i.e. the two agree to three digits *at the same
-  stride*, and each rises ~50 % per doubling because striding breaks the pixel-to-pixel correlation the
-  stacker's reprojection put there. Which stride a run gets is decided by the canvas (`PROXY_MAX_PX` 1500),
-  so the owner's ~3494 px mosaics are read at step 3 while a single field is read at step 1.
-  **Why it is a lead and not a bug today:** `analyze_proxy` returns `noisy = sky_sigma > 0.02` and both
-  samples sit ~25× below that bar, so nothing visible moves, and `noise_fraction` reads 0.0 on both. The
-  question for whoever takes it is whether the bar should be read at the stride it was calibrated on (or the
-  estimate corrected for it) — **measure first**: find the stride dependence of `estimate_noise_sigma` on a
-  canvas whose `sky_sigma` is actually near 0.02, and check whether Auto's denoise decision flips between
-  step 1 and step 3 on the same pixels. If it does, this becomes a blocker rather than a note.
+- **🟠 VERIFIED AND MEASURED — the gate its own entry set has been run, and it opened (Builder 2026-10-04,
+  promoted from the ⚪ lead the v0.492.36 rig filed). `analyze_proxy`'s `sky_sigma` is a function of the proxy
+  **stride** and nothing else, and every noise decision Auto makes is read against fixed bars — so on the same
+  pixels the one-click result depends on whether the canvas is a single field or a mosaic past `PROXY_MAX_PX`.**
+  *(Pillar: autonomy / the editor — PRIORITY 1–2; size **M to correct, L to be sure of** — the correction is a
+  design choice, see below; severity **medium**: it is the owner's own shooting shape, mosaics and thin panels,
+  that lands in the band; confidence: measured on real stacked masters **and** proved level-independent.)*
+  **What the old entry asked for, and what it answered.** It said: measure the stride dependence on a canvas
+  whose `sky_sigma` is actually near 0.02, and check whether Auto's denoise decision flips between step 1 and
+  step 3 on the same pixels — *"if it does, this becomes a blocker rather than a note"*. It does.
+  **(1) The factor is a property of the reprojection's correlation, not of the stack's depth.** Asking the three
+  real masters from the v0.492.37 repro (same sky, 457 / 907 / 1693 px) at steps 1 / 2 / 3 / 4 gives relative
+  σ of **1.00 / 1.53–1.60 / 1.75–1.83 / 1.84–1.89**, and the three agree to ~5 % at *every* stride, so it is the
+  decimation and not the canvas. On synthetic noise the ratio is **identical to five digits at σ = 0.002, 0.02
+  and 0.2** (0.074522 each at step 1), and it is **1.00 for white noise** — i.e. the whole effect is the
+  pixel-to-pixel correlation the stacker's reprojection puts in, and the multiplier therefore applies wherever a
+  canvas's σ happens to sit. That is what the old entry could not assume.
+  **(2) So the decision flips, and not marginally.** On a realistic linear proxy (stars setting the
+  normalising range, noise carrying the same correlation), read at step 1 and at step 3 — the same pixels:
+  `sky_sigma` 0.0137 → 0.0214 (`noisy` **False → True**, crossfade weight **0.104 → 0.589**); 0.0159 → 0.0249
+  (**False → True**, **0.241 → 0.804**); 0.0180 → 0.0282 (**False → True**, **0.374 → 1.000**). Every read is
+  ×1.57. So the same sky gets a sharpen-dominated Auto as a single field and a near-saturated
+  `detail.denoise` + `detail.chroma_denoise` as a big mosaic.
+  **(3) And the band is reachable on his data, by this file's own measurement.** `_AUTO_DENOISE_MAX`'s comment
+  records that *"a thin (e.g. 12-sub) S30 stack measures σ high enough that both the crossfade weight and the
+  measured-noise suggestion saturate"*. His mosaic panels are the thinnest, noisiest parts of his library **and**
+  his mosaics are the canvases that get strided, so the two conditions coincide rather than cancelling.
+  Worse, the recipe built from the strided measurement is applied to the **full-resolution** export, whose grain
+  is the ×1.57 *smaller* number — so the error is in the over-denoising direction on exactly the pictures that
+  can least afford it.
+  **⚠️ What is NOT settled, and why this is filed rather than fixed.** The obvious corrections were looked at and
+  each needs a decision this repo cannot take blind:
+  **(a) divide by a calibrated stride curve** — 1.00 / 1.57 / 1.79 / 1.84 is measured on *these* masters, and
+  hard-coding it makes a reprojection-kernel property into a constant; it would also move `sky_sigma` on every
+  mosaic, i.e. change a running install's one-click output (§9 — new behaviour is opt-in);
+  **(b) hand the editor the σ the stacker already measured at full resolution** (`BKGSIGMA` on the master /
+  `stack_runs.noise_sigma`) instead of re-deriving it from the proxy — attractive, because it is the honest
+  number and already stored, but it is in the stacker's own normalisation and `analyze_proxy` is also called on
+  an *edited* proxy mid-session, so the two are not interchangeable without checking what the units are and what
+  a NULL row does;
+  **(c) measure the grain on an un-strided patch** — correct by construction and the only one that needs no
+  calibration, but `build_proxy` keeps no full-res pixels (`rgb[::step, ::step]`), so it is new machinery in the
+  proxy cache.
+  **Do not simply move the bars**: they are read by `noisy`, `_noise_fraction`, `_AUTO_DENOISE_MAX` and
+  `_AUTO_CHROMA_MAX`, all calibrated at whatever stride their fixtures used, and a flat shift trades one wrong
+  answer for another. **Repro** (cheap, no stacking): `seestack.edit.presets.analyze_proxy` on one canvas read
+  at `[::1]` and `[::3]`, with noise that has been Gaussian-smoothed (σ ≈ 0.7 px) so it carries a reprojection's
+  correlation; white noise shows nothing, which is the control.
 
 - **⚪ VERIFIED BY ARITHMETIC (Builder 2026-10-04, found while fixing v0.492.33 in the same function) — two of
   `classify_target`'s three archetypes report a `confidence` that is **mathematically pinned to exactly 1.0**
@@ -3489,6 +3458,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **✅ v0.492.37** — 🟠 BUG FIX (trust / friendliness, PRIORITY 3 on the editor-adjacent "How's my stack?" card), draining the front-of-queue Bugs entry the v0.492.36 scale-pair rig filed: **`measure_seam_residual` was not scale-free, so the same sky through a bigger sensor lost the "the panels of this mosaic evened out" note.** The bundled mosaic stacked at three sensors with everything but the sensor held identical read **0.4520 → 0.7075 → 0.8685** on union canvases of 457 / 907 / 1693 px — monotone and across `_SEAM_FLAT_RATIO` — while the panel **bodies** agreed on all three to within half an ADU on a grain of σ ≈ 9–13. Levelling worked; what moved was how many **0.2–0.9 %-of-the-canvas** levels (the single-frame fringe at +7.9/+8.3 ADU, the four-way overlap corner at +8.3/+5.5) cleared the absolute `min_pixels_per_level = 200` and were then allowed to set the whole `max − min`: 10 readable levels on the smallest canvas, 19 on the biggest. The range is now trimmed by **share of the covered canvas** (`_SEAM_TRIM_SHARE`, `_trimmed_extreme`), which gives two stateable properties: a level covering **≥ 1 %** always votes at full value (one panel of the owner's 12×8 raster is still ~1 %), and `share = 0` *is* the old `max − min`, so the figure can only ever read **≤** the previous generation's on identical pixels — the one direction `stored_seam_verdict` reads an old row by. **The per-level *floor* was built first and is measured wrong** — a dither ramp fragments a panel **body** into thin levels, so it blinds `test_a_real_step_on_a_deep_dithered_mosaic_is_still_caught`; a trim does not, because a *group* of thin levels that together clears the bar still sets the extreme. One percent and not two because that fixture's un-stepped border is 2.1 % of its canvas. `_SEAM_FLAT_RATIO`/`_SEAM_VISIBLE_RATIO` **untouched**, and every number they were calibrated on is unchanged (`_panel_scene`'s levels are 25 % each). After: **0.0616 / 0.0931 / 0.0000** on the same three masters. `SEAM_ESTIMATOR_GENERATION` 2 → 3 + `_SEAM_SCALE_FIXED_IN`, so stored rows are read on the safe side and `backfill_seam_residual` heals them; the four fixture files that had the version **typed in** now derive it from the constant, so the next bump does not flip eight tests about something else. Tests +2, fail-before = the finding itself (one sky, two sensors, a 0.25 %-of-canvas sliver whose pixel count differs 9× across the 200 floor: flat on the small canvas, "check" at 16.4 on the big one). No config, schema, migration, on-disk, default or response-shape change. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **✅ v0.492.36** — 🔵 TOOLING (the editor's scale-invariance instrument, AGENTS.md §7), draining the Infra lead filed with v0.492.33: **the two bundled mosaic samples "differ in scale alone" and nothing asked them the same question.** `scripts/dogfood_scale_pair.py`, called from step 4a-ter of `agent-dogfood.sh` when `--mosaic` and `--big` are both on, asks four endpoints that claim to describe the *sky* rather than the picture (`editor/preset-suggestion`, `editor/auto-analysis`, `framing`, `stack-health`) of both halves and prints what moved — the comparison `--big` never made, which is why v0.492.33 ("Galaxy" from one canvas, "Star cluster" from the other) stayed invisible. A **finder, not a gate**: it prints the agreements as well, because a report that shows only failures cannot be told apart from one that asked nothing, and each question carries its own line on what may honestly differ there (the panels' jitter is a fixed *pixel* count, so the ragged corner is a smaller share of the bigger canvas; the full-size canvas really does catch ~3.5× the sky). Tests +8: the comparison is a pure function over injected payloads, so it is pinned against the **pre-v0.492.33 pair of answers** (it must report `MOVED`), against an identical pair (it must read CLEAN *and name what it asked*), and against both built-in honest differences (neither may read as a finding) — blinding `agree()` fails three of them — plus the route/method anchors and the shell gate. **On its first real run it printed two findings, both filed under "Bugs"**: `seam_residual` moves 0.6998 → 1.2218 on the same sky and loses the "panels evened out" note, and `sky_sigma`'s move turned out to be the proxy *stride* rather than the canvas (measured, and the rig's own report now shows both sides of a finding in full — its first finding was hidden behind a truncated common prefix). Entry in [`SHIPPED.md`](SHIPPED.md).
 - **✅ v0.492.35** — 🟡 BUG FIX (trust + autonomy, PRIORITY 2/3), the Scout's ungated 2026-10-04 entry (observer issue [#1063](https://github.com/JimmyeJones/astrostack/issues/1063)), drained: **`/api/incoming-lag` added a double-registered folder's two tallies together, so the folder read as about twice as imported as it is and `incoming_lag`'s `waiting <= 0` guard dropped it** — the one signal built to catch subs that silently never imported was dark on **30 of the owner's 54 drop folders, a 41,727-sub dead zone**, and already answered `n_waiting=1` where the ground truth was 6 across 5 folders. The backlog left the rollup decision open, and it was settled with a measurement rather than an argument: candidate **(a) `max` across targets** was written out and run, and it fixes the repro **while failing** the disjoint-halves guard — reporting two subs as missing that are in the library, the one direction this note must never go. So **(b)**, in the shape that costs what (a) costs on an ordinary library: `source_path` is `UNIQUE` per target, so a folder only *one* target registered is still answered by the one grouped `COUNT`, and only a folder **more than one target claims** is re-counted as the union of its `source_path`s (new `Project.source_paths_in_folder`, matched against the *same* SQL dirname expression `source_folders_under` groups by, so the two cannot drift; grouped by target so a project opens once). **A library with no double-registered folder reads not one extra row and gets a byte-for-byte identical answer**, pinned by a spy that is also shown firing once the duplicate exists. A de-duplication that cannot be completed keeps the old summed tally, because an under-count is the direction that cries wolf. `incoming_lag` itself and `test_a_double_registered_folder_can_only_ever_read_as_imported` are untouched. Tests +12 (5 webapp, 7 engine); fail-before shown (`0 == 2`, total silence). No config, schema, migration, on-disk, default or response-shape change. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.492.34** — 🔴 BUG FIX (the owner's first deploy, 2026-10-04): `scripts/deploy.sh` stopped the app and exited silently — `zfs list | awk '{…; exit}'` died of SIGPIPE under `pipefail` on a NAS with hundreds of datasets — and a failed `zfs snapshot` would have deployed with no backup. Lookup moved to `scripts/lib/zfs-dataset.sh` (reads the whole listing), snapshot failure falls back to the tar copy, an ERR trap names the line and `sudo docker start astrostack`; scripts run each other through `bash` (his clone's dataset is no-exec).

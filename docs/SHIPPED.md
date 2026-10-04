@@ -1,5 +1,95 @@
 # Shipped — the record
 
+## 2026-10-04 (Builder) — the seam number stops depending on the sensor it was shot with
+
+### v0.492.37 — 🟠 BUG FIX: `measure_seam_residual` is scale-free, so "the panels of this mosaic evened out" survives a bigger canvas
+
+**The bug, as the owner would meet it.** `stack_runs.seam_residual` is the mosaic half of "How's my stack?":
+below 1.0 grain-widths the card says *"the panels of this mosaic evened out"*, above 1.5 it says *"faint seams
+may show once it's stretched"*, and the band between is deliberately silent. The figure was **not scale-free**.
+The bundled mosaic sample, stacked at three sensors with everything but the sensor held identical — the same 2×2
+grid, the same 82 % step, the same uneven depth, the same hazy panel, one shared star catalogue at one shared
+on-sky density — read **0.4520 → 0.7075 → 0.8685** on union canvases of **457 / 907 / 1693 px**. Monotone, and
+across `_SEAM_FLAT_RATIO`: the small canvas got the compliment and the big one got **silence**, about the same
+sky. The owner's own mosaics are ~3494×2470 and up, ~6.5× the biggest sample's area, so his canvases sat further
+along that curve again — and past 1.5 the silence becomes the **wrong warning** about a canvas whose panels did
+even out.
+
+**The mechanism, measured rather than reasoned.** `measure_seam_residual` is a `max − min` over the per-coverage-
+level sky estimates, divided by the grain *within* a level. Everything about that is unit-free — rescaling the
+picture moves the step and the yardstick together — except **which levels get a vote**, which was
+`min_pixels_per_level = 200`: an absolute pixel count, scaled for the read's *stride* by `_level_context`
+(deliberately, so a proxy picks the levels the export would) and for nothing else. A sliver's pixel count grows
+with the panel perimeter, so a bigger sensor lets more slivers clear the gate — **10 readable levels on the
+smallest canvas, 13 on the middle one, 19 on the biggest** — and the two outermost of them set the whole range.
+Re-measured with the internals printed, the **panel bodies agreed on all three canvases to within half an ADU**
+on a grain of σ ≈ 9–13: levelling worked. The spread came entirely from levels holding **0.2–0.9 %** of the
+canvas — the single-frame fringe (+7.9 / +8.3 ADU) and the four-way overlap corner (+8.3 / +5.5) — whose sky is
+what the final 128-px gradient box does to a thin region, not a seam between panels. The `±2 SE` slack
+v0.313.1 added shrinks as 1/√n, so it does not hold the figure still either.
+
+**The fix: trim the range by *share of the canvas*, not by pixel count.** Each level now carries how much of the
+covered canvas it is (free — `_level_context` already takes the level histogram to build `big_levels`), and the
+range is taken between the weighted extremes after at most `_SEAM_TRIM_SHARE` of the canvas has been trimmed off
+each end (`_trimmed_extreme`). Two properties, and they are what the number now rests on:
+
+* **a level covering ≥ 1 % of the canvas always votes, at its full value** — so a real panel step is untouched
+  whatever the grid size (one panel of the 12×8 raster `tests/shapes.py` names is still ~1 % of the canvas);
+* **`share = 0` is the old `max − min` exactly**, and a trim can only ever drop candidates from each end, so the
+  figure is **≤** what the previous generation read on the identical pixels — by construction, which is the one
+  direction `stackhealth.stored_seam_verdict` reads an older row by.
+
+**The obvious fix was built first, measured, and is wrong — it is written down so nobody re-picks it.** A
+per-level *floor* (refuse the vote to any level under ~2 % of the canvas) fixes the repro and leaves
+`_panel_scene`'s controls byte-identical, and it **blinds
+`test_a_real_step_on_a_deep_dithered_mosaic_is_still_caught`**: a dither ramp fragments a panel **body** into
+many thin levels, so on the owner's own shape a level's share is *not* a proxy for "is this a body", and a
+genuinely stranded body stops being caught. A trim has no such failure — a *group* of thin levels that together
+covers more than the bar and pulls the same way still sets the extreme, which is exactly the dithered body. One
+percent rather than two for the same reason: that fixture's un-stepped border is **2.1 %** of its canvas at 128
+subs a panel, so a 2 % trim would sit on top of the one case where a thin group *is* the signal. `_SEAM_FLAT_RATIO`
+and `_SEAM_VISIBLE_RATIO` are **not touched**, and could not be — the fault was in what the figure means, not
+where the bar is, and `_panel_scene`'s four levels are 25 % of the canvas each, so every number those bars were
+calibrated on (0.519 levelled, 2.0542 one level stranded, 15.6576 unlevelled) is unchanged by the trim.
+
+**After, on the same three real masters: 0.0616 / 0.0931 / 0.0000** — one verdict on all three canvases, and the
+biggest gets its compliment back.
+
+**The generation bump, and its bill.** `SEAM_ESTIMATOR_GENERATION` goes 2 → 3 and `_SEAM_SCALE_FIXED_IN` to
+(0, 492, 37), because the *meaning* of the figure moved. Stored generation-2 rows are therefore read on the safe
+side — a "flat" still holds (the bump is one-sided), a "check" goes silent — and
+`coverage_backfill.backfill_seam_residual` re-measures a superseded row from the master it already wrote, at the
+same cost as healing a NULL. The bill the backlog predicted was real and is paid: the four fixture files whose
+runs are dated by `engine_version` had the date **typed in** (`"0.446.4"`), which silently turns every fixture
+into an *undated* run on a generation bump. Each now derives it from `_SEAM_SCALE_FIXED_IN`, and
+`test_the_scale_boundary_is_the_release_that_moved_the_number` is written against the constant rather than
+against the literal of the day — so the next bump does not flip eight tests that are about something else. The
+pre-generation-1 emulation in `_generation_1_ratio` now zeroes **both** `_SEAM_SE_Z` and `_SEAM_TRIM_SHARE`,
+because each generation only subtracts from the same range and leaving one in place would measure a
+half-generation that never shipped.
+
+**Tests.** +2 engine, and the fail-before is the finding itself rather than a stand-in: `_sliver_scene` builds
+one sky at **two sensor sizes** with the same four panels, the same leveled bodies and the same stranded sliver
+at **0.25 % of the canvas** — so the sliver's pixel count differs 9× (150 against 1350) while its share does
+not, and 200 falls between them. On `origin/main` that reads **flat on the small canvas and "check" (16.4
+grain-widths) on the 9×-bigger one**, which is the bug in two lines; after, both read flat. Its companion grows
+the same stranded level to exactly `_SEAM_TRIM_SHARE` and asserts it is **still caught** (~6 grain-widths),
+which is the bar stated as a test instead of as a comment; measured across it on that scene, 0.25 % and 0.5 %
+read flat and 1 / 2 / 3 / 4 % all read check. The existing one-sidedness proof
+(`test_the_estimator_fix_can_only_ever_read_a_seam_lower`) now spans generations 1→3 over six scenes. Full suite
+green; no test weakened, skipped or loosened.
+
+**Upgrade safety (§9).** No config field, no schema change, no migration, no on-disk layout change, no default
+flip, no endpoint and no response shape touched. `seam_scale` and `SEAM_ESTIMATOR_GENERATION` are the mechanism
+that was built for exactly this, and it is used as designed: nothing is rewritten on upgrade, no stored figure is
+cleared, and a row whose master has gone keeps the only measurement anybody ever made of it.
+
+**What is left, deliberately.** The second finding the v0.492.36 rig printed (`analyze_proxy`'s `sky_sigma` is a
+function of the proxy *stride*) stays filed as a ⚪ lead — nothing on today's data misfires on it, and it is the
+stride rather than the canvas. The caveat for the next run is unchanged and now has a second instance behind it:
+**the raw cues move ~30 % relative between the two bundled canvases while the verdicts hold, so any tightening of
+a threshold in this family must be checked at two canvas sizes.**
+
 ## 2026-10-04 (Builder) — the scale-invariance pair is an instrument the pass finally uses
 
 ### v0.492.36 — 🔵 TOOLING: `--mosaic --big` asks both mosaic samples the same questions and diffs the answers

@@ -108,6 +108,50 @@ _MODE_SE_FACTOR = 2.15
 # on.
 _SEAM_SE_Z = 2.0
 
+# How much of the covered canvas the seam spread may be trimmed from each end,
+# as a share — the share-weighted equivalent of the ``max−min`` it replaces.
+#
+# **Why a share at all.** Every other part of this measurement is scale-free (it
+# is a step divided by the picture's own grain, so exposure, gain and
+# normalisation all cancel), but *which levels get a vote* was a fixed pixel
+# count: ``min_pixels_per_level`` scaled by the read's stride and by nothing
+# else. A sliver's pixel count grows with the panel perimeter, so a bigger
+# sensor over the *same sky* lets more slivers clear the gate, and the max−min
+# over the survivors climbs with the canvas. Measured on the bundled mosaic
+# sample stacked at three sensors (457 / 907 / 1693 px of union canvas, same sky,
+# same four panels, same real step): **0.4520 → 0.7075 → 0.8685**, i.e. monotone
+# and across ``_SEAM_FLAT_RATIO``, so the biggest canvas lost the "the panels of
+# this mosaic evened out" note entirely. The same three read **0.0616 / 0.0931 /
+# 0.0000** once the range is trimmed by share. The panel *bodies* agreed on all three to
+# within half an ADU on a grain of σ ≈ 9–13 — levelling worked; what moved was
+# the number of 0.2 %-of-the-canvas levels allowed to set it.
+#
+# **Why a trimmed range and not a floor.** The obvious fix — refuse the vote to
+# any level holding less than some share — was built and measured and is
+# *wrong*: a deep dither ramp fragments a panel **body** into many thin levels,
+# so on the owner's own shape a level's share is not a proxy for "is this a
+# body", and a genuinely stranded body stops being caught (it blinds
+# ``test_a_real_step_on_a_deep_dithered_mosaic_is_still_caught``). A trim does
+# not have that failure: it discards at most this share of the canvas from each
+# end, so a *group* of thin levels that together covers more than it and pulls
+# the same way still sets the extreme, which is exactly the dithered body. Two
+# properties follow and are what the number now rests on:
+#
+# * a level covering at least this share **always votes, at its full value** —
+#   so a real panel step is untouched whatever the grid size (a panel in a
+#   100-panel mosaic is still 1 % of the canvas);
+# * ``share = 0`` is the old ``max−min`` exactly, and the trim can only ever
+#   remove candidates from each end, so the figure is **≤** what the previous
+#   generation read on the identical pixels — by construction, which is what
+#   :func:`seestack.stackhealth.stored_seam_verdict` reads an older row by.
+#
+# One percent rather than two: the thin un-stepped border of the deep-dither
+# fixture is 2.1 % of its canvas at 128 subs a panel, so a 2 % trim sits on top
+# of the one case where a thin group *is* the signal, while the slivers this
+# exists to disarm are 0.2–0.9 % and comfortably inside 1 %. Erring small costs
+# a little scale-invariance on a small canvas and never costs a catch.
+_SEAM_TRIM_SHARE = 0.01
+
 # Which generation of this estimator wrote a stored ``seam_residual``. The
 # number is not a version — it is the answer to "can today's thresholds be read
 # against that figure?", and it only moves when the *meaning* of the figure
@@ -116,17 +160,23 @@ _SEAM_SE_Z = 2.0
 # * **1** — a plain ``max(v) − min(v)`` over the per-level sky modes, up to and
 #   including v0.313.0. It charges every level's own estimation noise to the
 #   seam, which on a deep, heavily-dithered mosaic grows with the sub count.
-# * **2** — today's: the same max−min taken between the levels' ``±_SEAM_SE_Z``
-#   intervals instead of between the point estimates (v0.313.1 onwards).
+# * **2** — the same max−min taken between the levels' ``±_SEAM_SE_Z``
+#   intervals instead of between the point estimates (v0.313.1 up to and
+#   including v0.492.36).
+# * **3** — today's: that range *trimmed by share of the canvas* rather than
+#   taken between the outermost two levels, so a 0.2 %-of-the-canvas sliver can
+#   no longer set a whole mosaic's verdict and the figure stops climbing with
+#   the sensor on one unchanged sky (see :data:`_SEAM_TRIM_SHARE`).
 #
-# The two are one-sided, and that is load-bearing rather than incidental:
+# Every bump is one-sided, and that is load-bearing rather than incidental:
 # ``se >= 0`` makes ``max(v − z·se) <= max(v)`` and ``min(v + z·se) >= min(v)``
-# for every channel, over a yardstick v0.313.1 did not touch — so generation 2
-# can only ever report a figure **less than or equal to** generation 1's on the
-# identical pixels. A generation-1 figure is therefore still readable in one
+# for every channel, over a yardstick v0.313.1 did not touch, and a trim only
+# ever drops candidates from each end of that same range — so each generation
+# can only ever report a figure **less than or equal to** its predecessor's on
+# the identical pixels. An older figure is therefore still readable in one
 # direction (see :func:`seestack.stackhealth.stored_seam_verdict`), which is why
 # this is recorded rather than the rows being silenced or rewritten.
-SEAM_ESTIMATOR_GENERATION = 2
+SEAM_ESTIMATOR_GENERATION = 3
 
 
 # Sigma-clipped statistics used only to *locate* a level (its rough sky, its
@@ -265,6 +315,13 @@ class _LevelContext:
     # Floor on the sky sample a *grain* σ may be taken from, already scaled for
     # the read's stride — see :data:`_GRAIN_MIN_SKY_PIXELS`.
     grain_sky_min: int
+    # How many valid pixels each coverage level holds, and how many there are in
+    # total — i.e. what *share of the picture* a level is. Free here (the level
+    # histogram is already taken to build ``big_levels``) and the scale-free
+    # weight :func:`measure_seam_residual` trims by, so a sliver cannot set a
+    # whole canvas's verdict. See :data:`_SEAM_TRIM_SHARE`.
+    region_counts: dict[int, int]
+    n_valid: int
 
 
 def _level_context(
@@ -415,6 +472,9 @@ def _level_context(
         max_level_sigma=_RESCUE_MAX_SIGMA_RATIO * sky_sigma,
         effective_min=effective_min,
         grain_sky_min=grain_sky_min,
+        region_counts={int(lv): int(n)
+                       for lv, n in zip(levels, region_counts)},
+        n_valid=int(valid_pix.sum()),
     )
 
 
@@ -517,6 +577,37 @@ class SeamResidual:
     ratio: float         # spread_adu / noise_sigma
 
 
+def _trimmed_extreme(values: list[float], weights: list[float],
+                     bar: float, *, upper: bool) -> float:
+    """The largest (or smallest) of ``values`` once ``bar`` pixels have been
+    trimmed off that end, each value weighted by ``weights``.
+
+    The weighted generalisation of ``max``/``min``: walk the values inwards from
+    the end, accumulating their weights, and answer with the first one at which
+    the accumulated weight reaches ``bar``. ``bar = 0`` therefore answers with
+    the plain extreme (the first candidate already clears a zero bar), and
+    raising it can only ever move the answer *inwards* — which is what makes a
+    bump of :data:`SEAM_ESTIMATOR_GENERATION` one-sided.
+
+    ``weights`` are pixel counts and ``bar`` is one too (a share of the *whole*
+    covered canvas, not of the levels that happened to be readable), so a level
+    holding more than ``bar`` pixels is always its own answer while a *group* of
+    thinner levels pulling the same way still reaches it together.
+    """
+    if not values:
+        return 0.0
+    order = sorted(range(len(values)), key=lambda i: values[i], reverse=upper)
+    acc = 0.0
+    for i in order:
+        acc += max(0.0, float(weights[i]))
+        if acc >= max(0.0, float(bar)):
+            return float(values[i])
+    # The readable levels together hold less than the trim: nothing can honestly
+    # set this end, so answer with the innermost candidate. The caller clamps the
+    # range at zero, so this says "no confident step" rather than inventing one.
+    return float(values[order[-1]])
+
+
 def measure_seam_residual(
     rgb: np.ndarray,
     coverage: np.ndarray,
@@ -554,6 +645,11 @@ def measure_seam_residual(
     per_level: dict[int, list[float]] = {}
     per_level_sigma: dict[int, list[float]] = {}
     per_level_n: dict[int, int] = {}
+    # How much of the covered canvas each level *is* — the weight the spread is
+    # trimmed by below, and deliberately the level's whole region rather than its
+    # sky sample: a seam shows across the region, and how much of it the object
+    # mask happened to keep is not how visible the step is.
+    per_level_region: dict[int, int] = {}
     for level in ctx.big_levels:
         found = _level_sky_mask(ctx, level, object_sigma, dilate_object_mask_px)
         if found is None:
@@ -569,10 +665,16 @@ def measure_seam_residual(
         # standard error, and the reason a thin dither-ramp level must not be
         # allowed to set the spread on its own.
         per_level_n[level] = int(region_sky_mask.sum())
+        per_level_region[level] = int(ctx.region_counts.get(level, 0))
 
     # Two readable levels is the minimum for a *difference* to exist at all.
     if len(per_level) < 2:
         return None
+
+    # How many pixels may be trimmed off each end of the range — a share of the
+    # *whole* covered canvas, so "a level covering 1 % of the picture always
+    # votes" means what it says whatever else was readable.
+    trim_bar = _SEAM_TRIM_SHARE * float(ctx.n_valid)
 
     worst: tuple[float, float, float] | None = None
     for c in range(3):
@@ -592,6 +694,7 @@ def measure_seam_residual(
         # the grain, so a real seam is untouched.
         his: list[float] = []
         los: list[float] = []
+        weights: list[float] = []
         for lvl, vals_c in per_level.items():
             v = float(vals_c[c])
             sig_l = per_level_sigma[lvl][c]
@@ -600,7 +703,17 @@ def measure_seam_residual(
                   if np.isfinite(sig_l) and sig_l > 0 and n_l > 0 else 0.0)
             his.append(v - _SEAM_SE_Z * se)
             los.append(v + _SEAM_SE_Z * se)
-        spread = max(0.0, float(max(his) - min(los)))
+            weights.append(float(per_level_region[lvl]))
+        # ...and the range is taken between the levels that actually *are* some
+        # of the picture, not between whichever two are furthest apart. Trimming
+        # by share of the canvas is what makes the figure scale-free: a sliver's
+        # pixel count grows with the panel perimeter, so a bigger sensor on one
+        # unchanged sky admits more of them, and the outermost two were theirs
+        # to pick. See :data:`_SEAM_TRIM_SHARE` for the measurement, and for why
+        # a trim rather than a per-level floor.
+        spread = max(0.0, (_trimmed_extreme(his, weights, trim_bar, upper=True)
+                           - _trimmed_extreme(los, weights, trim_bar,
+                                              upper=False)))
         # The yardstick is the grain *within* a level, taken as the median of the
         # per-level spreads — not the canvas-wide σ. A canvas-wide σ is itself
         # inflated by the very level-to-level offsets being measured, so on the

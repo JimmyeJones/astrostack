@@ -4,8 +4,17 @@ from __future__ import annotations
 
 import json
 
+from seestack.bg.coverage_leveling import SEAM_ESTIMATOR_GENERATION
 from seestack.io.library import Library
 from seestack.io.project import StackRunRow
+from seestack.stackhealth import _SEAM_SCALE_FIXED_IN
+
+
+# A version string that dates a fixture's seam figure as written by **today's**
+# estimator, derived from the bar itself rather than typed — see the same comment
+# in ``tests/test_stackhealth.py``. Every estimator generation moves the bar, and
+# a literal silently turns these fixtures into *undated* runs on the next bump.
+CURRENT_SCALE_VERSION = ".".join(str(p) for p in _SEAM_SCALE_FIXED_IN)
 
 
 def _register_run(data_root, safe: str, options: dict,
@@ -25,7 +34,7 @@ def _register_run(data_root, safe: str, options: dict,
                 # it — a figure from before v0.313.1 is on a scale today's
                 # thresholds over-read — so an unset version would silently make
                 # every fixture an *undated* run; the old-scale case says so.
-                **{"engine_version": "0.446.4", **kw},
+                **{"engine_version": CURRENT_SCALE_VERSION, **kw},
             ))
         finally:
             proj.close()
@@ -112,7 +121,8 @@ def test_the_gallery_does_not_warn_from_a_superseded_seam_scale(
     # version that stacked the run, or healing one would change nothing.
     healed = _register_run(solved_library, safe, {"sigma_clip": True},
                            is_mosaic=True, seam_residual=2.2,
-                           engine_version="0.287.2", seam_scale=2)
+                           engine_version="0.287.2",
+                           seam_scale=SEAM_ESTIMATOR_GENERATION)
 
     items = {it["run_id"]: it for it in client.get("/api/gallery").json()["items"]}
     assert items[old_stepped]["seam_verdict"] is None

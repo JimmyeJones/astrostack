@@ -165,16 +165,18 @@ _SOFT_STARS_MIN_SUB_FWHM = 5
 _SEAM_FLAT_RATIO = 1.0
 _SEAM_VISIBLE_RATIO = 1.5
 
-# The release whose estimator fix moved what ``seam_residual`` *means*. v0.313.1
-# stopped charging each coverage level's own estimation noise to the seam, so a
-# figure written before it is on a scale that reads *higher* than today's for the
-# identical pixels — see
-# :data:`seestack.bg.coverage_leveling.SEAM_ESTIMATOR_GENERATION` for why that is
-# one-sided by construction rather than by observation. Runs from before the
-# ``seam_scale`` column existed are dated by their ``engine_version`` instead,
-# which dates the stack and so dates its figure too, nothing having re-measured
-# it since.
-_SEAM_SCALE_FIXED_IN = (0, 313, 1)
+# The release whose estimator fix **most recently** moved what ``seam_residual``
+# *means*. v0.313.1 stopped charging each coverage level's own estimation noise
+# to the seam; v0.492.37 stopped letting a 0.2 %-of-the-canvas sliver set the
+# range, which is what made the figure climb with the sensor on one unchanged sky.
+# A figure written before this release is therefore on a scale that reads
+# *higher* than today's for the identical pixels — see
+# :data:`seestack.bg.coverage_leveling.SEAM_ESTIMATOR_GENERATION` for why every
+# bump is one-sided by construction rather than by observation. Runs from before
+# the ``seam_scale`` column existed are dated by their ``engine_version``
+# instead, which dates the stack and so dates its figure too, nothing having
+# re-measured it since.
+_SEAM_SCALE_FIXED_IN = (0, 492, 37)
 
 # How far below this target's clear-sky baseline a run's median transparency has
 # to sit before the app calls the night hazy. The badge that draws it used to own

@@ -13,6 +13,14 @@ import pytest
 
 from seestack.io.library import Library
 from seestack.io.project import StackRunRow
+from seestack.stackhealth import _SEAM_SCALE_FIXED_IN
+
+
+# A version string that dates a fixture's seam figure as written by **today's**
+# estimator, derived from the bar itself rather than typed — see the same comment
+# in ``tests/test_stackhealth.py``. Every estimator generation moves the bar, and
+# a literal silently turns these fixtures into *undated* runs on the next bump.
+CURRENT_SCALE_VERSION = ".".join(str(p) for p in _SEAM_SCALE_FIXED_IN)
 
 
 def _add_run(data_root: Path, safe: str, **kw) -> int:
@@ -33,7 +41,7 @@ def _add_run(data_root: Path, safe: str, **kw) -> int:
                 # a scale today's thresholds over-read). Unset would make every
                 # fixture an *undated* run and quietly exercise the cautious
                 # path; the old-scale cases below set it explicitly instead.
-                engine_version="0.446.4",
+                engine_version=CURRENT_SCALE_VERSION,
             )
             base.update(kw)
             return proj.add_stack_run(StackRunRow(**base))
