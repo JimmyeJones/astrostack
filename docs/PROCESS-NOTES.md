@@ -1,5 +1,74 @@
 # Process notes & QA sweep records
 
+## 2026-10-04 (Builder, branch `claude/dreamy-thompson-uyoli3`) — v0.492.35 shipped (observer #1063); the scale-invariance question swept on the pure-Python half — CLEAN, and the rig deliberately NOT shipped
+
+### What shipped
+
+**v0.492.35** — the incoming-lag note went silent on exactly the folders #878 had struck. The entry and the
+reasoning are in [`SHIPPED.md`](SHIPPED.md); the one process-worthy part is below.
+
+### The (a)-vs-(b) decision was settled by *running* (a), not by arguing about it
+
+The backlog entry for #1063 named two candidate rollups and asked the Builder to decide first: **(a)** `max`
+across targets (one line; right on 84/84 of the owner's folders, but it under-counts on two targets holding
+disjoint subsets of one folder) and **(b)** a distinct `source_path` count (right by construction, but
+costlier). Both arguments are a priori and both are plausible, which is exactly the shape of decision this
+repo has repeatedly got wrong by reasoning.
+
+So (a) was **written into the tree and run** against the test file that already held the repro plus a
+disjoint-halves case: it fixes the repro **and fails** the disjoint case, reporting two subs as missing that
+are in the library. That took about two minutes and turned "I think `max` can cry wolf" into "`max` does cry
+wolf, here, on this fixture". **Worth generalising:** where a backlog entry hands a run two candidates with
+stated costs, the cheap move is to implement the cheaper one first and run the other candidate's cost as a
+test. A rejected candidate that has been *measured* also leaves a durable guard behind — the disjoint test is
+now the reason the next run cannot quietly simplify this back to a `max`.
+
+### The scale-invariance question (`FOCUS.md` standing frontier, question 5) — swept on the pure-Python half, CLEAN
+
+`FOCUS.md` item 1 named the open, unswept question: **does a measurement change when only the canvas does?**
+— and the Infra lead filed with v0.492.33 asks for a rig that asks one sky the same question at two canvas
+sizes and diffs the answers. The **pure-Python half** of that was built as a scratch rig and run this run.
+
+**What was asked.** A synthetic Seestar field (420 stars at a real ~4 px FWHM, optional broad coloured
+nebula, a sky gradient, read noise) at full resolution and at `[::2, ::2]` — exactly what `build_proxy`
+does — through `auto_recipe`, `analyze_auto_inputs` and `classify_target`, each with the `proxy_scale` its own
+canvas carries, in three shapes: single-field + nebula, mosaic + nebula (four-level coverage map, trim rect),
+mosaic + pure stars.
+
+**Result: CLEAN.** In all three shapes the op list is identical — same ops, same order, same enabled flags,
+no op appearing or disappearing with the canvas — and the archetype verdict agrees (`None`/`None`,
+`None`/`None`, `cluster`/`cluster`). Every numeric disagreement is sampling noise at the rounding digit:
+`tone.stretch`'s `target_bg` moves by ≤ 8.5e-5 (0.224941 vs 0.225026), `sky` by ≤ 0.001 and `sky_sigma` by
+≤ 0.0001 — i.e. the last reported digit. Nothing structural moved.
+
+**Worth writing down for the next run:** the raw *cues* behind the verdict move much more than the verdict
+does — `pt_frac` 0.0366 → 0.0486 and `sig_frac` 0.0366 → 0.0486 on the pure-star shape, ~30 % relative — and
+the verdicts hold only because the branch gates have margin. That is not a bug (the gates are measured, see
+§1 "do not blind-flip a gated threshold"), but it means **a future tightening of any `classify_target`
+threshold has to be checked at two canvas sizes**, because the cue it is tightening against is not itself
+scale-stable to better than tens of percent.
+
+### Why the rig was NOT shipped as a test, which is the real finding
+
+The obvious next step is to land the rig as `tests/test_edit_scale_invariance.py`. It was not, and the reason
+is the one AGENTS.md §8 states outright — *"a regression test whose fixture cannot show the bug is green for
+the same reason"*:
+
+**the rig's own fixture cannot reproduce the one bug of this class that actually happened.** Re-run with the
+`proxy_scale` deliberately withheld from the half-size canvas — i.e. the pre-v0.492.33 defect, the opening
+footprint fixed in *proxy* pixels — this fixture still answers `cluster`/`cluster`, `ext_frac` 0.0/0.0. It is
+blind to the defect it would claim to guard. `tests/test_target_classify.py::test_the_archetype_does_not_change_with_the_size_of_the_canvas`
+already covers `classify_target` **with a fixture tuned to show it** (v0.492.33), and a second, insensitive
+copy of that guard over `auto_recipe` would buy a green tick and no safety, while its numeric tolerances
+would be pure guesswork against sampling noise nobody has bounded.
+
+**So what is left of the lead is its other half, and that is where the value is:** the sample-pair diff in
+`scripts/agent-dogfood.sh --big`. The two bundled mosaic samples "differ in scale alone" over **one shared
+star catalogue** — real Seestar star profiles, a real stacked canvas, a real coverage map — which is precisely
+what this synthetic fixture is not, and is why asking *them* the question found v0.492.33 while asking a
+synthetic field finds nothing. The lead stays open with that scoped down to the `--big` half; the pure-Python
+half is now struck as swept.
+
 ## 2026-10-04 (Scout, branch `claude/funny-shannon-ildr9k`) — triaged the new observer issue #1063 (verified + reproduced, filed into Bugs); `--mosaic` dogfood CLEAN; rotation sweep (3) ASTAP/ffmpeg filesystem side effects re-swept CLEAN
 
 *(Baseline `origin/main` at `48b854c` (`__version__` 0.492.33): **7391 passed, 4 skipped**, 18m59s with

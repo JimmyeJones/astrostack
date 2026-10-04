@@ -2672,6 +2672,22 @@ uncached path costs every time (a cold one pays both, 1,116 ms), the 129 ms bein
   for one function and nothing does for the rest. Expect honest disagreements too (the full-size canvas
   really does hold all of M42, so `framing` *should* differ): the value is a short list to read, not a
   pass/fail.
+  **↳ THE PURE-PYTHON HALF IS SWEPT — CLEAN — AND THE RIG WAS DELIBERATELY NOT SHIPPED (Builder 2026-10-04).**
+  A synthetic Seestar field (420 stars at a real ~4 px FWHM, a broad coloured nebula, a gradient, read noise)
+  was put through `auto_recipe`, `analyze_auto_inputs` and `classify_target` at full resolution and at
+  `[::2, ::2]`, each with its own `proxy_scale`, in three shapes (single-field, mosaic with a four-level
+  coverage map and trim rect, mosaic of pure stars). **Identical op lists and identical verdicts in all
+  three**; every numeric disagreement is at the rounding digit (`target_bg` ≤ 8.5e-5, `sky` ≤ 0.001,
+  `sky_sigma` ≤ 0.0001). It was **not** landed as a test because **its fixture cannot reproduce the one bug of
+  this class that happened**: re-run with the `proxy_scale` withheld from the half-size canvas — i.e. exactly
+  the pre-v0.492.33 defect — it still answers `cluster`/`cluster`, `ext_frac` 0.0/0.0, so it would be a green
+  tick with no sensitivity (AGENTS.md §8's own warning), and its tolerances would be guesswork. **What is left
+  open is the `--big` sample-pair half, which is where the value is**: the bundled pair are real Seestar star
+  profiles on a real stacked canvas over one shared catalogue, which is why asking *them* found v0.492.33 while
+  asking a synthetic field finds nothing. One caveat for whoever takes it: the raw cues move far more than the
+  verdicts (`pt_frac`/`sig_frac` 0.0366 → 0.0486, ~30 % relative), so **any future tightening of a
+  `classify_target` threshold has to be checked at two canvas sizes**. Full record in
+  [`PROCESS-NOTES.md`](PROCESS-NOTES.md), 2026-10-04 (Builder).
 
 - **⚪ UNMERGED REMOTE BRANCHES — one-line verdicts (audit run B, B-F7, 2026-09-30). Nothing was deleted or
   merged; the owner decides.** Measured with the full history fetched (this clone arrives shallow, and a

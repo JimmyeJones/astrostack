@@ -49,8 +49,15 @@ the front of the queue changes; it stays short and dated. If this page and the b
   2026-10-04 (Scout)**: ASTAP still copies each frame into a `TemporaryDirectory` before `-f` (no `-update`),
   `video/ffmpeg.py` only reads (output over a pipe, never an output path), and the stub-binary readonly-guard
   layers all pass. (4) the webapp routers were swept 2026-10-01. Details in `docs/PROCESS-NOTES.md`; don't
-  re-run (1), (3) or (4) before a finding says to. **A fifth question is open and unswept: does a measurement
-  change when only the canvas does?** (item 1).
+  re-run (1), (3) or (4) before a finding says to. **The fifth question — does a measurement change when only
+  the canvas does? — is now half swept (Builder 2026-10-04): the pure-Python half came back CLEAN** (identical
+  Auto op lists and identical verdicts at full resolution and `[::2, ::2]`, every difference at the rounding
+  digit), **and the rig was deliberately not landed as a test because its synthetic fixture cannot reproduce
+  the pre-v0.492.33 defect** — a green tick with no sensitivity. **What is open is the `--big` sample-pair
+  half**, which is where the value is: real star profiles on a real stacked canvas over one shared catalogue.
+  Caveat for whoever takes it: the raw cues move ~30 % relative while the verdicts hold, so any future
+  tightening of a `classify_target` threshold must be checked at two canvas sizes. Details in
+  `docs/PROCESS-NOTES.md` and the Infra lead.
 - **The single-field core is re-opened only narrowly** (a pixel-unit threshold tested on an eighth-size
   fixture; swept across `stack`/`calibrate`/`edit`/`render`/`qc` 2026-09-28 — CLEAN). Do **not** re-sweep
   `seestack/stack` or `seestack/calibrate` until a new bug is found there (AGENTS.md).
