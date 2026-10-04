@@ -1,5 +1,116 @@
 # Shipped — the record
 
+## 2026-10-04 (Builder) — v0.492.33: the editor's preset chip called a canvas of nothing but stars a galaxy, and changed its mind when the canvas got bigger
+
+### v0.492.33 — 🐛 BUG FIX (editor — **PRIORITY 1**): **the star/diffuse separator's footprint was a fixed 7×7 in *proxy* pixels, so it was narrower than a real Seestar star on an un-decimated canvas — and a different patch of sky on every canvas. Both bundled star-only mosaic samples were duly told *"Your image looks like a Galaxy (broadband)"*.**
+
+*(Builder, branch `agent/builder-run`. Baseline `origin/main` at `378a8c7` (`__version__` 0.492.32):
+**7387 passed, 4 skipped**, 16m07s with `OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`,
+`/tmp/pytest-of-root` cleared first. Green, no open PRs, "Bugs (fix these first)" holding nothing ungated —
+so this run took §2's big-picture review, a `--mosaic --editor --big` dogfood pass, and this is what it
+found. Full suite after the change: **7391 passed, 4 skipped**, 15m35s.)*
+
+**The surface.** `POST …/editor/preset-suggestion` → `presetSuggestionSentence` in the editor's "What
+Auto-process did" panel: *"Your image looks like a {label} — its preset is another good starting point to
+compare."* Behind it `seestack/edit/presets.py::classify_target` separates compact point sources from
+extended structure with a grey-scale opening, and reads `star_share` / `ext_frac` off the split. The same
+archetype also keys the stored Adaptive-Auto taste profile (`_classify_run`, and `auto_recipe`'s
+`object_type`), so a wrong answer is not only a wrong chip.
+
+**The bug, measured on the repo's own fixtures.** The opening footprint was `np.ones((7, 7))` — seven
+**proxy** pixels, and a proxy is the master strided to ≤1500 px (`edit/proxy.build_proxy`). Two things
+follow, and both bit:
+
+| run | proxy step | `ext_frac` | `star_share` | verdict |
+|---|---|---|---|---|
+| `Sample_Orion_Nebula_M42` | 1 | 0.0168 | 0.398 | **galaxy** |
+| `Sample_M42_mosaic_2_2` | 1 | 0.0194 | 0.333 | **galaxy** |
+| `Sample_M42_mosaic_2_2_full_size` | 2 | 0.0 | 1.0 | cluster |
+
+All three bundled demos are **Gaussian stars on a noisy sky and nothing else** (`sample_data._render_star_field`;
+`_FWHM_PX = 4.0`, a Seestar's own). There is no extended object in any of them to find, so 1.7–1.9 % of the
+canvas reported as *extended* signal is a measurement error — a 4-px-FWHM star, widened further by the
+`_GEOM_SMOOTH_PX` box the cues are measured through, has a core that survives a 7-px opening. And the last
+two rows are the **same sky through a bigger sensor**: the sample data's own comment says they "differ in
+scale alone, so a finding on one is a question about the other". They answered "galaxy" and "star cluster".
+
+**The sibling had it right all along.** `seestack/edit/starmask.py::star_mask` — the white top-hat
+`classify_target`'s own docstring names as where `star_share` comes from — opens with a footprint it
+**divides by `ctx.proxy_scale`**, under a module docstring that says why: *"the footprint is a physical star
+size in full-resolution pixels. On the decimated live-preview proxy the same star spans fewer pixels."* This
+site never got that treatment.
+
+**The fix.** `classify_target` takes `proxy_scale` (default `1.0`) and sizes the footprint through the new
+`_star_opening_side`, which takes the **larger** of two terms:
+
+- the **star**, `_STAR_OPENING_PX / proxy_scale` — a length on the sensor, exactly `star_mask`'s rule; and
+- the `_GEOM_SMOOTH_PX` box every cue is smoothed through, which is a *proxy*-pixel measure on purpose
+  (grain is per-pixel at every stride) and so does **not** shrink. An opening no wider than that box cannot
+  remove the plateau the box spreads each star into — measured: scaled all the way down to 3×3 at proxy
+  steps 6 and 8, a pure star field reads as a **nebula** (`ext_frac` 0.076). That is why the rule has a
+  floor, and the floor is today's 7×7.
+
+`_STAR_OPENING_PX = 6` is the smallest radius that stays continuous *in sky terms* across the step a real
+single-field Seestar stack gets: `round(6 / 2) == _GEOM_SMOOTH_PX`, so the footprint is ~13 full-resolution
+px at step 1 and ~14 at step 2. **So the only behaviour that moves anywhere is on an un-decimated proxy
+(a canvas ≤1500 px); every strided canvas keeps the 7×7 it has always had**, which is what the measurements
+below say it should.
+
+**After, on the same fixtures.** All three samples → `cluster`, `ext_frac` **0.0**. The full-size master
+re-read at steps 1/2/3/4/6/8 → `cluster`, `ext_frac` 0.0 at **every** step (before: `galaxy` at step 1,
+`cluster` at the rest). The three positive controls in `tests/test_target_classify.py` are unmoved at every
+footprint from 7 to 15: galaxy `ext_frac` 0.043, nebula 0.21, narrow-star cluster 0.0.
+
+**One fixture retuned, deliberately, and checked both ways.** `_star_field_with_faint_nebulosity`'s glow was
+0.05, and at that level the classifier **could not see it at all**: 150 stars of amplitude up to 0.8 set the
+0.5–99.5 percentile span the signal threshold is a fraction of, and the glow lands under it. The `ext_frac`
+the fixture reported was the stars' own cores leaking through the too-narrow opening — i.e. it declined for
+the wrong reason, and once the opening is wide enough it reads as a pure cluster and can carry neither of
+the two claims it exists for (v0.409.1's gradient guard and v0.410.1's panel-step guard). The glow is now
+`_FAINT_GLOW = 0.14`, the star population untouched, which puts the fixture back where its docstring says it
+is (`ext_frac` 0.092, `star_share` 0.52 — "neither cue dominates"). **Both guards were re-armed and verified
+armed:** with `_detrended_luminance` neutered the tilt turns the field into a `cluster` at 0.05 and 0.08,
+and with `_delevelled_luminance` neutered the panel steps do the same. Both guards also still pass against
+`origin/main` on the new fixture, so the retune is not a loosening in either direction.
+
+**The drift guard moved this site from the exemption list to the scaled list.** `tests/test_edit_neighbourhood_drift.py`
+had carried `grey_opening(np.ones((7, 7), dtype=bool))` under `_UNSCALED_BY_DESIGN` since v0.453.3, on the
+strength of a sweep that measured a galaxy, a nebula and a *narrow*-star cluster across proxy steps. That
+sweep's fixtures could not show this — their stars are `sigma=1.0`, FWHM 2.4, narrow enough for a 7×7 to
+erase, where the app's own sample data draws them at FWHM 4.0. The entry is deleted (the file's own
+`test_the_exemption_list_has_no_stale_entries` requires it) and the site is now asserted *scaled*.
+
+**Tests +4 new and one adapted, all five shown failing against `origin/main` in a `git worktree` at
+`378a8c7`** (3 engine, 2 webapp):
+- `test_a_field_of_real_seestar_stars_holds_no_extended_object` — a canvas of nothing but FWHM-4 stars:
+  `ext_frac` must be 0.0 and `star_share` 1.0. Before: `ext_frac` 0.026, `star_share` 0.674, `cls` `None`.
+- `test_the_archetype_does_not_change_with_the_size_of_the_canvas` — the same field whole and strided by
+  two, each classified at its own `proxy_scale`. Before: `None`/0.026 against `cluster`/0.0.
+- `test_the_opening_footprint_is_a_length_on_the_sensor` — the rule itself: 13 at step 1, the 7×7 floor at
+  every step from 2 up, and never finer than the floor for `0`, a negative, `nan` or `inf`.
+- `test_preset_suggestion_measures_stars_at_the_runs_own_pixel_scale` — the endpoint hands the classifier
+  the run's own proxy scale (2.0 for a 1600-px canvas, 1.0 for a 200-px one). Before: `None` for both.
+- `test_auto_feedback_with_run_context_is_scoped_to_the_object_type` (adapted, see above) — its stub now
+  asserts the scale reached it, so the *feedback* path's plumbing is pinned the same way. Before: the
+  archetype comes back `None` and the note says "for you".
+
+**One existing test updated, and it is the second time this exact trap has sprung.**
+`test_auto_feedback_with_run_context_is_scoped_to_the_object_type` stubbed the classifier with
+`lambda rgb, coverage=None: …`. `_classify_run` catches **every** exception by design ("classification is
+advisory; never sink feedback"), so a stub whose signature has fallen behind does not raise — it returns
+`None`, the feedback silently lands in the *global* taste bucket instead of the archetype's, and the only
+symptom is a note reading "for you" where it should read "for your galaxies". v0.410.1 hit the same thing
+when `classify_target` gained `coverage`. The three stubs are now one `_forced(cls)` helper that **asserts**
+it was handed a `proxy_scale` and rejects any unexpected kwarg — a tripwire instead of a lambda, so the next
+signature change fails with a sentence rather than a silently-degraded bucket. Nothing about what the test
+asserts changed.
+
+**Upgrade safety.** One optional keyword on two pure engine functions and one pass-through at three webapp
+call sites. No config, settings, schema, migration, on-disk layout, endpoint, response-shape or default
+change; the response's own fields are untouched. The stored Adaptive-Auto profile is unchanged on disk — a
+library that has never been given feedback classifies nothing at all, since `auto_recipe` only calls the
+classifier when `prefs` is present.
+
 ## 2026-10-03 (Builder) — v0.492.32: the Tonight planner spoke a mosaic's whole-target total as its depth
 
 ### v0.492.32 — 🟡 BUG FIX (friendliness / trust — PRIORITY 3, on two cards the app shows unasked): **"Best use of your scope right now" / "Worth more time" said *"You've got 10 h so far"* for a single field and for a 12×8 raster holding about six minutes a panel — the byte-identical sentence, a hundredfold apart.**

@@ -677,6 +677,42 @@ def test_preset_suggestion_endpoint_classifies_a_star_cluster(client, solved_lib
     assert set(body) == {"preset_id", "label", "reason", "confidence"}
 
 
+def test_preset_suggestion_measures_stars_at_the_runs_own_pixel_scale(
+        client, solved_library, monkeypatch):
+    """The chip's star/diffuse separator is a length on the **sensor**, so the
+    endpoint has to tell the classifier how hard this run's proxy was decimated.
+
+    Without it the same sky answers differently on two canvases: measured on the
+    two bundled mosaic samples — which the sample data's own comment says "differ
+    in scale alone" — the small one was called a *galaxy* and the full-size one a
+    star cluster. ``build_proxy`` strides a master to <=1500 px, so the scale is
+    a property of the run, and only the endpoint knows it.
+    """
+    from webapp.routers import editor as editor_mod
+
+    seen: list[float] = []
+    real = editor_mod.presets_mod.classify_target
+
+    def spy(rgb, coverage=None, **kw):
+        seen.append(kw.get("proxy_scale"))
+        return real(rgb, coverage, **kw)
+
+    monkeypatch.setattr(editor_mod.presets_mod, "classify_target", spy)
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # 1600 px on the long edge is past the 1500 px proxy cap, so this run's proxy
+    # is strided by two; the small one beside it is served whole.
+    wide = _make_run(solved_library, safe, basename="wide_run", h=120, w=1600)
+    small = _make_run(solved_library, safe, basename="small_run", h=120, w=200)
+
+    for rid in (wide, small):
+        assert client.post(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion"
+        ).status_code == 200
+
+    assert seen == [2.0, 1.0]
+
+
 def test_preset_suggestion_endpoint_declines_on_a_blank_field(client, solved_library):
     """A structureless field yields no suggestion (preset_id=None) — the chip stays
     hidden and the general Auto recipe remains the fallback."""
@@ -918,7 +954,25 @@ def test_auto_feedback_with_run_context_is_scoped_to_the_object_type(
 
     # Force the classifier so the test doesn't depend on the synthetic proxy's
     # content — the classifier itself is covered by its own unit tests.
-    monkeypatch.setattr(presets, "classify_target", lambda rgb, coverage=None: {"cls": "galaxy"})
+    #
+    # The stub **asserts** it was given the proxy scale rather than quietly
+    # tolerating it. `_classify_run` catches every exception by design ("never
+    # sink feedback"), so a stub whose signature has fallen behind the real
+    # function does not raise here — it returns `None`, the feedback silently
+    # lands in the *global* bucket instead of the archetype's, and the only
+    # symptom is a note that says "for you" where it should say "for your
+    # galaxies". That has now happened twice, at v0.410.1 and v0.492.33, so the
+    # stub is a tripwire instead of a lambda.
+    def _forced(cls):
+        def stub(rgb, coverage=None, *, proxy_scale=None, **kw):
+            assert proxy_scale is not None, (
+                "the caller must hand the classifier the run's own proxy scale; "
+                "see presets._star_opening_side")
+            assert not kw, f"unexpected classifier kwargs: {sorted(kw)}"
+            return {"cls": cls}
+        return stub
+
+    monkeypatch.setattr(presets, "classify_target", _forced("galaxy"))
 
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, basename="scoped")
@@ -951,9 +1005,9 @@ def test_auto_feedback_with_run_context_is_scoped_to_the_object_type(
             f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()["ops"]
         return next(o for o in ops if o["id"] == "tone.stretch")["params"]["target_bg"]
 
-    monkeypatch.setattr(presets, "classify_target", lambda rgb, coverage=None: {"cls": "cluster"})
+    monkeypatch.setattr(presets, "classify_target", _forced("cluster"))
     cluster_bg = stretch_target_bg()  # a cluster is untouched by the galaxy taste
-    monkeypatch.setattr(presets, "classify_target", lambda rgb, coverage=None: {"cls": "galaxy"})
+    monkeypatch.setattr(presets, "classify_target", _forced("galaxy"))
     galaxy_bg = stretch_target_bg()
     assert galaxy_bg > cluster_bg
 

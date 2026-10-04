@@ -1,5 +1,78 @@
 # Process notes & QA sweep records
 
+## 2026-10-04 (Builder, branch `agent/builder-run`) — v0.492.33 shipped; the `--mosaic --editor --big` dogfood pass CLEAN, and the finding came from the two samples it does *not* compare
+
+*(Baseline `origin/main` at `378a8c7` (`__version__` 0.492.32): **7387 passed, 4 skipped**, 16m07s with
+`OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI on
+`main` green, no open PRs. Suite after the change: **7391 passed, 4 skipped**, 15m35s. "Bugs (fix these first)" held nothing ungated — two gated LEADs and the ⚪ notes,
+exactly as `FOCUS.md` item 0 says — so the run took AGENTS.md §2's big-picture review. One task.)*
+
+### The dogfood pass: CLEAN, and worth saying what that covered
+
+`scripts/agent-dogfood.sh --mosaic --editor --big`, ~75 minutes. Exit 0, *"nothing overflowing, no console
+errors"* on all three targets, three editor drives (field, mosaic, full-size) each adding all 21 ops with
+Undo/Redo and each reporting `editor drive clean`, mosaic Auto trim **7.9 %** (the standing figure; §1's bug
+bar is ~15 %), the full-size preview correctly shrunk `1693x1150 → 1/2` with all five preview↔export
+advisories and the loupe live on it. Read as one paragraph, the Target / Dashboard / Tonight cards agreed
+with each other on every target — including the mosaic pair, where `next-best-move` and the readiness card
+both speak per panel and the framing verdict goes `partial` on the small mosaic and *"Nicely framed"* on the
+full-size one, which is correct: the bigger sensor's canvas really does hold all of M42.
+
+### Where the finding actually came from, and the lesson
+
+Not from a page. The two mosaic samples are, in the sample data's own words, *"the small one's own picture
+shot with a bigger sensor"* — they **differ in scale alone, so a finding on one is a question about the
+other**. Nothing in the script asks the two the same question and compares the answers, so the comparison was
+made by hand: `POST …/editor/preset-suggestion` against the running scratch install for both runs.
+
+```
+Sample_M42_mosaic_2_2            → "Galaxy (broadband)"  confidence 1.0
+Sample_M42_mosaic_2_2_full_size  → "Star cluster"        confidence 1.0
+```
+
+Both samples hold **Gaussian stars and nothing else**. That is the bug v0.492.33 fixes (full write-up in
+`docs/SHIPPED.md`): the star/diffuse opening's footprint was seven *proxy* pixels, so it was a different
+patch of sky on each canvas, and on the un-decimated one it was narrower than the FWHM-4 star the sample data
+itself draws.
+
+**Three things worth carrying forward.**
+
+1. **The pair is an instrument the script does not use.** `--big` exists to reach the decimated-preview
+   surfaces, and it does — but the *scale-invariance* question it is uniquely able to answer ("does this
+   endpoint say the same thing about the same sky through two sensors?") is not asked anywhere. Any
+   measurement that should not depend on canvas size can be tested by asking both and diffing. Filed as a
+   lead in `docs/IMPROVEMENTS.md` (Infra).
+2. **An exemption is only as good as its fixtures.** `tests/test_edit_neighbourhood_drift.py` had carried this
+   exact call site under `_UNSCALED_BY_DESIGN` since v0.453.3, with a reason that reads convincingly and was
+   measured — on a galaxy, a nebula and a cluster of `sigma=1.0` (FWHM 2.4) stars. A FWHM-2.4 star is narrow
+   enough for a 7x7 opening to erase; the app's own sample data, and a Seestar, draw them at **FWHM 4.0**.
+   The sweep could not have seen it. When an exemption's reason rests on a sweep, the sweep's fixtures are
+   part of the reason — say what they were, and say whether they match the data the owner actually has.
+3. **A fixture can pass for the wrong reason, and fixing a bug is when you find out.**
+   `_star_field_with_faint_nebulosity` declined (`cls None`), which is what its two guard tests wanted — but
+   its 0.05 glow was below what the classifier can see once 150 bright stars set the dynamic range, and the
+   `ext_frac` it reported was the stars' own cores leaking through the too-narrow opening. Widen the opening
+   and the fixture becomes a pure cluster and can carry neither claim. It was retuned (glow 0.14, star
+   population untouched), and both guards were then **verified armed** by neutering `_detrended_luminance`
+   and `_delevelled_luminance` in turn and watching each guard fail. Both also still pass against
+   `origin/main` on the new fixture, so the retune is not a loosening in either direction.
+
+4. **A blanket `except Exception` turns a stale test stub into a silently wrong answer.** The one existing
+   test this change broke — `test_auto_feedback_with_run_context_is_scoped_to_the_object_type` — stubbed
+   `classify_target` with a two-parameter lambda. `_classify_run` catches everything by design ("never sink
+   feedback"), so the extra kwarg did not raise: the stub's `TypeError` was swallowed, the archetype came
+   back `None`, and the feedback went into the *global* taste bucket. The visible symptom was one word in a
+   sentence. **v0.410.1 hit this same trap**, which is why the three stubs are now a `_forced(cls)` helper
+   that asserts it was handed a `proxy_scale`. Where a caller swallows exceptions on purpose, its test
+   doubles have to be strict, because nothing else will be.
+
+### Cost note
+
+The suite is 16 minutes here and the dogfood pass ~75; they cannot overlap (the script rebuilds
+`webapp/static/`). Running the suite first and *reading* — the backlog, the editor engine, the drift guard's
+exemption list — while it ran is what put the `starmask`/`classify_target` asymmetry in view before the
+dogfood even finished. The reading is the work, not the waiting.
+
 ## 2026-10-03 (Builder, branch `claude/dreamy-thompson-r7lmtt`) — v0.492.32 shipped; `--mosaic` dogfood CLEAN; the probe cannot photograph the card that was fixed
 
 *(Baseline `origin/main` at `bddbb05` (`__version__` 0.492.31): **7374 passed, 4 skipped**, 13m17s with

@@ -465,6 +465,60 @@ _CHROMA_SMOOTH_PX = 7
 #: worse: it smears a dense star field into fake "extended" signal.)
 _GEOM_SMOOTH_PX = 3
 
+#: Radius, in **full-resolution** pixels, of the opening footprint that tells a
+#: compact point source from extended structure in :func:`classify_target`.
+#:
+#: The same physical measure, for the same reason, as
+#: ``seestack.edit.starmask.star_mask``'s ``size_px`` — the function this one's
+#: own docstring names as where ``star_share`` comes from, and which already
+#: divides its footprint by ``proxy_scale`` because "a star is a fixed size *on
+#: the sensor*". This site did not, and a 7x7 footprint in *proxy* pixels is two
+#: different patches of sky on two canvases: measured on the two bundled mosaic
+#: samples, which the sample data's own comment says "differ in scale alone",
+#: the small one (proxy step 1) read ``ext_frac`` 0.0194 and was called a
+#: **galaxy** — "a concentrated extended object on a mostly dark sky" — while the
+#: full-size one (the same sky through a bigger sensor, proxy step 2) read 0.0
+#: and was correctly called a star cluster. Neither sample contains any extended
+#: object at all: all three bundled demos are Gaussian stars on a noisy sky.
+#:
+#: 6 is the smallest radius that is still *continuous in sky terms* at the step a
+#: real Seestar single-field stack gets: ``round(6 / 2) == _GEOM_SMOOTH_PX``, so
+#: the footprint is ~13 full-resolution pixels at step 1 and ~14 at step 2
+#: (see :func:`_star_opening_side` for why the floor is where it is), and a
+#: 4-px-FWHM star — ``webapp.sample_data._FWHM_PX``, and a Seestar's own — no
+#: longer survives it. Measured: every bundled sample, and the full-size master
+#: re-read at steps 1/2/3/4/6/8, now answers "cluster" with ``ext_frac`` 0.0,
+#: where step 1 alone used to answer "galaxy"; the galaxy, nebula and
+#: narrow-star-cluster controls in ``tests/test_target_classify.py`` are unmoved
+#: (``ext_frac`` 0.043 / 0.21 / 0.0 at every footprint from 7 to 15).
+_STAR_OPENING_PX = 6
+
+
+def _star_opening_side(proxy_scale: float) -> int:
+    """Side of the square opening footprint, in **proxy** pixels.
+
+    Two things have to be erased before what is left may count as extended
+    structure, and they do not scale the same way:
+
+    * the **star**, whose width on this grid is its full-resolution size over the
+      proxy's stride — ``_STAR_OPENING_PX / proxy_scale``; and
+    * the ``_GEOM_SMOOTH_PX`` box every geometry cue is measured through, which
+      is a *proxy*-pixel measure on purpose (it averages out per-pixel shot
+      noise, and grain is per-pixel at every stride) and so does **not** shrink
+      with the stride. An opening no wider than that box cannot remove the
+      plateau the box itself spreads each star into — measured: at step 6 and 8 a
+      footprint scaled all the way down to 3x3 turns a pure star field into a
+      *nebula* (``ext_frac`` 0.076).
+
+    So the footprint is the larger of the two, which is today's 7x7 at every
+    decimated step and wider only on an un-decimated proxy.
+    """
+    scale = float(proxy_scale)
+    if not math.isfinite(scale) or scale < 1.0:
+        scale = 1.0
+    radius = max(_GEOM_SMOOTH_PX, int(round(_STAR_OPENING_PX / scale)))
+    return 2 * radius + 1
+
 
 def _extended_chroma(arr: np.ndarray, ext_sig: np.ndarray) -> float:
     """Median chroma ``(max−min)/mean`` of the extended-signal region.
@@ -513,7 +567,9 @@ def _extended_chroma(arr: np.ndarray, ext_sig: np.ndarray) -> float:
 
 
 def classify_target(rgb: np.ndarray | None,
-                    coverage: np.ndarray | None = None) -> dict[str, Any]:
+                    coverage: np.ndarray | None = None,
+                    *,
+                    proxy_scale: float = 1.0) -> dict[str, Any]:
     """Coarsely classify a proxy as a *star cluster*, *nebula*, or *galaxy* and
     suggest the matching built-in preset — or decline (``preset_id=None``) when the
     content isn't clearly one archetype. A pure hint used by the editor's
@@ -528,7 +584,9 @@ def classify_target(rgb: np.ndarray | None,
     (:func:`_detrended_luminance`, plus :func:`_delevelled_luminance` when the
     caller supplies a mosaic's ``coverage`` map) so that one unchanging sky gives
     one answer however much light pollution was sitting on top of it, and however
-    the panels carrying it were laid out:
+    the panels carrying it were laid out — and on a footprint that is a length on
+    the **sensor** (``proxy_scale``, :data:`_STAR_OPENING_PX`) so that one
+    unchanging sky gives one answer however big the canvas carrying it is:
 
     * ``star_share`` — how much of the above-sky *signal* is compact point sources
       (from the same white-top-hat ``star_mask`` the editor uses). A field that is
@@ -540,6 +598,12 @@ def classify_target(rgb: np.ndarray | None,
       call unless the diffuse spread is unmistakably large, so a big *neutral*
       galaxy (e.g. M31) isn't confidently mis-labelled a nebula — it falls through
       to "unsure" (no chip) instead.
+
+    ``proxy_scale`` is the preview proxy's own stride (``full_width /
+    proxy_width``, what :func:`seestack.edit.proxy.build_proxy` returns beside
+    the pixels). It sizes the star/diffuse separator the way
+    ``starmask.star_mask`` already sizes its own; ``1.0`` — the default, for a
+    caller holding an un-decimated image — is the honest answer for one.
 
     Returns ``{"cls", "preset_id", "label", "reason", "confidence", "cues"}``. When
     nothing is clear, ``cls``/``preset_id`` are ``None`` and no chip is shown.
@@ -617,11 +681,21 @@ def classify_target(rgb: np.ndarray | None,
         return none  # essentially blank — no structured target to classify
 
     # Separate *diffuse* structure from *compact* point sources with a grey-scale
-    # morphological opening: a footprint a few px wide erases stars (and their
-    # Gaussian wings) but leaves anything larger — nebulosity, a galaxy — intact.
-    # So the opened image, thresholded above sky, is the extended signal; whatever
-    # is bright in the raw image but *not* in the opened image is a point source.
-    opened = grey_opening(meas, footprint=np.ones((7, 7), dtype=bool))
+    # morphological opening: a footprint a little wider than a star erases stars
+    # (and their Gaussian wings) but leaves anything larger — nebulosity, a
+    # galaxy — intact. So the opened image, thresholded above sky, is the
+    # extended signal; whatever is bright in the raw image but *not* in the
+    # opened image is a point source.
+    #
+    # "A little wider than a star" is a length on the **sensor**, so it tracks
+    # the proxy's stride (:func:`_star_opening_side`). Fixed at 7x7 it was two
+    # different patches of sky on two canvases, and on an un-decimated one it was
+    # narrower than a real 4-px-FWHM star: the star's own core then survived the
+    # opening and was counted as *extended* signal, which is how both bundled
+    # star-only samples came to be called "a concentrated extended object on a
+    # mostly dark sky".
+    side = _star_opening_side(proxy_scale)
+    opened = grey_opening(meas, footprint=np.ones((side, side), dtype=bool))
     ext_sig = (opened > thr) & cover
     point_sig = signal & ~ext_sig
     n_pt = int(point_sig.sum())
@@ -759,7 +833,8 @@ def auto_recipe(rgb: np.ndarray | None = None,
                 trim_crop: tuple[float, float, float, float] | None = None,
                 prefs: dict[str, Any] | None = None,
                 auto_crop: bool = True,
-                coverage: np.ndarray | None = None) -> Recipe:
+                coverage: np.ndarray | None = None,
+                proxy_scale: float = 1.0) -> Recipe:
     """One-click auto-process built from the image, not hardcoded.
 
     Always: background/gradient removal → photometric colour balance → a proper
@@ -818,6 +893,13 @@ def auto_recipe(rgb: np.ndarray | None = None,
     changes ("Trim border" is still there to crop by hand). The caller still
     *measures* the trim rectangle either way, so ``analyze_auto_inputs`` can report
     what Auto would have trimmed.
+
+    ``proxy_scale`` is the stride ``build_proxy`` decimated this image by. It is
+    a **measurement** input too, and reaches exactly one place: the archetype
+    :func:`classify_target` keys the stored taste profile on, whose star/diffuse
+    separator is a length on the sensor. ``1.0`` (the default, and what a caller
+    with no proxy of its own should pass) leaves the recipe byte-for-byte what it
+    was; with no ``prefs`` the classifier is not called at all.
     """
     target_bg = 0.20
     saturation = 1.2          # neutral fallback when the image can't be measured
@@ -883,7 +965,8 @@ def auto_recipe(rgb: np.ndarray | None = None,
         # Per-object-type taste: classify this image (galaxy/nebula/cluster) so a
         # bias learned on one archetype only shifts that archetype. An unclassified
         # image (cls None) falls back to the global taste — see auto_prefs.
-        object_type = (classify_target(m_rgb, m_cov if is_mosaic else None)
+        object_type = (classify_target(m_rgb, m_cov if is_mosaic else None,
+                                       proxy_scale=proxy_scale)
                        .get("cls") if rgb is not None else None)
         adj = auto_prefs.apply_profile(
             prefs,

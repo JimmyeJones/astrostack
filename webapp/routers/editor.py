@@ -365,7 +365,8 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
     return presets_mod.auto_recipe(
         rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
         prefs=prefs, auto_crop=auto_crop,
-        coverage=_auto_measure_coverage(run, scale, is_mosaic))
+        coverage=_auto_measure_coverage(run, scale, is_mosaic),
+        proxy_scale=scale)
 
 
 def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | None,
@@ -392,7 +393,8 @@ def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
     recipe or persists anything, so a mis-suggestion costs a click, not an image.
     Declines (``preset_id=None``) on an ambiguous or blank field."""
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
-    out = presets_mod.classify_target(rgb, _auto_measure_coverage(run, scale))
+    out = presets_mod.classify_target(rgb, _auto_measure_coverage(run, scale),
+                                      proxy_scale=scale)
     # Only the user-facing fields; the raw cues stay server-side (debug/tests only).
     return {"preset_id": out["preset_id"], "label": out["label"],
             "reason": out["reason"], "confidence": out["confidence"]}
@@ -766,7 +768,8 @@ def _classify_run(request: Request, safe: str, run_id: int) -> str | None:
         project_dir, run = _run_info(request, safe, run_id)
         rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
         return presets_mod.classify_target(
-            rgb, _auto_measure_coverage(run, scale)).get("cls")
+            rgb, _auto_measure_coverage(run, scale),
+            proxy_scale=scale).get("cls")
     except Exception:  # noqa: BLE001 — classification is advisory; never sink feedback
         return None
 
