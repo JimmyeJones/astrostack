@@ -1,20 +1,23 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-04 (Builder) — item 1 said editor re-audits come back clean, and one did not: v0.492.33.
-Corrected here rather than left, because the next run reads this page first. **The Scout rewrites this page**
-whenever the front of the queue changes; it stays short (≤ 60 lines) and dated. Live rules are in `AGENTS.md`;
-the backlog is `docs/IMPROVEMENTS.md`. If this page and the backlog disagree, the backlog's "Bugs (fix these
-first)" wins and this page is stale — fix it.*
+*Last edited 2026-10-04 (Scout) — filed new observer issue #1063 as the one ungated bug; `--mosaic` dogfood and
+the ASTAP/ffmpeg sweep both CLEAN (records in `docs/PROCESS-NOTES.md`). **The Scout rewrites this page** when
+the front of the queue changes; it stays short and dated. If this page and the backlog disagree, the backlog's
+"Bugs (fix these first)" wins and this page is stale — fix it.*
 
 ## Front of the queue
 
-0. **"Bugs (fix these first)" still holds no ungated work.** Its last ungated entry shipped as v0.492.32
-   (`nightplan._have_phrase` / `TonightPick.field_fulls`). What is left is **two gated LEADs and the ⚪
-   notes** — gated on owner data, on an unmeasured cost, or stood down with numbers (enumerated in
-   `docs/PROCESS-NOTES.md`); one ⚪ is new on 2026-10-04 (`classify_target`'s galaxy/nebula `confidence` is
-   pinned to 1.0 by its own gates — filed, not fixed, because nothing reads it). **Do not blind-flip a gated
-   threshold or re-litigate a stand-down that carries numbers.** Grep `docs/SHIPPED.md` before building — the
-   backlog has repeatedly carried shipped items.
+0. **"Bugs (fix these first)" now holds one ungated, reproduced bug at the top (Builder work).** 🟡 **#1063 —
+   the incoming-lag note goes silent on the owner's double-registered folders.** `imported_by_folder` sums
+   registered frame counts across targets, so #878's duplicate targets push the summed tally past the files on
+   disk and `incoming_lag`'s `waiting <= 0` guard drops the folder — 30 of 54 drop folders dark, a 41,727-sub
+   dead zone. Reproduced with the real `incoming_lag` this run; magnitude measured by the observer. Fix lives in
+   `imported_by_folder` (sum → **max** or a distinct-`source_path` count) and needs the (a)-vs-(b) decision in
+   the backlog entry — **not a blind one-liner** (`max` can cry wolf on disjoint subsets). Below it, everything
+   is **gated LEADs and ⚪ notes** (owner data, an unmeasured cost, or a numbered stand-down — see
+   `docs/PROCESS-NOTES.md`; the 2026-10-04 ⚪ is `classify_target`'s `confidence` pinned to 1.0, filed-not-fixed
+   because nothing reads it). **Do not blind-flip a gated threshold or re-litigate a numbered stand-down.** Grep
+   `docs/SHIPPED.md` before building.
 
 1. **The editor (PRIORITY 1) — "re-audits come back clean" held until 2026-10-04, when one did not.** Judge
    Auto/editor on a tiled mosaic at the owner's scale (`--mosaic --editor --big`); a "What Auto did" trim
@@ -26,11 +29,12 @@ first)" wins and this page is stale — fix it.*
    (lead filed under Infra).
 
 2. **Owner-approved, buildable now: empty** — everything shipped and cut to [`SHIPPED.md`](SHIPPED.md).
-3. **Open observer issues — all four verified, filed, blocked on an owner click/reading, none on code**
-   (re-triaged 2026-10-03 Scout; no new issue since 2026-09-25): #878 (reconcile shipped v0.482.1/.2 — closes
-   on a reading that shows the 11 pairs gone; its 2026-10-02 comment is evidence, not a new ask), #880 (both
-   live halves shipped v0.483.1/.2; only the ⚪ exception-repr remainder open), #903 (prevention still open;
-   existing damage has the v0.479.3 repair), #1015 (repo half shipped v0.488.2; the rest is out of this repo).
+3. **Open observer issues — five open (triaged 2026-10-04 Scout).** One carries code work: **#1063** — verified
+   + reproduced this run and filed into "Bugs" (item 0). The other four are blocked on an owner click/reading,
+   none on code: #878 (reconcile shipped v0.482.1/.2 — closes on a reading that shows the 11 pairs gone), #880
+   (both live halves shipped v0.483.1/.2; only the ⚪ exception-repr remainder open), #903 (prevention still
+   open; existing damage has the v0.479.3 repair), #1015 (repo half shipped v0.488.2; the clone-pin + token-mint
+   remainder is out of this repo — its 2026-10-03 follow-up is the same ask, wider window, not a new one).
 
 ## Standing frontier (unchanged until a finding says otherwise)
 
@@ -40,10 +44,12 @@ first)" wins and this page is stale — fix it.*
   at `tone.stretch`'s documented resolution dependence, every pixel-scaled op still routed through `scaled_px`.
   (2) mosaic/walk-away divergence — a threshold taken from a whole-target or *peak* number that is really
   per-panel — swept 2026-10-03 (Scout); it yielded the Tonight-planner bug, **shipped v0.492.32**, and the
-  engine stacking side was otherwise clean. (3) ASTAP/ffmpeg filesystem side effects and (4) the webapp routers
-  were swept 2026-09-30/2026-10-01. Details for all four in `docs/PROCESS-NOTES.md`; don't re-run (1), (3) or
-  (4) before a finding says to. **A fifth question is now open and unswept: does a measurement change when only
-  the canvas does?** (item 1).
+  engine stacking side was otherwise clean. (3) ASTAP/ffmpeg filesystem side effects — **re-swept CLEAN
+  2026-10-04 (Scout)**: ASTAP still copies each frame into a `TemporaryDirectory` before `-f` (no `-update`),
+  `video/ffmpeg.py` only reads (output over a pipe, never an output path), and the stub-binary readonly-guard
+  layers all pass. (4) the webapp routers were swept 2026-10-01. Details in `docs/PROCESS-NOTES.md`; don't
+  re-run (1), (3) or (4) before a finding says to. **A fifth question is open and unswept: does a measurement
+  change when only the canvas does?** (item 1).
 - **The single-field core is re-opened only narrowly** (a pixel-unit threshold tested on an eighth-size
   fixture; swept across `stack`/`calibrate`/`edit`/`render`/`qc` 2026-09-28 — CLEAN). Do **not** re-sweep
   `seestack/stack` or `seestack/calibrate` until a new bug is found there (AGENTS.md).
