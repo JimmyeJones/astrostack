@@ -109,32 +109,40 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   the big sample's area, so more slivers again clear the gate and the figure climbs further — past 1.5 it
   stops being silence and becomes the **wrong warning** ("faint seams may show once it's stretched… the
   editor's background tools can even it out further") about a canvas whose panels did even out.
-  **⚠️ Two negative results, so the next run does not repeat them.** A fix needs a fail-before fixture and
-  **neither synthetic one reproduces the move**: (1) a 2×2 jittered ragged mosaic with the sample's own
-  jitter, 82 % step and 6/6/6/3 depth, levelled and measured at both panel sizes, reads 0.687 → 0.585 (it
-  moves the *wrong way*); (2) the same with per-level noise σ ∝ 1/√coverage and real 4 px-FWHM Gaussian
-  stars at the sample's density reads 2.13 → 1.88. The existing `_panel_scene` fixture cannot show it at
-  all (4 equal full-height panels, no slivers). So the move needs something only the real pipeline supplies
-  — reprojection interpolation, per-panel photometric normalisation, the stacker's own levelling view, or
-  the rejection pass — and **finding the fixture is the first half of this task, not an afterthought**: a
-  fix pinned by a green tick with no sensitivity is the trap v0.492.33's own rig was refused for.
-  **Do not flip `_SEAM_FLAT_RATIO` or `_SEAM_VISIBLE_RATIO`** — they carry their own measurements (0.56
-  with a nebula, 0.02 without, 1.39/2.08 stranded, 15.7 unlevelled) and the fault is in what the figure
-  means, not where the bar is. The shape to weigh is a *share*-based floor on which levels vote, next to
-  `_GRAIN_MIN_SHARE = 0.10`'s precedent — but note a naive 10 % share leaves fewer than two levels on the
-  small sample and would silence the note everywhere, and that any estimator change needs a
-  `SEAM_ESTIMATOR_GENERATION` / `seam_scale` bump so stored figures keep being read on the scale they were
-  written on.
-  **Two more things the next run will want, read off the code this run (not measured).** The estimator already
-  has the machinery for a change like this: `SEAM_ESTIMATOR_GENERATION` + the `seam_scale` column date a stored
-  figure, `stored_seam_verdict` reads an older one on the safe side (a "flat" still holds, a "check" goes
-  silent), and `coverage_backfill.backfill_seam_residual` **re-measures** a superseded row from the master and
-  coverage map it already wrote — so a generation bump is cheaper here than it looks. But the safe-side reading
-  assumes the change can only move the figure *down*, and a share gate does not guarantee that by construction:
-  it shrinks the spread (a subset of the levels), and it also changes `sigma_c`, which is the **median** of the
-  surviving levels' own sigmas and can move either way. Establish that one-sidedness (or handle both directions)
-  before leaning on the existing generation rule.
-
+  **▶ THE FIXTURE EXISTS — the reproduction recipe, so no run re-derives it.** Three synthetic attempts
+  failed first and are not worth repeating: a hand-built ragged coverage map reads 0.687 → 0.585 (the
+  *wrong* way), the same with per-level noise σ ∝ 1/√coverage and real 4 px Gaussian stars reads
+  2.13 → 1.88, and `_panel_scene` cannot show it at all (4 equal panels, no slivers). What **does**
+  reproduce it is the real pipeline with the app's **own option set** — read it off any run's
+  `options_json`; `background_flatten` with its 128-px box is load-bearing, and without it the figure is
+  wild and non-monotonic (8.6 / 0.57 / 4.76). Build the bundled mosaic through `sample_data`'s own writers
+  at three sensors (240×160 / 480×320 / 900×600, stars scaled to hold the on-sky density: 50 / 200 / 700),
+  `run_stack(mosaic_canvas="auto", …)`, read `SEAMRES` off the master: **0.6461 → 0.7492 → 1.0008** on
+  canvases of 457 / 907 / 1693 px, i.e. monotone and across `_SEAM_FLAT_RATIO`, in **5.6 s / 13.4 s /
+  42.9 s** of stacking. A cheaper fail-before on one canvas: lowering `min_pixels_per_level` admits more
+  thin levels the way a bigger sensor does, and on the small master the figure walks 0.6406 → 0.8817 as it
+  goes 800 → 10.
+  **⚠️ AND THE OBVIOUS FIX IS MEASURED WRONG — do not re-pick it.** Restricting the *vote* to levels
+  holding ≥ 2 % of the covered canvas (yardstick left over every level, which makes it strictly one-sided,
+  which is the property `stored_seam_verdict` needs) **does** fix the repro — 0.0847 / 0.0 / 0.0163, four
+  voting levels each, one answer on all three canvases — and leaves `_panel_scene`'s controls byte-identical
+  (0.519 levelled / 2.0542 stranded / 15.6576 unlevelled). It was built, run, and **reverted**, because the
+  suite found what the repro could not: it **blinds `test_a_real_step_on_a_deep_dithered_mosaic_is_still_caught`**.
+  A dither ramp fragments a panel **body** into many thin levels, so on a heavily-dithered canvas — the
+  owner's own shape — a level's share of the canvas is *not* a proxy for "is this a body", and a genuinely
+  stranded body stops being caught. `test_coverage_grain.py::test_the_grain_step_is_invisible_to_the_seam_measurement`
+  goes silent for the same reason. So the shape needed is **grouping adjacent coverage levels into bands**
+  (or a pixel-count-weighted robust range in place of the max−min) rather than a floor — and that re-opens
+  `_SEAM_FLAT_RATIO` / `_SEAM_VISIBLE_RATIO`, which carry their own measurements (0.56 with a nebula, 0.02
+  without, 1.39/2.08 stranded, 15.7 unlevelled). **Do not flip either bar**; the fault is in what the figure
+  means, not where the bar is.
+  **The generation machinery is ready and its cost is known.** `SEAM_ESTIMATOR_GENERATION` + the `seam_scale`
+  column date a stored figure, `stored_seam_verdict` reads an older one on the safe side (a "flat" holds, a
+  "check" goes silent), and `coverage_backfill.backfill_seam_residual` re-measures a superseded row from the
+  master it already wrote. Keep the yardstick untouched and the bump is one-sided by construction. Budget for
+  it: bumping the generation also moves `_SEAM_SCALE_FIXED_IN` and flips five existing "is this scale current"
+  assertions in `test_stackhealth.py` plus three seam-note tests whose rows are dated by `engine_version` —
+  all correct consequences, none of them weakening, but they are the work.
 - **⚪ MEASURED LEAD (Builder 2026-10-04, the second finding the v0.492.36 rig printed — filed as a lead,
   not a bug, because no bundled sample shows it misfiring) — `analyze_proxy`'s `sky_sigma` is a function of
   the proxy **stride**, and `noisy` compares it against a fixed `0.02`, so whether Auto calls a picture

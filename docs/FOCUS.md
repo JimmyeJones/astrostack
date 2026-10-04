@@ -56,9 +56,14 @@ the front of the queue changes; it stays short and dated. If this page and the b
   the pre-v0.492.33 defect** — a green tick with no sensitivity. **The `--big` sample-pair half is now SHIPPED as
   v0.492.36** (`scripts/dogfood_scale_pair.py`, step 4a-ter of the dogfood pass) **and it found two things on
   its first run, both filed under "Bugs"**: `seam_residual` moves 0.6998 → 1.2218 on the same sky through a
-  bigger sensor and loses the "panels evened out" note (filed, not fixed — two synthetic fixtures were built
-  and neither reproduces it), and `sky_sigma`'s move turned out to be the proxy *stride* rather than the
-  canvas. So question 5 is **answered where it could be asked, and the queue now holds the consequences.**
+  bigger sensor and loses the "panels evened out" note, and `sky_sigma`'s move turned out to be the proxy
+  *stride* rather than the canvas. **The seam one is the front of the queue now, and it is unusually well
+  prepared**: the reproduction recipe is in its entry (the real pipeline at three sensors with the app's own
+  options — 0.6461 → 0.7492 → 1.0008, 5.6/13.4/42.9 s), and the obvious fix is **measured wrong** — a share
+  floor on which levels vote fixes the repro and leaves the controls byte-identical, but blinds
+  `test_a_real_step_on_a_deep_dithered_mosaic_is_still_caught`, because a dither ramp fragments a panel *body*
+  into thin levels. Band adjacent levels instead; do not re-pick the floor, and do not flip either bar.
+  So question 5 is **answered where it could be asked, and the queue now holds the consequences.**
   Next user of the rig: the pair differs in canvas extent *and* proxy stride at once, so ask any `MOVED` line
   of one master at two strides before calling it a canvas bug.
   Caveat for whoever takes it: the raw cues move ~30 % relative while the verdicts hold, so any future
