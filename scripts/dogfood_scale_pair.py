@@ -27,6 +27,16 @@ verdict holds, which is why a tolerance here is a reading aid and never a
 pass/fail. Anything this turns up still needs a real regression test
 (AGENTS.md §7).
 
+**Read a MOVED number against the stride before calling it a canvas bug.** The
+pair differs in two ways at once: the canvas's extent, and — because the bigger
+union canvas passes ``PROXY_MAX_PX`` — the proxy *stride*. On this rig's first
+real run ``sky_sigma`` moved 0.0004 → 0.0007 and that turned out to be the
+stride alone: asked of **one** master at steps 1/2/4 it reads 0.000429 /
+0.000651 / 0.000736, and the two samples agree to three digits at every stride.
+So for anything measured on the proxy, the second question is "does it still
+move when I hold the canvas and change only the stride?" — one call against one
+master, and it separated a real finding from a non-finding here in minutes.
+
 Run it through ``scripts/agent-dogfood.sh --mosaic --big``, which boots the app,
 loads and stacks both samples and then calls this with their safe names.
 """

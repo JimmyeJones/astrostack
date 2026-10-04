@@ -51,6 +51,31 @@ merge. `main`'s CI was green at the start. `--mosaic --big` dogfood pass otherwi
 7.9 %, the full-size preview decimated by 2 with the full-size check live, both samples classified
 `globular_cluster`/"Star cluster" at both canvas sizes (v0.492.33's fix holding).
 
+### One flaky failure, traced to the fixture rather than re-run away
+
+The pre-merge full suite failed once on
+`tests/webapp/test_current_picture_fallback.py::test_a_healthy_library_never_opens_a_project_for_the_fallback`
+(`assert ['NGC_7000'] == []`). It is **not** this run's change — the diff is a dev script, a dev helper, a test
+file and docs, and cannot reach `current_picture_path` — and it did not reproduce: the whole of `tests/webapp`
+under the same `-n 4` (2,705 tests) passed, the file passes alone, and the full suite passed on re-run.
+
+**But "flake" is not a root cause, so here is the mechanism, named for whoever fixes it.** The webapp `client`
+fixture starts the app *with its watcher enabled* and only turns it off one request later
+(`c.put("/api/settings", {"watcher_enabled": False})` after `TestClient(app)` has already run the lifespan).
+`Watcher._run` polls immediately, and every webapp test's `incoming/` holds the two folders `_make_incoming`
+writes — `M_42` and **`NGC_7000`**, which is exactly the target the assertion named. So a startup poll can fire
+a batch while the test body is running, and the scan it triggers calls `refresh_target_stats`, which recomputes
+`last_stack_preview` from the project's run list. Computed *before* the test's own `_register_picture` run
+exists and written *after* it, that stamp lands as NULL, the stamp is then unreadable, and
+`current_picture_path` falls through to step three — one `open_target`, which is the thing the test forbids.
+Under `-n 4` the window is a function of CPU contention, which is why adding eight unrelated tests was enough
+to open it once.
+
+**Not fixed here, deliberately:** the fix is to disable the watcher *before* `create_app()` rather than one
+request after, and that fixture is shared by all 2,705 webapp tests — a change to make on its own, with its own
+full-suite run, not at the tail of an unrelated one. Filed here rather than in the backlog because it is
+process/tooling, not product (AGENTS.md §2's three-file rule).
+
 ## 2026-10-04 (Builder, branch `claude/dreamy-thompson-uyoli3`) — v0.492.35 shipped (observer #1063); the scale-invariance question swept on the pure-Python half — CLEAN, and the rig deliberately NOT shipped
 
 ### What shipped

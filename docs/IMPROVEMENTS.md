@@ -125,6 +125,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   small sample and would silence the note everywhere, and that any estimator change needs a
   `SEAM_ESTIMATOR_GENERATION` / `seam_scale` bump so stored figures keep being read on the scale they were
   written on.
+  **Two more things the next run will want, read off the code this run (not measured).** The estimator already
+  has the machinery for a change like this: `SEAM_ESTIMATOR_GENERATION` + the `seam_scale` column date a stored
+  figure, `stored_seam_verdict` reads an older one on the safe side (a "flat" still holds, a "check" goes
+  silent), and `coverage_backfill.backfill_seam_residual` **re-measures** a superseded row from the master and
+  coverage map it already wrote — so a generation bump is cheaper here than it looks. But the safe-side reading
+  assumes the change can only move the figure *down*, and a share gate does not guarantee that by construction:
+  it shrinks the spread (a subset of the levels), and it also changes `sigma_c`, which is the **median** of the
+  surviving levels' own sigmas and can move either way. Establish that one-sidedness (or handle both directions)
+  before leaning on the existing generation rule.
 
 - **⚪ MEASURED LEAD (Builder 2026-10-04, the second finding the v0.492.36 rig printed — filed as a lead,
   not a bug, because no bundled sample shows it misfiring) — `analyze_proxy`'s `sky_sigma` is a function of
