@@ -82,24 +82,54 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **⚪ MEASURED LEAD (Builder 2026-10-04, the second finding the v0.492.36 rig printed — filed as a lead,
-  not a bug, because no bundled sample shows it misfiring) — `analyze_proxy`'s `sky_sigma` is a function of
-  the proxy **stride**, and `noisy` compares it against a fixed `0.02`, so whether Auto calls a picture
-  noisy can depend on the canvas size.** *(Pillar: autonomy / editor — PRIORITY 1–2; size **M**; severity
-  low **on today's data** and unknown on the owner's; confidence: measured, and the canvas was ruled out as
-  the cause.)*
-  The rig reported `sky_sigma` 0.0004 (small mosaic) vs 0.0007 (full-size). Asking **one** master at three
-  strides shows it is the decimation, not the sky: small 0.000429 / 0.000651 / 0.000736 and full-size
-  0.000438 / 0.000666 / 0.000774 at steps 1 / 2 / 4 — i.e. the two agree to three digits *at the same
-  stride*, and each rises ~50 % per doubling because striding breaks the pixel-to-pixel correlation the
-  stacker's reprojection put there. Which stride a run gets is decided by the canvas (`PROXY_MAX_PX` 1500),
-  so the owner's ~3494 px mosaics are read at step 3 while a single field is read at step 1.
-  **Why it is a lead and not a bug today:** `analyze_proxy` returns `noisy = sky_sigma > 0.02` and both
-  samples sit ~25× below that bar, so nothing visible moves, and `noise_fraction` reads 0.0 on both. The
-  question for whoever takes it is whether the bar should be read at the stride it was calibrated on (or the
-  estimate corrected for it) — **measure first**: find the stride dependence of `estimate_noise_sigma` on a
-  canvas whose `sky_sigma` is actually near 0.02, and check whether Auto's denoise decision flips between
-  step 1 and step 3 on the same pixels. If it does, this becomes a blocker rather than a note.
+- **🟠 VERIFIED AND MEASURED — the gate its own entry set has been run, and it opened (Builder 2026-10-04,
+  promoted from the ⚪ lead the v0.492.36 rig filed). `analyze_proxy`'s `sky_sigma` is a function of the proxy
+  **stride** and nothing else, and every noise decision Auto makes is read against fixed bars — so on the same
+  pixels the one-click result depends on whether the canvas is a single field or a mosaic past `PROXY_MAX_PX`.**
+  *(Pillar: autonomy / the editor — PRIORITY 1–2; size **M to correct, L to be sure of** — the correction is a
+  design choice, see below; severity **medium**: it is the owner's own shooting shape, mosaics and thin panels,
+  that lands in the band; confidence: measured on real stacked masters **and** proved level-independent.)*
+  **What the old entry asked for, and what it answered.** It said: measure the stride dependence on a canvas
+  whose `sky_sigma` is actually near 0.02, and check whether Auto's denoise decision flips between step 1 and
+  step 3 on the same pixels — *"if it does, this becomes a blocker rather than a note"*. It does.
+  **(1) The factor is a property of the reprojection's correlation, not of the stack's depth.** Asking the three
+  real masters from the v0.492.37 repro (same sky, 457 / 907 / 1693 px) at steps 1 / 2 / 3 / 4 gives relative
+  σ of **1.00 / 1.53–1.60 / 1.75–1.83 / 1.84–1.89**, and the three agree to ~5 % at *every* stride, so it is the
+  decimation and not the canvas. On synthetic noise the ratio is **identical to five digits at σ = 0.002, 0.02
+  and 0.2** (0.074522 each at step 1), and it is **1.00 for white noise** — i.e. the whole effect is the
+  pixel-to-pixel correlation the stacker's reprojection puts in, and the multiplier therefore applies wherever a
+  canvas's σ happens to sit. That is what the old entry could not assume.
+  **(2) So the decision flips, and not marginally.** On a realistic linear proxy (stars setting the
+  normalising range, noise carrying the same correlation), read at step 1 and at step 3 — the same pixels:
+  `sky_sigma` 0.0137 → 0.0214 (`noisy` **False → True**, crossfade weight **0.104 → 0.589**); 0.0159 → 0.0249
+  (**False → True**, **0.241 → 0.804**); 0.0180 → 0.0282 (**False → True**, **0.374 → 1.000**). Every read is
+  ×1.57. So the same sky gets a sharpen-dominated Auto as a single field and a near-saturated
+  `detail.denoise` + `detail.chroma_denoise` as a big mosaic.
+  **(3) And the band is reachable on his data, by this file's own measurement.** `_AUTO_DENOISE_MAX`'s comment
+  records that *"a thin (e.g. 12-sub) S30 stack measures σ high enough that both the crossfade weight and the
+  measured-noise suggestion saturate"*. His mosaic panels are the thinnest, noisiest parts of his library **and**
+  his mosaics are the canvases that get strided, so the two conditions coincide rather than cancelling.
+  Worse, the recipe built from the strided measurement is applied to the **full-resolution** export, whose grain
+  is the ×1.57 *smaller* number — so the error is in the over-denoising direction on exactly the pictures that
+  can least afford it.
+  **⚠️ What is NOT settled, and why this is filed rather than fixed.** The obvious corrections were looked at and
+  each needs a decision this repo cannot take blind:
+  **(a) divide by a calibrated stride curve** — 1.00 / 1.57 / 1.79 / 1.84 is measured on *these* masters, and
+  hard-coding it makes a reprojection-kernel property into a constant; it would also move `sky_sigma` on every
+  mosaic, i.e. change a running install's one-click output (§9 — new behaviour is opt-in);
+  **(b) hand the editor the σ the stacker already measured at full resolution** (`BKGSIGMA` on the master /
+  `stack_runs.noise_sigma`) instead of re-deriving it from the proxy — attractive, because it is the honest
+  number and already stored, but it is in the stacker's own normalisation and `analyze_proxy` is also called on
+  an *edited* proxy mid-session, so the two are not interchangeable without checking what the units are and what
+  a NULL row does;
+  **(c) measure the grain on an un-strided patch** — correct by construction and the only one that needs no
+  calibration, but `build_proxy` keeps no full-res pixels (`rgb[::step, ::step]`), so it is new machinery in the
+  proxy cache.
+  **Do not simply move the bars**: they are read by `noisy`, `_noise_fraction`, `_AUTO_DENOISE_MAX` and
+  `_AUTO_CHROMA_MAX`, all calibrated at whatever stride their fixtures used, and a flat shift trades one wrong
+  answer for another. **Repro** (cheap, no stacking): `seestack.edit.presets.analyze_proxy` on one canvas read
+  at `[::1]` and `[::3]`, with noise that has been Gaussian-smoothed (σ ≈ 0.7 px) so it carries a reprojection's
+  correlation; white noise shows nothing, which is the control.
 
 - **⚪ VERIFIED BY ARITHMETIC (Builder 2026-10-04, found while fixing v0.492.33 in the same function) — two of
   `classify_target`'s three archetypes report a `confidence` that is **mathematically pinned to exactly 1.0**
