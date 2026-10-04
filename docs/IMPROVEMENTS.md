@@ -82,6 +82,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **⚪ VERIFIED BY ARITHMETIC (Builder 2026-10-04, found while fixing v0.492.33 in the same function) — two of
+  `classify_target`'s three archetypes report a `confidence` that is **mathematically pinned to exactly 1.0**
+  by their own branch guards, so the number carries no information.** *(Pillar: trust — size **S to change,
+  M to decide what it should mean**; severity **low, and say why**: nothing reads it. Confidence: proven from
+  the source, and every verdict measured this run — galaxy and nebula — came back 1.0.)*
+  `seestack/edit/presets.py::classify_target`: the nebula branch requires `ext_frac >= 0.06` and then reports
+  `min(1.0, ext_frac / 0.06)`; the galaxy branch requires `ext_frac <= 0.05` and reports
+  `min(1.0, 0.05 / max(ext_frac, 1e-3))`. Both ratios are `>= 1` *inside their own gate*, so both `min`s are
+  always 1.0. Only the cluster branch's `min(1.0, star_share)` varies (its gate is `star_share >= 0.75`, so it
+  spans 0.75–1.0). v0.492.33 is why this matters enough to write down: the chip was confidently **wrong** about
+  all three bundled samples and said so at 1.0.
+  **Why it is filed and not fixed: nothing consumes it.** `confidence` is served by
+  `…/editor/preset-suggestion` and `frontend/src/components/editor/autoSummary.ts::presetSuggestionSentence`
+  gates on `preset_id` + `label` only — it never reads the number — so changing it is invisible today and
+  *choosing* a replacement is design, not a bug fix. Decide what it should mean first (how far inside its gate
+  the verdict sits? how far from the nearest rival branch?) and only then write a formula; do not quietly swap
+  one constant for another. If it is ever surfaced to the user, this becomes a blocker rather than a note.
+
 - **LEAD (Builder 2026-09-25, filed while shipping v0.473.1 — the two halves of observer issue
   [#965](https://github.com/JimmyeJones/astrostack/issues/965) that fix deliberately left) — refuse an
   implausible solve at *solve* time, and heal the rows already carrying one.** *(Pillar: image quality —
