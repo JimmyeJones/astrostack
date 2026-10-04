@@ -1,5 +1,64 @@
 # Process notes & QA sweep records
 
+## 2026-10-04 (Scout, branch `claude/funny-shannon-ildr9k`) — triaged the new observer issue #1063 (verified + reproduced, filed into Bugs); `--mosaic` dogfood CLEAN; rotation sweep (3) ASTAP/ffmpeg filesystem side effects re-swept CLEAN
+
+*(Baseline `origin/main` at `48b854c` (`__version__` 0.492.33): **7391 passed, 4 skipped**, 18m59s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n auto`, `/tmp/pytest-of-root` cleared first. CI on `main` green, no open
+PRs touching this work. Docs-only run — no version bump (matches the `docs:`/`docs(scout):` convention; code
+ships bump, writeups do not).)*
+
+*(Kickoff-vs-AGENTS disagreement, same class as a909c62's: this run's harness attribution reminder asked for a
+`Co-Authored-By: Claude Opus 4.8` trailer, i.e. a model identifier. AGENTS.md §10 forbids a model identifier in
+commits outright, and its preamble makes it win over the kickoff — so the commit uses the repo's own
+`Co-Authored-By: Claude <noreply@anthropic.com>`, as every prior commit here has.)*
+
+### The GitHub issue inbox
+
+Five open observer issues. Four (#878, #880, #903, #1015) were re-triaged by the 2026-10-03 Scout run and are
+blocked on an owner click/reading, none on code; no new activity since needs action (#1015's 2026-10-03
+follow-up restates the clone-pin/token-mint asks with a wider inference window — the repo half shipped
+v0.488.2, the rest is outside this repo). The one genuinely new issue is **#1063** (filed 2026-10-03), which
+`FOCUS.md` had not yet reflected ("no new issue since 2026-09-25" was stale).
+
+**#1063 — verified and REPRODUCED, filed into "Bugs (fix these first)".** The incoming-lag note goes silent on
+the owner's double-registered folders. `webapp/routers/incominglag.py::imported_by_folder` sums registered
+frame counts across every target; on the owner's library 76 % of frames are double-registered (#878), so a
+folder's summed tally is ~2× the files on disk, `incoming_lag`'s `waiting = n_files - n_imported` goes
+negative, and `if waiting <= 0: continue` drops the folder before it can speak. Reproduced with the real pure
+`incoming_lag` (a folder double-registered as 2×5,849): 1 / 100 / 1,000 / 3,000 / 5,849 never-imported subs →
+**SILENT**; 5,850 → speaks `waiting=1`; a single-registered control reports 1 missing sub immediately. The
+observer measured the magnitude on the real library (30 of 54 folders dark, a 41,727-sub dead zone; the note
+today answers `n_waiting=1` where the distinct ground truth is 6). **Not a re-litigation of a numbered
+stand-down:** the sum was a deliberate v0.442.0 choice ("can only ever floor the count at zero", pinned by
+`test_a_double_registered_folder_can_only_ever_read_as_imported`) — true about the *direction*, but the
+*magnitude* on this library was never measured. Left for the Builder because the fix (sum → `max`, or a
+distinct-`source_path` count) is a design decision with a real tradeoff (`max` can cry wolf on disjoint
+subsets), not a Scout blind-flip. Issue kept open (work not done) with a verification comment.
+
+### Dogfood `--mosaic` — CLEAN
+
+`scripts/agent-dogfood.sh --mosaic`, exit 0, *"nothing overflowing, no console errors"* on both targets.
+Mosaic Auto trim **7.9 %** (§1's bar is ~15 %). Read as one paragraph, the Target / Dashboard / Tonight cards
+agreed with each other on every target: on `Sample_M42_mosaic_2_2` the readiness card, next-best-move and
+mosaic-map all speak **per panel** (goal "~7.3 h (about 4 fields of sky)", "a typical part has 1 min", "a
+little behind at the top-right ~30 s") and the framing verdict is `partial` ("only about 75 % … a 3×3 covers
+all of it") — internally consistent. The only Dashboard note was the expected "Plate-solving isn't set up yet"
+(dogfood installs no ASTAP). Tallest page `/life-list [Still to shoot]` 14,492 px phone — the standing
+baseline, not overflowing.
+
+### Rotation sweep (3) — ASTAP/ffmpeg filesystem side effects, with a stub binary — CLEAN
+
+Next in AGENTS.md's rotation after (2) was swept 2026-10-03. Re-read both external-process paths and ran their
+guards. **ASTAP** (`seestack/solve/astap.py`): each invocation copies the frame into a
+`tempfile.TemporaryDirectory` and points `-f` at the *scratch* copy, never the source, and never passes
+`-update`; the `.wcs`/`.ini` sidecars land in the scratch dir and are read before it is torn down — so even a
+misbehaving binary can only write inside the temp dir. **ffmpeg/ffprobe** (`seestack/video/ffmpeg.py`): read
+only — `ffprobe` emits JSON to stdout, `ffmpeg` decodes to `-f rawvideo -pix_fmt rgb24 -` (a stdout pipe,
+killed in `finally`); neither is ever handed an output path, and video results are written to the video
+store, never `incoming/`. `tests/webapp/test_incoming_readonly_guard.py` (49 passed) exercises layers 1–5
+including the **stub-ASTAP** layer-4 test and its positive control, plus `test_incoming_lag.py` and the video
+API/CFA tests. No new bug. Do not re-run (3) before a finding says to.
+
 ## 2026-10-04 (Builder, branch `agent/builder-run`) — v0.492.33 shipped; the `--mosaic --editor --big` dogfood pass CLEAN, and the finding came from the two samples it does *not* compare
 
 *(Baseline `origin/main` at `378a8c7` (`__version__` 0.492.32): **7387 passed, 4 skipped**, 16m07s with
