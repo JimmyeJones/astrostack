@@ -1,5 +1,108 @@
 # Process notes & QA sweep records
 
+## 2026-10-04 (Builder, branch `claude/practical-keller-6lkiug`) — a whole-task collision on the seam finding: what prevented it was one command I did not run, and the duplicate's instrument verified the shipped fix
+
+### The collision, and the exact command that would have stopped it
+
+Two runs took the **same** front-of-queue entry (the v0.492.36 rig's `seam_residual` finding) inside the same
+hour. The sibling run shipped it as **v0.492.37** (`_SEAM_TRIM_SHARE` / `_trimmed_extreme` — trim the range by
+share of the covered canvas); this run independently reproduced the same bug, built a different fix (pool
+adjacent coverage levels into bands of ≥ 2 % of the canvas, `_coverage_bands`), got every seam, stackhealth,
+backfill and gallery test file green, and discovered on the pre-merge fetch that `main` already carried a
+measured fix for it. **The duplicate was discarded unpushed** —
+a second rewrite of the same estimator would re-litigate a measured decision, bump the stored-figure generation
+a second time, and buy the owner nothing (both shapes read every real canvas *flat*).
+
+**What failed is nameable and cheap to fix.** This run's start did `git fetch origin` and read
+`git log --oneline origin/main -30`, which is **half** of what AGENTS.md §2 asks for: "read `docs/FOCUS.md`,
+`docs/IMPROVEMENTS.md`, the last ~20 commits **and open PRs/branches**". The sibling's branch head was pushed at
+**21:24 UTC** and this run's first fetch was at **22:02** — 38 minutes *later* — so the claim was already visible
+and `git log origin/main` could not show it, because it was not on `main` yet. One command shows it, sorted so
+the live run is at the top:
+
+```
+git for-each-ref --sort=-committerdate \
+    --format='%(committerdate:iso8601)  %(refname:short)  %(subject)' refs/remotes/origin | head -12
+```
+
+Run it **after the fetch and again before writing code** (§11 already asks for the second fetch on an L item;
+the branch listing is what makes a fetch informative). §11's "an open PR is a stronger claim than a backlog
+line" is exactly this case, and it is the **fourth** collision of this class recorded here — the first three are
+the 2026-09-30 diary below. The entry was *not* stale, hot or ambiguous: it was the obvious top item, which is
+precisely why two runs picked it.
+
+### The useful half: the duplicate's instrument verified the shipped fix independently
+
+The discarded work had already built three real masters — the bundled mosaic through `sample_data`'s own writers
+at 240×160 / 480×320 / 900×600 (star counts 50 / 200 / 700 to hold the on-sky density), stacked by `run_stack`
+with the app's own defaults — in a different process, from a different harness, than the ones v0.492.37 was
+measured on. Asked of **today's `main`**, they read:
+
+| canvas | pre-fix (this run's own repro) | v0.492.37 as shipped |
+|---|---|---|
+| 457 px | 0.4520 | **0.0616** |
+| 907 px | 0.7075 | **0.0931** |
+| 1693 px | 0.8685 | **0.0000** |
+
+— the same three figures v0.492.37's own message claims, reproduced on independently-built masters, which is
+worth more than a re-reading of its diff. Its controls hold on this run's fixtures too: the stranded-body
+control on a dithered canvas reads **3.21 / 3.07 / 2.95** at 8 / 32 / 128 subs a panel (bar 1.5), the four-panel
+scene the two bars were calibrated on is unmoved at **0.5190 / 2.0542 / 15.6576**, the nebula-crossing controls
+(amp 60 and 400) and the ×37 rescale are flat, and the uneven-grain canvas stays quiet. **So the fix that
+reaches the owner through `stable` in three days is confirmed by a second instrument**, which is the one thing a
+duplicate run is good for.
+
+### The road not taken, recorded so nobody re-derives it — not an argument to re-open
+
+Banding is a second shape that also works, measured on the same three masters: **0.0 / 0.0 / 0.0178**, with the
+stranded-body control at 3.06–3.20 and `_panel_scene` byte-identical. The two differ in one way that matters
+only if a future finding presses on it:
+
+- **The trim's constant has a ceiling.** It must stay *below* the share of any thin *group* that is genuinely
+  the signal, which is why v0.492.37 reasons from the deep-dither fixture's un-stepped border being 2.1 % and
+  picks 1 %. Measured here from the other side: a trim of 5 % (weighted by sky-sample pixels) takes that same
+  control from 3.1 grain-widths to **0.13**, i.e. silent.
+- **Pooling has no such ceiling**, because nothing is discarded: a thin group pools with the body it borders in
+  coverage and still votes with its whole weight. Its own constant is bounded the other way instead (1 % left
+  the smallest canvas at 0.4678 — unfixed).
+
+Neither is better on today's data; they would diverge only if the 1 % ceiling ever has to rise. **Do not re-open
+this on the strength of this note** — it is here so the next run reads a measurement instead of building one.
+
+### §2 big-picture dogfood pass, `--mosaic --editor --big` — CLEAN, and it confirms v0.492.37 through the app
+
+Run on `main` at `bfba800` (i.e. *after* v0.492.37), which makes it the end-to-end half of the verification
+above:
+
+- **The scale-pair rig's `stack-health` question now reads `same notes` on both halves**, `seams_flat`
+  included — *"The panels of this mosaic evened out — the sky matches across the joins, so where the picture
+  looks grainier that is a difference in depth, not a step in the sky."* That note was **present on the small
+  canvas and absent on the full-size one** when the rig first ran, which is the finding v0.492.37 drained; it is
+  now the same sentence on both. The engine measurement and the sentence the owner reads agree.
+- **1 of 16 canvas-independent answers still moves**, and it is only `sky_sigma` (0.0004 → 0.0007) — the entry
+  already filed, verified and promoted to 🟠 the same day. Nothing new moved.
+- Editor driven on all three runs (21 ops each, plus undo/redo): every op re-rendered the preview, no console
+  error, no failed request, nothing overflowing. On the decimated full-size preview the page's own
+  "preview understates this" advisories speak correctly — the sharpen caveat (Auto seeds `sharpen_radius` 1.0),
+  the hot-pixel one, and the star-reduction one — and `median_fwhm` reads **2.07 on both canvases**, so Auto's
+  radius is not itself riding the stride.
+- The single-field, mosaic and full-size target pages each read as one coherent paragraph; the tallest page is
+  still `/life-list [Still to shoot]` on a phone at 14,492 px (unchanged — see "DOGFOOD BASELINE").
+
+### Two small measurements worth keeping
+
+- **A hairline a few rows tall is unmeasurable anyway**, whatever the voting rule: a 5 × 60 px strip loses
+  **197 of its 300 pixels** to the dilated object mask (a 2σ threshold on pure noise, dilated 4 px) and then
+  falls below `effective_min`, so `_level_sky_mask` returns `None`. A fixture that wants a *readable* thin level
+  needs a few hundred pixels of real width. Cost of not knowing this: one test that passed in both directions
+  until it was debugged.
+- **The three-sensor repro is cheap and reliable**: 7.9 s / 15.3 s / 39.3 s of stacking for 457 / 907 / 1693 px,
+  first try, from the recipe the previous run wrote down. Two runs have now hand-rolled that harness
+  independently (this one and v0.492.37's), and a third will want it for the `sky_sigma` stride entry's
+  candidate (a) — which names "these masters" in its own text. Nobody has filed it as tooling; whoever next
+  needs masters at several sensors should consider doing so rather than writing it a third time.
+
+
 ## 2026-10-04 (Builder, branch `claude/dreamy-thompson-54m9h2`) — the scale-pair rig shipped (v0.492.36) and found two things on its first run; the fix for the bigger one was deliberately NOT attempted
 
 ### What shipped
