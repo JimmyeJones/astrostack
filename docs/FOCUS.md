@@ -61,6 +61,6 @@ the front of the queue changes; it stays short and dated. If this page and the b
 
 ## How the owner gets builds now
 
-He deploys with `sudo scripts/deploy.sh` from the **`stable`** branch (advanced by `.github/workflows/stable.yml`
+He deploys with `sudo bash scripts/deploy.sh` from the **`stable`** branch (advanced by `.github/workflows/stable.yml`
 to the newest `main` commit ≥ 3 days old with green CI) or from a release tag. So a fix reaches him days after it
 merges — ship the follow-up to your own change *before* that soak ends.
