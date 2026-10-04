@@ -1,5 +1,65 @@
 # Shipped — the record
 
+## 2026-10-04 (Builder) — the lag note was silent on exactly the folders #878 had struck
+
+### v0.492.35 — 🟡 BUG FIX: `/api/incoming-lag` counted a double-registered folder's frames twice and went quiet
+
+**The bug** (observer issue [#1063](https://github.com/JimmyeJones/astrostack/issues/1063); verified and
+reproduced by the Scout 2026-10-04, magnitude measured by the observer on the real library).
+`webapp/routers/incominglag.py::imported_by_folder` built `{folder: Σ count over every target}`
+(`out[folder] = out.get(folder, 0) + int(n)`). Where a folder is registered under **two** targets — issue
+#878's mosaic double-registration, which covers 76 % of the owner's frames — the summed tally came out at
+about twice the files on disk, so `webapp/incominglag.py::incoming_lag`'s `waiting = unit.n_files -
+n_imported` went negative and the `waiting <= 0` guard dropped the folder. The one signal built to catch subs
+that silently never imported (v0.442.0) was therefore **dark on 30 of the owner's 54 drop folders, a combined
+41,727 subs**, and already answered `n_waiting=1` where the distinct-`source_path` ground truth was 6 across
+5 folders.
+
+**Why that was new evidence and not a re-litigation.** The sum was a deliberate choice: v0.442.0's own note
+reasons that a double registration "can only ever floor the count at zero", and
+`tests/test_incoming_lag.py::test_a_double_registered_folder_can_only_ever_read_as_imported` pins it. The
+*direction* of that reasoning is right and is untouched here — this module floors `waiting` at zero, so an
+overstated tally can only make it go quiet, never cry wolf. What had never been measured is *how much*
+quieter: enough to hide whole nights.
+
+**The decision the backlog left open, settled with a measurement rather than an argument.** The entry offered
+**(a) `max` across targets** — one line, exactly right for #878's frame-for-frame duplicates and right on
+84/84 of the owner's folders, but it *under*-counts where two targets hold genuinely disjoint subsets of one
+folder, which makes the note over-report — and **(b) a distinct `source_path` count**, right by construction
+but changing `source_folders_under`'s shape and costing more memory/IO on a walk-away box. Candidate (a) was
+written out and run: it fixes the repro **and fails**
+`test_two_targets_holding_disjoint_halves_of_one_folder_report_nothing`, reporting two subs as missing that
+are in the library — the one direction this note is designed never to go. So (b) it is, in the shape that
+costs what (a) costs on an ordinary library:
+
+- **`source_path` is `UNIQUE` per target**, so a folder only *one* target registered is already exact and is
+  still answered by the one grouped `COUNT` it always was. Only a folder **more than one target claims** is
+  re-counted, by `webapp/routers/incominglag.py::_count_shared_folders_distinctly`, as the size of the union
+  of its `source_path`s. **A library with no double-registered folder reads not one extra row and gets a
+  byte-for-byte identical answer** — every other install, and this one for every folder but the shared ones.
+- New `seestack/io/project.py::Project.source_paths_in_folder(prefix, folder)` returns the frames sitting
+  **directly** in one folder, as paths relative to `prefix`. It matches `folder` against the *same* SQL
+  dirname expression `source_folders_under` groups by, so the two cannot drift apart about where a frame
+  lives; a frame nested deeper carries its own key and is rolled up by `_rollup` as before, so it is never
+  counted twice. Answered from the `frames` rows alone — nothing walks, opens or `stat`s `incoming/`
+  (AGENTS.md §10).
+- Grouped by target, so a project opens once however many shared folders it holds, and the paths are relative
+  so the union holds only what tells two frames apart. **A de-duplication that cannot be completed keeps the
+  old summed tally**: a target that opened for the counts and not for the paths would leave its frames out of
+  the union, and an under-count is the direction that cries wolf — falling back to the quieter number is the
+  safe failure.
+
+**Pinned by** `tests/webapp/test_incoming_lag.py` (5 new): the repro (two never-imported subs in a
+double-registered folder — `0 == 2` before the fix, i.e. total silence); the same folder fully imported stays
+silent; the disjoint-halves guard that rules out `max`; a spy proving no extra row is read where nothing is
+shared *and* that it fires once the duplicate exists; and the failed-dedupe fallback. Plus
+`tests/test_project_source_folders.py` (7 new) for the new method, including an agreement test that every
+folder `source_folders_under` names returns exactly its own count, together covering every frame once, and
+the §10 filesystem trap.
+
+**Upgrade-safe:** no config, schema, on-disk-layout, default or API-shape change — `imported` is an internal
+mapping and the response's fields are untouched. `incoming_lag` itself and its existing test are unchanged.
+
 ## 2026-10-04 (owner session) — the owner's first deploy stopped the app and said nothing
 
 ### v0.492.34 — 🔴 BUG FIX: `scripts/deploy.sh` died silently right after stopping the app

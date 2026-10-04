@@ -1,23 +1,25 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-04 (Scout) — filed new observer issue #1063 as the one ungated bug; `--mosaic` dogfood and
-the ASTAP/ffmpeg sweep both CLEAN (records in `docs/PROCESS-NOTES.md`). **The Scout rewrites this page** when
+*Last edited 2026-10-04 (Builder — item 0 corrected, it named a bug that is now on `main`; the Scout's own
+2026-10-04 text is otherwise untouched). `--mosaic` dogfood and the ASTAP/ffmpeg sweep both CLEAN (records in
+`docs/PROCESS-NOTES.md`). **The Scout rewrites this page** when
 the front of the queue changes; it stays short and dated. If this page and the backlog disagree, the backlog's
 "Bugs (fix these first)" wins and this page is stale — fix it.*
 
 ## Front of the queue
 
-0. **"Bugs (fix these first)" now holds one ungated, reproduced bug at the top (Builder work).** 🟡 **#1063 —
-   the incoming-lag note goes silent on the owner's double-registered folders.** `imported_by_folder` sums
-   registered frame counts across targets, so #878's duplicate targets push the summed tally past the files on
-   disk and `incoming_lag`'s `waiting <= 0` guard drops the folder — 30 of 54 drop folders dark, a 41,727-sub
-   dead zone. Reproduced with the real `incoming_lag` this run; magnitude measured by the observer. Fix lives in
-   `imported_by_folder` (sum → **max** or a distinct-`source_path` count) and needs the (a)-vs-(b) decision in
-   the backlog entry — **not a blind one-liner** (`max` can cry wolf on disjoint subsets). Below it, everything
-   is **gated LEADs and ⚪ notes** (owner data, an unmeasured cost, or a numbered stand-down — see
-   `docs/PROCESS-NOTES.md`; the 2026-10-04 ⚪ is `classify_target`'s `confidence` pinned to 1.0, filed-not-fixed
-   because nothing reads it). **Do not blind-flip a gated threshold or re-litigate a numbered stand-down.** Grep
-   `docs/SHIPPED.md` before building.
+0. **"Bugs (fix these first)" holds no ungated code work — everything in it is a gated LEAD or a ⚪ note.**
+   🟡 **#1063 shipped as v0.492.35** (Builder 2026-10-04): the incoming-lag note went silent on the owner's
+   double-registered folders because `imported_by_folder` *summed* a folder's tally across targets, so #878's
+   duplicates pushed it past the files on disk and `waiting <= 0` dropped the folder — 30 of 54 drop folders
+   dark, a 41,727-sub dead zone. The rollup decision the entry left open was settled by **running candidate
+   (a)**: `max` across targets fixes the repro *and* cries wolf on two targets holding disjoint halves of one
+   folder, so the count is now distinct `source_path`s, taken **only for a folder more than one target
+   claims** (a library with no duplication reads not one extra row). What is left below is **gated LEADs and
+   ⚪ notes** (owner data, an unmeasured cost, or a numbered stand-down — see `docs/PROCESS-NOTES.md`; the
+   2026-10-04 ⚪ is `classify_target`'s `confidence` pinned to 1.0, filed-not-fixed because nothing reads it).
+   **Do not blind-flip a gated threshold or re-litigate a numbered stand-down.** Grep `docs/SHIPPED.md`
+   before building.
 
 1. **The editor (PRIORITY 1) — "re-audits come back clean" held until 2026-10-04, when one did not.** Judge
    Auto/editor on a tiled mosaic at the owner's scale (`--mosaic --editor --big`); a "What Auto did" trim
@@ -29,9 +31,8 @@ the front of the queue changes; it stays short and dated. If this page and the b
    (lead filed under Infra).
 
 2. **Owner-approved, buildable now: empty** — everything shipped and cut to [`SHIPPED.md`](SHIPPED.md).
-3. **Open observer issues — five open (triaged 2026-10-04 Scout).** One carries code work: **#1063** — verified
-   + reproduced this run and filed into "Bugs" (item 0). The other four are blocked on an owner click/reading,
-   none on code: #878 (reconcile shipped v0.482.1/.2 — closes on a reading that shows the 11 pairs gone), #880
+3. **Open observer issues — four open (triaged 2026-10-04 Scout; #1063 closed by v0.492.35).** **None carries
+   code work.** All four are blocked on an owner click/reading: #878 (reconcile shipped v0.482.1/.2 — closes on a reading that shows the 11 pairs gone), #880
    (both live halves shipped v0.483.1/.2; only the ⚪ exception-repr remainder open), #903 (prevention still
    open; existing damage has the v0.479.3 repair), #1015 (repo half shipped v0.488.2; the clone-pin + token-mint
    remainder is out of this repo — its 2026-10-03 follow-up is the same ask, wider window, not a new one).

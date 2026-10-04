@@ -2544,6 +2544,47 @@ class Project:
         ).fetchall()
         return [(str(r[0]), int(r[1] or 0)) for r in rows]
 
+    def source_paths_in_folder(self, prefix: str, folder: str,
+                               sep: str = os.sep) -> list[str]:
+        """Every registered frame sitting **directly** in ``folder``, as paths
+        relative to ``prefix``.
+
+        The per-frame companion to :meth:`source_folders_under`'s count, for the
+        one caller a count cannot serve: ``/api/incoming-lag`` rolls these
+        folders up across *every* target, and two targets that registered the
+        same folder — issue #878's mosaic double-registration — make the counts
+        add up to more files than exist on disk. Paths de-duplicate where counts
+        cannot. ``source_path`` is ``UNIQUE`` per target, so a single target's
+        count is already exact and only the cross-target union needs this.
+
+        ``folder`` is spelled exactly as :meth:`source_folders_under` reports it
+        — the whole relative directory, ``""`` for a frame sitting loose in
+        ``prefix`` — and is matched against the *same* SQL dirname expression, so
+        the two cannot drift apart about where a frame lives. Only frames whose
+        directory **is** ``folder`` come back, never one nested deeper: a deeper
+        frame carries its own key in :meth:`source_folders_under` and is rolled
+        up separately by the caller (:func:`webapp.incominglag._rollup`), so
+        including it here would count it twice.
+
+        Relative rather than whole paths, because the dropped prefix is the same
+        for every row and the caller holds the result in a set: the part that
+        tells two frames apart is the part worth keeping. Answered from the
+        ``frames`` rows alone, like its siblings, so nothing walks, opens or
+        ``stat``s anything under ``incoming/`` (AGENTS.md §10).
+        """
+        assert self._conn is not None
+        start = len(prefix) + 1
+        rows = self._conn.execute(
+            "WITH rest AS ("
+            "  SELECT substr(source_path, ?) AS r FROM frames"
+            "   WHERE substr(source_path, 1, ?) = ?"
+            ") "
+            "SELECT r FROM rest "
+            " WHERE rtrim(rtrim(r, replace(r, ?, '')), ?) = ?",
+            (start, len(prefix), prefix, sep, sep, folder),
+        ).fetchall()
+        return [str(r[0]) for r in rows]
+
     def frame_night_counts(self) -> dict[str, int]:
         """Tally *all* frames (accepted or rejected) by capture night.
 

@@ -92,3 +92,90 @@ def test_it_never_touches_the_folder_it_reports_on(proj, monkeypatch):
     with pytest.raises(AssertionError):
         os.stat(".")           # the trap is real, not a no-op
     assert proj.source_folders_under(PREFIX) == [("M 31_sub", 1)]
+
+
+# --- The per-frame companion, for a folder more than one target claims --------
+#
+# ``/api/incoming-lag`` rolls these folders up across *every* target, and two
+# targets that registered the same folder (issue #878's mosaic
+# double-registration) make the counts add up to more files than exist on disk.
+# ``source_paths_in_folder`` is how that union is taken once instead of twice
+# (v0.492.35); ``source_path`` is UNIQUE per target, so a single target's own
+# count needs none of this.
+
+
+def test_the_frames_in_one_folder_come_back_as_paths_relative_to_the_prefix(proj):
+    _add(proj, "M 31_sub/Light_1.fit", "M 31_sub/Light_2.fit", "A_sub/x.fit")
+    assert sorted(proj.source_paths_in_folder(PREFIX, "M 31_sub")) == [
+        os.path.join("M 31_sub", "Light_1.fit"),
+        os.path.join("M 31_sub", "Light_2.fit"),
+    ]
+
+
+def test_a_frame_nested_deeper_belongs_to_its_own_folder_not_the_parent(proj):
+    """``source_folders_under`` gives the deeper folder its own key, and the
+    caller rolls those up by prefix (:func:`webapp.incominglag._rollup`). So a
+    nested frame must NOT also come back under its parent, or the one caller
+    that joins both would count it twice."""
+    _add(proj, "M 31_sub/a.fit", "M 31_sub/night2/b.fit")
+    assert proj.source_paths_in_folder(PREFIX, "M 31_sub") == [
+        os.path.join("M 31_sub", "a.fit")]
+    assert proj.source_paths_in_folder(PREFIX, os.path.join("M 31_sub", "night2")) \
+        == [os.path.join("M 31_sub", "night2", "b.fit")]
+
+
+def test_the_root_folder_is_the_frames_loose_in_the_prefix(proj):
+    """``""`` is the ``Unsorted`` catch-all, and it is the one folder that cannot
+    be nested: rolling every folder in the library into it would make it swallow
+    all the others."""
+    _add(proj, "loose.fit", "M 31_sub/a.fit")
+    assert proj.source_paths_in_folder(PREFIX, "") == ["loose.fit"]
+
+
+def test_a_sibling_sharing_the_folders_first_characters_is_not_included(proj):
+    """``M 31_subX/`` is not ``M 31_sub/`` — the same prefix trap the folder
+    listing carries, one level further in."""
+    _add(proj, "M 31_sub/a.fit", "M 31_subX/b.fit")
+    assert proj.source_paths_in_folder(PREFIX, "M 31_sub") == [
+        os.path.join("M 31_sub", "a.fit")]
+
+
+def test_every_folder_the_listing_names_can_be_asked_for_exactly_its_frames(proj):
+    """The two methods are matched against the *same* SQL dirname expression, so
+    they cannot drift apart about where a frame lives. Pin that rather than
+    trusting it: every count is the length of its own path list, and the lists
+    together are every frame under the prefix, each exactly once."""
+    rel = ["loose.fit", "M 31_sub/a.fit", "M 31_sub/b.fit",
+           "M 31_sub/night2/c.fit", "M 31_subX/d.fit", "MyWorks/M 31_sub/e.fit"]
+    _add(proj, *rel)
+
+    folders = proj.source_folders_under(PREFIX)
+    all_paths: list[str] = []
+    for folder, n in folders:
+        paths = proj.source_paths_in_folder(PREFIX, folder)
+        assert len(paths) == n, folder
+        all_paths += paths
+    assert sorted(all_paths) == sorted(r.replace("/", os.sep) for r in rel)
+
+
+def test_asking_for_a_folder_no_frame_sits_in_reports_nothing(proj):
+    _add(proj, "M 31_sub/a.fit")
+    assert proj.source_paths_in_folder(PREFIX, "nobody_here") == []
+
+
+def test_the_frame_listing_never_touches_the_folder_it_reports_on(proj, monkeypatch):
+    """AGENTS.md §10, for the new read as well: ``incoming/`` holds the only copy
+    of every sub and is strictly read-only, so this is answered from the
+    ``frames`` rows alone. Arm the trap *and prove it is armed*."""
+    _add(proj, "M 31_sub/a.fit")
+
+    def boom(*a, **k):  # noqa: ANN002, ANN003
+        raise AssertionError("source_paths_in_folder touched the filesystem")
+
+    monkeypatch.setattr(os, "scandir", boom)
+    monkeypatch.setattr(os, "listdir", boom)
+    monkeypatch.setattr(os, "stat", boom)
+    with pytest.raises(AssertionError):
+        os.stat(".")           # the trap is real, not a no-op
+    assert proj.source_paths_in_folder(PREFIX, "M 31_sub") == [
+        os.path.join("M 31_sub", "a.fit")]

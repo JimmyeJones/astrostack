@@ -35,9 +35,15 @@ per target off an existing index.
   :data:`LAG_MIN_AGE_S`. A night still being copied over SMB is *supposed* to be
   ahead of the library, and so is one the watcher noticed four minutes ago.
 * Registered frames are rolled up **by folder prefix**, so a target whose subs
-  sit deeper than its unit folder still counts against it, and a folder
-  registered under two targets (the mosaic double-registration of issue #878)
-  can only ever make the waiting count *smaller*, never larger.
+  sit deeper than its unit folder still counts against it, and this module
+  floors ``waiting`` at zero, so whatever its caller hands it can only ever make
+  the count *smaller*, never larger. That flooring is why a folder registered
+  under two targets (the mosaic double-registration of issue #878) used to
+  silence the note outright rather than overstate it — the caller's tally for
+  such a folder was the two targets added together, i.e. about twice the files
+  on disk. It is counted distinctly there now (v0.492.35,
+  :func:`webapp.routers.incominglag.imported_by_folder`); nothing about the rule
+  here changed.
 
 **And one thing it must never do is under-report: go quiet.** A file this app
 has opened and *cannot read* is missing a frame row permanently — no scan will
@@ -144,8 +150,12 @@ def incoming_lag(
 
     ``planned`` is :func:`seestack.io.scanner.plan_incoming_units` over the
     watcher's listing; ``imported`` maps a folder (as
-    ``Project.source_folders_under`` spells it) to how many registered frames sit
-    in it, summed across every target.
+    ``Project.source_folders_under`` spells it) to how many **distinct**
+    registered frames sit in it across every target — distinct because a folder
+    two targets claim would otherwise be tallied twice and read as fully
+    imported (:func:`webapp.routers.incominglag.imported_by_folder`). An
+    over-stated tally cannot make this cry wolf, only go quiet: ``waiting`` is
+    floored at zero below.
 
     ``unreadable`` maps a folder the same way to how many of its files the last
     whole-library scan **opened and could not read**
