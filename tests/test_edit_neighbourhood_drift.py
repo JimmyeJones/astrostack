@@ -74,15 +74,6 @@ _UNSCALED_BY_DESIGN: dict[str, str] = {
         "Same sweep, same answer: ext_frac 0.0254/0.0254/0.0254/0.0255/0.0253 "
         "across steps 1-8 on the galaxy scene, and galaxy and nebula classify "
         "identically at every step.",
-
-    "seestack/edit/presets.py::classify_target::grey_opening(np.ones((7, 7), dtype=bool))":
-        "The star/diffuse separator, and the one site where scale does show — "
-        "but only by *declining*. Galaxy and nebula hold their verdict from step "
-        "1 to 8; a sparse star cluster decimates below the 'essentially blank' "
-        "floor at step 5+ and ``classify_target`` returns None rather than "
-        "guessing, which is the honest degradation and needs a >=7500 px canvas "
-        "to reach. It suggests a preset chip; it never changes the Auto recipe "
-        "except through a stored taste profile, per archetype.",
 }
 
 
@@ -228,7 +219,18 @@ def test_the_resolver_follows_a_radius_scaled_in_an_outer_scope():
     scaled, unscaled = _scan()
     for site in ("seestack/edit/ops/detail.py::run::gaussian_filter(radius)",
                  "seestack/edit/ops/detail.py::run::gaussian_filter((ring, ring, 0))",
-                 "seestack/edit/ops/tone.py::_scnr::gaussian_filter(sigma)"):
+                 "seestack/edit/ops/tone.py::_scnr::gaussian_filter(sigma)",
+                 # The star/diffuse separator, exempted here until v0.492.33 on
+                 # the strength of a sweep that measured a galaxy, a nebula and a
+                 # *narrow*-star cluster across proxy steps and missed the case
+                 # that matters: at step 1 a real 4-px-FWHM star is wider than the
+                 # 7x7 footprint, survives the opening, and is counted as extended
+                 # structure. Both bundled star-only mosaic samples were duly
+                 # called "a concentrated extended object" at step 1 and a star
+                 # cluster at step 2. It is a length on the sensor now, like the
+                 # sibling `starmask.star_mask` its own docstring cites.
+                 "seestack/edit/presets.py::classify_target::"
+                 "grey_opening(np.ones((side, side), dtype=bool))"):
         assert site in scaled, f"{site} should resolve to proxy_scale"
         assert site not in unscaled
 

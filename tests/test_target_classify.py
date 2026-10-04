@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from seestack.edit import presets
 from seestack.edit.presets import BUILTIN_PRESETS, classify_target
 
 
@@ -329,6 +330,27 @@ def _tilted(rgb: np.ndarray, amount: float) -> np.ndarray:
     return (np.asarray(rgb, np.float32) + ramp[..., None]).astype(np.float32)
 
 
+#: How bright the broad glow in :func:`_star_field_with_faint_nebulosity` is.
+#:
+#: It was 0.05 until v0.492.33, and at that level the classifier **could not see
+#: it at all**: 150 stars of amplitude up to 0.8 set the 0.5-99.5 percentile span
+#: the signal threshold is a fraction of, and a 0.05 glow on a 0.10 sky lands
+#: under it. The ``ext_frac`` 0.03-0.06 the fixture used to report was not the
+#: glow — it was the stars' own cores surviving a 7x7 opening that was narrower
+#: than a 1.6-sigma (FWHM 3.8 px) star, which is the bug v0.492.33 fixes. So the
+#: fixture declined for the wrong reason, and once the opening is wide enough to
+#: erase a real star it reads as a pure cluster and can no longer carry either
+#: claim below.
+#:
+#: 0.14 is the glow the measurement puts back in view (``ext_frac`` 0.092,
+#: ``star_share`` 0.52 — "neither cue dominates", as the docstring says), with
+#: the star population untouched. Both guards below are armed again at it and
+#: were checked to be: with ``_detrended_luminance`` neutered the tilt turns the
+#: field into a ``cluster`` at 0.05 and 0.08, and with ``_delevelled_luminance``
+#: neutered the panel steps do the same.
+_FAINT_GLOW = 0.14
+
+
 def _star_field_with_faint_nebulosity(seed: int = 6) -> np.ndarray:
     """Many stars over a broad, faint diffuse glow — the shape a real Seestar
     frame has, and the one whose verdict the tilt flips. Neither cue dominates,
@@ -336,7 +358,7 @@ def _star_field_with_faint_nebulosity(seed: int = 6) -> np.ndarray:
     rng = np.random.default_rng(seed)
     h = w = 220
     lum = (np.full((h, w), 0.10, np.float32)
-           + 0.05 * _blob((h, w), 110, 110, 45)
+           + _FAINT_GLOW * _blob((h, w), 110, 110, 45)
            + _stars((h, w), 150, rng, sigma=1.6))
     rgb = np.repeat(lum[..., None], 3, axis=2).astype("float32")
     return rgb + rng.normal(0, 0.004, rgb.shape).astype("float32")
@@ -462,3 +484,113 @@ def test_a_verdict_is_untouched_by_a_single_level_coverage_map():
     field = _star_field_with_faint_nebulosity()
     flat = np.full(field.shape[:2], 8.0, dtype=np.float32)
     assert classify_target(field, flat)["cues"] == classify_target(field)["cues"]
+
+
+# ---------------------------------------------------------------------------
+# …and the same again for the size of the CANVAS (v0.492.33)
+#
+# The star/diffuse separator is a grey-scale opening, and its footprint was a
+# fixed 7x7 in *proxy* pixels. A proxy is the master strided to <=1500 px
+# (``edit.proxy.build_proxy``), so 7 proxy pixels is 7 pixels of sky on one
+# canvas and 14 on another — and on an un-decimated one it is narrower than a
+# real Seestar star (``webapp.sample_data._FWHM_PX`` is 4.0), which then survives
+# the opening and is counted as *extended* structure.
+#
+# Measured on the two bundled mosaic samples, which the sample data's own comment
+# says "differ in scale alone": the small one (proxy step 1) read ``ext_frac``
+# 0.0194 and was called a **galaxy** — "a concentrated extended object on a
+# mostly dark sky" — while the full-size one (the same sky through a bigger
+# sensor, step 2) read 0.0 and was correctly called a star cluster. Neither holds
+# any extended object at all; all three bundled demos are Gaussian stars on a
+# noisy sky. The sibling ``starmask.star_mask`` — which this classifier's own
+# docstring names as where ``star_share`` comes from — has always divided its
+# footprint by ``proxy_scale`` for exactly this reason.
+# ---------------------------------------------------------------------------
+
+#: A Seestar's own star size, in full-resolution pixels — the same number
+#: ``webapp.sample_data._FWHM_PX`` renders every bundled demo sub with. The
+#: fixtures above use ``sigma=1.0`` (FWHM 2.4), which is narrow enough for the
+#: old 7x7 footprint to erase, which is why none of them could show this.
+_SEESTAR_FWHM_PX = 4.0
+
+
+def _seestar_star_field(seed: int = 11, h: int = 440, w: int = 440,
+                        n: int = 260) -> np.ndarray:
+    """Nothing but stars, at the size a Seestar actually puts them on the sensor.
+
+    No blob, no glow, no gradient: whatever this field measures as *extended*
+    structure is a measurement error, because there is no extended structure in
+    it to find.
+    """
+    rng = np.random.default_rng(seed)
+    lum = (np.full((h, w), 0.05, np.float32)
+           + _stars((h, w), n, rng, sigma=_SEESTAR_FWHM_PX / 2.3548))
+    rgb = np.repeat(lum[..., None], 3, axis=2).astype("float32")
+    return rgb + rng.normal(0, 0.004, rgb.shape).astype("float32")
+
+
+def test_a_field_of_real_seestar_stars_holds_no_extended_object():
+    """The false positive: a canvas of nothing but stars is not "a concentrated
+    extended object on a mostly dark sky".
+
+    Measured before the fix on this field: ``cls`` ``None`` with ``ext_frac``
+    0.026 — 2.6 % of a canvas that contains no extended structure whatsoever
+    reported as extended signal — and ``star_share`` 0.674 where every one of
+    those pixels is a star. On the bundled samples, whose stars are the same
+    size, the same leak was enough to tip the verdict all the way to ``galaxy``.
+    """
+    out = classify_target(_seestar_star_field())
+    assert out["cues"]["ext_frac"] == 0.0, out["cues"]
+    assert out["cues"]["star_share"] == 1.0, out["cues"]
+    assert out["cls"] == "cluster"
+    assert out["preset_id"] == "globular_cluster"
+
+
+def test_the_archetype_does_not_change_with_the_size_of_the_canvas():
+    """One unchanging sky, two canvases: the same field at full resolution and
+    decimated by two, each classified with the ``proxy_scale`` its own proxy
+    carries. The verdict, and every cue behind it, must agree.
+
+    Before the fix the two disagreed outright — ``None``/``ext_frac`` 0.026 at
+    step 1 against ``cluster``/0.0 at step 2 — which is how the two bundled
+    mosaic samples came to answer "galaxy" and "star cluster" about one sky.
+    """
+    full = _seestar_star_field()
+    half = full[::2, ::2]                      # exactly what build_proxy does
+
+    at_full = classify_target(full, proxy_scale=1.0)
+    at_half = classify_target(half, proxy_scale=2.0)
+
+    assert at_full["cls"] == at_half["cls"] == "cluster"
+    assert at_full["cues"]["ext_frac"] == at_half["cues"]["ext_frac"] == 0.0
+    assert at_full["preset_id"] == at_half["preset_id"]
+
+
+def test_the_opening_footprint_is_a_length_on_the_sensor():
+    """The footprint shrinks with the proxy's stride — down to the floor the
+    smoothing box sets, and no further.
+
+    Both terms are load-bearing. Without the stride the footprint means a
+    different patch of sky on every canvas (the test above). Without the floor it
+    shrinks past the ``_GEOM_SMOOTH_PX`` box every cue is measured through, and
+    an opening no wider than that box cannot remove the plateau the box spreads
+    each star into — measured at proxy steps 6 and 8, where a footprint scaled
+    all the way to 3x3 turns a pure star field into a *nebula* (``ext_frac``
+    0.076).
+    """
+    floor = 2 * presets._GEOM_SMOOTH_PX + 1
+
+    assert presets._star_opening_side(1.0) == 2 * presets._STAR_OPENING_PX + 1
+    # Continuous in *sky* terms across the step a real single-field stack gets:
+    # ~13 full-resolution px at step 1, ~14 at step 2.
+    assert presets._star_opening_side(1.0) == 13
+    assert presets._star_opening_side(2.0) == floor == 7
+
+    # Past that the floor holds, which is the 7x7 every decimated proxy has
+    # always had — so nothing about a strided canvas moves.
+    for scale in (2.0, 3.0, 4.0, 6.0, 8.0, 11.0):
+        assert presets._star_opening_side(scale) == floor
+
+    # Never finer than the proxy, whatever nonsense a caller hands it.
+    for bogus in (0.0, -3.0, float("nan"), float("inf")):
+        assert presets._star_opening_side(bogus) >= floor
