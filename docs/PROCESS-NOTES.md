@@ -1,5 +1,81 @@
 # Process notes & QA sweep records
 
+## 2026-10-04 (Builder, branch `claude/dreamy-thompson-54m9h2`) — the scale-pair rig shipped (v0.492.36) and found two things on its first run; the fix for the bigger one was deliberately NOT attempted
+
+### What shipped
+
+**v0.492.36** — `scripts/dogfood_scale_pair.py` + step 4a-ter of `agent-dogfood.sh`: the two bundled mosaic
+samples differ in scale alone, so the pass finally asks both the same questions and diffs the answers. Entry
+and reasoning in [`SHIPPED.md`](SHIPPED.md). This closes the Infra lead filed with v0.492.33 (the `--big`
+sample-pair half; the pure-Python half was swept CLEAN the run before).
+
+### The instrument paid for itself on the first run, which is the part worth recording
+
+Four questions, 16 canvas-independent answers, **2 moved** — and the two are a useful pair because they look
+identical in the output and are nothing alike underneath:
+
+- **`seam_residual` 0.6998 → 1.2218** on the same sky through a bigger sensor, across `_SEAM_FLAT_RATIO`, so
+  the "the panels evened out" note is present on one canvas and absent on the other. Real, filed under Bugs
+  with its mechanism measured (the spread is set by small-n sliver levels, and which slivers get a vote is a
+  fixed 200-pixel gate that `_level_context` scales for the proxy *stride* but not for the canvas's *extent*).
+- **`sky_sigma` 0.0004 → 0.0007**, which turned out to be the proxy **stride**, not the canvas: asked of *one*
+  master at steps 1/2/4 the two samples agree to three digits at every stride, and each rises ~50 % per
+  doubling. Filed as a measured lead.
+
+**The lesson for the next run that uses this rig:** the pair differs in *two* ways at once — canvas extent and,
+because of `PROXY_MAX_PX`, the proxy stride. So the second question to ask about any `MOVED` line is "does it
+move when I hold the canvas and change only the stride?". That is one cheap call against one master and it
+separated a real bug from a non-bug here in about five minutes.
+
+### Why the seam fix was not attempted, and what the next run should not repeat
+
+§5 wants a regression test that fails before, and **two synthetic fixtures were built and neither reproduces
+the move**:
+
+1. A 2×2 jittered ragged mosaic with the sample's own jitter, 82 % step and 6/6/6/3 depth, levelled and
+   measured at both panel sizes: **0.687 → 0.585** — it moves the *wrong way*.
+2. The same scene with per-level noise σ ∝ 1/√coverage (what a stack really has) and real 4 px-FWHM Gaussian
+   stars at the sample's own density: **2.13 → 1.88**. Still the wrong way.
+
+The existing `_panel_scene` fixture cannot show it at all — four equal full-height panels, no sliver levels.
+So whatever makes the real pair move lives in the part of the pipeline these fixtures do not model
+(reprojection interpolation, per-panel photometric normalisation, the stacker's own levelling view, the
+rejection pass), and **finding a fixture that moves is the first half of that task**. Shipping a fix pinned by
+a fixture that cannot show the bug is the trap the previous run refused its own rig for; the same refusal
+applies here, one level up.
+
+### Baseline
+
+Full suite green at the start of the run (7,410 passed, 4 skipped, 17m49s with `-n 4`) and again before the
+merge. `main`'s CI was green at the start. `--mosaic --big` dogfood pass otherwise CLEAN: mosaic Auto trim
+7.9 %, the full-size preview decimated by 2 with the full-size check live, both samples classified
+`globular_cluster`/"Star cluster" at both canvas sizes (v0.492.33's fix holding).
+
+### One flaky failure, traced to the fixture rather than re-run away
+
+The pre-merge full suite failed once on
+`tests/webapp/test_current_picture_fallback.py::test_a_healthy_library_never_opens_a_project_for_the_fallback`
+(`assert ['NGC_7000'] == []`). It is **not** this run's change — the diff is a dev script, a dev helper, a test
+file and docs, and cannot reach `current_picture_path` — and it did not reproduce: the whole of `tests/webapp`
+under the same `-n 4` (2,705 tests) passed, the file passes alone, and the full suite passed on re-run.
+
+**But "flake" is not a root cause, so here is the mechanism, named for whoever fixes it.** The webapp `client`
+fixture starts the app *with its watcher enabled* and only turns it off one request later
+(`c.put("/api/settings", {"watcher_enabled": False})` after `TestClient(app)` has already run the lifespan).
+`Watcher._run` polls immediately, and every webapp test's `incoming/` holds the two folders `_make_incoming`
+writes — `M_42` and **`NGC_7000`**, which is exactly the target the assertion named. So a startup poll can fire
+a batch while the test body is running, and the scan it triggers calls `refresh_target_stats`, which recomputes
+`last_stack_preview` from the project's run list. Computed *before* the test's own `_register_picture` run
+exists and written *after* it, that stamp lands as NULL, the stamp is then unreadable, and
+`current_picture_path` falls through to step three — one `open_target`, which is the thing the test forbids.
+Under `-n 4` the window is a function of CPU contention, which is why adding eight unrelated tests was enough
+to open it once.
+
+**Not fixed here, deliberately:** the fix is to disable the watcher *before* `create_app()` rather than one
+request after, and that fixture is shared by all 2,705 webapp tests — a change to make on its own, with its own
+full-suite run, not at the tail of an unrelated one. Filed here rather than in the backlog because it is
+process/tooling, not product (AGENTS.md §2's three-file rule).
+
 ## 2026-10-04 (Builder, branch `claude/dreamy-thompson-uyoli3`) — v0.492.35 shipped (observer #1063); the scale-invariance question swept on the pure-Python half — CLEAN, and the rig deliberately NOT shipped
 
 ### What shipped

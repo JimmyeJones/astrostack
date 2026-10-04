@@ -1,5 +1,75 @@
 # Shipped — the record
 
+## 2026-10-04 (Builder) — the scale-invariance pair is an instrument the pass finally uses
+
+### v0.492.36 — 🔵 TOOLING: `--mosaic --big` asks both mosaic samples the same questions and diffs the answers
+
+**What was missing.** `webapp/sample_data`'s own comment is the premise — the small mosaic sample and the
+full-size one "differ in *scale alone*, so a finding on one is a question about the other": same 2×2 grid, same
+82 % step, same uneven depth (6/6/6/3 subs), same hazy panel, same two nights, one shared star catalog at one
+shared on-sky density, stars rendered at one shared 4.0 px FWHM, one shared plate scale. Only the sensor differs
+(480×320 vs 900×600), which is what takes the union canvas past the editor's 1500 px proxy cap. That makes the
+pair an **instrument**: every answer that describes the *sky* rather than the *picture* has to come back the same
+from both. Not a theoretical one — **v0.492.33 was exactly this failure** ("Galaxy" from one canvas, "Star
+cluster" from the other, confidence 1.0 each) and it survived because `--big` loaded the pair and probed the two
+halves **independently**, never comparing them. The Infra lead filed with that fix asked for the comparison; this
+is it, and the lead is closed.
+
+**What it does.** `scripts/dogfood_scale_pair.py`, called from step 4a-ter of `agent-dogfood.sh` when both
+`--mosaic` and `--big` are on, asks four questions of each half and prints what moved:
+
+- `editor/preset-suggestion` — must agree on `preset_id`, `label` (the v0.492.33 claim itself);
+- `editor/auto-analysis` — on `is_mosaic`, `noisy`, `auto_crop`, `median_fwhm`, `sharpen_radius`, `sky`,
+  `sky_sigma`, `noise_fraction`;
+- `framing` — on whether it answered at all, `canvas`, `object_name`, `size_arcmin`;
+- `stack-health` — on which notes fired, how loud each is, what each offers, and `background_clean`.
+
+**A finder, not a gate** (AGENTS.md §7). It prints the agreements as well as the disagreements, because a report
+that prints only failures cannot be told apart from one that asked nothing; each question carries its own line on
+what may honestly differ there, and the two differences that genuinely do are *named* rather than tolerated by
+accident — the panels' pointing jitter is the same **pixel** count in both samples, so the same ragged corner is a
+smaller share of the bigger canvas (`trim_fraction` 0.079 → 0.065), and the full-size canvas really does catch
+~3.5× the sky (`framing`'s level, `coverage_pct` 75 → 95 and the nudge, carried into the report *unchecked* so the
+honest difference is printed with its own numbers). Tolerances are a reading aid, never a pass/fail: the two
+samples draw their noise from different streams on purpose, and the raw cues behind a verdict move ~30 % relative
+even when every verdict holds (the caveat the 2026-10-04 pure-Python sweep left behind).
+
+**What its first real run printed — two findings, both filed under "Bugs (fix these first)".**
+
+1. **`seam_residual` is not scale-invariant.** The same sky, the same four panels and the same real step read
+   **0.6998** on the 907 px canvas and **1.2218** on the 1686 px one — across `_SEAM_FLAT_RATIO`, so the "the
+   panels of this mosaic evened out" note is present on one and **absent** on the other (1.0–1.5 is the
+   deliberately silent band). Measured mechanism: the panel-**body** levels agree on both canvases and sit within
+   ~0.5 ADU of zero on a grain of σ ≈ 9–13, i.e. levelling worked; the whole spread comes from small-n sliver
+   levels (+9 ADU on n ≈ 300–750), and **which slivers get a vote is a fixed 200-pixel count** that
+   `_level_context` scales for the proxy *stride* but not for the canvas's *extent* — 10 readable levels on the
+   small canvas against 20 on the big one. It matters beyond one lost reassurance: the owner's mosaics are
+   ~3494×2470, so the figure climbs further still, and past 1.5 the silence becomes a *wrong warning*. **Filed and
+   not fixed**, with two negative fixture results recorded so the next run does not repeat them: neither a
+   jittered ragged synthetic mosaic (0.687 → 0.585, moving the *wrong* way) nor the same with per-level noise
+   σ ∝ 1/√coverage and real 4 px Gaussian stars (2.13 → 1.88) reproduces the move, so the fail-before fixture is
+   the first half of that task rather than an afterthought.
+2. **`sky_sigma`'s move is the proxy stride, not the canvas** — which is the rig working, and the reason it prints
+   rather than asserts. It reported 0.0004 vs 0.0007; asking **one** master at three strides gives 0.000429 /
+   0.000651 / 0.000736 (small) and 0.000438 / 0.000666 / 0.000774 (full-size) at steps 1/2/4, i.e. the two agree to
+   three digits at the same stride and each rises ~50 % per doubling. Filed as a measured **lead**, because
+   `noisy` is `sky_sigma > 0.02` and both samples sit ~25× below the bar — but which stride a run gets is decided
+   by its canvas, so the question of whether that bar means the same thing at step 1 and step 3 is live.
+
+**Tests** (`tests/test_dogfood_scale_pair.py`, 8). The comparison is a pure function over injected payloads, so
+the sensitivity that matters is testable without an app: handed the **pre-v0.492.33 pair of answers** it has to
+report `MOVED` on `preset_id` and `label`; handed an identical pair it has to read CLEAN *and name every answer it
+checked*; handed the two built-in honest differences it must report neither as a finding. Blinding `agree()` fails
+three of them. Plus the anchors the four questions need — every path is a live route with the right method (the
+two editor hints are POSTs), and the shell gates the diff on **both** halves of the pair and says so when given
+only `--big`. One of those eight came out of the first run itself: the `stack-health` finding was reported as a
+truncated common prefix on both sides, so a reader could see that *something* moved and not what — a finding
+nobody can read is not a finding, and `_moved_lines` now prints each side in full plus the one-sided difference of
+a comma-separated claim list.
+
+**No product change at all**: a dev script, a dev helper module and a test file. No engine, webapp, frontend,
+config, schema, migration, on-disk, default, endpoint or response-shape change.
+
 ## 2026-10-04 (Builder) — the lag note was silent on exactly the folders #878 had struck
 
 ### v0.492.35 — 🟡 BUG FIX: `/api/incoming-lag` counted a double-registered folder's frames twice and went quiet
