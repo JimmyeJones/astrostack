@@ -82,6 +82,69 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟠 VERIFIED AND MEASURED ON TWO REAL STACKED CANVASES (Builder 2026-10-04, the first finding the
+  v0.492.36 scale-pair rig printed) — `seam_residual` is not scale-invariant: the same sky, the same four
+  panels and the same real step read **0.6998** on the 907 px mosaic sample and **1.2218** on the 1686 px
+  one, which crosses `_SEAM_FLAT_RATIO` and loses the "the panels of this mosaic evened out" note
+  entirely.** *(Pillar: trust / friendliness — PRIORITY 3, on the editor-adjacent "How's my stack?" card;
+  size **M to fix, L to be sure of**; severity medium **and rising with canvas size**; confidence: the move
+  is reproduced, and the mechanism measured, on real stacked data — see the two negative fixture results
+  below before you start.)*
+  **Repro.** `scripts/agent-dogfood.sh --mosaic --big`, then read `stack_runs.seam_residual` on each
+  target's newest run (or the rig's own `stack-health` line: `seams_flat/good/-` is present on the small
+  canvas and absent on the big one). `seam_verdict` calls < 1.0 "flat", ≥ 1.5 "check" and the band between
+  them deliberately **silent**, so the bigger canvas says nothing at all.
+  **What was measured** (`measure_seam_residual` re-run on both masters with its internals printed). The
+  **panel-body** coverage levels — the ones that are what the note is about — agree on both canvases and sit
+  within ~0.5 ADU of zero on a grain of σ ≈ 9–13: levelling worked. The whole spread comes from **small-n
+  levels**: on the small canvas level 21 (n=493) reads +8.97 ADU and level 15 (n=749) +4.75; on the big one
+  levels 18/19 (n=416/310) read +8.41/+9.99 and level 21 (n=3858) +10.07. And **which of those levels gets
+  a vote is a fixed pixel count** — `min_pixels_per_level=200`, scaled for the proxy *stride* by
+  `_level_context` (deliberately, so a proxy picks the same levels the export would) but **not** for the
+  canvas's *extent*. A sliver's pixel count grows with the panel perimeter, so a bigger sensor admits more
+  of them: 10 readable levels on the small canvas against 20 on the big one. The standard-error slack that
+  v0.313.1 added shrinks as 1/√n too, so it does not hold the figure still either (raw max−min moves
+  1.0883σ → 1.6902σ; slack-corrected 0.6998 → 1.2218).
+  **Why it matters more than one lost reassurance.** The owner's own mosaics are ~3494×2470 and up, ~6.5×
+  the big sample's area, so more slivers again clear the gate and the figure climbs further — past 1.5 it
+  stops being silence and becomes the **wrong warning** ("faint seams may show once it's stretched… the
+  editor's background tools can even it out further") about a canvas whose panels did even out.
+  **⚠️ Two negative results, so the next run does not repeat them.** A fix needs a fail-before fixture and
+  **neither synthetic one reproduces the move**: (1) a 2×2 jittered ragged mosaic with the sample's own
+  jitter, 82 % step and 6/6/6/3 depth, levelled and measured at both panel sizes, reads 0.687 → 0.585 (it
+  moves the *wrong way*); (2) the same with per-level noise σ ∝ 1/√coverage and real 4 px-FWHM Gaussian
+  stars at the sample's density reads 2.13 → 1.88. The existing `_panel_scene` fixture cannot show it at
+  all (4 equal full-height panels, no slivers). So the move needs something only the real pipeline supplies
+  — reprojection interpolation, per-panel photometric normalisation, the stacker's own levelling view, or
+  the rejection pass — and **finding the fixture is the first half of this task, not an afterthought**: a
+  fix pinned by a green tick with no sensitivity is the trap v0.492.33's own rig was refused for.
+  **Do not flip `_SEAM_FLAT_RATIO` or `_SEAM_VISIBLE_RATIO`** — they carry their own measurements (0.56
+  with a nebula, 0.02 without, 1.39/2.08 stranded, 15.7 unlevelled) and the fault is in what the figure
+  means, not where the bar is. The shape to weigh is a *share*-based floor on which levels vote, next to
+  `_GRAIN_MIN_SHARE = 0.10`'s precedent — but note a naive 10 % share leaves fewer than two levels on the
+  small sample and would silence the note everywhere, and that any estimator change needs a
+  `SEAM_ESTIMATOR_GENERATION` / `seam_scale` bump so stored figures keep being read on the scale they were
+  written on.
+
+- **⚪ MEASURED LEAD (Builder 2026-10-04, the second finding the v0.492.36 rig printed — filed as a lead,
+  not a bug, because no bundled sample shows it misfiring) — `analyze_proxy`'s `sky_sigma` is a function of
+  the proxy **stride**, and `noisy` compares it against a fixed `0.02`, so whether Auto calls a picture
+  noisy can depend on the canvas size.** *(Pillar: autonomy / editor — PRIORITY 1–2; size **M**; severity
+  low **on today's data** and unknown on the owner's; confidence: measured, and the canvas was ruled out as
+  the cause.)*
+  The rig reported `sky_sigma` 0.0004 (small mosaic) vs 0.0007 (full-size). Asking **one** master at three
+  strides shows it is the decimation, not the sky: small 0.000429 / 0.000651 / 0.000736 and full-size
+  0.000438 / 0.000666 / 0.000774 at steps 1 / 2 / 4 — i.e. the two agree to three digits *at the same
+  stride*, and each rises ~50 % per doubling because striding breaks the pixel-to-pixel correlation the
+  stacker's reprojection put there. Which stride a run gets is decided by the canvas (`PROXY_MAX_PX` 1500),
+  so the owner's ~3494 px mosaics are read at step 3 while a single field is read at step 1.
+  **Why it is a lead and not a bug today:** `analyze_proxy` returns `noisy = sky_sigma > 0.02` and both
+  samples sit ~25× below that bar, so nothing visible moves, and `noise_fraction` reads 0.0 on both. The
+  question for whoever takes it is whether the bar should be read at the stride it was calibrated on (or the
+  estimate corrected for it) — **measure first**: find the stride dependence of `estimate_noise_sigma` on a
+  canvas whose `sky_sigma` is actually near 0.02, and check whether Auto's denoise decision flips between
+  step 1 and step 3 on the same pixels. If it does, this becomes a blocker rather than a note.
+
 - **⚪ VERIFIED BY ARITHMETIC (Builder 2026-10-04, found while fixing v0.492.33 in the same function) — two of
   `classify_target`'s three archetypes report a `confidence` that is **mathematically pinned to exactly 1.0**
   by their own branch guards, so the number carries no information.** *(Pillar: trust — size **S to change,
@@ -2657,38 +2720,6 @@ uncached path costs every time (a cold one pays both, 1,116 ms), the 129 ms bein
 
 ### Infra / maintainability
 
-- **LEAD (Builder 2026-10-04, filed with v0.492.33 — the instrument that found it, which nothing uses) —
-  the two bundled mosaic samples are a *scale-invariance* rig, and no test or script asks them the same
-  question.** *(Pillar: editor correctness / infra — size **S**; confidence: high, it is how v0.492.33 was
-  found.)* `webapp/sample_data`'s own comment says `Sample_M42_mosaic_2_2` and `…_full_size` "differ in
-  scale alone, so a finding on one is a question about the other" — same grid, step, depth, haze, nights,
-  one shared star catalog, different sensor. So **any** answer that should not depend on canvas size can be
-  checked by asking both and diffing, and v0.492.33's bug was invisible until somebody did ("Galaxy" vs
-  "Star cluster", confidence 1.0 each). `scripts/agent-dogfood.sh --big` loads the pair but probes them
-  independently and never compares. Worth: a `--big` block that diffs the pair's answers on the endpoints
-  that claim to describe the *sky* rather than the picture (`editor/preset-suggestion`, `editor/auto-analysis`,
-  `framing`, `stack-health`), printing any that disagree — plus the cheap pure-Python half, which
-  `tests/test_target_classify.py::test_the_archetype_does_not_change_with_the_size_of_the_canvas` now does
-  for one function and nothing does for the rest. Expect honest disagreements too (the full-size canvas
-  really does hold all of M42, so `framing` *should* differ): the value is a short list to read, not a
-  pass/fail.
-  **↳ THE PURE-PYTHON HALF IS SWEPT — CLEAN — AND THE RIG WAS DELIBERATELY NOT SHIPPED (Builder 2026-10-04).**
-  A synthetic Seestar field (420 stars at a real ~4 px FWHM, a broad coloured nebula, a gradient, read noise)
-  was put through `auto_recipe`, `analyze_auto_inputs` and `classify_target` at full resolution and at
-  `[::2, ::2]`, each with its own `proxy_scale`, in three shapes (single-field, mosaic with a four-level
-  coverage map and trim rect, mosaic of pure stars). **Identical op lists and identical verdicts in all
-  three**; every numeric disagreement is at the rounding digit (`target_bg` ≤ 8.5e-5, `sky` ≤ 0.001,
-  `sky_sigma` ≤ 0.0001). It was **not** landed as a test because **its fixture cannot reproduce the one bug of
-  this class that happened**: re-run with the `proxy_scale` withheld from the half-size canvas — i.e. exactly
-  the pre-v0.492.33 defect — it still answers `cluster`/`cluster`, `ext_frac` 0.0/0.0, so it would be a green
-  tick with no sensitivity (AGENTS.md §8's own warning), and its tolerances would be guesswork. **What is left
-  open is the `--big` sample-pair half, which is where the value is**: the bundled pair are real Seestar star
-  profiles on a real stacked canvas over one shared catalogue, which is why asking *them* found v0.492.33 while
-  asking a synthetic field finds nothing. One caveat for whoever takes it: the raw cues move far more than the
-  verdicts (`pt_frac`/`sig_frac` 0.0366 → 0.0486, ~30 % relative), so **any future tightening of a
-  `classify_target` threshold has to be checked at two canvas sizes**. Full record in
-  [`PROCESS-NOTES.md`](PROCESS-NOTES.md), 2026-10-04 (Builder).
-
 - **⚪ UNMERGED REMOTE BRANCHES — one-line verdicts (audit run B, B-F7, 2026-09-30). Nothing was deleted or
   merged; the owner decides.** Measured with the full history fetched (this clone arrives shallow, and a
   shallow `merge-base` made every branch look 100+ commits ahead — it is not): of the 80 remote branches
@@ -3441,6 +3472,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- **✅ v0.492.36** — 🔵 TOOLING (the editor's scale-invariance instrument, AGENTS.md §7), draining the Infra lead filed with v0.492.33: **the two bundled mosaic samples "differ in scale alone" and nothing asked them the same question.** `scripts/dogfood_scale_pair.py`, called from step 4a-ter of `agent-dogfood.sh` when `--mosaic` and `--big` are both on, asks four endpoints that claim to describe the *sky* rather than the picture (`editor/preset-suggestion`, `editor/auto-analysis`, `framing`, `stack-health`) of both halves and prints what moved — the comparison `--big` never made, which is why v0.492.33 ("Galaxy" from one canvas, "Star cluster" from the other) stayed invisible. A **finder, not a gate**: it prints the agreements as well, because a report that shows only failures cannot be told apart from one that asked nothing, and each question carries its own line on what may honestly differ there (the panels' jitter is a fixed *pixel* count, so the ragged corner is a smaller share of the bigger canvas; the full-size canvas really does catch ~3.5× the sky). Tests +8: the comparison is a pure function over injected payloads, so it is pinned against the **pre-v0.492.33 pair of answers** (it must report `MOVED`), against an identical pair (it must read CLEAN *and name what it asked*), and against both built-in honest differences (neither may read as a finding) — blinding `agree()` fails three of them — plus the route/method anchors and the shell gate. **On its first real run it printed two findings, both filed under "Bugs"**: `seam_residual` moves 0.6998 → 1.2218 on the same sky and loses the "panels evened out" note, and `sky_sigma`'s move turned out to be the proxy *stride* rather than the canvas (measured, and the rig's own report now shows both sides of a finding in full — its first finding was hidden behind a truncated common prefix). Entry in [`SHIPPED.md`](SHIPPED.md).
 - **✅ v0.492.35** — 🟡 BUG FIX (trust + autonomy, PRIORITY 2/3), the Scout's ungated 2026-10-04 entry (observer issue [#1063](https://github.com/JimmyeJones/astrostack/issues/1063)), drained: **`/api/incoming-lag` added a double-registered folder's two tallies together, so the folder read as about twice as imported as it is and `incoming_lag`'s `waiting <= 0` guard dropped it** — the one signal built to catch subs that silently never imported was dark on **30 of the owner's 54 drop folders, a 41,727-sub dead zone**, and already answered `n_waiting=1` where the ground truth was 6 across 5 folders. The backlog left the rollup decision open, and it was settled with a measurement rather than an argument: candidate **(a) `max` across targets** was written out and run, and it fixes the repro **while failing** the disjoint-halves guard — reporting two subs as missing that are in the library, the one direction this note must never go. So **(b)**, in the shape that costs what (a) costs on an ordinary library: `source_path` is `UNIQUE` per target, so a folder only *one* target registered is still answered by the one grouped `COUNT`, and only a folder **more than one target claims** is re-counted as the union of its `source_path`s (new `Project.source_paths_in_folder`, matched against the *same* SQL dirname expression `source_folders_under` groups by, so the two cannot drift; grouped by target so a project opens once). **A library with no double-registered folder reads not one extra row and gets a byte-for-byte identical answer**, pinned by a spy that is also shown firing once the duplicate exists. A de-duplication that cannot be completed keeps the old summed tally, because an under-count is the direction that cries wolf. `incoming_lag` itself and `test_a_double_registered_folder_can_only_ever_read_as_imported` are untouched. Tests +12 (5 webapp, 7 engine); fail-before shown (`0 == 2`, total silence). No config, schema, migration, on-disk, default or response-shape change. Entry in [`SHIPPED.md`](SHIPPED.md).
 - **v0.492.34** — 🔴 BUG FIX (the owner's first deploy, 2026-10-04): `scripts/deploy.sh` stopped the app and exited silently — `zfs list | awk '{…; exit}'` died of SIGPIPE under `pipefail` on a NAS with hundreds of datasets — and a failed `zfs snapshot` would have deployed with no backup. Lookup moved to `scripts/lib/zfs-dataset.sh` (reads the whole listing), snapshot failure falls back to the tar copy, an ERR trap names the line and `sudo docker start astrostack`; scripts run each other through `bash` (his clone's dataset is no-exec).
 - **✅ v0.492.33** — 🐛 BUG FIX (**PRIORITY 1, the editor**), found by this run's §2 big-picture `--mosaic --editor --big` dogfood pass, which was otherwise CLEAN: **the preset-suggestion chip told both bundled star-only mosaic samples *"Your image looks like a Galaxy (broadband)"*, and changed its mind to "Star cluster" on the same sky through a bigger sensor.** `presets.classify_target` separates point sources from extended structure with a grey-scale opening whose footprint was a fixed `7x7` in **proxy** pixels — so it meant a different patch of sky on every canvas (a proxy is the master strided to <=1500 px), and on an un-decimated one it was narrower than a real 4-px-FWHM Seestar star, whose core then survived the opening and was counted as *extended* signal. Measured on the three bundled demos, which hold Gaussian stars **and nothing else**: `ext_frac` 0.0168 / 0.0194 at proxy step 1 (verdict `galaxy`, "a concentrated extended object on a mostly dark sky") against 0.0 at step 2 (`cluster`) — and the sample data's own comment says the two mosaics "differ in scale alone, so a finding on one is a question about the other". The sibling `starmask.star_mask`, which this function's docstring names as where `star_share` comes from, has always divided its footprint by `proxy_scale`; this site never did. New `_star_opening_side` takes the larger of the star's size on this grid (`_STAR_OPENING_PX / proxy_scale`) and the `_GEOM_SMOOTH_PX` box the cues are smoothed through — which does **not** shrink with the stride, and without that floor a footprint scaled to 3x3 turns a pure star field into a *nebula* at steps 6 and 8 (`ext_frac` 0.076). So **only an un-decimated canvas moves**; every strided one keeps today's 7x7. After: all three samples and the full-size master re-read at steps 1/2/3/4/6/8 → `cluster`, `ext_frac` 0.0 at every step, with the galaxy/nebula/cluster controls unmoved at every footprint from 7 to 15. The drift guard's `_UNSCALED_BY_DESIGN` entry for this site — written on a sweep whose fixtures used `sigma=1.0` stars, too narrow to show it — is deleted and the site asserted scaled. One fixture retuned with its reason recorded, both of its guards re-armed and verified armed; the three `classify_target` stubs in the auto-feedback test are now a helper that **asserts** it was handed the scale, because `_classify_run` swallows every exception and a stale stub therefore degrades per-type taste to global taste in silence (it did, and v0.410.1 hit the same trap). Tests +4 new and one adapted, all five shown failing in an `origin/main` worktree. One optional keyword, no config, schema, migration, on-disk, default, endpoint or response-shape change. Entry in [`SHIPPED.md`](SHIPPED.md).

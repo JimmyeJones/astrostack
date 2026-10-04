@@ -20,6 +20,8 @@
 #   scripts/agent-dogfood.sh --editor        # ALSO drive the editor (adds every op)
 #   scripts/agent-dogfood.sh --mosaic        # ALSO load/stack/probe a 2x2 MOSAIC sample
 #   scripts/agent-dogfood.sh --big           # ALSO a FULL-SIZE mosaic: the editor's preview is decimated
+#                                           #   (with --mosaic it also DIFFS the pair, which
+#                                           #    differ in scale alone — see step 4a-ter)
 #   scripts/agent-dogfood.sh --no-site       # leave the scratch install with no observing site
 #   scripts/agent-dogfood.sh --incoming-lag  # ALSO leave subs in incoming/ the library never imported
 #                                           #   (one of them damaged, and scanned, so the
@@ -144,6 +146,14 @@
 # cost grows with the pixels and a pass nobody runs finds nothing: it adds about
 # a minute over --mosaic. It prints what the app answers about the shrunk
 # preview (`/editor/loupe-info`) and, with --editor, drives the editor on it.
+#
+# AND, when --mosaic is on too, it asks BOTH halves of that pair the same
+# questions and diffs the answers (step 4a-ter, scripts/dogfood_scale_pair.py).
+# The two samples differ in SCALE ALONE, so any answer about the *sky* rather
+# than the *picture* has to come back the same from both; v0.492.33 was exactly
+# that failure, and it survived because --big probed the two independently and
+# never compared them. A finder, not a gate: each question carries its own note
+# on what may honestly differ there.
 #
 # --calibration exists because NO PASS HAS EVER HELD A MASTER. The scratch
 # install's calibration registry is empty on every run ever recorded, so the
@@ -1246,6 +1256,29 @@ else:
     print("   so the five preview<->export advisories and the loupe are all live here")
 ' 2>/dev/null || echo "-- full-size preview: could not read /editor/loupe-info"
   fi
+fi
+
+# 4a-ter. THE PAIR AS AN INSTRUMENT (needs --mosaic AND --big). The two mosaic
+#     samples differ in SCALE ALONE — same grid, same 82 % step, same uneven
+#     depth, same hazy panel, one shared star catalog at one shared on-sky
+#     density, one shared 4.0 px star FWHM, one shared plate scale, different
+#     sensor — so every answer that describes the SKY rather than the PICTURE
+#     has to come back the same from both. v0.492.33 was exactly that failure
+#     ("Galaxy" from one, "Star cluster" from the other, confidence 1.0 each),
+#     and it stayed invisible because --big loaded the pair and probed the two
+#     INDEPENDENTLY, never comparing. This asks and diffs. A finder, not a gate:
+#     the questions, their tolerances and each one's "what may honestly differ
+#     here" all live in scripts/dogfood_scale_pair.py, next to the reasoning.
+if [ -n "$BIG_SAFE" ] && [ -n "$MOSAIC_SAFE" ]; then
+  echo "-- [scale] the two mosaic samples differ in SCALE ALONE: asking both the"
+  echo "   same questions and diffing (the instrument that found v0.492.33)"
+  BASE="$BASE" python "$REPO/scripts/dogfood_scale_pair.py" \
+    "$MOSAIC_SAFE" "$(run_id_of "$MOSAIC_SAFE")" \
+    "$BIG_SAFE" "$(run_id_of "$BIG_SAFE")" \
+    || echo "   [scale] the diff itself could not run"
+elif [ -n "$BIG_SAFE" ]; then
+  echo "-- [scale] only the full-size mosaic is loaded, and a scale-invariance"
+  echo "   diff needs both halves of the pair — add --mosaic to this pass"
 fi
 
 # 4b. What Auto would trim off the mosaic. AGENTS.md §1: on a mosaic canvas a

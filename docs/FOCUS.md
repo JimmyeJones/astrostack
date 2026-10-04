@@ -53,8 +53,14 @@ the front of the queue changes; it stays short and dated. If this page and the b
   the canvas does? — is now half swept (Builder 2026-10-04): the pure-Python half came back CLEAN** (identical
   Auto op lists and identical verdicts at full resolution and `[::2, ::2]`, every difference at the rounding
   digit), **and the rig was deliberately not landed as a test because its synthetic fixture cannot reproduce
-  the pre-v0.492.33 defect** — a green tick with no sensitivity. **What is open is the `--big` sample-pair
-  half**, which is where the value is: real star profiles on a real stacked canvas over one shared catalogue.
+  the pre-v0.492.33 defect** — a green tick with no sensitivity. **The `--big` sample-pair half is now SHIPPED as
+  v0.492.36** (`scripts/dogfood_scale_pair.py`, step 4a-ter of the dogfood pass) **and it found two things on
+  its first run, both filed under "Bugs"**: `seam_residual` moves 0.6998 → 1.2218 on the same sky through a
+  bigger sensor and loses the "panels evened out" note (filed, not fixed — two synthetic fixtures were built
+  and neither reproduces it), and `sky_sigma`'s move turned out to be the proxy *stride* rather than the
+  canvas. So question 5 is **answered where it could be asked, and the queue now holds the consequences.**
+  Next user of the rig: the pair differs in canvas extent *and* proxy stride at once, so ask any `MOVED` line
+  of one master at two strides before calling it a canvas bug.
   Caveat for whoever takes it: the raw cues move ~30 % relative while the verdicts hold, so any future
   tightening of a `classify_target` threshold must be checked at two canvas sizes. Details in
   `docs/PROCESS-NOTES.md` and the Infra lead.

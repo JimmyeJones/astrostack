@@ -298,6 +298,24 @@ the repo.
 > combine with `--editor` to drive the ops on the one run whose preview is not
 > 1:1.
 >
+> **With `--mosaic` as well, that pair becomes an instrument** *(added 2026-10-04
+> with v0.492.36)*. `webapp/sample_data`'s own comment says the two mosaic samples
+> "differ in **scale alone**, so a finding on one is a question about the other" —
+> same grid, same step, same uneven depth, same hazy panel, one shared star
+> catalog at one shared on-sky density, one shared 4.0 px star FWHM, one shared
+> plate scale, different sensor. So any answer that describes the **sky** rather
+> than the **picture** has to come back the same from both, and step 4a-ter asks
+> four of them (`editor/preset-suggestion`, `editor/auto-analysis`, `framing`,
+> `stack-health`) and prints what moved. **v0.492.33 was exactly that failure**,
+> and it survived because `--big` probed the two halves independently and never
+> compared them. A finder, not a gate: the questions, their tolerances and each
+> one's "what may honestly differ here" live in `scripts/dogfood_scale_pair.py`,
+> and its first real run printed two findings, both filed. One caveat it also
+> taught: the proxy **stride** is part of what differs between the two, so a
+> number measured on the proxy (`sky_sigma`) can move with the decimation rather
+> than with the sky — ask it of **one** master at two strides before calling it a
+> canvas bug.
+>
 > **And the drop folder itself has never held a file while a browser was
 > looking — `--incoming-lag`** *(added 2026-09-14 with v0.442.0)*. The scratch
 > install's `incoming/` is **empty on every pass**, because the sample arrives
