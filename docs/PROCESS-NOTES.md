@@ -76,6 +76,33 @@ request after, and that fixture is shared by all 2,705 webapp tests — a change
 full-suite run, not at the tail of an unrelated one. Filed here rather than in the backlog because it is
 process/tooling, not product (AGENTS.md §2's three-file rule).
 
+### Then the seam finding was taken as far as it goes in one run: fixture found, candidate fix built, measured wrong, reverted
+
+Worth recording as a shape, because the run did the work in the right order and the *last* step is the one that
+saved it.
+
+1. **Three synthetic fixtures failed** (above). The fourth worked: the bundled mosaic through
+   `sample_data`'s own writers at three sensors, stacked by `run_stack` **with the app's own option set** —
+   `0.6461 → 0.7492 → 1.0008` on 457 / 907 / 1693 px canvases, monotone and across the bar. The option set is
+   the part three attempts were missing; `background_flatten` with its 128-px box is load-bearing, and without
+   it the figure is wild and non-monotonic (8.6 / 0.57 / 4.76).
+2. **A candidate fix was built and measured good**: restrict the *vote* in the seam spread to levels holding
+   ≥ 2 % of the covered canvas, leaving the yardstick over every level (which makes the change strictly
+   one-sided — the property `stored_seam_verdict` already relies on). It fixed the repro to one answer on all
+   three canvases (0.0847 / 0.0 / 0.0163) and left `_panel_scene`'s three controls byte-identical.
+3. **Then the suite found what the repro could not**, and it is a genuine defect in the fix rather than a stale
+   test: a dither ramp fragments a panel **body** into many thin levels, so on a heavily-dithered canvas — the
+   owner's own shape — a level's share of the canvas is not a proxy for "is this a body", and
+   `test_a_real_step_on_a_deep_dithered_mosaic_is_still_caught` stops catching a genuinely stranded body.
+   Reverted, and the measurement written into the backlog entry so the next run starts from "the floor is the
+   wrong shape, try banding adjacent levels" instead of re-discovering it.
+
+**The lesson is about order, not about seams.** A fix validated only against the fixture that found the bug is
+validated against half the question; the other half is the suite's own sensitivity controls, and they are
+cheaper to run than the repro. Run them *before* writing any of the surrounding work (the generation bump,
+the docs, the version) — this run spent none of that, because the controls were run first.
+
+
 ## 2026-10-04 (Builder, branch `claude/dreamy-thompson-uyoli3`) — v0.492.35 shipped (observer #1063); the scale-invariance question swept on the pure-Python half — CLEAN, and the rig deliberately NOT shipped
 
 ### What shipped
