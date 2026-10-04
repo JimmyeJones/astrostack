@@ -333,3 +333,176 @@ def test_darks_in_the_drop_folder_are_not_reported_as_waiting(built_library, cli
     assert body["checked"] is True
     assert body["n_waiting"] == 0
     assert body["items"] == []
+
+
+# --- A folder two targets claim is counted once, not twice ---------------------
+#
+# Issue #878's mosaic double-registration left the same subs registered under two
+# targets across 76 % of the owner's frames, and the tally this endpoint joins
+# against used to *add* the two targets' counts. Such a folder therefore read as
+# about twice as imported as it is, ``waiting`` went negative, and the guard
+# dropped it — so the one signal built to catch subs that silently never imported
+# (v0.442.0) was dark on 30 of his 54 drop folders, a combined 41,727 subs
+# (v0.492.35). The counts are distinct now, and distinctly rather than by a
+# ``max`` across targets, for the reason the disjoint test below pins.
+
+
+def _registered_paths(root: Path, folder: str) -> list[str]:
+    """Every ``source_path`` the library already holds for ``folder``."""
+    from seestack.io.library import Library
+
+    out: list[str] = []
+    lib = Library.open_or_create(root / "library")
+    try:
+        for entry in lib.list_targets():
+            proj = lib.open_target(entry.safe_name)
+            try:
+                out += [f.source_path for f in proj.iter_frames()
+                        if Path(f.source_path).parent.name == folder]
+            finally:
+                proj.close()
+    finally:
+        lib.close()
+    return out
+
+
+def _register_under_a_new_target(root: Path, name: str, paths) -> None:
+    """A second target carrying frame rows for ``paths`` — #878's shape.
+
+    Nothing on disk moves: the duplicate is a second set of rows pointing at the
+    one copy of each sub, which is exactly what the safe-name collision in
+    ``Library._allocate_safe_name`` minted eleven times on the owner's library.
+    """
+    from seestack.io.library import Library
+    from seestack.io.project import FrameRow
+
+    lib = Library.open_or_create(root / "library")
+    try:
+        _, twin = lib.create_target(name)
+        try:
+            twin.add_frames([FrameRow(source_path=str(p)) for p in paths])
+        finally:
+            twin.close()
+    finally:
+        lib.close()
+
+
+def _drop_new_subs(root: Path, folder: str, *seeds: int) -> None:
+    """Good subs arriving in a folder the library already has rows for: never
+    imported, genuinely waiting."""
+    from tests.synth import write_seestar_fits
+
+    d = root / "incoming" / folder
+    d.mkdir(parents=True, exist_ok=True)
+    for s in seeds:
+        write_seestar_fits(d / f"late_{s:03d}.fit", width=48, height=32,
+                           n_stars=3, seed=s)
+
+
+def test_a_folder_two_targets_claim_still_names_its_missing_subs(
+        built_library, client):
+    """The observer's measured shape: two never-imported subs in a folder whose
+    rows exist twice over. Summed, the tally (3 + 3) exceeded the five files on
+    disk and the folder never spoke at all."""
+    _drop_new_subs(built_library, "M_42", 701, 702)
+    paths = _registered_paths(built_library, "M_42")
+    assert len(paths) == 3, paths
+    _register_under_a_new_target(built_library, "M_42 twin", paths)
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    body = client.get("/api/incoming-lag").json()
+    assert body["checked"] is True
+    assert body["n_waiting"] == 2
+    item = next(i for i in body["items"] if i["folder"] == "M_42")
+    assert (item["n_on_disk"], item["n_imported"], item["n_waiting"]) == (5, 3, 2)
+
+
+def test_a_fully_imported_folder_two_targets_claim_stays_silent(
+        built_library, client):
+    """The other half of the same fix: de-duplicating must not *invent* lag on a
+    folder whose subs are all in the library. The ordinary answer is unchanged."""
+    _register_under_a_new_target(built_library, "M_42 twin",
+                                 _registered_paths(built_library, "M_42"))
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    body = client.get("/api/incoming-lag").json()
+    assert body["checked"] is True
+    assert (body["n_waiting"], body["n_folders"], body["items"]) == (0, 0, [])
+
+
+def test_two_targets_holding_disjoint_halves_of_one_folder_report_nothing(
+        built_library, client):
+    """Why the tally is a distinct count and not a ``max`` across targets.
+
+    A ``max`` is exactly right for #878's frame-for-frame duplicates and wrong
+    here: two targets each holding *part* of one folder's subs are between them
+    holding all of them, so a ``max`` would call the rest of a fully-imported
+    folder missing — this note crying wolf about subs that are in the library,
+    which is the one direction it is designed never to go. (It passes under the
+    old sum too: it is the guard on the fix, not the fix's own repro.)
+    """
+    _drop_new_subs(built_library, "M_42", 801, 802)
+    later = sorted((built_library / "incoming" / "M_42").glob("late_*.fit"))
+    assert len(later) == 2
+    # The two late subs reach the library under a *different* target, so no file
+    # is registered twice and the folder is in fact fully imported.
+    _register_under_a_new_target(built_library, "M_42 panel 2", later)
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    body = client.get("/api/incoming-lag").json()
+    assert body["checked"] is True
+    assert body["n_waiting"] == 0
+
+
+def test_a_library_with_no_shared_folder_reads_not_one_extra_row(
+        built_library, client, monkeypatch):
+    """The de-duplication is paid only where targets actually overlap, so every
+    other install reads exactly what it read before. Prove the spy is wired up by
+    watching it fire once the duplicate exists."""
+    from seestack.io.project import Project
+
+    asked: list[str] = []
+    real = Project.source_paths_in_folder
+
+    def spy(self, prefix, folder, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        asked.append(folder)
+        return real(self, prefix, folder, *a, **k)
+
+    monkeypatch.setattr(Project, "source_paths_in_folder", spy)
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    assert client.get("/api/incoming-lag").json()["checked"] is True
+    assert asked == []
+
+    _register_under_a_new_target(built_library, "M_42 twin",
+                                 _registered_paths(built_library, "M_42"))
+    assert client.get("/api/incoming-lag").json()["checked"] is True
+    assert asked == ["M_42", "M_42"]      # one read per target that claims it
+
+
+def test_a_dedupe_that_cannot_be_completed_keeps_the_quieter_summed_tally(
+        built_library, client, monkeypatch):
+    """An under-count is the direction that makes this note cry wolf, so a union
+    that is missing a target's frames is never used: the folder falls back to the
+    old, summed number — quieter, and wrong only in the way it was wrong before.
+    A broken target must also not 500 the note."""
+    from seestack.io.project import Project
+
+    _drop_new_subs(built_library, "M_42", 901, 902)
+    _register_under_a_new_target(built_library, "M_42 twin",
+                                 _registered_paths(built_library, "M_42"))
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+    assert client.get("/api/incoming-lag").json()["n_waiting"] == 2
+
+    def boom(self, prefix, folder, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        raise RuntimeError("unreadable project")
+
+    monkeypatch.setattr(Project, "source_paths_in_folder", boom)
+    body = client.get("/api/incoming-lag").json()
+    assert body["checked"] is True
+    assert body["n_waiting"] == 0

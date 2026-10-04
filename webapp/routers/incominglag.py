@@ -18,7 +18,11 @@ under ``incoming/`` (AGENTS.md §10) — the watcher's poll already holds that
 listing and :meth:`webapp.watcher.Watcher.incoming_units` hands it over. The
 library side is one grouped ``COUNT`` per target off an existing index
 (:meth:`seestack.io.project.Project.source_folders_under`), the same read
-``/api/upload-destinations`` makes on a page a beginner opens.
+``/api/upload-destinations`` makes on a page a beginner opens — plus, **only for
+a folder more than one target registered**, that folder's ``source_path``s off
+the same index, so the two tallies can be de-duplicated instead of added
+together (:func:`imported_by_folder`). A library with no double-registered
+folder reads not one extra row.
 
 **One definition, one voice.** Which folders a scan would ingest — and which are
 deliberately passed over — comes from
@@ -101,20 +105,45 @@ class IncomingLagResponse(BaseModel):
 
 
 def imported_by_folder(lib, prefix: str) -> dict[str, int]:  # noqa: ANN001
-    """How many registered frames sit in each folder under ``prefix``, summed
-    across every target.
+    """How many **distinct** registered frames sit in each folder under
+    ``prefix``, across every target.
 
-    Summed rather than kept per target on purpose: a folder registered under two
-    targets — the mosaic double-registration of issue #878 — must not read as
-    half-imported, and summing means a double registration can only ever make the
-    waiting count *smaller*. A broken project DB is skipped exactly as the other
-    cross-target reads skip it, so one corrupt target cannot cost the whole
-    answer; the cost of that is an under-count, i.e. a folder that may speak when
-    it should not, which is why it is logged nowhere and bounded to one target.
+    This was a plain sum across targets until v0.492.35, and the sum is what made
+    the note go quiet exactly where it was built to speak. ``source_path`` is
+    ``UNIQUE`` per target, so a folder only *one* target registered is already
+    exact and is still answered by the one grouped ``COUNT``. A folder **two**
+    targets registered — issue #878's mosaic double-registration, which covers
+    76 % of the owner's frames — had its two tallies added together, so the
+    folder read as about twice as imported as it is; :func:`incoming_lag`'s
+    ``waiting <= 0`` guard then dropped it, and the one signal built to catch
+    subs that silently never imported (v0.442.0) was dark on 30 of 54 of his drop
+    folders, a combined 41,727 subs.
+
+    The sum was a deliberate choice and its reasoning still holds in *direction*:
+    a double registration can only ever make the waiting count smaller, so this
+    note could only under-report, never cry wolf. What was never measured is by
+    **how much** — enough to hide whole nights.
+
+    So a folder more than one target claims is counted by its distinct
+    ``source_path``s (:meth:`~seestack.io.project.Project.source_paths_in_folder`)
+    in :func:`_count_shared_folders_distinctly`, which is right by construction in
+    both directions: it cannot over-count the way the sum did, and it cannot
+    *under*-count the way a ``max`` across targets would on two targets holding
+    genuinely disjoint subsets of one folder — which would make this note
+    over-report, the one direction it is designed never to go. The extra read is
+    paid only where targets really overlap, so on a library with no double
+    registration — every other install, and this one for every folder but
+    those — not one extra row is read and the answer is byte-for-byte the old one.
+
+    A broken project DB is skipped exactly as the other cross-target reads skip
+    it, so one corrupt target cannot cost the whole answer.
     """
     from seestack.io.project import Project
 
     out: dict[str, int] = {}
+    # Which targets registered each folder, so the de-duplication below can tell
+    # "already exact" from "two tallies of possibly the same files".
+    claimed_by: dict[str, list] = {}
     for t in lib.list_targets():
         proj = None
         try:
@@ -127,7 +156,56 @@ def imported_by_folder(lib, prefix: str) -> dict[str, int]:  # noqa: ANN001
                 proj.close()
         for folder, n in folders:
             out[folder] = out.get(folder, 0) + int(n)
+            claimed_by.setdefault(folder, []).append(t)
+    _count_shared_folders_distinctly(lib, prefix, out, claimed_by)
     return out
+
+
+def _count_shared_folders_distinctly(lib, prefix: str, out: dict[str, int],  # noqa: ANN001
+                                     claimed_by: dict[str, list]) -> None:
+    """Replace the summed tally of each folder **two or more targets claim** with
+    its distinct ``source_path`` count, in place. See :func:`imported_by_folder`.
+
+    Grouped by target rather than by folder, so a project opens once however many
+    shared folders it holds. Peak memory is the relative paths of the shared
+    folders alone and nothing at all on a library with none; the paths are
+    relative to ``prefix`` because that is the part that tells two frames apart.
+
+    **A folder whose de-duplication could not be completed keeps its summed
+    tally** — a target that opened for the counts above and not here leaves its
+    frames out of the union, and an under-count is the direction that makes this
+    note cry wolf. Falling back to the old, quieter number is the safe failure.
+    """
+    from seestack.io.project import Project
+
+    entries: dict[str, object] = {}
+    wanted: dict[str, list[str]] = {}
+    for folder, targets in claimed_by.items():
+        if len(targets) < 2:
+            continue
+        for t in targets:
+            entries[t.safe_name] = t
+            wanted.setdefault(t.safe_name, []).append(folder)
+    if not wanted:
+        return
+
+    seen: dict[str, set[str]] = {}
+    incomplete: set[str] = set()
+    for safe, folders in wanted.items():
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(entries[safe]))
+            for folder in folders:
+                seen.setdefault(folder, set()).update(
+                    proj.source_paths_in_folder(prefix, folder))
+        except Exception:  # noqa: BLE001 — a refinement must not 500 the note
+            incomplete.update(folders)
+        finally:
+            if proj is not None:
+                proj.close()
+    for folder, paths in seen.items():
+        if folder not in incomplete:
+            out[folder] = len(paths)
 
 
 def scan_incoming_lag(
