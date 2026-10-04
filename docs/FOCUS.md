@@ -2,8 +2,10 @@
 
 *Last edited 2026-10-04 (Builder — item 0 and the seam paragraph corrected, both named a bug that is now on
 `main`, and the `sky_sigma` lead promoted to a verified bug after running the gate its own entry set; the
-Scout's own 2026-10-04 text is otherwise untouched). `--mosaic` dogfood and the ASTAP/ffmpeg sweep both CLEAN (records in
-`docs/PROCESS-NOTES.md`). **The Scout rewrites this page** when
+Scout's own 2026-10-04 text is otherwise untouched). A `--mosaic --editor --big` dogfood pass on `main`
+*after* v0.492.37 is CLEAN and is the end-to-end half of its verification — the scale-pair rig now reads
+`stack-health` **notes same** on both canvases, `seams_flat` included; `sky_sigma` is the only answer still
+moving. The ASTAP/ffmpeg sweep is CLEAN too (records in `docs/PROCESS-NOTES.md`). **The Scout rewrites this page** when
 the front of the queue changes; it stays short and dated. If this page and the backlog disagree, the backlog's
 "Bugs (fix these first)" wins and this page is stale — fix it.*
 
