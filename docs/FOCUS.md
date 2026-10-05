@@ -56,11 +56,18 @@ the front of the queue changes; it stays short and dated. If this page and the b
    (lead filed under Infra).
 
 2. **Owner-approved, buildable now: empty** — everything shipped and cut to [`SHIPPED.md`](SHIPPED.md).
-3. **Open observer issues — four open (triaged 2026-10-04 Scout; #1063 closed by v0.492.35).** **None carries
-   code work.** All four are blocked on an owner click/reading: #878 (reconcile shipped v0.482.1/.2 — closes on a reading that shows the 11 pairs gone), #880
+3. **Open observer issues — FIVE open, and #1069 is UNTRIAGED.** Four were triaged 2026-10-04 by the Scout
+   (#1063 closed by v0.492.35) and **none of those four carries code work** — all are blocked on an owner
+   click/reading: #878 (reconcile shipped v0.482.1/.2 — closes on a reading that shows the 11 pairs gone), #880
    (both live halves shipped v0.483.1/.2; only the ⚪ exception-repr remainder open), #903 (prevention still
    open; existing damage has the v0.479.3 repair), #1015 (repo half shipped v0.488.2; the clone-pin + token-mint
    remainder is out of this repo — its 2026-10-03 follow-up is the same ask, wider window, not a new one).
+   **#1069 arrived after that triage and nobody has verified it** (filed 2026-10-04: "56 of 745 History rows
+   serve another run's picture — 71 rows share 15 master paths, left behind when the v0.81.7 overwrite fix
+   shipped without a migration"). Noted, not triaged: the inbox is the **Scout's** (AGENTS.md "Agent roles"),
+   and an observer report is a *lead* until someone reproduces it against the code. **Next Scout run: this one
+   first.** The count above said "four" through 2026-10-05 and was already wrong — don't trust it over
+   `list_issues`.
 
 ## Standing frontier (unchanged until a finding says otherwise)
 
