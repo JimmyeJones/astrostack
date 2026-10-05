@@ -3101,19 +3101,49 @@ async def save_stack_preview(
     run's own stored recipe instead of from the sliders, so ticking "North up" on
     a finished picture rotates it rather than replacing it with a plain stretch.
     See :func:`_save_processed_preview`.
+
+    Refused with **409** for a run whose ``preview_path`` a *later* run also names
+    (:func:`webapp.displacedpicture.preview_owner_by_run_id`) — a pre-v0.81.8
+    History row, whose own picture was overwritten and which therefore owns no
+    file to write. Both save paths go through here, so the one check covers the
+    sliders and ``keep_processed`` alike.
     """
+    from webapp.displacedpicture import preview_owner_by_run_id
+
     lib, proj = deps.open_target_project(request, safe)
     try:
-        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+        runs = list(proj.iter_stack_runs())
     finally:
         proj.close()
         lib.close()
+    run = next((r for r in runs if r.id == run_id), None)
     if run is None:
         raise HTTPException(status_code=404, detail="No such run")
     if not run.fits_path or not Path(run.fits_path).exists():
         raise HTTPException(status_code=404, detail="No FITS for this run to render")
     if not run.preview_path:
         raise HTTPException(status_code=400, detail="Run has no preview path to overwrite")
+    # A row does not always own the file it names. Before the v0.81.7–0.81.8
+    # overwrite guard a re-stack wrote the canonical ``master.*`` over the
+    # previous run's output and nothing ever migrated the older rows (observer
+    # issue #1069: 56 of them on the owner's library), so saving from one of those
+    # cards re-rendered straight over the *live* run's preview PNG — the file its
+    # History thumbnail, Target hero, Library tile and Sky Map tile are all served
+    # from. Worse than the pixels: the stretch and the applied North-up rotation
+    # are recorded on *this* row, so the live row keeps a NULL
+    # ``preview_north_up_deg`` beside bytes that have been turned, which is the
+    # mismatch that column exists to prevent (see this function's docstring).
+    # There is nothing to redirect the write to — this run's own pixels are gone,
+    # which is what the card's "picture overwritten" badge says — so the honest
+    # answer is to refuse it.
+    owner_run_id = preview_owner_by_run_id(runs).get(run_id)
+    if owner_run_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=("This run's own picture is gone — a later stack wrote over the "
+                    "same file name, so the image here belongs to that stack "
+                    f"(run {owner_run_id}) and saving would change its picture "
+                    "instead. Adjust that stack instead."))
 
     north_up_req = bool(body.get("north_up", False))
     if bool(body.get("keep_processed", False)):

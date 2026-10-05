@@ -78,17 +78,60 @@ def picture_owner_by_run_id(
     none at all for the overwhelmingly common case of a history with no duplicate
     (the existence check runs only inside a group of more than one row).
     """
+    return _later_owner_by_run_id(runs, "fits_path", require_existing_file=True)
+
+
+def preview_owner_by_run_id(
+    runs: Iterable[StackRunRow],
+) -> dict[int, int]:
+    """``{run id: the later run id that also names this run's preview PNG}``.
+
+    The same displaced population as :func:`picture_owner_by_run_id`, asked about
+    the column a *write* actually lands on. A pre-guard pair shares its whole
+    output set, so the older row's ``preview_path`` is the file the live run's
+    thumbnail, Target hero, Library tile and Sky Map tile are all served from —
+    and :func:`webapp.routers.stack.save_stack_preview` re-renders straight over
+    it. Measured on a shared pair: saving from the older card replaced the live
+    run's 64x64 preview with an 86x86 render turned 155 degrees to North, while
+    the rotation was recorded on the *older* row and the live row's
+    ``preview_north_up_deg`` stayed ``NULL`` — which is exactly the mismatch that
+    column exists to prevent (``save_stack_preview``'s own docstring: without it
+    "the map placed the un-rotated canvas geometry against a rotated picture").
+
+    **No existence gate here, unlike the display question.** "This card shows a
+    later run's picture" is a claim about bytes that are there; "do not write a
+    file another row serves" is not. A shared path with nothing at it yet would be
+    *created* by the save, handing the live row a thumbnail rendered from another
+    row's sliders with its own stretch columns left NULL — so the guard keys on
+    the rows alone.
+    """
+    return _later_owner_by_run_id(runs, "preview_path", require_existing_file=False)
+
+
+def _later_owner_by_run_id(
+    runs: Iterable[StackRunRow],
+    column: str,
+    *,
+    require_existing_file: bool,
+) -> dict[int, int]:
+    """Rows that share one path in ``column`` with a run recorded *after* them.
+
+    One grouping pass, shared by both questions above so the two cannot drift.
+    Ordered by **row id**: see :func:`picture_owner_by_run_id` for why not by
+    ``timestamp_utc``.
+    """
     by_path: dict[str, list[StackRunRow]] = {}
     for run in runs:
-        if run.id is None or not run.fits_path:
+        path = getattr(run, column, None)
+        if run.id is None or not path:
             continue
-        by_path.setdefault(str(run.fits_path), []).append(run)
+        by_path.setdefault(str(path), []).append(run)
 
     owner: dict[int, int] = {}
     for path, group in by_path.items():
         if len(group) < 2:
             continue
-        if not Path(path).exists():
+        if require_existing_file and not Path(path).exists():
             # Nothing to explain: the card already shows no picture, and which of
             # the two ways it went missing is not knowable from here.
             continue

@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from seestack.io.library import Library
 from seestack.io.project import StackRunRow
 
@@ -165,3 +167,241 @@ def test_two_targets_naming_their_own_master_are_not_confused(
     only = _add_run(solved_library, safe, "master",
                     ts="2026-01-01T00:00:00+00:00", write_files=True)
     assert _owner_by_id(client, safe) == {only: None}
+
+
+# --------------------------------------------------------------------------
+# …and the same row must not be allowed to WRITE the file it does not own.
+#
+# "Adjust → Save as preview" re-renders from the FITS and overwrites
+# ``run.preview_path``. On a displaced row that path is the *live* run's preview
+# PNG — the file its History thumbnail, Target hero, Library tile and Sky Map
+# tile are all served from. Measured before the guard, on a shared pair: saving
+# from the older card replaced the live run's 64x64 preview with an 86x86 render
+# turned 155° to North, while the rotation was recorded on the *older* row and
+# the live row's ``preview_north_up_deg`` stayed NULL — the exact mismatch that
+# column exists to prevent. This was filed as "cosmetic" with v0.492.40 and is
+# not: the Sky Map places the live tile from a rotation the file no longer has.
+# --------------------------------------------------------------------------
+
+_PREVIEW_H = _PREVIEW_W = 64
+
+#: Enough field rotation that a North-up save visibly resizes the canvas
+#: (64x64 → 86x86), so a test can tell "the bytes were rewritten" from "the
+#: bytes were rewritten *and turned*" without decoding pixels.
+_ROT_DEG = 25.0
+
+
+def _write_output_set(out: Path, basename: str) -> tuple[Path, Path]:
+    """A renderable FITS (so the save endpoint gets past its own 404s) with a
+    rotated WCS (so "North up" has a rotation to apply), plus a preview PNG at
+    the canvas's own size. Returns ``(fits_path, preview_path)``."""
+    import numpy as np
+    from astropy.io import fits
+    from astropy.wcs import WCS
+    from PIL import Image
+
+    out.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(3)
+    cube = (rng.normal(0.02, 0.003, size=(3, _PREVIEW_H, _PREVIEW_W))
+            + 0.4).astype(np.float32)
+    wcs = WCS(naxis=2)
+    wcs.wcs.crpix = [(_PREVIEW_W - 1) / 2 + 1, (_PREVIEW_H - 1) / 2 + 1]
+    wcs.wcs.crval = [150.0, 20.0]
+    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    th = np.radians(_ROT_DEG)
+    cd = 0.001
+    wcs.wcs.cd = np.array([[-cd * np.cos(th), cd * np.sin(th)],
+                           [cd * np.sin(th), cd * np.cos(th)]])
+    fits_path = out / f"{basename}.fits"
+    fits.PrimaryHDU(data=cube, header=wcs.to_header()).writeto(
+        fits_path, overwrite=True)
+    preview = out / f"{basename}_preview.png"
+    Image.new("RGB", (_PREVIEW_W, _PREVIEW_H), (10, 20, 30)).save(preview)
+    return fits_path, preview
+
+
+def _add_real_run(data_root: Path, safe: str, basename: str, *, ts: str) -> int:
+    """A run row over a real output set of its own."""
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        entry = lib.find_target(safe)
+        assert entry is not None
+        fits_path, preview = _write_output_set(
+            lib.target_dir(entry) / "output", basename)
+        proj = lib.open_target(safe)
+        try:
+            return proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc=ts, output_basename=basename,
+                fits_path=str(fits_path), tiff_path=None,
+                preview_path=str(preview), n_frames_used=5,
+                canvas_h=_PREVIEW_H, canvas_w=_PREVIEW_W,
+                coverage_min=1, coverage_max=1,
+                options_json=json.dumps({"output_name": "m42"}),
+            ))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def _shared_output_set(data_root: Path, safe: str) -> tuple[int, int, Path]:
+    """Two rows naming **one** real output set — the pre-v0.81.8 shape.
+
+    Returns ``(displaced run id, live run id, the shared preview path)``.
+    """
+    displaced = _add_real_run(data_root, safe, "master",
+                              ts="2026-01-01T00:00:00+00:00")
+    live = _add_real_run(data_root, safe, "master",
+                         ts="2026-08-30T14:32:05+00:00")
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        entry = lib.find_target(safe)
+        assert entry is not None
+        preview = lib.target_dir(entry) / "output" / "master_preview.png"
+    finally:
+        lib.close()
+    return displaced, live, preview
+
+
+def _row(data_root: Path, safe: str, run_id: int):
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_adjusting_a_displaced_row_does_not_rewrite_the_live_runs_preview(
+        client, solved_library):
+    """FAIL-BEFORE: the save returned 200 and the live run's preview PNG changed.
+
+    Refused rather than redirected: this run's own pixels are gone — there is no
+    file of its own to write — which is precisely what its "picture overwritten"
+    badge says.
+    """
+    pytest.importorskip("PIL")
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    displaced, live, preview = _shared_output_set(solved_library, safe)
+    assert _owner_by_id(client, safe)[displaced] == live
+
+    before = preview.read_bytes()
+    r = client.post(f"/api/targets/{safe}/stack-runs/{displaced}/preview",
+                    json={"stretch": 0.25, "black": 0.0})
+
+    assert r.status_code == 409
+    assert str(live) in r.json()["detail"]
+    assert preview.read_bytes() == before
+
+
+def test_the_live_runs_recorded_rotation_cannot_desync_from_its_own_pixels(
+        client, solved_library):
+    """FAIL-BEFORE: ``north_up`` from the displaced card turned the live run's
+    64x64 preview into an 86x86 one and recorded the 155° on the *older* row, so
+    the Sky Map placed the live tile's un-rotated geometry against turned pixels
+    — the failure ``preview_north_up_deg`` exists to prevent."""
+    pytest.importorskip("PIL")
+    from PIL import Image
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    displaced, live, preview = _shared_output_set(solved_library, safe)
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{displaced}/preview",
+                    json={"stretch": 0.25, "black": 0.0, "north_up": True})
+
+    assert r.status_code == 409
+    assert Image.open(preview).size == (_PREVIEW_W, _PREVIEW_H)
+    assert _row(solved_library, safe, live).preview_north_up_deg is None
+    # And nothing was stamped on the refused row either: a 409 writes no column.
+    assert _row(solved_library, safe, displaced).preview_north_up_deg is None
+
+
+def test_keep_processed_is_refused_on_a_displaced_row_too(
+        client, solved_library):
+    """The second save path (re-bake the run's own recipe) writes the same file,
+    so it is guarded by the same check rather than by a second one."""
+    pytest.importorskip("PIL")
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    displaced, _live, preview = _shared_output_set(solved_library, safe)
+
+    before = preview.read_bytes()
+    r = client.post(f"/api/targets/{safe}/stack-runs/{displaced}/preview",
+                    json={"keep_processed": True, "north_up": True})
+
+    assert r.status_code == 409
+    assert preview.read_bytes() == before
+
+
+def test_the_run_that_owns_the_picture_can_still_save_it(
+        client, solved_library):
+    """The guard must not cost the live run its own Adjust. It is the *writer* of
+    the shared file, so saving from its card is the one correct way to change
+    those bytes — and this is the half a "refuse on any shared path" rule would
+    have broken."""
+    pytest.importorskip("PIL")
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _displaced, live, preview = _shared_output_set(solved_library, safe)
+
+    before = preview.read_bytes()
+    r = client.post(f"/api/targets/{safe}/stack-runs/{live}/preview",
+                    json={"stretch": 0.25, "black": 0.0})
+
+    assert r.status_code == 200
+    assert preview.read_bytes() != before
+    assert _row(solved_library, safe, live).preview_stretch == pytest.approx(0.25)
+
+
+def test_an_ordinary_run_with_its_own_output_set_saves_as_before(
+        client, solved_library):
+    """A history with no duplicate path — every install that has only re-stacked
+    since v0.81.8, where each row owns the set it names — reaches the save
+    exactly as it did, on the *older* row as much as the newer."""
+    pytest.importorskip("PIL")
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    older = _add_real_run(solved_library, safe, "master_20260101_000000",
+                          ts="2026-01-01T00:00:00+00:00")
+    newer = _add_real_run(solved_library, safe, "master",
+                          ts="2026-08-30T14:32:05+00:00")
+
+    assert _owner_by_id(client, safe) == {older: None, newer: None}
+    for run_id in (older, newer):
+        r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview",
+                        json={"stretch": 0.25, "black": 0.0})
+        assert r.status_code == 200
+
+
+def test_the_write_guard_has_no_existence_gate_but_the_display_claim_does(
+        client, solved_library):
+    """Two questions, deliberately different rules.
+
+    "This card shows a later run's picture" is a claim about bytes that are
+    *there* — with the file gone the card already says "no picture" and which way
+    it went is unknowable. "Do not write a file another row serves" is not: the
+    save would **create** that file, handing the live row a thumbnail rendered
+    from another row's sliders while its own stretch columns stay NULL.
+    """
+    from webapp.displacedpicture import (
+        picture_owner_by_run_id,
+        preview_owner_by_run_id,
+    )
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    displaced = _add_run(solved_library, safe, "master",
+                         ts="2026-01-01T00:00:00+00:00", write_files=False)
+    live = _add_run(solved_library, safe, "master",
+                   ts="2026-08-30T14:32:05+00:00", write_files=False)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            runs = list(proj.iter_stack_runs())
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    assert picture_owner_by_run_id(runs) == {}
+    assert preview_owner_by_run_id(runs) == {displaced: live}
