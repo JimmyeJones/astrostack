@@ -66,6 +66,27 @@ it only edited an existing file, which does resolve from the worktree.
 
 **No** config, schema, migration, on-disk-layout or default change, and the API change is an added optional field.
 
+**Correction, after re-reading the observer's own measurements (same run, before the branch was pushed on).** This
+entry and v0.492.40's first said the issue's "no wrong number exists today" was *wrong*. That overstated it, and the
+issue body is the evidence: the observer measured all 56 displaced rows and found **every** file-derived column NULL
+(`seam_residual` 0, `grain_ratio` 0, `coverage_thin_frac` 0, `uncovered_frac` 0, `coverage_median_depth` 0,
+`coverage_shares_version` 0, `stack_fwhm_px` 0). So **no wrong number existed on the owner's library**, and the
+fail-befores here were demonstrated on synthetic rows, not read off his data. What is accurate, and is still the
+reason the guard was worth building:
+
+* **`backfill_coverage_shares` is not protected by the incidental `is_mosaic` NULL the issue credits**, because
+  `want_uncovered` and `want_depth` consult no flag at all. So those 56 rows are **one "How's my stack?" away** from a
+  stamped wrong number — not one `is_mosaic` backfill away. That is a real narrowing of the issue's own safety margin
+  and is why this shipped rather than waiting.
+* **For `backfill_seam_residual` the `is_mosaic` gate does still apply** — it returns early on all 56 — so the
+  0.42→2.0542 fail-before needed a mosaic-flagged fixture. It is a *severity* finding, not a gate bypass: if anything
+  ever fills `is_mosaic` on old rows, that heal would not merely fill a NULL, it would **overwrite** an existing
+  measurement with one taken off a different picture.
+
+The issue's own conclusion — "the protection is a NULL in a legacy column, not a check" — was right, and remains the
+reason this is worth having. Only the claim that a wrong number already existed was mine and was wrong.
+
+
 **The backlog entry as it stood, cut from `docs/IMPROVEMENTS.md` (all three halves now shipped):**
 
 - **VERIFIED (Scout 2026-10-05, observer issue [#1069](https://github.com/JimmyeJones/astrostack/issues/1069);
@@ -196,16 +217,19 @@ itself** — both halves are the newer run's pixels. Neither compared the file's
 filing, both measured by the regression tests' fail-before:
 
 * `backfill_coverage_shares` is a **third** file-reading heal and has **no `is_mosaic` gate at all** — `stale`
-  consults the flag, but `want_uncovered` and `want_depth` do not — so it is the live path, not the latent one.
-  On a displaced row it stamped `coverage_thin_frac` **0.0667**, plus `uncovered_frac` and
-  `coverage_median_depth`, all measured off the replacement picture, on the first "How's my stack?" that graded
-  the row.
+  consults the flag, but `want_uncovered` and `want_depth` do not — so it is not covered by the incidental NULL the
+  issue credits, and those rows are **one grading away** rather than one `is_mosaic` backfill away. On a displaced
+  row it stamps `coverage_thin_frac` **0.0667**, plus `uncovered_frac` and `coverage_median_depth`, all measured off
+  the replacement picture, on the first "How's my stack?" that grades the row.
 * `backfill_seam_residual` does not only fill a NULL, it **re-measures a superseded-scale figure** (v0.447.0) —
-  so on a displaced row with a pre-v0.313.1 seam number it **overwrote the owner's stored 0.42 with 2.0542**
-  taken off a different picture. A wrong number replacing a right one, persisted.
+  so a displaced *mosaic-flagged* row with a pre-v0.313.1 seam number has its stored **0.42 overwritten with 2.0542**
+  taken off a different picture: a wrong number replacing a right one, persisted. The `is_mosaic` gate still holds on
+  the owner's 56, so this is a severity finding about the function, not a live condition on his data.
 
-So "the protection is an incidental NULL, not a check" understated it: for the shares there was no gate, and for
-the seam the gate was bypassed by the re-measure path.
+So "the protection is an incidental NULL, not a check" understated it **for the shares**, which have no gate at
+all; for the seam the gate does still hold, and the re-measure path makes the consequence worse rather than the gate
+weaker. See the correction at the top of this file (v0.492.41's entry): the observer measured every file-derived
+column NULL on all 56, so no wrong number existed on his library — both fail-befores here are synthetic.
 
 **The fix.** One predicate, `_canvas_of(run)`, returning the `(h, w)` the row recorded for the picture it wrote,
 and all three heals check their file against it:

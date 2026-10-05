@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-10-05 (Builder, branch `claude/optimistic-ritchie-l34ima`) — #1069 closed in three: the backfill guard (v0.492.39), the destructive delete it was hiding (v0.492.40), and the display fork settled with no file read (v0.492.41)
+## 2026-10-05 (Builder, branch `claude/optimistic-ritchie-l34ima`) — #1069 closed in three: the backfill guard (v0.492.39), the destructive delete it was hiding (v0.492.40), and the display fork settled with no file read (v0.492.41); plus a correction to this run's own severity claim
 
 *(Baseline `origin/main` at `0b93c66` (`__version__` 0.492.38): **7442 passed, 4 skipped**, 13m41s with
 `OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI green on
@@ -100,21 +100,30 @@ fork that is half (1) of the same entry.
 
 ### Two corrections to the entry, both found by writing the fail-before
 
-The entry rated severity low partly on "no wrong number exists today". That is wrong in two ways, and the
-regression tests' fail-before output is the evidence rather than a reading of the code:
+The entry rated severity low partly on "no wrong number exists today". **That claim is in fact correct for his
+library, and an earlier draft of this note said it was wrong — the correction is recorded here rather than quietly
+edited.** The issue body measures all 56 displaced rows and finds every file-derived column NULL (`seam_residual`,
+`grain_ratio`, `coverage_thin_frac`, `uncovered_frac`, `coverage_median_depth`, `coverage_shares_version`,
+`stack_fwhm_px` — zero populated), so both fail-befores below are demonstrated on **synthetic** rows, not read off
+his data. What the fail-befores do establish, and what the guard is for, is that the issue's safety margin is
+narrower than it claims:
 
 1. **There are three file-reading heals, not two, and the third has no `is_mosaic` gate.** The entry's argument is
    that all 56 displaced rows decline because both named heals need `run.is_mosaic` truthy and `is_mosaic` is NULL
    on a row that old. But `backfill_coverage_shares` reads the coverage sibling and stamps three columns, and only
-   its `stale` term consults `is_mosaic` — `want_uncovered` and `want_depth` are ungated. Fail-before:
-   `assert 0.06666666666666667 is None`, i.e. a thin share measured off the replacement picture, written to the
-   row on the first `/stack-health` that grades it.
-2. **`backfill_seam_residual` re-measures, so the `is_mosaic` gate is not the only way in.** Since v0.447.0 it
-   replaces a *superseded-scale* figure rather than only filling a NULL. Fail-before:
-   `assert 2.0542 == 0.42` — the owner's stored measurement **overwritten** by one taken off a different picture.
-   That is the worst case in the whole entry and the filing did not have it.
+   its `stale` term consults `is_mosaic` — `want_uncovered` and `want_depth` are ungated. So those rows are **one
+   `/stack-health` away** from a stamped wrong number, not one `is_mosaic` backfill away; the incidental NULL the
+   entry credits does not cover this heal at all. Fail-before: `assert 0.06666666666666667 is None`, i.e. a thin
+   share measured off the replacement picture.
+2. **`backfill_seam_residual` re-measures, which makes the consequence worse — not the gate weaker.** Since
+   v0.447.0 it replaces a *superseded-scale* figure rather than only filling a NULL, so if anything ever fills
+   `is_mosaic` on old rows it would **overwrite** an existing measurement rather than fill a blank. Fail-before:
+   `assert 2.0542 == 0.42`. The gate itself still holds on the owner's 56, so this is about the function, not his
+   data — an earlier draft of this note had it as a gate bypass, which it is not.
 
-So the half that shipped is the one the entry called latent, and it was live. Nothing about half (1) changed.
+So what shipped narrows a margin the entry described accurately; the entry's *measurement* was right and its
+reasoning ("the protection is a NULL in a legacy column, not a check") was the right worry. Nothing about half (1)
+changed.
 
 ### What the guard is, and the one thing it must not become
 

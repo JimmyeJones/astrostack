@@ -36,11 +36,14 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
    `docs/PROCESS-NOTES.md`.
    🟡 **#1069's ready half shipped as v0.492.39** (Builder 2026-10-05): all three file-reading heals in
    `coverage_backfill.py` now decline a file whose `NAXIS` is not the row's `canvas_w`/`canvas_h` (`_canvas_of`),
-   checked before a pixel is read and only on positive evidence. **The entry's "no wrong number exists today" was
-   wrong twice, and the fail-before is the evidence**: `backfill_coverage_shares` is a *third* file-reading heal
-   with **no `is_mosaic` gate** (it stamped a 0.0667 thin share off the replacement picture), and
-   `backfill_seam_residual` *re-measures* a superseded-scale figure, so it **overwrote** a stored 0.42 with 2.0542
-   taken off a different picture. The guard adds no new silence (a row that records no canvas heals as before; a
+   checked before a pixel is read and only on positive evidence. **No wrong number existed on the owner's library** — the observer
+   measured every file-derived column NULL on all 56 rows, and an earlier draft of this page said otherwise; both
+   fail-befores are synthetic. What the guard is for: `backfill_coverage_shares` is a *third* file-reading heal with
+   **no `is_mosaic` gate at all**, so those rows were **one "How's my stack?" away** from a stamped wrong number
+   rather than one `is_mosaic` backfill away (it stamps a 0.0667 thin share off the replacement picture); and
+   `backfill_seam_residual` *re-measures* a superseded-scale figure, so a mosaic-flagged displaced row has a stored
+   0.42 **overwritten** with 2.0542 off a different picture — the `is_mosaic` gate still holds on the owner's 56, so
+   that one is a severity finding about the function, not a live condition. The guard adds no new silence (a row that records no canvas heals as before; a
    superseded figure whose master is gone is kept, not cleared), and the invariant it rests on — a real
    `run_stack`'s row canvas *is* its master's `NAXIS`, drizzle included, which `StackEstimate.canvas_w`'s
    "pre-drizzle" docstring makes look doubtful — is pinned by its own test rather than argued. **What is still
