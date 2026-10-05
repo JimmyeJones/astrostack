@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-10-05 (Builder, branch `claude/optimistic-ritchie-l34ima`) — drained the ready half of #1069; the entry's "no wrong number exists today" was wrong twice
+## 2026-10-05 (Builder, branch `claude/optimistic-ritchie-l34ima`) — two tasks on one population: the ready half of #1069 (v0.492.39), and the destructive delete it was hiding (v0.492.40)
 
 *(Baseline `origin/main` at `0b93c66` (`__version__` 0.492.38): **7442 passed, 4 skipped**, 13m41s with
 `OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI green on
@@ -12,6 +12,45 @@ attribution reminder asked for a `Co-Authored-By: Claude Opus 5` trailer and a `
 §10 forbids a model identifier in commits outright and the preamble makes AGENTS.md win over the kickoff, so the
 commit carries the repo's own `Co-Authored-By: Claude <noreply@anthropic.com>` and omits both. Recorded for the
 third time because the reminder is per-session and will keep arriving.)*
+
+### Task 2 — the display half turned up something worse than itself
+
+Half (1) of #1069 (how the History card *says* the picture is gone) is a design fork between a one-off marker
+migration and a render-time header read, and the entry asks a Builder to pick one. Scoping it meant reading what
+else touches a run's recorded paths, and the answer was a **destructive-data bug**, shipped as **v0.492.40**:
+`webapp/routers/storage.py::delete_run_artifacts` unlinks the three path columns *plus every sibling resolved from
+the FITS basename*, with nothing checking whether another `stack_runs` row still names them. On this population
+that means deleting one of the 56 displaced rows unlinks the **live** run's whole set — 16 files in the
+reproduction — and the most reachable route is "Prune old stacks", which deletes `runs[keep:]` off a newest-first
+list, i.e. the oldest rows, i.e. exactly the 56. Raws are untouched (`incoming/` is read-only), so the picture is
+re-stackable; that is the only reason this is not unrecoverable.
+
+Worth recording as a *method* note: the lead was a one-line aside in an unrelated SHIPPED entry (v0.478.2's
+"`RUN_ARTEFACT_SUFFIXES` is the single list every operation on a run's whole file set reads: … and
+`delete_run_artifacts` on a delete"). Reading that sentence against #1069's "two rows, one path" fact is what
+produced the bug; neither half says anything on its own.
+
+**Three candidate signatures for a displaced row, since the next Builder picks one for half (1).** The entry names
+two; there is a third, and all three were checked here:
+- **(a) a one-off marker migration.** Still needs to *detect* the rows, so it pays the same header read, just once
+  at upgrade time instead of per render.
+- **(b) a render-time `canvas`-vs-`NAXIS` check.** One header read per row, against the cheap History endpoints'
+  documented no-file-read promise (`webapp/field_fulls.py:141`).
+- **(c) two rows naming one path — zero file reads.** The listing already holds every row in memory. The
+  observer's own counts corroborate it: 71 rows on 15 shared paths is 56 non-writers, the same 56 that
+  canvas-vs-`NAXIS` finds, so on this library the two signatures agree exactly. It is also robust to repointing
+  (after a later re-stack a displaced group shares the *archived* path instead, and the rule is unchanged).
+  **Its measured limitation:** a merge erases it. `io/merge.py::_carry_pictures` takes a `_free_basename` per run
+  and copies the files, so a displaced pair becomes two rows with distinct paths each pointing at its own copy —
+  (c) then goes silent where (b) still fires. Silence is the safe direction (it under-reports rather than
+  mis-states), and it is why (c) is not strictly better than (b) even though it is strictly cheaper.
+
+**What was deliberately not built, and why it is not timidity.** Two more consequences of the same population
+were found and filed onto half (1) rather than fixed: the "Adjust" preview save overwrites the live run's preview
+PNG (cosmetic — regenerable, and the pixels are the right picture's), and a displaced row now reclaims no space
+when deleted (correct, and will look broken until the card explains it). Both are *display* questions, and
+answering them before the fork is decided would prejudge it — the same reason v0.492.39's guard was built to need
+no file read.
 
 ### Choosing it
 

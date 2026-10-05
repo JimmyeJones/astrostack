@@ -83,6 +83,133 @@ def _leftovers(data_root, safe, basename, run_id):
     return files, meta
 
 
+def _add_displaced_run(data_root, safe, ts, basename, run_id_of_writer):
+    """A row that points at **another** run's output set and owns no files.
+
+    The shape observer issue #1069 found 56 of on the owner's library: before the
+    v0.81.7–0.81.8 overwrite guard a re-stack wrote the canonical ``master.*``
+    straight over the previous run's output, and ``repoint_stack_runs`` only runs
+    at re-stack time, so the older row was never moved aside and still names the
+    file a *newer* run wrote. Its own picture is gone; the file at that path
+    belongs to the live run.
+    """
+    tdir = _target_dir(data_root, safe)
+    out = tdir / "output"
+    lib, proj = _open(data_root, safe)
+    try:
+        return proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc=ts, output_basename=basename,
+            fits_path=str(out / f"{basename}.fits"),
+            tiff_path=str(out / f"{basename}.tif"),
+            preview_path=str(out / f"{basename}_preview.png"),
+            n_frames_used=1, canvas_h=10, canvas_w=10,
+            coverage_min=1, coverage_max=1,
+            options_json=json.dumps({}),
+        ))
+    finally:
+        proj.close()
+        lib.close()
+
+
+def _whole_output_set(data_root, safe, basename):
+    """Which of ``basename``'s output files are still on disk."""
+    from seestack.stack.output import RUN_ARTEFACT_SUFFIXES
+
+    out = _target_dir(data_root, safe) / "output"
+    return sorted(p.name for suffix in RUN_ARTEFACT_SUFFIXES.values()
+                  if (p := out / f"{basename}{suffix}").exists())
+
+
+def test_deleting_a_displaced_row_does_not_delete_the_live_picture(
+        client, solved_library):
+    """FAIL-BEFORE: deleting an old History entry destroyed a *current* picture.
+
+    ``delete_run_artifacts`` unlinks the three recorded columns plus every
+    sibling it resolves from the FITS basename, and checked nothing about whether
+    another row still names those files. On the owner's library 71 rows sit on 15
+    shared paths (observer issue #1069), so "delete this old stack" on any of the
+    56 displaced ones unlinked the master, TIFF, preview, coverage maps and reel
+    of the live run that shares the name — hours of stacking, and the target's
+    cover image, gone without being asked for.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    live = _add_run_with_artifacts(
+        solved_library, safe, "2026-04-01T00:00:00Z", "master")
+    displaced = _add_displaced_run(
+        solved_library, safe, "2026-01-01T00:00:00Z", "master", live)
+    before = _whole_output_set(solved_library, safe, "master")
+    assert before, "fixture wrote no files"
+
+    r = client.delete(f"/api/targets/{safe}/stack-runs/{displaced}")
+    assert r.status_code == 200
+
+    # The row goes — it is a real history row and the owner asked for it…
+    ids = [x["id"] for x in client.get(f"/api/targets/{safe}/stack-runs").json()]
+    assert displaced not in ids
+    assert live in ids
+    # …but not one byte of the picture it was only *pointing* at.
+    assert _whole_output_set(solved_library, safe, "master") == before
+
+
+def test_pruning_old_stacks_does_not_delete_the_newest_picture(
+        client, solved_library):
+    """The same hazard through the button it is most likely to be met on.
+    ``iter_stack_runs`` is newest-first and prune deletes ``runs[keep:]``, so
+    "keep the newest N" targets the **oldest** rows — which is exactly what the
+    56 displaced rows are (all pre-v0.81.7). Pruning a target that holds one took
+    its current master with it.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    live = _add_run_with_artifacts(
+        solved_library, safe, "2026-04-01T00:00:00Z", "master")
+    displaced = _add_displaced_run(
+        solved_library, safe, "2026-01-01T00:00:00Z", "master", live)
+    before = _whole_output_set(solved_library, safe, "master")
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/prune", json={"keep": 1})
+    assert r.status_code == 200
+    assert r.json()["deleted"] == [displaced]
+
+    assert _whole_output_set(solved_library, safe, "master") == before
+
+
+def test_pruning_every_run_still_reclaims_the_shared_file_set(
+        client, solved_library):
+    """The guard must not leak disk: it withholds a file only while a row that
+    still names it survives, so deleting the **last** of a shared group frees the
+    whole set. Reclaiming space is the entire point of the button."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    live = _add_run_with_artifacts(
+        solved_library, safe, "2026-04-01T00:00:00Z", "master")
+    _add_displaced_run(
+        solved_library, safe, "2026-01-01T00:00:00Z", "master", live)
+    assert _whole_output_set(solved_library, safe, "master")
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/prune", json={"keep": 0})
+    assert r.status_code == 200
+
+    assert _whole_output_set(solved_library, safe, "master") == []
+
+
+def test_deleting_the_live_row_keeps_the_files_its_displaced_sibling_serves(
+        client, solved_library):
+    """The other order, and the one that says the rule is about the *files* rather
+    than about which row is the writer: with the live row gone the displaced row
+    is the only one left naming those files, and it is now the one serving that
+    picture — so they stay."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    live = _add_run_with_artifacts(
+        solved_library, safe, "2026-04-01T00:00:00Z", "master")
+    _add_displaced_run(
+        solved_library, safe, "2026-01-01T00:00:00Z", "master", live)
+    before = _whole_output_set(solved_library, safe, "master")
+
+    assert client.delete(
+        f"/api/targets/{safe}/stack-runs/{live}").status_code == 200
+
+    assert _whole_output_set(solved_library, safe, "master") == before
+
+
 def test_deleting_a_run_removes_its_whole_file_set_proxy_and_notes(
         client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
