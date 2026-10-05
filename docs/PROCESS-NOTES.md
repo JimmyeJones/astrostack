@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-10-05 (Builder, branch `claude/practical-keller-inryw8`) — v0.492.38 shipped; a three-way design choice settled by noticing that the *ratio* is normalization-free, and one of the entry's own objections checked and found wrong
+## 2026-10-05 (Builder, branch `claude/practical-keller-inryw8`) — v0.492.38 shipped; a three-way design choice settled by noticing that the *ratio* is normalization-free, one of the entry's own objections checked and found wrong, and the `client`-fixture flake fixed when it came back
 
 **The run.** One task: the single ungated entry in "Bugs (fix these first)" — `analyze_proxy`'s `sky_sigma`
 being a function of the proxy's stride. Baseline suite green on `origin/main` (7,420 passed, 4 skipped,
@@ -70,6 +70,28 @@ v0.492.36) now reads **0 of 16 canvas-independent answers moved** — `sky_sigma
 still moving. Measured directly on the bundled pair's masters: 907 px (step 1) 0.000429, 1693 px (step 2)
 **0.000666 before / 0.000436 after**, i.e. the ×1.55 the entry predicted, removed to 1.6 %. On a 3494×2470
 canvas of *white* noise the factor is 0.9988 — the control, on the owner's shape.
+
+**Second task: the `client`-fixture flake, because it is what a red pre-merge suite looks like.** The
+pre-merge full run came back `1 failed, 7436 passed` on
+`test_a_healthy_library_never_opens_a_project_for_the_fallback` (`assert ['NGC_7000'] == []`) — the *same*
+assertion the 2026-10-04 note above had already traced to the shared `client` fixture turning the watcher off
+one request **after** `TestClient(app)` runs the lifespan. That note deliberately left the fix for a run of its
+own; this is that run, and the reason to take it rather than re-run past it is that the mechanism predicts
+recurrence: the window is CPU contention under `-n 4`, so *any* change that adds webapp tests reopens it, and
+this change added three. Two things worth keeping from it:
+
+- **A known mechanism is not a licence to re-run.** "It did not reproduce" was the honest answer in October's
+  note *because the mechanism had been named and the diff could not reach the code*. Once the same named
+  mechanism bites a second run, re-running is no longer diagnosis, it is deferral — and the deferral had
+  already been paid for once.
+- **Testing a fixture needs the fixture's rule extracted.** The race itself is not reproducible on demand, so
+  the test cannot assert it. What *is* a fact is "what does the app boot with?", which is exactly what the fix
+  changes — so the rule moved out of the conftest into `tests/webapp_boot.py` (beside `synth.py`, because
+  `tests/webapp/` is not importable) and is asserted through the real `SettingsStore` loader. A test that
+  reimplemented the write instead would have been vacuous, and one that asserted the fixture's *post*-PUT state
+  would have passed with the fix reverted.
+
+This commit ships no product code, so it carries no version of its own.
 
 **Housekeeping note:** `docs/SHIPPED.md` is at ~61.5 k lines against the budget test's 64 k ceiling. The next
 run that needs the room should archive its oldest entries to `docs/archive/` (never delete) rather than
@@ -253,6 +275,16 @@ to open it once.
 request after, and that fixture is shared by all 2,705 webapp tests — a change to make on its own, with its own
 full-suite run, not at the tail of an unrelated one. Filed here rather than in the backlog because it is
 process/tooling, not product (AGENTS.md §2's three-file rule).
+
+> **Fixed 2026-10-05** (Builder, branch `claude/practical-keller-inryw8`) — exactly as prescribed above, and
+> for the reason this note predicted: it came back. It failed that run's pre-merge full suite on the same
+> assertion, which is what a known-mechanism flake does when the next change adds a few more webapp tests.
+> `tests/webapp_boot.py::disable_watcher_before_boot` now writes `watcher_enabled: false` into the state folder
+> *before* `create_app()`, so there is no startup poll to race with; the post-boot request is kept as belt and
+> braces. Pinned by `tests/webapp/test_client_fixture_watcher.py` (5 tests, 2 of which fail when the pre-boot
+> write is neutered), including the **premise** — that `watcher_enabled` defaults to *on*, so the write is doing
+> real work — and that it changes **only** that one field and never overwrites a `config.json` a test supplied
+> for itself (the upgrade-safety tests rely on that). All 2,708 webapp tests pass.
 
 ### Then the seam finding was taken as far as it goes in one run: fixture found, candidate fix built, measured wrong, reverted
 

@@ -15,6 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # tests/ for synth
 from synth import make_synth_wcs_text, write_seestar_fits  # noqa: E402
+from webapp_boot import disable_watcher_before_boot  # noqa: E402
 
 # Dimensions match make_synth_wcs_text() defaults so the injected WCS lines up.
 FRAME_W, FRAME_H = 480, 320
@@ -84,16 +85,23 @@ def solved_library(built_library):
 
 @pytest.fixture
 def client(data_root: Path, monkeypatch):
-    """A TestClient with lifespan run (worker + watcher started)."""
+    """A TestClient with the lifespan run (worker started, **watcher off**).
+
+    The watcher is off *before* ``create_app()`` — see
+    :func:`disable_watcher_before_boot` for the race that makes the ordering
+    load-bearing. The redundant request below is kept: it costs one call and it
+    keeps the fixture's promise true even where the pre-boot write is skipped
+    (which it is, for a test that supplied its own config)."""
     monkeypatch.setenv("ASTROSTACK_DATA", str(data_root))
     # Disable the watcher loop side-effects during API tests.
     monkeypatch.setenv("ASTROSTACK_LOG_LEVEL", "WARNING")
+    disable_watcher_before_boot(data_root)
     from fastapi.testclient import TestClient
 
     from webapp.main import create_app
 
     app = create_app()
     with TestClient(app) as c:
-        # Turn the watcher off so it doesn't enqueue jobs underneath the tests.
+        # Belt and braces: the boot above already has it off.
         c.put("/api/settings", json={"watcher_enabled": False})
         yield c
