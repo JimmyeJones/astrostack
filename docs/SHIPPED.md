@@ -1,5 +1,104 @@
 # Shipped — the record
 
+## 2026-10-05 (Builder) — Auto's noise measurement stops depending on how hard the preview was shrunk
+
+### v0.492.38 — 🟠 BUG FIX: `analyze_proxy`'s `sky_sigma` is read on the full-resolution grid its bars were calibrated on
+
+**The bug, as the owner would meet it.** One sky, two canvases, two different one-click results. Auto decides
+how much to denoise and how much to sharpen from a single number — the background σ `analyze_proxy` reports —
+and that number was a function of the **proxy's stride** and nothing else. A single field fits inside the
+editor's 1500-px preview proxy and is measured un-decimated; every mosaic he shoots (~3494×2470 and up) is
+strided, and a strided read is systematically **×1.57 high**. On one realistic linear proxy read at step 1 and
+step 3 — *the same pixels* — σ went **0.0159 → 0.0246**, the `noisy` verdict flipped **False → True**, and the
+denoise/sharpen crossfade weight moved **0.243 → 0.789**. So the same sky got a sharpen-dominated Auto as a
+single field and a near-saturated `detail.denoise` + `detail.chroma_denoise` as a big mosaic. And the recipe
+built from the strided measurement is applied to the **full-resolution export**, whose grain is the ×1.57
+*smaller* number — so the error ran in the **over-denoising** direction on exactly the thin mosaic panels that
+can least afford it.
+
+**The mechanism.** `noise.estimate_noise_sigma` is a **lag-1** estimator: the MAD of *adjacent*-pixel
+differences. On a proxy decimated by `step`, "adjacent" means `step` full-resolution pixels apart, and the
+stacker's reprojection spreads one input sample over its neighbours, so the output's noise is correlated over
+about a pixel. `Var(Iᵢ₊ₗ − Iᵢ) = 2σ²(1 − ρ(l))` and `ρ(1)` has not reached zero, so the lag-1 read is *low* by
+`√(1 − ρ(1))` and the lag-`step` read is closer to the honest σ. Nothing about the noise changes with the
+stride; the estimator's answer does.
+
+**Which of the three candidate corrections, and why.** The entry named three and left the choice open.
+**(a) a calibrated stride curve** was rejected as filed: 1.00 / 1.57 / 1.79 / 1.84 is a property of the
+reprojection kernel measured on *those* masters, and hard-coding it freezes a kernel property into a constant.
+**(b) the σ the stacker already stored at full resolution** (`stack_runs.noise_sigma` / `BKGSIGMA`) was rejected
+on a reason the entry had not spotted: Auto does **not** measure the whole canvas, it measures
+`_measured_region` — the rectangle its own border trim keeps — so on a mosaic the stacker's number includes the
+ragged, low-coverage, noisier fringe the recipe is about to delete, and the two describe different pixels. (The
+entry's *other* objection to (b), that `analyze_proxy` is "also called on an edited proxy mid-session", does not
+hold: both call sites — `build_auto_recipe_for_run` and `build_auto_analysis_for_run` — pass the raw cached
+`get_proxy` array, and there is no third caller. Recorded because it was the argument against the attractive
+option.) **(c) measure the grain on un-strided pixels** was taken, in the shape that makes it need no
+calibration at all: as a **ratio**.
+
+**The fix.** `noise.grain_lag_ratio(rgb, lag)` returns `σ(lag 1) / σ(lag)` measured on one array through one
+normalization. The proxy's own lag-1 differences *are* the master's lag-`step` differences — literally the same
+pixel pairs — so multiplying the proxy's σ by this ratio returns what a lag-1 read of the master would have
+given, and because both halves are measured on the same pixels in the same units, **the normalization divides
+out exactly**: nothing has to be calibrated between the two grids, which is the whole reason this one is
+correct by construction and (a) is not. `proxy.source_grain_ratio(fits_path, step)` supplies it from the file:
+five 512-px **un-strided windows** read through `hdu.section` (a window read, never the canvas — the 150 MP
+mosaic is never materialised, pinned by a test that fails if `_load_fits_rgb` is reached), each asked for its
+own ratio, and the **median** taken so a window that landed on the galaxy instead of the sky is outvoted rather
+than averaged in. A window that is more than half NaN is skipped, so a ragged union canvas still answers.
+`analyze_proxy`, `auto_recipe`, `analyze_auto_inputs` and `suggest_denoise_strength` take one optional
+`grain_ratio`; `webapp/routers/editor.py::_auto_measure_grain_ratio` is the one place that reads the file.
+
+**Both halves of the crossfade are corrected, not one.** `_noise_fraction`'s band and `noise._SIGMA_FULL` (the
+bar behind the "From your image" denoise *strength*) are both full-resolution numbers, and correcting only the
+first would have left the weight and the strength arguing about which grid they were on.
+
+**And the third surface, because fixing two of three would have been worse than fixing none.** The editor's
+manual *"From your image"* denoise chip (`…/editor/denoise-suggestion`) reads the same `_SIGMA_FULL` bar off the
+same strided proxy. Correcting Auto alone would have printed **two different σ for one picture** on one screen —
+Auto's cues saying clean while the chip beside them asked for 1.6× the denoise — so it takes the same factor,
+from the same memoized measurement. Pinned by a test that asserts the two stay exactly
+`_SKY_HALF_MAD_SCALE` apart. With a `recipe` ahead of the op the factor is the master's own grain correlation,
+which the linear ops Auto puts there (background, gradient, colour balance) leave alone; a hand-added
+convolution ahead of denoise makes it approximate, which is still far closer than no correction.
+
+**Cost, and where it is paid.** The windowed reads are ~0.4 s and **flat in the canvas** (409 ms on the 1693-px
+sample, 412 ms on a 3494×2470 master — it is the windows, not the picture), so asking the file on every click
+for a number that cannot change would have put that on the editor's main button three times over. It is
+memoized in the proxy's **existing JSON sidecar** beside `proxy_scale`, keyed on the master's mtime exactly as
+the proxy is: an additive key, **no `PROXY_VERSION` bump**, so no cached proxy on the owner's install is
+discarded on upgrade and a sidecar written before this existed is filled in on first use. A decline is cached
+as `null` too — a master that cannot be measured must not be re-read on every click either.
+
+**What cannot move.** The ratio is **1.0** in the two cases that were already right, by construction rather
+than by tuning:
+- **step ≤ 1 returns 1.0 without touching the file.** An undecimated proxy is already on the full-resolution
+  grid, so an ordinary single-field stack's one-click Auto is **byte-for-byte what it was** on the owner's
+  running install — pinned at the engine seam and again at the webapp seam, where the test fails if a window is
+  read at all.
+- **White noise returns 1.0.** σ does not depend on separation when there is no correlation, so an image whose
+  grain is already pixel-independent is left exactly where it was. That is the control that says this is a
+  correction and not a tuning, and it is why the fixture's noise has to be Gaussian-smoothed to show anything.
+
+It is a correction **downwards** only — correlation can only shrink the short-lag difference — and it is
+clamped at 1.0 above and at `_GRAIN_RATIO_FLOOR = 0.25` below. The floor is a **rail, not a knob**: a real
+reprojection kernel bottoms out around 0.54 (measured 1.00 / 0.69 / 0.65 / 0.64 at lags 1–4 on a 0.7 px
+correlated field), so it only ever catches a window that is all structure. **No bar was moved** —
+`_NOISE_LO`/`_NOISE_HI`, the 0.02 `noisy` verdict, `_AUTO_DENOISE_MAX`, `_AUTO_CHROMA_MAX`, `_SIGMA_FULL` and
+`_SKY_HALF_MAD_SCALE` are untouched, which is what the entry asked for.
+
+**After.** The same canvas read at steps 1 / 2 / 3 / 4 answers **0.0159 / 0.0159 / 0.0159 / 0.0159** (within
+0.5 %), `noisy` holds, the crossfade weight holds at 0.241–0.244, and the one-click op list is the same list
+with the same parameters. Through the file, on a mosaic-shaped canvas with NaN corners, the correction recovers
+the full-resolution reading to within 6 %.
+
+**Tests +17** (14 engine in `tests/test_auto_noise_stride.py`, 3 webapp in `tests/webapp/test_editor.py`).
+Fail-before shown by scratch revert (neutering `grain_lag_ratio` to `1.0` fails 5 of the 12; the premise test and
+both controls correctly keep passing, which is how you can tell the fixture is not blind). One test pins the
+**premise** — that the uncorrected reading really does cross the bar between step 1 and step 2 — so the
+invariance tests cannot start passing because the fixture went blind. No config, schema, migration, on-disk,
+default, endpoint or response-shape change; every new parameter is optional and defaults to today's behaviour.
+
 ## 2026-10-04 (Builder) — the seam number stops depending on the sensor it was shot with
 
 ### v0.492.37 — 🟠 BUG FIX: `measure_seam_residual` is scale-free, so "the panels of this mosaic evened out" survives a bigger canvas

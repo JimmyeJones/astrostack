@@ -318,7 +318,8 @@ def _delevelled_luminance(lum: np.ndarray,
 
 
 def analyze_proxy(rgb: np.ndarray,
-                  coverage: np.ndarray | None = None) -> dict[str, Any]:
+                  coverage: np.ndarray | None = None,
+                  grain_ratio: float | None = None) -> dict[str, Any]:
     """Cheap content analysis of a proxy used to tailor the auto recipe:
     sky level, sky-noise fraction, and a coarse 'noisy' verdict.
 
@@ -352,6 +353,21 @@ def analyze_proxy(rgb: np.ndarray,
 
     Stars and the target can't masquerade as noise either: the MAD is robust to
     the minority of large jumps at their edges.
+
+    ``grain_ratio`` puts that local measurement back on the **full-resolution**
+    grid the thresholds below were calibrated on. The local estimator is lag-1,
+    so on a proxy decimated by ``step`` its "adjacent" pixels are ``step`` apart
+    on the real canvas, and a stacker's reprojection leaves the noise correlated
+    over about a pixel — so the *same sky* measured ×1.57 higher as a mosaic past
+    ``PROXY_MAX_PX`` than as a single field, which flipped ``noisy`` and moved
+    the crossfade weight 0.243 → 0.789 on one set of pixels
+    (``tests/test_auto_noise_stride.py``). The factor is
+    ``seestack.edit.proxy.source_grain_ratio`` (a few un-strided windows of the
+    master, lag-1 against lag-``step``); it is ``1.0`` whenever the proxy was not
+    decimated and for noise that is already pixel-independent, so an ordinary
+    single-field stack's number — and its one-click Auto — is byte-for-byte what
+    it was. ``None`` ⇒ no correction, which is both the pre-correction behaviour
+    and what a caller that could not measure the master should pass.
     """
     from seestack.edit.noise import estimate_noise_sigma
 
@@ -373,6 +389,9 @@ def analyze_proxy(rgb: np.ndarray,
     norm = np.clip((finite - lo) / (hi - lo), 0.0, 1.0)
     med = float(np.median(norm))
     local = estimate_noise_sigma(arr)
+    if (local is not None and grain_ratio is not None
+            and np.isfinite(grain_ratio) and 0 < grain_ratio <= 1):
+        local = float(local * grain_ratio)
     # Unmeasurable (too few finite pixels, no dynamic range) reads as clean —
     # the same convention the rest of the auto chain uses for "can't tell".
     sky_sigma = float(_SKY_HALF_MAD_SCALE * local) if local is not None else 0.0
@@ -834,7 +853,8 @@ def auto_recipe(rgb: np.ndarray | None = None,
                 prefs: dict[str, Any] | None = None,
                 auto_crop: bool = True,
                 coverage: np.ndarray | None = None,
-                proxy_scale: float = 1.0) -> Recipe:
+                proxy_scale: float = 1.0,
+                grain_ratio: float | None = None) -> Recipe:
     """One-click auto-process built from the image, not hardcoded.
 
     Always: background/gradient removal → photometric colour balance → a proper
@@ -900,6 +920,13 @@ def auto_recipe(rgb: np.ndarray | None = None,
     separator is a length on the sensor. ``1.0`` (the default, and what a caller
     with no proxy of its own should pass) leaves the recipe byte-for-byte what it
     was; with no ``prefs`` the classifier is not called at all.
+
+    ``grain_ratio`` is the other half of that stride story and a **measurement**
+    input too: it puts the noise σ read off a decimated proxy back on the
+    full-resolution grid both noise bars (``_NOISE_LO``/``_NOISE_HI`` here and
+    ``noise._SIGMA_FULL`` behind the denoise strength) were calibrated on. See
+    :func:`analyze_proxy`; ``None``/``1.0`` ⇒ no correction, and an undecimated
+    proxy is ``1.0`` by construction.
     """
     target_bg = 0.20
     saturation = 1.2          # neutral fallback when the image can't be measured
@@ -917,7 +944,7 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # part of it (see :func:`_measured_region`).
     m_rgb, m_cov = _measured_region(rgb, coverage, trim_crop if auto_crop else None)
     if rgb is not None:
-        a = analyze_proxy(m_rgb, m_cov if is_mosaic else None)
+        a = analyze_proxy(m_rgb, m_cov if is_mosaic else None, grain_ratio)
         sky_sigma = float(a["sky_sigma"])
         noise_frac = _noise_fraction(sky_sigma)
         # Darker sky → lift a little more (higher target grey), brighter → less.
@@ -937,7 +964,11 @@ def auto_recipe(rgb: np.ndarray | None = None,
             # the crossfade weight so it eases in across the band.
             from seestack.edit.noise import suggest_denoise_strength
 
-            _, suggested = suggest_denoise_strength(m_rgb)
+            # Same stride correction as the σ above: ``_SIGMA_FULL`` is a
+            # full-resolution bar, so the strided read has to be put back on that
+            # grid before it is compared against it, or the strength this picks
+            # disagrees with the crossfade weight that gates it.
+            _, suggested = suggest_denoise_strength(m_rgb, grain_ratio)
             base = suggested if suggested is not None else 0.5
             denoise_strength = round(base * noise_frac, 3)
             # The *colour* half of the same problem, on the same crossfade: what a
@@ -1055,6 +1086,7 @@ def analyze_auto_inputs(
     trim_crop: tuple[float, float, float, float] | None = None,
     auto_crop: bool = True,
     coverage: np.ndarray | None = None,
+    grain_ratio: float | None = None,
 ) -> dict[str, Any]:
     """The *measured cues* that drove the Auto recipe — the causal inputs behind
     each op, surfaced so the user sees Auto tuned itself to *their* data (not a
@@ -1077,6 +1109,11 @@ def analyze_auto_inputs(
     is the whole point of this function. ``trim_fraction_available`` reports what
     the trim *would* have removed, so the UI can offer "Auto could trim 12% of
     ragged edge" without lying about what happened.
+
+    ``grain_ratio`` must be passed here whenever it is passed to
+    :func:`auto_recipe`, for the same reason ``coverage`` must: the reported σ
+    would otherwise describe a different grid from the one the recipe's denoise
+    was chosen on.
     """
     out: dict[str, Any] = {
         "sky": None,
@@ -1099,7 +1136,7 @@ def analyze_auto_inputs(
     # the same pixels it measured (see :func:`_measured_region`).
     m_rgb, m_cov = _measured_region(rgb, coverage, trim_crop if auto_crop else None)
     if rgb is not None:
-        a = analyze_proxy(m_rgb, m_cov if is_mosaic else None)
+        a = analyze_proxy(m_rgb, m_cov if is_mosaic else None, grain_ratio)
         sky_sigma = float(a["sky_sigma"])
         out["sky"] = round(float(a["sky"]), 3)
         out["sky_sigma"] = round(sky_sigma, 4)

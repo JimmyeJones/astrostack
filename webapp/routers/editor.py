@@ -36,6 +36,7 @@ from seestack.edit.opnotes import COLOR_CAL_OP, merge_color_cal
 from seestack.edit.ops.stars import star_reduce_differs_on_proxy
 from seestack.edit.pipeline import apply_recipe
 from seestack.edit.proxy import (
+    cached_source_grain_ratio,
     coverage_path_for,
     frame_coverage_path_for,
     get_proxy,
@@ -338,6 +339,32 @@ def _auto_measure_coverage(run, scale: float, is_mosaic: bool | None = None):
     return cov
 
 
+def _auto_measure_grain_ratio(project_dir: Path, run, scale: float) -> float | None:
+    """The stride correction Auto's noise measurement needs for this run — the
+    factor that puts a σ read off the *decimated* proxy back on the master's own
+    grid (``seestack.edit.proxy.source_grain_ratio``).
+
+    The noise bars Auto reads σ against are full-resolution numbers, but the
+    proxy is strided whenever the canvas is bigger than ``PROXY_MAX_PX`` — which
+    is every mosaic this owner shoots — and the stacker's reprojection leaves the
+    grain correlated over about a pixel, so a strided read is systematically
+    *high* and Auto over-denoises exactly the thin mosaic panels that can least
+    afford it. ``1.0`` (no correction, today's number) for an undecimated proxy,
+    and ``None`` when the master can't be measured — the one place that falls
+    back to the uncorrected reading, deliberately, since a wrong correction is
+    worse than none.
+
+    A handful of ``hdu.section`` window reads, never the canvas — ~0.4 s on a
+    canvas the owner's size, and *memoized in the proxy's sidecar* beside
+    ``proxy_scale``, because it is as fixed for the run's lifetime as that is and
+    both Auto endpoints ask on every click."""
+    try:
+        return cached_source_grain_ratio(project_dir, run.id, run.fits_path,
+                                         int(round(scale)))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
                               prefs: dict | None = None,
                               auto_crop: bool = True) -> Recipe:
@@ -366,7 +393,8 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
         rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
         prefs=prefs, auto_crop=auto_crop,
         coverage=_auto_measure_coverage(run, scale, is_mosaic),
-        proxy_scale=scale)
+        proxy_scale=scale,
+        grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
 
 
 def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | None,
@@ -383,7 +411,8 @@ def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | Non
     return presets_mod.analyze_auto_inputs(
         rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
         auto_crop=auto_crop,
-        coverage=_auto_measure_coverage(run, scale, is_mosaic))
+        coverage=_auto_measure_coverage(run, scale, is_mosaic),
+        grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
 
 
 def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
@@ -1078,7 +1107,17 @@ async def denoise_suggestion(safe: str, run_id: int, request: Request,
                               frame_coverage=_proxy_frame_coverage(run.fits_path, scale),
                               already_display=_run_display_space(run))
             measured = apply_recipe(rgb, sub, ctx, for_preview=True, auto_stretch=False)
-        sigma, strength = suggest_denoise_strength(measured)
+        # Same stride correction Auto applies, for the same reason and off the
+        # same master: ``_SIGMA_FULL`` is a full-resolution bar and this proxy is
+        # strided on every mosaic. It also has to be the *same* number Auto used,
+        # or the "Your data" chip and the one-click recipe would print two
+        # different σ for one run. (With a ``recipe`` ahead of the op the factor
+        # is the master's own grain correlation, which the linear ops Auto puts
+        # there — background, gradient, colour balance — leave alone; a
+        # hand-added convolution ahead of denoise would make it approximate,
+        # which is still far closer than no correction at all.)
+        sigma, strength = suggest_denoise_strength(
+            measured, _auto_measure_grain_ratio(project_dir, run, scale))
         return DenoiseSuggestionOut(noise_sigma=sigma, strength=strength)
 
     return await run_in_threadpool(work)
