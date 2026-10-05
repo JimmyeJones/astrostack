@@ -1,5 +1,74 @@
 # Process notes & QA sweep records
 
+## 2026-10-05 (Builder, branch `claude/optimistic-ritchie-nhgpbf`) — the finding that was filed onto an entry that then shipped, and so had no home left
+
+*(Baseline `origin/main` at `e56ec9a` (`__version__` 0.492.41): **7459 passed, 4 skipped**, 14m27s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI green on
+`main`'s head; **no open PR**, nothing to collide with. "Bugs (fix these first)" held no ungated open work, which
+is what `FOCUS.md` said it would.)*
+
+*(Kickoff-vs-AGENTS disagreement — the fourth consecutive run to record the same class, since the reminder is
+per-session and keeps arriving: the harness attribution reminder asked for a `Co-Authored-By: Claude Opus 5`
+trailer and a `Claude-Session:` line. AGENTS.md §10 forbids a model identifier in commits outright, and the
+preamble makes AGENTS.md win, so the commit carries the repo's own
+`Co-Authored-By: Claude <noreply@anthropic.com>` and omits both.)*
+
+### The method note worth keeping: a lead filed onto a section is lost when that section ships
+
+`FOCUS.md` and the backlog both said Bugs was dry, and they were right — but the day's three merges had each
+*mentioned* a finding they deliberately did not fix, and the place they filed it was "#1069's open display half".
+That half shipped as v0.492.41 and the whole entry was cut to `SHIPPED.md`, which carried the two asides along with
+it. Nothing in `IMPROVEMENTS.md` held them. They were not stale, not declined and not gated — just unreachable by
+any triage that reads the backlog, which is every triage.
+
+So the dry-backlog move that paid this run was not a dogfood pass: it was **grepping `SHIPPED.md` for the previous
+runs' own "deliberately not built"** paragraphs. §2 already says to grep `SHIPPED.md` before building; the inverse
+is also true — a run that ships an entry should check whether anything was filed *onto* it, because cutting the
+entry deletes the only pointer. The two asides here were "the Adjust preview save overwrites the live run's preview
+PNG (cosmetic)" and "a displaced row now reclaims no space when deleted (correct, will look broken until the card
+says why)". The second is answered by v0.492.41's badge. The first was mis-severitied.
+
+### Why "cosmetic" was wrong, measured
+
+The aside's reasoning was that the PNG is regenerable and the pixels are the right picture's. Both true, and both
+about the *bytes*. What it missed is that the save writes **columns as well as a file**, and they go to different
+rows: the stretch, crop and applied rotation are stamped on the row that was clicked, while the bytes land on the
+file the *other* row serves. Through the real endpoint on a shared pair, with `north_up: true`:
+
+- the shared preview PNG: **64×64 → 86×86, turned 155°**
+- the clicked (displaced) row's `preview_north_up_deg`: NULL → **155.0**
+- the **live** row's `preview_north_up_deg`: NULL → **NULL**
+
+`save_stack_preview`'s own docstring says that column exists because, without it, "the map placed the *un-rotated*
+canvas geometry (and an un-rotated coverage footprint) against a rotated picture, tilting the tile and putting its
+transparent gaps in the wrong place". One click from a 2026-January card puts the live run in exactly that state.
+Its stored stretch/black stop describing its own preview too, so the "one frame vs your stack" reveal renders its
+two halves through different curves. Shipped as **v0.492.42**; entry in [`SHIPPED.md`](SHIPPED.md).
+
+**The general shape, for the next run:** v0.492.40 guarded *deletes* against "a row does not own what it points at".
+This is the same sentence applied to *writes*, and the two were one day apart because the delete was obviously
+destructive and the write looked like a thumbnail. Any other code path that writes a file resolved from a
+`stack_runs` path column is in the same class — grep `run.preview_path`, `run.fits_path` and `run_artifact_paths`
+for writers, not just readers. As of this run the preview save was the only remaining one that can *mis-state*:
+`sky.py` writes a state-dir cache of its own; the three `write_stack_outputs` callers all repoint
+(`stacker.py`, and both `pipeline.py` export paths). The **share render cache** (`<basename>_share.png` +
+`.sig`, `_build_or_get_share_source`) *is* shared by a displaced pair, since its name comes from the run's
+basename — but every read checks the signature (master stamp | recipe hash | size | app version) and re-renders
+on a mismatch, so two rows with different recipes can only make each other re-render, never serve the other's
+bytes. Checked, not assumed; left alone.
+
+### Two things found while testing, recorded rather than fixed
+
+- **`repoint_stack_runs` maps paths, not rows,** so calling it on a displaced pair moves **both** rows and leaves
+  them paired on the archived name. That is correct behaviour — and it is *why* the (c) signature survives a later
+  re-stack, which v0.492.41's entry claims — but it means the function cannot be used to *separate* a pair in a
+  fixture. Cost here: one wrong test, found immediately.
+- **The write guard deliberately has no existence gate while the display claim does,** and the difference is worth
+  stating because the obvious instinct is to share one rule. "This card shows a later run's picture" is a claim
+  about bytes that are there. "Do not write a file another row serves" is not: with the file absent the save would
+  **create** it, handing the live row a thumbnail rendered from another row's sliders while its own stretch columns
+  stay NULL. The two functions are pinned to disagree on exactly that fixture.
+
 ## 2026-10-05 (Builder, branch `claude/optimistic-ritchie-l34ima`) — #1069 closed in three: the backfill guard (v0.492.39), the destructive delete it was hiding (v0.492.40), and the display fork settled with no file read (v0.492.41); plus a correction to this run's own severity claim
 
 *(Baseline `origin/main` at `0b93c66` (`__version__` 0.492.38): **7442 passed, 4 skipped**, 13m41s with

@@ -1088,6 +1088,13 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
   // over it — everywhere it's used, including a pinned cover — and says nothing.
   // Say it, and (when the recipe is still there) offer the save that keeps it.
   const processedPreview = !!suggestion.data?.processed_preview;
+  // Both saves write `run.preview_path`, and on a pre-v0.81.8 displaced row that
+  // file is a *later* run's picture — so the server refuses them (409) rather
+  // than letting one card's Adjust re-render another card's thumbnail. The panel
+  // keeps every control it had (the sliders still render this image, which is
+  // real, just not this run's); only the two writes stand down, with the reason
+  // beside them.
+  const cannotSave = !!overwritten;
   const canKeepProcessed = !!suggestion.data?.can_keep_processed;
   const defStretch = typeof sugStretch === "number" ? sugStretch : DEFAULT_STRETCH;
   const defBlack = typeof sugBlack === "number" ? sugBlack : DEFAULT_BLACK;
@@ -1519,6 +1526,24 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
                 : "“Save as preview” replaces it with a plain view of the raw stack. Your edit is kept — re-open it in the editor to get the processed look back."}
             </Text>
           ) : null}
+          {cannotSave ? (
+            // Same shape as the warning above, for the other way this panel can
+            // cost somebody a picture — and the more surprising one, because the
+            // picture it would cost is a *different* run's. This row's own output
+            // was overwritten by a later stack (the "picture overwritten" badge
+            // on the card), so the file these buttons write is that stack's
+            // thumbnail. The server refuses it; this says so before the click,
+            // and points at the card that can do it.
+            <Text size="xs" c="orange.4" mt={4}>
+              This run’s own picture is gone — a later stack wrote over the same
+              file name, so saving here would change{" "}
+              {overwritten?.ownerDate
+                ? `the picture of the stack from ${overwritten.ownerDate}`
+                : "a later stack’s picture"}{" "}
+              instead. The sliders still show you this image; save it from that
+              stack’s card.
+            </Text>
+          ) : null}
           <Group gap="xs" mt={4}>
             {processedPreview && canKeepProcessed ? (
               // The one thing you actually want from this panel on a finished
@@ -1527,6 +1552,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               <Button
                 size="xs" color="grape" leftSection={<IconSparkles size={14} />}
                 loading={save.isPending && save.variables === true}
+                disabled={cannotSave}
                 onClick={() => save.mutate(true)}
               >
                 Keep the processed picture
@@ -1536,6 +1562,7 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
               size="xs" leftSection={<IconDeviceFloppy size={14} />}
               variant={processedPreview && canKeepProcessed ? "light" : "filled"}
               loading={save.isPending && save.variables === false}
+              disabled={cannotSave}
               onClick={() => save.mutate(false)}
             >
               Save as preview

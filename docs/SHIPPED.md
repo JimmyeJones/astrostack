@@ -1,5 +1,77 @@
 # Shipped — the record
 
+## 2026-10-05 (Builder) — and that card may no longer save over the picture it does not own
+
+### v0.492.42 — 🟠 BUG FIX: "Adjust → Save" on a displaced History row re-rendered a *different* run's preview (`preview_owner_by_run_id`, `_later_owner_by_run_id`, `cannotSave`)
+
+**The orphaned consequence of the same population, re-measured and upgraded from "cosmetic".** v0.492.40 found it
+while scoping #1069's display half and filed it *onto that half*; the half shipped as **v0.492.41** and the whole
+entry was cut to this file, so the finding had no open home. Re-read and reproduced here, it is not cosmetic.
+
+**What the owner could lose.** `POST /api/targets/{safe}/stack-runs/{id}/preview` ("Adjust → Save as preview", and
+the `keep_processed` re-bake beside it) re-renders from the FITS and does
+`Path(run.preview_path).write_bytes(png)`. On a pre-v0.81.8 **displaced** row that path is the *live* run's preview
+PNG — the one file its History thumbnail, Target hero, Library tile and Sky Map tile are all served from. So moving
+one slider on a 2026-January card silently replaced the current picture's thumbnail everywhere it appears. 56 such
+rows on the owner's library, by the observer's count on [#1069](https://github.com/JimmyeJones/astrostack/issues/1069).
+
+**And the half that makes it more than pixels: the DB and the file stop agreeing.** The stretch, the crop and the
+*applied* North-up rotation are recorded on **this** row, while the bytes land on the other one's file. Measured on
+a shared pair through the real endpoint, with `north_up: true`:
+
+| | before the save | after it |
+|---|---|---|
+| the shared preview PNG | 64×64 | **86×86**, turned 155° |
+| the **displaced** row's `preview_north_up_deg` | NULL | 155.0 |
+| the **live** row's `preview_north_up_deg` | NULL | **NULL** |
+
+That last row is the whole finding. `save_stack_preview`'s own docstring says why that column exists: "without it
+the map placed the *un-rotated* canvas geometry (and an un-rotated coverage footprint) against a rotated picture,
+tilting the tile and putting its transparent gaps in the wrong place." One click from an old card puts the live run
+in exactly that state — and its stored stretch/black no longer describe its own preview either, so the "one frame
+vs your stack" reveal renders its two halves through different curves.
+
+**The fix is a refusal, because there is nothing to redirect the write to.** This run's own pixels are gone — which
+is precisely what v0.492.41's "picture overwritten" badge now says on the same card — so writing *somewhere else*
+would hand the row a thumbnail of someone else's master and claim it as its own. `save_stack_preview` answers
+**409** with the reason in plain language, naming the run whose picture it is. Both save paths enter through that
+one function, so the sliders and `keep_processed` are covered by one check rather than two.
+
+**The signature is the one v0.492.41 already shipped, asked about the column a write actually lands on.**
+`webapp/displacedpicture.py` grows `preview_owner_by_run_id` beside `picture_owner_by_run_id`, both over one
+grouping pass (`_later_owner_by_run_id`) so the two cannot drift, and both ordered by **row id** for the same
+reason (`timestamp_utc` has been written in two formats). The run list is read once by the endpoint that already
+read it — `iter_stack_runs()` materialised instead of a `next(...)` scan — so the guard costs no extra query and no
+file read.
+
+**Deliberately *no* existence gate here, unlike the display claim.** "This card shows a later run's picture" is a
+claim about bytes that are there; "do not write a file another row serves" is not. A shared path with nothing at it
+yet would be **created** by the save, handing the live row a thumbnail rendered from another row's sliders while its
+own stretch columns stay NULL — so the write guard keys on the rows alone. Pinned by its own test, which asserts the
+two functions *disagree* on exactly that fixture.
+
+**The guard is about the file, not about which row looks newest.** The *writer* of a shared file — the live run — is
+the one card that may still change those bytes, and it does: its Adjust is untouched. A "refuse on any shared path"
+rule would have been wrong, so that half has its own test on both sides.
+
+**Said before the click, with nothing removed** (the UI rule, AGENTS.md §1). The Adjust panel keeps every control it
+had — the sliders still drive a live render of a real picture, just not this run's — and only the two writes stand
+down, with an orange note in the same place and the same shape as the existing "This picture was processed for you"
+warning, naming the date of the stack the save would otherwise have reached. No new card, no new banner, nothing
+moved for a healthy run.
+
+**Tests +8 (6 Python in `tests/webapp/test_displaced_picture.py`, 2 vitest), four fail before** — three through the
+HTTP endpoint (sliders, `north_up`, `keep_processed`) and one on the disabled button, each shown by reverting the
+guard in place and watching it fail. The other four must pass on **both** sides and do: the live run still saves,
+an ordinary two-run history still saves from either card, and the existence-gate distinction.
+
+*A note for whoever next reaches for `repoint_stack_runs` in a test:* it maps **paths**, so calling it on a displaced
+pair moves *both* rows and leaves them paired on the archived name — correct behaviour (and why the (c) signature is
+robust to a later re-stack), but it cannot be used to *separate* a pair in a fixture. Cost: one wrong test.
+
+**No** config, schema, migration, on-disk-layout, default or response-shape change. One endpoint gains a 409 for a
+case in which it was corrupting another run's file.
+
 ## 2026-10-05 (Builder) — a History card whose picture is not its own now says so
 
 ### v0.492.41 — 🟡 BUG FIX: the last open half of #1069 — `picture_owner_by_run_id`, `picture_owned_by_run_id`, `OverwrittenPictureBadge`

@@ -1,8 +1,8 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-05 (Builder — **closed observer issue #1069 in all three of its halves**: the backfill
+*Last edited 2026-10-05 (Builder — **closed observer issue #1069 in all four of its halves**: the backfill
 guard **v0.492.39**, the destructive delete it was hiding **v0.492.40** (deleting an old stack could delete a
-*current* picture), and the display fork **v0.492.41**, settled with a signature that reads no files. The Scout's
+*current* picture), the display fork **v0.492.41**, settled with a signature that reads no files, and **v0.492.42** — the *write* side of the same sentence, found by grepping `SHIPPED.md` for what the earlier runs filed onto the entry they then cut. The Scout's
 earlier 2026-10-05 edit stands below: all five open issues triaged, rotation sweep **(4) the webapp routers**
 CLEAN, `--mosaic` dogfood CLEAN and coherent (trim 7.9 %). Records in `docs/PROCESS-NOTES.md`.) **"Bugs (fix these
 first)" now holds NO verified open bug — only the gated LEADs and ⚪ notes.** The earlier Builder 2026-10-05 note stands: a `--mosaic --editor --big` dogfood
@@ -12,8 +12,23 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
 
 ## Front of the queue
 
-0. **"Bugs (fix these first)" holds NO verified open bug — #1069 is closed in all three of its halves (Builder
+0. **"Bugs (fix these first)" holds NO verified open bug — #1069 is closed in all FOUR of its halves (Builder
    2026-10-05) — only gated LEADs and ⚪ notes remain.**
+   🟠 **The fourth half shipped as v0.492.42** (Builder 2026-10-05), and finding it is a **method note, not a
+   sweep**: the previous run filed two consequences "onto #1069's open display half", that half shipped, and the
+   entry was cut to `SHIPPED.md` — so nothing in the backlog held them. **A run that ships an entry must check
+   what was filed *onto* it**, because cutting the entry deletes the only pointer; grepping `SHIPPED.md` for the
+   last runs' own *"deliberately not built"* paragraphs is what a dry backlog should do before a dogfood pass.
+   One of the two was mis-severitied as cosmetic and is not: **"Adjust → Save as preview" on a displaced row
+   re-rendered the *live* run's preview PNG** (its History thumbnail, Target hero, Library tile and Sky Map
+   tile). Measured through the endpoint — the shared preview 64×64 → **86×86 turned 155°**, the rotation stamped
+   on the *clicked* row, the live row's `preview_north_up_deg` left **NULL**, which is the exact mismatch that
+   column exists to prevent. Refused with 409 (`preview_owner_by_run_id`); the live run — the *writer* — still
+   saves, and the Adjust panel keeps every control. The other consequence (a displaced row reclaims no space) is
+   answered by v0.492.41's badge. **The class, for the next run: v0.492.40 guarded *deletes* against "a row does
+   not own what it points at"; this is the same sentence applied to *writes*. Grep `run.preview_path` /
+   `run.fits_path` / `run_artifact_paths` for *writers*, not readers — as of this run the preview save was the
+   last one.**
    🟡 **The display fork shipped as v0.492.41** and the whole entry is cut to [`SHIPPED.md`](SHIPPED.md). It took a
    **third** option the entry had not named: two rows naming one `fits_path` *is* the bug (the guard exists to stop
    exactly that), so it needs **no file read** — the listing already holds every row — which keeps the cheap History

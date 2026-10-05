@@ -2595,6 +2595,61 @@ describe("HistoryView adjustable render", () => {
     expect((await menuItem("JPEG")).getAttribute("href")).toContain("north_up=true");
   });
 
+  // Both saves in this panel write `run.preview_path`, and on a pre-v0.81.8
+  // displaced row that file is a *later* run's picture — so the server refuses
+  // them (409). The panel keeps every control it had; only the two writes stand
+  // down, with the reason beside them, rather than letting someone click a save
+  // whose only possible outcome is an error or (before the guard) another card's
+  // thumbnail quietly changing.
+  const displacedPair = [
+    mkRun({ id: 9, output_basename: "master", has_fits: true, has_preview: true,
+            timestamp_utc: "2026-08-30T14:32:05" }),
+    mkRun({ id: 2, output_basename: "master", has_fits: true, has_preview: true,
+            picture_owned_by_run_id: 9 }),
+  ];
+
+  it("stands the saves down on a row whose picture a later stack overwrote", async () => {
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue(displacedPair);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: 0.5, black: 0.35, north_up_deg: 33.0,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getAllByText("master").length).toBe(2));
+    // Newest first, so the displaced (older) row is the second card.
+    openAbout(1);
+    fireEvent.click(await menuItem("Adjust"));
+
+    const save = await screen.findByRole("button", { name: /Save as preview/ });
+    expect(save).toBeDisabled();
+    // ...and it names the stack the save would otherwise have reached, off the
+    // same list the row is rendered in.
+    const note = screen.getByText(/a later stack wrote over the same/);
+    expect(note.textContent).toContain(
+      formatStampDateTime(displacedPair[0].timestamp_utc));
+    // Nothing was removed: the sliders and Reset are still there, because the
+    // live render they drive is a real picture — just not this run's.
+    expect(screen.getByRole("button", { name: "Reset" })).toBeEnabled();
+  });
+
+  it("leaves the save alone on the run that owns the shared picture", async () => {
+    // The control half: the *writer* of a shared file is the one card that may
+    // change those bytes, so a "refuse on any shared path" rule would have been
+    // wrong. Also every ordinary run, which is what the other tests here use.
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue(displacedPair);
+    vi.spyOn(client.api, "stackRenderSuggestion").mockResolvedValue({
+      stretch: 0.5, black: 0.35,
+    });
+
+    renderHistory();
+    await waitFor(() => expect(screen.getAllByText("master").length).toBe(2));
+    openAbout(0);
+    fireEvent.click(await menuItem("Adjust"));
+
+    expect(await screen.findByRole("button", { name: /Save as preview/ })).toBeEnabled();
+    expect(screen.queryByText(/a later stack wrote over the same/)).toBeNull();
+  });
+
   it("hides the North-up toggle when the run has no orientation correction", async () => {
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
       mkRun({ has_fits: true, has_preview: true }),
