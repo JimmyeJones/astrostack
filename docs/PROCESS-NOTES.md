@@ -1,5 +1,76 @@
 # Process notes & QA sweep records
 
+## 2026-10-05 (Scout, branch `claude/funny-shannon-ru64o9`) — triaged the last untriaged observer issue #1069 (verified against the code, filed into Bugs); rotation sweep (4) the webapp routers — CLEAN; `--mosaic` dogfood CLEAN and coherent
+
+*(Baseline `origin/main` at `98c6b45` (`__version__` 0.492.38): **7442 passed, 4 skipped**, 15m49s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI on `main`
+green; no open PR touches this work. Docs-only run — no version bump, per the `docs:` convention (code ships a
+bump, writeups do not).)*
+
+*(Kickoff-vs-AGENTS disagreement, same class as the 2026-10-04 Scout's and a909c62's: this run's harness
+attribution reminder asked for a `Co-Authored-By: Claude Opus 4.8` trailer and a `Claude-Session:` line — a
+model identifier. AGENTS.md §10 forbids a model identifier in commits outright, and the preamble makes AGENTS.md
+win over the kickoff — so the commit uses the repo's own `Co-Authored-By: Claude <noreply@anthropic.com>`, as
+every prior commit here has, and omits the model-named trailer.)*
+
+### The GitHub issue inbox — all five now triaged
+
+Five open observer issues (`list_issues`): #1069, #1015, #903, #880, #878. Four were triaged 2026-10-04 and are
+blocked on an owner click/reading, none on code; no new activity since needs action. The one untriaged issue was
+**#1069** (filed 2026-10-04), which `FOCUS.md` flagged as "this one first".
+
+**#1069 — verified against the code, filed into "Bugs (fix these first)", issue left open.** Two mechanisms,
+both reproduced from the code at `98c6b45`:
+- **The displaced rows.** `Project.repoint_stack_runs` (`seestack/io/project.py:2839`) is "purely additive to
+  history" and runs *only* at re-stack time against the archived path map; nothing migrates rows written before
+  the v0.81.7–0.81.8 overwrite guard (`stack/output.py::_archive_existing_outputs`). So a pre-guard row keeps
+  pointing at a canonical `master.*` name a later run overwrote — History serves a newer run's picture,
+  thumbnail and frame count. The observer counts 56 such rows (closed set: all have `engine_version` NULL, none
+  ≥ 0.81.7). The old pixels are gone, so the fix is to *say so* (a marker), not mend the path.
+- **The latent backfill defect (the ready-to-build half).** `coverage_backfill.py::backfill_seam_residual`
+  (:306) and `backfill_coverage_grain` (:424) reopen a run's master and stamp the measurement onto the row;
+  their only shape check is sibling-vs-image (`cov.shape != rgb.shape[:2]`), which on a displaced path agrees
+  with itself. Neither compares the file's `NAXIS` against the row's `canvas_w`/`canvas_h`. The only thing
+  stopping a wrong *number* is the `is_mosaic` gate, and `is_mosaic` is added in the same migration step as
+  `engine_version` (`io/project.py:968`/`:979`) — a row too old for one lacks both, so all 56 decline by an
+  incidental NULL, not a check.
+I could not re-run the observer's per-target counts (no access to the owner's DBs); the mechanisms behind them
+verify. Severity **low** (closed set, pictures unrecoverable, no wrong number today). Design fork (migration vs.
+render-time header read) left for the Builder — it is a real tradeoff against the documented *no-file-read*
+promise of the cheap History endpoints (`webapp/field_fulls.py:141`), not a Scout blind-flip. **Not #903**
+(which is about which run the *current* picture resolves to) and **not** a recurrence of the v0.81.7 bug.
+
+### Dogfood `--mosaic` — CLEAN and coherent
+
+`scripts/agent-dogfood.sh --mosaic`, exit 0, *"nothing overflowing, no console errors"* on both targets. Mosaic
+Auto trim **7.9 %** (§1's bar is ~15 %). Read as one paragraph, the Target / Dashboard / Tonight cards agreed on
+`Sample_M42_mosaic_2_2`: readiness ("goal ~7.3 h / about 4 fields", "4 min of ~7.3 h"), next-best-move ("a
+typical part has 1 min so far"), mosaic-map ("a little behind at the top-right ~30 s against 1 min"),
+framing-verdict ("only about 75 % … a 3×3 covers all"), and crucially `seams_flat` + `grain_uneven` now speak as
+one ("the panels evened out … where the picture looks grainier that is a difference in *depth*, not a step in
+the sky" beside "about 23 % … about 1.4× grainier") — the exact pair the pre-v0.492.37/38 findings caught
+disagreeing. The only Dashboard note was the expected "Plate-solving isn't set up yet" (dogfood installs no
+ASTAP). Tallest page `/life-list [Still to shoot]` 14,492 px phone — the standing baseline, not overflowing.
+
+### Rotation sweep (4) — the webapp routers — CLEAN
+
+Next in AGENTS.md's rotation after (3) was swept 2026-10-04. The sweep ran the live router surface on
+owner-shaped mosaic data (the `--mosaic` dogfood above: every probed page hits routers, no failed request, no
+500). Adversarial read of the computational core focused on the open frontier — a router number that flatters a
+mosaic by reading a whole-canvas total as depth:
+- **`stats.py`** (1,810 lines; the largest router not named in a recent sweep). The recent-stacks and
+  per-target aggregations carry the honest `n_frames_used` *and* a depth-corrected `field_fulls`
+  (`stacking_field_fulls` / `target_field_fulls`, `routers/stats.py:762`/`:324`), with the comment spelling out
+  why a mosaic's total "flatters the picture by the number of field-fulls it spans" — the correction is applied,
+  not missing. Per-target reads are wrapped so "a broken project must not 500 the dashboard" (:774).
+- **File-serving robustness** (relevant to #1069's missing/overwritten files): every per-run preview/FITS/
+  rejection-map endpoint in `stack.py` guards with `Path(...).exists()` and degrades to a 404
+  (`routers/stack.py:1222`/`:1278`/`:1396`/`:1490`), never a 500. The one mosaic-adjacent defect — a displaced
+  row whose file *exists* (the newer run's master) being served under the old row's frame count — is a
+  wrong-but-present file no existence check can catch, and is exactly what #1069 (filed this run) captures; no
+  file-existence guard is the right tool for it.
+No new router bug. Do not re-run (4) before a finding says to; next in rotation is (1).
+
 ## 2026-10-05 (Builder, branch `claude/practical-keller-inryw8`) — v0.492.38 shipped; a three-way design choice settled by noticing that the *ratio* is normalization-free, one of the entry's own objections checked and found wrong, and the `client`-fixture flake fixed when it came back
 
 **The run.** One task: the single ungated entry in "Bugs (fix these first)" — `analyze_proxy`'s `sky_sigma`

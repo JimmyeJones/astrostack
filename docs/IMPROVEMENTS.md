@@ -82,6 +82,46 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **VERIFIED (Scout 2026-10-05, observer issue [#1069](https://github.com/JimmyeJones/astrostack/issues/1069);
+  mechanism traced in the code, the counts measured by the observer on the live library) — a closed set of
+  pre-v0.81.7 History rows serve a *newer* run's picture and frame count, and the three file-reading backfills
+  are one NULL away from stamping a wrong *number* onto them.** *(Pillar: trust / friendliness — PRIORITY 3;
+  size: the display half is **M** and carries a design fork (below), the backfill-guard half is **S** and is the
+  ready-to-build piece; severity **low** — the set cannot grow and no wrong number exists today, see below.
+  Confidence: the two mechanisms are **reproduced from the code**; the per-target counts are the observer's
+  measurement, which this repo cannot re-run against the owner's DB.)*
+  **(1) The displaced rows.** Before the v0.81.7–0.81.8 overwrite fix (`74758528`), a re-stack wrote the
+  canonical `master.*` straight over the previous run's output. After it, `stack/output.py::_archive_existing_outputs`
+  renames the old set aside and `Project.repoint_stack_runs` (`io/project.py:2839`) updates the older rows to the
+  archived name — but that repoint runs **only at re-stack time and is "purely additive to history"**
+  (its own docstring), so **nothing migrates the rows written before the guard**. The observer counts 56 of 745
+  `stack_runs` rows (71 rows on 15 shared `fits_path`/`tiff_path`/`preview_path`, one writer per file) whose own
+  `canvas_w`/`canvas_h` no longer match the `NAXIS` of the file they point at; History then shows the wrong FITS,
+  the wrong thumbnail and a frame count that belongs to a different picture. The set is **closed at 56 and cannot
+  grow**: all 56 have `engine_version` NULL (predating the column), none is ≥ 0.81.7, and recent un-versioned
+  `master.fits` writes archived+repointed correctly. The old pictures were overwritten, so there is nothing to
+  repoint *to* — the fix is to **say so**, not to mend the path.
+  **Design fork (not an owner gate — no network, no breaking change, additive either way):** (a) a one-off
+  additive migration that stamps the 56 rows (e.g. a "picture overwritten before v0.81.8, no longer on disk"
+  marker) — respects the documented *no-file-read* promise of the cheap History endpoints
+  (`webapp/field_fulls.py:141`, `samples_per_pixel_of_run`); or (b) a render-time `canvas_w/h` vs `NAXIS` check on
+  the History card — costs one header read per row, which that promise exists to avoid. (a) looks the cheaper
+  shape; a Builder picks and tests one.
+  **(2) The latent backfill defect — the ready-to-build half.** `coverage_backfill.py::backfill_seam_residual`
+  (:306) and `backfill_coverage_grain` (:424) reopen a run's master, measure it, and write the result onto the
+  row. Their only shape check is sibling-vs-image (`cov.shape != rgb.shape[:2]`), which on a displaced path
+  **agrees with itself** because both halves are the newer run's pixels; neither compares the file's `NAXIS`
+  against the row's `canvas_w`/`canvas_h`. The only thing stopping a displaced row from being stamped with a
+  figure measured off a *different* picture is that both backfills gate on `run.is_mosaic` truthy, and
+  `is_mosaic` is NULL on all 56 (added in the same migration step as `engine_version`, `io/project.py:968`/`:979`
+  — a row too old for one lacks both). So the protection is an incidental NULL, not a check: anything that later
+  fills `is_mosaic` on old rows, or a fourth file-reading backfill without that gate, turns 56 wrong pictures
+  into 56 wrong numbers. Adding a `canvas`-vs-`NAXIS` decline to the two backfills is additive, obviously safe,
+  and worth doing on its own merits (regression test: a mosaic-flagged row whose `fits_path` points at a
+  differently-sized master must leave the row NULL, not stamp a number). Grep `docs/SHIPPED.md` for `repoint`,
+  `_archive_existing_outputs` and `backfill_seam_residual` before building — and note this is **not** #903 (which
+  is about which run the *current* picture resolves to) and **not** a recurrence of the v0.81.7 bug.
+
 - **⚪ VERIFIED BY ARITHMETIC (Builder 2026-10-04, found while fixing v0.492.33 in the same function) — two of
   `classify_target`'s three archetypes report a `confidence` that is **mathematically pinned to exactly 1.0**
   by their own branch guards, so the number carries no information.** *(Pillar: trust — size **S to change,

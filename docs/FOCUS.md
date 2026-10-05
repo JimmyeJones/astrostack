@@ -1,17 +1,27 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-05 (Builder — item 0 and the `sky_sigma` paragraph corrected: both named the bug that
-shipped this run as v0.492.38, and **"Bugs (fix these first)" now holds no ungated open item at all**. The
-Scout's own 2026-10-04 text is otherwise untouched.) A `--mosaic --editor --big` dogfood pass *after*
-v0.492.38 is CLEAN, and the scale-pair rig now reads **0 of 16 canvas-independent answers moved** — including
-`sky_sigma`, the last one that was still moving (0.000429 at 907 px against 0.000666 at 1693 px on the same
-sky; now 0.000429 / 0.000436). The ASTAP/ffmpeg sweep is CLEAN too (records in `docs/PROCESS-NOTES.md`). **The Scout rewrites this page** when
-the front of the queue changes; it stays short and dated. If this page and the backlog disagree, the backlog's
-"Bugs (fix these first)" wins and this page is stale — fix it.*
+*Last edited 2026-10-05 (Scout — triaged the last untriaged observer issue **#1069** (verified against the
+code, filed into "Bugs (fix these first)"), so all five open issues are now triaged; ran rotation sweep **(4)
+the webapp routers** — CLEAN; `--mosaic` dogfood CLEAN and coherent (trim 7.9 %). Records in
+`docs/PROCESS-NOTES.md`.) **"Bugs (fix these first)" now holds one verified open bug (#1069, severity low) plus
+the gated LEADs and ⚪ notes.** The earlier Builder 2026-10-05 note stands: a `--mosaic --editor --big` dogfood
+after v0.492.38 is CLEAN and the scale-pair rig reads **0 of 16 canvas-independent answers moved**. **The Scout
+rewrites this page** when the front of the queue changes; it stays short and dated. If this page and the backlog
+disagree, the backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 
 ## Front of the queue
 
-0. **"Bugs (fix these first)" holds NO ungated open item — everything in it is a gated LEAD or a ⚪ note.**
+0. **"Bugs (fix these first)" holds ONE verified open bug — #1069 — plus gated LEADs and ⚪ notes.**
+   🟡 **#1069 verified and filed (Scout 2026-10-05), severity low.** A closed set of 56 pre-v0.81.7 History rows
+   serve a *newer* run's picture and frame count — `Project.repoint_stack_runs` runs only at re-stack time and
+   nothing migrated the rows written before the v0.81.7–0.81.8 overwrite guard (mechanism reproduced in the
+   code; the per-target counts are the observer's live-library measurement). The pictures were overwritten, so
+   the fix is to **say so**, not mend the path — a **design fork** (one-off additive migration marking the rows,
+   vs. a render-time `canvas`-vs-`NAXIS` check that costs a header read the cheap History endpoints promise to
+   avoid). The **ready-to-build half** is independent and obviously safe: `coverage_backfill.py`'s two
+   file-reading backfills lack a `canvas`-vs-`NAXIS` guard and are one filled-in `is_mosaic` NULL away from
+   stamping a wrong *number* onto a displaced row. Not #903, not a recurrence of the v0.81.7 bug. Full entry in
+   the backlog.
    🟠 **The `sky_sigma` stride bug shipped as v0.492.38** (Builder 2026-10-05): `analyze_proxy`'s σ was a
    function of the proxy's *stride* and nothing else, so the same sky got a sharpen-dominated Auto as a single
    field and a near-saturated denoise as a mosaic — ×1.57 high off a strided grid, `noisy` False→True,
@@ -56,18 +66,14 @@ the front of the queue changes; it stays short and dated. If this page and the b
    (lead filed under Infra).
 
 2. **Owner-approved, buildable now: empty** — everything shipped and cut to [`SHIPPED.md`](SHIPPED.md).
-3. **Open observer issues — FIVE open, and #1069 is UNTRIAGED.** Four were triaged 2026-10-04 by the Scout
-   (#1063 closed by v0.492.35) and **none of those four carries code work** — all are blocked on an owner
-   click/reading: #878 (reconcile shipped v0.482.1/.2 — closes on a reading that shows the 11 pairs gone), #880
-   (both live halves shipped v0.483.1/.2; only the ⚪ exception-repr remainder open), #903 (prevention still
-   open; existing damage has the v0.479.3 repair), #1015 (repo half shipped v0.488.2; the clone-pin + token-mint
-   remainder is out of this repo — its 2026-10-03 follow-up is the same ask, wider window, not a new one).
-   **#1069 arrived after that triage and nobody has verified it** (filed 2026-10-04: "56 of 745 History rows
-   serve another run's picture — 71 rows share 15 master paths, left behind when the v0.81.7 overwrite fix
-   shipped without a migration"). Noted, not triaged: the inbox is the **Scout's** (AGENTS.md "Agent roles"),
-   and an observer report is a *lead* until someone reproduces it against the code. **Next Scout run: this one
-   first.** The count above said "four" through 2026-10-05 and was already wrong — don't trust it over
-   `list_issues`.
+3. **Open observer issues — FIVE open, ALL now triaged (Scout 2026-10-05).** **#1069 is the one that got
+   triaged this run**: verified against the code and filed into "Bugs (fix these first)" (item 0 above),
+   severity low, issue left open with a verification comment (work not done). The other four were triaged
+   2026-10-04 and **none carries code work** — all are blocked on an owner click/reading, with no new activity
+   since needing action: #878 (reconcile shipped v0.482.1/.2 — closes on a reading that shows the 11 pairs
+   gone), #880 (both live halves shipped v0.483.1/.2; only the ⚪ exception-repr remainder open), #903
+   (prevention still open; existing damage has the v0.479.3 repair), #1015 (repo half shipped v0.488.2; the
+   clone-pin + token-mint remainder is out of this repo). Don't trust any count here over `list_issues`.
 
 ## Standing frontier (unchanged until a finding says otherwise)
 
