@@ -1,5 +1,55 @@
 # Process notes & QA sweep records
 
+## 2026-10-05 (Builder, same run) — dogfood `--mosaic --editor --restack` CLEAN, and the healthy half of v0.492.41/.42 checked on a real re-stack
+
+Run after the merge, on `main` at `e6d5f7e`. `--restack` was chosen over `--big` deliberately: it is the one flag
+that makes the app run `write_stack_outputs` **twice over one basename** and then let `repoint_stack_runs` move the
+older row aside — which is exactly the machinery v0.492.41's "picture overwritten" badge and v0.492.42's 409 guard
+read. A fixture can assert that a *displaced* pair is caught; only a real re-stack can show that an **ordinary**
+one is not.
+
+**The pass itself: CLEAN.** Two editor drives (the field sample and the mosaic run, `/edit/1` on
+`Sample_M42_mosaic_2_2`), all **21 ops** added one at a time with the live preview re-rendering on every one, undo
+and redo applied, **no console errors and nothing overflowing** on either the 1440 px or 420 px sweep. `--restack`
+produced the two-run history it exists to produce (`#2/6 subs, #1/3 subs`), with the deepening reel
+`available=True … 3 → 6 subs` and **`dated_by=capture`** (the intended clock, not the "when the stacks ran"
+fallback), and `noise-delta available=True patch=160px pixel_exact=True ratio=1.658`.
+
+**The targeted check, which is the reason for the flag.** Asked of the install the pass had just built:
+
+```
+Sample_Orion_Nebula_M42: 2 runs
+   run #2  6 subs  fits=master.fits                      preview=master_preview.png
+   run #1  3 subs  fits=master_20261005_212741.fits      preview=master_20261005_212741_preview.png
+   picture_owner (badge) : {}   — no card claims another's picture
+   preview_owner (guard) : {}   — no save is refused
+```
+
+and then over HTTP, through `create_app()` against that same data root:
+
+```
+runs: [(2, 6, picture_owned_by_run_id=None), (1, 3, picture_owned_by_run_id=None)]
+  run #2: POST .../preview -> 200
+  run #1: POST .../preview -> 200
+```
+
+So on a current install the archive-and-repoint works, both rows own the files they name, **neither signature
+fires**, and Adjust saves from **both** cards — including the older one, which is the row a careless
+"refuse on any shared path" rule would have broken. That is the half the unit tests can only assert about a
+fixture.
+
+**One thing the check printed that is correct and reads like a finding, recorded so the next run does not chase
+it:** re-saving a preview left the bytes **identical** on both runs. `--restack` drives
+`/api/targets/{safe}/process`, so each master is an in-place auto-edit and therefore **display-space** — and
+`save_stack_preview` renders a display-space FITS *verbatim*, ignoring the sliders, exactly as its own docstring
+says. A linear master would have changed. Not a bug; a consequence of which flag was used.
+
+**Page heights** match the standing baseline on every row except phone `/life-list [Up tonight]`, **7183 px
+against the recorded 7006** (`[Still to shoot]` 14492 and desktop 5101 are exact). +177 px on a page this run did
+not touch, and the tab is data-shaped (the observing site and what is up at the hour the pass runs), so it is
+recorded rather than treated as a regression — a later pass that sees it again at a different hour has the pair it
+needs to tell "data" from "drift". Nothing here was long enough to be a UI slice.
+
 ## 2026-10-05 (Builder, same run) — the issue that arrived two minutes after the Scout, and a third instance of one blindness
 
 ### An observer issue can land in the gap between the Scout's `list_issues` and its commit
