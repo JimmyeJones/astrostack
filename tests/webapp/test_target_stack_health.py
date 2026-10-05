@@ -205,6 +205,24 @@ def _write_coverage_map(fits_path: Path, cov) -> None:
         fits_path.with_name(f"{fits_path.stem}_framecov.fits"), overwrite=True)
 
 
+def _add_run_for_map(data_root: Path, safe: str, fits_path: Path, cov,
+                     **kw) -> int:
+    """Write a run's coverage map and insert the row that points at it, with the
+    row's canvas set to that map's own shape.
+
+    ``write_stack_outputs`` writes a master and its coverage siblings in one call
+    at one shape, so a real row's ``canvas_h``/``canvas_w`` *are* its map's shape
+    — and the heal now declines a map that is not the row's canvas
+    (``coverage_backfill._canvas_of``), because a pre-v0.81.8 row can point at a
+    *newer* run's output. Writing the map and the row together is what keeps a
+    fixture here from describing a run the stacker cannot produce, which would
+    quietly exercise that decline instead of the heal these tests are about.
+    """
+    _write_coverage_map(fits_path, cov)
+    return _add_run(data_root, safe, fits_path=str(fits_path),
+                    canvas_h=int(cov.shape[0]), canvas_w=int(cov.shape[1]), **kw)
+
+
 def test_an_older_run_gets_its_coverage_advice_from_the_map_on_disk(
         client, solved_library, data_root):
     """A run stacked before schema 20 has no thin-coverage share, and the note
@@ -218,9 +236,9 @@ def test_an_older_run_gets_its_coverage_advice_from_the_map_on_disk(
     # A 20-px edge on a single frame: narrow enough (6.7 % of the covered area,
     # under the 8 % a coverage plateau needs) to be an edge rather than a panel.
     cov[:, :20] = 1.0
-    _write_coverage_map(fits_path, cov)
-    rid = _add_run(data_root, "M_42", fits_path=str(fits_path),
-                   coverage_thin_frac=None, coverage_min=1, coverage_max=12)
+    rid = _add_run_for_map(data_root, "M_42", fits_path, cov,
+                           coverage_thin_frac=None, coverage_min=1,
+                           coverage_max=12)
 
     body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
     note = next(n for n in body["notes"] if n["kind"] == "coverage")
@@ -245,9 +263,9 @@ def test_a_mosaics_thinner_panel_is_not_offered_as_a_border_to_trim(
     fits_path = data_root / "out" / "panels.fits"
     cov = np.ones((300, 300), dtype=np.float32)
     cov[:, 200:] = 12.0
-    _write_coverage_map(fits_path, cov)
-    rid = _add_run(data_root, "M_42", fits_path=str(fits_path),
-                   coverage_thin_frac=None, coverage_min=1, coverage_max=12)
+    rid = _add_run_for_map(data_root, "M_42", fits_path, cov,
+                           coverage_thin_frac=None, coverage_min=1,
+                           coverage_max=12)
 
     body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
     assert not any(n["kind"] == "coverage" for n in body["notes"])
@@ -260,9 +278,10 @@ def test_an_evenly_covered_older_run_earns_the_compliment_too(
     import numpy as np
 
     fits_path = data_root / "out" / "even.fits"
-    _write_coverage_map(fits_path, np.full((200, 200), 12.0, dtype=np.float32))
-    rid = _add_run(data_root, "M_42", fits_path=str(fits_path),
-                   coverage_thin_frac=None, coverage_min=1, coverage_max=12)
+    rid = _add_run_for_map(data_root, "M_42", fits_path,
+                           np.full((200, 200), 12.0, dtype=np.float32),
+                           coverage_thin_frac=None, coverage_min=1,
+                           coverage_max=12)
 
     body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
     solid = next(n for n in body["notes"] if n["kind"] == "solid")
@@ -430,10 +449,9 @@ def test_an_older_run_learns_what_its_black_bands_are_from_the_map_on_disk(
     fits_path = data_root / "out" / "ragged.fits"
     cov = np.full((300, 300), 12.0, dtype=np.float32)
     cov[:, :100] = 0.0            # a third of the canvas: no frame reached it
-    _write_coverage_map(fits_path, cov)
-    rid = _add_run(data_root, "M_42", fits_path=str(fits_path),
-                   coverage_thin_frac=None, uncovered_frac=None,
-                   coverage_min=0, coverage_max=12)
+    rid = _add_run_for_map(data_root, "M_42", fits_path, cov,
+                           coverage_thin_frac=None, uncovered_frac=None,
+                           coverage_min=0, coverage_max=12)
 
     body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
     kinds = [n["kind"] for n in body["notes"]]
@@ -461,10 +479,9 @@ def test_an_ordinary_older_run_is_told_nothing_about_black_bands(
     cov[-3:, :] = 0.0
     cov[:, :3] = 0.0
     cov[:, -3:] = 0.0             # ~4% of the canvas, the honest border case
-    _write_coverage_map(fits_path, cov)
-    rid = _add_run(data_root, "M_42", fits_path=str(fits_path),
-                   coverage_thin_frac=None, uncovered_frac=None,
-                   coverage_min=0, coverage_max=12)
+    rid = _add_run_for_map(data_root, "M_42", fits_path, cov,
+                           coverage_thin_frac=None, uncovered_frac=None,
+                           coverage_min=0, coverage_max=12)
 
     body = client.get(f"/api/targets/M_42/stack-health?run_id={rid}").json()
     assert "uncovered" not in [n["kind"] for n in body["notes"]]

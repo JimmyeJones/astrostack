@@ -319,6 +319,107 @@ def test_a_coverage_map_from_another_canvas_is_refused(tmp_path):
         proj.close()
 
 
+def test_a_master_that_is_not_this_runs_canvas_is_refused(tmp_path):
+    """FAIL-BEFORE: a figure measured off a *different* picture was stamped onto
+    this row, which the existing sibling-vs-image check cannot catch because both
+    halves are the other run's pixels and so agree with each other.
+
+    The population is real: before the v0.81.7-0.81.8 overwrite guard a re-stack
+    wrote the canonical ``master.*`` straight over the previous run's output, and
+    ``repoint_stack_runs`` only runs at re-stack time — so a pre-guard row still
+    points at a *newer* run's file (observer issue #1069 counts 56). Today all 56
+    decline for an unrelated reason, an ``is_mosaic`` that is NULL on a row that
+    old; this is the check rather than the accident, so filling that column in
+    cannot turn 56 wrong pictures into 56 wrong numbers.
+    """
+    rgb, cov = _seamed_scene(6.0)          # the newer run's 600x800 output set
+    fits_path = tmp_path / "out" / "master.fits"
+    _write_outputs(fits_path, rgb, cov)
+
+    # …and the row remembers the canvas of the picture that was overwritten.
+    proj, run_id = _project_with_run(
+        tmp_path, _run(fits_path=str(fits_path), canvas_h=400, canvas_w=500))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert backfill_seam_residual(proj, row) is None
+        assert row.seam_residual is None
+        assert next(r for r in proj.iter_stack_runs()
+                    if r.id == run_id).seam_residual is None
+    finally:
+        proj.close()
+
+
+def test_a_displaced_row_keeps_a_figure_it_cannot_re_measure(tmp_path):
+    """The one thing the refusal must not do is destroy the owner's only
+    measurement: a superseded-scale figure whose own master is gone is *kept*,
+    read on the cautious side, exactly as it is when the master was deleted."""
+    rgb, cov = _seamed_scene(6.0)
+    fits_path = tmp_path / "out" / "master.fits"
+    _write_outputs(fits_path, rgb, cov)
+
+    proj, run_id = _project_with_run(
+        tmp_path, _run(fits_path=str(fits_path), canvas_h=400, canvas_w=500,
+                       seam_residual=0.42, engine_version="0.300.0"))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert backfill_seam_residual(proj, row) == pytest.approx(0.42)
+    finally:
+        proj.close()
+
+
+def test_a_real_stacks_row_canvas_is_its_masters_naxis(tmp_path):
+    """The invariant the refusal above rests on, pinned against a real
+    ``run_stack`` rather than argued from the diff: the canvas a row records *is*
+    the master's own ``NAXIS2``/``NAXIS1``.
+
+    Drizzle is the case worth pinning. ``StackEstimate.canvas_w`` is documented as
+    the *pre*-drizzle width, so the row's column reads like it might be too — but
+    ``run_stack`` reassigns ``dst_shape`` to the drizzler's output canvas before it
+    writes the row, and every surface that describes the file reads those columns
+    as output pixels. If that ever stopped being true, these heals would go silent
+    on every drizzled run in the library, so it is checked here rather than
+    assumed.
+    """
+    pytest.importorskip("drizzle")
+    pytest.importorskip("scipy")
+    pytest.importorskip("photutils")
+    pytest.importorskip("tifffile")
+    from astropy.io import fits as _fits
+
+    from seestack.io.project import FrameRow
+    from seestack.stack.stacker import StackOptions, run_stack
+    from tests.synth import make_synth_wcs_text, write_seestar_fits
+
+    proj = Project.create(tmp_path / "p", name="canvas-vs-naxis")
+    raws = tmp_path / "raws"
+    raws.mkdir()
+    wcs_text = make_synth_wcs_text()
+    for i in range(3):
+        path = write_seestar_fits(raws / f"f{i}.fit", add_wcs=True,
+                                  seed=20 + i, n_stars=20)
+        proj.add_frame(FrameRow(
+            source_path=str(path), cached_path=str(path),
+            width_px=480, height_px=320, bayer_pattern="RGGB",
+            wcs_json=wcs_text, ra_center_deg=83.6, dec_center_deg=-5.4))
+    try:
+        for name, opts in (
+            ("plain", StackOptions(output_name="plain", max_workers=1,
+                                   background_flatten=False)),
+            ("drizzled", StackOptions(output_name="drizzled", max_workers=1,
+                                      background_flatten=False, drizzle=True,
+                                      drizzle_scale=1.5, drizzle_pixfrac=0.8)),
+        ):
+            result = run_stack(proj, opts)
+            run = next(r for r in proj.iter_stack_runs()
+                       if r.output_basename == name)
+            with _fits.open(str(result.fits_path)) as hdul:
+                data = next(h.data for h in hdul if h.data is not None)
+            naxis_hw = data.shape[-2:]
+            assert (run.canvas_h, run.canvas_w) == naxis_hw, name
+    finally:
+        proj.close()
+
+
 def test_a_run_that_already_has_a_verdict_is_left_exactly_alone(tmp_path,
                                                                monkeypatch):
     """The common case — every mosaic stacked since v0.233.0 — must cost

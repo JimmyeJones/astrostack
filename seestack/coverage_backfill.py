@@ -59,6 +59,12 @@ is already grading it. A sweep over the library at startup would turn the first
 looking at. And none of them ever *substitutes* a different measurement — when
 the input is gone the row stays NULL and the app stays silent.
 
+And none of them measures a file that is not the run's **own** picture, which is
+a real thing a row can point at rather than a hypothetical one: see
+:func:`_canvas_of`, which every heal below checks its file against. A row whose
+picture was overwritten before the v0.81.7–0.81.8 guard keeps its NULL instead of
+being stamped with a figure measured off the stack that replaced it.
+
 **Audited, 2026-09-01 — the other later-added columns and why they are not here.**
 ``stack_fwhm_px`` (14) needs a star fit over the master: real work, and it
 belongs behind an explicit action rather than a lazy read. ``capture_start_utc``
@@ -92,6 +98,41 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from seestack.io.project import Project, StackRunRow
 
 log = logging.getLogger(__name__)
+
+
+def _canvas_of(run: StackRunRow) -> tuple[int, int] | None:
+    """The ``(height, width)`` this run recorded for the picture it wrote, or
+    ``None`` when the row does not usefully say.
+
+    Every heal in this module reads a file the row *points at* and stamps the
+    figure onto the row, so each one needs to know that the file really is this
+    run's own picture. ``canvas_h``/``canvas_w`` are what can answer that: the
+    stacker records the output canvas it actually wrote — the master's own
+    ``NAXIS2``/``NAXIS1``, drizzle included, since a drizzled canvas counts its
+    *output* pixels (``run_stack`` reassigns ``dst_shape`` to the drizzler's
+    ``output_canvas_shape`` before it writes the row) — and
+    ``write_stack_outputs`` writes the coverage siblings at that same shape.
+
+    A row can point at **another run's** picture, and not hypothetically. Before
+    the v0.81.7–0.81.8 overwrite guard a re-stack wrote the canonical
+    ``master.*`` straight over the previous run's output, and
+    :meth:`seestack.io.project.Project.repoint_stack_runs` only ever runs at
+    re-stack time, so the rows written before the guard still point at a *newer*
+    run's file (observer issue #1069 counts 56 of them on the owner's library).
+    Their own pictures were overwritten, so there is nothing of theirs left to
+    measure — and measuring the file that took their place turns a wrong picture
+    into a wrong *number*: confident, persisted, and about a stack nobody can see
+    any more.
+
+    ``None`` means "cannot be checked", never "refuse". A row whose canvas is
+    missing or degenerate heals exactly as it did before this check existed:
+    every decline keyed on this is made on positive evidence of a mismatch.
+    """
+    try:
+        h, w = int(run.canvas_h), int(run.canvas_w)
+    except (TypeError, ValueError):
+        return None
+    return (h, w) if h > 0 and w > 0 else None
 
 
 def backfill_coverage_shares(project: Project, run: StackRunRow) -> None:
@@ -132,9 +173,10 @@ def backfill_coverage_shares(project: Project, run: StackRunRow) -> None:
     in the same order, that :func:`seestack.stack.stacker.run_stack` itself makes
     when it stamps the columns on a new run.
 
-    No master path, no sibling on disk, an unreadable one, or a map with nothing
-    covered leaves the rows NULL and every surface silent. It never falls back to
-    the ``coverage_min`` test the thin share replaced.
+    No master path, no sibling on disk, an unreadable one, a sibling whose shape
+    is not the canvas this run recorded (:func:`_canvas_of`), or a map with
+    nothing covered leaves the rows NULL and every surface silent. It never falls
+    back to the ``coverage_min`` test the thin share replaced.
     """
     from seestack.stack.stacker import (
         COVERAGE_SHARES_VERSION,
@@ -161,6 +203,17 @@ def backfill_coverage_shares(project: Project, run: StackRunRow) -> None:
     if cov is None:
         cov = load_coverage(run.fits_path)
     if cov is None:
+        _drop_unmeasurable_stale_thin_share(run, stale)
+        return
+    canvas = _canvas_of(run)
+    if canvas is not None and cov.shape != canvas:
+        # The map beside a master is that master's own canvas, so a map that is
+        # not *this row's* canvas means the row is pointing at another run's
+        # output (:func:`_canvas_of`). Three shares measured off a different
+        # picture would be worse than the NULLs they replace — and unlike the
+        # two heals below, nothing else here declines first: these shares are
+        # not gated on ``is_mosaic``, so this is the only check standing between
+        # a displaced row and a persisted wrong number.
         _drop_unmeasurable_stale_thin_share(run, stale)
         return
 
@@ -269,15 +322,23 @@ def _seam_read_step(height: int, width: int) -> int | None:
     return step
 
 
-def _load_strided_rgb(fits_path: str | Path, step: int) -> np.ndarray | None:
+def _load_strided_rgb(fits_path: str | Path, step: int, *,
+                      canvas_hw: tuple[int, int] | None) -> np.ndarray | None:
     """Read a master FITS as ``(H, W, 3)`` float32, taking every ``step``-th
-    pixel, or ``None`` when it carries no usable image.
+    pixel, or ``None`` when it carries no usable image — or when it is not the
+    picture the caller's run recorded.
 
     Strided off the memory map one channel at a time — the shape
     :func:`seestack.render.thumbnail.load_stack_rgb` settled on — so the only
     full-canvas allocation this heal makes is the small strided output, not the
     big-endian cube it came from. Striding, not averaging: see the constants
     above.
+
+    ``canvas_hw`` is the caller's run's own ``(canvas_h, canvas_w)``, checked
+    against the file's ``NAXIS2``/``NAXIS1`` *before* any pixel is read: a file
+    whose dimensions are not that canvas is another run's output, which this heal
+    declines rather than measures (:func:`_canvas_of` says why that happens and
+    why it matters). ``None`` is "the row cannot say", and skips the check.
     """
     from astropy.io import fits as _fits
 
@@ -293,6 +354,8 @@ def _load_strided_rgb(fits_path: str | Path, step: int) -> np.ndarray | None:
             elif data.ndim == 2:
                 planes = [data]
             else:
+                return None
+            if canvas_hw is not None and planes[0].shape != canvas_hw:
                 return None
             out = [np.asarray(p[::step, ::step], dtype=np.float32)
                    for p in planes]
@@ -328,7 +391,8 @@ def backfill_seam_residual(project: Project,
     it is never taken twice.
 
     ``None`` — a single-field or unclassified run, no master path, a missing or
-    unreadable master or coverage sibling, a canvas too big to read within the
+    unreadable master or coverage sibling, a master that is **not** the canvas
+    this run recorded (:func:`_canvas_of`), a canvas too big to read within the
     stride cap, or a canvas whose levels can't be measured — leaves the row NULL
     and every seam surface silent, which is exactly what they do today. A
     superseded figure whose master has since gone is **kept**, not cleared: it is
@@ -370,15 +434,16 @@ def backfill_seam_residual(project: Project,
     master = _Path(run.fits_path)
     if not master.exists():
         return _unmeasurable()
-    try:
-        h, w = int(run.canvas_h), int(run.canvas_w)
-    except (TypeError, ValueError):
+    canvas = _canvas_of(run)
+    if canvas is None:
         return _unmeasurable()
-    step = _seam_read_step(h, w)
+    step = _seam_read_step(*canvas)
     if step is None:
         return _unmeasurable()
 
-    rgb = _load_strided_rgb(master, step)
+    # ``canvas`` is handed to the read so a master that is not this run's own
+    # picture declines before a pixel of it is measured (:func:`_canvas_of`).
+    rgb = _load_strided_rgb(master, step, canvas_hw=canvas)
     if rgb is None:
         return _unmeasurable()
     # The same two maps, in the same order of preference, that ``run_stack``
@@ -428,9 +493,11 @@ def backfill_coverage_grain(project: Project, run: StackRunRow) -> bool:
     carries the measurement.
 
     Same shape, same laziness and the same declines as
-    :func:`backfill_seam_residual` — a no-op for a run that already has one, and
-    free (no disk touched at all) for a run the stacker recorded as a single
-    field, which has one substantial coverage level and nothing to compare.
+    :func:`backfill_seam_residual` — a no-op for a run that already has one, free
+    (no disk touched at all) for a run the stacker recorded as a single field,
+    which has one substantial coverage level and nothing to compare, and silent
+    for a run whose master is not the canvas the row recorded
+    (:func:`_canvas_of`).
 
     Healing this one *is* possible where healing ``noise_sigma`` is not, and the
     difference is the estimator: this ratio comes from a sigma-clipped σ, which
@@ -454,15 +521,15 @@ def backfill_coverage_grain(project: Project, run: StackRunRow) -> bool:
     master = _Path(run.fits_path)
     if not master.exists():
         return False
-    try:
-        h, w = int(run.canvas_h), int(run.canvas_w)
-    except (TypeError, ValueError):
+    canvas = _canvas_of(run)
+    if canvas is None:
         return False
-    step = _seam_read_step(h, w)
+    step = _seam_read_step(*canvas)
     if step is None:
         return False
 
-    rgb = _load_strided_rgb(master, step)
+    # Same canvas check as the seam heal above, for the same reason.
+    rgb = _load_strided_rgb(master, step, canvas_hw=canvas)
     if rgb is None:
         return False
     cov = load_coverage(master, step=step)
