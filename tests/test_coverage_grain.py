@@ -921,6 +921,41 @@ def test_a_stack_stamps_the_grain_step_on_the_header_and_the_run(
     assert grain_verdict(run.grain_ratio) == "uneven"
 
 
+def test_a_master_that_is_not_this_runs_canvas_is_refused(tmp_path):
+    """FAIL-BEFORE: the grain figure of a *different* picture was stamped onto
+    this row — the same defect as the seam heal's
+    (``tests/test_seam_backfill.py``), because the two share the strided read.
+
+    A row written before the v0.81.7-0.81.8 overwrite guard still points at a
+    newer run's ``master.*`` (observer issue #1069). All such rows decline today,
+    but only because ``is_mosaic`` is NULL on a row that old — an accident, not a
+    check — and this heal needs ``is_mosaic`` truthy to run at all, so a row with
+    the flag filled in would be measured off the wrong file and the four grain
+    columns written from it.
+    """
+    from seestack.coverage_backfill import backfill_coverage_grain
+    from seestack.io.project import Project
+
+    rgb, cov = _uneven_canvas(h=600, w=1000)   # the newer run's output set
+    fits_path = tmp_path / "out" / "master.fits"
+    _write_outputs(fits_path, rgb, cov)
+
+    proj = Project.create(tmp_path / "t", name="T")
+    try:
+        # …while the row remembers the canvas of the picture that was overwritten.
+        run_id = proj.add_stack_run(_run(
+            id=None, fits_path=str(fits_path), canvas_h=400, canvas_w=700,
+            grain_ratio=None, grain_thin_frames=None, grain_deep_frames=None,
+            grain_thin_share=None))
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert backfill_coverage_grain(proj, row) is False
+        assert row.grain_ratio is None
+        assert next(r for r in proj.iter_stack_runs()
+                    if r.id == run_id).grain_ratio is None
+    finally:
+        proj.close()
+
+
 def test_a_single_field_run_is_healed_for_free_without_opening_a_file(tmp_path):
     from seestack.coverage_backfill import backfill_coverage_grain
     from seestack.io.project import Project

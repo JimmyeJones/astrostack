@@ -1,5 +1,78 @@
 # Process notes & QA sweep records
 
+## 2026-10-05 (Builder, branch `claude/optimistic-ritchie-l34ima`) — drained the ready half of #1069; the entry's "no wrong number exists today" was wrong twice
+
+*(Baseline `origin/main` at `0b93c66` (`__version__` 0.492.38): **7442 passed, 4 skipped**, 13m41s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI green on
+`main`'s head (all seven checks); **no open PR at all**, so nothing to collide with. One task shipped,
+v0.492.39.)*
+
+*(Kickoff-vs-AGENTS disagreement, the same class the 2026-10-04 and 2026-10-05 Scouts filed: this run's harness
+attribution reminder asked for a `Co-Authored-By: Claude Opus 5` trailer and a `Claude-Session:` line. AGENTS.md
+§10 forbids a model identifier in commits outright and the preamble makes AGENTS.md win over the kickoff, so the
+commit carries the repo's own `Co-Authored-By: Claude <noreply@anthropic.com>` and omits both. Recorded for the
+third time because the reminder is per-session and will keep arriving.)*
+
+### Choosing it
+
+"Bugs (fix these first)" held exactly one entry with open, ungated work: #1069, whose own text named the
+backfill-guard half as "the ready-to-build piece". Filed at 06:27 UTC by `c40fe2a`, picked at ~10:00 — outside
+§11's ~2-hour claimed-in-spirit window. Everything else in the section is a gated LEAD, a ⚪ note, or the design
+fork that is half (1) of the same entry.
+
+### Two corrections to the entry, both found by writing the fail-before
+
+The entry rated severity low partly on "no wrong number exists today". That is wrong in two ways, and the
+regression tests' fail-before output is the evidence rather than a reading of the code:
+
+1. **There are three file-reading heals, not two, and the third has no `is_mosaic` gate.** The entry's argument is
+   that all 56 displaced rows decline because both named heals need `run.is_mosaic` truthy and `is_mosaic` is NULL
+   on a row that old. But `backfill_coverage_shares` reads the coverage sibling and stamps three columns, and only
+   its `stale` term consults `is_mosaic` — `want_uncovered` and `want_depth` are ungated. Fail-before:
+   `assert 0.06666666666666667 is None`, i.e. a thin share measured off the replacement picture, written to the
+   row on the first `/stack-health` that grades it.
+2. **`backfill_seam_residual` re-measures, so the `is_mosaic` gate is not the only way in.** Since v0.447.0 it
+   replaces a *superseded-scale* figure rather than only filling a NULL. Fail-before:
+   `assert 2.0542 == 0.42` — the owner's stored measurement **overwritten** by one taken off a different picture.
+   That is the worst case in the whole entry and the filing did not have it.
+
+So the half that shipped is the one the entry called latent, and it was live. Nothing about half (1) changed.
+
+### What the guard is, and the one thing it must not become
+
+`_canvas_of(run)` is the whole mechanism: the `(h, w)` the row recorded, or `None` when the row cannot say.
+`_load_strided_rgb` checks it against the file's `NAXIS` **before** striding (a wrong master costs no pixel read),
+and the shares heal checks the coverage sibling's shape, which is free — deliberately, because the still-open half
+(1) has to respect the cheap History endpoints' documented *no-file-read* promise and a guard that itself read a
+header would have prejudged that fork.
+
+The thing it must not become is a new source of silence. `None` means "cannot be checked", never "refuse", and a
+superseded figure whose master is gone is **kept** rather than cleared — deleting the owner's only measurement to
+make a point about its scale is the destructive half of a fix that has a safe one. Both properties have their own
+test; both pass before *and* after, which is what makes them properties rather than regressions.
+
+### The invariant the guard rests on, and why it is a test rather than a paragraph
+
+The guard is only correct if `canvas_h`/`canvas_w` *are* the master's `NAXIS2`/`NAXIS1`. Drizzle is the case that
+reads as if they are not: `StackEstimate.canvas_w` is documented as the **pre**-drizzle width, and `run_stack`
+writes `canvas_h=dst_shape[0]` — 700 lines after reassigning `dst_shape` to `drizzler.output_canvas_shape`. Two
+independent confirmations (`webapp/derived_light`'s own note that "a drizzled canvas has `drizzle_scale` of them
+per camera pixel", and `tests/webapp/test_sky.py`'s 2× case) plus a new test that runs a real `run_stack` plain
+and at ×1.5 and asserts the row equals the file. Written as a test because the failure mode is **silence** — the
+heals would simply stop answering on every drizzled run in the library, which no existing test would notice.
+
+### Ten fixtures were describing runs the stacker cannot produce
+
+The guard made five tests in `tests/test_coverage_backfill.py` and four in
+`tests/webapp/test_target_stack_health.py` fail, and in every case the fixture was at fault: a 100×100, 120×90 or
+200×200 coverage map beside a row whose canvas said 300×300 or 1080×1920. `write_stack_outputs` writes the master
+and its siblings in one call at one shape, so a real row's canvas *is* its map's shape. Both files now derive the
+row's canvas from the map (`_run_for`, `_add_run_for_map`) so the two cannot drift apart again, and no assertion
+moved. A tenth fixture was **not** failing and was fixed anyway:
+`test_a_mosaics_thinner_panel_is_not_offered_as_a_border_to_trim` asserts an *absence*, so it would have gone on
+passing because the heal declined rather than because the measure was right — a green tick with no sensitivity,
+the same shape as the rig the 2026-10-04 run deliberately did not land.
+
 ## 2026-10-05 (Scout, branch `claude/funny-shannon-ru64o9`) — triaged the last untriaged observer issue #1069 (verified against the code, filed into Bugs); rotation sweep (4) the webapp routers — CLEAN; `--mosaic` dogfood CLEAN and coherent
 
 *(Baseline `origin/main` at `98c6b45` (`__version__` 0.492.38): **7442 passed, 4 skipped**, 15m49s with

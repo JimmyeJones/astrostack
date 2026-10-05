@@ -1,5 +1,86 @@
 # Shipped — the record
 
+## 2026-10-05 (Builder) — a History row whose picture was overwritten stops being stamped with the replacement's numbers
+
+### v0.492.39 — 🟡 BUG FIX: the three file-reading heals in `coverage_backfill.py` decline a file that is not the run's own picture (`_canvas_of`)
+
+**What the owner would see.** One History row, two pictures' worth of facts: the thumbnail and FITS of a *newer*
+stack, that newer stack's coverage numbers, and the older run's frame count — all on one card, all stated with
+the confidence of a measurement. The ready half of the front-of-queue Bugs entry (observer issue
+[#1069](https://github.com/JimmyeJones/astrostack/issues/1069), filed by the 2026-10-05 Scout).
+
+**The mechanism, as the entry traced it.** Before the v0.81.7–0.81.8 overwrite guard (`74758528`) a re-stack
+wrote the canonical `master.*` straight over the previous run's output. After it,
+`stack/output.py::_archive_existing_outputs` renames the old set aside and `Project.repoint_stack_runs` points
+the older rows at the archived name — but that repoint is "purely additive to history" and runs **only at
+re-stack time**, so nothing ever migrated the rows written *before* the guard. The observer counts **56 of 745**
+`stack_runs` rows whose own `canvas_w`/`canvas_h` no longer match the `NAXIS` of the file they point at. Those
+pictures were overwritten; there is nothing of theirs left to measure.
+
+**Three heals reopen that file and write the answer onto the row.** `backfill_coverage_shares`,
+`backfill_seam_residual` and `backfill_coverage_grain` all take a figure off the master and/or the coverage
+sibling beside it and stamp it on the row, so each needed to know the file is this run's picture. Their only
+shape check was sibling-vs-image (`cov.shape != rgb.shape[:2]`), which on a displaced path **agrees with
+itself** — both halves are the newer run's pixels. Neither compared the file's `NAXIS` to the row's canvas.
+
+**The entry called this latent. It is not, and that is the finding this run adds.** Two corrections to the
+filing, both measured by the regression tests' fail-before:
+
+* `backfill_coverage_shares` is a **third** file-reading heal and has **no `is_mosaic` gate at all** — `stale`
+  consults the flag, but `want_uncovered` and `want_depth` do not — so it is the live path, not the latent one.
+  On a displaced row it stamped `coverage_thin_frac` **0.0667**, plus `uncovered_frac` and
+  `coverage_median_depth`, all measured off the replacement picture, on the first "How's my stack?" that graded
+  the row.
+* `backfill_seam_residual` does not only fill a NULL, it **re-measures a superseded-scale figure** (v0.447.0) —
+  so on a displaced row with a pre-v0.313.1 seam number it **overwrote the owner's stored 0.42 with 2.0542**
+  taken off a different picture. A wrong number replacing a right one, persisted.
+
+So "the protection is an incidental NULL, not a check" understated it: for the shares there was no gate, and for
+the seam the gate was bypassed by the re-measure path.
+
+**The fix.** One predicate, `_canvas_of(run)`, returning the `(h, w)` the row recorded for the picture it wrote,
+and all three heals check their file against it:
+
+* `_load_strided_rgb` takes `canvas_hw` and compares it to the FITS's own `NAXIS2`/`NAXIS1` **before striding**,
+  so a wrong master costs no pixel read at all; the seam and grain heals pass their canvas through it.
+* `backfill_coverage_shares` compares the coverage sibling's shape, which `write_stack_outputs` writes at the
+  master's canvas in the same call — free, and it needs no new file read, which matters because the cheap History
+  endpoints' documented *no-file-read* promise (`webapp/field_fulls.py:141`) is exactly what the still-open half
+  of #1069 has to respect.
+* A declining row keeps its NULL and, for a stale mosaic, drops the unverifiable share **in memory only** — the
+  row is never written, so it heals for real if its own picture ever returns. A superseded figure whose master is
+  gone is **kept**, not cleared: deleting the owner's only measurement to make a point about its scale would be
+  the destructive half of a fix that has a safe one.
+
+**It declines on positive evidence only.** `_canvas_of` returns `None` when the row cannot say (the column is
+`NOT NULL`, so 0 is as blank as it gets), and a `None` canvas heals exactly as it did before — pinned by its own
+test. Nothing new goes quiet; the guard adds silence only where the row itself says the file is somebody else's.
+
+**The invariant it rests on is pinned, not assumed.** `canvas_h`/`canvas_w` have to *be* the master's
+`NAXIS2`/`NAXIS1`, and the drizzle case reads as if it might not: `StackEstimate.canvas_w` is documented as the
+**pre**-drizzle width. `run_stack` reassigns `dst_shape` to the drizzler's `output_canvas_shape` before it writes
+the row, and every surface that describes the file reads those columns as output pixels — so a new test runs a
+real `run_stack` plain and at ×1.5 drizzle and asserts the row's canvas equals the master's `NAXIS`. If that ever
+changes, the heals would go silent on every drizzled run in the library, and this fails instead.
+
+**Tests +7, five fail before** under a `git worktree` revert against pristine `origin/main` (the worktree, not a
+stash, because a stash rewrites the working tree the suite is reading — `docs/AGENT-ENVIRONMENT.md`). The two
+that pass before are the two that should: the no-canvas property and the `run_stack` invariant.
+
+**Ten fixtures were made faithful, and none was loosened.** `tests/test_coverage_backfill.py` and
+`tests/webapp/test_target_stack_health.py` wrote a 100×100, 120×90 or 200×200 coverage map beside a row whose
+canvas said 300×300 or 1080×1920 — a run the stacker cannot produce, since `write_stack_outputs` writes the
+master and its siblings in one call at one shape. Both files gained a helper that derives the row's canvas from
+the map (`_run_for`, `_add_run_for_map`), so the pairing is structural and a future fixture cannot drift apart
+again; every assertion is unchanged. One of them (`…_a_mosaics_thinner_panel_is_not_offered_as_a_border_to_trim`)
+asserts an *absence*, so it would have kept passing for the wrong reason — the decline rather than the measure —
+and that is precisely why it was fixed too.
+
+**No** config, schema, migration, on-disk-layout, default or response-shape change: the guard only ever turns a
+would-be write into the NULL the row already had. Upgrade-safe by construction — an install that has already been
+stamped with a wrong number keeps it (nothing is deleted), and the still-open half (1) of #1069 is what will
+eventually say so on the card.
+
 ## 2026-10-05 (Builder) — Auto's noise measurement stops depending on how hard the preview was shrunk
 
 ### v0.492.38 — 🟠 BUG FIX: `analyze_proxy`'s `sky_sigma` is read on the full-resolution grid its bars were calibrated on

@@ -1,18 +1,34 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-05 (Scout — triaged the last untriaged observer issue **#1069** (verified against the
-code, filed into "Bugs (fix these first)"), so all five open issues are now triaged; ran rotation sweep **(4)
-the webapp routers** — CLEAN; `--mosaic` dogfood CLEAN and coherent (trim 7.9 %). Records in
-`docs/PROCESS-NOTES.md`.) **"Bugs (fix these first)" now holds one verified open bug (#1069, severity low) plus
-the gated LEADs and ⚪ notes.** The earlier Builder 2026-10-05 note stands: a `--mosaic --editor --big` dogfood
+*Last edited 2026-10-05 (Builder — shipped **v0.492.39**, the ready half of **#1069**: the three file-reading
+heals in `coverage_backfill.py` stop measuring a file that is not the run's own picture. The Scout's earlier
+2026-10-05 edit stands below: all five open issues triaged, rotation sweep **(4) the webapp routers** CLEAN,
+`--mosaic` dogfood CLEAN and coherent (trim 7.9 %). Records in `docs/PROCESS-NOTES.md`.) **"Bugs (fix these
+first)" now holds one verified open bug — #1069's *display* half, a design fork — plus the gated LEADs and ⚪
+notes.** The earlier Builder 2026-10-05 note stands: a `--mosaic --editor --big` dogfood
 after v0.492.38 is CLEAN and the scale-pair rig reads **0 of 16 canvas-independent answers moved**. **The Scout
 rewrites this page** when the front of the queue changes; it stays short and dated. If this page and the backlog
 disagree, the backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 
 ## Front of the queue
 
-0. **"Bugs (fix these first)" holds ONE verified open bug — #1069 — plus gated LEADs and ⚪ notes.**
-   🟡 **#1069 verified and filed (Scout 2026-10-05), severity low.** A closed set of 56 pre-v0.81.7 History rows
+0. **"Bugs (fix these first)" holds ONE verified open bug — #1069, now down to its display half — plus gated
+   LEADs and ⚪ notes.**
+   🟡 **#1069's ready half shipped as v0.492.39** (Builder 2026-10-05): all three file-reading heals in
+   `coverage_backfill.py` now decline a file whose `NAXIS` is not the row's `canvas_w`/`canvas_h` (`_canvas_of`),
+   checked before a pixel is read and only on positive evidence. **The entry's "no wrong number exists today" was
+   wrong twice, and the fail-before is the evidence**: `backfill_coverage_shares` is a *third* file-reading heal
+   with **no `is_mosaic` gate** (it stamped a 0.0667 thin share off the replacement picture), and
+   `backfill_seam_residual` *re-measures* a superseded-scale figure, so it **overwrote** a stored 0.42 with 2.0542
+   taken off a different picture. The guard adds no new silence (a row that records no canvas heals as before; a
+   superseded figure whose master is gone is kept, not cleared), and the invariant it rests on — a real
+   `run_stack`'s row canvas *is* its master's `NAXIS`, drizzle included, which `StackEstimate.canvas_w`'s
+   "pre-drizzle" docstring makes look doubtful — is pinned by its own test rather than argued. **What is still
+   open is the design fork of half (1)**: how the History card *says* a pre-v0.81.8 picture is gone (a one-off
+   additive marker migration, or a render-time `canvas`-vs-`NAXIS` check that costs the header read the cheap
+   History endpoints promise to avoid). Ten fixtures that let a row's canvas differ from the map beside it were
+   made faithful, not loosened.
+   🟡 **#1069 as filed (Scout 2026-10-05), severity low.** A closed set of 56 pre-v0.81.7 History rows
    serve a *newer* run's picture and frame count — `Project.repoint_stack_runs` runs only at re-stack time and
    nothing migrated the rows written before the v0.81.7–0.81.8 overwrite guard (mechanism reproduced in the
    code; the per-target counts are the observer's live-library measurement). The pictures were overwritten, so

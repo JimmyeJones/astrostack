@@ -29,6 +29,21 @@ def _run(**kw) -> StackRunRow:
     return StackRunRow(**base)
 
 
+def _run_for(cov: np.ndarray, **kw) -> StackRunRow:
+    """``_run`` for a fixture whose coverage map is written to disk: the row's
+    canvas is that map's own shape.
+
+    ``write_stack_outputs`` writes a master and its coverage siblings in one
+    call at one shape, so a real row's ``canvas_h``/``canvas_w`` *are* its map's
+    shape — and the heal now declines a map that is not the row's canvas
+    (``coverage_backfill._canvas_of``), because a pre-v0.81.8 row can point at a
+    newer run's output and three shares measured off somebody else's picture are
+    worse than the NULLs they replace. A fixture that let the two differ would be
+    describing a run the stacker cannot produce.
+    """
+    return _run(canvas_h=int(cov.shape[0]), canvas_w=int(cov.shape[1]), **kw)
+
+
 def _ragged_border_coverage() -> np.ndarray:
     """A well-covered picture with a genuinely ragged edge: twelve frames deep
     everywhere except a 20-px band down one side that got one — the shape the
@@ -210,7 +225,8 @@ def test_the_two_shares_are_healed_together_from_one_read(tmp_path):
 
     reads = {"n": 0}
 
-    proj, run_id = _project_with_run(tmp_path, _run(fits_path=str(fits_path)))
+    proj, run_id = _project_with_run(
+        tmp_path, _run_for(cov, fits_path=str(fits_path)))
     try:
         row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
         assert row.uncovered_frac is None
@@ -255,8 +271,9 @@ def test_healing_only_the_missing_half_leaves_the_other_untouched(tmp_path):
     _write_map(fits_path.with_name("m42_framecov.fits"), cov)
 
     proj, run_id = _project_with_run(
-        tmp_path, _run(fits_path=str(fits_path), coverage_thin_frac=0.123,
-                       coverage_shares_version=COVERAGE_SHARES_VERSION))
+        tmp_path, _run_for(cov, fits_path=str(fits_path),
+                           coverage_thin_frac=0.123,
+                           coverage_shares_version=COVERAGE_SHARES_VERSION))
     try:
         row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
         backfill_coverage_shares(proj, row)
@@ -365,7 +382,7 @@ def test_the_median_depth_heals_off_the_same_read(tmp_path):
     _write_map(fits_path.with_name("m42_framecov.fits"), cov)
 
     proj, run_id = _project_with_run(
-        tmp_path, _run(fits_path=str(fits_path), is_mosaic=True))
+        tmp_path, _run_for(cov, fits_path=str(fits_path), is_mosaic=True))
     try:
         row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
         backfill_coverage_shares(proj, row)
@@ -407,7 +424,8 @@ def test_a_read_only_database_still_answers_the_empty_share(tmp_path, monkeypatc
     cov[:40] = 0.0
     _write_map(fits_path.with_name("m42_framecov.fits"), cov)
 
-    proj, run_id = _project_with_run(tmp_path, _run(fits_path=str(fits_path)))
+    proj, run_id = _project_with_run(
+        tmp_path, _run_for(cov, fits_path=str(fits_path)))
     try:
         row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
 
@@ -452,6 +470,101 @@ def test_a_read_only_database_still_answers_the_question(tmp_path, monkeypatch):
         proj.close()
 
 
+# --- the file has to be this run's own picture -------------------------------
+
+
+def test_a_map_from_another_canvas_heals_nothing_onto_this_row(tmp_path):
+    """FAIL-BEFORE: three shares measured off a *different* stack's coverage map
+    were stamped onto this row.
+
+    The population is real and this repo cannot mend it: before the
+    v0.81.7-0.81.8 overwrite guard a re-stack wrote the canonical ``master.*``
+    straight over the previous run's output, and ``repoint_stack_runs`` only runs
+    at re-stack time — so a pre-guard row still points at a *newer* run's file
+    (observer issue #1069 counts 56 of them). The old pixels are gone, so there is
+    nothing of this run's to measure, and the only check available is that the
+    file's shape is not the canvas the row recorded.
+
+    Unlike the two master-reading heals, nothing else here declines first:
+    ``uncovered_frac`` and ``coverage_median_depth`` are not gated on
+    ``is_mosaic``, so without this check a displaced row is stamped on the first
+    "How's my stack?" that grades it.
+    """
+    from seestack.coverage_backfill import backfill_coverage_shares
+
+    cov = _ragged_border_coverage()                     # the newer run's 300x300
+    fits_path = tmp_path / "out" / "m42.fits"
+    _write_map(fits_path.with_name("m42_framecov.fits"), cov)
+
+    # …and the row remembers the canvas of the picture it actually wrote.
+    proj, run_id = _project_with_run(
+        tmp_path, _run(fits_path=str(fits_path), canvas_h=200, canvas_w=200,
+                       coverage_thin_frac=None))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        backfill_coverage_shares(proj, row)
+        assert row.coverage_thin_frac is None
+        assert row.uncovered_frac is None
+        assert row.coverage_median_depth is None
+        # Nothing was written either: the row heals for real if its own picture
+        # ever comes back.
+        stored = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert stored.coverage_thin_frac is None
+        assert stored.uncovered_frac is None
+        assert stored.coverage_median_depth is None
+    finally:
+        proj.close()
+
+
+def test_a_row_that_records_no_canvas_still_heals(tmp_path):
+    """The decline above is made on positive evidence of a mismatch, never on the
+    absence of evidence: a row whose canvas is degenerate (the column is NOT
+    NULL, so 0 is as blank as it gets) is healed exactly as it was before the
+    check existed."""
+    from seestack.coverage_backfill import backfill_coverage_shares
+
+    cov = _ragged_border_coverage()
+    fits_path = tmp_path / "out" / "m42.fits"
+    _write_map(fits_path.with_name("m42_framecov.fits"), cov)
+
+    proj, run_id = _project_with_run(
+        tmp_path, _run(fits_path=str(fits_path), canvas_h=0, canvas_w=0,
+                       coverage_thin_frac=None))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        backfill_coverage_shares(proj, row)
+        assert row.coverage_thin_frac == pytest.approx(
+            coverage_thin_fraction(cov))
+    finally:
+        proj.close()
+
+
+def test_a_stale_mosaic_pointing_at_another_canvas_goes_quiet_without_writing(
+        tmp_path):
+    """A displaced *mosaic* carrying a share measured by the superseded
+    peak-referenced rule cannot be re-derived — its own map is gone — so the
+    number is dropped in memory and the row is left exactly as it is, the same
+    answer as for a map that was tidied away."""
+    from seestack.coverage_backfill import backfill_coverage_shares
+
+    cov = _ragged_border_coverage()
+    fits_path = tmp_path / "out" / "m42.fits"
+    _write_map(fits_path.with_name("m42_framecov.fits"), cov)
+
+    proj, run_id = _project_with_run(
+        tmp_path, _run(fits_path=str(fits_path), canvas_h=200, canvas_w=200,
+                       is_mosaic=True, coverage_thin_frac=0.42,
+                       coverage_shares_version=None))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        backfill_coverage_shares(proj, row)
+        assert row.coverage_thin_frac is None            # silenced in memory…
+        stored = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert stored.coverage_thin_frac == pytest.approx(0.42)   # …never lost
+    finally:
+        proj.close()
+
+
 def test_the_healed_number_is_the_one_the_stacker_would_have_stamped(tmp_path):
     """Pinned by construction rather than by a literal: whatever the measure
     does, the healed row and a fresh stack of the same coverage must agree, so
@@ -461,7 +574,8 @@ def test_the_healed_number_is_the_one_the_stacker_would_have_stamped(tmp_path):
     fits_path = tmp_path / "out" / "m42.fits"
     _write_map(fits_path.with_name("m42_framecov.fits"), cov)
 
-    proj, run_id = _project_with_run(tmp_path, _run(fits_path=str(fits_path)))
+    proj, run_id = _project_with_run(
+        tmp_path, _run_for(cov, fits_path=str(fits_path)))
     try:
         row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
         assert backfill_coverage_thin_frac(proj, row) == pytest.approx(
