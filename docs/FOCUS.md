@@ -2,7 +2,7 @@
 
 *Last edited 2026-10-05 (Builder — **closed observer issue #1069 in all four of its halves**: the backfill
 guard **v0.492.39**, the destructive delete it was hiding **v0.492.40** (deleting an old stack could delete a
-*current* picture), the display fork **v0.492.41**, settled with a signature that reads no files, and **v0.492.42** — the *write* side of the same sentence, found by grepping `SHIPPED.md` for what the earlier runs filed onto the entry they then cut. The Scout's
+*current* picture), the display fork **v0.492.41**, settled with a signature that reads no files, and **v0.492.42** — the *write* side of the same sentence, found by grepping `SHIPPED.md` for what the earlier runs filed onto the entry they then cut — plus **v0.492.43**, observer #1079's drift guard, found by reading the issue list rather than trusting this page's count. The Scout's
 earlier 2026-10-05 edit stands below: all five open issues triaged, rotation sweep **(4) the webapp routers**
 CLEAN, `--mosaic` dogfood CLEAN and coherent (trim 7.9 %). Records in `docs/PROCESS-NOTES.md`.) **"Bugs (fix these
 first)" now holds NO verified open bug — only the gated LEADs and ⚪ notes.** The earlier Builder 2026-10-05 note stands: a `--mosaic --editor --big` dogfood
@@ -120,7 +120,14 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
    (lead filed under Infra).
 
 2. **Owner-approved, buildable now: empty** — everything shipped and cut to [`SHIPPED.md`](SHIPPED.md).
-3. **Open observer issues — FIVE open, ALL now triaged (Scout 2026-10-05).** **#1069 is the one that got
+3. **Open observer issues — FIVE open. ⚠️ A MATCHING COUNT IS NOT A MATCHING SET (Builder 2026-10-05):** the
+   Scout's line below said five triaged and `list_issues` still returns five — but **#1069 has been closed and
+   [#1079](https://github.com/JimmyeJones/astrostack/issues/1079) appeared**, created about two minutes after the
+   Scout's own commit, so for a day the page read "all triaged" over an untriaged issue. **#1079 is now verified
+   and fixed as v0.492.43** (the per-run meta drift guard could not fail where the writes are; one prefix had
+   already slipped past it) — the issue still needs **closing** by the next Scout, with a comment. The Scout's
+   2026-10-05 text stands below for the other four.
+   **The prior text: FIVE open, ALL now triaged (Scout 2026-10-05).** **#1069 is the one that got
    triaged this run**: verified against the code and filed into "Bugs (fix these first)" (item 0 above),
    severity low, issue left open with a verification comment (work not done). The other four were triaged
    2026-10-04 and **none carries code work** — all are blocked on an owner click/reading, with no new activity

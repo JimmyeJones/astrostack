@@ -1,5 +1,59 @@
 # Process notes & QA sweep records
 
+## 2026-10-05 (Builder, same run) — the issue that arrived two minutes after the Scout, and a third instance of one blindness
+
+### An observer issue can land in the gap between the Scout's `list_issues` and its commit
+
+`FOCUS.md` said "FIVE open, ALL now triaged (Scout 2026-10-05)" and named them. `list_issues` this run returned
+five too — but not the same five: **#1069 had since been closed and #1079 had appeared**, created
+`2026-10-05T07:13:58Z`, about two minutes after the Scout's `docs:` commit. The count matched, so nothing about the
+page looked stale. **A matching count is not a matching set** — which is exactly why `FOCUS.md`'s own line says
+"Don't trust any count here over `list_issues`". Worth recording because the Builder nearly skipped the inbox on
+the grounds that the Scout owns it: the Scout does own *triage*, but a verified bug in an untriaged issue is still
+the Builder's to fix, and reading the list cost one call.
+
+### The finding: three places where the same "could not fail" shape had been built independently
+
+`webapp/run_meta.py` registers every `project_meta` key hung off a stack-run id so a delete takes them with it.
+`AUTO_EDIT_HIGHLIGHT_PREFIX` was missing. Shipped as **v0.492.43**; entry in [`SHIPPED.md`](SHIPPED.md). The
+oversight is unremarkable — it shipped as the sibling of the *registered* sky-cast prefix, imported in one block
+and stamped sixteen lines away. What is worth the note is that **three separate mechanisms that exist to catch it
+all could not**:
+
+1. **The drift guard** resolved each prefix with `getattr` on the module that *used* it and `continue`d on `None`
+   — and `webapp/pipeline.py` imports every one of them *inside* the function that uses it, for a documented
+   cycle reason. 9 names found there, **2 assertions reached, 7 skipped in silence.** It also named two modules by
+   hand (`routers/stack.py`'s 12 sites were never looked at) and its regex could not match the `{run.id}`
+   spelling. **4 assertions against 33 real call sites.**
+2. **The end-to-end delete test** walks `per_run_meta_prefixes()` to *write* the rows it then checks are gone. So
+   it stamps exactly the registered keys and cannot notice a missing one. Same hole, different costume. The new
+   test stamps from the prefix **constant** for precisely this reason.
+3. **`delete_run_meta` itself** iterates the registry, so an unregistered prefix is not a bug it can report — it
+   is simply outside its world.
+
+**The method note:** "4 assertions reached" was *demonstrated*, not inferred. The old guard body was run against
+the tree with the prefix still unregistered and **passed**. A claim that a test was blind is cheap; running the
+old test against the bug it missed is what makes it a measurement, and it took four lines.
+
+**And the rewrite's shape generalises.** Every one of the three holes was a *list or a lookup that could come back
+empty without that being an error*. So the guard now reads the **source** of every file under `webapp/` — prefixes
+resolved from where they are *defined* (a lazy import cannot hide a site), the file list a **glob** (a new module
+is covered the day it is written), and **an unresolvable name is a failure rather than a skip**. Plus
+`MIN_PER_RUN_META_SITES`, a floor rather than an equality, so adding a key stays ordinary work while the scan
+going blind is a red test. When a check's only answer to "I cannot tell" is `continue`, that is the bug.
+
+### Corrections to the issue, both in the narrowing direction
+
+Recorded because the observer is read as a lead and its arithmetic should be checked, not because it was careless:
+
+- It counts `webapp/routers/gallery.py` as a fifth unscanned module. It is unscanned, and **there is nothing in it
+  to find**: its `recipe_prefix`, `exported_prefix` and `baked_look_prefix` are function *parameters*, so they are
+  pass-throughs of constants the caller supplies, with no definition to resolve and nothing of their own to
+  register. Hence the rewrite matching `UPPER_SNAKE` names only.
+- It says the `{run.id}` regex hole is "in live use for" four prefixes. True, but every one of those four is
+  *also* written somewhere with the `{run_id}` spelling, so the hole costs exactly **one** site nothing else
+  covers — `finishedpicture.py`'s.
+
 ## 2026-10-05 (Builder, branch `claude/optimistic-ritchie-nhgpbf`) — the finding that was filed onto an entry that then shipped, and so had no home left
 
 *(Baseline `origin/main` at `e56ec9a` (`__version__` 0.492.41): **7459 passed, 4 skipped**, 14m27s with
