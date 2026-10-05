@@ -1,18 +1,30 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-04 (Builder — item 0 and the seam paragraph corrected, both named a bug that is now on
-`main`, and the `sky_sigma` lead promoted to a verified bug after running the gate its own entry set; the
-Scout's own 2026-10-04 text is otherwise untouched). A `--mosaic --editor --big` dogfood pass on `main`
-*after* v0.492.37 is CLEAN and is the end-to-end half of its verification — the scale-pair rig now reads
-`stack-health` **notes same** on both canvases, `seams_flat` included; `sky_sigma` is the only answer still
-moving. The ASTAP/ffmpeg sweep is CLEAN too (records in `docs/PROCESS-NOTES.md`). **The Scout rewrites this page** when
+*Last edited 2026-10-05 (Builder — item 0 and the `sky_sigma` paragraph corrected: both named the bug that
+shipped this run as v0.492.38, and **"Bugs (fix these first)" now holds no ungated open item at all**. The
+Scout's own 2026-10-04 text is otherwise untouched.) A `--mosaic --editor --big` dogfood pass *after*
+v0.492.38 is CLEAN, and the scale-pair rig now reads **0 of 16 canvas-independent answers moved** — including
+`sky_sigma`, the last one that was still moving (0.000429 at 907 px against 0.000666 at 1693 px on the same
+sky; now 0.000429 / 0.000436). The ASTAP/ffmpeg sweep is CLEAN too (records in `docs/PROCESS-NOTES.md`). **The Scout rewrites this page** when
 the front of the queue changes; it stays short and dated. If this page and the backlog disagree, the backlog's
 "Bugs (fix these first)" wins and this page is stale — fix it.*
 
 ## Front of the queue
 
-0. **"Bugs (fix these first)" holds ONE ungated item — the `sky_sigma` stride bug promoted on 2026-10-04
-   (below); everything else in it is a gated LEAD or a ⚪ note.**
+0. **"Bugs (fix these first)" holds NO ungated open item — everything in it is a gated LEAD or a ⚪ note.**
+   🟠 **The `sky_sigma` stride bug shipped as v0.492.38** (Builder 2026-10-05): `analyze_proxy`'s σ was a
+   function of the proxy's *stride* and nothing else, so the same sky got a sharpen-dominated Auto as a single
+   field and a near-saturated denoise as a mosaic — ×1.57 high off a strided grid, `noisy` False→True,
+   crossfade weight 0.243→0.789 on *the same pixels*, and in the **over**-denoising direction because the
+   recipe is applied to the full-resolution export. Of the entry's three candidates it took **(c)**, in the
+   shape that needs no calibration: as a **ratio**. `noise.grain_lag_ratio` = `σ(lag 1)/σ(lag step)` on one
+   array in one normalization — the proxy's lag-1 differences *are* the master's lag-`step` differences, so
+   the normalization divides out exactly and nothing is calibrated between the grids; `proxy.source_grain_ratio`
+   supplies it from un-strided windows of the master (memoized in the proxy sidecar). **No bar was moved**, and
+   it is 1.0 by construction on an undecimated proxy and on white noise — so a single-field stack's Auto is
+   byte-for-byte what it was. **(b) was rejected on a reason the entry had not spotted** (Auto measures
+   `_measured_region`, not the canvas the stacker measured), and the entry's own objection to (b) — an "edited
+   proxy mid-session" — does not exist: both call sites pass the raw `get_proxy` array.
    🟠 **The seam finding shipped as v0.492.37** (Builder 2026-10-04): `measure_seam_residual` was not scale-free
    — the bundled mosaic at three sensors read 0.4520 → 0.7075 → 0.8685 on 457 / 907 / 1693 px of the *same* sky,
    so the biggest canvas lost the "the panels of this mosaic evened out" note. The bodies agreed on all three to
@@ -74,12 +86,13 @@ the front of the queue changes; it stays short and dated. If this page and the b
   the entry's reproduction recipe held (0.4520 → 0.7075 → 0.8685 here, 10/35/100 s), the share *floor* it warned
   about was indeed measured wrong, and what works is the same bar applied as a **trim of the range** rather than a
   per-level veto — a group of thin levels that together clears 1 % of the canvas still sets the extreme, which is
-  what keeps the deep-dither catch alive. Neither bar was flipped. **`sky_sigma` is now the front of the queue**: its
-  entry's own gate was run and it opened — the ×1.57 step-1→step-3 factor is a property of the reprojection's
-  correlation (identical at σ 0.002/0.02/0.2, and 1.00 for white noise), and on the same pixels it flips `noisy`
-  and moves Auto's crossfade weight 0.241 → 0.804. **Measure before you correct it**: all three candidate
-  corrections are named in the entry and each needs a decision, and the bars must not simply be moved.
-  So question 5 is **answered where it could be asked, and one of its two consequences is drained.**
+  what keeps the deep-dither catch alive. Neither bar was flipped. **`sky_sigma` is now SHIPPED too, as v0.492.38** (item 0 above): the
+  ×1.57 step-1→step-3 factor is a property of the reprojection's correlation (identical at σ 0.002/0.02/0.2, and
+  1.00 for white noise), and the fix is that same correlation **measured** rather than calibrated —
+  `σ(lag 1)/σ(lag step)` off un-strided windows of the master, which is dimensionless, so no bar moved and the
+  two already-correct cases (undecimated proxy, uncorrelated grain) are 1.0 by construction. So question 5 is
+  **answered where it could be asked, and both of its consequences are drained** — and the pair rig that found
+  them now reads 0 of 16 moved.
   Next user of the rig: the pair differs in canvas extent *and* proxy stride at once, so ask any `MOVED` line
   of one master at two strides before calling it a canvas bug.
   Caveat for whoever takes it: the raw cues move ~30 % relative while the verdicts hold, so any future

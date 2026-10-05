@@ -2897,9 +2897,9 @@ _AUTO_BUILDERS = {
 }
 
 
-def _captured_coverage(monkeypatch, build, data_root, safe, rid):
-    """Run one of the Auto builders and return the ``coverage`` it handed the
-    engine (``None`` when it passed none)."""
+def _captured_auto_kwarg(monkeypatch, build, data_root, safe, rid, key):
+    """Run one of the Auto builders and return the ``key`` *measurement* input it
+    handed the engine (``None`` when it passed none)."""
     from webapp.routers import editor as editor_mod
 
     seen: dict = {}
@@ -2907,13 +2907,20 @@ def _captured_coverage(monkeypatch, build, data_root, safe, rid):
     real = getattr(editor_mod.presets_mod, name)
 
     def spy(*args, **kwargs):
-        seen["coverage"] = kwargs.get("coverage")
+        seen[key] = kwargs.get(key)
         return real(*args, **kwargs)
 
     monkeypatch.setattr(editor_mod.presets_mod, name, spy)
     project_dir, run = _run_and_dir(data_root, safe, rid)
     build(project_dir, run, None)
-    return seen["coverage"]
+    return seen[key]
+
+
+def _captured_coverage(monkeypatch, build, data_root, safe, rid):
+    """Run one of the Auto builders and return the ``coverage`` it handed the
+    engine (``None`` when it passed none)."""
+    return _captured_auto_kwarg(monkeypatch, build, data_root, safe, rid,
+                                "coverage")
 
 
 def test_auto_measures_a_mosaic_on_its_frame_count_map(monkeypatch, client,
@@ -2976,6 +2983,82 @@ def test_auto_measures_a_single_field_exactly_as_it_always_did(monkeypatch, clie
     for build in (build_auto_recipe_for_run, build_auto_analysis_for_run):
         assert _captured_coverage(monkeypatch, build, solved_library, safe,
                                   rid) is None, build.__name__
+
+
+# --- Auto reads its noise on the *full-resolution* grid its bars were
+#     calibrated on, however hard the proxy was strided ------------------------
+
+def test_auto_hands_the_engine_the_strided_grain_correction(monkeypatch, client,
+                                                            solved_library):
+    """A canvas past ``PROXY_MAX_PX`` is measured on a **decimated** proxy, where
+    the lag-1 noise estimator's "adjacent" pixels are ``step`` real pixels apart
+    — so both builders have to pass the stride correction
+    (``proxy.source_grain_ratio``) or Auto reads a σ that belongs to a different
+    grid from its own bars. Pinned as plumbing: this fixture's noise is *white*,
+    so the honest answer here is ≈1.0, and the engine suite measures what the
+    factor is worth on correlated grain."""
+    from webapp.routers.editor import build_auto_analysis_for_run, build_auto_recipe_for_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    # 1600 px on the long side ⇒ build_proxy strides by 2; narrow so the fixture
+    # stays a few MB rather than a real mosaic.
+    rid = _make_run(solved_library, safe, basename="tall", h=1600, w=200)
+
+    for build in (build_auto_recipe_for_run, build_auto_analysis_for_run):
+        ratio = _captured_auto_kwarg(monkeypatch, build, solved_library, safe,
+                                     rid, "grain_ratio")
+        assert ratio is not None, f"{build.__name__} applied no stride correction"
+        assert 0.9 <= ratio <= 1.0, (build.__name__, ratio)
+
+
+def test_auto_needs_no_grain_correction_on_an_undecimated_canvas(monkeypatch,
+                                                                 client,
+                                                                 solved_library):
+    """Upgrade safety at the seam that decides it: a canvas small enough that
+    ``build_proxy`` does not stride at all is already on the full-resolution
+    grid, so the factor is exactly ``1.0`` and the master is never read. That is
+    what keeps an ordinary single-field stack's one-click Auto byte-for-byte what
+    it was on the owner's running install."""
+    from webapp.routers.editor import build_auto_analysis_for_run, build_auto_recipe_for_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="small", h=80, w=100)
+
+    from seestack.edit import proxy as proxy_mod
+
+    def _no_window(*_a, **_k):  # pragma: no cover - fails if reached
+        raise AssertionError("an undecimated canvas was read for a correction")
+
+    monkeypatch.setattr(proxy_mod, "read_window_rgb", _no_window)
+    for build in (build_auto_recipe_for_run, build_auto_analysis_for_run):
+        assert _captured_auto_kwarg(monkeypatch, build, solved_library, safe,
+                                    rid, "grain_ratio") == 1.0, build.__name__
+
+
+def test_the_denoise_chip_reports_the_same_sigma_auto_used(monkeypatch, client,
+                                                          solved_library):
+    """The editor shows a measured σ in two places on one run — the one-click
+    Auto's "what Auto did" cues and the "From your image" denoise chip — and both
+    read it against the same full-resolution bar. Correcting one and not the
+    other would print two different numbers for one picture."""
+    from webapp.routers.editor import build_auto_analysis_for_run
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="tall2", h=1600, w=200)
+
+    chip = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/denoise-suggestion").json()
+    assert chip["noise_sigma"] is not None
+
+    project_dir, run = _run_and_dir(solved_library, safe, rid)
+    cues = build_auto_analysis_for_run(project_dir, run, None)
+    # analyze_proxy reports on the half-MAD scale (``_SKY_HALF_MAD_SCALE``) and
+    # over the trim-kept region, so the two are not the same number — but they
+    # must be the same *measurement*, i.e. one fixed ratio apart.
+    from seestack.edit.presets import _SKY_HALF_MAD_SCALE
+
+    assert cues["sky_sigma"] == pytest.approx(
+        chip["noise_sigma"] * _SKY_HALF_MAD_SCALE, rel=0.1), (cues, chip)
 
 
 # ---- "an older version trimmed this picture too far" ------------------------

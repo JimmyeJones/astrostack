@@ -1,5 +1,80 @@
 # Process notes & QA sweep records
 
+## 2026-10-05 (Builder, branch `claude/practical-keller-inryw8`) — v0.492.38 shipped; a three-way design choice settled by noticing that the *ratio* is normalization-free, and one of the entry's own objections checked and found wrong
+
+**The run.** One task: the single ungated entry in "Bugs (fix these first)" — `analyze_proxy`'s `sky_sigma`
+being a function of the proxy's stride. Baseline suite green on `origin/main` (7,420 passed, 4 skipped,
+12 m 42 s with `-n 4` and the BLAS caps). Shipped as v0.492.38. "Bugs" now holds **no ungated open item**.
+
+**The design note worth keeping — a ratio has no units, so it needs no calibration.** The entry named three
+candidate corrections and said each "needs a decision this repo cannot take blind". The decision turned out to
+be takeable, because the thing that made (c) ("measure the grain on an un-strided patch") look like new cache
+machinery was the *normalization*: `estimate_noise_sigma` reports σ in units of its own array's 0.5–99.5th
+percentile range, so a σ measured on a 512-px window of the master is not comparable with a σ measured on the
+whole proxy, and making them comparable is exactly the kind of cross-grid calibration that sank (a). Asking the
+window for a **ratio** — `σ(lag 1) / σ(lag step)` — removes the problem rather than solving it: both halves are
+measured on the same pixels through the same normalization, so the scale divides out identically and what is
+left is a pure property of the noise's correlation. The proxy's lag-1 differences *are* the master's
+lag-`step` differences (literally the same pixel pairs), so the correction is exact by construction, not
+fitted. Generalisable: **when a quantity's units are the obstacle, look for the dimensionless form of the
+question before building machinery to convert between grids.**
+
+**An entry's stated objection is a lead, not a finding — check it.** The entry rejected candidate (b) ("hand
+the editor the σ the stacker already measured at full resolution") partly because "`analyze_proxy` is also
+called on an *edited* proxy mid-session". It is not: `grep -rn analyze_proxy` finds exactly two production call
+sites, `build_auto_recipe_for_run` and `build_auto_analysis_for_run`, and **both pass the raw cached
+`get_proxy` array**. That was the hard half of the argument against the attractive option, and it was wrong.
+(b) is still the wrong answer, on a reason the entry had *not* spotted: Auto does not measure the canvas, it
+measures `_measured_region` — the rectangle its own border trim keeps — so on a mosaic the stacker's stored σ
+includes the ragged, low-coverage, noisier fringe the recipe is about to delete. Both corrections to the
+entry's reasoning are recorded in its `SHIPPED.md` paragraph, because the next agent to meet a similar entry
+should see that the objections in one are worth re-deriving.
+
+**A fixture that cannot go blind.** The invariance this fix is about — "one canvas, one σ, whatever the
+stride" — is trivially satisfiable by a fixture that has stopped showing anything, which is the failure mode
+`docs/HISTORY.md` records for the editor's re-audits. So `tests/test_auto_noise_stride.py` opens with
+`test_uncorrected_sky_sigma_really_does_depend_on_the_stride`, which asserts the *premise*: that the
+uncorrected reading crosses the 0.02 bar between step 1 and step 2 on this scene and that the `noisy` verdict
+really does flip. If the fixture ever stops being able to exhibit the bug, that test fails rather than the
+invariance tests passing for nothing. The scratch-revert (neutering `grain_lag_ratio` to return `1.0`) fails
+5 of the file's 14 and correctly leaves the premise test and both controls passing — which is itself the check
+that the premise test is independent of the fix.
+
+**Two fixture traps, both about the normalization again.** (1) A canvas of *only* sky and sparse stars reports
+nearly the **same** `sky_sigma` whatever its noise level, because the 99.5th percentile that normalizes it is
+set by the noise's own tail: four scenes at σ 0.008–0.02 all read ≈0.07 and no bar can be crossed. The fixture
+needs an extended object filling a few percent of the frame — which a real stack has — before the reported σ
+means anything. Measured: with one added, σ 0.024 reads 0.0159 at step 1 and 0.0246 at step 3, reproducing the
+entry's 0.0159 → 0.0249 almost exactly. (2) Comparing two `auto_recipe` results with `to_dict()` fails on the
+freshly-generated per-op `uid`s; compare `[(op.id, op.params) for op in recipe.ops]`.
+
+**Cost, measured, and where it went.** The windowed reads are ~0.4 s and **flat in the canvas** (5 × 512²
+through `hdu.section`: 409 ms on the 1693-px sample, 412 ms on a 3494×2470 master — it is the windows, not the
+picture). Row-slab reads are cheaper per pixel but not per answer (3 × 128 full-width rows: 123 ms on the
+sample, 252 ms on the owner-size canvas, same ratio to 0.2 %). Either way, two Auto endpoints × every click is
+the wrong place to pay it for a number that cannot change, so it is memoized in the proxy's **existing JSON
+sidecar** beside `proxy_scale`, keyed on the master's mtime exactly as the proxy is — an additive key, **no
+`PROXY_VERSION` bump**, so no cached proxy on the owner's install is thrown away on upgrade and a sidecar
+written before this existed is simply filled in on first use. `null` is cached too: a master that cannot be
+measured must not be re-read on every click either.
+
+**Fixing two of three surfaces would have been worse than fixing none.** `_SIGMA_FULL` is read in a *third*
+place: the editor's manual "From your image" denoise chip (`…/editor/denoise-suggestion`), on the same strided
+proxy. Correcting Auto and not it would have printed **two different σ for one picture on one screen** — Auto's
+cues saying clean beside a chip asking for 1.6× the denoise — i.e. the fix would have introduced a visible
+contradiction that did not exist before. Worth the (3-line) widening, and worth asking of any measurement fix:
+how many surfaces read this bar?
+
+**Dogfood (`--mosaic --editor --big`), after the fix: CLEAN**, and the scale-pair rig (step 4a-ter,
+v0.492.36) now reads **0 of 16 canvas-independent answers moved** — `sky_sigma` included, the last one that was
+still moving. Measured directly on the bundled pair's masters: 907 px (step 1) 0.000429, 1693 px (step 2)
+**0.000666 before / 0.000436 after**, i.e. the ×1.55 the entry predicted, removed to 1.6 %. On a 3494×2470
+canvas of *white* noise the factor is 0.9988 — the control, on the owner's shape.
+
+**Housekeeping note:** `docs/SHIPPED.md` is at ~61.5 k lines against the budget test's 64 k ceiling. The next
+run that needs the room should archive its oldest entries to `docs/archive/` (never delete) rather than
+discover the ceiling in CI.
+
 ## 2026-10-04 (Builder, branch `claude/practical-keller-6lkiug`) — a whole-task collision on the seam finding: what prevented it was one command I did not run, and the duplicate's instrument verified the shipped fix
 
 ### The collision, and the exact command that would have stopped it
