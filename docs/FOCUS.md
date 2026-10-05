@@ -120,13 +120,14 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
    (lead filed under Infra).
 
 2. **Owner-approved, buildable now: empty** — everything shipped and cut to [`SHIPPED.md`](SHIPPED.md).
-3. **Open observer issues — FIVE open. ⚠️ A MATCHING COUNT IS NOT A MATCHING SET (Builder 2026-10-05):** the
+3. **Open observer issues — FOUR open. ⚠️ A MATCHING COUNT IS NOT A MATCHING SET (Builder 2026-10-05):** the
    Scout's line below said five triaged and `list_issues` still returns five — but **#1069 has been closed and
    [#1079](https://github.com/JimmyeJones/astrostack/issues/1079) appeared**, created about two minutes after the
-   Scout's own commit, so for a day the page read "all triaged" over an untriaged issue. **#1079 is now verified
-   and fixed as v0.492.43** (the per-run meta drift guard could not fail where the writes are; one prefix had
-   already slipped past it) — the issue still needs **closing** by the next Scout, with a comment. The Scout's
-   2026-10-05 text stands below for the other four.
+   Scout's own commit, so for a day the page read "all triaged" over an untriaged issue. **#1079 was verified, fixed as
+   v0.492.43 and CLOSED in the same run** (the per-run meta drift guard could not fail where the writes are; one
+   prefix had already slipped past it), with a comment recording the two narrowing corrections to it. **So FOUR
+   issues are open, not five** — #878, #880, #903, #1015, none of which carries code work. The Scout's 2026-10-05
+   text stands below for those four.
    **The prior text: FIVE open, ALL now triaged (Scout 2026-10-05).** **#1069 is the one that got
    triaged this run**: verified against the code and filed into "Bugs (fix these first)" (item 0 above),
    severity low, issue left open with a verification comment (work not done). The other four were triaged
