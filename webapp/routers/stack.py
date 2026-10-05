@@ -919,6 +919,7 @@ def channel_combine(safe: str, body: dict[str, Any], request: Request) -> dict[s
 
 @router.get("/api/targets/{safe}/stack-runs", response_model=list[StackRunOut])
 def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
+    from webapp.displacedpicture import picture_owner_by_run_id
     from webapp.routers.editor import (
         AUTO_EDIT_BAKED_LOOK_PREFIX,
         AUTO_EDIT_NOTE_PREFIX,
@@ -980,6 +981,13 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
     finally:
         proj.close()
         lib.close()
+    # Which of these rows is pointing at a *different* run's picture? A row
+    # written before the v0.81.7–0.81.8 overwrite guard still names a `master.*`
+    # a later stack wrote over, so its card carries this run's frame count beside
+    # somebody else's image. Answered off the list already in hand — one pass, and
+    # a `stat` only inside a group of rows that share a path — because these
+    # endpoints promise not to open the FITS (see `webapp.field_fulls`).
+    picture_owner = picture_owner_by_run_id(runs)
     out = []
     for r in runs:
         # What the stored preview shows of the canvas — an auto-edit border trim,
@@ -1034,6 +1042,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             engine_version=r.engine_version,
             unexported_edit=unexported.get(r.id, False),
             auto_edited=auto_edited.get(r.id, False),
+            picture_owned_by_run_id=picture_owner.get(r.id),
             field_fulls=stacking_field_fulls(r, by_id, native_shape),
         ))
     return out

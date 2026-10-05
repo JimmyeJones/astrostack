@@ -1,5 +1,117 @@
 # Shipped — the record
 
+## 2026-10-05 (Builder) — a History card whose picture is not its own now says so
+
+### v0.492.41 — 🟡 BUG FIX: the last open half of #1069 — `picture_owner_by_run_id`, `picture_owned_by_run_id`, `OverwrittenPictureBadge`
+
+**Closes observer issue [#1069](https://github.com/JimmyeJones/astrostack/issues/1069)'s display half**, the design
+fork the entry left for a Builder to pick and test. The other two halves shipped earlier today: the backfill guard
+as **v0.492.39** and the destructive delete as **v0.492.40**.
+
+**What the owner sees.** One History card carrying two pictures' worth of facts: the older run's frame count,
+integration time and canvas beside the *newer* run's thumbnail and FITS. Every number on it is true of the run; the
+image is not, and nothing said so. 56 of 745 rows on his library, by the observer's count.
+
+**Why there is nothing to mend.** Before the v0.81.7–0.81.8 guard a re-stack wrote the canonical `master.*` straight
+over the previous run's output; `repoint_stack_runs` moves the older row onto the archived name but runs **only at
+re-stack time** and is "purely additive to history", so nothing migrated the rows written before it. The old pixels
+were overwritten — there is nothing to repoint *to* — so the only honest fix is to **say so**.
+
+**The fork, and a third option it did not name.** The entry offered (a) a one-off additive marker migration and (b) a
+render-time `canvas`-vs-`NAXIS` check, costing one header read per row against the cheap History endpoints' documented
+*no-file-read* promise (`webapp/field_fulls.py`, `samples_per_pixel_of_run`). (a) still has to *detect* the rows, so it
+pays the same header read, just once at upgrade time. This takes **(c): two rows naming one `fits_path`** — which *is*
+the bug, since the guard exists precisely to stop that happening, so after it no two rows share a canonical path (a
+re-stack archives and repoints; an editor re-export under one basename does the same). The older row of such a pair
+owns no files at all.
+
+(c) costs **no file read**: the listing already holds every row in memory, so the answer is one pass over a list the
+endpoint has anyway, plus one `stat` *inside* a group of rows that share a path — none at all for a history with no
+duplicate. No migration, no schema change, no header read, so the promise is kept and the fork is settled without
+touching the DB.
+
+**Its limitation is measured and stated rather than discovered later.** A merge erases the signature:
+`io/merge.py::_carry_pictures` takes a `_free_basename` per run and *copies* the files, so a displaced pair becomes
+two rows with distinct paths each pointing at its own copy, and (c) goes silent where (b) would still fire. That is
+the safe direction — it under-reports rather than mis-states — and it is why the sibling guard in
+`coverage_backfill._canvas_of` (v0.492.39), which *is* already holding the file open, keys on `NAXIS` instead. The two
+agree exactly on the owner's library today: 71 rows on 15 shared paths is 56 non-writers, the same 56 the `NAXIS`
+comparison finds.
+
+**Ordered by row id, not by `timestamp_utc`.** The id is the order the runs were recorded in; the timestamp is a
+string the app has written in more than one format (`…+00:00` and `…Z` both appear), so comparing them as text can put
+a pair the wrong way round and name the *older* run as the writer. Its own test, with a fixture whose two formats sort
+backwards as plain text.
+
+**Only when the file exists.** A path with no file is already reported by `has_fits`, and the card shows no picture
+without this; whether it was overwritten or simply deleted is not knowable from here. Restricting the claim to a file
+that is there is what makes "the image here belongs to a later stack" literally true.
+
+**The surface.** New additive optional `StackRunOut.picture_owned_by_run_id` (None on every healthy run, so an older
+client ignores it and behaves exactly as today), and a new `OverwrittenPictureBadge` in the badge row the card already
+has — the same shape as `UnexportedEditBadge` beside it, appearing only on affected runs, so nothing is added to a page
+the owner already called busy and nothing moves for the runs this does not apply to (the UI rule, AGENTS.md §1). It
+names the date of the run whose picture it really is, looked up from the same list the row is rendered in rather than
+another request, and falls back to "a later stack of this target" rather than guessing when that row is not in view.
+The tooltip says all three things — this run's picture is gone, whose is on screen, and that the numbers are still
+this run's — because the label alone would read as "something is broken".
+
+**Tests +10** (6 Python, 4 vitest: 3 badge + the helper's 4 cases). **Fail-before: two**, through the HTTP endpoint —
+and deliberately through the endpoint, because of an environment trap found while checking it and now written into
+`docs/AGENT-ENVIRONMENT.md`: a `git worktree` at `origin/main` resolves `webapp`/`seestack` from its own tree, but a
+submodule that does **not exist** there falls through to the editable install and is imported from the main checkout,
+so a fail-before that depends on `from webapp.<new module> import …` passes for the wrong reason. Measured
+(`webapp` → worktree, `webapp.displacedpicture` → `/home/user/astrostack/…`). v0.492.39's revert check is unaffected:
+it only edited an existing file, which does resolve from the worktree.
+
+**No** config, schema, migration, on-disk-layout or default change, and the API change is an added optional field.
+
+**The backlog entry as it stood, cut from `docs/IMPROVEMENTS.md` (all three halves now shipped):**
+
+- **VERIFIED (Scout 2026-10-05, observer issue [#1069](https://github.com/JimmyeJones/astrostack/issues/1069);
+  mechanism traced in the code, the counts measured by the observer on the live library) — a closed set of
+  pre-v0.81.7 History rows serve a *newer* run's picture and frame count. The backfill half is now
+  guarded (v0.492.39, below); what is open is **how the History card says the picture is gone**.** *(Pillar:
+  trust / friendliness — PRIORITY 3; size **M**, and it carries a design fork (below); severity **low** — the
+  set cannot grow. Confidence: the mechanism is **reproduced from the code**; the per-target counts are the
+  observer's measurement, which this repo cannot re-run against the owner's DB.)*
+  **(1) The displaced rows.** Before the v0.81.7–0.81.8 overwrite fix (`74758528`), a re-stack wrote the
+  canonical `master.*` straight over the previous run's output. After it, `stack/output.py::_archive_existing_outputs`
+  renames the old set aside and `Project.repoint_stack_runs` (`io/project.py:2839`) updates the older rows to the
+  archived name — but that repoint runs **only at re-stack time and is "purely additive to history"**
+  (its own docstring), so **nothing migrates the rows written before the guard**. The observer counts 56 of 745
+  `stack_runs` rows (71 rows on 15 shared `fits_path`/`tiff_path`/`preview_path`, one writer per file) whose own
+  `canvas_w`/`canvas_h` no longer match the `NAXIS` of the file they point at; History then shows the wrong FITS,
+  the wrong thumbnail and a frame count that belongs to a different picture. The set is **closed at 56 and cannot
+  grow**: all 56 have `engine_version` NULL (predating the column), none is ≥ 0.81.7, and recent un-versioned
+  `master.fits` writes archived+repointed correctly. The old pictures were overwritten, so there is nothing to
+  repoint *to* — the fix is to **say so**, not to mend the path.
+  **Design fork (not an owner gate — no network, no breaking change, additive either way):** (a) a one-off
+  additive migration that stamps the 56 rows (e.g. a "picture overwritten before v0.81.8, no longer on disk"
+  marker) — respects the documented *no-file-read* promise of the cheap History endpoints
+  (`webapp/field_fulls.py:141`, `samples_per_pixel_of_run`); or (b) a render-time `canvas_w/h` vs `NAXIS` check on
+  the History card — costs one header read per row, which that promise exists to avoid. (a) looks the cheaper
+  shape; a Builder picks and tests one.
+  **(2) The backfill defect — shipped as v0.492.39** (Builder 2026-10-05), and it was **not** latent: the entry
+  said "no wrong number exists today", and on a displaced row carrying a superseded-scale seam figure
+  `backfill_seam_residual` **overwrote** the owner's 0.42 with 2.0542 measured off the other picture. All three
+  file-reading heals in `coverage_backfill.py` now decline a file whose `NAXIS` is not the row's
+  `canvas_w`/`canvas_h` (`_canvas_of`); the third, `backfill_coverage_shares`, had no `is_mosaic` gate at all, so
+  it was the live path rather than the latent one. Full entry in [`SHIPPED.md`](SHIPPED.md).
+  **(3) The destructive consequence — shipped as v0.492.40** (Builder 2026-10-05), and it was the most serious
+  thing in this population by a wide margin: `delete_run_artifacts` unlinked a displaced row's whole *shared* file
+  set, so deleting one of the 56 (or pruning, which targets the oldest rows first) destroyed the **live** run's
+  picture — 16 files in the reproduction. Fixed; see [`SHIPPED.md`](SHIPPED.md).
+  **Still open: (1) only** — the display fork above, now with two more reasons to take it. Both are consequences
+  of the same population, both were found while fixing (3), and both are deliberately **not** built because the
+  fork's design decides them: (i) the "Adjust" preview save does `Path(run.preview_path).write_bytes(...)`, so
+  adjusting a displaced row overwrites the *live* run's preview PNG — cosmetic only (the PNG is regenerable from
+  the master and the pixels are the right picture's), but it is a second write to a file the row does not own;
+  (ii) since v0.492.40 deleting a displaced row reclaims **no** space, which is correct and will look broken until
+  the card says why. Grep `docs/SHIPPED.md` for `repoint`, `_archive_existing_outputs`, `_canvas_of` and
+  `run_artifact_paths` before building, and note this is **not** #903 (which is about which run the *current*
+  picture resolves to) and **not** a recurrence of the v0.81.7 bug.
+
 ## 2026-10-05 (Builder) — deleting an old stack could delete a current picture
 
 ### v0.492.40 — 🔴 BUG FIX: `delete_run_artifacts` does not unlink a file another surviving row still names (`run_artifact_paths`, `iter_stack_run_output_paths`)

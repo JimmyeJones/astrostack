@@ -1,19 +1,27 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-05 (Builder — shipped **v0.492.39**, the ready half of **#1069**: the three file-reading
-heals in `coverage_backfill.py` stop measuring a file that is not the run's own picture. The Scout's earlier
-2026-10-05 edit stands below: all five open issues triaged, rotation sweep **(4) the webapp routers** CLEAN,
-`--mosaic` dogfood CLEAN and coherent (trim 7.9 %). Records in `docs/PROCESS-NOTES.md`.) **"Bugs (fix these
-first)" now holds one verified open bug — #1069's *display* half, a design fork — plus the gated LEADs and ⚪
-notes.** The earlier Builder 2026-10-05 note stands: a `--mosaic --editor --big` dogfood
+*Last edited 2026-10-05 (Builder — **closed observer issue #1069 in all three of its halves**: the backfill
+guard **v0.492.39**, the destructive delete it was hiding **v0.492.40** (deleting an old stack could delete a
+*current* picture), and the display fork **v0.492.41**, settled with a signature that reads no files. The Scout's
+earlier 2026-10-05 edit stands below: all five open issues triaged, rotation sweep **(4) the webapp routers**
+CLEAN, `--mosaic` dogfood CLEAN and coherent (trim 7.9 %). Records in `docs/PROCESS-NOTES.md`.) **"Bugs (fix these
+first)" now holds NO verified open bug — only the gated LEADs and ⚪ notes.** The earlier Builder 2026-10-05 note stands: a `--mosaic --editor --big` dogfood
 after v0.492.38 is CLEAN and the scale-pair rig reads **0 of 16 canvas-independent answers moved**. **The Scout
 rewrites this page** when the front of the queue changes; it stays short and dated. If this page and the backlog
 disagree, the backlog's "Bugs (fix these first)" wins and this page is stale — fix it.*
 
 ## Front of the queue
 
-0. **"Bugs (fix these first)" holds ONE verified open bug — #1069, now down to its display half — plus gated
-   LEADs and ⚪ notes.**
+0. **"Bugs (fix these first)" holds NO verified open bug — #1069 is closed in all three of its halves (Builder
+   2026-10-05) — only gated LEADs and ⚪ notes remain.**
+   🟡 **The display fork shipped as v0.492.41** and the whole entry is cut to [`SHIPPED.md`](SHIPPED.md). It took a
+   **third** option the entry had not named: two rows naming one `fits_path` *is* the bug (the guard exists to stop
+   exactly that), so it needs **no file read** — the listing already holds every row — which keeps the cheap History
+   endpoints' no-file-read promise and settles the fork with no migration and no schema change. Its limitation is
+   measured: a merge erases the signature (`_carry_pictures` copies under a `_free_basename`), under-reporting rather
+   than mis-stating — which is why v0.492.39's sibling guard, already holding the file open, keys on `NAXIS` instead.
+   **Next run: "Bugs" is dry of ungated work.** Per AGENTS.md §2 that means a dogfood pass and file what you find —
+   do not manufacture busywork, and do not re-litigate the gated stand-downs below.
    🔴 **The serious one on this population shipped as v0.492.40** (Builder 2026-10-05), found by reading while
    scoping the display half: **deleting an old stack could delete a *current* picture.** `delete_run_artifacts`
    unlinks a run's three path columns plus every basename-derived sibling and checked nothing about whether another

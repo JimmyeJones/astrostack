@@ -18,6 +18,7 @@ import { HazyNightBadge } from "../components/HazyNightBadge";
 import { PanelSeamsBadge } from "../components/PanelSeamsBadge";
 import { CalibrationBadge } from "../components/CalibrationBadge";
 import { UnexportedEditBadge } from "../components/UnexportedEditBadge";
+import { OverwrittenPictureBadge } from "../components/OverwrittenPictureBadge";
 import { calibrationSummaryText } from "../components/calibrationSummary";
 import { autoSkyCastCaption } from "../components/editor/skyCast";
 import { autoColorCalCaption } from "../components/editor/colorCal";
@@ -715,6 +716,27 @@ export function derivedFromNote(
   return { text: `Edited from ${source.output_basename}`, runId: source.id };
 }
 
+// Which run's picture is this row actually showing? The server answers with the
+// id (`picture_owned_by_run_id`); this turns it into the date the card can name,
+// off the same list the row is rendered in rather than another request.
+//
+// Null for every ordinary run — the field is set only on a row written before the
+// v0.81.7–0.81.8 overwrite guard, which still points at a `master.*` a later
+// stack wrote over. `date` is undefined (not guessed) when that run is not in
+// this list, and the badge then says "a later stack of this target" instead.
+export function overwrittenPictureNote(
+  run: StackRun, runs: StackRun[],
+): { ownerRunId: number; ownerDate?: string } | null {
+  const owner = run.picture_owned_by_run_id;
+  if (typeof owner !== "number" || !Number.isFinite(owner)) return null;
+  // A row pointing at itself would be nonsense; say nothing rather than tell
+  // someone their picture was overwritten by itself.
+  if (owner === run.id) return null;
+  const source = runs.find((r) => r.id === owner);
+  const stamped = formatStampDateTime(source?.timestamp_utc);
+  return { ownerRunId: owner, ownerDate: stamped || undefined };
+}
+
 // Compact seconds label for exposures — "30s", "2.5s" — trimming a trailing ".0".
 function formatExposure(s: number): string {
   const r = Math.round(s * 10) / 10;
@@ -975,11 +997,15 @@ function NotesEditor({ safe, run }: { safe: string; run: StackRun }) {
 const DEFAULT_STRETCH = 0.5;
 const DEFAULT_BLACK = 0.35;
 
-function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compareToId, identity, focus, derivedFrom, targetName }: {
+function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compareToId, identity, focus, derivedFrom, overwritten, targetName }: {
   safe: string; run: StackRun; onDelete: () => void; deleting?: boolean;
   isCleanest?: boolean; noiseDelta?: number; compareToId?: number | null;
   identity?: ObjectInfo | null; focus?: FocusVerdict;
   derivedFrom?: DerivedFromNote | null;
+  /** Set when this row's thumbnail belongs to a *different*, later run, because
+   *  a pre-v0.81.8 re-stack wrote over this run's own output. See
+   *  `overwrittenPictureNote`. */
+  overwritten?: { ownerRunId: number; ownerDate?: string } | null;
   /** The target's display name ("M 42"), for anything that leaves the app.
    *
    *  The card *heads* itself with `run.output_basename` on purpose — that is how
@@ -1376,6 +1402,15 @@ function RunCard({ safe, run, onDelete, deleting, isCleanest, noiseDelta, compar
             one-click finish lives on the hero; here it's just a truthful label
             next to the picture it applies to. */}
         <UnexportedEditBadge show={run.unexported_edit} />
+        {/* …and the one case where the thumbnail is not this run's picture at
+            all: a pre-v0.81.8 re-stack overwrote this run's output, so the image
+            beside these numbers belongs to a later stack. Nothing can be mended
+            — the old pixels are gone — so the card says so rather than letting
+            the two be read as one picture. */}
+        <OverwrittenPictureBadge
+          ownerRunId={overwritten?.ownerRunId}
+          ownerDate={overwritten?.ownerDate}
+        />
         {/* The same badge the Gallery card of this very run shows, given the
             same run's own `field_fulls` — this row is otherwise badge-for-badge
             identical to that one, and a plain count here meant the two pages
@@ -1890,6 +1925,7 @@ export function HistoryView() {
               identity={identity.data ?? null}
               focus={focus.get(r.id)}
               derivedFrom={derivedFromNote(r, list)}
+              overwritten={overwrittenPictureNote(r, list)}
               targetName={target.data?.name ?? null}
               compareToId={previousRunId(list, r.id)} />
           ))}

@@ -934,6 +934,17 @@ class StackRunOut(BaseModel):
     # those surfaces say so — and offer to finish the export — instead of
     # silently presenting the wrong image. False for every ordinary run.
     unexported_edit: bool = False
+    # The run whose picture the file this row names actually is, or None (the
+    # normal case) when this run owns its own. Set only for a History row written
+    # before the v0.81.7–0.81.8 overwrite guard, which still points at a *newer*
+    # run's ``master.*`` because nothing ever migrated it — so the card shows this
+    # run's frame count and integration time beside somebody else's image. Decided
+    # server-side by :func:`webapp.displacedpicture.picture_owner_by_run_id` with
+    # no file read beyond one ``stat`` per shared path, because the cheap History
+    # endpoints promise not to open the FITS. Additive and optional: an older
+    # client ignores it and behaves exactly as it does today.
+    picture_owned_by_run_id: int | None = None
+
     # How many single-frame *field-fulls of sky* this run's canvas covers — 1.0
     # for a single field, ~4.0 for a 2x2 no-overlap mosaic (see
     # :mod:`webapp.field_fulls`). A mosaic's canvas grows as its panels are shot,
