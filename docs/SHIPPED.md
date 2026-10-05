@@ -1,5 +1,62 @@
 # Shipped — the record
 
+## 2026-10-05 (Builder) — deleting an old stack could delete a current picture
+
+### v0.492.40 — 🔴 BUG FIX: `delete_run_artifacts` does not unlink a file another surviving row still names (`run_artifact_paths`, `iter_stack_run_output_paths`)
+
+**Found by reading, while scoping the *other* half of observer issue
+[#1069](https://github.com/JimmyeJones/astrostack/issues/1069) — and it is the more serious consequence of that
+issue's population by a wide margin.** Reproduced through the real endpoints before a line was written.
+
+**What the owner could lose.** `delete_run_artifacts` unlinks a run's three recorded path columns **plus every
+sibling it resolves from the FITS basename** (`RUN_ARTEFACT_SUFFIXES`: both coverage maps, the preview, the
+progress and deepening reels, the share PNG) and checked **nothing** about whether another `stack_runs` row still
+names those files. A row does not always own what it points at: before the v0.81.7–0.81.8 overwrite guard a
+re-stack wrote the canonical `master.*` straight over the previous run's output, and `repoint_stack_runs` only
+runs at re-stack time, so the rows written before the guard still name a file a *newer* run wrote — **71 rows on
+15 shared paths** on the owner's library, 56 of them displaced, by the observer's count.
+
+So deleting one of those 56 old History entries unlinked the **live** run's entire output set. Measured in the
+reproduction: **16 files gone** — `master.fits`, the TIFF, the preview, `master_coverage.fits`,
+`master_framecov.fits`, the reels, the share PNG — while the live run's own History row survived, now pointing at
+nothing. Hours of stacking and the target's cover image, for a picture the owner never asked to lose.
+
+**And the button most likely to meet it is the one that looks safest.** `iter_stack_runs` is newest-first and
+`prune_stack_runs` deletes `runs[keep:]`, so "keep the N newest" targets the **oldest** rows — which is exactly
+what all 56 are (every one pre-v0.81.7). "Prune old stacks" on any target holding one took that target's current
+master with it. The raws are safe (`incoming/` is read-only, §10) so the picture is re-stackable, which is the one
+thing that keeps this out of unrecoverable territory.
+
+**The fix.** `purge_stack_run` — the single definition both delete paths already go through — asks the DB which
+files the *other* rows still name before a byte is unlinked, and `delete_run_artifacts` skips anything in that
+set. New `run_artifact_paths()` is the one definition of "every file one run's output set occupies", used from
+both directions (what to unlink, and what another row still serves) so the two can never drift; new
+`Project.iter_stack_run_output_paths(exclude_run_id=...)` is a three-column read rather than `iter_stack_runs`'
+`SELECT *`, because a prune walks every run it deletes through here.
+
+**It does not leak disk, and that is the property worth stating.** The set is re-read per run and holds only rows
+that *still exist*, so deleting the **last** row of a shared group frees the whole file set — reclaiming space is
+the entire point of either button, and a guard that quietly stopped reclaiming would have traded one bug for
+another. Pinned by `test_pruning_every_run_still_reclaims_the_shared_file_set`.
+
+**The rule is about the files, not about which row is the writer.** Deleting the *live* row while a displaced
+sibling still names those files also keeps them: the displaced row is then the only one serving that picture. Its
+own test, because the natural implementation ("protect the newest") would get this backwards.
+
+**Tests +4 in `tests/webapp/test_run_purge.py`, three fail before** (the fourth is the no-disk-leak property and
+must pass both sides). Paths are compared as plain `Path` with no `resolve()`: these are the strings the DB
+holds, two rows naming one file hold the *same* string, and a delete must not start following symlinks.
+
+**No** config, schema, migration, on-disk-layout, default or response-shape change — only a file that *was* being
+unlinked now is not. The two existing purge tests (unique basenames) are untouched and still assert that an
+ordinary delete reclaims everything.
+
+**Two further consequences of the same population, filed and deliberately not built** (they belong with #1069's
+open display half, whose design decides them): the "Adjust" preview save does
+`Path(run.preview_path).write_bytes(...)`, so adjusting a displaced row overwrites the live run's preview PNG —
+cosmetic, since the PNG is regenerable from the master and the pixels are the right picture's; and deleting a
+displaced row now reclaims **no** space, which is correct and will look broken until the card says why.
+
 ## 2026-10-05 (Builder) — a History row whose picture was overwritten stops being stamped with the replacement's numbers
 
 ### v0.492.39 — 🟡 BUG FIX: the three file-reading heals in `coverage_backfill.py` decline a file that is not the run's own picture (`_canvas_of`)

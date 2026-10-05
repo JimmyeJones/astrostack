@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -60,7 +61,37 @@ def _dir_bytes(path: Path) -> int:
     return total
 
 
-def delete_run_artifacts(run: StackRunRow) -> None:
+def run_artifact_paths(fits_path: str | None,
+                       tiff_path: str | None = None,
+                       preview_path: str | None = None) -> list[Path]:
+    """Every file one run's output set occupies on disk.
+
+    The three paths a ``stack_runs`` row records, plus every sibling resolved
+    from the FITS *basename* rather than from a column (see
+    :data:`seestack.stack.output.RUN_ARTEFACT_SUFFIXES`): the two coverage maps,
+    the preview, the progress and deepening reels, the share PNG.
+
+    One definition, because two callers need exactly this answer from opposite
+    directions — :func:`delete_run_artifacts` to know what to unlink, and
+    :func:`purge_stack_run` to know what another row still serves. Built with
+    plain :class:`~pathlib.Path` and no ``resolve()``: these are the strings the
+    DB holds, two rows naming one file hold the *same* string, and a delete must
+    not start following symlinks.
+    """
+    from seestack.stack.output import RUN_ARTEFACT_SUFFIXES
+
+    paths: list[Path] = [Path(p) for p in (fits_path, tiff_path, preview_path)
+                         if p]
+    if fits_path:
+        fp = Path(fits_path)
+        stem = fp.name[:-len(fp.suffix)] if fp.suffix else fp.name
+        paths.extend(fp.with_name(f"{stem}{sfx}")
+                     for sfx in RUN_ARTEFACT_SUFFIXES.values())
+    return paths
+
+
+def delete_run_artifacts(run: StackRunRow, *,
+                         keep_paths: Collection[Path] = ()) -> None:
     """Unlink a stack run's output files. Best-effort.
 
     Not only the three paths recorded on the ``stack_runs`` row
@@ -71,21 +102,28 @@ def delete_run_artifacts(run: StackRunRow) -> None:
     recorded three left those behind for good — the coverage map alone is ~8 MB
     on a 1080×1920 stack and far more on a mosaic, and reclaiming space is the
     entire point of deleting a run.
-    """
-    from seestack.stack.output import RUN_ARTEFACT_SUFFIXES
 
-    paths: list[Path] = []
-    for attr in ("fits_path", "tiff_path", "preview_path"):
-        p = getattr(run, attr, None)
-        if p:
-            paths.append(Path(p))
-    fits = getattr(run, "fits_path", None)
-    if fits:
-        fp = Path(fits)
-        stem = fp.name[:-len(fp.suffix)] if fp.suffix else fp.name
-        paths.extend(fp.with_name(f"{stem}{sfx}")
-                     for sfx in RUN_ARTEFACT_SUFFIXES.values())
-    for p in paths:
+    ``keep_paths`` is every file a **surviving** row still names, and nothing in
+    it is unlinked. A row does not always own the files it points at: before the
+    v0.81.7–0.81.8 overwrite guard a re-stack wrote the canonical ``master.*``
+    straight over the previous run's output, and
+    :meth:`seestack.io.project.Project.repoint_stack_runs` only runs at re-stack
+    time, so the rows written before the guard still name a file a *newer* run
+    wrote (observer issue #1069 counts 56 of them, on 15 shared paths). Deleting
+    one of those rows unlinked the live run's whole set — master, TIFF, preview,
+    both coverage maps and the reels — losing a picture the owner never asked to
+    lose, on the button whose whole purpose is routine housekeeping.
+
+    Go through :func:`purge_stack_run`, which supplies this set from the DB; the
+    empty default exists only for a caller that has no project to ask, and there
+    is none.
+    """
+    skip = set(keep_paths)
+    for p in run_artifact_paths(getattr(run, "fits_path", None),
+                                getattr(run, "tiff_path", None),
+                                getattr(run, "preview_path", None)):
+        if p in skip:
+            continue
         try:
             p.unlink(missing_ok=True)
         except OSError:
@@ -105,7 +143,18 @@ def purge_stack_run(proj: Any, run: StackRunRow) -> None:
     from seestack.edit.proxy import clear_proxy
     from webapp.run_meta import delete_run_meta
 
-    delete_run_artifacts(run)
+    # Which files do the *other* rows still name? A row does not always own what
+    # it points at (see :func:`delete_run_artifacts`), so this is asked before a
+    # byte is unlinked. A three-column read rather than ``iter_stack_runs``'
+    # ``SELECT *``, because "Prune old stacks" walks every run it removes through
+    # here. The run's own paths are excluded, or nothing would ever be deleted —
+    # and because the set is re-read per run, deleting the *last* row of a shared
+    # group still frees the whole file set, which is what keeps the guard from
+    # leaking disk on the one button that exists to reclaim it.
+    keep: set[Path] = set()
+    for paths in proj.iter_stack_run_output_paths(exclude_run_id=run.id):
+        keep.update(run_artifact_paths(*paths))
+    delete_run_artifacts(run, keep_paths=keep)
     if run.id is None:
         return
     proj.delete_stack_run(run.id)

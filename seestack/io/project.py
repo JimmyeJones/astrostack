@@ -2859,6 +2859,29 @@ class Project:
                 updated += cur.rowcount
         return updated
 
+    def iter_stack_run_output_paths(
+        self, *, exclude_run_id: int | None = None
+    ) -> list[tuple[str | None, str | None, str | None]]:
+        """``(fits_path, tiff_path, preview_path)`` for every stack run,
+        optionally excluding one.
+
+        A three-column read rather than :meth:`iter_stack_runs`' ``SELECT *``:
+        the caller is a *delete* that only needs to know which files other rows
+        still name, and "Prune old stacks" walks every run it removes through it,
+        so materialising whole rows would read a target's entire history once per
+        deleted run. See
+        :func:`webapp.routers.storage.purge_stack_run` for why a delete has to
+        ask: a row does not always own the files it points at.
+        """
+        assert self._conn is not None
+        sql = "SELECT fits_path, tiff_path, preview_path FROM stack_runs"
+        params: tuple[int, ...] = ()
+        if exclude_run_id is not None:
+            sql += " WHERE id <> ?"
+            params = (int(exclude_run_id),)
+        return [(row["fits_path"], row["tiff_path"], row["preview_path"])
+                for row in self._conn.execute(sql, params)]
+
     def delete_stack_run(self, run_id: int) -> None:
         assert self._conn is not None
         self._conn.execute("DELETE FROM stack_runs WHERE id = ?", (run_id,))

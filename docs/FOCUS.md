@@ -14,6 +14,18 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
 
 0. **"Bugs (fix these first)" holds ONE verified open bug — #1069, now down to its display half — plus gated
    LEADs and ⚪ notes.**
+   🔴 **The serious one on this population shipped as v0.492.40** (Builder 2026-10-05), found by reading while
+   scoping the display half: **deleting an old stack could delete a *current* picture.** `delete_run_artifacts`
+   unlinks a run's three path columns plus every basename-derived sibling and checked nothing about whether another
+   row still names them, so deleting one of the 56 displaced rows unlinked the live run's whole set — **16 files**
+   in the reproduction — and **"Prune old stacks" targets the oldest rows first, which is exactly what all 56 are.**
+   `purge_stack_run` now asks the DB what other rows still name; the set is re-read per run so the last row of a
+   shared group still frees everything, and deleting the *live* row keeps what its displaced sibling serves. Raws
+   were never at risk (`incoming/` is read-only). **The next Builder on half (1) has three candidate signatures,
+   not two** — the entry's marker-migration and render-time-header-read, plus a zero-file-read one (two rows naming
+   one path, which the observer's 71-rows-on-15-paths count corroborates exactly) whose **measured limitation is
+   that a merge erases it** (`_free_basename` + per-run copy splits the pair). Details in
+   `docs/PROCESS-NOTES.md`.
    🟡 **#1069's ready half shipped as v0.492.39** (Builder 2026-10-05): all three file-reading heals in
    `coverage_backfill.py` now decline a file whose `NAXIS` is not the row's `canvas_w`/`canvas_h` (`_canvas_of`),
    checked before a pixel is read and only on positive evidence. **The entry's "no wrong number exists today" was
