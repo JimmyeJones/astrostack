@@ -5,8 +5,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import roughCases from "../roughlyAligned.cases.json";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, panelGainSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, contributingSubs, calibrationSummaryText, drizzleDegradedNote, rejectionDegradedNote, removedOverlayCaption, derivedFromNote } from "./History";
-import { formatIntegration } from "../format";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, panelGainSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, contributingSubs, calibrationSummaryText, drizzleDegradedNote, rejectionDegradedNote, removedOverlayCaption, derivedFromNote, overwrittenPictureNote } from "./History";
+import { formatIntegration, formatStampDateTime } from "../format";
 import * as client from "../api/client";
 import { FULL_RES_PNG_MAX_LONG_EDGE } from "../fullres";
 import { SAMPLE_TOUR_COPY } from "../components/SampleTourNote";
@@ -2934,6 +2934,53 @@ describe("HistoryView — the run's two dates, each labelled", () => {
     expect(line.textContent).not.toMatch(/Stacked/);
     expect(line.textContent).not.toMatch(/Invalid/);
     expect(line.textContent?.trimStart()).toMatch(/^100×100/);
+  });
+});
+
+describe("overwrittenPictureNote", () => {
+  // The pre-v0.81.8 shape: an older row and a newer one naming one `master.*`,
+  // which the server reports by handing the older row the newer one's id.
+  const live = mkRun({ id: 9, output_basename: "master",
+                       timestamp_utc: "2026-08-30T14:32:05" });
+  const displaced = mkRun({ id: 2, output_basename: "master",
+                            picture_owned_by_run_id: 9 });
+
+  it("names the date of the stack whose picture is really on the card", () => {
+    const note = overwrittenPictureNote(displaced, [displaced, live]);
+    expect(note?.ownerRunId).toBe(9);
+    // Formatted by the same helper the card's own "Stacked …" stamp uses, so one
+    // page cannot print two formats for two moments.
+    expect(note?.ownerDate).toBe(formatStampDateTime(live.timestamp_utc));
+    expect(note?.ownerDate).not.toMatch(/Invalid/);
+  });
+
+  it("says nothing for a run that owns its own picture", () => {
+    // Every ordinary run, and every run at all on an install that has only
+    // re-stacked since the guard.
+    expect(overwrittenPictureNote(live, [displaced, live])).toBeNull();
+    expect(overwrittenPictureNote(mkRun({}), [])).toBeNull();
+  });
+
+  it("still reports the state when the owning run is not in the list", () => {
+    // Its row can be absent (deleted, or filtered out of this view). The
+    // thumbnail is still not this run's, so the note stands — only the date is
+    // dropped, rather than guessed or printed as "Invalid Date".
+    const note = overwrittenPictureNote(displaced, [displaced]);
+    expect(note?.ownerRunId).toBe(9);
+    expect(note?.ownerDate).toBeUndefined();
+  });
+
+  it("ignores an owner id that is not usable, or is the row itself", () => {
+    for (const bad of [null, undefined, NaN]) {
+      expect(overwrittenPictureNote(
+        mkRun({ id: 2, picture_owned_by_run_id: bad as number | null }), [live],
+      )).toBeNull();
+    }
+    // A row said to be overwritten by itself is nonsense, and telling someone
+    // their picture was overwritten by itself is worse than saying nothing.
+    expect(overwrittenPictureNote(
+      mkRun({ id: 9, picture_owned_by_run_id: 9 }), [live],
+    )).toBeNull();
   });
 });
 

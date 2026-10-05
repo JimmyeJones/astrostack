@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-10-05 (Builder, branch `claude/optimistic-ritchie-l34ima`) — two tasks on one population: the ready half of #1069 (v0.492.39), and the destructive delete it was hiding (v0.492.40)
+## 2026-10-05 (Builder, branch `claude/optimistic-ritchie-l34ima`) — #1069 closed in three: the backfill guard (v0.492.39), the destructive delete it was hiding (v0.492.40), and the display fork settled with no file read (v0.492.41)
 
 *(Baseline `origin/main` at `0b93c66` (`__version__` 0.492.38): **7442 passed, 4 skipped**, 13m41s with
 `OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI green on
@@ -51,6 +51,45 @@ PNG (cosmetic — regenerable, and the pixels are the right picture's), and a di
 when deleted (correct, and will look broken until the card explains it). Both are *display* questions, and
 answering them before the fork is decided would prejudge it — the same reason v0.492.39's guard was built to need
 no file read.
+
+### Task 3 — the display fork, settled with a third option and no file read
+
+The entry offered two shapes and asked a Builder to pick one. Both pay a header read: **(b)** per render, against
+the cheap History endpoints' documented *no-file-read* promise (`webapp/field_fulls.py`), and **(a)**, the marker
+migration, once at upgrade time — because it still has to *detect* the rows before it can mark them. **(c)** is
+neither: two rows naming one `fits_path` **is** the bug, since the v0.81.7–0.81.8 guard exists precisely to stop
+that (a re-stack archives the set and repoints the old row; an editor re-export under one basename does the same),
+so the older row of such a pair owns no files at all. The listing already holds every row in memory, so the answer
+costs one pass plus a `stat` *inside* a shared-path group — nothing at all for a history with no duplicate.
+
+**Corroboration before building:** the observer's two independent counts agree. 71 rows on 15 shared paths is 56
+non-writers; the `canvas`-vs-`NAXIS` comparison also finds 56. Two signatures, one population.
+
+**And the limitation, measured rather than left to be discovered:** a merge erases (c).
+`io/merge.py::_carry_pictures` takes a `_free_basename` per run and *copies* the files, so a displaced pair becomes
+two rows with distinct paths each pointing at its own copy. (c) then says nothing where (b) still would. That is
+the safe direction (under-report, never mis-state) and it is why v0.492.39's sibling guard — which is already
+holding the file open — keys on `NAXIS` instead. So the two guards shipped today deliberately use *different*
+signatures, each the cheaper correct one for where it sits, and that is written into both modules.
+
+**Ordering is the row id, not `timestamp_utc`.** The app has written that column in more than one format
+(`…+00:00` and `…Z` both appear), so a text comparison can put a pair the wrong way round and name the *older* run
+as the writer. Its own test, with a fixture whose two stamps sort backwards as plain text.
+
+### An environment trap found while checking this run's fail-before
+
+A `git worktree` at `origin/main` resolves `webapp` and `seestack` from its own tree — checked,
+`webapp.__file__` points inside the worktree — **but a submodule that does not exist there falls through to the
+editable install and is imported from `/home/user/astrostack`.** Measured: `webapp` → worktree,
+`webapp.displacedpicture` → the main checkout. So a fail-before that depends on
+`from webapp.<new module> import …` passes **for the wrong reason**, and a run would report a clean revert check
+it never had. The two fail-befores claimed for v0.492.41 go through the HTTP endpoint instead, where the
+worktree's own `routers/stack.py` and `schemas.py` are the ones that answer.
+
+v0.492.39's revert check is unaffected and was re-examined rather than assumed: it only *edited* an existing file
+(`seestack/coverage_backfill.py`), which does resolve from the worktree — which is why five tests failed there.
+Written into [`AGENT-ENVIRONMENT.md`](AGENT-ENVIRONMENT.md) beside the stash warning, because the common case
+(editing an existing file) is unaffected, which is exactly how this stays unnoticed.
 
 ### Choosing it
 

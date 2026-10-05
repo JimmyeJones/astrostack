@@ -58,6 +58,22 @@ cd frontend && npm install
 > > `git worktree add` for a scratch comparison; it touches nothing the suite is
 > > reading.)
 > >
+> > **⚠️ But a worktree does NOT isolate a module your change *adds*** *(added
+> > 2026-10-05, caught mid-run while checking a fail-before)*. A worktree at
+> > `origin/main` resolves `webapp` and `seestack` from its own tree — verified,
+> > `webapp.__file__` points inside the worktree — but a submodule that does **not
+> > exist** there falls through to the editable install's search path and is
+> > imported from `/home/user/astrostack`. So a test whose fail-before depends on
+> > `from webapp.mynewmodule import …` **passes in the worktree for the wrong
+> > reason**: it imported the new file from the main checkout. Measured:
+> > `webapp` → worktree, `webapp.displacedpicture` → `/home/user/astrostack/…`.
+> > A test that reverts cleanly by *editing* an existing file is unaffected (that
+> > file resolves from the worktree), which is the common case and why this went
+> > unnoticed. **When your change adds a module, prove the fail-before through a
+> > path that does not import it** — the HTTP endpoint, or the existing function
+> > you changed — or print `mod.__file__` and check it. One line to check, and the
+> > alternative is a "five fail before" claim with a hole in it.
+> >
 > > **And for this variant the tell above is exactly backwards.** It finished
 > > `2 failed` in **`tests/webapp/test_derived_light.py`** — a file the run had
 > > *not* touched, in a subsystem its change did not go near. Those two are

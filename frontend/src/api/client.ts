@@ -1601,6 +1601,15 @@ export interface StackRun {
   // auto-stretch of the linear stack, not the picture the user made. Absent on an
   // older backend, which reads as "no unfinished edit" and shows nothing.
   unexported_edit?: boolean;
+  // The run whose picture the file this row names actually *is*, or null/absent
+  // (the normal case) when this run owns its own. Set only for a row written
+  // before the v0.81.7–0.81.8 overwrite guard, which still points at a *newer*
+  // run's master because nothing ever migrated it — so this card's frame count
+  // and integration time sit beside somebody else's image. The id is in this same
+  // list, so the card can name that run's date without another request. Absent on
+  // an older backend, which reads as "this run owns its picture" — today's
+  // behaviour.
+  picture_owned_by_run_id?: number | null;
   // True when the *unattended* walk-away pass finished this run into a picture
   // for the user (rather than a hand-driven Auto click). Absent on an older
   // backend, which reads as "you made this one", the safe answer. Lets the hero
