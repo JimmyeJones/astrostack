@@ -295,25 +295,166 @@ def test_deleting_a_missing_run_still_answers(client, solved_library):
     assert r.status_code == 200
 
 
+#: A ``project_meta`` key built from a prefix constant and a run id. Both
+#: spellings — ``{run_id}`` and ``{run.id}``. The second was invisible to this
+#: guard until 2026-10-05: the old pattern was ``\{(\w+)\}\{[\w.]*run_id\}``,
+#: and ``[\w.]*`` cannot consume ``run.`` and then *also* match the literal
+#: ``run_id``.
+#:
+#: Only ``UPPER_SNAKE`` names, deliberately. A lowercase one is a local or a
+#: function parameter — ``webapp/routers/gallery.py`` takes ``recipe_prefix``,
+#: ``exported_prefix`` and ``baked_look_prefix`` as *arguments* — so it is a
+#: pass-through of a constant its caller supplies, with no definition here to
+#: resolve and nothing of its own to register.
+_META_SITE_RE = re.compile(r'f"\{([A-Z][A-Z0-9_]*)\}\{[\w.]*run(?:_id|\.id)\}"')
+
+#: A module-level prefix constant: ``NAME = "literal"``.
+_PREFIX_DEFN_RE = re.compile(
+    r'^([A-Z][A-Z0-9_]*)\s*=\s*["\']([^"\']*)["\']\s*$', re.MULTILINE)
+
+#: How many ``<prefix><run_id>`` sites the scan below must still find.
+#:
+#: A **floor, not an equality**: adding a per-run key is ordinary work and must
+#: not require editing a number here. What it catches is the scan going *blind*,
+#: which is the only failure this guard has ever actually had. Observer issue
+#: `#1079 <https://github.com/JimmyeJones/astrostack/issues/1079>`_ measured the
+#: previous version reaching **4** assertions against the 33 sites that exist —
+#: it resolved each name with ``getattr`` on the module that *used* it and
+#: ``continue``d when that returned ``None``, and ``webapp/pipeline.py``, which
+#: holds most of the write sites, imports every one of those prefixes *inside*
+#: the function that uses it (deliberately: ``webapp/run_meta.py`` documents the
+#: cycle reason). Seven sites in that one file were skipped without a word.
+#:
+#: 30, against the 33 found when it was set: ``webapp/pipeline.py`` (14),
+#: ``webapp/routers/stack.py`` (12), ``webapp/routers/editor.py`` (6) and
+#: ``webapp/finishedpicture.py`` (1).
+MIN_PER_RUN_META_SITES = 30
+
+
 def test_every_per_run_meta_prefix_is_registered():
     """Drift guard: a new ``<prefix><run_id>`` key that isn't in
-    ``per_run_meta_prefixes()`` would silently start orphaning rows again."""
-    from webapp import pipeline
-    from webapp.routers import editor
+    ``per_run_meta_prefixes()`` would silently start orphaning rows again.
+
+    Read off the **source** of every file under ``webapp/`` rather than off
+    imported module attributes, which closes three holes at once and closes them
+    by construction rather than by a longer hand-written list (all three measured
+    in observer issue #1079):
+
+    * a prefix is resolved from **where it is defined**, so the lazy in-function
+      imports that keep ``webapp.pipeline`` cheap and cycle-free no longer hide a
+      site — ``getattr(pipeline, "RECIPE_META_PREFIX", None)`` is ``None``, and
+      the old version read that as "not a prefix" and moved on;
+    * the file list is a **glob**, so a new module that keys meta by a run id is
+      covered the day it is written. The old version named two modules by hand
+      and ``webapp/routers/stack.py`` — 12 sites — was never among them; and
+    * an ``UPPER_SNAKE`` name that resolves to no definition is a **failure**,
+      not a skip. That was the shape of every one of those holes: the old
+      guard's only answer to "I cannot tell what this is" was to carry on.
+    """
     from webapp.run_meta import per_run_meta_prefixes
 
+    webapp_root = Path(__file__).resolve().parents[2] / "webapp"
+    defined: dict[str, str] = {}
+    sites: list[tuple[str, str]] = []
+    for path in sorted(webapp_root.rglob("*.py")):
+        src = path.read_text()
+        for m in _PREFIX_DEFN_RE.finditer(src):
+            defined.setdefault(m.group(1), m.group(2))
+        for m in _META_SITE_RE.finditer(src):
+            sites.append((path.name, m.group(1)))
+
     registered = set(per_run_meta_prefixes())
-    used = re.compile(r'f"\{(\w+)\}\{[\w.]*run_id\}"')
-    for module in (pipeline, editor):
-        src = Path(module.__file__).read_text()
-        names = {m.group(1) for m in used.finditer(src)}
-        for name in names:
-            value = getattr(module, name, None)
-            if not isinstance(value, str):
-                continue
-            assert value in registered, (
-                f"{module.__name__}.{name} = {value!r} is keyed by a run id but "
-                "is not listed in webapp/run_meta.py::per_run_meta_prefixes")
+    for filename, name in sites:
+        assert name in defined, (
+            f"{filename} keys project_meta by a run id with {name}, which is "
+            "defined nowhere under webapp/ as a plain string literal — so this "
+            'guard cannot check it. Define it as `NAME = "prefix:"` at module '
+            "level, or this site is unpoliced.")
+        assert defined[name] in registered, (
+            f"{filename}: {name} = {defined[name]!r} is keyed by a run id but is "
+            "not listed in webapp/run_meta.py::per_run_meta_prefixes, so "
+            "delete_run_meta leaves its rows behind when a run is deleted")
+
+    # The guard's own self-check. It has been blind once; silence is not a pass.
+    assert len(sites) >= MIN_PER_RUN_META_SITES, (
+        f"only {len(sites)} per-run meta sites found, below the "
+        f"{MIN_PER_RUN_META_SITES} that existed when this floor was set — the "
+        "scan has probably stopped matching (a renamed spelling, a moved file), "
+        "which is how this guard lost 7 of its 9 sites in silence before")
+
+
+def test_deleting_a_run_takes_the_auto_edit_highlight_reading_with_it(
+        client, solved_library):
+    """FAIL-BEFORE: ``editor_auto_highlight:`` was not in
+    ``per_run_meta_prefixes()``, so ``delete_run_meta`` left its row behind for
+    good — observer issue #1079.
+
+    Stamped from the prefix **constant**, deliberately never from
+    ``per_run_meta_prefixes()``. The helpers at the top of this file walk the
+    registry to *write* the rows they then check, so they stamp exactly the keys
+    that are registered and cannot notice a missing one — the same blindness as
+    the guard's, wearing the end-to-end test's clothes.
+    """
+    from webapp.routers.editor import AUTO_EDIT_HIGHLIGHT_PREFIX
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _add_run_with_artifacts(solved_library, safe,
+                                     "2026-05-01T00:00:00Z", "master")
+    lib, proj = _open(solved_library, safe)
+    try:
+        proj.set_meta(f"{AUTO_EDIT_HIGHLIGHT_PREFIX}{run_id}",
+                      json.dumps({"strength": 0.4, "flat_fraction": 0.02,
+                                  "core_px": 118}))
+    finally:
+        proj.close()
+        lib.close()
+
+    assert client.delete(
+        f"/api/targets/{safe}/stack-runs/{run_id}").status_code == 200
+
+    lib, proj = _open(solved_library, safe)
+    try:
+        left = proj.get_meta(f"{AUTO_EDIT_HIGHLIGHT_PREFIX}{run_id}")
+    finally:
+        proj.close()
+        lib.close()
+    assert left is None, (
+        "the unattended auto-edit's highlight reading outlived the run it "
+        "describes, where nothing will ever read it again")
+
+
+def test_the_guard_sees_a_prefix_its_module_only_imports_lazily():
+    """The property the rewrite is *for*, asserted rather than argued.
+
+    ``RECIPE_META_PREFIX`` is used with a run id in ``webapp/pipeline.py`` and
+    defined in ``webapp/routers/editor.py``, reaching ``pipeline`` only through
+    an import inside the function that uses it. So the module attribute the old
+    guard asked for does not exist, and the site was skipped in silence.
+    """
+    from webapp import pipeline
+
+    assert getattr(pipeline, "RECIPE_META_PREFIX", None) is None, (
+        "pipeline now imports this at module level, so this test no longer "
+        "pins the lazy-import case — point it at another lazily-imported prefix")
+
+    src = Path(pipeline.__file__).read_text()
+    names = {m.group(1) for m in _META_SITE_RE.finditer(src)}
+    assert "RECIPE_META_PREFIX" in names
+    # ...and the scan resolves it anyway, from where it is defined.
+    webapp_root = Path(__file__).resolve().parents[2] / "webapp"
+    defined = {m.group(1): m.group(2)
+               for path in sorted(webapp_root.rglob("*.py"))
+               for m in _PREFIX_DEFN_RE.finditer(path.read_text())}
+    assert defined.get("RECIPE_META_PREFIX") == "editor_recipe:"
+
+
+def test_an_unresolvable_prefix_name_fails_rather_than_being_skipped():
+    """"I cannot tell what this is" must not read as "nothing to check" — that
+    one ``continue`` is what let seven sites through."""
+    src = '    proj.set_meta(f"{A_PREFIX_DEFINED_NOWHERE}{run_id}", "x")\n'
+    names = {m.group(1) for m in _META_SITE_RE.finditer(src)}
+    assert names == {"A_PREFIX_DEFINED_NOWHERE"}
+    assert not _PREFIX_DEFN_RE.findall(src)
 
 
 def test_a_real_stack_write_leaves_nothing_the_delete_path_cannot_find(tmp_path):

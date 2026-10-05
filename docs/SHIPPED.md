@@ -1,5 +1,87 @@
 # Shipped — the record
 
+## 2026-10-05 (Builder) — a drift guard that could not fail where the writes are
+
+### v0.492.43 — 🟡 BUG FIX + 🔵 the guard that should have caught it: `per_run_meta_prefixes`, `AUTO_EDIT_HIGHLIGHT_PREFIX`, `MIN_PER_RUN_META_SITES`
+
+**Verified against the code from observer issue
+[#1079](https://github.com/JimmyeJones/astrostack/issues/1079)**, which arrived about two minutes *after* the
+2026-10-05 Scout run finished and was therefore the one open issue not triaged (`FOCUS.md`'s "five open, all
+triaged" predates it). Issue text is a lead, not a finding: every number below was re-measured here, and two of
+its claims came out narrower than filed.
+
+**The leak, which is the part with a consequence.** `webapp/run_meta.py` is the registry of every `project_meta`
+key hung off a stack-run id, so that deleting a run takes its annotations with it.
+`AUTO_EDIT_HIGHLIGHT_PREFIX` (`editor_auto_highlight:`) was not in it. It is written by the unattended auto-edit
+at `pipeline.py:4628` and read back by the highlight roll-up at `pipeline.py:1469`, so `delete_run_meta` left its
+rows behind for good.
+
+**It is an oversight rather than a decision, and the code says so plainly.** The prefix shipped as the sibling of
+`AUTO_EDIT_SKYCAST_PREFIX`, which *is* registered. The two are imported in one block
+(`pipeline.py:4483–4485`) and stamped sixteen lines apart in consecutive `try` blocks at 4612 and 4628. One was
+registered.
+
+**What it has cost: nothing — and the issue says so itself rather than being talked down to it.** Nothing reads an
+orphan (the roll-up iterates existing runs and looks each up by its own id), `stack_runs.id` is `AUTOINCREMENT` so
+an id is never reused and an orphan can never be picked up by a later run, and the owner has deleted a run on 1 of
+95 targets. The consequence is a few hundred bytes of dead weight per deleted run, of which there are none — **0
+of 576 per-run meta rows on his library are orphaned, across all ten prefixes**. So there is no repair migration,
+because there is nothing to repair.
+
+**So the finding is the guard.** `test_every_per_run_meta_prefix_is_registered` calls itself a drift guard and
+resolved each prefix name with `getattr` on the module that *used* it, `continue`ing when the result was not a
+`str`. `webapp/pipeline.py` imports every one of these prefixes **inside** the function that uses it — a
+deliberate choice `run_meta.py` documents ("imported lazily … so this module stays cheap and cycle-free") — so
+`getattr` returned `None` and the assertion was skipped without a word. Re-measured on this tree: **9 names found
+in `pipeline.py`, 2 assertions reached, 7 skipped.** It also named only two modules by hand, so
+`webapp/routers/stack.py` (12 sites) and `webapp/finishedpicture.py` were never looked at; and its pattern,
+`f"\{(\w+)\}\{[\w.]*run_id\}"`, cannot match the `{run.id}` spelling, because `[\w.]*` cannot consume
+`run.` and then *also* match the literal `run_id`.
+
+**Total: 4 assertions reached, against 33 call sites that exist.** And that is not an inference — the old guard
+was run against the tree with the prefix still unregistered and **passed**, reaching exactly those 4.
+
+**The rewrite reads the source of every file under `webapp/`** rather than imported module attributes, which
+closes all three holes at once and closes them *by construction* rather than by a longer hand-written list:
+
+- a prefix is resolved from **where it is defined** (`NAME = "literal"` at module level, anywhere under
+  `webapp/`), so a lazy in-function import no longer hides a site — and the cycle reason that put those imports
+  there is untouched;
+- the file list is a **glob**, so a new module that keys meta by a run id is covered the day it is written;
+- the pattern takes `run(?:_id|\.id)`, so both spellings match;
+- an `UPPER_SNAKE` name that resolves to **no definition is a failure**, not a skip. That was the shape of every
+  hole: the old guard's only answer to "I cannot tell what this is" was to carry on.
+
+**Only `UPPER_SNAKE` names, deliberately — and that is one of the two corrections to the issue.** A lowercase name
+is a local or a function parameter: `webapp/routers/gallery.py` takes `recipe_prefix`, `exported_prefix` and
+`baked_look_prefix` as *arguments*, so each is a pass-through of a constant its caller supplies, with no
+definition to resolve and nothing of its own to register. The issue counts `gallery.py` as a fifth unscanned
+module; it is unscanned, and there is nothing in it to find. The second correction: the `{run.id}` hole is
+narrower than it reads — every one of the four prefixes the issue names is *also* written somewhere with the
+`{run_id}` spelling, so the hole costs exactly **one** site nothing else covers, `finishedpicture.py`'s.
+
+**And a self-check, because silence is how this failed.** `MIN_PER_RUN_META_SITES` is a **floor** (30, against the
+33 that exist), not an equality: adding a per-run key is ordinary work and must not require editing a number.
+What it catches is the scan going blind again — a renamed spelling, a moved file — which is the only failure mode
+this guard has ever actually had.
+
+**Measured after:** 33 sites across `pipeline.py` (14), `routers/stack.py` (12), `routers/editor.py` (6) and
+`finishedpicture.py` (1); every constant resolved; one unregistered prefix found, which is the registration above.
+
+**Tests +3, two fail before** (shown by reverting the one-line registration and watching them name
+`AUTO_EDIT_HIGHLIGHT_PREFIX`), where the old guard passed on that same tree. The rewritten guard is one of the
+two; the others pin its *reach* — that it resolves a prefix the scanned module only imports lazily, and that an
+unresolvable `UPPER_SNAKE` name is seen rather than skipped — plus a new end-to-end one that deletes a run
+carrying an `editor_auto_highlight:` row through the real endpoint and asserts the row is gone.
+
+**That end-to-end test stamps from the prefix constant, never from `per_run_meta_prefixes()`, and the reason is a
+third instance of the same blindness.** The existing helpers at the top of `test_run_purge.py` walk the registry
+to *write* the rows they then check — so they stamp exactly the keys that are registered and cannot notice a
+missing one. The guard's hole, wearing the end-to-end test's clothes.
+
+**No** config, schema, migration, on-disk-layout, default or response-shape change. Registering the prefix changes
+only what a future delete removes.
+
 ## 2026-10-05 (Builder) — and that card may no longer save over the picture it does not own
 
 ### v0.492.42 — 🟠 BUG FIX: "Adjust → Save" on a displaced History row re-rendered a *different* run's preview (`preview_owner_by_run_id`, `_later_owner_by_run_id`, `cannotSave`)
