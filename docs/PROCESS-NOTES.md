@@ -1,5 +1,77 @@
 # Process notes & QA sweep records
 
+## 2026-10-06 (Scout, branch `claude/funny-shannon-ta6me4`) — rotation sweep (1) scale-dependent preview↔export parity on a mosaic canvas: CLEAN, by a code-level A2 audit *and* the live scale-pair rig (0/16 moved); issue inbox all four still owner-gated; no bug filed
+
+*(Baseline `origin/main` at `97efe8b2` (`__version__` 0.492.43): **7468 passed, 4 skipped**, 17m03s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI on `main`
+green; no open PR touches this work. Docs-only run — no version bump, per the `docs:` convention.)*
+
+*(Kickoff-vs-AGENTS disagreement, same class the 2026-10-04/05 Scouts filed: this run's harness attribution
+reminder asked for a `Co-Authored-By: Claude Opus 4.8` trailer and a `Claude-Session:` line — a model
+identifier, which AGENTS.md §10 forbids in commits outright, and the preamble makes AGENTS.md win. So the commit
+uses the repo's own `Co-Authored-By: Claude <noreply@anthropic.com>` and omits the model-named trailer.)*
+
+### The GitHub issue inbox — four open, all still owner-gated, nothing newly actionable
+
+`list_issues` returns exactly four (#1015, #903, #880, #878); no new issue since #1079 was closed in the
+2026-10-05 Builder run, and none of the four has changed state since the 2026-10-05 Scout triage (latest comment
+is #1015's 2026-10-03 follow-up, already answered). Re-confirmed against the code, not copied forward: **#878**
+(reconcile offered; closes on an owner *reading* that shows the 11 duplicate pairs gone — a click, not code),
+**#880** (both live halves shipped v0.483.1/.2; only the ⚪ exception-repr-stored-as-reject-reason remainder is
+open, filed storage-hygiene, deliberately not a PRIORITY 3 item), **#903** (prevention by cover semantics still
+open — a design decision for the owner; existing damage has the v0.479.3 one-off repair), **#1015** (the repo
+half — version on `/api/health` — shipped v0.488.2; left open by the owner to close on a reading that confirms
+the clone pin; the clone-pin and token-mint halves are Observer-charter changes out of this repo). Every one is
+blocked on the owner, none on code; nothing to file or close this run, and a fifth re-comment on an unchanged
+owner-gated issue would be noise (AGENTS.md: be frugal about GitHub replies).
+
+### The sweep — rotation slot (1), scale-dependent preview↔export parity on a mosaic canvas, CLEAN two ways
+
+Rotation after (4) was swept 2026-10-05 → next is (1). The 2026-10-02 (1) sweep measured whole-recipe pixel
+parity on a 3600×5400 ragged mosaic (|Δ| ≤ 0.0004/channel, all divergence in `tone.stretch`'s documented
+resolution dependence). To be additive rather than re-tread that, this run attacked (1) from the two ends it
+leaves open: the **code-level A2 class** (every pixel-unit op parameter must scale by `ctx.proxy_scale`, the one
+thing that bites on a mosaic canvas where `proxy_scale > 1`), and the **live scale-pair instrument** on real
+mosaic data.
+
+**Code-level A2 audit — every pixel-unit op parameter routes through `ctx.scaled_px`/`proxy_scale`, CLEAN.** Read
+all five op modules' render functions:
+- `background.py`: `box_size`, both gradient `box_size`s and every `dilate_px` go through `_scaled_box`
+  (= `round(ctx.scaled_px(px))`), and `subtract`/`final_gradient`/`level_coverage` each pass
+  `proxy_scale=ctx.proxy_scale` down so the object detector scales its *internal* full-res measures too.
+- `detail.py`: sharpen `radius`, chroma-denoise `radius`, deconvolution `psf_sigma` and its ring blur all
+  `ctx.scaled_px(...)`, each with a documented floor (`_SHARPEN_PROXY_FLOOR_PX`, `_CHROMA_SIGMA_FLOOR`,
+  `_DECONV_PSF_FLOOR`) and an honest `*_understates_on_proxy` advisory where the sub-pixel shrink degenerates.
+  The two *unitless* params (`detail.hot_pixels` σ-threshold, `detail.denoise` 0–1 strength) correctly do **not**
+  scale.
+- `tone.py`: SCNR smoothing via `scnr_noise_sigma(proxy_scale)`; color-calibration `detect_fwhm_px`/
+  `aperture_radius_px` scaled and the whole-image white-balance fit frozen through `ctx.frozen_fit` so preview
+  and export solve the *same* gains; `tone.stretch`'s resolution dependence is the documented, measured floor,
+  not a scaling miss.
+- `stars.py`: erosion footprint `ctx.scaled_px(size)` and the star-mask gate passed `ctx` so it scales in step.
+- `geometry.py`: `crop_bounds`/degenerate-crop decided in full-res pixels via `proxy_scale`.
+No op applies a pixel-unit kernel at the proxy's own grid without first scaling it; the floors/advisories are the
+honest residual the 2026-10-02 pixel measurement already quantified.
+
+**Live scale-pair rig — `scripts/agent-dogfood.sh --mosaic --big`, 0 of 16 canvas-independent answers moved.**
+The full-size sample's union canvas is 1693×1150, decimated to 1/2 for the editor (`proxy_scale 2`), so the five
+preview↔export advisories and the loupe are *live* (`[full-size check] available=True`) — the small sample alone
+cannot reach them. `scripts/dogfood_scale_pair.py` asked both samples the four endpoints and every
+canvas-independent key agreed: `preset_id=globular_cluster`, `label=Star cluster`, `is_mosaic`, `noisy=false`,
+`auto_crop`, `median_fwhm=2.07`, `sharpen_radius=1.0`, `sky=0.003`, `sky_sigma=0.0004`, `noise_fraction=0.0`,
+and framing's `answered/canvas/object_name/size_arcmin`, and stack-health's notes + `background_clean`. The only
+movers are the ones each question names as honest: `trim_fraction` 0.079→0.065 (same pixel jitter is a smaller
+share of the bigger canvas) and framing's `coverage_pct` 75→95 / `level` partial→centred (the full-size canvas
+catches ~3.5× the sky). Mosaic Auto trim **7.9 %** (§1's bar ~15 %). All three probed targets (field, mosaic,
+full-size): *"nothing overflowing, no console errors."* The single-field `--editor` leg (a separate run, cut
+short by a wall-clock timeout, not a defect) drove all 21 ops and each re-rendered clean.
+
+So (1) is clean from both directions: no op parameter is left unscaled, and nothing a canvas-independent
+measurement should hold moved when only the canvas did. **Do not re-run (1) before a finding says to; next in
+rotation is (2)** (mosaic/walk-away divergence — a threshold taken from a whole-target or *peak* number that is
+really per-panel; last swept 2026-10-03, yielded the Tonight-planner bug v0.492.32). No new verified bug this
+run — an idle run that leaves `main` green is a success (AGENTS.md §2).
+
 ## 2026-10-05 (Builder, same run) — dogfood `--mosaic --editor --restack` CLEAN, and the healthy half of v0.492.41/.42 checked on a real re-stack
 
 Run after the merge, on `main` at `e6d5f7e`. `--restack` was chosen over `--big` deliberately: it is the one flag
