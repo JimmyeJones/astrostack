@@ -1,6 +1,12 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-05 (Builder — **closed observer issue #1069 in all four of its halves**: the backfill
+*Last edited 2026-10-06 (Scout — **rotation sweep (1) scale-dependent preview↔export parity on a mosaic canvas
+re-swept CLEAN**, two ways: a code-level A2 audit found every pixel-unit op parameter routing through
+`ctx.scaled_px`/`proxy_scale`, and the live scale-pair rig read **0 of 16** canvas-independent answers moved on
+`--mosaic --big` (full-size proxy_scale 2, advisories live; mosaic Auto trim 7.9 %). All four open observer issues
+(#1015, #903, #880, #878) still owner-gated — no new issue, no state change, nothing to file or close. **Bugs
+stays dry of ungated work; no bug filed; next in rotation is (2).** Baseline 7468 passed / 4 skipped, CI green.
+Record in `docs/PROCESS-NOTES.md`. The 2026-10-05 Builder note stands below.) (Builder 2026-10-05 — **closed observer issue #1069 in all four of its halves**: the backfill
 guard **v0.492.39**, the destructive delete it was hiding **v0.492.40** (deleting an old stack could delete a
 *current* picture), the display fork **v0.492.41**, settled with a signature that reads no files, and **v0.492.42** — the *write* side of the same sentence, found by grepping `SHIPPED.md` for what the earlier runs filed onto the entry they then cut — plus **v0.492.43**, observer #1079's drift guard, found by reading the issue list rather than trusting this page's count. The Scout's
 earlier 2026-10-05 edit stands below: all five open issues triaged, rotation sweep **(4) the webapp routers**
@@ -140,9 +146,12 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
 ## Standing frontier (unchanged until a finding says otherwise)
 
 - **Mosaic-scale and walk-away behaviour is the open frontier**, not the single-field engine core.
-- **Rotation state.** (1) preview↔export parity on a mosaic canvas — **swept CLEAN 2026-10-02 (Scout)**: the
-  one-click Auto recipe renders proxy↔export within |Δ|≤0.0004/channel at proxy step 4, all divergence entering
-  at `tone.stretch`'s documented resolution dependence, every pixel-scaled op still routed through `scaled_px`.
+- **Rotation state.** (1) preview↔export parity on a mosaic canvas — **swept CLEAN 2026-10-02, re-swept CLEAN
+  2026-10-06 (Scout)**: the one-click Auto recipe renders proxy↔export within |Δ|≤0.0004/channel at proxy step 4,
+  all divergence entering at `tone.stretch`'s documented resolution dependence; the 2026-10-06 re-sweep confirmed
+  it from both ends — a code-level A2 audit (every pixel-unit op param scales by `ctx.scaled_px`/`proxy_scale`,
+  with documented floors/advisories where the sub-pixel shrink degenerates) and the live scale-pair rig reading
+  **0 of 16** canvas-independent answers moved on `--mosaic --big`. **Don't re-run (1); next in rotation is (2).**
   (2) mosaic/walk-away divergence — a threshold taken from a whole-target or *peak* number that is really
   per-panel — swept 2026-10-03 (Scout); it yielded the Tonight-planner bug, **shipped v0.492.32**, and the
   engine stacking side was otherwise clean. (3) ASTAP/ffmpeg filesystem side effects — **re-swept CLEAN
