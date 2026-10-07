@@ -1,5 +1,87 @@
 # Process notes & QA sweep records
 
+## 2026-10-07 (Scout, branch `claude/funny-shannon-gz71u7`) — rotation sweep (2) mosaic/walk-away divergence (a threshold taken from a whole-target or *peak* number that is really per-panel): CLEAN, by a code-level audit of every per-panel threshold surface *and* the live `--mosaic` dogfood; issue inbox all four still owner-gated; no bug filed
+
+*(Baseline `origin/main` at `3a243fba` (`__version__` 0.492.43): **7468 passed, 4 skipped**, 13m14s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI on `main`
+green; no open PR touches this work. Docs-only run — no version bump, per the `docs:` convention.)*
+
+*(Kickoff-vs-AGENTS disagreement, same class the 2026-10-04/05/06 Scouts filed, recorded again per AGENTS.md's
+preamble: this run's harness attribution reminder asked for a `Co-Authored-By: Claude Opus 4.8` trailer and a
+`Claude-Session:` line — a model identifier, which AGENTS.md §10 forbids in commits outright, and the preamble
+makes AGENTS.md win. So the commit uses the repo's own `Co-Authored-By: Claude <noreply@anthropic.com>` and omits
+the model-named trailer.)*
+
+### The GitHub issue inbox — four open, all still owner-gated, nothing newly actionable
+
+`list_issues` returns exactly four (#1015, #903, #880, #878); no new issue, and none of the four has changed
+state since the 2026-10-05/06 triage — every issue's latest comment predates the last two Scout runs, and each
+was re-checked against the code rather than copied forward: **#878** (recurrence closed by the sibling-skip rule;
+the merge/combine tool shipped v0.482.1/.2 — closes on an owner *reading* that shows the 11 duplicate pairs gone,
+a click, not code; latest comment 2026-10-02 is observer cost data, no new ask), **#880** (both live halves
+shipped v0.483.1/.2; only the ⚪ exception-repr-stored-as-reject-reason remainder is open, filed storage-hygiene,
+deliberately not a PRIORITY 3 item), **#903** (prevention by cover semantics still open — a design decision for
+the owner; existing damage has the v0.479.3 one-off repair), **#1015** (the repo half — version on `/api/health`
+— shipped v0.488.2; left open by the owner to close on a reading that confirms the clone pin; the clone-pin and
+token-mint halves are Observer-charter changes out of this repo). Every one is blocked on the owner, none on
+code; nothing to file or close this run, and a further re-comment on an unchanged owner-gated issue would be
+noise (AGENTS.md: be frugal about GitHub replies).
+
+### The sweep — rotation slot (2), mosaic/walk-away divergence, a per-panel/peak threshold audit — CLEAN
+
+Rotation after (1) was re-swept 2026-10-06 → next is (2): *any threshold taken from a whole-target or peak number
+that is really per-panel.* (2) last ran 2026-10-03 and yielded the Tonight-planner depth-phrase bug
+(v0.492.32); this run re-audited the whole per-panel threshold family, engine→webapp→frontend, and ran it on the
+owner's mosaic shape. **CLEAN — every threshold that reads a whole-target or peak number either divides by the
+per-panel scale or is provably scale-invariant.** What was checked and why each holds:
+
+- **`nightplan` best-tonight — score, ranking and noise-cut %: provably scale-invariant, not just "untouched".**
+  The score is `sky × _depth_component(total_exposure_s)`, and `_depth_component` is
+  `clip(noise_gain_from_more_time(total)/0.15, 0, 1)` with `noise_gain = 1 − √(T/(T+h))`. Going per panel divides
+  both the captured time and the extra-hour spread by the field count F — `1 − √((T/F)/((T+h)/F))` — and **F
+  cancels exactly**, so the score, the `_depth_only_picks` tiebreak and the noise-cut % are byte-identical at any
+  canvas size. The v0.492.32 fix corrected the one surface where F does *not* cancel (the *have*-clause phrase,
+  a claim about a patch) and left the rest correctly alone; the commit's claim verified from the arithmetic, not
+  trusted.
+- **`stackhealth` noise yardstick — `crop_depth`, deliberately the median, not the peak.** `noise_yardstick_frames`
+  judges a mosaic against `crop_depth`, and `_measure_crop_depth` reads the **median** of `{stem}_framecov.fits`
+  over the same crop the ratio was measured on — explicitly *not* `coverage_max`, because "the deepest pixel
+  belongs to the deepest panel" would put the same false alarm back on a lopsided mosaic. The exact "peak vs
+  per-panel" trap this sweep hunts, already reasoned about and avoided.
+- **Readiness / goal verdict (`frontend/src/readiness.ts`) — goal scaled up by `cleanFieldFulls`** (per-type
+  default × field-fulls), with a user-set goal left untouched by design. `thinStack.ts`, `grainProjection.ts`,
+  `integrationTrend.ts` and `nextBestMove.ts`'s short-integration rung all divide the run's own total by its
+  per-run `field_fulls` (`perPixel`) before judging depth; `mosaicEffort.ts` multiplies by the *panel count* (not
+  field-fulls) for the time-to-shoot question, which is the correct different denominator and says so.
+- **Auto-stack walk-away gate (`webapp/pipeline._auto_stack_panel_depth`)** applies a per-panel floor via
+  `typical_panel_depth`/`panel_frame_counts` on top of the whole-target `auto_stack_min_frames` count, so a 3×3
+  one pass in (9 subs, 1 deep everywhere) is held rather than auto-published and auto-edited as speckle.
+- **Mosaic engine (`seestack/stack/mosaic.py`)** outlier/scale rejection is robust population median+MAD
+  consensus (a whole-set "do the frames agree on pointing/scale?" question), not the per-panel-depth class;
+  engine stacking side was swept clean 2026-10-03 and AGENTS.md bars re-sweeping `seestack/stack` absent a new
+  finding — none here.
+
+### Live confirmation — `scripts/agent-dogfood.sh --mosaic`, read on owner-shaped data — CLEAN and coherent
+
+A sweep counts only if it ran the code on the owner's shape (AGENTS.md). The `--mosaic` pass booted a real app,
+stacked the bundled 2×2 mosaic and the single field, and printed every per-panel verdict. Mosaic
+`Sample_M42_mosaic_2_2`: Auto trim **7.9 %** (< the ~15 % bar); readiness card **"goal ~7.3 h (about 4 fields of
+sky) · 4 min of ~7.3 h"** (the goal scaled by field-fulls, ~1.8 h × 4); next-best-move **"your 4 min is spread
+across about 4 fields of sky, so a typical part has 1 min so far"** (per-panel integration, the short-integration
+rung audited above); grain-uneven **"23 % has 3 subs where most has 6 … 1.4× grainier"** and seams **"the panels
+of this mosaic evened out"** both per-panel; mosaic-map **"about 30 s there against 1 min on a typical panel"**.
+Single field `Sample_Orion_Nebula_M42`: readiness **"1 min of ~2 h for this single field"** — unscaled, exactly
+as the single-field path should read. `nothing overflowing, no console errors` on both pages. So every per-panel
+threshold I audited renders the correct per-panel number on the owner's mosaic shape; the one surface that could
+have regressed (the single field) still reads the whole-target number, as it should.
+
+### Rotation state after this run
+
+(1) re-swept CLEAN 2026-10-06. **(2) re-swept CLEAN 2026-10-07 (this run).** (3) re-swept CLEAN 2026-10-04.
+(4) swept 2026-10-01. Next in rotation is **(3) ASTAP/ffmpeg filesystem side effects with a stub binary.**
+`docs/IMPROVEMENTS.md` left exactly as found (no bug to file); "Bugs (fix these first)" still holds only the
+gated LEADs and ⚪ notes. `docs/FOCUS.md` rewritten to move the front of the queue from (1)→(2) swept.
+
 ## 2026-10-06 (Scout, branch `claude/funny-shannon-ta6me4`) — rotation sweep (1) scale-dependent preview↔export parity on a mosaic canvas: CLEAN, by a code-level A2 audit *and* the live scale-pair rig (0/16 moved); issue inbox all four still owner-gated; no bug filed
 
 *(Baseline `origin/main` at `97efe8b2` (`__version__` 0.492.43): **7468 passed, 4 skipped**, 17m03s with

@@ -1,11 +1,15 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-06 (Scout — **rotation sweep (1) scale-dependent preview↔export parity on a mosaic canvas
-re-swept CLEAN**, two ways: a code-level A2 audit found every pixel-unit op parameter routing through
-`ctx.scaled_px`/`proxy_scale`, and the live scale-pair rig read **0 of 16** canvas-independent answers moved on
-`--mosaic --big` (full-size proxy_scale 2, advisories live; mosaic Auto trim 7.9 %). All four open observer issues
+*Last edited 2026-10-07 (Scout — **rotation sweep (2) mosaic/walk-away divergence re-swept CLEAN**: a threshold
+taken from a whole-target or *peak* number that is really per-panel. Audited the whole per-panel threshold family
+engine→webapp→frontend and ran it on the owner's mosaic shape — every such threshold either divides by the
+per-panel scale or is **provably scale-invariant** (the best-tonight score's F cancels in `1 − √(T/(T+h))`; the
+stackhealth yardstick's `crop_depth` is deliberately the median, not the peak). The `--mosaic` dogfood confirmed
+it live: mosaic readiness reads **"goal ~7.3 h (about 4 fields of sky)"** and next-best-move **"4 min spread
+across about 4 fields of sky, so a typical part has 1 min"** (per-panel), the single field reads **"1 min of ~2 h
+for this single field"** (unscaled), trim 7.9 %, no overflow or console errors. All four open observer issues
 (#1015, #903, #880, #878) still owner-gated — no new issue, no state change, nothing to file or close. **Bugs
-stays dry of ungated work; no bug filed; next in rotation is (2).** Baseline 7468 passed / 4 skipped, CI green.
+stays dry of ungated work; no bug filed; next in rotation is (3).** Baseline 7468 passed / 4 skipped, CI green.
 Record in `docs/PROCESS-NOTES.md`. The 2026-10-05 Builder note stands below.) (Builder 2026-10-05 — **closed observer issue #1069 in all four of its halves**: the backfill
 guard **v0.492.39**, the destructive delete it was hiding **v0.492.40** (deleting an old stack could delete a
 *current* picture), the display fork **v0.492.41**, settled with a signature that reads no files, and **v0.492.42** — the *write* side of the same sentence, found by grepping `SHIPPED.md` for what the earlier runs filed onto the entry they then cut — plus **v0.492.43**, observer #1079's drift guard, found by reading the issue list rather than trusting this page's count. The Scout's
@@ -151,14 +155,19 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
   all divergence entering at `tone.stretch`'s documented resolution dependence; the 2026-10-06 re-sweep confirmed
   it from both ends — a code-level A2 audit (every pixel-unit op param scales by `ctx.scaled_px`/`proxy_scale`,
   with documented floors/advisories where the sub-pixel shrink degenerates) and the live scale-pair rig reading
-  **0 of 16** canvas-independent answers moved on `--mosaic --big`. **Don't re-run (1); next in rotation is (2).**
+  **0 of 16** canvas-independent answers moved on `--mosaic --big`. **Don't re-run (1).**
   (2) mosaic/walk-away divergence — a threshold taken from a whole-target or *peak* number that is really
-  per-panel — swept 2026-10-03 (Scout); it yielded the Tonight-planner bug, **shipped v0.492.32**, and the
-  engine stacking side was otherwise clean. (3) ASTAP/ffmpeg filesystem side effects — **re-swept CLEAN
+  per-panel — swept 2026-10-03 (Scout, yielding the Tonight-planner bug **shipped v0.492.32**) and **re-swept
+  CLEAN 2026-10-07 (Scout)**: the whole per-panel threshold family audited engine→webapp→frontend and run on the
+  owner's mosaic shape — the best-tonight score/ranking/noise-% are provably scale-invariant (F cancels in
+  `1 − √(T/(T+h))`), the stackhealth yardstick's `crop_depth` is the median not the peak, and readiness/thin-stack/
+  grain/next-best-move/auto-stack-hold all divide by the per-panel `field_fulls`; the `--mosaic` dogfood read the
+  per-panel sentences correctly on the 2×2 (and the single field unscaled). **Don't re-run (2); next in rotation
+  is (3).** (3) ASTAP/ffmpeg filesystem side effects — **re-swept CLEAN
   2026-10-04 (Scout)**: ASTAP still copies each frame into a `TemporaryDirectory` before `-f` (no `-update`),
   `video/ffmpeg.py` only reads (output over a pipe, never an output path), and the stub-binary readonly-guard
   layers all pass. (4) the webapp routers were swept 2026-10-01. Details in `docs/PROCESS-NOTES.md`; don't
-  re-run (1), (3) or (4) before a finding says to. **The fifth question — does a measurement change when only
+  re-run (1), (2), (3) or (4) before a finding says to — next in rotation is (3). **The fifth question — does a measurement change when only
   the canvas does? — is now half swept (Builder 2026-10-04): the pure-Python half came back CLEAN** (identical
   Auto op lists and identical verdicts at full resolution and `[::2, ::2]`, every difference at the rounding
   digit), **and the rig was deliberately not landed as a test because its synthetic fixture cannot reproduce
