@@ -82,6 +82,49 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 VERIFIED (Scout 2026-10-08, observer issue [#1088](https://github.com/JimmyeJones/astrostack/issues/1088),
+  reproduced end-to-end through the real `plan_incoming_units` + `find_calibration_folders` + `incoming_lag`) —
+  the "subs waiting in incoming/" note offers a scan it can never fulfil when calibration frames sit one folder
+  deep.** *(Pillar: trust/friendliness — PRIORITY 3; size **M to fix right** — a prefix roll-up is S but wrong,
+  see below; severity **low now, latent**: not firing on the owner's library today — his `incoming/` has zero
+  nested directories and `find_calibration_folders` over it returns zero folders, so the skip set is empty and
+  inert — but the Calibration page deliberately invites the shape that trips it. Confidence: **reproduced**.)*
+  `webapp/incominglag.py::incoming_lag` excludes a calibration folder by **exact** string equality
+  (`if unit.folder in skip`), where `skip` is `webapp/routers/incominglag._calibration_folders` →
+  `seestack/calibrate/discover.find_calibration_folders`. The two sides name folders at **different granularity**:
+  the scan plans a *recursive unit* whose folder is the top-level directory (`plan_incoming_units`), while
+  discovery classifies an *individual directory* non-recursively (`discover._fits_files_in`, "directly inside
+  `folder`") and descends up to `discover.MAX_DEPTH = 2`. So declared darks in `Darks/20s/` are planned as unit
+  `Darks` (recursive file list) but discovered as `Darks/20s` — `'Darks' not in {'Darks/20s'}` → the note names
+  `Darks`, N waiting, over a **Scan incoming** button, while `_calibration_units` (header rule on the recursive
+  unit, `len(files) >= MIN_FRAMES`) skips the whole `Darks` unit so no scan will ever import it. This is exactly
+  the "under-report → never offer a scan that cannot help" promise the module's own docstring and the
+  `plan_incoming_units`/`_calibration_units` docstrings forbid ("the two sets are **identical**, a folder could
+  not fall between them" — true only when calibration frames sit *directly* in a top-level folder).
+  **Repro** (synthetic, real functions, 6 darks `IMAGETYP=DARK` + 6 lights, mtimes 3 h old): darks in `Darks 20s/`
+  (control) → discovery `Darks 20s`, plan unit `Darks 20s`, sets agree, note **silent** about darks; darks in
+  `Darks/20s/` → discovery `Darks/20s`, plan unit `Darks`, note reports `('Darks', 6)` — the bug.
+  **Two distinct causes; a prefix roll-up fixes only the first and regresses a third layout:**
+  (1) *Granularity* (the above). A roll-up — skip a planned unit when a skip folder is at-or-under it
+  (`skipfolder == unit or skipfolder.startswith(unit + os.sep)`) — fixes B/C and still passes
+  `tests/test_incoming_lag.py::test_skipping_is_exact_not_by_prefix` (`Darks 10s notes` is not under `Darks 10s/`).
+  (2) *The `MIN_FRAMES` floor applied per-directory, not per-unit.* With `Darks 20s/a` + `Darks 20s/b` holding 3
+  each, discovery offers **nothing** (neither directory reaches `MIN_FRAMES = 5`) while `_calibration_units` skips
+  the 6-file unit; the note reports it and a prefix roll-up cannot reach it — there is nothing in `skip` to roll up.
+  (3) *An over-silence regression the roll-up introduces.* Darks nested inside a **light** unit (`M 42_sub/darks/`)
+  → discovery lists `M 42_sub/darks`; the roll-up would skip the whole `M 42_sub` unit and hide genuine lag on the
+  lights, even though `_calibration_units` keeps and ingests that unit (a light at sample index 0 rules it out).
+  **Why the robust fix is Builder-sized.** The note mirrors a *unit-level, header-based* decision
+  (`_calibration_units`) with a *directory-level, floor-gated* reconstruction (`find_calibration_folders`); string
+  matching cannot make them agree. The clean fix is to have the note consult **what the scan actually skipped** —
+  the `SkippedCalibrationFolder` set `_calibration_units` already produces (`ScanResult.skipped_calibration_folders`)
+  — which needs (a) the unit folder added to `SkippedCalibrationFolder` (it carries `target_name`/`kind`/`n_files`/
+  `declared` only) and (b) that set persisted for the note the way `webapp/unreadablesubs.py` persists the
+  unreadable set, since the note may not open anything under `incoming/` (§10) and the scan is the only place the
+  header rule runs. `test_skipping_is_exact_not_by_prefix` and the "identical sets" docstrings must be revisited
+  together. Grep `SHIPPED.md` for v0.455.0 (where the "identical" claim entered) and v0.492.35 (the sibling
+  under-count fix) first. Issue left open with a verification comment.
+
 - **⚪ VERIFIED BY ARITHMETIC (Builder 2026-10-04, found while fixing v0.492.33 in the same function) — two of
   `classify_target`'s three archetypes report a `confidence` that is **mathematically pinned to exactly 1.0**
   by their own branch guards, so the number carries no information.** *(Pillar: trust — size **S to change,
@@ -265,7 +308,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 - **Minor / low-priority (traced, filed for completeness — fix only if touching these files).** *(Nine
   fixed sub-items and two closed-not-fixed notes moved out 2026-09-30 — [`SHIPPED.md`](SHIPPED.md) and
-  [`PROCESS-NOTES.md`](PROCESS-NOTES.md); the four below are what is still open.)*
+  [`PROCESS-NOTES.md`](PROCESS-NOTES.md); the five below are what is still open.)*
+  - `frontend/src/routes/Calibration.tsx:198-211` the self-hiding **"Repair them"** button's label is clipped on
+    phone width — a `--mosaic --incoming-lag --calibration` dogfood measured the label span at 70 px content in a
+    67 px box (3 px). The `<Group wrap="nowrap">` holds the repair message `<Text>` (which does not shrink) and
+    the `size="xs"` Button, so on a ~360 px viewport the message squeezes the button and `nowrap` forbids it
+    wrapping. The button only renders when a master reports fixable defects, which is why earlier `--calibration`
+    passes that did not seed that state read "nothing overflowing". Fix when touching the file: let the message
+    shrink (`style={{ minWidth: 0 }}`) and keep the button intact (`style={{ flexShrink: 0 }}`), or let the Group
+    wrap on narrow widths. (Cosmetic/friendliness — PRIORITY 3; confidence: measured by the dogfood probe.)
   - `seestack/post/skymap.py:266` the **offline** galactic-plane fallback (astropy absent) draws the Milky Way
     curve with a linear-in-sin approximation that is up to ~29° off in declination. In this deployment astropy is
     a hard dependency, so the exact `except` branch is dead code and never renders — noted only so a future
