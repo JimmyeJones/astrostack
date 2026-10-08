@@ -24,11 +24,20 @@ the same index, so the two tallies can be de-duplicated instead of added
 together (:func:`imported_by_folder`). A library with no double-registered
 folder reads not one extra row.
 
-**One definition, one voice.** Which folders a scan would ingest — and which are
-deliberately passed over — comes from
+**One definition, one voice.** Which folders a scan would ingest comes from
 :func:`seestack.io.scanner.plan_incoming_units`, which applies the *actual*
-convention rather than a second copy of its rules. So this note cannot name a
-folder the scanner skips on purpose, and cannot miss one it would take.
+convention rather than a second copy of its rules, so this note cannot miss a
+folder the scan would take or invent one it would not.
+
+**Which folders it deliberately passes over is a second question, and answering
+it from a second walk was wrong** (observer issue #1088). The calibration skip is
+decided from the frames' own headers, which the plan may not read — so this note
+asks what the scan *recorded* as skipped (:mod:`webapp.calibrationskips`),
+unioned with the Calibration page's own offer for the builds that predate the
+record. See :func:`_skip_folders`. Before that, the exclusion compared a planned
+*unit* against a *directory* walk and the two disagreed about where a folder
+begins, so a folder of darks one level down was named as waiting over a **Scan
+incoming** button that could never import it.
 
 **It offers; it never acts.** Importing is the app's own job and it retries by
 itself; the only button is the ordinary "Scan incoming", which is the same thing
@@ -55,6 +64,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from webapp import deps
+from webapp.calibrationskips import recall_calibration_skips
 from webapp.incominglag import (
     INCOMING_LAG_MAX,
     SNAPSHOT_MAX_AGE_S,
@@ -238,11 +248,43 @@ def scan_incoming_lag(
             unreadable = recall_unreadable(lib)
         except Exception:  # noqa: BLE001 — a side note must not 500 the note
             unreadable = {}
+        # Which units the last whole-library scan actually passed over as
+        # calibration data, off the same meta table — see ``_skip_folders``.
+        try:
+            scan_skipped = recall_calibration_skips(lib)
+        except Exception:  # noqa: BLE001 — a side note must not 500 the note
+            scan_skipped = set()
     finally:
         lib.close()
     return (incoming_lag(units, imported, now_epoch, unreadable=unreadable,
-                         skip_folders=_calibration_folders(request)),
+                         skip_folders=_skip_folders(request, scan_skipped)),
             polled_at)
+
+
+def _skip_folders(request: Request, scan_skipped: set[str]) -> set[str]:
+    """Folders this note must not name, from the two things that know.
+
+    Both sides answer with a :attr:`~seestack.io.scanner.PlannedUnit.folder`
+    spelling, so :func:`~webapp.incominglag.incoming_lag` compares them with
+    plain equality — which is what keeps a dark folder nested inside a **light**
+    unit (``M 42_sub/darks/``) from silencing that unit's genuine lag, as a prefix
+    roll-up would.
+
+    * What the last whole-library scan **passed over** (``scan_skipped``,
+      :mod:`webapp.calibrationskips`) — authoritative, because it is the unit the
+      scan really skipped, read off the frames' own headers. Empty until a scan
+      has run on this build, which is why the second source stays.
+    * What the Calibration page's ``incoming/`` walk **offers**
+      (:func:`_calibration_folders`) — today's behaviour exactly, and right
+      whenever the frames sit directly in a top-level folder, which is the shape
+      the page's own build form asks for.
+
+    The union, because each is sound on its own: a folder either side names is
+    one no scan will import. Neither can over-silence a folder of real subs —
+    the first is a verdict the scan reached from the frames, the second a verdict
+    ``discover`` reached from the frames.
+    """
+    return _calibration_folders(request) | scan_skipped
 
 
 def _calibration_folders(request: Request) -> set[str]:
@@ -257,10 +299,21 @@ def _calibration_folders(request: Request) -> set[str]:
 
     Read off the walk :func:`webapp.calibration.cached_incoming_folders` already
     keeps for the Calibration page's offer, so nothing extra is opened under
-    ``incoming/`` and the two surfaces answer from one list. That is also *why*
-    the scanner's skip carries ``discover.MIN_FRAMES``: the set it skips and the
-    set this reads are then the same set, and a folder could not fall between
-    them. Never raises — on any failure the note simply behaves as it did before.
+    ``incoming/`` and the two surfaces answer from one list.
+
+    **One of two sources, not the whole answer** — see :func:`_skip_folders`.
+    v0.455.0 argued this *was* the whole answer, because the scanner's skip
+    carries ``discover.MIN_FRAMES`` and so "a folder could not fall between
+    them". That holds only while the calibration frames sit **directly** in a
+    top-level folder: the scan plans a *recursive unit* (``Darks``) where this
+    walk names an *individual directory* (``Darks/20s``), and the Calibration
+    page's own ``discover.MAX_DEPTH = 2`` invites that nesting — so the note
+    offered a scan it could never fulfil (observer issue #1088). What the scan
+    actually skipped now travels from the scan itself
+    (:mod:`webapp.calibrationskips`); this stays because it is right for the flat
+    shape and answers on a build that has not scanned yet.
+
+    Never raises — on any failure the note simply behaves as it did before.
     """
     from webapp import calibration
 

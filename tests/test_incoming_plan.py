@@ -9,6 +9,7 @@ here is the one that runs both over the same tree and compares.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -189,3 +190,44 @@ def test_the_plan_still_offers_a_calibration_folder_the_scan_skips(
     assert [t.target_name for t in result.targets] == ["M 42"]
     assert [s.target_name for s in result.skipped_calibration_folders] \
         == ["Darks 10s"]
+
+
+def test_every_skipped_calibration_unit_is_a_folder_the_plan_names(
+    tmp_path: Path,
+) -> None:
+    """The invariant the "subs waiting in incoming/" note's exclusion rests on,
+    stated rather than hoped for: a calibration skip is recorded against the
+    **unit** folder, which is a folder the plan names, so plain equality is
+    enough and no prefix roll-up is needed.
+
+    Observer issue #1088 is what happens without it. The note excluded folders
+    by comparing a planned unit against the Calibration page's *directory* walk
+    (``discover.find_calibration_folders``), and the two name different things —
+    ``Darks`` against ``Darks/20s`` — so a nested calibration folder was named as
+    waiting over a **Scan incoming** button that could never import it. Every
+    nesting shape at once here: directly in a top-level folder, one level down,
+    split across two half-full directories, and inside a device container.
+    """
+    from webapp.sample_data import write_sample_calibration_frames
+
+    incoming = tmp_path / "incoming"
+    write_sample_calibration_frames(incoming / "Darks 10s", "dark")
+    write_sample_calibration_frames(incoming / "Flats" / "30s", "flat")
+    for part in ("a", "b"):
+        write_sample_calibration_frames(incoming / "Bias 20s" / part, "bias", n=3)
+    _fits(incoming / "MyWorks" / "M 42_sub" / "frame_001.fit", 1)
+    write_sample_calibration_frames(incoming / "MyWorks" / "Darks 30s", "dark")
+
+    planned = {u.folder for u in plan_incoming_units(incoming, _listing(incoming))}
+
+    lib = Library.open_or_create(tmp_path / "library")
+    try:
+        result = scan_and_organize(lib, incoming, copy_to_cache=False)
+    finally:
+        lib.close()
+
+    skipped = {s.folder for s in result.skipped_calibration_folders}
+    assert skipped == {"Darks 10s", "Flats", "Bias 20s",
+                       os.path.join("MyWorks", "Darks 30s")}
+    assert skipped <= planned
+    assert [t.target_name for t in result.targets] == ["M 42"]

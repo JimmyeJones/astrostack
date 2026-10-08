@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -336,10 +336,22 @@ def plan_incoming_units(
     this function may not read — it exists to be cheap enough to run on every
     watcher poll. So a calibration folder is still planned here. Nothing
     downstream reports it: the one consumer that would,
-    :mod:`webapp.incominglag`, is handed the same folders the Calibration page's
-    build offer lists and excludes them there. That is why the scanner's skip
-    carries ``discover.MIN_FRAMES`` — it makes those two sets identical, so the
-    exclusion needs no second header read.
+    :mod:`webapp.incominglag`, is handed the folders to exclude and excludes them
+    there.
+
+    Which folders those are took two goes. v0.455.0 handed it the Calibration
+    page's own ``incoming/`` walk and argued the two sets were *identical*,
+    because the scanner's skip carries ``discover.MIN_FRAMES``. They are not: the
+    scan plans a **recursive unit** named after the top-level directory while
+    discovery classifies an **individual directory** up to ``MAX_DEPTH = 2`` deep,
+    and that floor is per-unit on one side and per-directory on the other — so
+    darks in ``Darks/20s/`` were planned as ``Darks``, matched nothing, and were
+    named as waiting over a scan that would never take them (observer issue
+    #1088). The verdict itself therefore travels from the scan, which has both the
+    unit boundaries and the headers, as :attr:`SkippedCalibrationFolder.folder`
+    (see :mod:`webapp.calibrationskips`) — and because that is spelled exactly as
+    ``folder`` is here, the exclusion stays a plain equality and needs no second
+    header read.
 
     **One deliberate approximation.** The real scan recognises a whole-device
     *container* (``incoming/MyWorks/{M 31_sub, …}``) with
@@ -955,6 +967,17 @@ class SkippedCalibrationFolder:
     kind: str          # "dark" | "flat" | "bias" — the master slot it fills
     n_files: int       # FITS files in the unit
     declared: dict[str, int]  # what the sampled frames actually said
+    #: The unit's directory relative to the scan root, ``os.sep``-joined —
+    #: deliberately the spelling :attr:`PlannedUnit.folder` uses, because one
+    #: consumer has to compare the two: the "subs waiting in ``incoming/``" note
+    #: excludes what the scan passed over and may not open anything down there to
+    #: work it out for itself (:mod:`webapp.calibrationskips`, AGENTS.md §10).
+    #: It is *not* derivable from ``target_name``, which the convention rewrites
+    #: (``<T>_mosaic_sub`` becomes ``"<T> (mosaic)"``).
+    #: ``""`` means the frames sit loose in the scan root (the ``Unsorted``
+    #: catch-all) — a real answer, which is why ``None``, not ``""``, means "this
+    #: scan did not record it". Defaulted so an older caller still constructs one.
+    folder: str | None = None
 
 
 @dataclass
@@ -1015,6 +1038,7 @@ class ScanResult:
 
 def _calibration_units(
     units: list[tuple[str, list[Path]]],
+    folder_of: Mapping[str, str] | None = None,
 ) -> tuple[list[tuple[str, list[Path]]], list[SkippedCalibrationFolder]]:
     """Split ``units`` into the ones to ingest and the ones that are calibration.
 
@@ -1033,14 +1057,25 @@ def _calibration_units(
 
     ``min_frames`` is :data:`~seestack.calibrate.discover.MIN_FRAMES`, the
     *offer's* own floor, and it is applied here deliberately even though the
-    question "is this a target?" would not need it. It is what makes the two sets
-    **identical**, and one thing downstream depends on that: the "subs waiting in
-    incoming/" note excludes the folders the Calibration page lists, and it is
-    allowed to, because it may not open anything under ``incoming/`` itself
-    (AGENTS.md §10) and so has no other way to know what the scan passed over. The
-    honest residue is a folder of one to four declared darks, which is still
-    ingested as a target — a fragment nobody shoots, and a state the note would
-    otherwise nag about for ever.
+    question "is this a target?" would not need it. The honest residue is a folder
+    of one to four declared darks, which is still ingested as a target — a
+    fragment nobody shoots, and a state the "subs waiting in incoming/" note
+    would otherwise nag about for ever.
+
+    **It does *not* make the two sets identical, and v0.455.0 claimed it did.**
+    That claim held only for frames sitting *directly* in a top-level folder, and
+    cost the note a scan it could never fulfil (observer issue #1088). The floor
+    is this rule's on the whole **unit** and discovery's on each individual
+    **directory**, and the two name folders at different depths besides, so the
+    note cannot reconstruct this verdict from a directory walk. ``folder_of``
+    maps a unit's first file's path to the unit's folder relative to the scan
+    root, which is stamped onto each skip so the note can be told what was
+    actually passed over (:attr:`SkippedCalibrationFolder.folder`,
+    :mod:`webapp.calibrationskips`). Keyed on a path rather than on list identity
+    for the reason :func:`plan_incoming_units` gives: the convention happens to
+    return the very lists it was handed, and a rule this depends on should not be
+    one an innocent refactor can break. Omitted ⇒ every skip records ``None``,
+    i.e. "this scan did not say", which reads as the pre-record behaviour.
 
     Never raises: a unit whose headers cannot be read is simply ingested exactly
     as it is today. Getting frames in is the scan's job, and a note about
@@ -1065,7 +1100,8 @@ def _calibration_units(
         kind, declared, _infos = found
         skipped.append(SkippedCalibrationFolder(
             target_name=target_name, kind=kind, n_files=len(files),
-            declared=dict(declared)))
+            declared=dict(declared),
+            folder=(folder_of or {}).get(str(files[0]))))
     return keep, skipped
 
 
@@ -1136,6 +1172,11 @@ def scan_and_organize(
     # is the scan root. Without this a bare root-level "<T>/" of real subs is
     # skipped merely because an unrelated container child happens to be "<T>_sub".
     parents: list[str] = []
+    # Each unit's directory relative to the scan root, keyed on its first file's
+    # path — the spelling ``PlannedUnit.folder`` uses, carried through the
+    # convention exactly as ``plan_incoming_units`` carries it, so a skip can be
+    # recorded against the folder the plan names. See ``_calibration_units``.
+    folder_of: dict[str, str] = {}
     for d in subdirs:
         # Whole-device drop: the Seestar share/SD card copied wholesale keeps a
         # container level (e.g. "MyWorks/") intact, so a subdir may hold no FITS
@@ -1149,6 +1190,8 @@ def scan_and_organize(
                 if child_fits:
                     subdirs_with_fits.append((child.name, child_fits))
                     parents.append(str(d))
+                    folder_of[str(child_fits[0])] = os.path.join(
+                        d.name, child.name)
             # Heal the OLD shape: before this expansion existed, a scan lumped the
             # whole container into ONE giant target named after it, mixing several
             # objects' subs with on-device outputs/videos — it keeps auto-stacking
@@ -1162,6 +1205,7 @@ def scan_and_organize(
         if fits:
             subdirs_with_fits.append((d.name, fits))
             parents.append(str(root))
+            folder_of[str(fits[0])] = d.name
     # Fold the Seestar folder convention in (raw "_sub" folders → targets;
     # skip on-device outputs and videos) before turning folders into targets.
     # The skipped bare "<T>/" folders come back with it so the scan can say what
@@ -1192,12 +1236,15 @@ def scan_and_organize(
     output_bases = _seestar_output_bases(subdirs_with_fits, parents)
     if loose:
         units.append((UNSORTED_TARGET_NAME, loose))
+        # Loose frames sit *in* the root, so the Unsorted unit's folder is the
+        # empty string — a real answer, not a missing one.
+        folder_of[str(loose[0])] = ""
 
     # A unit whose own frames all say "I am a dark" is not a target. See
     # :class:`SkippedCalibrationFolder` for why that folder is there at all — the
     # Calibration page asks for it — and :func:`_calibration_units` for the rule,
     # which is literally the one the build offer is decided by.
-    units, cal_skips = _calibration_units(units)
+    units, cal_skips = _calibration_units(units, folder_of)
     result.skipped_calibration_folders.extend(cal_skips)
     for cal in cal_skips:
         log.info(
