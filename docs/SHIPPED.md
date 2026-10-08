@@ -1,5 +1,117 @@
 # Shipped — the record
 
+## 2026-10-08 (Builder) — a note that offered a scan it could never fulfil
+
+### v0.492.44 — 🟡 BUG FIX: `SkippedCalibrationFolder.folder`, `webapp/calibrationskips.py`, `_skip_folders`
+
+**Verified against the code from observer issue
+[#1088](https://github.com/JimmyeJones/astrostack/issues/1088)**, filed by the Scout on 2026-10-08 as the one
+ungated open bug in "Bugs (fix these first)". Issue text is a lead, not a finding: both halves were re-reproduced
+here end-to-end through the real `plan_incoming_units` + `find_calibration_folders` + `incoming_lag` before a line
+was changed, and the fix the entry sketched was taken, with the cheap alternative it warned about measured rather
+than argued away.
+
+**The bug.** `webapp/incominglag.py::incoming_lag` drops a folder the scan deliberately passes over as calibration
+data — `if unit.folder in skip` — and the caller built `skip` from the Calibration page's own `incoming/` walk
+(`webapp/routers/incominglag._calibration_folders` →
+`seestack.calibrate.discover.find_calibration_folders`). v0.455.0 argued those two sets were **identical**,
+because the scanner's skip carries `discover.MIN_FRAMES`, and wrote the claim into three docstrings: "the two sets
+are identical, a folder could not fall between them". It is true only while the calibration frames sit
+**directly** in a top-level folder. Where it is false, the note names the folder, N waiting, over a **Scan
+incoming** button — and `_calibration_units` skips that whole unit, so no scan will ever import it. That is the
+one thing the module's own docstring forbids: *"a note that says 'haven't been imported yet' and offers a scan is
+promising a fix that will never arrive."*
+
+**Two independent causes, not one.**
+
+1. *Granularity.* The scan plans a **recursive unit** whose folder is the top-level directory; discovery
+   classifies an **individual directory** (`discover._fits_files_in`, "directly inside `folder`") and descends to
+   `discover.MAX_DEPTH = 2`. So declared darks in `Darks/20s/` are planned as the unit `Darks` and discovered as
+   `Darks/20s`, and `'Darks' not in {'Darks/20s'}`. The Calibration page's own `MAX_DEPTH` is what invites that
+   nesting.
+2. *The floor is applied at different levels.* `MIN_FRAMES` is this rule's floor on the whole **unit** and
+   discovery's floor on each individual **directory**. `Darks 20s/{a,b}` holding three frames each is one skipped
+   six-frame unit that discovery does not offer **at all** — there is nothing in the discovery set to match
+   against, at any looseness.
+
+Reproduced before the fix, synthetic tree, real functions, 6 darks (`IMAGETYP=DARK`) + 6 lights, mtimes 3 h old:
+darks in `Darks 20s/` (the control) → discovery `Darks 20s`, plan unit `Darks 20s`, note **silent** about darks;
+darks in `Darks/20s/` → plan unit `Darks`, note reports `('Darks', 6)`; darks in `Darks 20s/a/` → plan unit
+`Darks 20s`, note reports `('Darks 20s', 6)`. The real `scan_and_organize` over the same three trees skips the
+unit in **all three** cases (`[('Darks', 'dark', 6)]`, etc.) and ingests only `M 42`. Both halves of the
+contradiction, measured.
+
+**Severity: low and latent, said plainly.** It is not firing on the owner's library today — his `incoming/` holds
+zero nested directories and `find_calibration_folders` over it returns zero folders, so the skip set is empty and
+inert. What makes it worth fixing rather than filing is that the Calibration page deliberately asks for the shape
+that trips it.
+
+**The prefix roll-up was rejected on measurement, not taste.** Skipping a planned unit when a skip folder is
+at-or-under it (`skipfolder == unit or skipfolder.startswith(unit + os.sep)`) is the cheap repair, and the entry
+had already named two of its three problems. It fixes cause (1), cannot reach cause (2) at all, and **introduces a
+new wrong answer**: darks filed *inside* a light unit (`M 42_sub/darks/`) are discovered as `M 42_sub/darks`, so
+the roll-up would silence the whole `M 42_sub` unit — four nights of real subs that `_calibration_units` keeps and
+ingests (a light at sample index 0 rules the unit out). That is the one direction this note is designed never to
+go. It is now pinned by `test_a_light_folder_holding_nested_darks_still_reports_its_lag`, which passes **before and
+after**: a test that would have gone red on the cheap fix.
+
+**What shipped instead: the verdict travels from the scan.** `_calibration_units` is the one pass that holds both
+the unit boundaries *and* the frames' own headers, so it says what it skipped rather than leaving the note to
+reconstruct it.
+
+* `SkippedCalibrationFolder.folder` — the unit's directory relative to the scan root, `os.sep`-joined, which is
+  exactly how `PlannedUnit.folder` spells it, so the comparison needs no translation. Additive and defaulted.
+  **`None` and `""` are different answers**: `""` is the loose-root `Unsorted` unit, so `None` is what means "this
+  scan did not record it" and `folders_from_scan` drops it rather than guessing. It is *not* derivable from
+  `target_name`, which the convention rewrites (`<T>_mosaic_sub` → `"<T> (mosaic)"`).
+* A `folder_of` map in `scan_and_organize`, keyed on the unit's first file's path and carried through
+  `_apply_seestar_convention` — the same mechanism, for the same stated reason, that `plan_incoming_units` already
+  uses: the convention happens to return the very lists it was handed, and a rule this depends on should not be
+  one an innocent refactor can break. Covers all three unit shapes (root-level folder, expanded container child,
+  loose-in-the-root).
+* `webapp/calibrationskips.py` remembers one whole-library scan's answer as a single JSON value in the registry's
+  existing `library_meta` key/value table, exactly as `webapp/unreadablesubs.py` and `webapp/skipped_folders.py`
+  remember theirs. **No schema change**, and a build that predates the key never asks for it. Sorted on the way in
+  so two scans that found the same thing write the same bytes; capped at 64 folders, and the cap is noted as
+  erring in the *speaking* direction, which is the safe one for a value whose job is silencing.
+* `_skip_folders` **unions** that record with the old discovery set rather than replacing it. Each is sound alone
+  — both are verdicts reached from the frames — so the union cannot over-silence, and keeping the second source
+  means an install that has not scanned since upgrading behaves **exactly** as it does today instead of losing the
+  flat-shape exclusion it already had.
+
+**Matching stays exact**, which is the property that makes the record safe: both sources speak in `PlannedUnit.folder`
+spelling, so `test_skipping_is_exact_not_by_prefix` holds unchanged.
+
+**Why it cannot go stale into a lie.** Every whole-library scan re-reads every unit, so its answer is complete and
+replaces the last: a folder the owner drops lights into is ingested on the next scan and leaves the record then.
+In the window before that scan the note stays quiet about the folder — and it would anyway, because
+`LAG_MIN_AGE_S` gives a folder two hours of silence after its newest file stops moving, which is many watcher
+polls. Only a whole-library scan may write it; a scoped scan has looked at one folder, so its answer is not the
+whole answer and must not replace one — the same rule `_remember_unreadable_subs` follows.
+
+**The three false docstrings are corrected, not left standing.** `plan_incoming_units`, `_calibration_units` and
+`_calibration_folders` each asserted the identity; all three now say where it holds and where it does not, and
+`test_the_skip_and_the_build_offer_name_the_same_folders` is **kept** — the agreement is real on the flat tree —
+but re-scoped to say so, with the three divergent shapes as its siblings.
+
+**Tests +14 (6 record, 4 scanner, 1 plan-invariant, 3 endpoint), seven failing before** in an `origin/main`
+worktree: four `AttributeError: 'SkippedCalibrationFolder' object has no attribute 'folder'`, the plan invariant,
+and the two endpoint cases at `assert 6 == 0` — the bug itself, six darks reported as waiting. Module resolution
+was **verified** rather than assumed (`webapp`, `webapp.routers.incominglag` and `seestack.io.scanner` all printed
+paths inside the worktree), because a worktree does not isolate a module the change *adds* and the new
+`webapp/calibrationskips.py` would otherwise have been imported from the main checkout — which is why the
+fail-before is taken through the endpoint and the dataclass, never through that module. The plan-invariant test
+states the thing exact matching rests on: every folder a skip records is a folder the plan names, across all four
+nesting shapes at once.
+
+No config, schema, migration, on-disk, default, endpoint or response-shape change, and no frontend change — the
+response shape is untouched, so `IncomingLagNote.tsx` renders the corrected answer unmodified. Full suite green:
+**7,483 passed, 3 skipped** against a baseline of 7,468 passed, 4 skipped. The +15/-1 rather than the
++14/-0 the new tests account for is a **condition-dependent skip elsewhere in the suite turning into a pass** —
+this suite has many `pytest.skip()` calls inside test bodies — and it moves in the direction of more coverage,
+not less. Nothing in the diff touches the subsystem it is in, and no test was weakened, skipped or xfailed.
+
+
 ## 2026-10-05 (Builder) — a drift guard that could not fail where the writes are
 
 ### v0.492.43 — 🟡 BUG FIX + 🔵 the guard that should have caught it: `per_run_meta_prefixes`, `AUTO_EDIT_HIGHLIGHT_PREFIX`, `MIN_PER_RUN_META_SITES`

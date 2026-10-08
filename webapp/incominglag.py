@@ -174,10 +174,19 @@ def incoming_lag(
     waiting for anything and never will be — they are a master dark somebody has
     not built yet, not a night that did not land — so reporting them would turn
     this note into a permanent complaint about the folder the Calibration page
-    asked the owner to create. The caller supplies the set (it comes from the
-    same discovery the Calibration page's offer is built from), because this
-    module may not open anything under ``incoming/`` to find out for itself.
-    Omitted ⇒ nothing is skipped, i.e. the previous behaviour exactly.
+    asked the owner to create. The caller supplies the set
+    (:func:`webapp.routers.incominglag._skip_folders`, which unions what the last
+    scan recorded as skipped with what the Calibration page's own walk offers),
+    because this module may not open anything under ``incoming/`` to find out for
+    itself. Omitted ⇒ nothing is skipped, i.e. the previous behaviour exactly.
+
+    **Matched exactly, never by prefix**, and both sources spell a folder the way
+    :attr:`~seestack.io.scanner.PlannedUnit.folder` does so that they can be.
+    Rolling a skip up to the unit enclosing it looks like the cheap repair for a
+    nested calibration folder and is wrong: darks filed *inside* a light unit
+    (``M 42_sub/darks/``) would silence that unit's real lag, and it cannot reach
+    a unit the Calibration page never offered at all. Observer issue #1088 is
+    fixed by giving this the right folders, not a looser comparison.
     """
     unreadable = unreadable or {}
     skip = set(skip_folders or ())

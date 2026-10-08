@@ -193,6 +193,32 @@ def _remember_unreadable_subs(
         log.warning("could not remember this scan's unreadable files", exc_info=True)
 
 
+def _remember_calibration_skips(lib: Library, scan: ScanResult) -> None:
+    """Write down which unit folders this scan passed over as calibration data.
+
+    The Dashboard's lag note offers a **Scan incoming** button over every folder
+    it names, and a folder of declared darks is one no scan will ever take — so
+    naming it promises a fix that cannot arrive. The note has always excluded the
+    Calibration page's own ``incoming/`` walk, and that walk disagrees with the
+    scan about where a folder begins once the frames sit one directory down
+    (observer issue #1088). This scan has the unit boundaries *and* has just read
+    the headers, so this scan says. See ``webapp/calibrationskips.py``.
+
+    Best-effort by construction, exactly like :func:`_remember_unreadable_subs`: a
+    scan that ingested the owner's frames must never be reported as failed
+    because a note about it could not be written."""
+    from webapp.calibrationskips import (
+        folders_from_scan,
+        remember_calibration_skips,
+    )
+
+    try:
+        remember_calibration_skips(lib, folders_from_scan(scan))
+    except Exception:  # noqa: BLE001 — never fail a scan over a side note
+        log.warning("could not remember this scan's calibration skips",
+                    exc_info=True)
+
+
 def _remember_scan_skips(
     lib: Library, scan: ScanResult, *, single_target: bool
 ) -> None:
@@ -326,6 +352,14 @@ def _pipeline_body(
             # folder. See ``webapp/unreadablesubs.py``.
             if not single_target:
                 _remember_unreadable_subs(lib, scan, settings)
+                # …and, for the same note and the same reason, which units this
+                # scan passed over as calibration data. A folder of declared
+                # darks is waiting for nothing, and only the scan knows both
+                # where a unit begins and what its frames said — see
+                # ``webapp/calibrationskips.py``. Whole-library scans only: a
+                # scoped scan has looked at one folder, so its answer is not the
+                # whole answer and must not replace one.
+                _remember_calibration_skips(lib, scan)
             # Folders the Seestar convention passed over as "the device's own
             # finished picture" that hold files its naming can't vouch for — i.e.
             # possibly a user's own raw subs sitting in a plainly-named folder

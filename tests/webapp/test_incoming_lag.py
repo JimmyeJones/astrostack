@@ -506,3 +506,98 @@ def test_a_dedupe_that_cannot_be_completed_keeps_the_quieter_summed_tally(
     body = client.get("/api/incoming-lag").json()
     assert body["checked"] is True
     assert body["n_waiting"] == 0
+
+
+# --- A calibration folder one level deep (observer issue #1088) ---------------
+#
+# The exclusion above reads the Calibration page's own ``incoming/`` walk, and
+# v0.455.0 claimed that set was *identical* to the one the scan passes over: the
+# scanner's skip carries ``discover.MIN_FRAMES``, so "a folder could not fall
+# between them". It only ever was identical for darks sitting **directly** in a
+# top-level folder. The scan plans a recursive *unit* (``Darks``) where discovery
+# classifies an individual *directory* (``Darks/20s``) — and the Calibration
+# page's own ``MAX_DEPTH = 2`` invites exactly that nesting — so the note named
+# ``Darks`` over a **Scan incoming** button that will never import it. The scan
+# knows the unit boundaries and has just read the headers, so the scan writes
+# down what it skipped (``webapp/calibrationskips.py``) and this reads it too.
+
+
+def test_darks_one_folder_deep_are_not_reported_as_waiting(built_library, client):
+    """#1088, end to end through the real endpoint."""
+    from webapp.sample_data import write_sample_calibration_frames
+
+    write_sample_calibration_frames(
+        built_library / "incoming" / "Darks" / "20s", "dark")
+    _scan(client)
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    # The granularity the bug lives in, asserted rather than assumed: discovery
+    # names the directory one level down…
+    offer = client.get("/api/calibration/incoming").json()
+    assert [f["rel_path"] for f in offer["folders"]] == ["Darks/20s"]
+    # …while the plan this note joins against names the unit above it, so the
+    # two strings cannot match and a test that only asserted silence would pass
+    # just as well if the nesting had never been planned as a unit at all.
+    units, _ = client.app.state.watcher.incoming_units()
+    assert "Darks" in {u.folder for u in units}
+
+    body = client.get("/api/incoming-lag").json()
+    assert body["checked"] is True
+    assert body["n_waiting"] == 0
+    assert body["items"] == []
+
+
+def test_two_half_full_dark_directories_are_not_reported_as_waiting(
+        built_library, client):
+    """The second half of #1088, which no amount of string matching could fix:
+    ``MIN_FRAMES`` is the scan's floor on the whole **unit** and discovery's
+    floor on each **directory**, so three darks in each of two directories is
+    one skipped six-frame unit that the Calibration page does not offer at
+    all — there is nothing in the discovery set to match against."""
+    from seestack.calibrate.discover import MIN_FRAMES
+    from webapp.sample_data import write_sample_calibration_frames
+
+    half = MIN_FRAMES - 2
+    for part in ("a", "b"):
+        write_sample_calibration_frames(
+            built_library / "incoming" / "Darks 20s" / part, "dark", n=half)
+    _scan(client)
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    assert client.get("/api/calibration/incoming").json()["folders"] == []
+
+    body = client.get("/api/incoming-lag").json()
+    assert body["checked"] is True
+    assert body["n_waiting"] == 0
+
+
+def test_a_light_folder_holding_nested_darks_still_reports_its_lag(
+        built_library, client):
+    """Why the fix is not a prefix roll-up — which was the cheap repair and is
+    wrong in this direction.
+
+    Darks filed *inside* a light unit (``IC 360_sub/darks/``) are discovered as
+    ``IC 360_sub/darks``, and rolling a skip up to its enclosing unit would
+    silence the whole of ``IC 360_sub`` — four nights of real subs that the scan
+    does ingest. Matching stays **exact**, which is what makes the record above
+    safe: it is keyed by the unit the scan actually passed over."""
+    from tests.synth import write_seestar_fits
+    from webapp.sample_data import write_sample_calibration_frames
+
+    d = built_library / "incoming" / "IC 360_sub"
+    d.mkdir(parents=True)
+    for i in range(4):
+        write_seestar_fits(d / f"frame_{i:03d}.fit", width=48, height=32,
+                           n_stars=3, seed=300 + i)
+    n_darks = write_sample_calibration_frames(d / "darks", "dark")
+    _age_everything(built_library / "incoming", LONG_AGO_S)
+    _poll(client)
+
+    offer = client.get("/api/calibration/incoming").json()
+    assert [f["rel_path"] for f in offer["folders"]] == ["IC 360_sub/darks"]
+
+    body = client.get("/api/incoming-lag").json()
+    assert {i["folder"] for i in body["items"]} == {"IC 360_sub"}
+    assert body["n_waiting"] == 4 + n_darks

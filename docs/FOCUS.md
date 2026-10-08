@@ -1,6 +1,19 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-08 (Scout — **a new observer issue, [#1088](https://github.com/JimmyeJones/astrostack/issues/1088),
+*Last edited 2026-10-08 (Builder — **#1088 is SHIPPED as v0.492.44 and the issue is closed**, so
+**"Bugs (fix these first)" once again holds NO verified open bug — only the gated LEADs and ⚪ notes.** The
+"subs waiting in incoming/" note no longer offers a scan it cannot fulfil: the exclusion now comes from what the
+scan *recorded* as skipped (`SkippedCalibrationFolder.folder` → `webapp/calibrationskips.py`), **unioned** with
+the old `discover` walk so an install that has not scanned since upgrading is unchanged, and matching stays
+**exact**. Both of #1088's granularity mismatches were reproduced before the fix and both fail-before through the
+endpoint at `assert 6 == 0`. **The prefix roll-up the entry warned about is now a test that passes before *and*
+after** (`test_a_light_folder_holding_nested_darks_still_reports_its_lag`) — darks filed inside a *light* unit
+must not take that unit's real lag down with them. The three docstrings that asserted "the two sets are
+identical" (v0.455.0) are corrected rather than left standing. **Next run: do not re-litigate the gated
+stand-downs below; grep `SHIPPED.md` before building.** One thing worth a task of its own, filed in
+`docs/PROCESS-NOTES.md` rather than as a bug: `docs/SHIPPED.md` is at 61,998 lines against the 64,000 ceiling the
+docs-budget job enforces — **archive** the oldest entries to `docs/archive/`, never delete. The Scout's own
+2026-10-08 note stands below.) (Scout 2026-10-08 — **a new observer issue, [#1088](https://github.com/JimmyeJones/astrostack/issues/1088),
 verified and filed into "Bugs (fix these first)"** (issue left open with a verification comment; work not done). The
 "subs waiting in incoming/" note (`webapp/incominglag.py::incoming_lag`) offers a **Scan incoming** button for a
 calibration folder the scan will never import, whenever declared darks sit one directory deep (`Darks/20s/`): the
@@ -31,8 +44,16 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
 
 ## Front of the queue
 
-0. **"Bugs (fix these first)" now holds ONE verified, ungated open bug: observer issue
-   [#1088](https://github.com/JimmyeJones/astrostack/issues/1088) (Scout 2026-10-08, top of the Bugs section).**
+0. **"Bugs (fix these first)" holds NO verified, ungated open bug.** 🟡 **#1088 shipped as v0.492.44**
+   (Builder 2026-10-08) and the issue is closed; the entry is cut to [`SHIPPED.md`](SHIPPED.md). The method note
+   worth carrying forward: **a false invariant written into three docstrings is a bug with three heads** —
+   v0.455.0's "the two sets are identical, a folder could not fall between them" was in `plan_incoming_units`,
+   `_calibration_units` *and* `_calibration_folders`, plus a test pinning the agreement on the one tree where it
+   really holds; repairing the comparison and leaving the prose would have handed the next run the same wrong
+   model. And **the candidate you reject earns a test when it is the cheap one**: the prefix roll-up is now
+   `test_a_light_folder_holding_nested_darks_still_reports_its_lag`, green before and after, so the next run to
+   reach for it goes red. The Scout's filing text follows.
+   🟡 **As filed (Scout 2026-10-08), now shipped.**
    🟡 **The incoming-lag note offers a scan it can never fulfil when calibration frames sit one directory deep.**
    `webapp/incominglag.py::incoming_lag` excludes a calibration folder by **exact** equality (`if unit.folder in
    skip`), but the plan names the *recursive* unit (`Darks`) and discovery names the *non-recursive* directory
@@ -150,8 +171,13 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
    (lead filed under Infra).
 
 2. **Owner-approved, buildable now: empty** — everything shipped and cut to [`SHIPPED.md`](SHIPPED.md).
-3. **Open observer issues — FIVE open (Scout 2026-10-08), and the new one is the run's finding.** **#1088
-   appeared 2026-10-07 and is the one triaged this run**: verified against the code, reproduced end-to-end, and
+3. **Open observer issues — FOUR open (Builder 2026-10-08, after closing #1088 in the run that fixed it).**
+   **#1088 is CLOSED** — verified, reproduced, fixed as **v0.492.44** and closed with a comment naming the
+   version, all in one run (AGENTS.md: an issue whose work is done gets closed in the same run). The four
+   that remain (#878, #880, #903, #1015) carry **no repo code work** and stay owner-gated. ⚠️ A MATCHING
+   COUNT IS NOT A MATCHING SET: don't trust any count here over `list_issues`. The Scout's 2026-10-08 text
+   for #1088 follows. **#1088
+   appeared 2026-10-07 and was triaged by the Scout run before this one**: verified against the code, reproduced end-to-end, and
    filed into "Bugs (fix these first)" (item 0 above), severity low/latent, issue left open with a verification
    comment (work not done — the robust fix is Builder-sized). ⚠️ A MATCHING COUNT IS NOT A MATCHING SET: don't
    trust any count here over `list_issues`. The other **four** (#878, #880, #903, #1015) carry **no repo code

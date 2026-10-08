@@ -1,5 +1,73 @@
 # Process notes & QA sweep records
 
+## 2026-10-08 (Builder, branch `claude/jolly-bardeen-19vz82`) — #1088 drained: the note's exclusion now comes from the scan, not from a walk that cannot agree with it (v0.492.44)
+
+**Baseline.** `7468 passed, 4 skipped` (13m22s, BLAS cap + `-n 4 --dist worksteal`), green and matching the
+standing baseline exactly. One task taken: the single ungated verified bug at the top of "Bugs" (observer issue
+#1088, filed by the Scout ~15 h earlier, so outside the §11 two-hour claimed-in-spirit window). No open PRs, no
+competing branch.
+
+**What the run adds over the entry, as method notes:**
+
+**1. A false invariant written into three docstrings is a bug with three heads, and fixing one is not fixing it.**
+v0.455.0's claim — "the set [the scan] skips and the set this reads are then the same set, and a folder could not
+fall between them" — is in `plan_incoming_units`, `_calibration_units` *and*
+`routers/incominglag._calibration_folders`, plus a test
+(`test_the_skip_and_the_build_offer_name_the_same_folders`) that pins the *agreement* on the one tree where it
+really holds. A run that repairs the comparison and leaves the three prose claims standing hands the next agent
+the same wrong model. All three now say where the identity holds and where it does not; the test is **kept and
+re-scoped** rather than deleted, because what it asserts is true of the flat shape and that shape is the one the
+Calibration page's build form asks for.
+
+**2. The rejected candidate earned a test that passes before *and* after.** The prefix roll-up (skip a unit when a
+discovered folder is at-or-under it) is the obvious repair, and the entry had already spotted that it misses the
+`MIN_FRAMES`-floor variant and over-silences darks nested in a *light* unit. The second of those is the one with a
+consequence — `M 42_sub/darks/` would have taken the whole `M 42_sub` unit's genuine lag down with it — so it is
+now `test_a_light_folder_holding_nested_darks_still_reports_its_lag`, which is green on `main` and green after.
+**A guard against a fix you did not ship is worth writing when the fix you did not ship is the cheap one**: the
+next run to reach for the roll-up goes red instead of merging it.
+
+**3. `""` and `None` are different answers, and conflating them would have been a silent hole.** Darks loose in
+`incoming/` are the `Unsorted` unit, whose `PlannedUnit.folder` **is** the empty string — so there is no spare
+falsy value to mean "the scan did not record this". `SkippedCalibrationFolder.folder` is therefore
+`str | None = None`, and `folders_from_scan` drops `None` rather than treating it as the root. Had it defaulted to
+`""`, an older or incompletely-mapped record would have silenced every loose file in the drop folder.
+
+**4. The union, not the replacement.** Replacing the discovery set with the remembered one is tidier and strictly
+worse: the record is empty until a whole-library scan has run on the new build, so an in-place upgrade would
+*lose* the flat-shape exclusion it already had and start complaining about the folder the Calibration page asked
+for. Both sources are verdicts reached from the frames' own headers, so neither can over-silence a folder of real
+subs and the union is sound. `_skip_folders` is one named place that says so.
+
+**5. Fail-before through the endpoint, with module resolution printed.** Seven of the thirteen new tests fail on
+`origin/main`: four `AttributeError` on the new dataclass field, the plan invariant, and the two endpoint cases at
+**`assert 6 == 0`** — the bug itself. The 2026-10-05 trap applies (a worktree does **not** isolate a module the
+change *adds*), so `webapp/calibrationskips.py` would have been imported from the main checkout; the fail-before
+is taken through `GET /api/incoming-lag` and through the dataclass, never through that module, and `webapp`,
+`webapp.routers.incominglag` and `seestack.io.scanner` were each printed to confirm they resolved **inside** the
+worktree. One line to check, as the environment doc says.
+
+**6. Reproduce the scan side too, not just the note side.** The repro the entry carried shows the note naming
+`Darks`; what makes it a bug rather than a mismatch is that the *scan* really does pass that unit over. Both were
+run before touching anything (`scan_and_organize` over the same three trees: unit skipped in all three, only
+`M 42` ingested). A note naming a folder is only wrong if nothing will ever import it.
+
+**Suite.** `7483 passed, 3 skipped` (12m56s) against the `7468 passed, 4 skipped` baseline. The new tests
+account for **+14**; the extra pass-and-one-fewer-skip is a **condition-dependent skip elsewhere in the suite**
+(this suite has many in-body `pytest.skip()` calls) flipping to a pass between two runs of an unrelated
+subsystem. It moves toward more coverage, not less, and nothing was weakened, skipped or xfailed — but it is
+worth writing down that **this suite's skip count is not stable run to run**, so a run that reads its baseline as
+a fingerprint rather than as a floor will chase a ghost.
+
+**Severity kept where the Scout put it: low and latent.** The owner's `incoming/` holds zero nested directories
+today, so the skip set is empty and the bug is inert on his library. It is worth the work because the Calibration
+page's `MAX_DEPTH = 2` invites the shape, not because it is firing.
+
+**Left for a later run (not filed as a bug — no defect):** `docs/SHIPPED.md` is at **61,998** lines against the
+`SHIPPED_CEILING = 64_000` in `tests/test_process_docs_budget.py`. Two or three more entries of this size and the
+docs-budget job goes red; the fix is the documented one — **archive** the oldest entries whole into
+`docs/archive/`, never delete — and it is a task in its own right rather than something to bolt onto a bug fix.
+
 ## 2026-10-08 (Scout, branch `claude/funny-shannon-rijtcf`) — new observer issue #1088 verified + filed into Bugs; rotation sweep (3) ASTAP/ffmpeg filesystem side effects re-swept CLEAN; dogfood `--mosaic --incoming-lag --calibration` coherent with one minor overflow finding
 
 **Baseline.** `7468 passed, 4 skipped` (13m07s, BLAS cap + `-n 4 --dist worksteal`), green — matches the standing
