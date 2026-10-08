@@ -1,16 +1,25 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-07 (Scout — **rotation sweep (2) mosaic/walk-away divergence re-swept CLEAN**: a threshold
-taken from a whole-target or *peak* number that is really per-panel. Audited the whole per-panel threshold family
-engine→webapp→frontend and ran it on the owner's mosaic shape — every such threshold either divides by the
-per-panel scale or is **provably scale-invariant** (the best-tonight score's F cancels in `1 − √(T/(T+h))`; the
-stackhealth yardstick's `crop_depth` is deliberately the median, not the peak). The `--mosaic` dogfood confirmed
-it live: mosaic readiness reads **"goal ~7.3 h (about 4 fields of sky)"** and next-best-move **"4 min spread
-across about 4 fields of sky, so a typical part has 1 min"** (per-panel), the single field reads **"1 min of ~2 h
-for this single field"** (unscaled), trim 7.9 %, no overflow or console errors. All four open observer issues
-(#1015, #903, #880, #878) still owner-gated — no new issue, no state change, nothing to file or close. **Bugs
-stays dry of ungated work; no bug filed; next in rotation is (3).** Baseline 7468 passed / 4 skipped, CI green.
-Record in `docs/PROCESS-NOTES.md`. The 2026-10-05 Builder note stands below.) (Builder 2026-10-05 — **closed observer issue #1069 in all four of its halves**: the backfill
+*Last edited 2026-10-08 (Scout — **a new observer issue, [#1088](https://github.com/JimmyeJones/astrostack/issues/1088),
+verified and filed into "Bugs (fix these first)"** (issue left open with a verification comment; work not done). The
+"subs waiting in incoming/" note (`webapp/incominglag.py::incoming_lag`) offers a **Scan incoming** button for a
+calibration folder the scan will never import, whenever declared darks sit one directory deep (`Darks/20s/`): the
+exclusion compares the plan's *recursive* unit folder (`Darks`) against discovery's *non-recursive* directory
+(`Darks/20s`) by **exact** equality, and the two only coincide when calibration frames sit directly in a top-level
+folder — exactly the shape the Calibration page's `MAX_DEPTH = 2` nesting invites. **Reproduced end-to-end** through
+the real `plan_incoming_units` + `find_calibration_folders` + `incoming_lag`; severity **low/latent** (not firing on
+the owner's library today — zero nested directories under his `incoming/`). The naive prefix roll-up is **wrong** —
+it misses the `MIN_FRAMES`-floor variant and over-silences darks nested in a light unit — so the robust fix (consult
+what the scan *actually* skipped) is Builder-sized; full entry in the backlog. **Rotation sweep (3) ASTAP/ffmpeg
+filesystem side effects re-swept CLEAN**: ASTAP still copies each frame into a `TemporaryDirectory` before `-f` (no
+`-update`, sidecars read from the temp copy), `video/ffmpeg.py` reads with `-i` and pipes raw frames to stdout (`-`,
+never an output path), and the stub-binary readonly-guard tests (`tests/webapp/test_incoming_readonly_guard.py`) are
+green in the baseline. **Dogfood** `--mosaic --incoming-lag --calibration` otherwise coherent (incoming-lag note,
+mosaic readiness, stack-health all read sensibly); one minor finding — the self-hiding "Repair them" button's label
+clips 3 px on phone width — filed under the Bugs "Minor / low-priority" bucket (cosmetic, fix when touching the file).
+The other four open issues (#1015, #903, #880, #878) stay owner-gated — #1015's app half shipped, only the owner's
+token-mint and the Observer's own clone-pin remain. Baseline 7468 passed / 4 skipped, CI green. Record in
+`docs/PROCESS-NOTES.md`. The 2026-10-05 Builder note stands below.) (Builder 2026-10-05 — **closed observer issue #1069 in all four of its halves**: the backfill
 guard **v0.492.39**, the destructive delete it was hiding **v0.492.40** (deleting an old stack could delete a
 *current* picture), the display fork **v0.492.41**, settled with a signature that reads no files, and **v0.492.42** — the *write* side of the same sentence, found by grepping `SHIPPED.md` for what the earlier runs filed onto the entry they then cut — plus **v0.492.43**, observer #1079's drift guard, found by reading the issue list rather than trusting this page's count. The Scout's
 earlier 2026-10-05 edit stands below: all five open issues triaged, rotation sweep **(4) the webapp routers**
@@ -22,8 +31,18 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
 
 ## Front of the queue
 
-0. **"Bugs (fix these first)" holds NO verified open bug — #1069 is closed in all FOUR of its halves (Builder
-   2026-10-05) — only gated LEADs and ⚪ notes remain.**
+0. **"Bugs (fix these first)" now holds ONE verified, ungated open bug: observer issue
+   [#1088](https://github.com/JimmyeJones/astrostack/issues/1088) (Scout 2026-10-08, top of the Bugs section).**
+   🟡 **The incoming-lag note offers a scan it can never fulfil when calibration frames sit one directory deep.**
+   `webapp/incominglag.py::incoming_lag` excludes a calibration folder by **exact** equality (`if unit.folder in
+   skip`), but the plan names the *recursive* unit (`Darks`) and discovery names the *non-recursive* directory
+   (`Darks/20s`), so they only match when the frames sit directly in a top-level folder — and the Calibration
+   page's `MAX_DEPTH = 2` deliberately accepts the nested shape. Reproduced end-to-end; severity low/latent (not
+   on the owner's data today). The prefix roll-up is wrong on two counts (the `MIN_FRAMES`-floor variant, and
+   over-silencing darks nested in a light unit), so the robust fix — have the note consult the scan's actual
+   `SkippedCalibrationFolder` set — is **Builder-sized**. Full entry (repro, three layouts, fix shape) in the
+   backlog; issue left open with a verification comment. **Below this, #1069 is closed in all FOUR of its halves
+   (Builder 2026-10-05); the rest is gated LEADs and ⚪ notes.**
    🟠 **The fourth half shipped as v0.492.42** (Builder 2026-10-05), and finding it is a **method note, not a
    sweep**: the previous run filed two consequences "onto #1069's open display half", that half shipped, and the
    entry was cut to `SHIPPED.md` — so nothing in the backlog held them. **A run that ships an entry must check
@@ -45,8 +64,9 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
    endpoints' no-file-read promise and settles the fork with no migration and no schema change. Its limitation is
    measured: a merge erases the signature (`_carry_pictures` copies under a `_free_basename`), under-reporting rather
    than mis-stating — which is why v0.492.39's sibling guard, already holding the file open, keys on `NAXIS` instead.
-   **Next run: "Bugs" is dry of ungated work.** Per AGENTS.md §2 that means a dogfood pass and file what you find —
-   do not manufacture busywork, and do not re-litigate the gated stand-downs below.
+   **Next run: the one ungated verified bug is #1088 at the top of "Bugs"** (Scout 2026-10-08, Builder-sized —
+   see item 0). Below it is gated LEADs and ⚪ notes; do not manufacture busywork, and do not re-litigate the
+   gated stand-downs below.
    🔴 **The serious one on this population shipped as v0.492.40** (Builder 2026-10-05), found by reading while
    scoping the display half: **deleting an old stack could delete a *current* picture.** `delete_run_artifacts`
    unlinks a run's three path columns plus every basename-derived sibling and checked nothing about whether another
@@ -130,14 +150,14 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
    (lead filed under Infra).
 
 2. **Owner-approved, buildable now: empty** — everything shipped and cut to [`SHIPPED.md`](SHIPPED.md).
-3. **Open observer issues — FOUR open. ⚠️ A MATCHING COUNT IS NOT A MATCHING SET (Builder 2026-10-05):** the
-   Scout's line below said five triaged and `list_issues` still returns five — but **#1069 has been closed and
-   [#1079](https://github.com/JimmyeJones/astrostack/issues/1079) appeared**, created about two minutes after the
-   Scout's own commit, so for a day the page read "all triaged" over an untriaged issue. **#1079 was verified, fixed as
-   v0.492.43 and CLOSED in the same run** (the per-run meta drift guard could not fail where the writes are; one
-   prefix had already slipped past it), with a comment recording the two narrowing corrections to it. **So FOUR
-   issues are open, not five** — #878, #880, #903, #1015, none of which carries code work. The Scout's 2026-10-05
-   text stands below for those four.
+3. **Open observer issues — FIVE open (Scout 2026-10-08), and the new one is the run's finding.** **#1088
+   appeared 2026-10-07 and is the one triaged this run**: verified against the code, reproduced end-to-end, and
+   filed into "Bugs (fix these first)" (item 0 above), severity low/latent, issue left open with a verification
+   comment (work not done — the robust fix is Builder-sized). ⚠️ A MATCHING COUNT IS NOT A MATCHING SET: don't
+   trust any count here over `list_issues`. The other **four** (#878, #880, #903, #1015) carry **no repo code
+   work** and stay owner-gated — #1015's app half shipped (version now on `/api/health`, v0.479.3/.488.2) and only
+   the owner's token-mint and the Observer's own clone-pin remain (both outside this repo). The Scout's 2026-10-05
+   text for those four stands below.
    **The prior text: FIVE open, ALL now triaged (Scout 2026-10-05).** **#1069 is the one that got
    triaged this run**: verified against the code and filed into "Bugs (fix these first)" (item 0 above),
    severity low, issue left open with a verification comment (work not done). The other four were triaged
@@ -162,12 +182,14 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
   owner's mosaic shape — the best-tonight score/ranking/noise-% are provably scale-invariant (F cancels in
   `1 − √(T/(T+h))`), the stackhealth yardstick's `crop_depth` is the median not the peak, and readiness/thin-stack/
   grain/next-best-move/auto-stack-hold all divide by the per-panel `field_fulls`; the `--mosaic` dogfood read the
-  per-panel sentences correctly on the 2×2 (and the single field unscaled). **Don't re-run (2); next in rotation
-  is (3).** (3) ASTAP/ffmpeg filesystem side effects — **re-swept CLEAN
-  2026-10-04 (Scout)**: ASTAP still copies each frame into a `TemporaryDirectory` before `-f` (no `-update`),
-  `video/ffmpeg.py` only reads (output over a pipe, never an output path), and the stub-binary readonly-guard
-  layers all pass. (4) the webapp routers were swept 2026-10-01. Details in `docs/PROCESS-NOTES.md`; don't
-  re-run (1), (2), (3) or (4) before a finding says to — next in rotation is (3). **The fifth question — does a measurement change when only
+  per-panel sentences correctly on the 2×2 (and the single field unscaled). **Don't re-run (2).**
+  (3) ASTAP/ffmpeg filesystem side effects — **re-swept CLEAN 2026-10-04 and again 2026-10-08 (Scout)**: ASTAP
+  still copies each frame into a `TemporaryDirectory` before `-f` (no `-update`, sidecars read from the temp
+  copy), `video/ffmpeg.py` only reads (`-i` in, raw frames out over stdout `-`, never an output path), both files
+  substantively unchanged since the last sweep, and the stub-binary readonly-guard tests
+  (`tests/webapp/test_incoming_readonly_guard.py`) are green in the baseline. (4) the webapp routers were swept
+  2026-10-01. Details in `docs/PROCESS-NOTES.md`; don't re-run (1), (2), (3) or (4) before a finding says to —
+  **next in rotation is (4).** **The fifth question — does a measurement change when only
   the canvas does? — is now half swept (Builder 2026-10-04): the pure-Python half came back CLEAN** (identical
   Auto op lists and identical verdicts at full resolution and `[::2, ::2]`, every difference at the rounding
   digit), **and the rig was deliberately not landed as a test because its synthetic fixture cannot reproduce

@@ -1,5 +1,64 @@
 # Process notes & QA sweep records
 
+## 2026-10-08 (Scout, branch `claude/funny-shannon-rijtcf`) — new observer issue #1088 verified + filed into Bugs; rotation sweep (3) ASTAP/ffmpeg filesystem side effects re-swept CLEAN; dogfood `--mosaic --incoming-lag --calibration` coherent with one minor overflow finding
+
+**Baseline.** `7468 passed, 4 skipped` (13m07s, BLAS cap + `-n 4 --dist worksteal`), green — matches the standing
+baseline. CI green on `origin/main` at `58487a5f`.
+
+**Issue inbox.** Five open at run start (`list_issues`): #1088 (new, 2026-10-07), #1015, #903, #880, #878. **#1088
+is the one that carried work this run**; the other four are the same owner-gated set the last runs left (#1015's
+app half has shipped — `GET /api/health` now carries the running version, v0.479.3/.488.2 — leaving only the
+owner's read-only-token mint and the Observer's own clone-pin, both outside this repo; #878/#880/#903 unchanged and
+owner-gated). Read #1015's three comments to confirm the remainder is not repo code work — it is not.
+
+**#1088 — verified and reproduced, filed into "Bugs (fix these first)" (issue left open with a verification
+comment).** The observer's lead holds in full. `webapp/incominglag.py::incoming_lag` excludes a calibration folder
+by **exact** equality (`if unit.folder in skip`). `skip` comes from `discover.find_calibration_folders`, which
+classifies an *individual directory* non-recursively (`_fits_files_in`, "directly inside `folder`") and descends to
+`MAX_DEPTH = 2`; the planned unit names the *recursive* top-level folder (`plan_incoming_units`). So declared darks
+in `Darks/20s/` are planned as unit `Darks` and discovered as `Darks/20s` — the exclusion misses, the note reports
+`Darks` as waiting over a **Scan incoming** button, and `_calibration_units` skips the whole `Darks` unit so no scan
+will import it. The `plan_incoming_units`/`_calibration_units`/`incoming_lag` docstrings all assert the two sets are
+"identical" because the skip carries `MIN_FRAMES`; that is true **only** when calibration frames sit directly in a
+top-level folder. **Reproduced** with a scratch script running the real `plan_incoming_units` +
+`find_calibration_folders` + `incoming_lag` on 6 synthetic darks (`IMAGETYP=DARK`) + 6 lights: control (`Darks 20s/`)
+silent, nested (`Darks/20s/`) reports `('Darks', 6)`. **Severity low/latent** — the observer measured the owner's
+`incoming/` as having zero nested directories and `find_calibration_folders` returning zero, so it is not firing
+today; but the Calibration page's `MAX_DEPTH = 2` deliberately invites the nesting. **Why not fixed this run:** the
+naive prefix roll-up (skip a unit when a skip folder is at-or-under it) misses a second cause (the `MIN_FRAMES` floor
+applied per-directory in discovery vs per-unit in the scan — `Darks 20s/a`+`Darks 20s/b` with 3 each) and
+*regresses* a third layout (darks inside a light unit `M 42_sub/darks/` would silence genuine light lag). The robust
+fix — have the note consult what the scan *actually* skipped, i.e. the `SkippedCalibrationFolder` set
+`_calibration_units` produces, persisted the way `webapp/unreadablesubs.py` persists its set and keyed by unit
+folder (the dataclass carries no folder today) — is Builder-sized and must revisit `test_skipping_is_exact_not_by_prefix`
+and the "identical sets" docstrings together. Full entry at the top of the Bugs section.
+
+**Rotation sweep (3) — ASTAP/ffmpeg filesystem side effects, re-swept CLEAN.** `seestack/solve/astap.py` copies each
+frame into a `tempfile.TemporaryDirectory` and runs `-f <scratch>` with no `-update`; the `.wcs`/`.ini` sidecars are
+written beside the scratch copy and read before the temp dir is destroyed; the source (which under `copy_to_cache off`
+*is* the owner's raw in `incoming/`) is only ever read via `shutil.copy2`. `seestack/video/ffmpeg.py` runs
+`ffprobe` (read, capture) and the frame reader `[exe, -v error -nostdin -i <path> … -f rawvideo -pix_fmt rgb24 -]` —
+output is stdout (`-`), never a file; no `-y`, no temp, no sidecar. Both files are substantively unchanged since the
+last sweep. The stub-binary readonly-guard tests (`tests/webapp/test_incoming_readonly_guard.py`,
+`tests/test_readonly_paths_mirror.py`, `tests/test_astap.py`) are part of the green baseline. **Next in rotation: (4)
+the webapp routers.**
+
+**Dogfood `--mosaic --incoming-lag --calibration` — coherent, one minor finding.** The mosaic Target page
+(readiness, next-best-move, mosaic-map, stack-health, framing) reads per-panel and consistent on the 2×2; the
+Dashboard incoming-lag note reads "8 subs … haven't been imported yet … 11 days" with the §10 reassurance; no
+console errors; page heights in line with the standing DOGFOOD BASELINE. The one flag: `/calibration` OVERFLOW — the
+self-hiding **"Repair them"** button's label is 70 px content in a 67 px box (3 px) on phone width. Traced to
+`Calibration.tsx:198-211`: a `<Group wrap="nowrap">` holding the repair-message `<Text>` (no shrink) and the
+`size="xs"` Button, so the message squeezes the button and `nowrap` forbids wrapping. The button renders only when a
+master reports fixable defects, which is why earlier `--calibration` passes that did not seed that state read
+"nothing overflowing". Filed under the Bugs "Minor / low-priority (fix only if touching these files)" bucket
+(cosmetic/friendliness, PRIORITY 3). `HintAnchor`'s `w={320}` is the Tooltip popover width, not the trigger, so it is
+*not* the cause.
+
+**Backlog hygiene.** `docs/IMPROVEMENTS.md` grew only by the #1088 Bugs entry (marked *reproduced*/*measured*, which
+the three-file rule permits) plus the one-item overflow line in the existing Minor bucket; nothing else added.
+`docs/test_process_docs_budget.py` green against `origin/main`.
+
 ## 2026-10-07 (Scout, branch `claude/funny-shannon-gz71u7`) — rotation sweep (2) mosaic/walk-away divergence (a threshold taken from a whole-target or *peak* number that is really per-panel): CLEAN, by a code-level audit of every per-panel threshold surface *and* the live `--mosaic` dogfood; issue inbox all four still owner-gated; no bug filed
 
 *(Baseline `origin/main` at `3a243fba` (`__version__` 0.492.43): **7468 passed, 4 skipped**, 13m14s with
