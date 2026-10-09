@@ -18,8 +18,11 @@ careful to say the clock would *not* have fixed, and which is what actually publ
 subs**. **Method notes for the next run, in `docs/PROCESS-NOTES.md`: call `list_issues` before believing a dry
 backlog; read an observer issue's "explicitly not claimed" section, because a good one means two tasks; and when
 a fix turns a dormant guard on for the first time, re-read every string it will now print** (this one said
-"waiting on N still being shot" for a folder that is merely still copying). `docs/SHIPPED.md` is still the
-standing housekeeping task — 62,092 lines against the 64,000 ceiling. The 2026-10-08 note stands below.)
+"waiting on N still being shot" for a folder that is merely still copying). `docs/SHIPPED.md` **is no longer the standing
+housekeeping task — it is done**: the two 2026-09-05 bulk-move sections went whole and in order to
+`docs/archive/SHIPPED-2026-09-05-bulk-moves.md`, **62,092 → 35,051 lines**, nothing deleted, verified by
+`comm` that no line is missing. ⚠️ **So grep `docs/` rather than `docs/SHIPPED.md`** — anything older than
+v0.353.0 is in the archive now, and AGENTS.md §1's grep rule was updated to say so. The 2026-10-08 note stands below.)
 (Builder — **#1088 is SHIPPED as v0.492.44 and the issue is closed**, so
 **"Bugs (fix these first)" once again held NO verified open bug at that point** — only the gated LEADs and ⚪ notes. The — **#1088 is SHIPPED as v0.492.44 and the issue is closed**, so
 **"Bugs (fix these first)" once again holds NO verified open bug — only the gated LEADs and ⚪ notes.** The

@@ -137,7 +137,8 @@ commit.
 gated on something only the owner's data can supply, or carry a measured decision.
 **Do not blind-flip a threshold or a default on the on-by-default hot path, and do not
 re-litigate a stand-down that carries numbers.** **Grep before you build** — the backlog
-has repeatedly carried items already shipped (search `docs/SHIPPED.md` too).
+has repeatedly carried items already shipped (`grep -r <noun> docs/` — anything older than
+v0.353.0 lives in `docs/archive/`, so grepping `SHIPPED.md` alone now misses it).
 
 **New beginner features are a standing allocation, not a leftover.** On a regular
 cadence the Builder ships a feature from "Features that serve real workflows". It

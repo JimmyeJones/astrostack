@@ -56,6 +56,20 @@ a bug to someone who is shooting nothing tonight. Reworded to *"still arriving"*
 body. **Worth generalising: when a fix turns a guard on for the first time, read every string it will now
 print.**
 
+**Second task: `docs/SHIPPED.md` archived, the housekeeping two runs had written down and deferred.** It was
+at **62,092** lines against the 64,000 ceiling and **1,908** from it — about twenty merged PRs, and the
+≥500-line headroom guard trips first. The two **2026-09-05 bulk-move sections** at its foot (the 227 resolved
+"Bugs" entries and the inline `✅ SHIPPED` "Ideas" entries) are the oldest content and over 40 % of the file, so
+they went whole and in order to `docs/archive/SHIPPED-2026-09-05-bulk-moves.md`: **62,092 → 35,051**, nothing
+deleted, nothing reordered, every entry intact, the cut exactly on the two section boundaries. Verified by
+`comm` on the sorted unique lines of the before file against the two after files concatenated — **nothing is
+missing**; the +47 are the archive header and the pointer left behind.
+**One live rule changed with it**, which is the part worth copying next time a file is archived: AGENTS.md §1's
+"**Grep before you build** … (search `docs/SHIPPED.md` too)" was *made wrong* by the move, so it now says
+`grep -r <noun> docs/` and names the v0.353.0 boundary. **An archive that leaves a rule pointing at the wrong
+file has moved the problem, not solved it** — the next run greps `SHIPPED.md`, finds nothing, and builds
+something that shipped in August.
+
 **Fail-befores, four, and why two were not enough.** The change has a read half (`MAX(ingested_at)` in the
 answer) and a write half (the central stamp in `add_frame`). Reverting the read fails the two settle tests;
 reverting the write fails the two ingest tests. The settle tests write `ingested_at` by hand, so they cannot
