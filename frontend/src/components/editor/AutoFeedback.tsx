@@ -99,10 +99,21 @@ export function AutoFeedback(
         cue, scoped ? { safe: safe!, runId: runId! } : undefined, autoCrop),
     onSuccess: (data) => {
       qc.setQueryData(prefsKey, data);
-      notifications.show({
-        message: "Thanks — Auto will lean that way for you", color: "violet",
-      });
-      onRerun();
+      // A tap that cannot move this picture gets told so, instead of the thanks.
+      // The server decides it (`editor._feedback_limit_note`): when the stored
+      // taste had nowhere to go, Auto rebuilds a byte-identical recipe, so
+      // "Auto will lean that way for you" was a claim about a picture that did
+      // not change. That covers the fourth identical tap on any chip, and "Core
+      // looks flat" from the *first* tap on a picture Auto is not holding back
+      // (highlight protection starts off, so there is nothing to walk back).
+      // Nothing to re-run in that case either, so the rebuild is skipped.
+      const limit = data.limit_note ?? null;
+      notifications.show(
+        limit
+          ? { message: limit, color: "gray" }
+          : { message: "Thanks — Auto will lean that way for you", color: "violet" },
+      );
+      if (!limit) onRerun();
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });

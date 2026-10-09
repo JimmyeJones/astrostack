@@ -1,5 +1,100 @@
 # Shipped — the record
 
+## 2026-10-09 (Builder) — an Auto feedback chip that cannot move the picture now says so
+
+### v0.492.53 — 🟡 BUG FIX (PRIORITY 1, the editor): `auto_prefs._UNCHANGED_PHRASE` / `unchanged_note`, `editor._feedback_limit_note`, `AutoPreferencesOut.limit_note`
+
+Found by taking v0.492.52's method one table further. That run read `_CUE_STEP` as a **population** —
+*which parameters are reachable in both directions?* — and found `green` was not. The same question of
+the table next to it, `_PARAM_RANGE`, is *which chips can actually move this picture?* **Some of them
+cannot, and the editor thanked the owner for every one.**
+
+**The symptom.** `AutoFeedback.tsx` answers every tap with *"Thanks — Auto will lean that way for you"*
+and calls `onRerun()`, which rebuilds Auto. When the tap has nowhere to go, that is a false claim over
+a byte-identical re-render — the same sentence v0.492.50's docstring was written about, one level
+further out: there the tap was filed in a bucket nothing read, here it is filed correctly and has no
+room to act.
+
+**Two mechanisms. One of them is free to detect, and that is the one that shipped.**
+
+1. **The taste has nowhere to go.** `_clamp_step` caps an accumulated bias at `MAX_STEPS`, so the
+   **fourth** identical tap on any of the twelve chips stores nothing new; and
+   `_PARAM_MIN_STEP["highlights"] = 0` floors the one one-sided knob, so **"Core looks flat" is dead
+   from the very first tap** on any picture whose highlight protection is already off — which is every
+   picture until "Core blown out" has been tapped. Detecting this needs **no proxy and no
+   measurement**: if the *effective* biases for this archetype did not move, every other input to
+   `auto_recipe` is identical too, so the recipe it rebuilds is byte-for-byte the one on screen.
+2. **This picture has nowhere to go.** The bias moves, but `_nudge` clamps the shift away because the
+   value `auto_recipe` measured already sits at the end of that parameter's `_PARAM_RANGE`.
+   **Measured, filed as a LEAD, and deliberately not built here** — see below.
+
+**What mechanism 2 looks like, measured against `origin/main` before anything was built**, on two
+realistic synthetic scenes (300×300, a cored object on sky), comparing `presets.auto_recipe`'s output
+either side of each tap. The comparison needs stating: `Recipe.to_dict()` mints a fresh `uid` per op
+and stamps `updated_utc`, so comparing the dicts reports **every** build as different — the shape that
+actually decides what the owner sees is `(op id, enabled, params)` per op, in order.
+
+| scene | `noise_fraction` | chips that moved nothing on **5 of 5** taps | taps that moved, of 5 |
+|---|---|---|---|
+| clean deep stack | 0.000 | **Over-smoothed**, *Core looks flat* (mechanism 1) | 3 for the other ten |
+| noisy | 0.915 | **Too noisy**, **Over-sharpened** | Over-smoothed 1; Colours too strong 2 |
+
+On a clean stack — the owner's shape, thousands of subs per target — `auto_recipe` sets
+`denoise_strength = 0.0` and only overwrites it `if noise_frac > 0.0`, so **every** "Over-smoothed" tap
+is inert. On a noisy one the denoise is pinned at `presets._AUTO_DENOISE_MAX` so "Too noisy" is inert,
+Auto's sharpen already sits under the op's own `>= 0.05` gate so "Over-sharpened" is inert, and
+"Over-smoothed" moved on tap **3**, not tap 1 — the pathology `_PARAM_MIN_STEP`'s own comment was
+written for ("the walk-back would need three taps to undo one"), in the wild on a parameter it does not
+cover.
+
+**Why mechanism 2 was cut rather than shipped, with the number.** The exact predicate was *built* —
+rebuild the recipe either side of the tap, which cannot drift from `auto_recipe` and covers the op
+gates, the rounding and the post-profile `_AUTO_DENOISE_MAX` cap — and then **measured**: one
+`auto_recipe` build with a profile costs **639 ms** on a 1000×1500 proxy (`classify_target` 335 ms +
+`analyze_proxy` 300 ms), so two of them add **1.28 s to every *live* tap** on the PRIORITY-1 hot path,
+to label a minority of taps, on canvases larger than the one measured. That is the wrong trade, and the
+right home for the question is an endpoint already paying the cost rather than a second one — a design
+decision, not a patch. Both candidate homes are named in the LEAD.
+
+**What shipped, then, is the sentence for mechanism 1 — and Auto's output is unchanged, byte for byte.**
+`_PARAM_RANGE`, `_PARAM_STEP`, `MAX_STEPS` and `_PARAM_MIN_STEP` are untouched.
+
+* **`auto_prefs.unchanged_note(cue)`** composes *"That didn't change this picture — Auto is already
+  leaving the bright cores alone here."* from `_UNCHANGED_PHRASE`, one phrase per cue. It says **this
+  picture**, not *your taste*, on purpose: the tap is still recorded, and the same taste can bite on a
+  noisier target tomorrow. Claiming the taste was discarded would be the opposite lie. Whether a tap is
+  such a tap is explicitly *not* this function's question.
+* **`editor._feedback_limit_note`** is the free, exact predicate above. Gated on the request carrying a
+  run, because the sentence is about a picture — so a tap with no run context (every older frontend)
+  answers byte-for-byte as it always has.
+* **`AutoPreferencesOut.limit_note`** is one additive, nullable response field. Every read endpoint and
+  the DELETE answer exactly as before; `_auto_preferences_out` gained a pass-through argument
+  defaulting to `None`.
+* **The editor** shows it in place of the thanks, in `gray` rather than `violet`, and **skips the
+  `onRerun()`** — there is nothing to re-render, so an inert tap is now *cheaper* than it was (no Auto
+  rebuild at all) rather than more expensive.
+
+**The guard that outlives it.** `_UNCHANGED_PHRASE` is the third table in
+`tests/test_auto_feedback_cues_mirror.py` pinned against `_CUE_STEP` **from both sides**, beside
+v0.492.52's two: a cue added without a phrase would silently fall back to the claim that is wrong on
+exactly the taps the sentence exists for, and a phrase for a cue no chip can send is dead copy. The
+test also pins that every line says "this picture", so the wording cannot drift into the opposite lie.
+
+**Tests +6 (4 Python, 2 vitest), fail-before verified in place twice.** 3 webapp
+(`tests/webapp/test_editor.py`): the first-tap dead chip (`core_flat`, with `neutral` asserted to show
+nothing was stored, *and* both live controls — `core_clipped`, then `core_flat` again once a bias is in
+force); the live chip at **both** edges (`too_dark` taps 1–3 report no limit *and* move `target_bg`, tap
+4 reports one); and the no-run-context control. 1 mirror test. 2 vitest
+(`AutoFeedback.test.tsx`), spying on `notifications.show` since the shared `wrap` mounts no
+`<Notifications />`. Fail-before: with the whole fix reverted all 3 webapp tests fail and the mirror
+test cannot even import `_UNCHANGED_PHRASE`; with only the *decision* stubbed to `return None`, the two
+behaviour tests fail and the control passes — the stronger proof, since they pin the behaviour rather
+than the field's existence. The five existing `classify_target` shape-spy transcripts are
+**untouched**, which is the check that this change adds no measurement to the hot path at all.
+
+**No config, schema, migration, on-disk, default, request-shape or engine-behaviour change.** One
+additive response field.
+
 ## 2026-10-09 (Builder) — Adaptive Auto's green knob is no longer one-way
 
 ### v0.492.52 — 🟡 BUG FIX (PRIORITY 1, the editor): `auto_prefs._CUE_STEP["too_magenta"]`, `AUTO_FEEDBACK_CHIPS`, `autoFeedbackCues.cases.json`

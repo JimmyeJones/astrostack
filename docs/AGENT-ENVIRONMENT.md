@@ -211,6 +211,34 @@ the repo.
 > the app used to refuse to boot in that state; fixed in v0.414.2, so today it
 > degrades to "Frontend not built" instead. The test collision remains.)*
 >
+> **⚠️ A `_wait_job` 60 s timeout in `tests/webapp/test_pipeline.py` at `-n 8` is
+> the harness, not `main`** *(added 2026-10-09, after it hit two different tests
+> in that file on two different runs)*. The job-running tests poll with a 60 s
+> budget, and under eight-way load a scan job can miss it; the failure then reads
+> `AssertionError: job <id> did not finish in 60s` at the `_wait_job` line. **The
+> tell is that the assertion is about the job *wait* rather than about the thing
+> under test**, and it reads exactly like a red `main`, which §2 makes task #1.
+> Seen so far: `test_an_ordinary_seestar_drop_says_nothing_about_its_skips`
+> (2026-10-09, passed alone in 8.1 s) and
+> `test_the_scan_says_which_subs_it_could_not_read` (2026-10-09, passed alone in
+> 7.7 s; the whole file green in 119 s). **Re-run the single test alone before
+> believing it**, and check `main`'s own CI run as the second, independent
+> signal. `-n 4 --dist worksteal` has not hit it.
+>
+> **⚠️⚠️ And the collision runs the other way too — a `vite build` is as
+> destructive to a running *dogfood* as a dogfood is to a running `pytest`**
+> *(added 2026-10-09, after it put a phantom finding in a dogfood record)*. The
+> §5 checklist tells you to run `npx vite build` after touching `frontend/`, and
+> `emptyOutDir: true` means that build **empties `webapp/static/` while the
+> dogfood's own uvicorn is serving out of it**. The probe then reports
+> `[phone] /live: CONSOLE ERROR … 500 (Internal Server Error)` — one page, no
+> overflow, nothing else wrong — and that reads exactly like a real defect on a
+> page your diff never went near. The tell is in `$DOGFOOD/server.log`:
+> `FileNotFoundError: … webapp/static/index.html` under a plain `GET /live`,
+> i.e. the SPA fallback, not the API. **Serialise all three:** dogfood, then
+> `vite build` / `vitest`, then `pytest` — and if a probe reports a lone 500 on
+> a page you did not touch, read `server.log` before writing it down.
+>
 > **On any run making an Auto/editor claim, add `--mosaic`** *(v0.386.0)*. §1
 > judges those claims on a tiled mosaic at the owner's scale, never on the
 > 6-frame single field — and until now the tooling could not produce one, so
