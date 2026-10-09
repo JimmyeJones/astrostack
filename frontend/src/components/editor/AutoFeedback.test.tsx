@@ -1,4 +1,5 @@
 import { MantineProvider } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -46,6 +47,50 @@ describe("AutoFeedback", () => {
     await waitFor(() => expect(onRerun).toHaveBeenCalled());
     // The "why" note surfaces once the profile is non-neutral.
     await screen.findByText(/running a bit brighter/);
+  });
+
+  it("says a tap changed nothing, and does not re-run Auto, when the server says so", async () => {
+    // The server decides this (`editor._feedback_limit_note`) by rebuilding Auto's
+    // recipe either side of the tap: on a clean deep stack — the owner's own shape
+    // — Auto leaves the denoise at exactly 0, so *every* "Over-smoothed" tap is
+    // inert. Answering it with "Auto will lean that way for you" and re-rendering
+    // a byte-identical recipe is what this replaces.
+    vi.spyOn(client.api, "getRunAutoPreferences")
+      .mockResolvedValue({ biases: {}, note: null, neutral: true });
+    vi.spyOn(client.api, "sendAutoFeedback").mockResolvedValue({
+      biases: { denoise: -1 }, note: null, neutral: false,
+      limit_note: "That didn\u2019t change this picture \u2014 Auto is already smoothing as little as it will here.",
+    });
+    const shown = vi.spyOn(notifications, "show");
+    const onRerun = vi.fn();
+
+    wrap(onRerun, { safe: "M31", runId: 7 });
+    fireEvent.click(await screen.findByRole("button", { name: "Over-smoothed" }));
+
+    await waitFor(() => expect(shown).toHaveBeenCalled());
+    expect(shown.mock.calls[0][0].message)
+      .toMatch(/already smoothing as little as it will/);
+    expect(shown.mock.calls[0][0].message).not.toMatch(/lean that way/);
+    // Nothing moved, so there is nothing to re-render either.
+    expect(onRerun).not.toHaveBeenCalled();
+  });
+
+  it("still thanks the user, and re-runs Auto, when the tap did move something", async () => {
+    // The control: an absent/null `limit_note` must leave the tap's answer exactly
+    // what it has always been, so a live chip is never told it did nothing.
+    vi.spyOn(client.api, "getRunAutoPreferences")
+      .mockResolvedValue({ biases: {}, note: null, neutral: true });
+    vi.spyOn(client.api, "sendAutoFeedback").mockResolvedValue({
+      biases: { brightness: 1 }, note: null, neutral: false, limit_note: null,
+    });
+    const shown = vi.spyOn(notifications, "show");
+    const onRerun = vi.fn();
+
+    wrap(onRerun, { safe: "M31", runId: 7 });
+    fireEvent.click(await screen.findByRole("button", { name: "Too dark" }));
+
+    await waitFor(() => expect(onRerun).toHaveBeenCalled());
+    expect(shown.mock.calls[0][0].message).toMatch(/Auto will lean that way/);
   });
 
   it("scopes feedback to the run's archetype when given safe/runId", async () => {

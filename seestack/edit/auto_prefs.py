@@ -400,6 +400,57 @@ _BIAS_PHRASE: dict[tuple[str, bool], str] = {
 }
 
 
+# --- "that tap changed nothing" ---------------------------------------------
+# A tap can land somewhere it has no room to move, and in two different ways.
+# **The taste is at its limit:** the bias is already at ``MAX_STEPS`` (or at a
+# ``_PARAM_MIN_STEP`` floor), so a fourth identical tap stores nothing new.
+# **This picture is at its limit:** the bias moves, but the value Auto measured
+# for *this* image already sits at the end of its ``_PARAM_RANGE``, so ``_nudge``
+# clamps the shift away. The second one is not an edge case — it is the ordinary
+# state of a deep, clean mosaic, where ``auto_recipe`` leaves ``denoise_strength``
+# at exactly 0.0 and an "over-smoothed" tap has nothing to ease back (and the
+# mirror image on a very noisy one, where the denoise is already at
+# ``presets._AUTO_DENOISE_MAX`` and "too noisy" has nothing to add). Either way
+# the recipe Auto rebuilds is byte-for-byte the one on screen, and the editor
+# answered every tap with *"Thanks — Auto will lean that way for you"*.
+#
+# The *decision* stays with the caller. Today it answers the first mechanism,
+# which it can do for free and exactly — the biases either side of the tap are
+# equal, so every input to ``auto_recipe`` is — while the second needs the
+# picture and is filed in ``docs/IMPROVEMENTS.md`` with its measured cost. This
+# table is only the sentence the caller says when the tap is inert: one phrase
+# per cue, pinned against ``_CUE_STEP`` by
+# ``tests/test_auto_feedback_cues_mirror.py`` so a cue added without one cannot
+# silently fall back to the claim that is wrong.
+_UNCHANGED_PHRASE: dict[str, str] = {
+    "too_dark":        "Auto is already lifting this picture as far as it will go",
+    "too_bright":      "Auto is already keeping it as dark as it will go",
+    "too_soft":        "Auto is already sharpening as much as it will here",
+    "over_sharpened":  "Auto is already sharpening as little as it will here",
+    "too_noisy":       "Auto is already smoothing as much as it will here",
+    "over_smoothed":   "Auto is already smoothing as little as it will here",
+    "undersaturated":  "Auto is already boosting the colour as much as it will here",
+    "too_saturated":   "Auto is already boosting the colour as little as it will here",
+    "too_green":       "Auto is already taking out as much green as it will here",
+    "too_magenta":     "Auto is already leaving in as much green as it will here",
+    "core_clipped":    "Auto is already holding the bright cores back as much as it will",
+    "core_flat":       "Auto is already leaving the bright cores alone here",
+}
+
+
+def unchanged_note(cue: str) -> str | None:
+    """A plain-language line for a tap that leaves Auto's recipe for *this*
+    picture byte-for-byte unchanged — ``None`` for a cue this module does not
+    know. Whether a tap is such a tap is the caller's question, not this one's.
+
+    It talks about the **picture**, not about the stored taste, on purpose: the
+    tap may well have moved the bias (a profile is library-wide, and the same
+    taste can bite on a noisier target tomorrow). What it did not do is change
+    what the owner is looking at, which is the thing the old message claimed."""
+    phrase = _UNCHANGED_PHRASE.get(cue)
+    return None if phrase is None else f"That didn’t change this picture — {phrase}."
+
+
 def is_neutral(profile: dict[str, Any] | None,
                object_type: str | None = None,
                now: float | None = None) -> bool:

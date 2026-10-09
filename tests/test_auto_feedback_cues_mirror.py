@@ -35,9 +35,11 @@ from seestack.edit.auto_prefs import (
     _BIAS_PHRASE,
     _CUE_STEP,
     _PARAM_STEP,
+    _UNCHANGED_PHRASE,
     apply_profile,
     known_cues,
     record_feedback,
+    unchanged_note,
 )
 
 _FE = Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "editor"
@@ -138,3 +140,27 @@ def test_the_green_walk_back_saturates_rather_than_running_away() -> None:
     amount = apply_profile(prof, **base)["scnr_amount"]
     assert amount == pytest.approx(0.4), "±3 steps of 0.10 from Auto's own 0.7"
     assert amount >= 0.05, "a saturated walk-back must not switch the op off"
+
+
+def test_every_cue_can_say_that_it_changed_nothing() -> None:
+    """Third table, same rule as the first two. A tap can land somewhere it has
+    no room to move — the taste already at ``MAX_STEPS``, or at the
+    ``_PARAM_MIN_STEP`` floor that makes ``highlights`` one-sided — and the
+    editor then says so instead of "Thanks — Auto will lean that way for you". A
+    cue with no phrase would fall back to that claim on exactly the taps where it
+    is untrue, which is the defect the sentence exists for; so the table is
+    pinned against ``_CUE_STEP`` from both sides."""
+    assert set(_UNCHANGED_PHRASE) == set(_CUE_STEP), (
+        "`_UNCHANGED_PHRASE` and `_CUE_STEP` disagree about which cues exist: "
+        f"no phrase for {sorted(set(_CUE_STEP) - set(_UNCHANGED_PHRASE))}, "
+        f"a phrase for {sorted(set(_UNCHANGED_PHRASE) - set(_CUE_STEP))} that "
+        "no chip can send."
+    )
+    for cue in sorted(_CUE_STEP):
+        note = unchanged_note(cue)
+        assert note and note.endswith("."), f"{cue} has no finished sentence"
+        assert "this picture" in note, (
+            f"{cue}'s line must say the *picture* did not change — the stored "
+            "taste may well have, and claiming otherwise is the opposite lie."
+        )
+    assert unchanged_note("make_it_pop") is None, "an unknown cue says nothing"

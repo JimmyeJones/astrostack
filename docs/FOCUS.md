@@ -1,5 +1,42 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-09 (Builder, fifth run of the day — **the inbox was clear, there were no open PRs, and the
+bug came from asking the table NEXT TO the one that paid out last time. SHIPPED as v0.492.53.** v0.492.52 read
+`_CUE_STEP` as a population (*which parameters are reachable both ways?*); `_PARAM_RANGE`, immediately below it,
+takes a different question — *which chips can actually move this picture?* **Not all of them, on every realistic
+picture**, and `AutoFeedback.tsx` answered every tap with *"Thanks — Auto will lean that way for you"* over a
+byte-identical re-render. Two mechanisms, and **only the free one shipped**: the stored taste having nowhere to
+go (a bias at `MAX_STEPS`, so the *fourth* identical tap on any of the twelve chips; and
+`_PARAM_MIN_STEP["highlights"] = 0`, so **"Core looks flat" is dead from the FIRST tap** on any picture Auto is
+not already holding back). Equal effective biases either side of the tap ⇒ every input to `auto_recipe` is
+equal ⇒ the recipe is byte-identical, so it needs no proxy and no measurement.
+**The other mechanism is REPRODUCED, MEASURED and FILED as a LEAD, not built** — and the reason is the useful
+part. The bias moves while `_nudge`'s range clamp swallows it: on a clean deep stack (`noise_fraction` 0.000,
+the owner's own shape) `auto_recipe` leaves `denoise_strength` at exactly 0.0 and **"Over-smoothed" moved
+nothing on 5 of 5 taps**; on a noisy one, **"Too noisy"** and **"Over-sharpened"** were inert the same way and
+"Over-smoothed" needed **3 taps to undo one**. The exact predicate — rebuild `auto_recipe` either side of the
+tap — **was written, then cut on a measurement**: 639 ms per build on a 1000×1500 proxy, i.e. **1.28 s added to
+every live tap** on the PRIORITY-1 hot path to label a minority. The LEAD names the two cheaper homes, and the
+better one is better UX too: report it from `…/editor/auto` (which already pays that cost on every Auto click)
+so the chips row can **mark a dead chip before it is tapped** rather than apologise afterwards. **Read the
+LEAD before touching `_PARAM_RANGE`** — widening it changes what Auto emits for an existing saturated profile.
+**Three method notes** in [`PROCESS-NOTES.md`](PROCESS-NOTES.md): (1) *a comment that asserts a relationship
+between two tables is a claim you can check* — `auto_prefs` says its ranges are "a touch wider than
+`auto_recipe`'s own measurement clamps", and that is true of **one** of the six; (2) *build the exact check,
+then price it, and be willing to cut it* — and **an existing test that pins a call count is a performance
+guard nobody labelled as one**: the five `classify_target` shape-spy transcripts went red while the slow path
+was in and are untouched in what shipped; (3) `Recipe.to_dict()` **cannot be compared** (fresh `uid` per op,
+fresh `updated_utc`), and it fails in the direction that hides nothing — the first repro printed "MOVED" for
+all 60 taps and read as a clean bill of health.
+A **`--mosaic --editor` dogfood was CLEAN** (both passes, both editor drives, all 21 ops, trim 7.9 %, zero 500s)
+— **but it took two runs, and the first one's finding was mine**: `npx vite build` emptied `webapp/static/`
+under the dogfood's own uvicorn and the probe reported a `/live` 500 on a page this diff never touched. **New
+trap, now in [`AGENT-ENVIRONMENT.md`](AGENT-ENVIRONMENT.md): serialise dogfood → `vite build`/`vitest` →
+`pytest`, and read `$DOGFOOD/server.log` before writing down a lone 500.**
+**"Bugs (fix these first)" holds one new entry — the LEAD above, marked reproduced/measured — plus the older
+gated LEADs and ⚪ notes; do not re-litigate the numbered stand-downs.** The issue inbox was checked first
+again: **four open, all previously acted-on and owner-gated**, both of the day's observer comments opening
+"not a new report". Earlier 2026-10-09 notes stand below.)
 *Last edited 2026-10-09 (Builder, fourth run of the day — **the inbox was clear, the one actionable lead was
 claimed by an open PR, and the bug this run shipped came from reading a TABLE AS A POPULATION rather than as a
 list. SHIPPED as v0.492.52.** Adaptive Auto's `_CUE_STEP` maps eleven plain-language chips to one Auto

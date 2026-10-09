@@ -1,5 +1,94 @@
 # Process notes & QA sweep records
 
+## 2026-10-09 (Builder, branch `claude/jolly-bardeen-7zt3ew`) — ask the table *next to* the one that just paid out
+
+**Baseline.** `source scripts/agent-setup.sh` green. Full suite **`7541 passed, 4 skipped`** at `-n 8` in
+12m52s, clean first time.
+
+**But the `_wait_job` timeout the previous note described DID recur, on the verification run, and it is now a
+standing trap in [`AGENT-ENVIRONMENT.md`](AGENT-ENVIRONMENT.md).** The final suite came back
+`1 failed, 7544 passed, 4 skipped`, and the failure was
+`tests/webapp/test_pipeline.py::test_the_scan_says_which_subs_it_could_not_read` —
+`AssertionError: job … did not finish in 60s`, which **passes alone in 7.7 s** and whose whole file is green
+in 119 s. That is a *different* test from the one the previous run hit, in the same file, which is what turns
+"load-dependent, probably not worth writing down" into a trap with a name: **the tell is that the assertion is
+about the job *wait* rather than about the thing under test.** The previous note's advice to treat it as
+transient was right; its advice not to generalise was wrong, and two independent sightings is the threshold.
+
+**Start-of-run reads.** `list_issues` first again: **four open, all previously acted-on and owner-gated**. Two
+carried comments timestamped that morning (#878, #1015) and both open with *"New evidence on an existing
+finding; not a new report"* — so nothing new was owed and the inbox was not the front of the queue.
+**Zero open PRs**, so no §11 claim to dodge. "Bugs (fix these first)" held only gated LEADs and ⚪ notes.
+
+**The method, and it is a small turn of the last one.** v0.492.52 found its bug by reading `_CUE_STEP` as a
+**population** rather than a list. The turn: a table that paid out under one question has a **neighbour**, and
+the neighbour takes a *different* question. `_CUE_STEP` answered *which parameters are reachable in both
+directions?*; the table immediately below it, `_PARAM_RANGE`, answers *which chips can actually move this
+picture?* — and the answer, measured, is **not all of them**, on every realistic picture. Shipped as
+**v0.492.53**; the arithmetic and the two-scene measurement are in [`SHIPPED.md`](SHIPPED.md).
+
+**Three notes worth carrying forward.**
+
+1. **A comment that states an intent is a claim you can check.** `auto_prefs` says its ranges are "a touch
+   wider than `auto_recipe`'s own measurement clamps so a bias has a little room to move". Taken literally and
+   checked parameter by parameter against those clamps, it is true of **one** of the six (`green`, exactly ±3)
+   plus the one that is one-sided on purpose. Two have less headroom below than the vocabulary offers, and two
+   can have *none*. The comment was not wrong when it was written — `highlights`' own floor comment shows the
+   author knew this failure mode — it just was never re-checked against the four parameters it does not cover.
+   **Grep for comments that assert a relationship between two tables, and do the arithmetic.**
+2. **Build the exact check, then price it — and be willing to cut it.** The honest predicate here is
+   "rebuild `auto_recipe` either side of the tap and compare", which cannot drift from the function it is
+   about (the failure mode of three of the last five editor bugs: `classify_target`'s fourth and fifth
+   callers, the per-run `auto_crop` override). It was written, it worked, and then it was **measured**: one
+   `auto_recipe` build with a profile is **639 ms** on a 1000×1500 proxy, so the pair adds **1.28 s to every
+   live tap** on the PRIORITY-1 hot path to label a minority of them. So it came back out, and what shipped
+   is the half that is *also* exact but costs nothing — equal effective biases either side of the tap ⇒ every
+   input to `auto_recipe` is equal ⇒ the recipe is byte-identical. **The tell that the cut was right is in
+   the diff:** the five existing `classify_target` shape-spy transcripts went red when the slow path was in
+   (three classifications per POST instead of one) and are **untouched** in what shipped. Those transcripts
+   are a cost assertion nobody wrote as one — *an existing test that pins a call count is a performance
+   guard, and a run that has to "update" one should ask what it just made more expensive.*
+   The other half of the lesson: the exact version's own measurement is what makes the LEAD worth taking —
+   it names the two cheaper homes (report it from `…/editor/auto`, which already pays the cost on every Auto
+   click, so the chips can be marked *before* they are tapped; or stash the measured knobs the way
+   `edit_fit_cache` already stashes op measurements) instead of leaving the next run to rediscover the price.
+3. **`Recipe.to_dict()` cannot be compared, and it fails in the direction that hides nothing.** Every op gets
+   a fresh `uid` and the recipe a fresh `updated_utc`, so dict equality reports **every** build as different.
+   The first run of this investigation's own repro printed "MOVED" for all 60 taps and looked like a clean
+   bill of health for the chips. The comparable shape is `(op id, enabled, params)` per op, in order. Noted
+   because a future run measuring "did Auto change?" will reach for `to_dict()` first.
+
+**The `--mosaic --editor` dogfood record: CLEAN** — *"nothing overflowing, no console errors"* on **both**
+passes (field sample and mosaic sample, desktop and phone widths), **both editor drives clean across all 21
+ops** including Undo/Redo, mosaic trim **7.9 %** (unchanged from the last four runs, and well under the 15 %
+AGENTS.md calls a bug), **zero 500s in `server.log`**. Fourth consecutive clean pass on that pair — and, for
+the third run in a row, **it could not have found this run's bug**: the probe photographs what a page *says*,
+and the defect was a sentence that was wrong only on the taps that did nothing. A probe that would catch this
+family has to *drive* the chips and compare the recipe before and after — which is exactly what
+`editor._feedback_limit_note` now does in production, so the cheaper guard is the regression test, not a
+bigger probe.
+
+**⚠️ And it took two dogfood runs, because the first was contaminated by my own `vite build`** — a new trap,
+now written into [`AGENT-ENVIRONMENT.md`](AGENT-ENVIRONMENT.md). The §5 checklist says to run
+`npx vite build` after touching `frontend/`; `emptyOutDir: true` means that build **empties
+`webapp/static/` while the dogfood's uvicorn is serving out of it**, and the probe duly reported
+`[phone] /live: CONSOLE ERROR … 500` — one page, nothing else wrong, on a route this diff never went near.
+`server.log` settled it in one grep: `FileNotFoundError: … webapp/static/index.html` under a plain
+`GET /live`, i.e. the SPA fallback. **The existing trap in that file is written one way round only** (never
+dogfood during `pytest`); the reverse costs a run a phantom finding, and the general rule is that the three
+things that touch `webapp/static/` — dogfood, `vite build`, `pytest` — must be serialised in that order.
+**The habit worth keeping: a lone 500 on a page your diff cannot reach is a harness question, and
+`server.log` answers it before the backlog does.**
+
+**One thing checked and deliberately not built.** Observer #878's section 5 flags
+`webapp/skipped_folders.already_brought_in` resolving a folder's target through `make_safe_name` directly
+rather than through `_allocate_safe_name`'s hash-suffix branch. The sibling,
+`library_hygiene.find_duplicate_base`, **already fixed exactly this** (by-display-name first, safe name as
+fallback — read its docstring). The remaining site is latent for the reason the observer gives and one more:
+the folders it records are *device-output* and *temp* folders, whose own names do not collide, and
+`unvouched_skipped_folders` is `[]` on his library. Left alone — it belongs to the Scout's inbox, not to a
+Builder run with a measured PRIORITY-1 editor bug in hand.
+
 ## 2026-10-09 (Builder, branch `claude/jolly-bardeen-3kwrz6`) — read a table as a population, not a list
 
 **Baseline.** `source scripts/agent-setup.sh` green. Full suite **`7518 passed, 4 skipped, 1 failed`** at

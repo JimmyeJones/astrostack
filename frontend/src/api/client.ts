@@ -2814,6 +2814,13 @@ export interface AutoPreferences {
   /** Said only when recency decay has actually eased a taste back toward the
    * measured default (`null` otherwise), so the fade is never silent. */
   fade_note?: string | null;
+  /** Said only in answer to a feedback tap that left Auto's recipe for this run
+   * **byte-for-byte unchanged** because the stored taste had nowhere to go — a
+   * bias already at its cap (so the fourth identical tap on any chip), or the
+   * one-sided "Core looks flat" on a picture Auto is not holding back. `null`
+   * whenever the tap moved something, on a tap with no run context, and on
+   * every read endpoint. */
+  limit_note?: string | null;
 }
 
 /** The measured cues Auto-process read from a run's own data to build its recipe

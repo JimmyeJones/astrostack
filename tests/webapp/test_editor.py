@@ -1302,6 +1302,82 @@ def test_auto_feedback_on_a_ragged_mosaic_actually_changes_what_auto_does(
     assert _auto_target_bg(client, safe, rid) > before
 
 
+def test_a_tap_that_cannot_move_the_taste_says_so_instead_of_thanks(
+        client, solved_library):
+    """The chip that is dead from the **first** tap, on every picture.
+
+    ``highlights`` is Adaptive Auto's one one-sided knob — highlight protection
+    starts *off*, so ``_PARAM_MIN_STEP["highlights"] = 0`` floors the bias and
+    "Core looks flat" has nothing below neutral to ask for. On any picture Auto
+    has not been told to hold back (which is every picture, until "Core blown
+    out" is tapped) the cue stores nothing, ``auto_recipe`` rebuilds a
+    byte-identical recipe, and the editor answered *"Thanks — Auto will lean that
+    way for you"* anyway.
+
+    The predicate is free and exact: the effective biases for this archetype did
+    not move, so every other input to ``auto_recipe`` is identical too."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="flat_core")
+
+    r = client.post("/api/editor/auto-preferences/feedback",
+                    json={"cue": "core_flat", "safe": safe, "run_id": rid})
+    assert r.status_code == 200, r.text
+    note = r.json()["limit_note"]
+    assert note, "a tap that changes nothing must say so"
+    assert "this picture" in note and "bright cores" in note, note
+    assert r.json()["neutral"] is True, "and nothing was stored"
+
+    # The walk-back's own cue is live, so it must *not* be told it did nothing —
+    # and once a bias exists, "Core looks flat" becomes live too.
+    up = client.post("/api/editor/auto-preferences/feedback",
+                     json={"cue": "core_clipped", "safe": safe, "run_id": rid})
+    assert up.json()["limit_note"] is None
+    back = client.post("/api/editor/auto-preferences/feedback",
+                       json={"cue": "core_flat", "safe": safe, "run_id": rid})
+    assert back.json()["limit_note"] is None, (
+        "with a bias in force the walk-back has somewhere to go"
+    )
+
+
+def test_a_tap_that_does_move_this_picture_is_not_told_it_changed_nothing(
+        client, solved_library):
+    """The control, on the same run: a live chip must stay silent about limits.
+
+    ``too_dark`` has three real steps here and the fourth tap has nowhere to go
+    (``MAX_STEPS``), so this pins both edges of the same sentence — and the taps
+    that work are the ones a false "that changed nothing" would be worst on."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="live_chip")
+
+    before = _auto_target_bg(client, safe, rid)
+    for tap in range(1, 4):
+        r = client.post("/api/editor/auto-preferences/feedback",
+                        json={"cue": "too_dark", "safe": safe, "run_id": rid})
+        assert r.status_code == 200, r.text
+        assert r.json()["limit_note"] is None, f"tap {tap} did move the picture"
+    assert _auto_target_bg(client, safe, rid) > before
+
+    fourth = client.post("/api/editor/auto-preferences/feedback",
+                         json={"cue": "too_dark", "safe": safe, "run_id": rid})
+    note = fourth.json()["limit_note"]
+    assert note and "this picture" in note, (
+        "the taste is at MAX_STEPS, so the fourth identical tap stores nothing "
+        "new and the picture cannot change"
+    )
+
+
+def test_a_feedback_tap_with_no_run_context_never_claims_a_limit(client):
+    """Without ``safe``/``run_id`` there is no picture to measure, so the answer
+    stays exactly what every older frontend gets: no limit note, whatever the
+    taste is doing. (The read endpoints never carry one either.)"""
+    for _ in range(6):
+        r = client.post("/api/editor/auto-preferences/feedback",
+                        json={"cue": "too_dark"})
+        assert r.status_code == 200
+        assert r.json()["limit_note"] is None
+    assert client.get("/api/editor/auto-preferences").json()["limit_note"] is None
+
+
 def test_auto_feedback_is_filed_on_the_whole_canvas_with_the_trim_off(
         client, solved_library, monkeypatch):
     """The control, and the same rule the recipe and the chip follow: with the

@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import math
+import time
 from pathlib import Path
 from typing import Any
 
@@ -802,6 +803,12 @@ class AutoPreferencesOut(BaseModel):
     # profile never drifts silently. ``None`` whenever nothing has faded — which is
     # every profile written before decay shipped.
     fade_note: str | None = None
+    # Said only in answer to a feedback tap that left Auto's recipe for the run
+    # **byte-for-byte unchanged** — the taste was already at its limit, or this
+    # picture's own measured value is. ``None`` on every read endpoint, on a tap
+    # with no run context, and whenever the tap did move something. See
+    # :func:`_feedback_limit_note`.
+    limit_note: str | None = None
 
 
 def _read_auto_preferences(lib) -> dict:
@@ -820,17 +827,22 @@ def _read_auto_preferences(lib) -> dict:
 
 
 def _auto_preferences_out(profile: dict,
-                          object_type: str | None = None) -> AutoPreferencesOut:
+                          object_type: str | None = None,
+                          limit_note: str | None = None) -> AutoPreferencesOut:
     """The profile as the editor needs it. With ``object_type`` (the archetype of
     the run being edited) the biases/note/neutral reflect that type's *effective*
     taste (global set + per-type override); with ``None`` they reflect the global
     set — so the library-wide GET stays a global view while the per-run feedback
-    response is scoped to the target the owner just judged."""
+    response is scoped to the target the owner just judged.
+
+    ``limit_note`` is carried straight through; only the feedback POST ever has
+    one, so every read endpoint keeps its response byte-for-byte."""
     return AutoPreferencesOut(
         biases=auto_prefs_mod.effective_biases(profile, object_type),
         note=auto_prefs_mod.describe_profile(profile, object_type),
         neutral=auto_prefs_mod.is_neutral(profile, object_type),
         fade_note=auto_prefs_mod.fade_note(profile, object_type),
+        limit_note=limit_note,
     )
 
 
@@ -868,6 +880,41 @@ def _classify_run(request: Request, safe: str, run_id: int,
         return classify_run_measured(project_dir, run, crop).get("cls")
     except Exception:  # noqa: BLE001 — classification is advisory; never sink feedback
         return None
+
+
+def _feedback_limit_note(cue: str, before: dict, after: dict,
+                         object_type: str | None) -> str | None:
+    """The plain-language line for a tap that cannot change the picture — or
+    ``None`` when it can.
+
+    The predicate is **free and exact**: if the *effective* biases for this
+    archetype did not move, every other input to ``auto_recipe`` is identical
+    too, so the recipe it rebuilds is byte-for-byte the one already on screen.
+    No proxy is read and nothing is measured.
+
+    That covers the taps whose dead end is in the **store**: ``_clamp_step`` caps
+    an accumulated bias at ``MAX_STEPS``, so the *fourth* identical tap on any of
+    the twelve chips stores nothing new; and ``_PARAM_MIN_STEP["highlights"] = 0``
+    floors the one one-sided knob, so **"Core looks flat" is dead from the very
+    first tap** on any picture whose highlight protection is already off — which
+    is every picture Auto has not been told to hold back.
+
+    It does **not** cover the second mechanism, where the bias moves but
+    ``_nudge``'s range clamp swallows the shift because the value Auto measured
+    for this picture already sits at the end of that parameter's
+    ``_PARAM_RANGE``. That one is measured and filed as a LEAD in
+    `docs/IMPROVEMENTS.md` rather than built here, because answering it needs the
+    picture: comparing the recipe either side of the tap is exact and cannot
+    drift from ``auto_recipe``, but it costs **two builds at a measured 639 ms
+    each** on a 1000x1500 proxy — 1.28 s added to every *live* tap, on the
+    PRIORITY-1 hot path, to label a minority of them. The lead names the two
+    cheaper homes; this function is deliberately the half that costs nothing.
+    """
+    now = time.time()
+    if (auto_prefs_mod.effective_biases(before, object_type, now)
+            != auto_prefs_mod.effective_biases(after, object_type, now)):
+        return None
+    return auto_prefs_mod.unchanged_note(cue)
 
 
 @router.get("/api/editor/auto-preferences", response_model=AutoPreferencesOut)
@@ -940,12 +987,22 @@ def post_auto_feedback(body: AutoFeedbackIn, request: Request) -> AutoPreference
                                     body.auto_crop)
     lib = deps.open_library(request)
     try:
+        stored = _read_auto_preferences(lib)
         updated = auto_prefs_mod.record_feedback(
-            _read_auto_preferences(lib), body.cue, object_type=object_type)
+            stored, body.cue, object_type=object_type)
         lib.set_meta(AUTO_PREFERENCES_META_KEY, json.dumps(updated))
     finally:
         lib.close()
-    return _auto_preferences_out(updated, object_type)
+    # The tap is recorded either way — a taste that cannot move *this* picture
+    # still applies to the next one. What changes is what the editor says about
+    # it, when the answer would otherwise be a claim that is not true here.
+    # Gated on the run, because the sentence is about a picture: a tap with no run
+    # context (every older frontend) answers byte-for-byte as it always has.
+    limit_note = None
+    if body.safe and body.run_id is not None:
+        limit_note = _feedback_limit_note(
+            body.cue, stored, updated, object_type)
+    return _auto_preferences_out(updated, object_type, limit_note)
 
 
 @router.delete("/api/editor/auto-preferences", response_model=AutoPreferencesOut)
