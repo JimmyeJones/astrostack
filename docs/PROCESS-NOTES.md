@@ -1,5 +1,55 @@
 # Process notes & QA sweep records
 
+## 2026-10-09 (Scout, branch `claude/funny-shannon-gmfk0d`) — rotation sweep (4) the webapp routers: one VERIFIED + REPRODUCED low/latent bug filed (the "My map" page's two picture-counts disagree); issue inbox all five acted-on; `--mosaic` dogfood CLEAN
+
+**Baseline.** `source scripts/agent-setup.sh` green; full suite `7488 passed, 4 skipped` (11m58s, BLAS cap +
+`-n 4 --dist worksteal`) — the +6 over the Builder run earlier today. CI green on `origin/main` at `4f6f7a8f`
+(v0.492.45).
+
+**Issue inbox — five open, every one already acted-on, nothing new owed.** `list_issues` returned the same five
+FOCUS.md records: #1090 (triaged *today* by the Builder — clock half shipped v0.492.45, mid-copy half filed into
+Bugs, issue left open with a comment naming both), and the four owner-gated (#1015, #903, #880, #878). The only
+fresh activity since the last run is a 2026-10-08 Observer **follow-up** on #878 — explicitly "not a new report":
+the duplication did **not** recur across an overnight ingest of 3,700 frames into 4 new single-folder targets
+(41,732 duplicate rows byte-identical for the fifth consecutive reading, no twelfth hash-suffixed target), which
+*strengthens* the shipped stance (historical residue, prevention already in). No code action owed; it stays gated
+on the owner reading that the 11 existing pairs are gone. So no issue needed a new comment this run.
+
+### Rotation sweep (4) — the webapp routers — ONE bug filed, rest CLEAN
+
+Next in AGENTS.md's rotation after (1)/(2)/(3) were swept 2026-10-06/-07/-08. Ran the live router surface on
+owner-shaped mosaic data (the `--mosaic` dogfood below). Adversarial read focused on the surfaces a many-target
+mosaic owner hits that the last two router sweeps did **not** cover (2026-10-05 was `stats.py` + `stack.py`
+file-serving; 2026-10-01 was upload/video/editor/stack layer): the cross-library aggregation routers
+`plan.py`, `sky.py`, `lifelist.py`, `wishlist.py`, `gallery.py`.
+
+- **`plan.py`** — the tonight/week planner's astronomy lives in `seestack/` (out of router scope and swept under
+  (2)); the router layer is orchestration + the `plan_week` registry cache, whose signature carries **every**
+  input that moves the answer (bucketed now, site, horizon, altitude floor, each target's acquisition tuple, the
+  frame field, catalogue size + `canvas_is_mosaic`), each line annotated with the wrong-answer it prevents. No
+  gap found.
+- **`sky.py` — the finding.** `GET /api/sky/my-map.png` and `GET /api/sky/coverage` sit on one screen and each
+  report a count of "your pictures", computed by **different** rules: the map keeps a WCS-less run (nominal-field
+  fallback) while coverage drops it (`_stack_footprint`→`None`). **Reproduced** end-to-end with a two-target
+  library (`repro_skymap_count.py`, kept in the session scratchpad): map `len(pictures)=2` vs coverage
+  `n_pictures=1`. Filed into "Bugs (fix these first)", severity low/latent (needs a displayed WCS-less run; the
+  owner's current library has none — observer #1015 measured 83/83 placeable), filed-not-fixed because the fix is
+  a wording / source-of-truth choice. Distinct from v0.492.23 (which guarded the same two functions for a corrupt
+  DB, not the count) and from #1015 (the reverse direction, UNKNOWN-crop, measured not firing).
+- **`lifelist.py` / `wishlist.py` / `gallery.py`** — read clean on the adversarial pass; the life-list tally is
+  pinned byte-identical between `/api/life-list` and `/api/life-list/counts` by an existing test, and gallery's
+  best-pictures reads swallow their own DB errors by design (noted in v0.492.23's sweep).
+
+**`--mosaic` dogfood CLEAN and coherent.** Every probed page hit routers with no failed request, no 500, no
+console error, nothing overflowing. The Target/Dashboard/Tonight paragraphs read consistently (next-best-move,
+readiness, mosaic-map, stack-health and framing-verdict all agree the 2×2 is thin at the top-right and point the
+same way; the week plan and the mosaic framing verdict agree on "needs a 3×3"). Tallest page `/life-list [Still
+to shoot]` 14,513px phone — unchanged shape, not sliced this run. The Sky page's two picture-counts **agree** on
+the bundled data (its runs carry synthetic WCS), which is exactly why the filed bug is latent, not firing on the
+fixture — a green tick with no sensitivity, so the repro script carries the proof instead.
+
+Do not re-run (4) before a finding says to; next in rotation is (1).
+
 ## 2026-10-09 (Builder, branch `claude/jolly-bardeen-kn2j5d`) — a fifth open issue this page's count did not have, and a guard that had never once fired
 
 **Baseline.** `source scripts/agent-setup.sh` green; full suite `7482 passed, 4 skipped` (11m48s, BLAS cap +
