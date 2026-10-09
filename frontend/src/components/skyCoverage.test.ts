@@ -38,31 +38,43 @@ describe("formatSkyArea", () => {
 describe("describeSkyCoverage", () => {
   it("anchors the area in the one patch of sky a beginner can picture", () => {
     const s = describeSkyCoverage(18.4, 18.4 / 41252.96, 12);
-    expect(s).toContain("12 pictures");
-    expect(s).toContain("18.4 square degrees");
+    expect(s).toContain("18.4 square degrees of sky");
     expect(s).toContain(`${Math.round(18.4 / FULL_MOON_DEG2)} full Moons`);
     expect(s).toContain("0.045% of the whole sky");
   });
 
-  // This test's name was already right and its assertion was not: it pinned
-  // "Your 1 picture cover" — the subject and the verb disagreeing — which is
-  // what a beginner reads on the Dashboard the day they make their first
-  // picture, i.e. the single most-seen state of this sentence.
-  it("reads naturally on a first picture", () => {
-    const s = describeSkyCoverage(1.3, 1.3 / 41252.96, 1);
-    expect(s).toContain("Your picture covers 1.3 square degrees");
-    expect(s).not.toContain("picture cover ");
-    expect(s).toContain("full Moons");
+  // The bug: this line sat directly under a map whose baked subtitle counts
+  // "your pictures" by a *different* rule — it keeps a picture with no usable
+  // WCS, which the area measurement drops rather than invent the sky it covers
+  // — so one screen showed two counts of one thing, disagreeing. The count
+  // belongs to the map, where a reader can check it by looking; this sentence is
+  // about area and now says only that.
+  it("makes no claim about how many pictures there are", () => {
+    const s = describeSkyCoverage(18.4, 18.4 / 41252.96, 12);
+    expect(s).not.toContain("12");
+    expect(s).not.toContain("pictures cover");
+    expect(s).toContain("You've photographed 18.4 square degrees of sky");
   });
 
-  it("keeps the count and the plural verb once there is more than one", () => {
-    const s = describeSkyCoverage(18.4, 18.4 / 41252.96, 12);
-    expect(s).toContain("Your 12 pictures cover 18.4 square degrees");
+  // The most-seen state of this sentence: the Dashboard on the day a beginner
+  // makes their first picture. It used to need a singular subject and verb of
+  // its own ("Your picture covers"); with no count to agree with, one phrasing
+  // is right for every library — and "your picture" cannot contradict a map
+  // that says it drew four.
+  it("reads naturally on a first picture", () => {
+    const s = describeSkyCoverage(1.3, 1.3 / 41252.96, 1);
+    expect(s).toBe(
+      "You've photographed 1.3 square degrees of sky — about 6 full Moons' "
+      + "worth, and 0.003% of the whole sky.");
+    // No count, so nothing has to agree with one: not "Your picture covers",
+    // not "Your 1 picture cover", and not a "1" anywhere.
+    expect(s).not.toContain("Your picture");
+    expect(s).not.toMatch(/\b1 picture\b/);
   });
 
   it("drops the plural when the whole library is about one moon", () => {
     expect(describeSkyCoverage(0.21, 0.21 / 41252.96, 1))
-      .toContain("about a full Moon's worth of sky");
+      .toContain("about a full Moon's worth, and");
   });
 
   // Overlapping pictures are counted once server-side, which makes the number
@@ -71,7 +83,8 @@ describe("describeSkyCoverage", () => {
   it("explains itself when overlapping pictures visibly changed the number", () => {
     const s = describeSkyCoverage(12.0, 12.0 / 41252.96, 5, 18.4);
     expect(s).toContain("12.0 square degrees");
-    expect(s).toContain("Where two of them overlap, that patch counts once.");
+    expect(s).toContain(
+      "Where two of your pictures overlap, that patch counts once.");
   });
 
   it("stays quiet about overlap that doesn't move the number it shows", () => {

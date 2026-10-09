@@ -1,5 +1,67 @@
 # Shipped — the record
 
+## 2026-10-09 (Builder) — "My map" stopped printing two different counts of "your pictures"
+
+### v0.492.48 — 🟡 BUG FIX (PRIORITY 3, trust / friendliness): `describeSkyCoverage`, `_my_map_pictures`, `sky_area_union_deg2`
+
+The one verified, ungated open entry in "Bugs (fix these first)", filed by the Scout's 2026-10-09 rotation sweep
+(4) of the webapp routers and **reproduced** there as map `len(pictures)=2` against coverage `n_pictures=1`.
+
+**The bug.** Two numbers on one screen, both worded as a count of "your pictures", counted by different rules:
+
+- `GET /api/sky/my-map.png` bakes `f"{len(pictures)} of your pictures …"` into the PNG from `_my_map_pictures`
+  (`webapp/routers/sky.py`), which **keeps** a run whose master carries no stored WCS — it falls back to a
+  nominal 1.3° field and appends it anyway, "so it still lands somewhere honest … rather than being dropped".
+- `GET /api/sky/coverage` beside it serves `n_pictures` from `_measure_sky_coverage` → `sky_area_union_deg2`,
+  which **drops** a WCS-less master (`seestack/skyarea.py`: no footprint, no contribution) rather than claim sky
+  the owner never pointed at.
+
+So the two disagree by exactly the number of displayed pictures that have a preview but no usable WCS. A lone
+WCS-less target is masked (`describeSkyCoverage` returns `""` at `n_pictures == 0`), but a **mix** reads
+*"Your 3 pictures cover …"* under a map captioned *"4 of your pictures"*.
+
+**Why neither count was changed — and this is the decision the entry left open.** Both rules are right for their
+own job, and all three of the entry's candidates cost something real: counting only placeable pictures in the
+subtitle makes the map contradict its own pixels (a reader can count the pictures on it); dropping WCS-less
+pictures from the map loses the "lands somewhere honest" behaviour the code comment defends; and giving the area
+a guessed field would put invented sky into the one number on the page whose whole value is that it is measured.
+
+**The fix is the third option the entry named — reword, in its strongest form: the read-out no longer claims a
+count at all.** It is the sentence about *area*, so it now says only that:
+
+> You've photographed 18.4 square degrees of sky — about 91 full Moons' worth, and 0.045 % of the whole sky.
+
+The count belongs to the map, which is where a reader can check it by looking, and there is now exactly one
+count of "your pictures" on the screen. Two things fall out of it: the singular special case ("Your picture
+covers …", added so the subject and verb would agree with a count of 1) is retired, because with no count there
+is one phrasing for every library — and it could not contradict a map that says it drew four; and the overlap
+clause names its subject ("Where two of **your pictures** overlap, that patch counts once") now that the
+sentence no longer opens with them. `moonPhrase` dropped its trailing "of sky", which the lead clause now
+carries.
+
+**What did not change.** `n_pictures` is still the **gate**: a library with nothing placeable prints nothing
+rather than a number nobody measured, so a fresh install and a WCS-less-only library are unaffected. The
+`/api/sky/coverage` payload keeps every field (no API change), the map's subtitle is untouched, and both
+`_my_map_pictures` and `sky_area_union_deg2` keep their rules exactly.
+
+**Tests: +1 Python; one vitest case replaced ("keeps the count and the plural verb once there is more than one"
+→ "makes no claim about how many pictures there are") and three reworded, with 5 of the file's 11 failing
+against `main`.** The replacement pins that the sentence contains no count at all (`not.toContain("12")`,
+`not.toContain("pictures cover")`, `not.toContain("Your picture")`), and the first-picture case — the
+most-seen state of this line, a beginner's Dashboard on the day they make their first picture — is pinned to the
+whole string rather than a fragment. The Python one is a
+**guard-rail that passes both ways on purpose**: on a two-target library (one WCS-ful, one WCS-less) it pins the
+map at **2 drawn** against the area's **1 measured**, and pins the WCS-less picture's width at the nominal 1.3°
+rather than a measured field — so a later run cannot "reconcile" the two counts by dropping a picture off a map
+that can still place it, or by giving its area a guess. That is the failure mode this fix exists to avoid, and
+it is not something the bug itself could have caught.
+
+**Severity, stated honestly: low and latent.** It needs a *displayed* picture whose master carries no stored WCS
+("older/edited runs"), and observer #1015 measured 83/83 of the owner's displayed runs placeable — so it is not
+firing on his library today, which is why it was this run's small second task rather than its first.
+
+No config, schema, migration, on-disk, default or API-shape change.
+
 ## 2026-10-09 (Builder) — observer #1095: a canvas is a bounding box, so its area was never the sky it covers
 
 ### v0.492.47 — 🟠 BUG FIX (PRIORITY 2–3, autonomy + trust): `field_fulls_of_sky(uncovered_frac=…)`, `_covered_share`, `target_field_fulls`, `stacking_field_fulls`, `fieldsOfSkyLabel`, `_fields_of_sky_phrase`
