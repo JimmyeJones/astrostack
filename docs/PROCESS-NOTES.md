@@ -47,9 +47,24 @@ label's floor had been justified ("only ever printed when the canvas spans more 
 and does not license *stating a count* that is wrong. Checking what the fixed number would **print**, not just
 what it would equal, is the same discipline as v0.492.45's "re-read every string a newly-live guard can print".
 
-**Dogfood.** Not run this task: nothing in it changes a page's layout or a rendered picture, and the four
-surfaces it does change are covered end-to-end through `/api/plan/tonight` (the consequence itself) plus the
-existing per-run and target-level suites. The next run that touches an Auto/editor claim still owes `--mosaic`.
+**Dogfood — `--mosaic`, CLEAN, and it is the record of both fixes in a real browser.** Run after both merges
+(never beside `pytest`, §7). Nothing overflowing, no console errors, Auto's trim on the mosaic canvas **7.9 %**
+(the bug line is ~15 %). Read as one paragraph, which is the question that block exists for:
+
+- The **single-field** sample reads as a single field — *"1 min of ~2 h **for this single field**"* — and keeps
+  the framing verdict v0.492.47 is about: *"🧩 It's bigger than one frame · Orion Nebula is bigger than your
+  frame — only about 20 % of it is in this picture. Shoot it in mosaic mode to capture all of it. · About a 3×3
+  mosaic …"*. That is consequence 1 of observer #1095 not firing.
+- The **2×2 mosaic** still counts fields, in the same words on both surfaces: *"goal ~6.9 h (**about 3 fields of
+  sky**)"* on the readiness card and *"your 4 min is spread across **about 3 fields of sky**, so a typical part
+  of this picture has 1 min so far"* on next-best-move — so the sub-1.5 phrase did not swallow a real raster,
+  and the two sentences a beginner reads together still quote one number.
+- The health block and the panel map agree with both: *"about 23 % of the picture has 3 subs on it where most of
+  it has 6, so that part looks about 1.4× grainier"* beside *"a little behind at the top-right: about 30 s there
+  against 1 min on a typical panel"*. The depth story is told once, consistently, by the panel map, the health
+  note and the goal chip.
+
+Nothing new filed from it.
 
 **Second task — the Scout's "My map" two-count bug (v0.492.48).** Taken after #1095 merged, the entry being
 ~4 h old by then (§11's two-hour claimed-in-spirit window had long passed; the run before this one had
