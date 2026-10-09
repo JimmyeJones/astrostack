@@ -49,6 +49,24 @@ end-to-end symptom (`preset_id` was `globular_cluster` off a two-pixel ring of c
 version of the claim at honest depth needs the 300×600 fixture, which is in the engine file. Duplicating that
 fixture into `tests/webapp/` to re-demonstrate at HTTP what the engine already measures would have been churn.
 
+**`--mosaic --editor` dogfood after the fix — CLEAN, and the bundled sample is blind to it.** Run after the
+commit and before the final suite (never beside `pytest`, §7). Mosaic trim **7.9 %**; the editor drive added all
+**21** ops one at a time on *both* the single field and the 2×2 mosaic with every preview re-rendering, undo and
+redo applied, no console error and no failed request; nothing overflowing at 420 px; the server-side mosaic
+paragraph still tells one story (panel map "a little behind at the top-right ~30 s", grain note "23 % of the
+picture at 3 subs where most has 6, ~1.4x grainier", seams note "the sky matches across the joins, so where it
+looks grainier that is depth, not a step").
+
+**And the honest datum about the sample: this fix changes nothing on it.** Classified both ways on the dogfood's
+own stacked 2×2 (proxy 615x907, stride 1, trim **7.4 %** of the canvas), the verdict is `cluster` /
+`globular_cluster` with `star_share 1.0, ext_frac 0.0` **before and after** — the narrowing moves `sig_frac`
+0.0291 → 0.0294 and nothing else. That is the same property the 2026-10-01 entry recorded for the stretch target
+(the sample's fringe is 3.1 % of its *finite* population, and its content is a star-only synthetic with no
+extended signal at all, so neither cue has anywhere to move). It is the third time this sample has been the
+weaker witness than a synthetic for a mechanism that is real on the owner's data, which is worth stating as a
+standing caveat rather than re-discovering: **`--mosaic` is a coherence and console check; it is not evidence
+about a cue measured on a thin fringe.**
+
 **Instruction disagreement, resolved in AGENTS.md's favour (preamble).** The harness's kickoff names a
 designated branch (`claude/jolly-bardeen-ssa1n0`) and says never to push elsewhere; AGENTS.md §8 asks for
 `agent/<topic>` from `origin/main` but explicitly allows "a harness branch … if it is based on current

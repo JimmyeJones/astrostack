@@ -81,6 +81,14 @@ Builder change. Filed as a lead rather than built.
 - **Fail-before verified** by reverting the production change in place: the wiring test and the end-to-end
   verdict test both go red, and the three controls and the premise correctly stay green.
 
+**Verified in a browser, and the sample's own answer stated plainly.** A `--mosaic --editor` dogfood after the
+commit is CLEAN (trim 7.9 %, all 21 ops re-rendering on both the single field and the 2×2, undo/redo, no console
+error, nothing overflowing at 420 px). On that run's *own* stacked 2×2, though, **this fix changes nothing**: the
+verdict is `globular_cluster` with `star_share 1.0, ext_frac 0.0` before *and* after, because the bundled sample
+is a star-only synthetic with no extended signal and a fringe that is 3.1 % of its finite population — the same
+reason the 2026-10-01 instalment found it blind to the stretch-target half. The evidence for this fix is the
+engine's ragged canvases, as the table above says; the dogfood is the coherence and console check.
+
 **Upgrade-safe (§9):** no config, schema, migration, on-disk, default or API-**shape** change. One optional
 request field on an endpoint that previously ignored its body; an older frontend sends no body and gets the
 library setting, which is `auto_crop_border = True` — i.e. the fixed behaviour. The response keys are untouched
