@@ -55,6 +55,29 @@ produce.** `_BIAS_PHRASE[("green", False)]` holds a complete, grammatical senten
 **Dead *output* vocabulary is evidence about the *input* vocabulary.** Worth grepping for elsewhere: a
 phrase/label/branch keyed on a value, where nothing can produce that value.
 
+**`--mosaic --editor` dogfood record for v0.492.52 — CLEAN, on the one thing this change could plausibly
+break.** The fix adds a **twelfth** chip to the editor's "How did Auto do? Tap what you'd change:" row, on a
+page the owner has already called "extremely busy", so the probe's layout checks are the point of the pass
+rather than a formality. Both targets: **"nothing overflowing, no console errors"** at **desktop (1440) and
+phone (420)** widths — zero `OVERFLOW`, zero `CLIPPED LABEL`, zero `SQUEEZE` findings across the whole sweep —
+and **"editor drive clean"** twice, all **21 ops** re-rendering the live preview plus Undo/Redo on the field
+sample *and* on the mosaic run. Tallest phone page unchanged (`/life-list [Still to shoot]` 14513 px); the
+mosaic Target page at 3729 px sits mid-pack, below `/tonight`'s variants. Read as one paragraph, the five
+mosaic Target-page sentences still point the same way — next-best-move and readiness both price the depth per
+panel (4 min across ~3 fields of sky, ~1 min on a typical part), the panel map names the thin top-right and
+says it evens out, and the framing verdict says more passes over the panels you have beat a wider grid until
+the depth is there. No new finding.
+
+**What this pass could NOT have caught, stated so the record is honest.** The chip row wraps (`Group` with
+`gap={4}` and no `nowrap`), so a twelfth chip was never likely to overflow — what the probe actually rules out
+is a *clipped* or *squeezed* label, which is the failure the Calibration "Repair them" note in "Bugs" was
+measured at. And the probe cannot see the bug this run fixed at all: the symptom was a cue the vocabulary had
+no reverse for, which is a missing *button*, not a broken one — a probe that photographs what is on screen
+cannot report what is absent. That is the same shape as v0.492.50's record ("a probe could not have found this
+run's bug, the symptom being a *lack* of change in a recipe"), and it is now twice in a row: **the editor's
+remaining defects are increasingly things that are not there, which only reading the code as a population
+finds.**
+
 **Collision diary.** PR #1101 merged at 18:23 UTC, mid-run, touching both of the frontend files this change
 touches. `origin/main` was merged in; one conflict (its `wrap()` signature against this run's shared-table
 import) resolved as a union, and the three-argument `sendAutoFeedback` convention it introduced adopted in the

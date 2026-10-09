@@ -14,6 +14,7 @@ eleven cues to a saturated profile — every one left the bias at `+3`. Fixed wi
 floor), plus the guard that outlives it: a shared `autoFeedbackCues.cases.json` pinning
 `AUTO_FEEDBACK_CHIPS` ↔ `_CUE_STEP` from both sides, and a test that **every parameter a cue reaches is
 reachable both ways**.
+A **`--mosaic --editor` dogfood ran after the change and was CLEAN** — *"nothing overflowing, no console errors"* at desktop and phone widths on both targets (zero overflow / clipped-label / squeeze findings), both editor drives clean across all 21 ops — **and, for the second run in a row, it could not have found this run's bug**: the symptom was a *missing* chip, and a probe that photographs what is on screen cannot report what is absent. Record in [`PROCESS-NOTES.md`](PROCESS-NOTES.md).
 **Three method notes worth carrying forward.** (1) **Read a table as a population.** A list of entries that
 are *supposed* to be symmetric is a property you can state, and a property you can state is a test — so ship
 the invariant, not just the missing row. (2) **Dead output vocabulary is evidence about the input
