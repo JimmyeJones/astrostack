@@ -1,5 +1,90 @@
 # Process notes & QA sweep records
 
+## 2026-10-09 (Builder, branch `claude/jolly-bardeen-3kwrz6`) — read a table as a population, not a list
+
+**Baseline.** `source scripts/agent-setup.sh` green. Full suite **`7518 passed, 4 skipped, 1 failed`** at
+`-n 8` in 14m33s — and the one failure was the **harness, not `main`**:
+`tests/webapp/test_pipeline.py::test_an_ordinary_seestar_drop_says_nothing_about_its_skips` timed out on
+`_wait_job`'s 60 s budget under eight-way load, and passes **alone in 8.1 s**. `main`'s own CI run for
+`ba726ad` is green, which is the second, independent check. **Worth knowing before it costs another run a
+"red `main`" detour:** the existing traps in `docs/AGENT-ENVIRONMENT.md` cover a file edited mid-suite and a
+piped exit status, but not *a job-wait timeout at high worker counts*. The tell is that the failure is a
+`_wait_job` assertion rather than an assertion about the thing under test, and the fix is to re-run that one
+test alone before believing it. `-n 4 --dist worksteal` (the previous run's recipe) did not hit it.
+
+**Start-of-run reads.** `list_issues` first, as the last four notes prescribe: **four open, all previously
+acted-on and owner-gated** — nothing new owed, so the inbox was not the front of the queue this time.
+`docs/FOCUS.md`, the Bugs section and the open-PR list next. **PR #1101 was open and 18 minutes old**, holding
+the one actionable lead in "Bugs" (the per-run border-trim switch, filed with v0.492.50) — so under §11 that
+item was claimed by a stronger claim than a backlog line and this run took something else.
+
+**What the queue looked like, and the five dead ends worth recording so they are not re-walked.** With the
+inbox clear and the one lead taken, "Bugs" held only gated LEADs and ⚪ notes, and "Features that serve real
+workflows" held no ready entry (every open bullet there is shipped, closed-as-already-built, measured-and-stood-down,
+or explicitly deprioritised; the two live ones are "constellation lines **only if** a dataset is already
+bundled" and "unpack a big archive as a job" — gated on someone actually uploading one). So the run went
+looking, in the editor, and these five all came back **clean** — each is a grep away and each cost real time:
+
+1. **`proxy_scale` divergence between `build_auto_recipe_for_run` and `classify_run_measured`** — they agree;
+   `_auto_measure_coverage` returns `None` off a mosaic, which is exactly the `m_cov if is_mosaic else None`
+   `auto_recipe` applies, and `analyze_auto_inputs` takes no `proxy_scale` at all (it needs none — the only
+   consumer is `classify_target`).
+2. **The five "the preview is not faithful here" advisories** (`deconv_`, `sharpen_`, `denoise_`,
+   `hot_pixels_`, `star_reduce_`) — all five are computed on the histogram, carried on the response, typed in
+   `client.ts`, turned into a caption by their own `*Preview.ts`, **and rendered** in `Editor.tsx`. Nothing is
+   a bucket nobody reads. The bilateral-denoise one in particular already exists with its measured table.
+3. **`star_mask` footprint scaling in `stars.reduce` / `stars.boost_nebula`** — `size_px` looks unscaled at the
+   two call sites, but `starmask.star_mask` divides by `ctx.proxy_scale` itself.
+4. **The `OP_PHRASES` ↔ `_AUTO_OP_PHRASES` mirror** — word-identical and pinned from both sides.
+5. **The border trim's over-crop bound** — `largest_covered_rect` is bounded three ways and its history (D1,
+   `FRINGE_OUTSIDE_FRAC`) is closed; four scalar levers are measured and rejected.
+
+**The method that did work, and it is a new one worth carrying.** The last three runs found their bugs by
+reading the *previous fix* as a lead. This one found its bug by reading a **table as a population**: `_CUE_STEP`
+is eleven lines mapping a chip to a parameter and a signed step, and the question "which parameters are
+reachable in both directions?" is one the table answers at a glance once you ask it of the whole table instead
+of reading down it. Five parameters had a pair; `green` had one line. **A list of n entries that are supposed
+to be symmetric is a property you can state, and a property you can state is a test** — which is why the fix
+ships `test_every_biased_parameter_is_reachable_in_both_directions` rather than only the missing row.
+
+**The second cue, and it is the same shape as v0.492.50's note (2) inverted.** That run's lesson was "a bucket
+nothing reads is a feature that silently does nothing". Here it was the mirror image: **a phrase no writer can
+produce.** `_BIAS_PHRASE[("green", False)]` holds a complete, grammatical sentence —
+*"with a lighter green-cast removal"* — that `describe_profile` could never say, and `auto_recipe`'s own comment
+("a bias can dial the green removal down to nothing") described a reachable state that was not reachable.
+**Dead *output* vocabulary is evidence about the *input* vocabulary.** Worth grepping for elsewhere: a
+phrase/label/branch keyed on a value, where nothing can produce that value.
+
+**`--mosaic --editor` dogfood record for v0.492.52 — CLEAN, on the one thing this change could plausibly
+break.** The fix adds a **twelfth** chip to the editor's "How did Auto do? Tap what you'd change:" row, on a
+page the owner has already called "extremely busy", so the probe's layout checks are the point of the pass
+rather than a formality. Both targets: **"nothing overflowing, no console errors"** at **desktop (1440) and
+phone (420)** widths — zero `OVERFLOW`, zero `CLIPPED LABEL`, zero `SQUEEZE` findings across the whole sweep —
+and **"editor drive clean"** twice, all **21 ops** re-rendering the live preview plus Undo/Redo on the field
+sample *and* on the mosaic run. Tallest phone page unchanged (`/life-list [Still to shoot]` 14513 px); the
+mosaic Target page at 3729 px sits mid-pack, below `/tonight`'s variants. Read as one paragraph, the five
+mosaic Target-page sentences still point the same way — next-best-move and readiness both price the depth per
+panel (4 min across ~3 fields of sky, ~1 min on a typical part), the panel map names the thin top-right and
+says it evens out, and the framing verdict says more passes over the panels you have beat a wider grid until
+the depth is there. No new finding.
+
+**What this pass could NOT have caught, stated so the record is honest.** The chip row wraps (`Group` with
+`gap={4}` and no `nowrap`), so a twelfth chip was never likely to overflow — what the probe actually rules out
+is a *clipped* or *squeezed* label, which is the failure the Calibration "Repair them" note in "Bugs" was
+measured at. And the probe cannot see the bug this run fixed at all: the symptom was a cue the vocabulary had
+no reverse for, which is a missing *button*, not a broken one — a probe that photographs what is on screen
+cannot report what is absent. That is the same shape as v0.492.50's record ("a probe could not have found this
+run's bug, the symptom being a *lack* of change in a recipe"), and it is now twice in a row: **the editor's
+remaining defects are increasingly things that are not there, which only reading the code as a population
+finds.**
+
+**Collision diary.** PR #1101 merged at 18:23 UTC, mid-run, touching both of the frontend files this change
+touches. `origin/main` was merged in; one conflict (its `wrap()` signature against this run's shared-table
+import) resolved as a union, and the three-argument `sendAutoFeedback` convention it introduced adopted in the
+two new assertions — which is a reminder that **a mid-run merge can change a call's arity, so re-run the
+touched test file after syncing rather than trusting the pre-merge green**. Version taken as `0.492.52`, above
+the `0.492.51` the merged PR holds. No branch left unmerged.
+
 ## 2026-10-09 (Builder, branch `claude/jolly-bardeen-2wlx72`) — read the fix you just shipped as a lead
 
 **Baseline.** `source scripts/agent-setup.sh` green. Full suite **`7515 passed, 4 skipped`** (13m53s, BLAS cap +

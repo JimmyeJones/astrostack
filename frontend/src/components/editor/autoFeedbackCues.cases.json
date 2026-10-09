@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "The one table naming every Adaptive-Auto feedback cue, driven from BOTH",
+    "implementations: `AUTO_FEEDBACK_CHIPS`",
+    "(frontend/src/components/editor/AutoFeedback.tsx, the chips the editor's",
+    "\"How did Auto do? Tap what you'd change:\" row renders) and `_CUE_STEP`",
+    "(seestack/edit/auto_prefs.py, the table that turns a tap into a bounded",
+    "bias). The cue string is the wire contract between them: the feedback POST",
+    "422s on a cue the engine does not know, and a cue the engine knows with no",
+    "chip is a taste the owner can never express.",
+    "",
+    "They agreed when this table was written; nothing was enforcing that, and",
+    "the gap it would have caught was real — `too_green` shipped with no",
+    "opposite, so three taps saturated Auto's green removal at full strength",
+    "and only a whole-profile Reset could undo them, while `_BIAS_PHRASE`",
+    "already held the sentence for the direction no cue could reach. Add a cue,",
+    "rename one, or change which parameter or direction it moves, and you must",
+    "change this table, which reddens both suites at once:",
+    "tests/test_auto_feedback_cues_mirror.py and",
+    "frontend/src/components/editor/AutoFeedback.test.tsx.",
+    "",
+    "`step` is the signed unit step (+1 = \"more of it\"). The Python test also",
+    "asserts every parameter a cue can reach is reachable in BOTH directions,",
+    "so the next cue cannot be added one-way the way `too_green` was."
+  ],
+  "cases": [
+    { "cue": "too_dark", "param": "brightness", "step": 1, "label": "Too dark" },
+    { "cue": "too_bright", "param": "brightness", "step": -1, "label": "Too bright" },
+    { "cue": "too_soft", "param": "sharpen", "step": 1, "label": "Too soft" },
+    { "cue": "over_sharpened", "param": "sharpen", "step": -1, "label": "Over-sharpened" },
+    { "cue": "too_noisy", "param": "denoise", "step": 1, "label": "Too noisy" },
+    { "cue": "over_smoothed", "param": "denoise", "step": -1, "label": "Over-smoothed" },
+    { "cue": "undersaturated", "param": "saturation", "step": 1, "label": "Colours too weak" },
+    { "cue": "too_saturated", "param": "saturation", "step": -1, "label": "Colours too strong" },
+    { "cue": "too_green", "param": "green", "step": 1, "label": "Too green" },
+    { "cue": "too_magenta", "param": "green", "step": -1, "label": "Too magenta" },
+    { "cue": "core_clipped", "param": "highlights", "step": 1, "label": "Core blown out" },
+    { "cue": "core_flat", "param": "highlights", "step": -1, "label": "Core looks flat" }
+  ]
+}

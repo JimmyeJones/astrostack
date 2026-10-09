@@ -1,5 +1,89 @@
 # Shipped — the record
 
+## 2026-10-09 (Builder) — Adaptive Auto's green knob is no longer one-way
+
+### v0.492.52 — 🟡 BUG FIX (PRIORITY 1, the editor): `auto_prefs._CUE_STEP["too_magenta"]`, `AUTO_FEEDBACK_CHIPS`, `autoFeedbackCues.cases.json`
+
+Found by reading Adaptive Auto's cue table as a population rather than a list, once "Bugs (fix
+these first)" again held no verified, ungated open bug and the one actionable lead had been taken by
+PR #1101. **`green` was the only one of the six biased Auto parameters a cue could move in a single
+direction.**
+
+**The bug, reproduced before anything moved.** `_CUE_STEP` maps each plain-language chip to one Auto
+parameter and a signed step, and every parameter had both directions — *too dark / too bright*,
+*too soft / over-sharpened*, *too noisy / over-smoothed*, *colours too weak / too strong*, *core
+blown out / core looks flat* — except green, which had only **`too_green`, `+1`**. So three taps on
+"Too green" take Auto's SCNR amount **0.7 → 0.8 → 0.9 → 1.0** (full green-cast removal), after which
+nothing in the vocabulary can bring it back: the only exits are
+`DELETE /api/editor/auto-preferences`, which discards **every** taste the owner has taught Auto, and
+`DECAY_DAYS` — one step per **90 days** of not tapping it. Run against `origin/main`, all eleven
+cues were offered to a saturated profile and every one of them left the bias at `+3`.
+
+**Two artifacts in the code were already written for the direction no cue could reach**, which is
+what turns this from a design choice into an omission:
+
+* `_BIAS_PHRASE[("green", False)]` holds *"with a lighter green-cast removal"* — a sentence
+  `describe_profile` can never say, because no cue can produce the bias it describes. (A
+  hand-written `{"green": -2}` profile renders it fine.)
+* `auto_recipe`'s `if scnr_amount >= 0.05:` carries the comment *"a bias can dial the green removal
+  down to nothing"*. It could not.
+
+**And the symptom has a name the editor already uses, two lines up the same screen.** Over-strong
+SCNR is a one-sided clip, so it rectifies the green *noise* and drags the sky **magenta** — measured
+at **−14 %** of the sky's green median on an already-neutral background in the long-standing
+`docs/IMPROVEMENTS.md` entry on exactly this ("does Auto's SCNR tint an already-neutral background
+magenta?"). The editor's histogram read-out reports it in those words —
+*"Sky background has a magenta cast"* (`frontend/src/components/editor/skyCast.ts`) — so the app was
+naming a problem its own feedback row had no chip for.
+
+**The fix.** One cue, `"too_magenta": ("green", -1)`, and one chip, **"Too magenta"**, placed beside
+"Too green" in the existing **Colour** group — no new card, no new banner, the twelfth chip in a row
+that already groups into five questions (AGENTS.md §1's standing IA rule). Symmetric at ±3 steps,
+*not* floored at 0 like `highlights`: highlight protection starts at the bottom of its range so its
+negative cue is only a walk-back, whereas Auto *sets* green removal at 0.7, so less of it is a real
+taste. ±3 × 0.10 spans **0.40 … 1.00**, and the floor stays clear of the `>= 0.05` gate, so a
+saturated walk-back eases the op rather than switching it off.
+
+**The guard, which is the half that outlives this fix.** The cue string is the wire contract between
+`AUTO_FEEDBACK_CHIPS` and `_CUE_STEP` — a chip the engine does not know **422s** at the user, a cue
+with no chip is a taste they cannot express — and nothing was enforcing it. Both sides are now
+driven from a shared table (`frontend/src/components/editor/autoFeedbackCues.cases.json`), the idiom
+`autoOpPhrases.cases.json` / `tests/test_auto_summary_mirror.py` established, and the Python half
+also asserts the property this bug violated: **every parameter a cue can reach is reachable in both
+directions**, and **every `_BIAS_PHRASE` entry is produced by some cue**. So the next cue cannot be
+added one-way the way `too_green` was. The frontend's "keeps each opposing pair together" test used
+to list the pairs by hand and silently omitted green — the pair that did not exist — and now derives
+them from the table.
+
+**Upgrade-safe (§9).** Additive: one key in a cue table, one chip. No config, schema, migration,
+on-disk, default, endpoint or response-shape change, and an **empty profile is byte-for-byte today's
+Auto**. Downgrade-safe too, which is worth stating because this is a stored blob: biases are keyed
+by *parameter*, not by cue, so an older build reading a profile a newer one wrote keeps the green
+bias and merely drops the unknown `counts["too_magenta"]` tally (`_coerce_bucket` already discards
+unknown cue keys).
+
+**Tests +20** (Python +18, vitest +2; full suite **7541 passed, 4 skipped** against v0.492.51's 7523) —
+`tests/test_auto_feedback_cues_mirror.py` (new, 17 items: the set of cues matches
+the shared table, each cue's parameter and direction matches it, both-directions-reachable,
+every-phrase-reachable, and the green pair walking a saturated bias all the way back without
+disturbing an unrelated brightness taste), `tests/webapp/test_editor.py` (+1 end-to-end on the
+served Auto recipe's `tone.scnr` amount: saturate with three `too_green`, ease with one, undo with
+three, confirm the brightness taste survives, then saturate below neutral and read the
+*"lighter green-cast removal"* note), `AutoFeedback.test.tsx` (+2: the green pair sends both cue
+keys; the chips match the shared table's cues and labels in its order) — and one existing vitest case
+(`keeps each opposing pair together`) **rewritten rather than loosened**: it listed the pairs by hand and
+silently omitted green, so it now derives them from the shared table and asserts each parameter yields
+exactly one `{+1, -1}` pair. **Fail-before verified in an
+`origin/main` worktree:** 6 of the mirror file's items red (11 controls green), the webapp test red
+on `422 unknown feedback cue: 'too_magenta'`, and 3 vitest items red with `main`'s chip list in
+place (11 controls green).
+
+**Collision note.** PR #1101 merged mid-run and touched both frontend files; `origin/main` was
+merged in and the one conflict — its `wrap()` signature against this run's shared-table import —
+resolved as the union both sides wanted, and the three-argument `sendAutoFeedback` convention it
+introduced adopted in the two new assertions. Version taken as `0.492.52`, above the `0.492.51` that
+PR held (§11).
+
 ## 2026-10-09 (Builder) — the editor's per-run border-trim switch now reaches the two classification surfaces
 
 ### v0.492.51 — 🟡 BUG FIX (PRIORITY 1, the editor): `_classify_run(auto_crop=…)`, `AutoFeedbackIn.auto_crop`, `api.presetSuggestion`, `api.sendAutoFeedback`, `api.getRunAutoPreferences`

@@ -1107,6 +1107,58 @@ def test_core_clipped_feedback_turns_on_the_stretch_highlight_hold(
     assert client.get("/api/editor/auto-preferences").json()["neutral"] is True
 
 
+def test_the_green_pair_walks_the_served_auto_recipe_both_ways(
+        client, solved_library):
+    """The green cue's walk-back, end to end on the recipe the editor renders.
+
+    ``too_green`` shipped without an opposite, so three taps saturated
+    ``tone.scnr``'s amount at full green-cast removal and the only way back was
+    ``DELETE /api/editor/auto-preferences``, which discards *every* learned
+    taste. ``too_magenta`` — named for the cast the histogram read-out on the
+    same screen already reports — brings it back one tap at a time, leaving the
+    rest of the profile alone."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="greenpair")
+
+    def scnr_amount():
+        ops = client.post(
+            f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()["ops"]
+        return next(o for o in ops if o["id"] == "tone.scnr")["params"]["amount"]
+
+    base = scnr_amount()
+    # An unrelated taste that must survive the walk-back untouched.
+    client.post("/api/editor/auto-preferences/feedback", json={"cue": "too_dark"})
+    for _ in range(3):
+        client.post("/api/editor/auto-preferences/feedback", json={"cue": "too_green"})
+    saturated = scnr_amount()
+    assert saturated > base
+
+    r = client.post("/api/editor/auto-preferences/feedback",
+                    json={"cue": "too_magenta"})
+    assert r.status_code == 200, r.text
+    assert scnr_amount() < saturated, "one tap must move it, not just the third"
+    for _ in range(2):
+        client.post("/api/editor/auto-preferences/feedback", json={"cue": "too_magenta"})
+    assert scnr_amount() == pytest.approx(base), (
+        "three 'too magenta' taps must undo three 'too green' ones"
+    )
+    # ...and the brightness taste the owner also gave is still in force, so the
+    # walk-back was not the whole-profile Reset it used to require.
+    prefs = client.get("/api/editor/auto-preferences").json()
+    assert prefs["biases"].get("brightness") == 1
+    assert prefs["neutral"] is False
+
+    # Below neutral is a real taste too (less green removal than Auto measured),
+    # bounded like every other two-sided bias and never switching the op off.
+    for _ in range(3):
+        client.post("/api/editor/auto-preferences/feedback", json={"cue": "too_magenta"})
+    lighter = scnr_amount()
+    assert lighter < base
+    assert lighter >= 0.05, "a saturated walk-back must not drop the op entirely"
+    note = client.get("/api/editor/auto-preferences").json()["note"] or ""
+    assert "lighter green-cast removal" in note
+
+
 def test_auto_feedback_with_run_context_is_scoped_to_the_object_type(
         client, solved_library, monkeypatch):
     """Feedback given while editing a run is recorded into that run's archetype
