@@ -713,6 +713,144 @@ def test_preset_suggestion_measures_stars_at_the_runs_own_pixel_scale(
     assert seen == [2.0, 1.0]
 
 
+def test_preset_suggestion_classifies_the_picture_auto_is_about_to_make(
+        client, solved_library, monkeypatch):
+    """The chip must read the rectangle the border trim keeps, not the ragged
+    fringe beside it.
+
+    ``auto_recipe`` keys its taste profile on this very classification, and since
+    v0.410.1 it reads it off ``presets.measured_region`` — the picture its own last
+    op leaves behind. This endpoint asked the same question of the whole canvas, so
+    one picture had two archetypes, and the canvas's was the worse of the two: a
+    fringe one to three subs deep is several times grainier than the panels, that
+    grain lifts the classifier's signal threshold until faint diffuse structure
+    vanishes under it, and the verdict walks toward "star cluster". Measured on the
+    engine's own ragged canvases, the verdict flips on 21 of 210 — the cheapest at
+    a 9.8 % trim, inside the band AGENTS.md calls a healthy ragged edge
+    (``tests/test_auto_noise_measure.py`` carries the numbers).
+
+    Here it is the wiring: what *shape* the classifier is handed."""
+    from webapp.routers import editor as editor_mod
+
+    shapes: list[tuple[int, int]] = []
+    real = editor_mod.presets_mod.classify_target
+
+    def spy(rgb, coverage=None, **kw):
+        shapes.append(None if rgb is None else tuple(rgb.shape[:2]))
+        return real(rgb, coverage, **kw)
+
+    monkeypatch.setattr(editor_mod.presets_mod, "classify_target", spy)
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    _write_frame_coverage(solved_library, safe, _ragged_border_coverage())
+
+    assert client.post(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion"
+    ).status_code == 200
+
+    # The trim this map asks for cuts the two outer rings of a four-pixel ramp —
+    # the same rectangle `trim-suggestion` reports for it — so the classified
+    # picture is 76x96 of the 80x100 canvas, not the canvas.
+    assert shapes == [(76, 96)]
+
+
+def test_preset_suggestion_does_not_call_a_mosaic_a_star_cluster_off_its_fringe(
+        client, solved_library):
+    """And the symptom, end to end: the ``preset_id`` the editor prints.
+
+    The picture is a small nebulous field inside a two-pixel ring of much coarser
+    grain — the ring the trim cuts. Classified whole it is **all** point sources
+    (``star_share`` 1.0, ``ext_frac`` 0.0) and the chip said *"your image looks
+    like a Star cluster"*; classified on the rectangle the trim keeps it is the
+    nebulous field it actually is, and the chip stays quiet.
+
+    The ring here is deliberately far noisier than a real one-sub fringe (a fringe
+    covered once against panels covered twelve times is ~3.5x grainier, not 30x),
+    because a two-pixel ring is only ~5 % of an 80x100 canvas and the flip has to
+    be unambiguous in one assertion. The same flip at **realistic** depth, on the
+    ragged 300x600 canvases a mosaic actually stacks onto, is measured in
+    ``tests/test_auto_noise_measure.py`` — 21 of 210, from a 9.8 % trim up."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="fringe_run", h=80, w=100,
+                    is_mosaic=True)
+    _write_frame_coverage(solved_library, safe, _ragged_border_coverage(),
+                          basename="fringe_run")
+
+    h, w = 80, 100
+    rng = np.random.default_rng(7)
+    yy, xx = np.mgrid[0:h, 0:w]
+    lum = np.full((h, w), 0.08, np.float32)
+    lum += (0.05 * np.exp(-(((xx - w / 2) / 14.0) ** 2
+                            + ((yy - h / 2) / 10.0) ** 2))).astype("float32")
+    for _ in range(25):
+        cy, cx = rng.uniform(5, h - 5), rng.uniform(5, w - 5)
+        lum += (0.5 * rng.uniform(0.4, 1.0)
+                * np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / 2.2)).astype("float32")
+    lum += rng.normal(0, 0.003, (h, w)).astype("float32")
+    ring = np.zeros((h, w), bool)
+    ring[:2, :] = ring[-2:, :] = True
+    ring[:, :2] = ring[:, -2:] = True
+    lum[ring] += rng.normal(0, 0.1, int(ring.sum())).astype("float32")
+    _overwrite_fits(solved_library, safe,
+                    np.stack([lum, lum * 1.01, lum * 0.99]), basename="fringe_run")
+
+    body = client.post(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion").json()
+    assert body["preset_id"] is None, body
+
+
+def test_preset_suggestion_classifies_the_whole_canvas_with_the_trim_off(
+        client, solved_library, monkeypatch):
+    """The control, and the same rule the recipe follows: with the owner's
+    border-trim preference off, no crop runs, the fringe is part of the picture the
+    editor shows, and classifying the whole canvas is the honest answer. The
+    override arrives the way the two Auto endpoints already accept it, so a
+    body-less POST (every frontend) still reads as "use the setting"."""
+    from webapp.routers import editor as editor_mod
+
+    shapes: list[tuple[int, int]] = []
+    real = editor_mod.presets_mod.classify_target
+
+    def spy(rgb, coverage=None, **kw):
+        shapes.append(None if rgb is None else tuple(rgb.shape[:2]))
+        return real(rgb, coverage, **kw)
+
+    monkeypatch.setattr(editor_mod.presets_mod, "classify_target", spy)
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
+    _write_frame_coverage(solved_library, safe, _ragged_border_coverage())
+
+    assert client.post(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion",
+        json={"auto_crop": False}).status_code == 200
+    assert shapes == [(80, 100)]
+
+
+def test_preset_suggestion_on_a_single_field_run_is_untouched(client,
+                                                              solved_library):
+    """Upgrade safety as a property: a single-field run has no trim rectangle, so
+    nothing is narrowed and the chip answers exactly what it answered before."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="single_run", h=200, w=200)
+
+    rng = np.random.default_rng(11)
+    h, w = 200, 200
+    yy, xx = np.mgrid[0:h, 0:w]
+    lum = np.full((h, w), 0.02, np.float32)
+    for _ in range(180):
+        cy, cx = rng.uniform(3, h - 3), rng.uniform(3, w - 3)
+        lum += 0.8 * rng.uniform(0.5, 1.0) * np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / 2.0)
+    lum += rng.normal(0, 0.004, (h, w)).astype("float32")
+    _overwrite_fits(solved_library, safe, np.stack([lum, lum, lum]),
+                    basename="single_run")
+
+    body = client.post(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion").json()
+    assert body["preset_id"] == "globular_cluster"
+
+
 def test_preset_suggestion_endpoint_declines_on_a_blank_field(client, solved_library):
     """A structureless field yields no suggestion (preset_id=None) — the chip stays
     hidden and the general Auto recipe remains the fallback."""

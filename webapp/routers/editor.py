@@ -415,15 +415,39 @@ def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | Non
         grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
 
 
-def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
+def build_preset_suggestion_for_run(project_dir: Path, run,
+                                    auto_crop: bool = True) -> dict:
     """Coarsely classify a run's own proxy and, when one archetype is clear, suggest
     the matching built-in preset (galaxy / nebula / star cluster) — a hint the editor
     shows as a one-click "try this preset?" chip. Read-only: it never changes the Auto
     recipe or persists anything, so a mis-suggestion costs a click, not an image.
-    Declines (``preset_id=None``) on an ambiguous or blank field."""
+    Declines (``preset_id=None``) on an ambiguous or blank field.
+
+    **Mirrors ``build_auto_recipe_for_run``** — same proxy, same mosaic verdict,
+    same trim rect, same measured region — the way
+    :func:`build_auto_analysis_for_run` already does, and for the same reason:
+    ``auto_recipe`` keys its taste profile on this very function's verdict, read
+    off the rectangle its own border trim keeps
+    (``presets.measured_region``), so a chip measured on the whole canvas is a
+    second opinion about one picture. It is also the *worse* opinion: the ragged
+    fringe is one to three subs deep where the panels are a dozen, and that grain
+    lifts ``classify_target``'s signal threshold until the faint diffuse structure
+    vanishes under it — the verdict then walks toward "star cluster", which is a
+    statement about the canvas rather than about what was photographed. Measured:
+    the verdict flips on 21 of 210 ragged canvases, from the 9.8 % trim upward
+    (see ``presets.measured_region``).
+
+    ``auto_crop`` is the owner's "let Auto trim the ragged border" preference, and
+    it gates the narrowing exactly as it gates it in the two siblings: with the
+    trim switched off no crop runs, the fringe *is* part of the picture the editor
+    shows, and the whole canvas is the honest thing to classify."""
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
-    out = presets_mod.classify_target(rgb, _auto_measure_coverage(run, scale),
-                                      proxy_scale=scale)
+    is_mosaic = _run_is_mosaic(run, load=True)
+    trim = _trim_rect_for_run(run) if is_mosaic else None
+    m_rgb, m_cov = presets_mod.measured_region(
+        rgb, _auto_measure_coverage(run, scale, is_mosaic),
+        trim if auto_crop else None)
+    out = presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
     # Only the user-facing fields; the raw cues stay server-side (debug/tests only).
     return {"preset_id": out["preset_id"], "label": out["label"],
             "reason": out["reason"], "confidence": out["confidence"]}
@@ -2139,9 +2163,14 @@ async def preset_suggestion(safe: str, run_id: int, request: Request) -> dict:
     stays the safe fallback). Additive sibling of ``…/editor/auto``; it never persists
     anything and doesn't change what Auto emits."""
     project_dir, run = _run_info(request, safe, run_id)
+    # The same question the two Auto endpoints ask, through the same helper: the
+    # chip classifies the picture Auto is about to make, so on a mosaic it reads
+    # the rectangle the border trim keeps rather than the ragged fringe beside
+    # it. A body-less POST (every frontend) reads as "use the setting".
+    auto_crop = await _auto_crop_pref(request)
 
     def work() -> dict:
-        return build_preset_suggestion_for_run(project_dir, run)
+        return build_preset_suggestion_for_run(project_dir, run, auto_crop=auto_crop)
 
     return await run_in_threadpool(work)
 

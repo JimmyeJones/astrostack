@@ -35,6 +35,8 @@ from seestack.edit.presets import (
     analyze_auto_inputs,
     analyze_proxy,
     auto_recipe,
+    classify_target,
+    measured_region,
 )
 from seestack.edit.registry import EditContext
 
@@ -732,3 +734,72 @@ def test_analyze_auto_inputs_reports_the_region_the_recipe_measured():
     # ...and what it says was trimmed is still the whole rectangle's share.
     assert cues["trim_fraction"] == pytest.approx(
         round(1.0 - (trim[2] - trim[0]) * (trim[3] - trim[1]), 3))
+
+
+# --------------------------------------------------------------------------
+# ...and the *archetype* is the fourth measurement on the same pixels, which the
+# first instalment did not check. `classify_target` keys Auto's taste profile
+# AND the editor's "try this preset?" chip, and the chip asks it from the webapp
+# (`editor.build_preset_suggestion_for_run`) rather than through `auto_recipe`,
+# so it was left reading the canvas while the three measurements inside this
+# module moved to the kept rectangle.
+# --------------------------------------------------------------------------
+
+def _archetypes(band: int, seed: int, sigma: float = 0.02):
+    """``(whole_canvas, kept_rectangle)`` verdicts for one ragged canvas."""
+    img, cov, trim = _ragged(seed=seed, sigma=sigma, band=band)
+    assert trim is not None
+    return (classify_target(img, cov),
+            classify_target(*measured_region(img, cov, trim)))
+
+
+def test_the_fringe_really_does_walk_the_archetype_toward_a_star_cluster():
+    """The premise, so this fixture cannot go blind the way the editor's re-audits
+    did (``docs/HISTORY.md``): the ragged border has to be *able* to change the
+    verdict, or the invariance below holds for nothing.
+
+    The mechanism is the one ``classify_target``'s own docstring records for a
+    mosaic's panel steps, arriving by the other door: the fringe is one to three
+    subs deep where the panels are six to fifteen, that grain inflates the
+    ``6·sky_sigma`` term of the signal threshold, and faint diffuse structure
+    disappears under it — so ``ext_frac`` falls, ``star_share`` rises, and a
+    nebulous field reads as a star cluster. Measured over these six canvases
+    (σ = 0.02): whole-canvas **cluster on 5**, kept-rectangle on **0**.
+    """
+    pairs = [_archetypes(band, seed)
+             for band in (14, 20, 24) for seed in (34, 89)]
+    whole_cluster = sum(1 for w, _k in pairs if w["cls"] == "cluster")
+    kept_cluster = sum(1 for _w, k in pairs if k["cls"] == "cluster")
+    assert whole_cluster >= 4, whole_cluster      # the fringe can say "cluster"
+    assert kept_cluster < whole_cluster           # ...and the kept picture does not
+    # The direction of both cues, on every one of them — the mechanism, not the
+    # tally, so a numerics change that moves a verdict still has to move these.
+    for w, k in pairs:
+        assert k["cues"]["star_share"] < w["cues"]["star_share"]
+        assert k["cues"]["ext_frac"] >= w["cues"]["ext_frac"]
+
+
+def test_classifying_a_ragged_canvas_answers_what_the_kept_picture_answers():
+    """The archetype half of ``test_auto_builds_the_recipe_the_kept_picture_itself
+    _would_get``: narrowing and then classifying must give *exactly* what handing
+    the classifier the cropped picture gives, cues included — which is also what
+    pins ``measured_region``'s rounding against a plain slice.
+    """
+    img, cov, trim = _ragged(seed=89, sigma=0.02, band=20)
+    h, w = img.shape[:2]
+    x0, y0, x1, y1 = trim
+    rows = slice(int(round(y0 * h)), int(round(y1 * h)))
+    cols = slice(int(round(x0 * w)), int(round(x1 * w)))
+
+    assert (classify_target(*measured_region(img, cov, trim))
+            == classify_target(img[rows, cols], cov[rows, cols]))
+
+
+def test_with_auto_crop_off_the_whole_canvas_is_classified_again():
+    """Same rule as the recipe's: with the owner's border-trim preference off no
+    crop runs, the fringe stays in the picture the editor shows, and the whole
+    canvas is the honest thing to classify. ``measured_region`` is handed ``None``
+    for the rectangle in that case, which is what makes this one line."""
+    img, cov, _trim = _ragged(seed=89, sigma=0.02, band=20)
+    assert (classify_target(*measured_region(img, cov, None))
+            == classify_target(img, cov))

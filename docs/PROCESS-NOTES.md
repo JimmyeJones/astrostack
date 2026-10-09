@@ -1,5 +1,79 @@
 # Process notes & QA sweep records
 
+## 2026-10-09 (Builder, branch `claude/jolly-bardeen-ssa1n0`) — a "next time" note is also a *last* time note
+
+**Baseline.** `source scripts/agent-setup.sh` green (it does **not** install `pytest-xdist` — that is the run's
+own `pip install`, and a background shell does not inherit the `source`d venv, so the first suite launch failed
+with `No module named pytest` from `/usr/local/bin/python`; use `.venv/bin/python -m pytest` explicitly in a
+backgrounded command). Full suite **`7508 passed, 4 skipped`** (14m04s, BLAS cap + `-n 4 --dist worksteal`).
+`origin/main` at `4ba21d0c`, **no open PRs**, no other live run.
+
+**The queue was dry and the issue inbox was dry.** `docs/FOCUS.md` item 0 said so, the four open issues
+(#1015, #903, #880, #878) are all owner-gated with no repo code work — #1015 gained a fourth observer comment at
+07:13 today and it is still about the Observer's own clone pin, not this repo — and the "Features that serve real
+workflows" section has no open entry a Builder may take (§4: only the Scout adds ideas). So the standing
+beginner-feature allocation had nothing to draw from this run, which is worth saying out loud rather than
+inventing something to fill it.
+
+**What found the bug, and it is a reusable move.** The last run's own write-up ended with a forward-looking
+caution: *"`auto_recipe` measures the image in **three** places … a fourth measurement added later must go
+through `measured_region` too or the recipe becomes a blend of two pictures again"* (2026-10-01, below). Read as
+an instruction it is about the future. Read as a **question about the present** — *is there already a fourth?* —
+it names the bug: `classify_target`'s other consumer is
+`webapp/routers/editor.py::build_preset_suggestion_for_run`, i.e. **outside the module the fix swept**, which is
+exactly why three instalments of grepping `seestack/edit/` never reached it. **Generalisable: when a run's record
+says "a future change must also do X", check whether something already needed X and was missed.** The same
+sentence that protects the future is a list of places the past may have skipped.
+
+**The measurement is why this shipped instead of being filed.** The first sweep of the repo's own ragged
+four-panel fixture said the verdict moved on **0 of 32** canvases, and a stand-down draft was already written.
+That was the 2026-10-01 trap in a second costume: the fixture sat at `unsure` in *both* columns, parked between
+`classify_target`'s gates, so it could not show a flip whatever the fringe did — while the cues moved hard and
+always in the predicted direction (`star_share` 0.779 → 0.672, `ext_frac` +37 %). Sweeping σ and fringe width
+until the gate was actually crossed gave **21 flips in 210**, every one whole-canvas *cluster* against
+kept-rectangle *unsure*, the cheapest at a **9.8 % trim**. So: **"the verdict did not change" is not "the
+mechanism is not there" — check whether the fixture is parked between the thresholds before believing a null.**
+(Same lesson as "is the output at a clamp?" from 2026-10-01, one step along: there the number was clamped, here
+the *decision* was in a dead band.)
+
+**One fixture decision worth keeping.** The premise test asserts the **ensemble** (whole-canvas `cluster` on ≥4
+of six canvases, strictly more than the kept rectangle) plus **the direction of both cues on every one**, rather
+than a per-case verdict. A per-case `assert cls == "cluster"` on this scene has a ~0.001-wide `ext_frac` margin
+and would make `main` red on a numpy/scipy bump that moved nothing real; the ensemble + direction form needs only
+that the mechanism still exists, which is the property the test is for.
+
+**Where each claim lives.** The engine file owns the numbers (the ragged 300×600 canvases at realistic depth);
+`tests/webapp/test_editor.py` owns the wiring (the classifier is handed 76×96 of an 80×100 canvas) and the
+end-to-end symptom (`preset_id` was `globular_cluster` off a two-pixel ring of coarse grain). The webapp ring is
+**deliberately exaggerated** and its docstring says so — a two-pixel ring is ~5 % of that canvas, and the honest
+version of the claim at honest depth needs the 300×600 fixture, which is in the engine file. Duplicating that
+fixture into `tests/webapp/` to re-demonstrate at HTTP what the engine already measures would have been churn.
+
+**`--mosaic --editor` dogfood after the fix — CLEAN, and the bundled sample is blind to it.** Run after the
+commit and before the final suite (never beside `pytest`, §7). Mosaic trim **7.9 %**; the editor drive added all
+**21** ops one at a time on *both* the single field and the 2×2 mosaic with every preview re-rendering, undo and
+redo applied, no console error and no failed request; nothing overflowing at 420 px; the server-side mosaic
+paragraph still tells one story (panel map "a little behind at the top-right ~30 s", grain note "23 % of the
+picture at 3 subs where most has 6, ~1.4x grainier", seams note "the sky matches across the joins, so where it
+looks grainier that is depth, not a step").
+
+**And the honest datum about the sample: this fix changes nothing on it.** Classified both ways on the dogfood's
+own stacked 2×2 (proxy 615x907, stride 1, trim **7.4 %** of the canvas), the verdict is `cluster` /
+`globular_cluster` with `star_share 1.0, ext_frac 0.0` **before and after** — the narrowing moves `sig_frac`
+0.0291 → 0.0294 and nothing else. That is the same property the 2026-10-01 entry recorded for the stretch target
+(the sample's fringe is 3.1 % of its *finite* population, and its content is a star-only synthetic with no
+extended signal at all, so neither cue has anywhere to move). It is the third time this sample has been the
+weaker witness than a synthetic for a mechanism that is real on the owner's data, which is worth stating as a
+standing caveat rather than re-discovering: **`--mosaic` is a coherence and console check; it is not evidence
+about a cue measured on a thin fringe.**
+
+**Instruction disagreement, resolved in AGENTS.md's favour (preamble).** The harness's kickoff names a
+designated branch (`claude/jolly-bardeen-ssa1n0`) and says never to push elsewhere; AGENTS.md §8 asks for
+`agent/<topic>` from `origin/main` but explicitly allows "a harness branch … if it is based on current
+`origin/main`". The harness branch was byte-identical to `origin/main` at run start, so it satisfies both and
+there is nothing to resolve — recorded only so the next run does not re-derive it. (The attribution trailer
+naming the model was again declined, per §10 and the 2026-10-01 note below.)
+
 ## 2026-10-09 (Builder, branch `claude/jolly-bardeen-ylooc9`) — observer #1095, and what "the forgiving direction" cost
 
 **Baseline.** `source scripts/agent-setup.sh` green; full suite **`7496 passed, 4 skipped`** (13m41s, BLAS cap

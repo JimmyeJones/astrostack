@@ -1,5 +1,100 @@
 # Shipped — the record
 
+## 2026-10-09 (Builder) — the editor's "try this preset?" chip stopped reading the border Auto deletes
+
+### v0.492.49 — 🟠 BUG FIX (PRIORITY 1, the editor): `build_preset_suggestion_for_run`, `presets.measured_region`, `classify_target`
+
+Builder-found, by following the collateral note v0.410.1 left in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md) (2026-10-01): *"`auto_recipe` measures the image in **three** places …
+a fourth measurement added later must go through `measured_region` too or the recipe becomes a blend of two
+pictures again."* There was already a fourth, and it was not added later — it lives in the **webapp**, so the
+grep for the narrowing never reached it.
+
+**The bug.** `seestack.edit.presets.classify_target` has two consumers:
+
+- `auto_recipe`, which keys the Adaptive-Auto taste profile on the archetype — and since v0.410.1 reads it off
+  `measured_region`, the rectangle Auto's own last op (`geometry.crop` to the trim rect) keeps;
+- `webapp.routers.editor.build_preset_suggestion_for_run`, behind
+  `POST …/editor/preset-suggestion`, which is the editor's *"your image looks like a Star cluster — its preset
+  is another good starting point to compare"* chip (`frontend/src/components/editor/autoSummary.ts::presetSuggestionSentence`,
+  rendered both on the empty pipeline and inside the **"What Auto-process did"** panel).
+
+The second asked the question of the **whole canvas**, so one picture had two archetypes — and the canvas's was
+the worse of the two. A ragged union canvas's fringe is covered one to three times where the panels are covered
+six to fifteen, so it is several times grainier; `classify_target`'s signal threshold is
+`sky + max(0.06, 6·sky_sigma)`, so that grain lifts the threshold until faint diffuse structure disappears under
+it, `ext_frac` falls, `star_share` rises, and the verdict walks toward **cluster**. That is the identical
+mechanism the function's own docstring already records for a mosaic's *panel steps* — *"a verdict about the
+layout, not about what was photographed"* — arriving by the other door.
+
+The sharpest form of it: the "What Auto-process did" panel says in one line that Auto **trimmed the ragged
+mosaic border**, and in the next line classifies the picture *including* that border.
+
+**Measured before building** (`seestack/edit/presets.py::measured_region`'s docstring carries the numbers), on
+the engine's own ragged four-panel canvases — perimeter mostly uncovered, the covered remainder one to three
+subs deep and `sqrt(depth)` grainier, `trim_crop` taken from the real `largest_covered_rect`:
+
+| | whole canvas | kept rectangle |
+|---|---|---|
+| verdict flips (210 canvases: seed × σ × fringe width) | **21** | — |
+| every flip | `cluster` | `unsure` (no chip) |
+| cheapest flip | **9.8 % trim** | — |
+| six-canvas ensemble at σ = 0.02 | `cluster` on **5** | `cluster` on **0** |
+| `star_share` / `ext_frac` | 0.813–0.852 / 0.0102–0.0122 | 0.725–0.779 / 0.0122–0.0162 |
+
+A 9.8 % trim is **inside** the band AGENTS.md calls a healthy ragged edge (above ~15 % is itself a bug), so this
+is not an edge case of a broken canvas — it is the ordinary mosaic.
+
+**The fix.** `build_preset_suggestion_for_run` now **mirrors `build_auto_recipe_for_run`** — same proxy, same
+`_run_is_mosaic` verdict, same `_trim_rect_for_run` rectangle, same measured region — exactly as
+`build_auto_analysis_for_run` already promises to in its own docstring. `presets._measured_region` is therefore
+public as **`presets.measured_region`** (its only callers were in that module until now; the rename is the whole
+of the engine change besides docstrings).
+
+`auto_crop` gates the narrowing **the same way it gates it in the two siblings**: with the owner's border-trim
+preference off no crop runs, the fringe is part of the picture the editor shows, and the whole canvas is the
+honest thing to classify. The endpoint resolves it through the existing `_auto_crop_pref`, so a body-less POST —
+which is what every frontend sends (`api.presetSuggestion` posts no body) — reads as "use the setting", and the
+three Auto-ish endpoints now answer one question in one place rather than two in two.
+
+**What was deliberately NOT done.** With `auto_crop` **off**, Auto's own taste-profile archetype is still read
+off the whole canvas, fringe grain included — so the *cue corruption* survives in that setting even though the
+*disagreement* does not. Changing that would mean moving `auto_recipe`'s measurement region on a picture it is
+not going to crop, i.e. changing what Auto emits for an existing setting on the hot path, which is not a blind
+Builder change. Filed as a lead rather than built.
+
+**Tests (+7: 3 engine, 4 webapp, and 3 of the seven are controls).**
+
+- `tests/test_auto_noise_measure.py` — `test_the_fringe_really_does_walk_the_archetype_toward_a_star_cluster`
+  is the **premise**, in the shape `tests/test_auto_noise_stride.py` established: it asserts the fixture can
+  still *exhibit* the bug (whole-canvas `cluster` on ≥4 of six canvases, strictly more than the kept rectangle)
+  **and the direction of both cues on every one of them**, so a numerics change that moves a tally still has to
+  move the mechanism. Plus the narrow-then-classify parity against a plain slice (which also pins
+  `measured_region`'s rounding), and the `auto_crop`-off control.
+- `tests/webapp/test_editor.py` — `test_preset_suggestion_classifies_the_picture_auto_is_about_to_make` pins the
+  **wiring** (the classifier is handed 76×96 of an 80×100 canvas, the same rectangle `trim-suggestion` reports
+  for that map); `test_preset_suggestion_does_not_call_a_mosaic_a_star_cluster_off_its_fringe` pins the
+  **symptom** end to end through the real endpoint (`preset_id` was `globular_cluster` off a two-pixel ring of
+  coarse grain, and is `None` on the picture inside it — the ring is deliberately exaggerated, as its docstring
+  says, because a two-pixel ring is only ~5 % of that canvas; the realistic-depth measurement is the engine
+  file's); plus the trim-off control and a single-field no-op control.
+- **Fail-before verified** by reverting the production change in place: the wiring test and the end-to-end
+  verdict test both go red, and the three controls and the premise correctly stay green.
+
+**Verified in a browser, and the sample's own answer stated plainly.** A `--mosaic --editor` dogfood after the
+commit is CLEAN (trim 7.9 %, all 21 ops re-rendering on both the single field and the 2×2, undo/redo, no console
+error, nothing overflowing at 420 px). On that run's *own* stacked 2×2, though, **this fix changes nothing**: the
+verdict is `globular_cluster` with `star_share 1.0, ext_frac 0.0` before *and* after, because the bundled sample
+is a star-only synthetic with no extended signal and a fringe that is 3.1 % of its finite population — the same
+reason the 2026-10-01 instalment found it blind to the stretch-target half. The evidence for this fix is the
+engine's ragged canvases, as the table above says; the dogfood is the coherence and console check.
+
+**Upgrade-safe (§9):** no config, schema, migration, on-disk, default or API-**shape** change. One optional
+request field on an endpoint that previously ignored its body; an older frontend sends no body and gets the
+library setting, which is `auto_crop_border = True` — i.e. the fixed behaviour. The response keys are untouched
+(`tests/test_dogfood_scale_pair.py`'s `preset_id`/`label` contract is unchanged), and a single-field run has no
+trim rectangle so nothing is narrowed for it at all.
+
 ## 2026-10-09 (Builder) — "My map" stopped printing two different counts of "your pictures"
 
 ### v0.492.48 — 🟡 BUG FIX (PRIORITY 3, trust / friendliness): `describeSkyCoverage`, `_my_map_pictures`, `sky_area_union_deg2`
