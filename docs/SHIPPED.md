@@ -63,7 +63,7 @@ off the whole canvas, fringe grain included — so the *cue corruption* survives
 not going to crop, i.e. changing what Auto emits for an existing setting on the hot path, which is not a blind
 Builder change. Filed as a lead rather than built.
 
-**Tests (+10: 3 engine, 4 webapp, and 3 of those are controls).**
+**Tests (+7: 3 engine, 4 webapp, and 3 of the seven are controls).**
 
 - `tests/test_auto_noise_measure.py` — `test_the_fringe_really_does_walk_the_archetype_toward_a_star_cluster`
   is the **premise**, in the shape `tests/test_auto_noise_stride.py` established: it asserts the fixture can
