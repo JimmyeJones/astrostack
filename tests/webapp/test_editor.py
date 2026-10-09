@@ -755,6 +755,51 @@ def test_preset_suggestion_classifies_the_picture_auto_is_about_to_make(
     assert shapes == [(76, 96)]
 
 
+def _make_fringe_mosaic_run(data_root, safe, *, basename,
+                            h: int = 80, w: int = 100) -> int:
+    """A mosaic run whose *canvas* and whose *kept rectangle* classify differently.
+
+    A small nebulous field inside a two-pixel ring of much coarser grain — the ring
+    the border trim cuts. Classified whole it is **all** point sources
+    (``star_share`` 1.0, ``ext_frac`` 0.0) and reads as a star cluster; classified
+    on the rectangle the trim keeps it is the nebulous field it actually is, and
+    nothing is confidently one archetype.
+
+    The ring is deliberately far noisier than a real one-sub fringe (a fringe
+    covered once against panels covered twelve times is ~3.5x grainier, not 30x),
+    because a two-pixel ring is only ~5 % of an 80x100 canvas and the flip has to
+    be unambiguous in one assertion. The same flip at **realistic** depth, on the
+    ragged 300x600 canvases a mosaic actually stacks onto, is measured in
+    ``tests/test_auto_noise_measure.py`` — 21 of 210, from a 9.8 % trim up.
+
+    Shared by the "try this preset?" chip's test and the taste-profile bucket's,
+    so the two are provably about one picture: they are the same classification
+    read for two different purposes, which is the whole reason the second one went
+    on reading the canvas after v0.492.49 narrowed the first.
+    """
+    rid = _make_run(data_root, safe, basename=basename, h=h, w=w, is_mosaic=True)
+    _write_frame_coverage(data_root, safe, _ragged_border_coverage(h, w),
+                          basename=basename)
+
+    rng = np.random.default_rng(7)
+    yy, xx = np.mgrid[0:h, 0:w]
+    lum = np.full((h, w), 0.08, np.float32)
+    lum += (0.05 * np.exp(-(((xx - w / 2) / 14.0) ** 2
+                            + ((yy - h / 2) / 10.0) ** 2))).astype("float32")
+    for _ in range(25):
+        cy, cx = rng.uniform(5, h - 5), rng.uniform(5, w - 5)
+        lum += (0.5 * rng.uniform(0.4, 1.0)
+                * np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / 2.2)).astype("float32")
+    lum += rng.normal(0, 0.003, (h, w)).astype("float32")
+    ring = np.zeros((h, w), bool)
+    ring[:2, :] = ring[-2:, :] = True
+    ring[:, :2] = ring[:, -2:] = True
+    lum[ring] += rng.normal(0, 0.1, int(ring.sum())).astype("float32")
+    _overwrite_fits(data_root, safe,
+                    np.stack([lum, lum * 1.01, lum * 0.99]), basename=basename)
+    return rid
+
+
 def test_preset_suggestion_does_not_call_a_mosaic_a_star_cluster_off_its_fringe(
         client, solved_library):
     """And the symptom, end to end: the ``preset_id`` the editor prints.
@@ -772,28 +817,7 @@ def test_preset_suggestion_does_not_call_a_mosaic_a_star_cluster_off_its_fringe(
     ragged 300x600 canvases a mosaic actually stacks onto, is measured in
     ``tests/test_auto_noise_measure.py`` — 21 of 210, from a 9.8 % trim up."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
-    rid = _make_run(solved_library, safe, basename="fringe_run", h=80, w=100,
-                    is_mosaic=True)
-    _write_frame_coverage(solved_library, safe, _ragged_border_coverage(),
-                          basename="fringe_run")
-
-    h, w = 80, 100
-    rng = np.random.default_rng(7)
-    yy, xx = np.mgrid[0:h, 0:w]
-    lum = np.full((h, w), 0.08, np.float32)
-    lum += (0.05 * np.exp(-(((xx - w / 2) / 14.0) ** 2
-                            + ((yy - h / 2) / 10.0) ** 2))).astype("float32")
-    for _ in range(25):
-        cy, cx = rng.uniform(5, h - 5), rng.uniform(5, w - 5)
-        lum += (0.5 * rng.uniform(0.4, 1.0)
-                * np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / 2.2)).astype("float32")
-    lum += rng.normal(0, 0.003, (h, w)).astype("float32")
-    ring = np.zeros((h, w), bool)
-    ring[:2, :] = ring[-2:, :] = True
-    ring[:, :2] = ring[:, -2:] = True
-    lum[ring] += rng.normal(0, 0.1, int(ring.sum())).astype("float32")
-    _overwrite_fits(solved_library, safe,
-                    np.stack([lum, lum * 1.01, lum * 0.99]), basename="fringe_run")
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="fringe_run")
 
     body = client.post(
         f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion").json()
@@ -1148,6 +1172,143 @@ def test_auto_feedback_with_run_context_is_scoped_to_the_object_type(
     monkeypatch.setattr(presets, "classify_target", _forced("galaxy"))
     galaxy_bg = stretch_target_bg()
     assert galaxy_bg > cluster_bg
+
+
+def _auto_target_bg(client, safe: str, rid: int) -> float:
+    """The grey one-click Auto aims this run's sky at — the whole recipe in one
+    number, and the one a ``too_dark`` tap is supposed to move."""
+    ops = client.post(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()["ops"]
+    return next(o for o in ops
+                if o["id"] == "tone.stretch")["params"]["target_bg"]
+
+
+def test_auto_feedback_is_filed_under_the_archetype_auto_itself_reads(
+        client, solved_library, monkeypatch):
+    """The *write* side of the taste profile must agree with the read side.
+
+    ``auto_recipe`` keys the Adaptive-Auto profile on ``classify_target`` read off
+    ``presets.measured_region`` — the rectangle Auto's own border trim keeps. The
+    bucket a feedback tap is filed in was keyed on the **whole canvas**, so on a
+    ragged mosaic the two disagree, and a disagreement here is not a mislabel: it
+    files the owner's tap somewhere Auto never looks.
+
+    Here it is the wiring — what *shape* the classifier is handed on the feedback
+    request. (v0.492.49 fixed the chip and left this one; see
+    ``editor.classify_run_measured``.)"""
+    from webapp.routers import editor as editor_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="bucket_wiring")
+
+    shapes: list[tuple[int, int] | None] = []
+    real = editor_mod.presets_mod.classify_target
+
+    def spy(rgb, coverage=None, **kw):
+        shapes.append(None if rgb is None else tuple(rgb.shape[:2]))
+        return real(rgb, coverage, **kw)
+
+    monkeypatch.setattr(editor_mod.presets_mod, "classify_target", spy)
+
+    assert client.post("/api/editor/auto-preferences/feedback",
+                       json={"cue": "too_dark", "safe": safe,
+                             "run_id": rid}).status_code == 200
+    # ...and the run-scoped GET, which reports the taste in force for this picture.
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences"
+    ).status_code == 200
+
+    # The trim this coverage map asks for cuts the two outer rings of a four-pixel
+    # ramp, so the classified picture is 76x96 of the 80x100 canvas — both times.
+    assert shapes == [(76, 96), (76, 96)]
+
+
+def test_auto_feedback_on_a_ragged_mosaic_actually_changes_what_auto_does(
+        client, solved_library):
+    """And the symptom the owner sees: tapping "too dark" has to change the picture.
+
+    The editor answers a tap with *"Thanks — Auto will lean that way for you"* and
+    immediately re-runs Auto. On this canvas the fringe said **cluster** while Auto
+    keyed on the kept rectangle, which is confidently nothing — so the bias
+    saturated in a ``by_type["cluster"]`` bucket ``effective_biases`` never reads
+    for this picture, and the re-run came back byte-identical. Three taps, no
+    change, no error, nothing to notice.
+
+    Measured on the engine's own ragged four-panel canvases (the realistic depth
+    this 80x100 fixture stands in for): the two archetypes differ on **8 of 30**,
+    the cheapest at a 13.6 % trim — inside the band AGENTS.md calls a healthy
+    ragged edge — and three "too dark" taps moved Auto's stretch target by
+    **0.0000** against the 0.06 they are worth."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="bucket_effect")
+
+    before = _auto_target_bg(client, safe, rid)
+    for _ in range(3):
+        r = client.post("/api/editor/auto-preferences/feedback",
+                        json={"cue": "too_dark", "safe": safe, "run_id": rid})
+        assert r.status_code == 200, r.text
+    assert _auto_target_bg(client, safe, rid) > before
+
+
+def test_auto_feedback_is_filed_on_the_whole_canvas_with_the_trim_off(
+        client, solved_library, monkeypatch):
+    """The control, and the same rule the recipe and the chip follow: with the
+    owner's border-trim preference off no crop runs, the fringe is part of the
+    picture the editor shows, and the whole canvas is what Auto keys on too — so
+    it is what the tap must be filed under.
+
+    The preference is read from the **setting**, the way a body-less POST to
+    ``…/editor/preset-suggestion`` resolves it: neither of these two requests
+    carries the editor's per-run override."""
+    from webapp.routers import editor as editor_mod
+
+    assert client.put("/api/settings",
+                      json={"auto_crop_border": False}).status_code == 200
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="bucket_nocrop")
+
+    shapes: list[tuple[int, int] | None] = []
+    real = editor_mod.presets_mod.classify_target
+
+    def spy(rgb, coverage=None, **kw):
+        shapes.append(None if rgb is None else tuple(rgb.shape[:2]))
+        return real(rgb, coverage, **kw)
+
+    monkeypatch.setattr(editor_mod.presets_mod, "classify_target", spy)
+
+    assert client.post("/api/editor/auto-preferences/feedback",
+                       json={"cue": "too_dark", "safe": safe,
+                             "run_id": rid}).status_code == 200
+    assert shapes == [(80, 100)]
+
+
+def test_auto_feedback_on_a_single_field_classifies_the_whole_frame(
+        client, solved_library, monkeypatch):
+    """The other control: a single-field run has no ragged border to trim, reads no
+    coverage sibling at all, and is classified exactly as it is today — the shared
+    helper must not narrow a picture Auto is not going to crop."""
+    from webapp.routers import editor as editor_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="bucket_single", h=80, w=100,
+                    is_mosaic=False)
+
+    shapes: list[tuple[int, int] | None] = []
+    real = editor_mod.presets_mod.classify_target
+
+    def spy(rgb, coverage=None, **kw):
+        shapes.append(None if rgb is None else tuple(rgb.shape[:2]))
+        # A single-field run reads no coverage map at all.
+        assert coverage is None
+        return real(rgb, coverage, **kw)
+
+    monkeypatch.setattr(editor_mod.presets_mod, "classify_target", spy)
+
+    assert client.post("/api/editor/auto-preferences/feedback",
+                       json={"cue": "too_dark", "safe": safe,
+                             "run_id": rid}).status_code == 200
+    assert shapes == [(80, 100)]
 
 
 def test_edit_preview_and_histogram(client, solved_library):

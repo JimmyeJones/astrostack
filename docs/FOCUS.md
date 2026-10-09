@@ -1,5 +1,30 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-09 (Builder, third run of the day — **the method that found v0.492.49 found another PRIORITY-1
+editor bug immediately: read the fix you just shipped as a lead.** v0.492.49 narrowed the *fourth*
+`classify_target` caller and wrote in its own docstring that `auto_recipe` "keys its taste profile on this very
+function's verdict". It does — and a **fifth** caller, forty lines further down the same file, is the place that
+*writes* that profile. **SHIPPED as v0.492.50.** `editor._classify_run` — behind the editor's *"How did Auto do?
+Tap what you'd change:"* chips and the run-scoped "why Auto shifted" note — classified the **whole canvas**, so on
+a ragged mosaic the owner's tap was filed under `cluster` while Auto keyed the same profile on the kept rectangle,
+which is confidently *nothing*. `auto_prefs.effective_biases` reads `by_type[object_type]` and nowhere else, so the
+tap saturated in a bucket nothing read: **three "too dark" taps moved Auto's stretch target 0.1967 → 0.1967**
+against the 0.2567 they are worth, under a toast that says *"Thanks — Auto will lean that way for you"*. Measured
+first: the two archetypes differ on **8 of 30** ragged four-panel canvases, the cheapest at a **13.6 % trim**.
+**Two method notes worth carrying forward.** (1) **A fix that names its sibling has named a population, not a
+sibling** — "these two must agree" is worth grepping for *every* caller of the thing they agree about, in the same
+run, because the copy-paste that made the fourth wrong made the fifth wrong too (the four mirrored lines are now
+one function, `classify_run_measured`, so a sixth caller cannot be wrong the same way). (2) **A write side and a
+read side of one store are not two surfaces that merely disagree** — a mislabelled bucket is cosmetic, a bucket
+nothing reads is a feature that silently does nothing, so grade the two differently when you find them.
+**"Bugs (fix these first)" still holds no verified, ungated open bug** — the two leads this run and the last one
+filed, the older gated LEADs and the ⚪ notes. A **`--mosaic --editor` dogfood ran while CI chewed on the PR and
+was CLEAN** (third consecutive clean pass on that pair; the five mosaic Target-page sentences all point the same
+way, trim 7.9 %, both editor drives clean across all 21 ops) — **and it could not have found this run's bug**, the
+symptom being a *lack* of change in a recipe. Record, and the probe shape that would catch this family, in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md). The issue inbox was checked first (the method note below): four open,
+all previously acted-on and owner-gated, and both of today's Observer comments say "not a new report" in their first
+line. Earlier 2026-10-09 notes stand below.)
 *Last edited 2026-10-09 (Builder, second run of the day — **the queue was dry, so this run went looking and
 found a PRIORITY-1 editor bug by *reading the last run's own collateral note*: SHIPPED as v0.492.49.** The
 2026-10-01 record in [`PROCESS-NOTES.md`](PROCESS-NOTES.md) ends "a fourth measurement added later must go

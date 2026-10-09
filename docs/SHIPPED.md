@@ -1,5 +1,90 @@
 # Shipped — the record
 
+## 2026-10-09 (Builder) — the owner's Auto feedback stopped being filed where Auto never looks
+
+### v0.492.50 — 🟠 BUG FIX (PRIORITY 1 the editor / PRIORITY 2 autonomy): `classify_run_measured`, `_classify_run`, `build_preset_suggestion_for_run`
+
+Builder-found by taking **v0.492.49's own fix as the lead**: that run narrowed the *fourth*
+`classify_target` caller (the "try this preset?" chip) and recorded in its docstring that
+`auto_recipe` "keys its taste profile on this very function's verdict". It does — and a **fifth**
+caller, forty lines further down the same file, is the place that *writes* that profile.
+
+**The bug.** `webapp.routers.editor._classify_run` is the archetype a feedback tap is filed under.
+It backs two requests:
+
+- `POST /api/editor/auto-preferences/feedback` — the editor's *"How did Auto do? Tap what you'd
+  change:"* chips (`frontend/src/components/editor/AutoFeedback.tsx`), which answer with
+  *"Thanks — Auto will lean that way for you"* and immediately re-run Auto;
+- `GET …/stack-runs/{id}/editor/auto-preferences` — the run-scoped *"why Auto shifted"* note.
+
+It classified the **whole canvas**. `auto_recipe` keys the same profile on the archetype of the
+rectangle its own border trim keeps (`presets.measured_region`, v0.410.1). So on a ragged mosaic the
+*write* side and the *read* side of the taste profile disagreed — and a disagreement here is not a
+mislabel. `auto_prefs.effective_biases` looks in `by_type[object_type]` and nowhere else, so the tap
+saturates in a bucket Auto never reads for that picture:
+
+> three "too dark" taps, `target_bg` **0.1967 → 0.1967**. Filed under the archetype Auto reads:
+> **0.1967 → 0.2567** (the full 3 × 0.02 brightness step).
+
+The owner taps a chip, is thanked, watches Auto re-run, and gets a byte-identical recipe. No error,
+nothing to notice, and pressing it again only saturates the wrong bucket faster. On the owner's own
+shooting style — he is a heavy mosaic user — that is the Adaptive-Auto feature not working.
+
+**Measured before building**, on the engine's own ragged four-panel canvases (`_ragged`, 5 fringe
+widths × 3 seeds × 2 σ = 30 trimmable canvases), as whether the whole-canvas archetype and the
+kept-rectangle archetype agree:
+
+| | |
+|---|---|
+| canvases where the two buckets differ | **8 of 30** |
+| cheapest divergence | **13.6 % trim** |
+| every divergence | whole-canvas `cluster` vs kept-rectangle **nothing** |
+| `target_bg` after 3 taps, filed on the canvas | **0.1967** (unchanged) |
+| `target_bg` after 3 taps, filed where Auto reads | **0.2567** |
+
+13.6 % is inside the band AGENTS.md calls a healthy ragged edge (above ~15 % is itself a bug), so
+this is the ordinary mosaic, not a broken canvas. And the direction is always the same: the fringe's
+grain lifts `classify_target`'s `6·sky_sigma` threshold, diffuse structure disappears under it, the
+verdict walks to `cluster`, while the kept picture is confidently *nothing* — so the tap is filed in
+`cluster` and read from the global set, i.e. **lost**, rather than merely applied to the wrong
+archetype.
+
+**The fix.** The mirrored measurement is now a function, `editor.classify_run_measured` — same
+proxy, same `_run_is_mosaic` verdict, same `_trim_rect_for_run` rectangle, same
+`presets.measured_region` — and it is what both callers use. `build_preset_suggestion_for_run` loses
+its own copy of those four lines (v0.492.49's behaviour is byte-identical; its four tests are
+untouched and green), and `_classify_run` goes through it. One question, one place: the reason the
+fifth caller survived the fourth's fix is that the four lines were *copied* rather than shared.
+
+`auto_crop` gates the narrowing the way it gates it in all three Auto siblings. `_classify_run`
+resolves it from the **setting**, exactly as a body-less POST to `…/editor/preset-suggestion` does:
+neither of its two requests carries the editor's per-run override (the feedback body is a cue; the
+GET has no body). That residual is **filed as a lead rather than plumbed through**, because the
+preset chip does not see the override either — `api.presetSuggestion` sends no body — and fixing it
+for one of the two classification surfaces would just move the divergence instead of closing it.
+
+**What is deliberately NOT done: the taste already filed in the wrong bucket is left alone.** An
+install that has been tapping chips on mosaics may hold a saturated `by_type["cluster"]` bucket that
+was meant for something else. Nothing here rewrites it: the app cannot know which picture a stored
+tap was about, a bucket is legitimate taste for genuine clusters, and `auto_prefs`' recency decay
+already eases an unreinforced bias back toward neutral. Reading is unchanged, so no existing profile
+changes what Auto does today.
+
+**Upgrade-safe (§9):** no config, schema, migration, on-disk, default or API-shape change. Both
+endpoints keep their request and response shapes; what changes is which archetype string an existing
+field is computed from.
+
+**Tests (+4, all in `tests/webapp/test_editor.py`).** The wiring (the classifier is handed 76×96 of
+an 80×100 canvas on **both** requests), the symptom end to end (three taps must move
+`_auto_target_bg`; it is the assertion that reads `assert 0.2283677… > 0.2283677…` before the fix),
+and two controls — the trim-off case (`auto_crop_border: false` ⇒ the whole canvas again, the same
+rule the recipe and the chip follow) and the single-field case (no coverage map read at all).
+v0.492.49's fringe canvas is factored out as `_make_fringe_mosaic_run` and shared by the chip's test
+and the bucket's, so the two are provably about one picture. **Fail-before verified by reverting the
+production change in place**: the wiring test and the end-to-end test go red, both controls and all
+of v0.492.49's tests stay green.
+
+
 ## 2026-10-09 (Builder) — the editor's "try this preset?" chip stopped reading the border Auto deletes
 
 ### v0.492.49 — 🟠 BUG FIX (PRIORITY 1, the editor): `build_preset_suggestion_for_run`, `presets.measured_region`, `classify_target`

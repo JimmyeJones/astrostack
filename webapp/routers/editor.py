@@ -415,6 +415,43 @@ def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | Non
         grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
 
 
+def classify_run_measured(project_dir: Path, run, auto_crop: bool = True) -> dict:
+    """``presets.classify_target`` on the picture Auto is about to make — the one
+    place in the webapp that asks a run's coarse archetype.
+
+    **Mirrors ``build_auto_recipe_for_run``** — same proxy, same
+    :func:`_run_is_mosaic` verdict, same :func:`_trim_rect_for_run` rectangle,
+    same measured region — the way :func:`build_auto_analysis_for_run` already
+    promises to, and for the same reason: ``auto_recipe`` keys the Adaptive-Auto
+    taste profile on this very verdict, read off the rectangle its own border trim
+    keeps (``presets.measured_region``), so an archetype measured on the whole
+    canvas is a second opinion about one picture. It is also the *worse* opinion:
+    the ragged fringe is one to three subs deep where the panels are a dozen, and
+    that grain lifts ``classify_target``'s signal threshold until the faint
+    diffuse structure vanishes under it — the verdict then walks toward "star
+    cluster", which is a statement about the canvas rather than about what was
+    photographed.
+
+    It is a *function*, not two call sites, because both of its callers are the
+    same question with different consequences — the editor's "try this preset?"
+    chip (:func:`build_preset_suggestion_for_run`) and the bucket a feedback tap
+    is filed in (:func:`_classify_run`) — and the second one went on reading the
+    whole canvas after v0.492.49 narrowed the first.
+
+    ``auto_crop`` is the owner's "let Auto trim the ragged border" preference, and
+    it gates the narrowing exactly as it gates it in the Auto siblings: with the
+    trim switched off no crop runs, the fringe *is* part of the picture the editor
+    shows, and the whole canvas is the honest thing to classify.
+    """
+    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+    is_mosaic = _run_is_mosaic(run, load=True)
+    trim = _trim_rect_for_run(run) if is_mosaic else None
+    m_rgb, m_cov = presets_mod.measured_region(
+        rgb, _auto_measure_coverage(run, scale, is_mosaic),
+        trim if auto_crop else None)
+    return presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
+
+
 def build_preset_suggestion_for_run(project_dir: Path, run,
                                     auto_crop: bool = True) -> dict:
     """Coarsely classify a run's own proxy and, when one archetype is clear, suggest
@@ -423,31 +460,15 @@ def build_preset_suggestion_for_run(project_dir: Path, run,
     recipe or persists anything, so a mis-suggestion costs a click, not an image.
     Declines (``preset_id=None``) on an ambiguous or blank field.
 
-    **Mirrors ``build_auto_recipe_for_run``** — same proxy, same mosaic verdict,
-    same trim rect, same measured region — the way
-    :func:`build_auto_analysis_for_run` already does, and for the same reason:
-    ``auto_recipe`` keys its taste profile on this very function's verdict, read
-    off the rectangle its own border trim keeps
-    (``presets.measured_region``), so a chip measured on the whole canvas is a
-    second opinion about one picture. It is also the *worse* opinion: the ragged
-    fringe is one to three subs deep where the panels are a dozen, and that grain
-    lifts ``classify_target``'s signal threshold until the faint diffuse structure
-    vanishes under it — the verdict then walks toward "star cluster", which is a
-    statement about the canvas rather than about what was photographed. Measured:
-    the verdict flips on 21 of 210 ragged canvases, from the 9.8 % trim upward
-    (see ``presets.measured_region``).
+    Classifies through :func:`classify_run_measured`, which mirrors
+    ``build_auto_recipe_for_run`` — same proxy, same mosaic verdict, same trim
+    rect, same measured region. The reason is in that function's docstring; the
+    measurement is in ``presets.measured_region`` (the verdict flips on 21 of 210
+    ragged canvases, from the 9.8 % trim upward).
 
-    ``auto_crop`` is the owner's "let Auto trim the ragged border" preference, and
-    it gates the narrowing exactly as it gates it in the two siblings: with the
-    trim switched off no crop runs, the fringe *is* part of the picture the editor
-    shows, and the whole canvas is the honest thing to classify."""
-    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
-    is_mosaic = _run_is_mosaic(run, load=True)
-    trim = _trim_rect_for_run(run) if is_mosaic else None
-    m_rgb, m_cov = presets_mod.measured_region(
-        rgb, _auto_measure_coverage(run, scale, is_mosaic),
-        trim if auto_crop else None)
-    out = presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
+    ``auto_crop`` is the owner's "let Auto trim the ragged border" preference; see
+    :func:`classify_run_measured` for how it gates the narrowing."""
+    out = classify_run_measured(project_dir, run, auto_crop)
     # Only the user-facing fields; the raw cues stay server-side (debug/tests only).
     return {"preset_id": out["preset_id"], "label": out["label"],
             "reason": out["reason"], "confidence": out["confidence"]}
@@ -816,13 +837,31 @@ def _auto_preferences_out(profile: dict,
 def _classify_run(request: Request, safe: str, run_id: int) -> str | None:
     """Best-effort coarse archetype (galaxy/nebula/cluster) of a run's own proxy,
     so type-scoped feedback lands in the right bucket. Returns ``None`` — i.e. fall
-    back to the global taste — on any failure (missing run, unreadable proxy)."""
+    back to the global taste — on any failure (missing run, unreadable proxy).
+
+    **It has to be the archetype ``auto_recipe`` itself keys on**, which is why it
+    goes through :func:`classify_run_measured` rather than classifying the canvas:
+    this is the *write* side of the taste profile and ``auto_recipe`` is the read
+    side, so a disagreement does not merely mislabel a bucket — it files the tap
+    somewhere Auto never looks. Measured on the engine's own ragged four-panel
+    canvases: the two archetypes differ on **8 of 30** (the cheapest at a 13.6 %
+    trim, inside the band AGENTS.md calls a healthy ragged edge), every one of
+    them a whole-canvas ``cluster`` against a kept-rectangle *nothing* — so three
+    "too dark" taps moved Auto's stretch target by **0.0000** where filing them
+    under the archetype Auto reads moves it by 0.06. The editor says "Thanks —
+    Auto will lean that way for you" and re-runs Auto on a byte-identical recipe.
+
+    The border-trim preference comes from the **setting**, exactly as a body-less
+    POST to ``…/editor/preset-suggestion`` resolves it: the editor's per-run
+    override is not carried on either of this function's two requests (the
+    feedback body is a cue, the run-scoped GET has no body), and neither surface
+    sees it today. Filed as a lead rather than plumbed through here, so the two
+    classification surfaces keep answering with one rule.
+    """
     try:
         project_dir, run = _run_info(request, safe, run_id)
-        rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
-        return presets_mod.classify_target(
-            rgb, _auto_measure_coverage(run, scale),
-            proxy_scale=scale).get("cls")
+        auto_crop = bool(deps.get_settings(request).auto_crop_border)
+        return classify_run_measured(project_dir, run, auto_crop).get("cls")
     except Exception:  # noqa: BLE001 — classification is advisory; never sink feedback
         return None
 

@@ -1,5 +1,70 @@
 # Process notes & QA sweep records
 
+## 2026-10-09 (Builder, branch `claude/jolly-bardeen-2wlx72`) — read the fix you just shipped as a lead
+
+**Baseline.** `source scripts/agent-setup.sh` green. Full suite **`7515 passed, 4 skipped`** (13m53s, BLAS cap +
+`.venv/bin/python -m pytest -q -n 4 --dist worksteal`, launched as a backgrounded command exactly as the previous
+run's note prescribes). `origin/main` at `ea087df1`, **no open PRs**, no other live run.
+
+**Issue inbox first, again — and this time it was genuinely dry.** Four open (#1015, #903, #880, #878), all
+previously acted-on and owner-gated. Two of them had been updated hours before this run (both at 07:13Z), which is
+exactly the shape that has been the real front of the queue three runs running — but both open with
+*"New evidence on an existing finding; not a new report."* #1015 reports the clone gap has tripled (0.437.5 against
+a deployed 0.492.34) and that the read-only token is still deployed-and-unminted; #878 reports the duplicate set
+has **not** grown across 13,777 further distinct frames, which bounds it as a past event rather than a live
+mechanism. Neither is repo work. **The rule that held: an Observer follow-up's first line says whether it is a new
+report, so reading one costs nothing — but it still has to be read, because "updated today" and "new finding" look
+identical in a listing.**
+
+**What the run was: the previous run's own fix, read as a lead.** v0.492.49 narrowed the *fourth*
+`classify_target` caller (the editor's preset chip) and recorded in its new docstring that `auto_recipe` "keys its
+taste profile on this very function's verdict". Taking that sentence at its word and grepping
+`webapp/routers/editor.py` for every `classify_target` call found a **fifth**, forty lines below the fourth:
+`_classify_run`, which is the archetype a feedback tap is *filed under*. It classified the whole canvas. Shipped as
+**v0.492.50**; the numbers and the fix are in [`SHIPPED.md`](SHIPPED.md).
+
+**Three notes worth carrying forward.**
+
+1. **A fix that names its sibling has named a *population*, not a sibling.** "These two must agree about X" is
+   worth grepping, in the same run, for *every* caller of X — the copy-paste that made the fourth caller wrong is
+   the same copy-paste that made the fifth wrong, and the fifth is in the same file. The four mirrored lines are
+   now one function (`editor.classify_run_measured`) rather than a third copy, which is the only form of the fix
+   that a sixth caller cannot defeat. The 2026-10-01 note said "a fourth measurement added later must go through
+   `measured_region` too"; the honest generalisation is **"stop writing the line a future caller has to remember"**.
+
+2. **A write side and a read side of one store are not two surfaces that merely disagree.** All of this family's
+   earlier instalments were "one picture, two opinions" — the chip said *cluster* where the recipe said *nebula*,
+   a mislabel. This one is the *write* side of the taste profile against the *read* side, and
+   `auto_prefs.effective_biases` looks in `by_type[object_type]` **and nowhere else**: so the disagreement does not
+   mislabel the bucket, it files the tap where nothing looks. Measured, three "too dark" taps: `target_bg`
+   **0.1967 → 0.1967**, under a toast reading *"Thanks — Auto will lean that way for you"*. **When a bug is found
+   on a store, ask which side of it you are on before grading the severity** — the same divergence is cosmetic on
+   a display and a dead feature on a write.
+
+3. **The honest residual was filed rather than half-fixed, and the reason is worth the line.** The editor's
+   *per-run* border-trim switch reaches neither classification surface (`api.presetSuggestion` sends no body; the
+   feedback body is a cue). Plumbing it through the feedback path alone would have **moved** the divergence to the
+   chip beside it rather than closing it, so it is one entry covering both surfaces, in "Bugs" with the call sites
+   and the query-key trap written down. A fix that leaves two surfaces answering one question by two rules is not
+   smaller than the fix that leaves them answering by one.
+
+**`--mosaic --editor` dogfood: CLEAN** — run while CI chewed on the PR, so it cost the run nothing. Worth
+recording because it is the third consecutive clean pass on this pair, and because **it could not have found this
+run's bug**: the symptom is a *lack* of change in a recipe, and a probe that photographs one render cannot see a
+second render that should have differed and did not. (If this family is ever probed, the shape is *tap a chip,
+re-ask `…/editor/auto`, diff the two recipes* — a probe assertion rather than a page reading.)
+What it did read, as the one paragraph AGENTS.md §7 asks for: the five mosaic Target-page sentences all point the
+**same** way — deepen the panels you have before widening the grid — which is the agreement four of the last five
+findings were about. Framing says *"only about 75 % of it is in this picture… more passes over the panels you
+already have do more for it than a wider grid"*, next-best-move says *"another pass or two over the same mosaic
+evens out the thinner part"*, and readiness says *"more time pulls out fainter detail"*. The numbers reconcile in
+both directions: `4 min` of a `~6.9 h` goal **both** being whole-target shooting time for *about 3 fields of sky*
+(so not the whole-target-vs-per-panel mismatch v0.492.31/.32 closed), and the panel map's *30 s at the top-right
+against 1 min on a typical panel* being exactly 4 min over four panels. Trim **7.9 %**, 3 of 5 cards visible
+without a click, `nothing overflowing, no console errors`, and **both** editor drives clean — all 21 ops
+re-rendered plus undo/redo, on the single field and on the mosaic run. Nothing filed.
+Python suite re-run green after the sync; no frontend change, so no `tsc`/`vitest`/`vite build`.
+
 ## 2026-10-09 (Builder, branch `claude/jolly-bardeen-ssa1n0`) — a "next time" note is also a *last* time note
 
 **Baseline.** `source scripts/agent-setup.sh` green (it does **not** install `pytest-xdist` — that is the run's
