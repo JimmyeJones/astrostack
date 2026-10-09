@@ -547,9 +547,12 @@ describe("pipelineSummary", () => {
     ]);
   });
 
-  it("says which targets are still being shot, rather than reading as nothing done", () => {
+  it("says which targets are still receiving subs, rather than reading as nothing done", () => {
     // A beginner watching Jobs on a night of shooting would otherwise see
     // "Imported 60 new frames." and no picture, with nothing saying why.
+    // "arriving" rather than "being shot": the hold fires just as readily on a
+    // drop folder still copying in, which is the case the owner met (#1090),
+    // and "still being shot" reads as a bug to someone shooting nothing.
     const { line, heldSettling } = pipelineSummary({
       scanned: 60, auto_stacked: [],
       auto_stack_held_settling: [
@@ -557,7 +560,7 @@ describe("pipelineSummary", () => {
         { target: "NGC 7000", quiet_min: 0, settle_min: 20 },
       ],
     });
-    expect(line).toBe("Imported 60 new frames · waiting on 2 still being shot.");
+    expect(line).toBe("Imported 60 new frames · waiting on 2 still arriving.");
     expect(heldSettling).toEqual([
       { target: "M 42", quietMin: 2, settleMin: 20 },
       { target: "NGC 7000", quietMin: 0, settleMin: 20 },

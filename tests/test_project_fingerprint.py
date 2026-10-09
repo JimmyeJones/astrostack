@@ -136,16 +136,25 @@ def test_an_empty_project_has_a_fingerprint_rather_than_an_error(tmp_path):
 # --- what it deliberately does *not* hash -------------------------------------
 
 
-def test_the_set_aside_and_restoration_stamps_are_not_part_of_the_fingerprint():
-    """They record *when the app changed its mind*, not the frame's own state.
+def test_the_bookkeeping_stamps_are_not_part_of_the_fingerprint():
+    """The three columns that record *what the app did*, not the frame's state.
 
-    Every change they accompany is already visible to the hash through
-    ``accept``, so hashing them would buy a cache holder nothing — and would
-    cost the property the test above pins, because ``update_frame`` stamps
-    ``rejected_utc`` on every set-aside and the undo could never get back."""
+    ``restored_utc``/``rejected_utc``: every change they accompany is already
+    visible to the hash through ``accept``, so hashing them would buy a cache
+    holder nothing — and would cost the property the test above pins, because
+    ``update_frame`` stamps ``rejected_utc`` on every set-aside and the undo
+    could never get back.
+
+    ``ingested_at``: a wall clock stamped once, at insert. Hashing it makes two
+    libraries holding the same subs disagree purely because they were scanned
+    seconds apart, which is what ``test_two_projects_with_the_same_frames_agree``
+    below measures. It can hide nothing: it is never updated, so only a *new*
+    row can carry a new value, and the hash already sees a new row through every
+    other column."""
     from seestack.io.project import _FINGERPRINT_PROVENANCE_COLS
 
-    assert _FINGERPRINT_PROVENANCE_COLS == {"restored_utc", "rejected_utc"}
+    assert _FINGERPRINT_PROVENANCE_COLS == {
+        "restored_utc", "rejected_utc", "ingested_at"}
 
 
 def test_a_column_nobody_listed_is_hashed_by_default(tmp_path):

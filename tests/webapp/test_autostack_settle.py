@@ -53,14 +53,21 @@ def _patch_run_stack(monkeypatch):
 
 
 def _age_every_sub(lib: Library, seconds: float) -> None:
-    """Make every target's subs look ``seconds`` old, on the row *and* the file —
-    the row is what the hold reads, the file is what a re-scan would re-stamp."""
+    """Make every target's subs look ``seconds`` old, on the rows *and* the file —
+    the rows are what the hold reads, the file is what a re-scan would re-stamp.
+
+    Both stored times, because the hold reads the **later** of them
+    (``Project.newest_accepted_sub_time``): ``ingested_at`` says when the sub
+    landed in the library and ``source_mtime`` when its file was written, and a
+    helper that aged only one would leave the fixture looking freshly-arrived
+    however old it claimed to be."""
     when = time.time() - seconds
     for entry in lib.list_targets():
         proj = lib.open_target(entry.safe_name)
         try:
             proj._conn.execute(  # noqa: SLF001 — reaching for the stored fact
-                "UPDATE frames SET source_mtime = ?", (when,))
+                "UPDATE frames SET source_mtime = ?, ingested_at = ?",
+                (when, when))
             proj._conn.commit()  # noqa: SLF001
             for row in proj.iter_frames():
                 if row.source_path and os.path.exists(row.source_path):
@@ -136,7 +143,8 @@ def test_a_library_with_no_sub_times_is_never_held(solved_library, monkeypatch):
             proj = lib.open_target(entry.safe_name)
             try:
                 proj._conn.execute(  # noqa: SLF001
-                    "UPDATE frames SET source_mtime = NULL, timestamp_utc = NULL")
+                    "UPDATE frames SET source_mtime = NULL, ingested_at = NULL, "
+                    "timestamp_utc = NULL")
                 proj._conn.commit()  # noqa: SLF001
                 assert proj.newest_accepted_sub_time() is None
             finally:
@@ -159,7 +167,7 @@ def test_a_frames_capture_time_stands_in_when_the_file_time_is_missing(
         proj = lib.open_target(entry.safe_name)
         try:
             proj._conn.execute(  # noqa: SLF001
-                "UPDATE frames SET source_mtime = NULL, "
+                "UPDATE frames SET source_mtime = NULL, ingested_at = NULL, "
                 "timestamp_utc = '2024-11-15T21:00:00+00:00'")
             proj._conn.commit()  # noqa: SLF001
             newest = proj.newest_accepted_sub_time()
@@ -218,3 +226,131 @@ def test_the_named_default_is_the_settings_default(solved_library):
     poll, shorter than a meridian flip); the setting must not drift from it."""
     assert (Settings(data_root=str(solved_library)).auto_stack_settle_min
             == pipeline.AUTO_STACK_SETTLE_DEFAULT_MIN)
+
+
+# --- the arrival clock: observer issue #1090 ---------------------------------
+#
+# The hold above had never held anything on the owner's install, and could not:
+# it asked for the newest sub's time and was answered with the newest sub's
+# *capture* time. ``frames.source_mtime`` is the source file's own ``st_mtime``,
+# so every copy that preserves timestamps — measured on 118 of 118 of his drop
+# folders — records when the sub was shot, hours to months before the folder was
+# dropped in, and the 20-minute window was already spent before the first sub of
+# a folder reached the database. ``frames.ingested_at`` is the arrival itself.
+
+
+def test_a_sub_captured_weeks_ago_but_ingested_now_holds_the_target(
+        solved_library, monkeypatch):
+    """The owner's shape, end to end: a folder of subs shot weeks ago, copied in
+    with its timestamps preserved, ingested seconds ago.
+
+    Fails before: every target stacked, because the only time the hold could ask
+    for said the subs were three weeks old — so the guard that exists for exactly
+    "subs are still arriving" stood aside for the one case it was written for."""
+    calls = _patch_run_stack(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        _age_every_sub(lib, seconds=21 * 24 * 3600)   # captured three weeks ago
+        _landed_just_now(lib)                         # …and copied in this minute
+
+        summary = pipeline._pipeline_body(
+            _settings(solved_library), _FakeJM(), Job(kind="pipeline"), root=None)
+
+        assert calls == []
+        assert summary["auto_stacked"] == []
+        held = summary.get("auto_stack_held_settling")
+        assert held, "a folder that landed seconds ago must be held"
+        assert all(h["quiet_min"] == 0 and h["settle_min"] == 20 for h in held), held
+    finally:
+        lib.close()
+
+
+def _landed_just_now(lib: Library) -> None:
+    """Stamp every sub's *arrival* as now, leaving its capture time alone."""
+    now = time.time()
+    for entry in lib.list_targets():
+        proj = lib.open_target(entry.safe_name)
+        try:
+            proj._conn.execute(  # noqa: SLF001
+                "UPDATE frames SET ingested_at = ?", (now,))
+            proj._conn.commit()  # noqa: SLF001
+        finally:
+            proj.close()
+
+
+def test_the_answer_is_the_later_of_arrival_and_capture(solved_library):
+    """Not one column in preference to the other: either being recent means the
+    target is still moving, so the max is what the hold must see. That also makes
+    the change one-sided — it can only ever report a *more* recent time than the
+    pair did before ``ingested_at`` existed, so the hold became more cautious and
+    never less."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(iter(lib.list_targets())).safe_name
+        proj = lib.open_target(safe)
+        try:
+            old, recent = time.time() - 30 * 24 * 3600, time.time() - 90
+            # Shot a month ago, landed 90 s ago → the arrival wins.
+            proj._conn.execute(  # noqa: SLF001
+                "UPDATE frames SET source_mtime = ?, ingested_at = ?",
+                (old, recent))
+            proj._conn.commit()  # noqa: SLF001
+            assert abs(proj.newest_accepted_sub_time() - recent) < 1
+            # Landed a month ago, re-copied (so re-stamped) 90 s ago → capture
+            # wins, which is today's behaviour unchanged.
+            proj._conn.execute(  # noqa: SLF001
+                "UPDATE frames SET source_mtime = ?, ingested_at = ?",
+                (recent, old))
+            proj._conn.commit()  # noqa: SLF001
+            assert abs(proj.newest_accepted_sub_time() - recent) < 1
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_a_project_predating_the_arrival_column_answers_exactly_as_before(
+        tmp_path):
+    """§9: the column is added by ``_reconcile_table_columns`` on first open, so
+    an in-place upgrade self-heals — and because every existing row is left NULL,
+    such a library's answer is the old one (``source_mtime``) byte for byte.
+
+    The ``ALTER`` that drops it back out is this test's way of being an *old*
+    project; it is never something the app does."""
+    from seestack.io.project import Project
+
+    proj = Project.create(tmp_path / "t", name="t")
+    try:
+        proj.add_frame(_frame(tmp_path / "a.fit", mtime=1_700_000_000.0))
+        proj.add_frame(_frame(tmp_path / "b.fit", mtime=1_700_000_500.0))
+    finally:
+        proj.close()
+    # Rewind to before the column existed. SQLite can drop a plain column.
+    import sqlite3
+
+    conn = sqlite3.connect(tmp_path / "t" / "project.sqlite")
+    try:
+        conn.execute("ALTER TABLE frames DROP COLUMN ingested_at")
+        conn.commit()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(frames)")}
+        assert "ingested_at" not in cols
+    finally:
+        conn.close()
+
+    proj = Project.open(tmp_path / "t")
+    try:
+        cols = {r[1] for r in
+                proj._conn.execute("PRAGMA table_info(frames)")}  # noqa: SLF001
+        assert "ingested_at" in cols, "the reconcile must restore it on open"
+        rows = list(proj.iter_frames())
+        assert [r.ingested_at for r in rows] == [None, None]
+        assert proj.newest_accepted_sub_time() == 1_700_000_500.0
+    finally:
+        proj.close()
+
+
+def _frame(path, *, mtime: float):
+    from seestack.io.project import FrameRow
+
+    return FrameRow(source_path=str(path), source_mtime=mtime,
+                    wcs_json="CTYPE1", accept=True)

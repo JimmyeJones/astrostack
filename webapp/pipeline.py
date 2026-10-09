@@ -3475,6 +3475,15 @@ def _auto_stack_settle_hold(
     readability holds, so the stack happens on the first scan after the subs stop
     — delayed, never stranded, and never skipped.
 
+    "Newest" is :meth:`Project.newest_accepted_sub_time`, which answers with the
+    later of the sub's **arrival** and its capture. The arrival half is what makes
+    this hold able to fire at all: until ``frames.ingested_at`` existed the window
+    was measured against the source file's own mtime, which a timestamp-preserving
+    copy sets to the capture time — so on a library whose subs are copied in (the
+    owner's: 118 of 118 drop folders, observer issue #1090) the window had already
+    expired before the first sub of a folder was ingested, and this function had
+    never held anything.
+
     Returns ``None`` — i.e. stack now — when the window is 0 (today's behaviour,
     byte for byte), when the target has no sub time at all to judge by (a library
     predating the fingerprint columns must not be held on a fact it cannot

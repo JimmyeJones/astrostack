@@ -178,7 +178,9 @@ def test_a_carried_frame_keeps_every_column_it_had(tmp_path):
     ``_frame_without_id`` listed the columns to copy by hand, so every column
     added to ``FrameRow`` after it was written — ``restored_utc``,
     ``source_size_bytes``, ``source_mtime``, ``streak_cx``/``streak_cy`` — was
-    silently left behind. It now copies the row and resets only the three fields
+    silently left behind.  (``ingested_at`` is the newest such column, and it is
+    the one that would have been *wrong* rather than merely absent: restamped on
+    the way in, it would make the destination read as "still receiving subs".) It now copies the row and resets only the three fields
     that are *about this project*: the id and the two cache paths. Driven off
     ``FrameRow``'s own fields, so a column added tomorrow is covered too.
     """
@@ -191,6 +193,15 @@ def test_a_carried_frame_keeps_every_column_it_had(tmp_path):
         full = FrameRow(
             source_path=str(tmp_path / "light.fit"),
             source_size_bytes=123456, source_mtime=1700000000.5,
+            # Given a value on purpose, like every other column here: a row that
+            # left it ``None`` would be *stamped* by ``add_frame`` on insert, and
+            # the loop below would then compare the stored stamp with the local
+            # object's ``None`` and fail for a reason that is not about merging.
+            # With a value, this also pins the property that matters — a merge
+            # moves a sub between targets of a library it is already in, so it
+            # must carry the arrival it really had rather than read as having
+            # just landed and hold the destination's walk-away stack.
+            ingested_at=1700000321.0,
             timestamp_utc="2026-09-01T22:00:00Z", exposure_s=10.0, gain=80.0,
             sensor_temp_c=-3.5, width_px=1080, height_px=1920,
             bayer_pattern="GRBG", ra_hint_deg=10.68, dec_hint_deg=41.27,

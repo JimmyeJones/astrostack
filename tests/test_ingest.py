@@ -655,3 +655,94 @@ def test_ingest_dedupes_across_a_relative_vs_absolute_respell(tmp_path, monkeypa
         assert proj.count() == 1  # no duplicate row
     finally:
         proj.close()
+
+
+# --- arrival time: observer issue #1090 --------------------------------------
+
+
+def test_ingest_records_when_a_sub_landed_not_only_when_it_was_shot(tmp_path):
+    """``source_mtime`` is the *source file's* own mtime, so a copy that
+    preserves timestamps records the capture — which is why the walk-away settle
+    window, asked of it, had never held anything on a library whose subs arrive
+    by such a copy (``Project.newest_accepted_sub_time``, observer #1090).
+
+    ``ingested_at`` is the arrival itself: the wall clock at insert, stamped
+    centrally by ``Project.add_frame`` so no ingest route can forget it. Fails
+    before the column existed; fails again if the stamp moves out of
+    ``add_frame`` and a caller forgets to pass it."""
+    import time
+
+    src = tmp_path / "raws"
+    src.mkdir()
+    captured = time.time() - 21 * 24 * 3600          # shot three weeks ago
+    for name in ("a.fit", "b.fit"):
+        path = write_seestar_fits(src / name, add_wcs=True)
+        os.utime(path, (captured, captured))         # …and copied in with -p
+
+    proj = Project.create(tmp_path / "proj", name="t")
+    cache = CacheManager(proj.project_dir)
+    try:
+        before = time.time()
+        list(ingest_files(proj, cache, find_fits_files(src), copy_to_cache=False))
+        after = time.time()
+        rows = list(proj.iter_frames())
+        assert len(rows) == 2
+        for row in rows:
+            # The file's own time still says three weeks ago…
+            assert abs(row.source_mtime - captured) < 2
+            # …and the row now also says when it reached this library.
+            assert row.ingested_at is not None
+            assert before <= row.ingested_at <= after
+        # Which is the whole point: "is this target still being shot?" answers
+        # "yes, seconds ago" instead of "no, three weeks ago".
+        newest = proj.newest_accepted_sub_time()
+        assert newest is not None and before <= newest <= after
+    finally:
+        proj.close()
+
+
+def test_a_merged_sub_keeps_the_arrival_it_really_had(tmp_path):
+    """A merge moves a sub between targets of a library it is already in, so
+    restamping its arrival would make the destination read as "still receiving
+    subs" and hold its own walk-away stack over files that landed weeks ago.
+    ``add_frame`` stamps only a row that carries none, which is what lets
+    ``merge._frame_without_id``'s ``replace`` keep it."""
+    from seestack.io.merge import merge_projects
+
+    landed = 1_700_000_321.0
+    src = Project.create(tmp_path / "src", name="src")
+    try:
+        src.add_frame(_row(tmp_path / "light.fit", ingested_at=landed))
+    finally:
+        src.close()
+    dst = Project.create(tmp_path / "dst", name="dst")
+    try:
+        list(merge_projects(dst, [tmp_path / "src"], copy_cached_files=False))
+        carried = next(iter(dst.iter_frames(accepted_only=False)))
+        assert carried.ingested_at == landed
+    finally:
+        dst.close()
+
+
+def test_a_row_inserted_without_an_arrival_is_stamped_once_not_on_every_read(
+        tmp_path):
+    """The stamp is a property of the insert, so it must not drift afterwards —
+    a value that moved on re-read would make the settle window a function of when
+    the scan last looked rather than of when the sub arrived."""
+    proj = Project.create(tmp_path / "proj", name="t")
+    try:
+        frame_id = proj.add_frame(_row(tmp_path / "x.fit"))
+        first = proj.get_frame(frame_id).ingested_at
+        assert first is not None
+        assert proj.get_frame(frame_id).ingested_at == first
+        proj.update_frame(frame_id, accept=False)
+        assert proj.get_frame(frame_id).ingested_at == first
+    finally:
+        proj.close()
+
+
+def _row(path, *, ingested_at=None):
+    from seestack.io.project import FrameRow
+
+    return FrameRow(source_path=str(path), source_mtime=1_600_000_000.0,
+                    ingested_at=ingested_at, wcs_json="CTYPE1")
