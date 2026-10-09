@@ -62,14 +62,18 @@ by *parameter*, not by cue, so an older build reading a profile a newer one wrot
 bias and merely drops the unknown `counts["too_magenta"]` tally (`_coerce_bucket` already discards
 unknown cue keys).
 
-**Tests +12** — `tests/test_auto_feedback_cues_mirror.py` (new, 17 items: the set of cues matches
+**Tests +20** (Python +18, vitest +2; full suite **7541 passed, 4 skipped** against v0.492.51's 7523) —
+`tests/test_auto_feedback_cues_mirror.py` (new, 17 items: the set of cues matches
 the shared table, each cue's parameter and direction matches it, both-directions-reachable,
 every-phrase-reachable, and the green pair walking a saturated bias all the way back without
 disturbing an unrelated brightness taste), `tests/webapp/test_editor.py` (+1 end-to-end on the
 served Auto recipe's `tone.scnr` amount: saturate with three `too_green`, ease with one, undo with
 three, confirm the brightness taste survives, then saturate below neutral and read the
 *"lighter green-cast removal"* note), `AutoFeedback.test.tsx` (+2: the green pair sends both cue
-keys; the chips match the shared table's cues and labels in its order). **Fail-before verified in an
+keys; the chips match the shared table's cues and labels in its order) — and one existing vitest case
+(`keeps each opposing pair together`) **rewritten rather than loosened**: it listed the pairs by hand and
+silently omitted green, so it now derives them from the shared table and asserts each parameter yields
+exactly one `{+1, -1}` pair. **Fail-before verified in an
 `origin/main` worktree:** 6 of the mirror file's items red (11 controls green), the webapp test red
 on `422 unknown feedback cue: 'too_magenta'`, and 3 vitest items red with `main`'s chip list in
 place (11 controls green).
