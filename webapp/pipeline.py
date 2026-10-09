@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from seestack.io.ingest import find_fits_files
 from seestack.io.library import Library
 from seestack.io.project import (
     first_existing_frame_path,
@@ -92,6 +93,21 @@ AUTO_STACK_UNREADABLE_META_KEY = "web_auto_stack_unreadable"
 # the calibration recheck's discipline — so a heal that (for any reason) still
 # comes out thin can never re-trigger on every subsequent scan.
 AUTO_STACK_DEGRADED_META_KEY = "web_auto_stack_degraded_retrigger"
+
+# Per-target meta marker recording how this target's drop folders looked **on
+# disk** the last time the arrival hold held it back: ``folder=n`` for each
+# folder its subs sit in, sorted and ``|``-joined (the fingerprint idiom of
+# :func:`_calib_fingerprint`). The hold compares the folders' *current* shape
+# against this one and holds only when the two differ, and that comparison is
+# what makes it structurally un-strandable: a folder holding a file no scan can
+# **ever** import — an unreadable header, and this owner's library has ~147 such
+# rows (issue #880) — would otherwise read as "still copying" on every poll for
+# ever, silently switching auto-stack off for that target. One observed on-disk
+# shape buys one hold, so the worst case is a single extra poll, once, per shape
+# the folder is ever seen in. Absent (older installs, and every target whose
+# folder has never been caught mid-copy) reads as "no shape held yet", which is
+# exactly today's behaviour.
+AUTO_STACK_ARRIVAL_META_KEY = "web_auto_stack_arrival_seen"
 
 # How much thinner than the target's best a newest picture must be before a heal
 # is worth the compute. A stack that drops a few subs at alignment is normal and
@@ -516,6 +532,17 @@ def _pipeline_body(
             held_unreadable: list[dict[str, Any]] = []
             held_settling: list[dict[str, Any]] = []
             healed: list[dict[str, Any]] = []
+            # The two library-wide tallies the arrival hold subtracts from what a
+            # drop folder holds on disk. Read at most once per scan, and only if
+            # some target actually reaches that guard: `imported_by_folder` opens
+            # every target's project, so asking it per candidate would be
+            # quadratic in the library's target count. One snapshot is as good as
+            # a fresh read for every candidate because nothing in this pass
+            # ingests a frame — stacking adds pictures, never rows.
+            incoming_prefix = os.path.join(
+                str(settings.resolved_incoming_dir), "")
+            arrival_state: tuple[dict[str, int], dict[str, int]] | None = None
+            arrival_state_read = False
             mixed_skipped: list[str] = []
             legacy_skipped: list[str] = []
             stack_errors: dict[str, str] = {}
@@ -627,6 +654,23 @@ def _pipeline_body(
                         # discipline as the two holds above — so the first scan
                         # after the subs stop stacks it once, on the whole night.
                         held_settling.append(settle_hold)
+                        continue
+                    if not arrival_state_read:
+                        arrival_state = _incoming_import_state(
+                            lib, incoming_prefix)
+                        arrival_state_read = True
+                    arrival_hold = _auto_stack_arrival_hold(
+                        lib, safe, incoming_prefix, arrival_state)
+                    if arrival_hold is not None:
+                        # The folder itself still holds files the library has no
+                        # row for: it is mid-copy, and every count above this was
+                        # taken from the rows that *had* arrived. Stacking now
+                        # publishes — and auto-edits — a picture of a fraction of
+                        # the night; 6 of 742 subs on the owner's own install.
+                        # Held with the same discipline as the three holds above:
+                        # no attempt marker, so the next scan ingests the rest and
+                        # stacks it once, on everything the folder holds.
+                        held_settling.append(arrival_hold)
                         continue
                     if settings.mixed_pointing_guard and _mixed_pointing_check(
                             lib, safe) is not None:
@@ -3514,6 +3558,137 @@ def _auto_stack_settle_hold(
         "target": safe,
         "quiet_min": max(0, int(quiet_s // 60)),
         "settle_min": settle_min,
+    }
+
+
+def _incoming_import_state(
+        lib: Library, prefix: str) -> tuple[dict[str, int], dict[str, int]] | None:
+    """``(registered subs by folder, files no scan could read by folder)`` for
+    everything under ``incoming/``, or ``None`` when the question cannot be
+    answered.
+
+    Both halves are library-**wide** on purpose, and both are already written,
+    measured and tested for exactly these numbers by the "subs waiting in
+    ``incoming/``" note:
+
+    * :func:`webapp.routers.incominglag.imported_by_folder` counts **distinct**
+      ``source_path``s across every target. A per-target row count is the wrong
+      number here and would be worse than no guard at all: 76 % of this owner's
+      frames are registered in *two* targets each (issue #878's mosaic
+      double-registration), so a folder two targets share would read as
+      half-imported on each of them and hold both back for ever.
+    * :func:`webapp.unreadablesubs.recall_unreadable` is what the last
+      whole-library scan **opened and could not read**, off the registry's own
+      ``library_meta`` table. Subtracting it is what separates "these files have
+      not arrived yet" from "these files will never import", which is the whole
+      difference between a hold that ends by itself and a hold that strands.
+
+    ``None`` — hold nothing — is the safe failure, and the *direction* is why it
+    is spelled out rather than swallowed: an absent import tally would make every
+    folder read as entirely unimported, so an error here would pause the one path
+    the owner walks away from. Read-only throughout; nothing under ``incoming/``
+    is walked, opened or ``stat``ed by either call.
+    """
+    from webapp.routers.incominglag import imported_by_folder
+    from webapp.unreadablesubs import recall_unreadable
+
+    try:
+        imported = imported_by_folder(lib, prefix)
+    except Exception:  # noqa: BLE001 — no answer must mean no hold, not every hold
+        log.warning("auto-stack arrival check: no import tally, holding nothing")
+        return None
+    try:
+        unreadable = recall_unreadable(lib)
+    except Exception:  # noqa: BLE001 — a side note must not cost the whole guard
+        unreadable = {}
+    return (imported, unreadable)
+
+
+def _auto_stack_arrival_hold(
+        lib: Library, safe: str, prefix: str,
+        state: tuple[dict[str, int], dict[str, int]] | None) -> dict[str, Any] | None:
+    """Why a walk-away stack of ``safe`` should wait for its drop folder to
+    finish copying in, or ``None``.
+
+    Every guard before this one counts subs the library has **already ingested**,
+    and the scan's own ``TargetScanResult.n_frames_found`` is what the walk
+    *saw* — so a drop folder caught mid-copy read as a complete, settled target
+    all the way down. That is not hypothetical: the owner's ``C_9`` was
+    published, **and auto-edited, from 6 of its 742 subs** (observer issue
+    #1090), then re-stacked from 609 seventy minutes later. It was not even
+    QC-graded on the way past, because ``MIN_FRAMES_FOR_GRADING`` is 10 and six
+    rows skip every metric — which is what turns a thin stack into a published
+    one.
+
+    :func:`_auto_stack_settle_hold` is the obvious place to expect this and it
+    **cannot** cover the case, which the observer measured rather than assumed:
+    that folder's copy finished *35.9 min* before its stack started, because the
+    job spent 39 min stacking the other target first, so the 20-minute window had
+    honestly expired. The settle hold asks "when did the newest sub arrive?";
+    this asks the one question nothing between the walk and the stack ever
+    asked — **how many files does the folder hold right now?** — and it has to be
+    a fresh look for the same reason.
+
+    So: count the FITS files each of this target's drop folders holds this
+    instant, subtract what the library has rows for and what no scan will ever
+    import (:func:`_incoming_import_state`), and hold on a positive remainder.
+    The caller holds **without** marking the attempt, exactly like the thin,
+    readability and settle holds, so the next scan — which ingests the rest
+    first — stacks it once, on the whole folder. Delayed, never stranded.
+
+    **Read-only, and non-recursive.** The only thing this does under
+    ``incoming/`` is list a directory and read file names
+    (:func:`seestack.io.ingest.find_fits_files`), which is a read: AGENTS.md §10
+    is untouched. Non-recursive because the folders are the ones
+    :meth:`~seestack.io.project.Project.source_folders_under` names — the whole
+    relative directory each sub actually sits in — so the nested ``Darks/`` the
+    Calibration page's ``MAX_DEPTH = 2`` deliberately invites is not counted as
+    this target's own lights still arriving. A folder that has gone away
+    entirely is skipped rather than read as "742 waiting": that says nothing
+    about what is arriving, and the readability hold above is the guard for files
+    that have *left*.
+
+    **It cannot strand a target**, which is what
+    :data:`AUTO_STACK_ARRIVAL_META_KEY` is for — see that constant. The bound is
+    deliberately *evidence and a changed shape*, never the settle window: the
+    incident is precisely that window expiring while the folder was still
+    mid-import.
+    """
+    if state is None:
+        return None
+    imported, unreadable = state
+    proj = lib.open_target(safe)
+    try:
+        on_disk: dict[str, int] = {}
+        waiting = 0
+        for folder, _rows in proj.source_folders_under(prefix):
+            try:
+                found = len(find_fits_files(
+                    os.path.join(prefix, folder), recursive=False))
+            except OSError:
+                continue
+            on_disk[folder] = found
+            # Per folder, and floored at zero: a folder with more rows than files
+            # (subs whose files have since been deleted) must not offset another
+            # folder's genuine backlog.
+            accounted = int(imported.get(folder, 0)) + int(unreadable.get(folder, 0))
+            waiting += max(0, found - accounted)
+        if waiting <= 0:
+            return None
+        shape = "|".join(f"{f}={n}" for f, n in sorted(on_disk.items()))
+        if proj.get_meta(AUTO_STACK_ARRIVAL_META_KEY) == shape:
+            # Held once on exactly this shape already, and the folder has not
+            # moved since — so nothing is arriving into it and whatever the
+            # library has no row for, it never will. Stack.
+            return None
+        proj.set_meta(AUTO_STACK_ARRIVAL_META_KEY, shape)
+    finally:
+        proj.close()
+    return {
+        "target": safe,
+        "waiting": int(waiting),
+        "on_disk": int(sum(on_disk.values())),
+        "folders": len(on_disk),
     }
 
 

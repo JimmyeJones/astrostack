@@ -1,5 +1,127 @@
 # Shipped — the record
 
+## 2026-10-09 (Builder) — the other half of #1090: nothing between the walk and the stack re-asked how many files the folder held
+
+### v0.492.46 — 🔴 BUG FIX (PRIORITY 2, autonomy): `_auto_stack_arrival_hold`, `_incoming_import_state`, `AUTO_STACK_ARRIVAL_META_KEY`, `heldSettlingLine`
+
+**The second, independent half of observer issue
+[#1090](https://github.com/JimmyeJones/astrostack/issues/1090)** — the half the observer was careful to say the
+clock fix would *not* have covered, and the half that actually published the wrong picture. Its clock half
+shipped the run before as **v0.492.45**; this closes the issue.
+
+**The bug.** Every guard on the walk-away path — `_auto_stack_frame_count`, the thin floor,
+`_auto_stack_panel_depth`, `_auto_stack_readability_hold` and `_auto_stack_settle_hold` — is computed over
+frames the library has **already ingested**, and the scan's own `TargetScanResult.n_frames_found` is what the
+walk *saw*. So nothing between the walk and the stack ever re-asked **how many files the folder holds now**, and
+a drop folder caught mid-copy read as a complete, settled target all the way down. The owner's `C_9` was
+published *and auto-edited* from **6 of its 742 subs**, then re-stacked from 609 seventy minutes later. It was
+never QC-graded on the way past either — `MIN_FRAMES_FOR_GRADING` is 10, so six rows skip every metric — which
+is what turns a thin stack into a published one.
+
+**Why the settle window could not cover it, measured rather than assumed.** That folder's copy finished
+**35.9 min** before its stack started, because the job spent 39 min stacking the other target first, so the
+20-minute window had honestly expired. The settle hold asks *when did the newest sub arrive?*; this asks *how
+many files does the folder hold right now?*, and it has to be a **fresh** look for the same reason — the scan's
+own result cannot know about the 735 still copying.
+
+**The fix.** Per auto-stack candidate only (a handful of targets a poll, not the tree):
+`Project.source_folders_under(prefix)` names this target's drop folders, `ingest.find_fits_files(folder,
+recursive=False)` counts what each holds *this instant*, and the hold fires on a positive remainder after
+subtracting both library-wide tallies the "subs waiting in `incoming/`" note already computes:
+
+* `routers.incominglag.imported_by_folder` — the **distinct**-`source_path` count across every target, *not*
+  this target's own row count. A per-target comparison would have been worse than no guard at all: 76 % of this
+  owner's frames are registered in two targets each (#878's mosaic double-registration), so a shared folder
+  would read as half-imported on each of them and hold both for ever.
+* `unreadablesubs.recall_unreadable` — what the last whole-library scan opened and **could not** read, off the
+  registry's own meta table. Subtracting it is what separates "has not arrived yet" from "will never import",
+  so the owner's ~147 such rows (#880) in five folders cost **not even one poll**.
+
+**Un-strandable by construction, which was the trap the entry named.** An unbounded count comparison holds
+*forever* on a file that can never be ingested — silently switching auto-stack off for that target, which is
+worse than the bug. Two independent bounds: the evidence subtraction above, and `AUTO_STACK_ARRIVAL_META_KEY`,
+which records the folders' on-disk shape (`folder=n`, sorted, `|`-joined — `_calib_fingerprint`'s idiom) and
+holds only when the current shape **differs** from it. One observed shape buys one hold, so the worst case is a
+single extra poll, once, per shape the folder is ever seen in. Deliberately **not** bounded by the settle
+window: the incident *is* that window expiring mid-import.
+
+**Non-recursive, and read-only.** The folders are the whole relative directories `source_folders_under` names,
+so the nested `Darks/` the Calibration page's `MAX_DEPTH = 2` invites is not counted as this target's missing
+lights (its own test). The only thing done under `incoming/` is listing a directory and reading file names —
+a read, so **AGENTS.md §10 is untouched**. A folder that has gone away entirely holds nothing rather than
+reading as "742 waiting": that says nothing about what is arriving, and the readability hold is the guard for
+files that have *left*. And `None` from `_incoming_import_state` holds nothing — the safe failure in the
+direction that matters, since an absent import tally would otherwise read as "every folder entirely unimported"
+and pause the whole library.
+
+**Reproduced before the fix, end to end through `_pipeline_body`.** `M_42` with 3 ingested subs and 20 more
+sitting in its own drop folder with no library row was auto-stacked — `auto_stacked == ["M_42", "NGC_7000"]` —
+which is the 6-of-742 incident at fixture scale. With the guard neutralised to `main`'s behaviour, 3 of the 8
+new tests go red for exactly that reason; with it, `auto_stacked == ["NGC_7000"]` and `M_42` carries **no
+attempt marker**, so the next scan stacks it once on the whole folder. The two "must *not* hold" tests
+(the one-poll bound, the known-unreadable subtraction) pass in both directions by design — they are the
+guard-rails against stranding, not the bug.
+
+**One alert, not a second banner** (AGENTS.md §1's UI rule). The two guards catch the same situation from
+opposite ends and a beginner needs the same sentence either way, so the arrival hold reports through the
+existing `auto_stack_held_settling` key and the existing "Subs still arriving" alert; new `heldSettlingLine`
+branches on `waiting > 0` for the per-target line. **Every string the newly-live guard can print was re-read**
+— the method note v0.492.45 left behind. The alert's stated reason was the settle window's ("stacking after
+every batch would re-stack the whole target over and over"), which is not this case's harm, so it now names
+the harm both share: *"stacking now would make it out of only the subs that have landed so far, and the next
+batch would replace it minutes later."* The per-target line is phrased *"its folder holds 742 files, 735 of
+them not imported yet"* so it stays grammatical at one file and one waiting sub, which the obvious
+`N sub${s} ... haven't` phrasing does not.
+
+**Upgrade-safe:** no schema change (one additive `library_meta`-style per-target meta key, absent reads as "no
+shape held yet" = today's behaviour), no setting added or flipped, no API shape changed (`waiting`/`on_disk`
+are *added* fields on an existing optional summary key), no on-disk layout touched. Unconditional rather than
+behind a setting, on `_auto_stack_readability_hold`'s precedent: it can only ever *delay* a stack, never
+strand one, never make a picture worse, and the app does not need another knob.
+
+**As the entry was filed (Builder 2026-10-09, with the v0.492.45 fix of the other half):**
+
+- **🔴 VERIFIED + REPRODUCED (Builder 2026-10-09, the half of observer issue
+  [#1090](https://github.com/JimmyeJones/astrostack/issues/1090) that v0.492.45 deliberately left) — a
+  walk-away stack is published from the subs a folder had when the scan *walked* it, and nothing between the
+  walk and the stack re-asks how many the folder now holds.** *(Pillar: autonomy — PRIORITY 2; size **M**;
+  severity **medium-high, and it has fired**: the owner's `C_9` was published **and auto-edited from 6 of its
+  742 subs**, then re-stacked from 609 seventy minutes later. Confidence: the mechanism is traced in the code
+  and the live incident is measured in the observer's snapshot; the fix shape below is **not** built or
+  measured.)*
+  **What is traced.** `webapp/pipeline._auto_stack_frame_count` fires on "more solved subs than the last stack
+  covered", and every guard after it — the thin floor, the panel-depth floor, the readability hold and
+  `_auto_stack_settle_hold` — is computed over frames **already ingested**. So a drop folder caught mid-copy
+  reads as a complete, settled target: 7 of 742 files registered, 6 accepted, the rest still arriving. **The
+  settle window cannot cover this case even now it works** (v0.492.45), and the observer measured why rather
+  than assuming: the folder's copy finished **35.9 min** before the stack started, because the job spent 39 min
+  stacking the other target first, so the 20-minute window had honestly expired. The two are independent
+  causes of one symptom — this is the second.
+  **It was also never QC-graded,** which is what turns a thin stack into a published one: `auto_grade_frames`
+  is on but `MIN_FRAMES_FOR_GRADING` is 10, so on 6 rows every metric is skipped ("only 6 of 6 accepted frames
+  carry this metric") and the run carries the full auto-edit key set. Rare — it needs a scan to land inside the
+  copy window, and only 2 of 751 runs in the owner's record show the shape — but it is the north-star flow
+  handing him a wrong picture unattended.
+  **The fix spec, worked out this run, and every piece of it already exists.** The re-look has to be a *fresh*
+  one — `TargetScanResult.n_frames_found` is what the walk **saw** (7), so the scan's own result cannot know
+  about the 735 still copying. So, per auto-stack candidate only (a handful of targets a poll, not the tree):
+  **(1)** `Project.source_folders_under(incoming_prefix)` → this target's folders; **(2)** count the FITS files
+  each holds *now* (`ingest.find_fits_files(folder, recursive=False)`; a directory read, so AGENTS.md §10 is
+  untouched); **(3)** subtract `routers/incominglag.imported_by_folder(lib, prefix)` for that folder, **not**
+  this target's own row count — the library-wide **distinct-`source_path`** tally, because 76 % of the owner's
+  frames are registered in two targets each (#878) and a per-target comparison would cry wolf on every shared
+  folder; **(4)** subtract `unreadablesubs.recall_unreadable(lib)` for that folder — a cheap library-meta read,
+  no walk — and hold only on a positive remainder.
+  **(4) is what makes it un-strandable, and it is the whole reason to build it this way.** The naive count
+  comparison holds **forever** on a file that can never be ingested (an unreadable header — ~147 such rows,
+  #880), and `incoming_lag` already solved exactly that problem for exactly these numbers: "a file the library
+  has no row for is a file the library has no row for", separated from the ones no scan will ever import. So
+  the bound is *evidence*, not a marker or a timer. Do **not** bound it with the settle window instead: the
+  incident is the window expiring while the folder was still mid-import.
+  **Not to be confused with** the clock half, which **shipped as v0.492.45** (`frames.ingested_at`) and is in
+  [`SHIPPED.md`](SHIPPED.md); and not with #903 or #878. The issue is left **open** with a comment naming the
+  shipped half and this remainder.
+
 ## 2026-10-09 (Builder) — the walk-away settle window had never held anything, because it was asking for a capture time
 
 ### v0.492.45 — 🔴 BUG FIX (PRIORITY 2, autonomy): `frames.ingested_at`, `Project.add_frame`, `newest_accepted_sub_time`

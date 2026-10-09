@@ -11,7 +11,8 @@ import {
   starMatchedNote, buildMasterSummary, friendlyJobError, jobHeaderNote,
   jobTempNote,
   jobKindLabel,
-  calibrationMismatchNote, heldForFilesLine, heldForSubsLine, missingSubsNote,
+  calibrationMismatchNote, heldForFilesLine, heldForSubsLine,
+  heldSettlingLine, missingSubsNote,
   readErrorsNote,
   storageTroubleAlert,
   pipelineSummary, processTargetSummary, qcSolveNudge, qcSolveSummary, reprocessSummary,
@@ -562,9 +563,46 @@ describe("pipelineSummary", () => {
     });
     expect(line).toBe("Imported 60 new frames · waiting on 2 still arriving.");
     expect(heldSettling).toEqual([
-      { target: "M 42", quietMin: 2, settleMin: 20 },
-      { target: "NGC 7000", quietMin: 0, settleMin: 20 },
+      { target: "M 42", quietMin: 2, settleMin: 20, waiting: 0, onDisk: 0 },
+      { target: "NGC 7000", quietMin: 0, settleMin: 20, waiting: 0, onDisk: 0 },
     ]);
+    // The settle window is what spoke here, so the line is the quiet one.
+    expect(heldSettlingLine(heldSettling[0]))
+      .toBe(": last sub 2 min ago — waits for 20 min of quiet.");
+    expect(heldSettlingLine(heldSettling[1]))
+      .toBe(": a sub arrived just now — waits for 20 min of quiet.");
+  });
+
+  it("says a folder is still copying in when that is the guard that spoke", () => {
+    // The second of the two backend guards (observer #1090): the drop folder
+    // holds files the library has no row for. Saying "last sub 0 min ago —
+    // waits for 20 min of quiet" there would be wrong twice over — the subs are
+    // hours old, and the wait is on the *copy*, not on a quiet window. Both
+    // guards share one alert rather than adding a second always-on banner, so
+    // this line is the only thing that tells them apart.
+    const { line, heldSettling } = pipelineSummary({
+      scanned: 7, auto_stacked: [],
+      auto_stack_held_settling: [
+        { target: "C 9", waiting: 735, on_disk: 742, folders: 1 },
+      ],
+    });
+    expect(line).toBe("Imported 7 new frames · waiting on 1 still arriving.");
+    expect(heldSettlingLine(heldSettling[0])).toBe(
+      ": its folder holds 742 files, 735 of them not imported yet — it looks "
+      + "like it's still copying in.");
+  });
+
+  it("stays grammatical at one file and at one waiting sub", () => {
+    // "1 sub of the 10 ... haven't been imported" is the shape this phrasing
+    // exists to avoid: the count goes in a clause that reads the same either way.
+    expect(heldSettlingLine(
+      { target: "X", quietMin: 0, settleMin: 20, waiting: 1, onDisk: 10 },
+    )).toBe(": its folder holds 10 files, 1 of them not imported yet — it looks "
+      + "like it's still copying in.");
+    expect(heldSettlingLine(
+      { target: "X", quietMin: 0, settleMin: 20, waiting: 1, onDisk: 1 },
+    )).toBe(": its folder holds 1 file, 1 of them not imported yet — it looks "
+      + "like it's still copying in.");
   });
 
   it("reads 'No new frames' and singularises one target / one picture", () => {

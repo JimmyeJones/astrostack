@@ -1,5 +1,66 @@
 # Process notes & QA sweep records
 
+## 2026-10-09 (Builder, branch `agent/builder-run`) — the second half of #1090, and three notes about shapes
+
+**Baseline.** `source scripts/agent-setup.sh` green; full suite **`7488 passed, 4 skipped`** (11m49s, BLAS cap
++ `-n 4 --dist worksteal`) — the 7482 of the run before plus its +6. CI green on `origin/main` at `4f6f7a8f`.
+One live run alongside this one: Scout PR **#1093** (docs-only, no version bump), so no version collision; its
+`docs/` edits were unioned at merge.
+
+**The task.** The front of the queue was unambiguous for once — `docs/FOCUS.md` item 0 was the one verified,
+ungated open bug, with a fix spec worked out by the run that filed it — so this run drained it rather than
+looking for work. Shipped as **v0.492.46**; the full engineering record is in [`SHIPPED.md`](SHIPPED.md).
+
+**Note 1 — the UI rule decided the shape of the output, not just its placement.** The new guard needed to tell
+the user something, and the reflex is a new summary key and a new alert. AGENTS.md §1: *"prefer a
+consolidation over a new card, every time, and put a new feature inside the existing grouping rather than
+appending another always-on banner."* The two guards here (the settle *window* and the arrival *re-look*)
+catch one situation from opposite ends — one asks when the newest sub arrived, the other how many files the
+folder holds — and the sentence a beginner needs is the same either way: *your folder isn't all here yet,
+nothing is skipped, it will stack when it is.* So the arrival hold reports through the **existing**
+`auto_stack_held_settling` key and the existing alert, with one `waiting > 0` branch in a new pure
+`heldSettlingLine` to say which spoke. Zero new banners, and `overnight.py` / `routers/targets.py` needed no
+change because neither reads that key. **The generalisable form: when a second mechanism is added for a
+symptom the app already has a sentence for, the new code belongs behind the old sentence.**
+
+**Note 2 — v0.492.45's own method note paid off on the very next run.** It said: *"when a fix turns a dormant
+guard on for the first time, re-read every string it will now print."* This is the sibling case — a guard
+that never existed, reporting through an existing surface — and re-reading caught the alert's stated reason:
+*"Stacking after every batch would re-stack the whole target over and over and hand you a picture of a night
+that isn't over."* True of the settle window; **not this case's harm at all**, which is publishing a picture
+made from a fraction of the subs. Reworded to the harm both share. A new guard reusing an old surface inherits
+the old surface's *claims*, and those are as much part of the change as the code.
+
+**Note 3 — a test that must pass in both directions is still worth writing.** Three of the eight new tests go
+red when the guard is neutralised to `main`'s behaviour; two are green either way by design — the one-poll
+bound (a file that can never be imported costs one poll, not the target) and the known-unreadable subtraction.
+Those two are not weak tests, they are the **guard-rails against the trap the backlog entry named**: an
+unbounded count comparison that strands a target is worse than the bug it fixes, and the next run to
+"simplify" either bound away goes red. Same discipline as v0.492.44's prefix roll-up test, which also passes
+before *and* after.
+
+**Fail-before method.** The guard was neutralised in place (`if arrival_hold is not None:` → `if False:`) with
+the fixed file kept aside and restored immediately after — no worktree needed, because this change *adds* no
+module (the v0.492.41 trap: a `git worktree` revert does not isolate an added module, so an added-module fix
+needs the worktree and an in-place edit is unsafe there). `ruff check webapp/pipeline.py` reports the same 11
+pre-existing errors before and after.
+
+**Why the run stopped at one task, with the collision rule doing the deciding.** PR **#1093** (Scout) merged
+into `main` while v0.492.46 was in CI, filing a **new** verified, ungated bug — the "My map" page's two
+disagreeing picture-counts — which made `docs/FOCUS.md`'s freshly-written *"Bugs holds NO verified, ungated
+open bug"* wrong within the hour; item 0 was corrected in the merge rather than left to the next run. That
+entry is also the obvious second task, and it was **deliberately not taken**: §11's *"a freshly filed entry is
+the hot one — an item filed by a `docs:` commit within the last ~2 hours is claimed-in-spirit"* is exactly this
+situation, minutes rather than hours old. §11 says take another; the rest of "Bugs" is gated LEADs and ⚪ notes
+that must not be re-litigated, so there was no other bug to take, and §2's *"when you run out of clearly
+worthwhile work, STOP"* is the answer rather than manufacturing a third. Noted here so the next run can see the
+entry was passed over **by the rule** and not overlooked — by then it is well outside the two-hour window and is
+the front of the queue. **Post-merge re-test (§11): full suite re-run after merging `origin/main`, `7496
+passed, 4 skipped`.** Dogfood `--mosaic --incoming-lag` CLEAN besides: nothing overflowing, no console errors,
+mosaic trim **7.9 %**, and the incoming-lag note reads sensibly — worth a line because this change is the first
+to add a *fresh directory read* to the unattended path, and a dogfood is the only place that runs it against a
+real tree.
+
 ## 2026-10-09 (Scout, branch `claude/funny-shannon-gmfk0d`) — rotation sweep (4) the webapp routers: one VERIFIED + REPRODUCED low/latent bug filed (the "My map" page's two picture-counts disagree); issue inbox all five acted-on; `--mosaic` dogfood CLEAN
 
 **Baseline.** `source scripts/agent-setup.sh` green; full suite `7488 passed, 4 skipped` (11m58s, BLAS cap +
