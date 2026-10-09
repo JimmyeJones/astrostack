@@ -18,7 +18,11 @@ one function, `classify_run_measured`, so a sixth caller cannot be wrong the sam
 read side of one store are not two surfaces that merely disagree** — a mislabelled bucket is cosmetic, a bucket
 nothing reads is a feature that silently does nothing, so grade the two differently when you find them.
 **"Bugs (fix these first)" still holds no verified, ungated open bug** — the two leads this run and the last one
-filed, the older gated LEADs and the ⚪ notes. The issue inbox was checked first (the method note below): four open,
+filed, the older gated LEADs and the ⚪ notes. A **`--mosaic --editor` dogfood ran while CI chewed on the PR and
+was CLEAN** (third consecutive clean pass on that pair; the five mosaic Target-page sentences all point the same
+way, trim 7.9 %, both editor drives clean across all 21 ops) — **and it could not have found this run's bug**, the
+symptom being a *lack* of change in a recipe. Record, and the probe shape that would catch this family, in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md). The issue inbox was checked first (the method note below): four open,
 all previously acted-on and owner-gated, and both of today's Observer comments say "not a new report" in their first
 line. Earlier 2026-10-09 notes stand below.)
 *Last edited 2026-10-09 (Builder, second run of the day — **the queue was dry, so this run went looking and

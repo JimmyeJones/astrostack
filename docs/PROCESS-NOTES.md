@@ -48,9 +48,22 @@ taste profile on this very function's verdict". Taking that sentence at its word
    and the query-key trap written down. A fix that leaves two surfaces answering one question by two rules is not
    smaller than the fix that leaves them answering by one.
 
-**No dogfood pass this run** (the last two runs' `--mosaic --editor` records are below and both read CLEAN; this
-bug is invisible to a probe — its symptom is a *lack* of change in a recipe). Python suite re-run green after the
-sync; no frontend change, so no `tsc`/`vitest`/`vite build`.
+**`--mosaic --editor` dogfood: CLEAN** — run while CI chewed on the PR, so it cost the run nothing. Worth
+recording because it is the third consecutive clean pass on this pair, and because **it could not have found this
+run's bug**: the symptom is a *lack* of change in a recipe, and a probe that photographs one render cannot see a
+second render that should have differed and did not. (If this family is ever probed, the shape is *tap a chip,
+re-ask `…/editor/auto`, diff the two recipes* — a probe assertion rather than a page reading.)
+What it did read, as the one paragraph AGENTS.md §7 asks for: the five mosaic Target-page sentences all point the
+**same** way — deepen the panels you have before widening the grid — which is the agreement four of the last five
+findings were about. Framing says *"only about 75 % of it is in this picture… more passes over the panels you
+already have do more for it than a wider grid"*, next-best-move says *"another pass or two over the same mosaic
+evens out the thinner part"*, and readiness says *"more time pulls out fainter detail"*. The numbers reconcile in
+both directions: `4 min` of a `~6.9 h` goal **both** being whole-target shooting time for *about 3 fields of sky*
+(so not the whole-target-vs-per-panel mismatch v0.492.31/.32 closed), and the panel map's *30 s at the top-right
+against 1 min on a typical panel* being exactly 4 min over four panels. Trim **7.9 %**, 3 of 5 cards visible
+without a click, `nothing overflowing, no console errors`, and **both** editor drives clean — all 21 ops
+re-rendered plus undo/redo, on the single field and on the mosaic run. Nothing filed.
+Python suite re-run green after the sync; no frontend change, so no `tsc`/`vitest`/`vite build`.
 
 ## 2026-10-09 (Builder, branch `claude/jolly-bardeen-ssa1n0`) — a "next time" note is also a *last* time note
 
