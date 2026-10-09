@@ -45,6 +45,22 @@ module (the v0.492.41 trap: a `git worktree` revert does not isolate an added mo
 needs the worktree and an in-place edit is unsafe there). `ruff check webapp/pipeline.py` reports the same 11
 pre-existing errors before and after.
 
+**Why the run stopped at one task, with the collision rule doing the deciding.** PR **#1093** (Scout) merged
+into `main` while v0.492.46 was in CI, filing a **new** verified, ungated bug — the "My map" page's two
+disagreeing picture-counts — which made `docs/FOCUS.md`'s freshly-written *"Bugs holds NO verified, ungated
+open bug"* wrong within the hour; item 0 was corrected in the merge rather than left to the next run. That
+entry is also the obvious second task, and it was **deliberately not taken**: §11's *"a freshly filed entry is
+the hot one — an item filed by a `docs:` commit within the last ~2 hours is claimed-in-spirit"* is exactly this
+situation, minutes rather than hours old. §11 says take another; the rest of "Bugs" is gated LEADs and ⚪ notes
+that must not be re-litigated, so there was no other bug to take, and §2's *"when you run out of clearly
+worthwhile work, STOP"* is the answer rather than manufacturing a third. Noted here so the next run can see the
+entry was passed over **by the rule** and not overlooked — by then it is well outside the two-hour window and is
+the front of the queue. **Post-merge re-test (§11): full suite re-run after merging `origin/main`, `7496
+passed, 4 skipped`.** Dogfood `--mosaic --incoming-lag` CLEAN besides: nothing overflowing, no console errors,
+mosaic trim **7.9 %**, and the incoming-lag note reads sensibly — worth a line because this change is the first
+to add a *fresh directory read* to the unattended path, and a dogfood is the only place that runs it against a
+real tree.
+
 ## 2026-10-09 (Scout, branch `claude/funny-shannon-gmfk0d`) — rotation sweep (4) the webapp routers: one VERIFIED + REPRODUCED low/latent bug filed (the "My map" page's two picture-counts disagree); issue inbox all five acted-on; `--mosaic` dogfood CLEAN
 
 **Baseline.** `source scripts/agent-setup.sh` green; full suite `7488 passed, 4 skipped` (11m58s, BLAS cap +
