@@ -49,17 +49,31 @@ describe("perPixel", () => {
 
 describe("fieldsOfSkyLabel", () => {
   it("rounds to a whole field — the precision would be spurious", () => {
-    // The canvas includes its uncovered corners, so "about 4.3 fields" would
-    // read as a measurement rather than the rough scale it is.
+    // "about 4.3 fields" reads as a measurement rather than the rough scale it
+    // is, and the scale is all these sentences need.
     expect(fieldsOfSkyLabel(4)).toBe("about 4 fields of sky");
     expect(fieldsOfSkyLabel(3.5)).toBe("about 4 fields of sky");
     expect(fieldsOfSkyLabel(8.7)).toBe("about 9 fields of sky");
   });
 
-  it("never says 'about 1 field', which would explain nothing", () => {
-    // Only ever printed when the canvas really does span more than one field,
-    // so a scale that rounds down to 1 still reads as at least 2.
-    expect(fieldsOfSkyLabel(1.2)).toBe("about 2 fields of sky");
+  it("does not round one pointing's drift up into a second field", () => {
+    // The bug (observer #1095, measured on the owner's library): the count was
+    // floored at 2, so a canvas spanning 1.2 fields — one pointing with a
+    // night's drift — was announced as "about 2 fields of sky" on 46 of his 50
+    // single-field pictures. The scale is still named, and it is now true.
+    expect(fieldsOfSkyLabel(1.2)).toBe("a little over one field of sky");
+    expect(fieldsOfSkyLabel(1.25)).toBe("a little over one field of sky");
+    expect(fieldsOfSkyLabel(1.49)).not.toContain("2 fields");
+    // …and it still never says "about 1 field of sky", which would explain
+    // nothing to a reader asking why a total and a depth differ.
+    expect(fieldsOfSkyLabel(1.2)).not.toContain("about 1 field");
+  });
+
+  it("counts fields again as soon as there are two of them", () => {
+    // From 1.5 up, rounding cannot answer less than 2 — so the phrase above is
+    // exactly the sub-two case and nothing wider gets talked down by it.
+    expect(fieldsOfSkyLabel(1.5)).toBe("about 2 fields of sky");
+    expect(fieldsOfSkyLabel(2.25)).toBe("about 2 fields of sky");
   });
 });
 

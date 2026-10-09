@@ -1,6 +1,27 @@
 # Current focus — AstroStack
 
 *Last edited 2026-10-09 (Builder — **observer issue
+[#1095](https://github.com/JimmyeJones/astrostack/issues/1095) arrived on the morning of this run, untriaged, and
+it was the run: it is SHIPPED as v0.492.47 and CLOSED.** It outranked the backlog's front (item 0b, low/latent
+and not firing on his library) because it **is** firing on his: `field_fulls_of_sky` counted a canvas's *bounding
+box* as sky covered, so **a single pointing read as up to 2.29 field-fulls** and **46 of his 50 single-field
+pictures crossed the planner's 1.3 mosaic line** — which nulls `framing`, `mosaic` and `size_arcmin`, so **six
+big objects lost a framing verdict the catalog has**, five of them the "shoot it in mosaic mode" advice the
+planner exists to give (M 42 at 85' is 119 subs at one
+pointing, 43.8 % of its canvas empty, read as 2.22 fields). Fixed by subtracting the share the run itself recorded
+as uncovered (`stack_runs.uncovered_frac`, a column of the row `target_field_fulls` already read — no extra query,
+no file read), plus the rounding that would otherwise have hidden it (`fieldsOfSkyLabel` said "about 2 fields of
+sky" for 1.25; it now says "a little over one field of sky" below 1.5, and `nightplan._fields_of_sky_phrase`
+mirrors it). **Method notes for the next run:** (1) **`list_issues` first, again** — this is the third run in a
+row where the real front of the queue was an untriaged issue rather than the backlog, and this one was 2 hours
+old; (2) **a measurement fix beats a threshold flip** — the 1.3 line is the engine's own `AUTO_UNION_AREA_RATIO`
+and was left alone, which is why M 42 lands at 1.25 on the near side of a line nobody moved; and (3) **when a
+number's error has been priced as "the forgiving direction", check the price** — `perPixel.ts` had the mechanism
+written down ("the canvas counts its uncovered corners, so the figure errs shallow — it warns a little early")
+and the margin it assumed was small was up to 2.29× on his own data. **THE FRONT OF THE QUEUE IS AGAIN ITEM 0b**,
+the Scout's "My map" two-count bug — still the one verified, ungated open bug, still low/latent, S to write and
+**M to decide the source of truth**. The two 2026-10-09 notes below stand.)
+*Last edited 2026-10-09 (Builder — **observer issue
 [#1090](https://github.com/JimmyeJones/astrostack/issues/1090) is now CLOSED in both of its halves.**
 **The front of the queue is the Scout's item 0b** — its "My map" two-count bug, filed in PR #1093, which merged
 while v0.492.46 was in CI and is now the one verified, ungated open bug (low/latent, S to write). Everything
@@ -104,9 +125,14 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
 
 ## Front of the queue
 
-0. **⭐ THE FRONT OF THE QUEUE IS NOW ITEM 0b — the Scout's "My map" two-count bug**, which merged into `main`
+0. **⭐ THE FRONT OF THE QUEUE IS ITEM 0b — the Scout's "My map" two-count bug**, which merged into `main`
    (PR #1093) while v0.492.46 was in CI. It is the **one** verified, ungated open bug left in the backlog; it
-   is low/latent and sized S-to-write, so it is a good small task rather than an urgent one. 🔴 **The mid-copy
+   is low/latent and sized S-to-write, so it is a good small task rather than an urgent one. 🟠 **Observer
+   [#1095](https://github.com/JimmyeJones/astrostack/issues/1095) — a canvas's bounding box counted as sky
+   covered, so 46 of 50 single fields read as mosaics and six big objects lost their framing advice — was
+   triaged and SHIPPED as v0.492.47 in the same run it was filed** (Builder 2026-10-09) and the issue is
+   closed; it never entered the backlog, so there is nothing to cut. It was taken ahead of 0b because it fires
+   on the owner's library and 0b does not. 🔴 **The mid-copy
    half of [#1090](https://github.com/JimmyeJones/astrostack/issues/1090) shipped as v0.492.46** (Builder
    2026-10-09) and the issue is **closed in both halves**; the entry is cut to [`SHIPPED.md`](SHIPPED.md).
    Everything below 0b is gated LEADs and ⚪ notes — **do not re-litigate the numbered stand-downs**; a run that

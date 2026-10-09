@@ -87,6 +87,61 @@ class TestFieldFullsOfSky:
         n = field_fulls_of_sky(960, 540, frame_w=1920, frame_h=1080)
         assert n == pytest.approx(1.0, abs=1e-9)
 
+    def test_a_single_pointing_s_empty_corners_are_not_sky_it_covers(self):
+        """The bug observer #1095 measured: one pointing read as 2.25 fields.
+
+        A canvas is the bounding box of the accepted frames' footprints, so a
+        night of pointing drift and field rotation leaves corners inside the box
+        and outside every frame. On the owner's library that put 46 of his 50
+        single-field pictures over the planner's 1.3 mosaic line — M 42 (119
+        subs at one pointing, 43.8 % of its canvas empty) read as 2.22 fields of
+        sky, so the planner withheld "shoot it in mosaic mode" from an 85'
+        nebula on the grounds that it was already being shot wide.
+
+        The run already recorded the share, so the area is correctable without a
+        file read.
+        """
+        drifted = field_fulls_of_sky(2880, 1620, frame_w=1920, frame_h=1080)
+        assert drifted == pytest.approx(2.25, abs=1e-9)   # what it used to say
+        honest = field_fulls_of_sky(
+            2880, 1620, frame_w=1920, frame_h=1080, uncovered_frac=0.56,
+        )
+        assert honest == pytest.approx(1.0, abs=1e-9)
+        # …and specifically on the near side of the line the planner's mosaic
+        # stand-down is keyed on (`_MOSAIC_CANVAS_FIELD_FULLS`), which is the
+        # consequence the owner sees.
+        assert honest < 1.3
+
+    def test_a_real_mosaic_keeps_the_scale_it_needs(self):
+        # The other direction, and the one that matters more: a 2x2 raster whose
+        # bounding box is 10 % empty is still four fields of sky minus that
+        # corner, nowhere near a single field. The correction must not talk a
+        # genuine mosaic down into the single-field goal — the failure this
+        # module was written to prevent.
+        n = field_fulls_of_sky(3840, 2160, frame_w=1920, frame_h=1080,
+                               uncovered_frac=0.10)
+        assert n == pytest.approx(3.6, abs=1e-9)
+        assert n > 1.3
+
+    def test_an_absent_or_impossible_uncovered_share_changes_nothing(self):
+        # Every run stacked before the column existed, every pre-stack estimate
+        # (no coverage map yet), and any value that cannot be a share of a
+        # canvas: all keep the plain area ratio, i.e. today's answer exactly.
+        for bad in (None, "", "ragged", float("nan"), float("inf"), -0.1,
+                    1.0, 1.5):
+            n = field_fulls_of_sky(3840, 2160, frame_w=1920, frame_h=1080,
+                                   uncovered_frac=bad)
+            assert n == pytest.approx(4.0, abs=1e-9), bad
+
+    def test_an_almost_entirely_empty_canvas_still_never_lowers_the_goal(self):
+        # A 2x2 canvas recorded as 99 % empty computes to 0.04 fields. The
+        # clamp that already protects a cropped canvas protects this too: a
+        # scale below 1.0 would *lower* what "plenty" means and call a
+        # half-integrated target done.
+        n = field_fulls_of_sky(3840, 2160, frame_w=1920, frame_h=1080,
+                               uncovered_frac=0.99)
+        assert n == pytest.approx(1.0, abs=1e-9)
+
     def test_a_nonsense_drizzle_scale_is_treated_as_one(self):
         # A garbled or below-1.0 drizzle scale never *inflates* the field
         # count — the safe direction on an on-by-default readiness path.
@@ -251,7 +306,8 @@ class TestTargetFieldFulls:
         return proj
 
     def _add_run(self, proj, *, timestamp: str, canvas_w: int, canvas_h: int,
-                 derived_from: int | None = None) -> int:
+                 derived_from: int | None = None,
+                 uncovered_frac: float | None = None) -> int:
         options: dict = ({"editor_recipe": {"ops": []},
                           "derived_from": derived_from}
                          if derived_from is not None else {"sigma_clip": True})
@@ -260,7 +316,7 @@ class TestTargetFieldFulls:
             fits_path=None, tiff_path=None, preview_path=None,
             n_frames_used=180, canvas_h=canvas_h, canvas_w=canvas_w,
             coverage_min=1, coverage_max=1 if derived_from is not None else 180,
-            options_json=json.dumps(options),
+            options_json=json.dumps(options), uncovered_frac=uncovered_frac,
         ))
 
     def test_a_plain_mosaic_stack_gives_its_canvas(self, tmp_path):
@@ -269,6 +325,57 @@ class TestTargetFieldFulls:
             self._add_run(proj, timestamp="2026-05-02T00:00:00Z",
                           canvas_w=self.CANVAS_W, canvas_h=self.CANVAS_H)
             assert target_field_fulls(proj) == pytest.approx(4.0)
+        finally:
+            proj.close()
+
+    def test_a_drifted_single_field_is_not_read_as_a_mosaic(self, tmp_path):
+        """Observer #1095, through the read the three surfaces actually make.
+
+        One pointing, a canvas 1.5x the frame on each axis because the night
+        drifted, and the run's own record that 56 % of that box is empty. The
+        figure behind the goal chip, the Dashboard bar and the planner's mosaic
+        stand-down has to be the sky with data on it.
+        """
+        proj = self._project(tmp_path)
+        try:
+            self._add_run(proj, timestamp="2026-05-02T00:00:00Z",
+                          canvas_w=720, canvas_h=480, uncovered_frac=0.56)
+            assert target_field_fulls(proj) == pytest.approx(1.0, abs=1e-9)
+        finally:
+            proj.close()
+
+    def test_a_run_with_no_recorded_share_answers_exactly_as_before(
+            self, tmp_path):
+        # 668 of the owner's 756 stack-run rows carry no `uncovered_frac` (they
+        # predate the column, and only a surface that grades them backfills it).
+        # Those keep the area ratio they have always had — the upgrade is
+        # invisible until a row has something to say.
+        proj = self._project(tmp_path)
+        try:
+            self._add_run(proj, timestamp="2026-05-02T00:00:00Z",
+                          canvas_w=self.CANVAS_W, canvas_h=self.CANVAS_H)
+            assert target_field_fulls(proj) == pytest.approx(4.0)
+        finally:
+            proj.close()
+
+    def test_a_cropped_export_takes_the_stack_s_own_emptiness_too(
+            self, tmp_path):
+        """The export's canvas is not read, so neither is its emptiness.
+
+        A crop changes both terms — it removes the ragged border *and* shrinks
+        the box — so pairing the stack's area with the export's share (or the
+        reverse) would be two halves of two pictures. The stacking run answers
+        with both of its own numbers.
+        """
+        proj = self._project(tmp_path)
+        try:
+            src = self._add_run(proj, timestamp="2026-05-02T00:00:00Z",
+                                canvas_w=self.CANVAS_W, canvas_h=self.CANVAS_H,
+                                uncovered_frac=0.25)
+            self._add_run(proj, timestamp="2026-09-13T10:00:00Z",
+                          canvas_w=920, canvas_h=614, derived_from=src,
+                          uncovered_frac=0.0)
+            assert target_field_fulls(proj) == pytest.approx(3.0, abs=1e-9)
         finally:
             proj.close()
 

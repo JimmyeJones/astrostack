@@ -17,6 +17,21 @@ spans. A single-field stack is ≈1.0; a 2×2 no-overlap mosaic is 4.0; a 2×2
 with 50% overlap is ~2.25. The readiness fraction then compares the total
 integration against `goal_hours * field_fulls`, i.e. an honest per-panel depth.
 
+**A canvas is a bounding box, so its area is not the sky it covers.** The union
+canvas is the axis-aligned bounding box of every accepted frame's footprint, so
+pointing drift and field rotation over a night push its corners outside all of
+them — and those empty corners counted as sky. Where the run recorded what share
+of the canvas no frame reached (`stack_runs.uncovered_frac`, measured by
+`seestack.stack.stacker.uncovered_fraction`), the ratio is corrected to the
+**covered** area, which is the sky the picture actually has data on. Measured on
+the owner's own library (observer issue #1095, 88 stacked targets): a *single
+pointing* read as up to 2.29 field-fulls, 46 of his 50 single-field pictures
+crossed the planner's 1.3 mosaic line, and six big objects lost a framing
+verdict — five of them the "shoot it in mosaic mode" advice — on the grounds
+that they were already being shot wide. A
+run that carries no such share — an older row, or a pre-stack estimate with no
+coverage map yet — is left exactly as it was.
+
 Kept a pure function of the numbers themselves so it stays cheap to test and
 easy to wire in wherever a caller already knows a target's newest run + its
 frame shape (the two things the routers already have to hand).
@@ -78,6 +93,7 @@ def field_fulls_of_sky(
     frame_w: int | float | None,
     frame_h: int | float | None,
     drizzle_scale: float | None = None,
+    uncovered_frac: float | None = None,
 ) -> float | None:
     """The number of single-frame field-fulls of sky the canvas covers.
 
@@ -87,6 +103,16 @@ def field_fulls_of_sky(
     shape). ``drizzle_scale`` is the run's drizzle super-sampling factor, so a
     2× drizzled single-field canvas (4× the pixels of a native frame) doesn't
     read as "4 fields of sky covered" — the sky it covers is still one field.
+
+    ``uncovered_frac`` is the share of that canvas no frame reached (the stack
+    run's own column), which is subtracted from the area before it is counted:
+    the canvas is the bounding box of the frames' footprints, so a night's
+    pointing drift and field rotation leave corners inside the box and outside
+    every frame. Without it a *single pointing* reads as up to 2.29 fields of
+    sky (measured across the owner's library, observer #1095) and the planner
+    calls it a mosaic. ``None`` — an older run, or an estimate taken before
+    there is a coverage map to measure — keeps the plain area ratio, which is
+    exactly the previous behaviour.
 
     Returns ``None`` when any dimension is missing or non-positive: the caller
     then falls back to the un-scaled goal, which is exactly today's behaviour on
@@ -109,6 +135,12 @@ def field_fulls_of_sky(
     if frame_area <= 0:
         return None
     ratio = canvas_area / frame_area
+    # Only the pixels a frame actually reached are sky this target has been
+    # pointed at; the bounding box's empty corners are not, and no amount of
+    # further integration will ever put light in them.
+    covered = _covered_share(uncovered_frac)
+    if covered is not None:
+        ratio *= covered
     if not math.isfinite(ratio) or ratio <= 0:
         return None
     # A canvas smaller than one native frame (a cropped stack, or a partial-dim
@@ -200,6 +232,25 @@ def drizzle_scale_of(opts: Any) -> float | None:
     return val
 
 
+def _covered_share(uncovered_frac: float | None) -> float | None:
+    """The share of a canvas at least one frame reached, or ``None``.
+
+    ``None`` means "don't correct anything": a missing column (a run stacked
+    before it existed, or a pre-stack estimate), an unreadable value, and
+    anything outside ``[0, 1)``. A canvas recorded as *wholly* uncovered is a
+    row to disbelieve rather than a picture covering no sky —
+    :func:`seestack.stack.stacker.uncovered_fraction` answers ``None`` for a
+    canvas nothing covered, so a stored 1.0 cannot have come from a picture.
+    """
+    try:
+        frac = float(uncovered_frac)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(frac) or frac < 0.0 or frac >= 1.0:
+        return None
+    return 1.0 - frac
+
+
 def _positive(x: object) -> bool:
     try:
         v = float(x)  # type: ignore[arg-type]
@@ -231,6 +282,11 @@ def target_field_fulls(proj) -> float | None:  # noqa: ANN001 — any open Proje
     falling back to the newest row of any kind when a target has nothing else
     (its source pruned from History), which is what it always did.
 
+    The newest stacking run's ``uncovered_frac`` travels with its canvas, so the
+    figure is the sky the picture has data on rather than the area of its
+    bounding box — see :func:`field_fulls_of_sky`. It is a column of the row this
+    already reads, so the correction costs no extra query and no file read.
+
     Two tiny SQL reads: the newest stacking run's canvas + options, and a single
     ``LIMIT 1`` frame row for the native shape. Dropping the ``LIMIT 1`` costs
     nothing measurable — ``idx_stack_runs_ts`` covers the ordering, so the plan
@@ -245,7 +301,8 @@ def target_field_fulls(proj) -> float | None:  # noqa: ANN001 — any open Proje
         return None
     try:
         cursor = conn.execute(
-            "SELECT canvas_w, canvas_h, options_json FROM stack_runs "
+            "SELECT canvas_w, canvas_h, options_json, uncovered_frac "
+            "FROM stack_runs "
             "ORDER BY timestamp_utc DESC"
         )
         run_row = _newest_stacking_run(cursor)
@@ -258,6 +315,9 @@ def target_field_fulls(proj) -> float | None:  # noqa: ANN001 — any open Proje
     options_json = (
         run_row["options_json"] if "options_json" in run_row.keys() else None
     )
+    uncovered_frac = (
+        run_row["uncovered_frac"] if "uncovered_frac" in run_row.keys() else None
+    )
     shape = native_frame_shape(proj)
     if shape is None:
         return None
@@ -267,6 +327,7 @@ def target_field_fulls(proj) -> float | None:  # noqa: ANN001 — any open Proje
         canvas_w, canvas_h,
         frame_w=frame_w, frame_h=frame_h,
         drizzle_scale=drizzle,
+        uncovered_frac=uncovered_frac,
     )
 
 

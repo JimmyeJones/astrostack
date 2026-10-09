@@ -59,7 +59,7 @@ def test_the_planner_says_a_typical_part_in_the_frontends_exact_words():
 
 
 def test_the_planner_names_the_scale_in_the_frontends_exact_words():
-    """``fieldsOfSkyLabel``: the same template and the same floor of 2."""
+    """``fieldsOfSkyLabel``: the same template, and the same sub-two phrase."""
     src = _ts_source()
     body = re.search(
         r"export function fieldsOfSkyLabel\([^)]*\): string \{(.*?)^\}",
@@ -70,16 +70,29 @@ def test_the_planner_names_the_scale_in_the_frontends_exact_words():
     )
     template = re.search(r"return `([^`]+)`;", body.group(1))
     assert template is not None, "…and could not read the phrase it returns."
-    # "about ${fields} fields of sky" → the Python phrase for that same count.
+    # "about ${Math.round(fulls)} fields of sky" → the Python phrase for that
+    # same count, whatever the interpolation inside it is spelled.
     for fields in (2, 4, 96):
-        expected = template.group(1).replace("${fields}", str(fields))
+        expected = re.sub(r"\$\{[^}]+\}", str(fields), template.group(1))
         assert _fields_of_sky_phrase(float(fields)) == expected
 
-    # Rounded to a whole field, and floored at 2, on both sides.
+    # …and the words it uses instead of rounding one pointing's drift up into a
+    # second field, which is a false count of fields rather than a rough scale
+    # (observer #1095 — 46 of the owner's 50 single-field pictures said it).
+    just_over = re.search(r'return "([^"]+)";', body.group(1))
+    assert just_over is not None, (
+        "`fieldsOfSkyLabel` no longer has its own phrase for a canvas spanning "
+        "a little more than one field. If that was a deliberate reword, change "
+        "`seestack.nightplan._fields_of_sky_phrase` in the same breath."
+    )
+    assert _fields_of_sky_phrase(1.2) == just_over.group(1)
+    assert _fields_of_sky_phrase(1.49) == just_over.group(1)
+
+    # Rounded to a whole field on both sides, and never a count below two.
     assert "Math.round(" in body.group(1)
-    assert "Math.max(2," in body.group(1)
     assert _fields_of_sky_phrase(2.25) == _fields_of_sky_phrase(2.0)
     assert _fields_of_sky_phrase(1.5) == _fields_of_sky_phrase(2.0)
+    assert _fields_of_sky_phrase(1.2) != _fields_of_sky_phrase(2.0)
 
 
 def test_the_two_surfaces_build_the_same_mosaic_clause():

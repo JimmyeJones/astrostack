@@ -2712,14 +2712,21 @@ def _fields_of_sky_phrase(field_fulls: float | None) -> str:
     """"about 4 fields of sky" — how much sky the canvas spans, for the clause
     that has to explain why a total and a depth differ.
 
-    Rounded to a whole field (the precision is spurious — a ragged union canvas
-    counts its uncovered corners as area) and never below 2, exactly as
-    ``fieldsOfSkyLabel`` is, because it is only ever printed where the canvas
-    really does span more than one field. Only reached from behind
+    Rounded to a whole field, because the precision would read as a measurement
+    rather than the rough scale it is — and **just over one field is said in
+    words rather than rounded up to two**, exactly as ``fieldsOfSkyLabel`` does
+    it in the browser (the two phrases are mirrored by hand and pinned by
+    ``tests/test_per_panel_phrase_mirror.py``). The old floor of 2 stated a
+    false count of fields on a canvas spanning 1.2 — one pointing with a
+    night's drift — which observer issue #1095 measured on 46 of the owner's 50
+    single-field pictures. Only reached from behind
     :func:`_spans_more_than_one_field`, so the value is a finite float above 1
     and needs no second clamp.
     """
-    return f"about {max(2, round(float(field_fulls or 1.0)))} fields of sky"
+    fulls = float(field_fulls or 1.0)
+    if fulls < 1.5:
+        return "a little over one field of sky"
+    return f"about {round(fulls)} fields of sky"
 
 
 def _have_phrase(hours: float, subject: str | None, *,
