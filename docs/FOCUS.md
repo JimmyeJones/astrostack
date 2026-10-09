@@ -1,5 +1,41 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-09 (Builder, fourth run of the day — **the inbox was clear, the one actionable lead was
+claimed by an open PR, and the bug this run shipped came from reading a TABLE AS A POPULATION rather than as a
+list. SHIPPED as v0.492.52.** Adaptive Auto's `_CUE_STEP` maps eleven plain-language chips to one Auto
+parameter and a signed step. Read down it, it is eleven fine lines; asked of the whole table — *which
+parameters are reachable in both directions?* — five had a pair and **`green` had one line**. So three taps on
+"Too green" take Auto's SCNR amount **0.7 → 1.0** (full green-cast removal) and **nothing in the vocabulary
+brings it back**: only `DELETE /api/editor/auto-preferences`, which discards *every* taste the owner has
+taught Auto, or `DECAY_DAYS` at **one step per 90 days**. Reproduced against `origin/main` by offering all
+eleven cues to a saturated profile — every one left the bias at `+3`. Fixed with one cue
+(`"too_magenta": ("green", -1)`) and one chip beside "Too green" in the existing Colour group, symmetric at ±3
+(Auto *sets* green removal at 0.7, so less of it is a real taste, unlike `highlights` which starts at its
+floor), plus the guard that outlives it: a shared `autoFeedbackCues.cases.json` pinning
+`AUTO_FEEDBACK_CHIPS` ↔ `_CUE_STEP` from both sides, and a test that **every parameter a cue reaches is
+reachable both ways**.
+**Three method notes worth carrying forward.** (1) **Read a table as a population.** A list of entries that
+are *supposed* to be symmetric is a property you can state, and a property you can state is a test — so ship
+the invariant, not just the missing row. (2) **Dead output vocabulary is evidence about the input
+vocabulary** — the inverse of v0.492.50's "a bucket nothing reads". `_BIAS_PHRASE[("green", False)]` held a
+complete sentence (*"with a lighter green-cast removal"*) that `describe_profile` could never say, and
+`auto_recipe`'s own comment described a state no cue could reach. Grep for a phrase/label/branch keyed on a
+value nothing produces. (3) **A mid-run merge can change a call's arity** — PR #1101 landed mid-run on both
+frontend files this touched and added a third argument to `sendAutoFeedback`; re-run the touched test file
+after syncing rather than trusting the pre-merge green.
+**"Bugs (fix these first)" still holds no verified, ungated open bug.** The issue inbox was checked first
+again (**four open, all previously acted-on and owner-gated — nothing new owed**), and "Features that serve
+real workflows" holds **no ready entry**: every open bullet there is shipped, closed-as-already-built,
+measured-and-stood-down or deprioritised, and the two live ones are gated ("constellation lines *only if* a
+dataset is already bundled"; "unpack a big archive as a job", gated on someone uploading one). **Five editor
+dead ends are written out in [`PROCESS-NOTES.md`](PROCESS-NOTES.md) so they are not re-walked** — the
+`proxy_scale` divergence between the two Auto builders (they agree), the five preview-fidelity advisories (all
+five rendered), `star_mask`'s footprint at its two call sites (scaled inside `starmask`), the `OP_PHRASES`
+mirror (pinned), and the border trim's over-crop bound (closed, four levers measured and rejected). **One
+baseline note:** the full suite at `-n 8` dropped one test on a `_wait_job` **60 s timeout under load**
+(`test_an_ordinary_seestar_drop_says_nothing_about_its_skips`), which passes alone in 8.1 s and is green in
+`main`'s CI — a harness trap not yet in `AGENT-ENVIRONMENT.md`; re-run the single test before calling `main`
+red. Earlier 2026-10-09 notes stand below.)
 *Last edited 2026-10-09 (Builder, same run, second task — **the residual the first task filed is SHIPPED as
 v0.492.51, and the entry's own prescription is why it was one task rather than two.** The editor's *per-run*
 border-trim switch reached `…/editor/auto`, so **Auto honoured it** and with the trim off classified the whole

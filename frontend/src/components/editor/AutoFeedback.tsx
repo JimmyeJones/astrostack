@@ -30,7 +30,15 @@ export const AUTO_FEEDBACK_CHIPS: AutoFeedbackChip[] = [
   { cue: "over_smoothed", label: "Over-smoothed", group: "Grain" },
   { cue: "undersaturated", label: "Colours too weak", group: "Colour" },
   { cue: "too_saturated", label: "Colours too strong", group: "Colour" },
+  // The green pair. "Too green" asks for a stronger green-cast removal (SCNR);
+  // "Too magenta" eases it back off. The reverse chip is what makes the pair a
+  // pair: without it three "Too green" taps saturated the bias at full removal
+  // and only Reset — which throws away *every* learned taste — could undo them.
+  // "Magenta" is the word the sky-cast read-out on this same screen already
+  // uses for the symptom ("Sky background has a magenta cast"), which is what
+  // over-strong SCNR produces.
   { cue: "too_green", label: "Too green", group: "Colour" },
+  { cue: "too_magenta", label: "Too magenta", group: "Colour" },
   // The bright-core pair. "Core blown out" asks Auto to hold the highlights back
   // (it starts off); "Core looks flat" walks that back toward off again.
   { cue: "core_clipped", label: "Core blown out", group: "Bright core" },
@@ -43,7 +51,7 @@ export const AUTO_FEEDBACK_CHIPS: AutoFeedbackChip[] = [
  * side by side with the chip that got the user there — hiding the reverse
  * behind a second interaction is what would make the feature feel one-way.
  * Grouping only changes how the row *reads*: five small questions instead of
- * eleven equal-weight buttons, which is the point of a feature meant to reduce
+ * twelve equal-weight buttons, which is the point of a feature meant to reduce
  * decisions rather than add them.
  */
 export function autoFeedbackGroups(

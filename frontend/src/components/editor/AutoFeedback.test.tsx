@@ -3,7 +3,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUTO_FEEDBACK_CHIPS, AutoFeedback, autoFeedbackGroups } from "./AutoFeedback";
+import autoFeedbackCueCases from "./autoFeedbackCues.cases.json";
 import * as client from "../../api/client";
+
+/** The shared cue table, driven from both sides — see the file's own
+ * `_comment` and `tests/test_auto_feedback_cues_mirror.py`. */
+const CUE_CASES = autoFeedbackCueCases.cases as {
+  cue: string; param: string; step: number; label: string;
+}[];
 
 function wrap(onRerun = () => {},
   scope?: { safe: string; runId: number; autoCrop?: boolean }) {
@@ -117,7 +124,28 @@ describe("AutoFeedback", () => {
       expect(send).toHaveBeenCalledWith("core_flat", undefined, undefined));
   });
 
-  it("clusters the chips so the row reads as five questions, not eleven buttons", async () => {
+  it("offers the green pair and sends its cues", async () => {
+    // "Too green" asks for a stronger green-cast removal; "Too magenta" eases it
+    // back off — the direction this row shipped without, which left a saturated
+    // green bias undoable except by discarding the whole profile. Both must
+    // reach the backend by their exact cue keys (an unknown cue 422s there).
+    vi.spyOn(client.api, "getAutoPreferences")
+      .mockResolvedValue({ biases: {}, note: null, neutral: true });
+    const send = vi.spyOn(client.api, "sendAutoFeedback")
+      .mockResolvedValue({ biases: { green: -1 }, note: "Auto is running with a lighter green-cast removal for you, based on your recent feedback.", neutral: false });
+
+    wrap();
+    fireEvent.click(await screen.findByRole("button", { name: "Too green" }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith("too_green", undefined, undefined));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Too magenta" }));
+    await waitFor(() => expect(send).toHaveBeenCalledWith("too_magenta", undefined, undefined));
+    // The note for the negative green bias is a sentence the app could not say
+    // before, because no cue could produce the bias it describes.
+    await screen.findByText(/lighter green-cast removal/);
+  });
+
+  it("clusters the chips so the row reads as five questions, not twelve buttons", async () => {
     vi.spyOn(client.api, "getAutoPreferences")
       .mockResolvedValue({ biases: {}, note: null, neutral: true });
     wrap();
@@ -147,7 +175,7 @@ describe("autoFeedbackGroups", () => {
     expect(flat.map((c) => c.cue)).toEqual(AUTO_FEEDBACK_CHIPS.map((c) => c.cue));
   });
 
-  it("collapses eleven buttons into a handful of clusters", () => {
+  it("collapses twelve buttons into a handful of clusters", () => {
     const groups = autoFeedbackGroups();
     expect(groups.length).toBeLessThanOrEqual(6);
     expect(groups.length).toBeLessThan(AUTO_FEEDBACK_CHIPS.length);
@@ -159,16 +187,30 @@ describe("autoFeedbackGroups", () => {
   it("keeps each opposing pair together, so the walk-back is never further away", () => {
     const groupOf = (cue: string) =>
       autoFeedbackGroups().find((g) => g.chips.some((c) => c.cue === cue))?.group;
-    for (const [a, b] of [
-      ["too_dark", "too_bright"],
-      ["too_soft", "over_sharpened"],
-      ["too_noisy", "over_smoothed"],
-      ["undersaturated", "too_saturated"],
-      ["core_clipped", "core_flat"],
-    ]) {
+    // Derived from the shared table rather than hand-kept: this list used to be
+    // written out here and silently omitted the green pair, which is the pair
+    // that did not exist. Every parameter now has two cues, so every parameter
+    // yields exactly one pair.
+    const pairs = [...new Set(CUE_CASES.map((c) => c.param))].map((param) => {
+      const both = CUE_CASES.filter((c) => c.param === param);
+      expect(both.map((c) => c.step).sort()).toEqual([-1, 1]);
+      return both.map((c) => c.cue);
+    });
+    expect(pairs.length).toBeGreaterThanOrEqual(6);
+    for (const [a, b] of pairs) {
       expect(groupOf(a)).toBe(groupOf(b));
       expect(groupOf(a)).toBeDefined();
     }
+  });
+
+  it("renders exactly the cues and labels of the shared table, in its order", () => {
+    // The other half of the guard in `tests/test_auto_feedback_cues_mirror.py`:
+    // the cue string is the wire contract, so a chip the engine does not know
+    // 422s at the user and a cue with no chip is a taste they cannot express.
+    // Order is pinned on this side because this is the side that renders.
+    expect(AUTO_FEEDBACK_CHIPS.map((c) => [c.cue, c.label])).toEqual(
+      CUE_CASES.map((c) => [c.cue, c.label]),
+    );
   });
 
   it("explains a faded taste, including when it has faded away entirely", async () => {

@@ -44,6 +44,24 @@ _CUE_STEP: dict[str, tuple[str, int]] = {
     "too_noisy":       ("denoise",    +1),
     "over_smoothed":   ("denoise",    -1),
     "too_green":       ("green",      +1),
+    # The walk-back for "too green", and the one direction this vocabulary was
+    # missing. ``green`` was the only one of the six parameters a cue could move
+    # in a single direction: three "too green" taps take Auto's SCNR amount
+    # 0.7 -> 1.0 (full green-cast removal) and nothing short of resetting the
+    # *whole* profile could bring it back — while ``_BIAS_PHRASE`` already held
+    # the sentence for a negative green bias ("with a lighter green-cast
+    # removal") that no cue could produce. Unlike ``highlights`` (which starts at
+    # the bottom of its range, see ``_PARAM_MIN_STEP``) less green removal is a
+    # real taste, not just a walk-back to off, so this is symmetric: +-3 steps
+    # span 0.4..1.0.
+    #
+    # Named for the symptom the user can see, like every other cue, and in the
+    # words the editor already uses for it: over-strong SCNR rectifies the
+    # green noise and drags the sky magenta, and the histogram read-out two
+    # lines up says so ("Sky background has a magenta cast",
+    # ``frontend/src/components/editor/skyCast.ts``). Until now that read-out
+    # named a problem the feedback row had no chip for.
+    "too_magenta":     ("green",      -1),
     "undersaturated":  ("saturation", +1),
     "too_saturated":   ("saturation", -1),
     "core_clipped":    ("highlights", +1),
@@ -77,12 +95,13 @@ MAX_STEPS = 3
 
 # Per-parameter floor on the accumulated bias, when it isn't the symmetric
 # ``-MAX_STEPS``. ``highlights`` is the one one-sided knob: Auto measures its
-# other four parameters from the image and can be nudged either way from there,
-# but highlight protection starts *off* (0 = the historical stretch), so there is
-# nothing below neutral to ask for. Its negative cue ("the core looks flat") is a
-# walk-back to neutral rather than an opposite direction — without this floor the
-# bias would keep accumulating negative steps that the range clamp swallows, so
-# the walk-back would need three taps to undo one.
+# other five parameters from the image (or, for ``green``, sets them) and each
+# can be nudged either way from there, but highlight protection starts *off*
+# (0 = the historical stretch), so there is nothing below neutral to ask for.
+# Its negative cue ("the core looks flat") is a walk-back to neutral rather
+# than an opposite direction — without this floor the bias would keep
+# accumulating negative steps that the range clamp swallows, so the walk-back
+# would need three taps to undo one.
 _PARAM_MIN_STEP: dict[str, int] = {"highlights": 0}
 
 # --- recency decay -----------------------------------------------------------
