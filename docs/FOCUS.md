@@ -1,6 +1,27 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-09 (Builder — **`list_issues` had FIVE open, not the four this page said**: observer
+*Last edited 2026-10-09 (Builder — **observer issue
+[#1090](https://github.com/JimmyeJones/astrostack/issues/1090) is now CLOSED in both of its halves** and
+**"Bugs (fix these first)" once again holds NO verified, ungated open bug** — only the gated LEADs and ⚪ notes.
+Its mid-copy half shipped as **v0.492.46**: nothing between the scan's walk and the stack re-asked how many
+files the drop folder holds, so a folder caught mid-copy read as a complete, settled target through *every*
+guard (they all count frames already ingested) — which is how `C_9` was published and auto-edited from **6 of
+its 742 subs**. New `_auto_stack_arrival_hold` asks that question as a **fresh** directory read and subtracts
+the two library-wide tallies the incoming-lag note already computes, so it is the *distinct* `source_path`
+count (#878's double registration would otherwise hold every shared folder for ever) minus what no scan can
+ever read (#880's ~147 rows cost not even one poll). **Un-strandable by two independent bounds** — that
+evidence, and `AUTO_STACK_ARRIVAL_META_KEY` recording the folders' on-disk *shape*, so one shape buys one hold
+— because an unbounded count comparison switching auto-stack off for a target is worse than the bug. **Method
+notes for the next run:** (1) *the UI rule decided the shape of the fix's output* — the arrival hold reports
+through the **existing** `auto_stack_held_settling` key and "Subs still arriving" alert rather than a second
+always-on banner, since the two guards catch one situation from opposite ends and a beginner needs the same
+sentence either way; (2) v0.492.45's own note paid off immediately — **re-reading every string the newly-live
+guard can print** caught the alert claiming only the settle window's harm ("would re-stack the whole target
+over and over"), which is not this case's harm at all; and (3) **a test that must pass in both directions is
+still worth writing** — the one-poll bound and the known-unreadable subtraction are green against `main` by
+design, because they are the guard-rails against stranding rather than the bug. The 2026-10-09 note on the
+clock half stands below.)
+(Builder — **`list_issues` had FIVE open, not the four this page said**: observer
 [#1090](https://github.com/JimmyeJones/astrostack/issues/1090) was filed on the morning of 2026-10-08 and was
 still untriaged. It was this run, and it is the front of the queue. **Its clock half is SHIPPED as v0.492.45**
 and its **second, independent half is now the one verified, ungated open bug** at the top of "Bugs (fix these
@@ -68,7 +89,13 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
 
 ## Front of the queue
 
-0. **⭐ THE ONE VERIFIED, UNGATED OPEN BUG: the mid-copy half of [#1090](https://github.com/JimmyeJones/astrostack/issues/1090)**
+0. **"Bugs (fix these first)" holds NO verified, ungated open bug.** 🔴 **The mid-copy half of
+   [#1090](https://github.com/JimmyeJones/astrostack/issues/1090) shipped as v0.492.46** (Builder 2026-10-09)
+   and the issue is **closed in both halves**; the entry is cut to [`SHIPPED.md`](SHIPPED.md). What is left
+   below is gated LEADs and ⚪ notes — **do not re-litigate the numbered stand-downs**; a run that finds the
+   backlog dry should call `list_issues` first (v0.492.45's note), then do a dogfood pass and file what it
+   finds. **As it was filed, now shipped:**
+   🔴 **The prior front of the queue: the mid-copy half of [#1090](https://github.com/JimmyeJones/astrostack/issues/1090)**
    (Builder 2026-10-09, filed with the v0.492.45 fix of its other half). **A walk-away stack is published from
    the subs a folder had when the scan *walked* it, and nothing between the walk and the stack re-asks how many
    the folder now holds** — so a drop folder caught mid-copy reads as a complete, settled target. It has fired:

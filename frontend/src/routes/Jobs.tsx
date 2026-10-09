@@ -1050,8 +1050,40 @@ export function heldForFilesLine(h: HeldForFiles): string {
  * on a drop folder that is still *copying* — subs shot weeks ago, arriving now,
  * which is the case the owner actually met (observer #1090). Wording that says
  * "still being shot" is wrong there, and wrong in the direction that reads as a
- * bug to someone who is not shooting anything tonight. */
-export interface HeldSettling { target: string; quietMin: number; settleMin: number; }
+ * bug to someone who is not shooting anything tonight.
+ *
+ * **Two backend guards, one thing to tell the user.** The *settle window* asks
+ * when the newest sub arrived (`quietMin`/`settleMin`); the *arrival re-look*
+ * asks how many files the drop folder holds right now and how many of them the
+ * library has no row for (`waiting`/`onDisk`). They catch the same situation
+ * from opposite ends — the second exists because a copy can finish *while the
+ * job is busy stacking something else*, which spends the window honestly — and
+ * the sentence a beginner needs is the same either way, so they share this one
+ * alert rather than adding a second always-on banner. `waiting > 0` is what
+ * says which of the two is speaking. */
+export interface HeldSettling {
+  target: string; quietMin: number; settleMin: number;
+  /** How many FITS files this target's drop folders hold that the library has
+   * no row for — i.e. still copying in. 0 when the settle window is the guard
+   * that spoke. */
+  waiting: number;
+  /** How many files those folders hold in total, so the line can say "23 of
+   * them" rather than a bare remainder. */
+  onDisk: number;
+}
+
+/** The per-target line under the "subs still arriving" alert (pure, tested).
+ * Branches on which of the two guards spoke — see {@link HeldSettling}. */
+export function heldSettlingLine(h: HeldSettling): string {
+  if (h.waiting > 0) {
+    return `: its folder holds ${h.onDisk} file`
+      + `${h.onDisk === 1 ? "" : "s"}, ${h.waiting} of them not imported yet `
+      + "— it looks like it's still copying in.";
+  }
+  return (h.quietMin === 0 ? ": a sub arrived just now"
+    : `: last sub ${h.quietMin} min ago`)
+    + ` — waits for ${h.settleMin} min of quiet.`;
+}
 
 /** One target the scan re-stacked because its newest picture had come out much
  * thinner than one the same target already made — the state a storage hiccup
@@ -1106,6 +1138,8 @@ export function pipelineSummary(r: Record<string, unknown>): {
           target: typeof o.target === "string" ? o.target : "",
           quietMin: Number(o.quiet_min ?? 0) || 0,
           settleMin: Number(o.settle_min ?? 0) || 0,
+          waiting: Number(o.waiting ?? 0) || 0,
+          onDisk: Number(o.on_disk ?? 0) || 0,
         }))
     : [];
   const healed: HealedThin[] = Array.isArray(r.auto_stack_healed)
@@ -1442,9 +1476,9 @@ function JobResultActions({ job }: { job: Job }) {
             <Text size="xs">
               {"New subs are still arriving for these — either you're shooting "}
               {"right now, or a folder is still copying in — so the picture is "}
-              {"not made yet. Stacking after every batch would re-stack the "}
-              {"whole target over and over and hand you a picture of a night "}
-              {"that isn't over. Nothing is skipped — the next check after the "}
+              {"not made yet. Stacking now would make it out of only the subs "}
+              {"that have landed so far, and the next batch would replace it "}
+              {"minutes later. Nothing is skipped — the next check after the "}
               {"subs stop stacks each one, once, from everything it has. Open a "}
               {'target and use "Stack" if you want one now:'}
             </Text>
@@ -1454,10 +1488,7 @@ function JobResultActions({ job }: { job: Job }) {
                   {h.target ? (
                     <Anchor component={Link} to={`/targets/${h.target}`}>{h.target}</Anchor>
                   ) : "This target"}
-                  {h.quietMin === 0
-                    ? ": a sub arrived just now"
-                    : `: last sub ${h.quietMin} min ago`}
-                  {` — waits for ${h.settleMin} min of quiet.`}
+                  {heldSettlingLine(h)}
                 </Text>
               ))}
             </Stack>
