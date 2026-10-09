@@ -1257,9 +1257,9 @@ def test_auto_feedback_is_filed_on_the_whole_canvas_with_the_trim_off(
     picture the editor shows, and the whole canvas is what Auto keys on too — so
     it is what the tap must be filed under.
 
-    The preference is read from the **setting**, the way a body-less POST to
-    ``…/editor/preset-suggestion`` resolves it: neither of these two requests
-    carries the editor's per-run override."""
+    Here the preference comes from the **setting**, which is what a request that
+    carries no override resolves to — the per-run override has its own tests
+    below."""
     from webapp.routers import editor as editor_mod
 
     assert client.put("/api/settings",
@@ -1281,6 +1281,111 @@ def test_auto_feedback_is_filed_on_the_whole_canvas_with_the_trim_off(
                        json={"cue": "too_dark", "safe": safe,
                              "run_id": rid}).status_code == 200
     assert shapes == [(80, 100)]
+
+
+def _classify_shape_spy(monkeypatch) -> list:
+    """Record the ``(h, w)`` of every array the webapp hands ``classify_target``."""
+    from webapp.routers import editor as editor_mod
+
+    shapes: list[tuple[int, int] | None] = []
+    real = editor_mod.presets_mod.classify_target
+
+    def spy(rgb, coverage=None, **kw):
+        shapes.append(None if rgb is None else tuple(rgb.shape[:2]))
+        return real(rgb, coverage, **kw)
+
+    monkeypatch.setattr(editor_mod.presets_mod, "classify_target", spy)
+    return shapes
+
+
+def test_the_per_run_trim_override_reaches_the_bucket_a_cue_is_filed_in(
+        client, solved_library, monkeypatch):
+    """The editor's **per-run** border-trim switch has to reach the classification,
+    not just the setting.
+
+    `Editor.tsx` keeps an `autoCropOverride` and sends it to ``…/editor/auto``, so
+    with the switch flipped Auto classifies the **whole** canvas — and the bucket a
+    tap is filed under must follow, or the write side and the read side of the taste
+    profile disagree again at exactly the moment the owner has told the app to leave
+    the fringe in. The library-wide setting stays **on** here, so the only thing
+    that can narrow or widen the measurement is the override itself."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="override_feedback")
+    assert client.get("/api/settings").json()["auto_crop_border"] is True
+
+    shapes = _classify_shape_spy(monkeypatch)
+
+    # Trim off for this one picture → the whole 80x100 canvas.
+    assert client.post("/api/editor/auto-preferences/feedback",
+                       json={"cue": "too_dark", "safe": safe, "run_id": rid,
+                             "auto_crop": False}).status_code == 200
+    # Trim on → the 76x96 rectangle the trim keeps, as the setting already gives.
+    assert client.post("/api/editor/auto-preferences/feedback",
+                       json={"cue": "too_dark", "safe": safe, "run_id": rid,
+                             "auto_crop": True}).status_code == 200
+    assert shapes == [(80, 100), (76, 96)]
+
+
+def test_the_per_run_trim_override_reaches_the_run_scoped_profile_too(
+        client, solved_library, monkeypatch):
+    """And the other half of the pair: the run-scoped "why Auto shifted" note.
+
+    It is a GET, so the override arrives as a query param rather than in a body —
+    the one shape difference between these two requests. It must answer about the
+    same picture the feedback POST beside it files into, or the note describes a
+    taste the tap is not going to land in."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="override_get")
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences"
+
+    shapes = _classify_shape_spy(monkeypatch)
+
+    assert client.get(f"{url}?auto_crop=false").status_code == 200
+    assert client.get(f"{url}?auto_crop=true").status_code == 200
+    assert client.get(url).status_code == 200          # omitted ⇒ the setting (on)
+    assert shapes == [(80, 100), (76, 96), (76, 96)]
+
+
+def test_the_per_run_trim_override_also_overrides_a_setting_that_is_off(
+        client, solved_library, monkeypatch):
+    """The override has to work in **both** directions, or it is just a second way
+    of spelling the setting: someone who normally keeps the full frame can still let
+    Auto crop this one picture, and the bucket follows that too. This is the case a
+    test that only ever turns the override off cannot see."""
+    assert client.put("/api/settings",
+                      json={"auto_crop_border": False}).status_code == 200
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="override_both")
+
+    shapes = _classify_shape_spy(monkeypatch)
+
+    # Setting off, override on → narrowed, against the setting.
+    assert client.post("/api/editor/auto-preferences/feedback",
+                       json={"cue": "too_dark", "safe": safe, "run_id": rid,
+                             "auto_crop": True}).status_code == 200
+    # ...and omitted still means the setting, which is off → the whole canvas.
+    assert client.post("/api/editor/auto-preferences/feedback",
+                       json={"cue": "too_dark", "safe": safe,
+                             "run_id": rid}).status_code == 200
+    assert shapes == [(76, 96), (80, 100)]
+
+
+def test_the_preset_chip_honours_the_per_run_trim_override(
+        client, solved_library, monkeypatch):
+    """The chip is the other classification surface, and it is why this was one task
+    rather than two: it already *accepted* the override (v0.492.49) but no frontend
+    sent one, so fixing only the feedback path would have left the two surfaces
+    answering one question by two rules. ``api.presetSuggestion`` now sends it."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="override_chip")
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion"
+
+    shapes = _classify_shape_spy(monkeypatch)
+
+    assert client.post(url, json={"auto_crop": False}).status_code == 200
+    assert client.post(url, json={"auto_crop": True}).status_code == 200
+    assert shapes == [(80, 100), (76, 96)]
 
 
 def test_auto_feedback_on_a_single_field_classifies_the_whole_frame(

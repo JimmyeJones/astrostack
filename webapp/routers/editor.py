@@ -834,7 +834,8 @@ def _auto_preferences_out(profile: dict,
     )
 
 
-def _classify_run(request: Request, safe: str, run_id: int) -> str | None:
+def _classify_run(request: Request, safe: str, run_id: int,
+                  auto_crop: bool | None = None) -> str | None:
     """Best-effort coarse archetype (galaxy/nebula/cluster) of a run's own proxy,
     so type-scoped feedback lands in the right bucket. Returns ``None`` — i.e. fall
     back to the global taste — on any failure (missing run, unreadable proxy).
@@ -851,17 +852,20 @@ def _classify_run(request: Request, safe: str, run_id: int) -> str | None:
     under the archetype Auto reads moves it by 0.06. The editor says "Thanks —
     Auto will lean that way for you" and re-runs Auto on a byte-identical recipe.
 
-    The border-trim preference comes from the **setting**, exactly as a body-less
-    POST to ``…/editor/preset-suggestion`` resolves it: the editor's per-run
-    override is not carried on either of this function's two requests (the
-    feedback body is a cue, the run-scoped GET has no body), and neither surface
-    sees it today. Filed as a lead rather than plumbed through here, so the two
-    classification surfaces keep answering with one rule.
+    ``auto_crop`` is the editor's **per-run** border-trim override, which Auto
+    itself honours (`Editor.tsx`'s ``autoCropArg`` reaches ``…/editor/auto``), so
+    the bucket has to honour it too or the write side and the read side disagree
+    again at exactly the moment the owner has told the app to leave the fringe in.
+    ``None`` — every older frontend, and any caller that does not know — falls back
+    to the library-wide ``auto_crop_border`` setting, which is what a body-less
+    POST to ``…/editor/preset-suggestion`` already resolves to, so the default
+    answer is byte-for-byte what it was.
     """
     try:
         project_dir, run = _run_info(request, safe, run_id)
-        auto_crop = bool(deps.get_settings(request).auto_crop_border)
-        return classify_run_measured(project_dir, run, auto_crop).get("cls")
+        crop = (bool(deps.get_settings(request).auto_crop_border)
+                if auto_crop is None else bool(auto_crop))
+        return classify_run_measured(project_dir, run, crop).get("cls")
     except Exception:  # noqa: BLE001 — classification is advisory; never sink feedback
         return None
 
@@ -879,13 +883,19 @@ def get_auto_preferences(request: Request) -> AutoPreferencesOut:
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/editor/auto-preferences",
             response_model=AutoPreferencesOut)
 def get_run_auto_preferences(safe: str, run_id: int,
-                             request: Request) -> AutoPreferencesOut:
+                             request: Request,
+                             auto_crop: bool | None = None) -> AutoPreferencesOut:
     """The Adaptive-Auto profile *scoped to this run's archetype* — so the editor's
     "why Auto shifted" note reflects the taste that actually applies to the target
     the owner is looking at (galaxy taste on a galaxy), on load, not only after the
     next feedback tap. Falls back to the global taste when the run can't be
-    classified. Read-only."""
-    object_type = _classify_run(request, safe, run_id)
+    classified. Read-only.
+
+    ``auto_crop`` is the editor's per-run border-trim override, as a query param
+    because this is a GET (the two Auto endpoints take the same flag in a body).
+    Omitted ⇒ the saved ``auto_crop_border`` setting, i.e. what every older
+    frontend asks for and gets today."""
+    object_type = _classify_run(request, safe, run_id, auto_crop)
     lib = deps.open_library(request)
     try:
         return _auto_preferences_out(_read_auto_preferences(lib), object_type)
@@ -901,6 +911,12 @@ class AutoFeedbackIn(BaseModel):
     # the cue updates the global taste exactly as before.
     safe: str | None = None
     run_id: int | None = None
+    # The editor's per-run "let Auto trim the ragged border?" override, the same
+    # flag `…/editor/auto` and `…/editor/auto-analysis` accept — because the
+    # archetype this cue is filed under has to be the one Auto keys on, and with
+    # the trim off Auto keys on the whole canvas. Absent ⇒ the saved
+    # `auto_crop_border` setting (every older frontend, unchanged).
+    auto_crop: bool | None = None
 
 
 @router.post("/api/editor/auto-preferences/feedback", response_model=AutoPreferencesOut)
@@ -912,12 +928,16 @@ def post_auto_feedback(body: AutoFeedbackIn, request: Request) -> AutoPreference
 
     When the request carries the run's ``safe``/``run_id``, the cue is recorded into
     that run's object-type bucket (best-effort classification; unclassifiable ⇒ the
-    global set), and the returned note is scoped to that archetype."""
+    global set), and the returned note is scoped to that archetype. An optional
+    ``auto_crop`` carries the editor's per-run border-trim override into that
+    classification, so the bucket is the one Auto keys on even when the owner has
+    told Auto to leave the fringe in (see :func:`_classify_run`)."""
     if body.cue not in auto_prefs_mod.known_cues():
         raise HTTPException(status_code=422, detail=f"unknown feedback cue: {body.cue!r}")
     object_type = None
     if body.safe and body.run_id is not None:
-        object_type = _classify_run(request, body.safe, body.run_id)
+        object_type = _classify_run(request, body.safe, body.run_id,
+                                    body.auto_crop)
     lib = deps.open_library(request)
     try:
         updated = auto_prefs_mod.record_feedback(

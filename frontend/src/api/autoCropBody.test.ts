@@ -50,4 +50,52 @@ describe("auto endpoints — auto_crop body", () => {
     await api.autoAnalysis("M_31", 5);
     expect(fetchMock.mock.calls[1][1]?.body).toBeUndefined();
   });
+
+  /** The three *classification* surfaces. Each asks "what is this picture?" about
+   * the picture Auto is about to make, so each has to see the same per-run
+   * override Auto does — the chip's endpoint has accepted one since v0.492.49 and
+   * nothing sent it, which is why this went unnoticed. */
+  it("sends the preference to the preset chip, which classifies the same picture",
+    async () => {
+      const fetchMock = mockFetch();
+      await api.presetSuggestion("M_31", 5, false);
+      const [path, init] = fetchMock.mock.calls[0];
+      expect(path)
+        .toBe("/api/targets/M_31/stack-runs/5/editor/preset-suggestion");
+      expect(JSON.parse(init?.body as string)).toEqual({ auto_crop: false });
+      await api.presetSuggestion("M_31", 5);
+      expect(fetchMock.mock.calls[1][1]?.body).toBeUndefined();
+    });
+
+  it("sends the preference with a scoped feedback tap, so the cue is filed in the "
+    + "bucket Auto reads", async () => {
+    const fetchMock = mockFetch();
+    await api.sendAutoFeedback("too_dark", { safe: "M_31", runId: 5 }, false);
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string))
+      .toEqual({ cue: "too_dark", safe: "M_31", run_id: 5, auto_crop: false });
+    // Omitted ⇒ the key is absent, not `null`: the server reads absent as "use the
+    // saved setting", which is what every earlier build sent.
+    await api.sendAutoFeedback("too_dark", { safe: "M_31", runId: 5 });
+    expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string))
+      .toEqual({ cue: "too_dark", safe: "M_31", run_id: 5 });
+    // An unscoped tap has no run to classify, so it carries neither.
+    await api.sendAutoFeedback("too_dark", undefined, false);
+    expect(JSON.parse(fetchMock.mock.calls[2][1]?.body as string))
+      .toEqual({ cue: "too_dark" });
+  });
+
+  it("carries the preference on the run-scoped profile GET as a query param",
+    async () => {
+      const fetchMock = mockFetch();
+      await api.getRunAutoPreferences("M_31", 5, false);
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        "/api/targets/M_31/stack-runs/5/editor/auto-preferences?auto_crop=false");
+      await api.getRunAutoPreferences("M_31", 5, true);
+      expect(fetchMock.mock.calls[1][0]).toBe(
+        "/api/targets/M_31/stack-runs/5/editor/auto-preferences?auto_crop=true");
+      // Omitted ⇒ the bare path, byte-for-byte what every earlier build asked for.
+      await api.getRunAutoPreferences("M_31", 5);
+      expect(fetchMock.mock.calls[2][0])
+        .toBe("/api/targets/M_31/stack-runs/5/editor/auto-preferences");
+    });
 });

@@ -59,23 +59,36 @@ export function autoFeedbackGroups(
 }
 
 export function AutoFeedback(
-  { onRerun, safe, runId }: { onRerun: () => void; safe?: string; runId?: number },
+  { onRerun, safe, runId, autoCrop }: {
+    onRerun: () => void; safe?: string; runId?: number;
+    /** The editor's per-run "let Auto trim the ragged border?" override, or
+     * `undefined` to follow the saved setting. It travels with both requests
+     * below because the archetype this taste is filed under has to be the one
+     * Auto keys on, and with the trim off Auto keys on the whole canvas. */
+    autoCrop?: boolean;
+  },
 ) {
   const qc = useQueryClient();
   const scoped = safe != null && runId != null;
   // Query the run-scoped profile when we know the target, so the "why" note
   // reflects this archetype's taste on load; otherwise the library-wide profile.
-  const prefsKey = scoped ? ["auto-prefs", safe, runId] : ["auto-prefs"];
+  // `autoCrop` is part of the key: flipping the border-trim switch can change the
+  // archetype, so a cached note taken under the other setting is the wrong note.
+  const prefsKey = scoped
+    ? ["auto-prefs", safe, runId, autoCrop] : ["auto-prefs"];
   const prefs = useQuery({
     queryKey: prefsKey,
     queryFn: () =>
-      scoped ? api.getRunAutoPreferences(safe!, runId!) : api.getAutoPreferences(),
+      scoped
+        ? api.getRunAutoPreferences(safe!, runId!, autoCrop)
+        : api.getAutoPreferences(),
   });
   const feedback = useMutation({
     // Pass the run context so the cue is scoped to this target's archetype
     // (galaxy/nebula/cluster) — taste learned on galaxies won't move clusters.
     mutationFn: (cue: string) =>
-      api.sendAutoFeedback(cue, scoped ? { safe: safe!, runId: runId! } : undefined),
+      api.sendAutoFeedback(
+        cue, scoped ? { safe: safe!, runId: runId! } : undefined, autoCrop),
     onSuccess: (data) => {
       qc.setQueryData(prefsKey, data);
       notifications.show({

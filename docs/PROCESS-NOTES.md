@@ -48,6 +48,22 @@ taste profile on this very function's verdict". Taking that sentence at its word
    and the query-key trap written down. A fix that leaves two surfaces answering one question by two rules is not
    smaller than the fix that leaves them answering by one.
 
+**Second task, same run: v0.492.51** — the residual the first task filed, built in the shape its own entry
+prescribed (both classification surfaces or neither). **The note worth carrying: when a fix makes two sites
+agree, the agreement is only as good as the narrowest input they share.** v0.492.50 made the taste profile's
+write side and read side agree about the `auto_crop_border` *setting* and left them disagreeing about the
+editor's *per-run override* — the same bug one level down, re-entered through the one input Auto takes
+(`autoCropArg` reaches `…/editor/auto`) and the classification did not. So after reconciling two sites, the
+next question is not "are they equal now?" but **"equal as a function of what?"** — enumerate every input one
+of them reads and check the other reads it too.
+Two smaller things this one is worth remembering for. **(1) A test that only ever turns a flag off cannot see a
+flag that is just a second spelling of the setting** — so the override has a test that turns it *on against a
+setting that is off*, which is the direction that proves it is an override at all. **(2) Three existing
+`AutoFeedback.test.tsx` assertions were updated rather than loosened**: the calls genuinely carry a third
+argument now, so they assert `undefined` where the test sets none (the pre-override behaviour) instead of
+dropping to a looser matcher. Weakening an exact-arguments assertion to accommodate a new parameter is how a
+tripwire quietly stops being one — the same failure mode the file's own `_forced` stub comment records twice.
+
 **`--mosaic --editor` dogfood: CLEAN** — run while CI chewed on the PR, so it cost the run nothing. Worth
 recording because it is the third consecutive clean pass on this pair, and because **it could not have found this
 run's bug**: the symptom is a *lack* of change in a recipe, and a probe that photographs one render cannot see a

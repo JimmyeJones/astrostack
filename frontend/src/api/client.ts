@@ -4581,10 +4581,12 @@ export const api = {
   autoAnalysis: (safe: string, runId: number, autoCrop?: boolean) =>
     req<AutoAnalysis>(`/api/targets/${safe}/stack-runs/${runId}/editor/auto-analysis`,
       { method: "POST", ...autoCropBody(autoCrop) }),
-  presetSuggestion: (safe: string, runId: number) =>
+  // `autoCrop` as above: the chip classifies the picture Auto is about to make, so
+  // it has to see the same per-run border-trim override Auto does.
+  presetSuggestion: (safe: string, runId: number, autoCrop?: boolean) =>
     req<PresetSuggestion>(
       `/api/targets/${safe}/stack-runs/${runId}/editor/preset-suggestion`,
-      { method: "POST" }),
+      { method: "POST", ...autoCropBody(autoCrop) }),
   exportPng: (safe: string, runId: number, recipe: Recipe) =>
     req<{ job_id: string }>(`/api/targets/${safe}/stack-runs/${runId}/editor/export-png`, {
       method: "POST", body: JSON.stringify({ recipe }),
@@ -4636,15 +4638,29 @@ export const api = {
     }),
   getAutoPreferences: () => req<AutoPreferences>("/api/editor/auto-preferences"),
   /** The profile scoped to a run's archetype (galaxy/nebula/cluster), so the
-   * editor's "why Auto shifted" note reflects the target being edited. */
-  getRunAutoPreferences: (safe: string, runId: number) =>
+   * editor's "why Auto shifted" note reflects the target being edited.
+   * `autoCrop` carries the editor's per-run border-trim override into that
+   * classification — a query param here because this is a GET. Omit it to use the
+   * saved setting, which is what every earlier build asked for. */
+  getRunAutoPreferences: (safe: string, runId: number, autoCrop?: boolean) =>
     req<AutoPreferences>(
-      `/api/targets/${safe}/stack-runs/${runId}/editor/auto-preferences`),
-  sendAutoFeedback: (cue: string, ctx?: { safe: string; runId: number }) =>
+      `/api/targets/${safe}/stack-runs/${runId}/editor/auto-preferences`
+      + (autoCrop === undefined ? "" : `?auto_crop=${autoCrop}`)),
+  /** `autoCrop` is sent for the same reason: the bucket a cue is filed under must
+   * be the archetype Auto keys on, and with the trim off Auto keys on the whole
+   * canvas. Omitted (and on an unscoped tap) the server uses the saved setting. */
+  sendAutoFeedback: (
+    cue: string, ctx?: { safe: string; runId: number }, autoCrop?: boolean,
+  ) =>
     req<AutoPreferences>("/api/editor/auto-preferences/feedback", {
       method: "POST",
       body: JSON.stringify(
-        ctx ? { cue, safe: ctx.safe, run_id: ctx.runId } : { cue }),
+        ctx
+          ? {
+            cue, safe: ctx.safe, run_id: ctx.runId,
+            ...(autoCrop === undefined ? {} : { auto_crop: autoCrop }),
+          }
+          : { cue }),
     }),
   resetAutoPreferences: () =>
     req<AutoPreferences>("/api/editor/auto-preferences", { method: "DELETE" }),

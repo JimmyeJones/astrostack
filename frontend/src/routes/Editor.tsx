@@ -1263,8 +1263,11 @@ export function EditorView() {
   // has no such endpoint): it never changes Auto, and `preset_id` is null when the
   // content isn't clearly one archetype, so the chip simply stays hidden then.
   const presetSuggest = useQuery({
-    queryKey: ["preset-suggestion", safe, rid],
-    queryFn: () => api.presetSuggestion(safe, rid).catch(() => null),
+    // `autoCropArg` is part of the key as well as the request: the chip classifies
+    // the picture Auto is about to make, so with the border trim off it classifies
+    // the whole canvas instead — a different question, not a stale answer.
+    queryKey: ["preset-suggestion", safe, rid, autoCropArg],
+    queryFn: () => api.presetSuggestion(safe, rid, autoCropArg).catch(() => null),
     staleTime: Infinity,
   });
   // Resolve a chosen look into concrete ops and switch on the look-compare split.
@@ -2461,7 +2464,8 @@ export function EditorView() {
                 {/* Adaptive Auto: one-tap feedback teaches Auto the owner's taste
                     over time (bounded, reversible). Re-runs Auto so the shift shows
                     immediately. */}
-                <AutoFeedback onRerun={() => auto.mutate()} safe={safe} runId={rid} />
+                <AutoFeedback onRerun={() => auto.mutate()} safe={safe} runId={rid}
+                  autoCrop={autoCropArg} />
               </Alert>
             ) : null}
 
