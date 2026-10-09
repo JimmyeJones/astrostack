@@ -243,6 +243,91 @@ def test_tonight_stands_the_framing_verdict_down_on_a_mosaic_target(
     assert m42["type"] == "nebula" and m42["difficulty"] is not None
 
 
+def _single_pointing_run(data_root, safe: str, *, uncovered_frac: float | None,
+                         drift: float = 1.5) -> int:
+    """A stack run from **one** pointing whose canvas is a drifted bounding box.
+
+    ``drift`` is how many frame widths/heights the union's bounding box spans:
+    1.5 on each axis is 2.25 field-fulls of raw canvas area, which is what a
+    night of pointing drift and field rotation produces from a single pointing
+    and is well past the planner's 1.3 mosaic line. ``uncovered_frac`` is the
+    share of that box no frame reached — the run's own measurement, and the
+    thing that says the corners are not sky.
+    """
+    from seestack.io.library import Library
+    from seestack.io.project import StackRunRow
+    from tests.webapp.conftest import FRAME_H, FRAME_W
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run_id = proj.add_stack_run(StackRunRow(
+                id=None, timestamp_utc="2026-05-01T00:00:00Z",
+                output_basename="m", fits_path=None, tiff_path=None,
+                preview_path=None, n_frames_used=119,
+                canvas_h=int(FRAME_H * drift), canvas_w=int(FRAME_W * drift),
+                coverage_min=1, coverage_max=119,
+                options_json='{"sigma_clip": true}',
+                uncovered_frac=uncovered_frac,
+            ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        return int(run_id)
+    finally:
+        lib.close()
+
+
+def test_tonight_keeps_the_framing_advice_on_a_drifted_single_field(
+        client, solved_library):
+    """Observer #1095: a single pointing read as up to 2.29 field-fulls of sky,
+    so the planner called 46 of the owner's 50 single-field pictures "already a
+    mosaic" and stood their framing verdict down — withholding "shoot it in
+    mosaic mode" from five big nebulae on the grounds that they were already
+    being shot wide. M 42 is the measured case: 119 subs at one pointing, 43.8 %
+    of its canvas empty, read as 2.22 fields of sky.
+
+    A canvas is the bounding box of the frames' footprints, so drift and field
+    rotation leave corners inside the box and outside every frame. The run
+    records what share that is, so the advice no longer turns on it."""
+    _single_pointing_run(solved_library, "M_42", uncovered_frac=0.56)
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    # The advice an 85' nebula shot at one pointing exists for, intact.
+    assert m42["size_arcmin"] and m42["size_arcmin"] > 0
+    assert m42["framing"] is not None and m42["framing"]["level"] == "mosaic"
+    assert m42["mosaic"] is not None and m42["mosaic"]["panels"] >= 2
+    # …and the scale the goal is read against is the sky with data on it.
+    assert m42["field_fulls"] == pytest.approx(1.0, abs=1e-9)
+
+
+def test_tonight_still_stands_down_on_a_genuine_mosaic_canvas(
+        client, solved_library):
+    """The guard-rail on the fix above, in the direction that matters more.
+
+    A real 2x2-ish raster whose bounding box is 56 % empty is still well past
+    the mosaic line, so a target genuinely being shot wide keeps its stand-down
+    and is not asked to plan the grid it is already shooting. The stand-down
+    holds before the fix as much as after it, which is exactly the point: a
+    correction that talked a real mosaic down into the single-field goal would
+    be the failure `webapp/field_fulls.py` exists to prevent, arriving from the
+    other side. Only the figure beside it moves (9.0 of bounding box → 3.96 of
+    sky with data on it)."""
+    _single_pointing_run(solved_library, "M_42", uncovered_frac=0.56, drift=3.0)
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert m42["field_fulls"] == pytest.approx(9.0 * 0.44, abs=1e-6)
+    assert m42["framing"] is None and m42["mosaic"] is None
+    assert m42["size_arcmin"] is None
+
+
 def _mosaic_canvas(real):
     """Wrap `_annotate_library_targets` so every row reports a mosaic canvas.
 

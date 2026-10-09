@@ -40,6 +40,7 @@ def _add_run(
     total_exposure_s: float | None = None,
     drizzle: bool = False,
     drizzle_scale: float = 1.0,
+    uncovered_frac: float | None = None,
 ) -> int:
     """Attach one stack run of the given canvas to a fixture target."""
     lib = Library.open_or_create(data_root / "library")
@@ -58,6 +59,7 @@ def _add_run(
                 options_json=json.dumps({
                     "drizzle": drizzle, "drizzle_scale": drizzle_scale,
                 }),
+                uncovered_frac=uncovered_frac,
             ))
         finally:
             proj.close()
@@ -149,3 +151,68 @@ def test_the_field_is_present_but_null_when_no_frame_records_its_shape(
     rows = _runs(client, "M_42")
     assert rows and all("field_fulls" in r for r in rows)
     assert [r["field_fulls"] for r in rows] == [None]
+
+
+def test_a_drifted_single_field_run_reports_the_sky_it_covers(
+        client, solved_library):
+    """Observer #1095, on the per-run figure: a canvas is the bounding box of
+    its frames' footprints, so a night's pointing drift and field rotation
+    leave corners inside the box and outside every frame.
+
+    Counting them made one pointing read as 2.25 field-fulls of sky, which both
+    deflated every per-pixel figure on this row and (at the target level) had
+    the planner call a single field a mosaic. The run records the share, so the
+    listing can serve the covered area."""
+    _add_run(solved_library, "M_42",
+             canvas_w=int(FRAME_W * 1.5), canvas_h=int(FRAME_H * 1.5),
+             uncovered_frac=0.56)
+    assert [r["field_fulls"] for r in _runs(client, "M_42")] == [1.0]
+
+
+def test_the_jobs_summary_quotes_the_same_figure_as_the_listing(
+        client, solved_library, monkeypatch):
+    """One run, one answer — on the summary the Jobs page reads as well.
+
+    ``_stack_target`` computes this row's ``field_fulls`` for the thin-stack
+    heads-up from the canvas the stacker just returned, while every other
+    surface reads it off the row. The share that corrects it lives only on the
+    row, so leaving that read out would have let the Jobs page call a drifted
+    single pointing a two-field mosaic while the History listing two clicks away
+    called it one field — a second definition of "depth", which is the thing
+    :mod:`webapp.field_fulls` exists to prevent."""
+    from types import SimpleNamespace
+
+    from webapp import pipeline
+    from webapp.config import Settings
+    from webapp.jobs import Job
+
+    canvas_w, canvas_h = int(FRAME_W * 1.5), int(FRAME_H * 1.5)
+    run_id = _add_run(solved_library, "M_42", canvas_w=canvas_w,
+                      canvas_h=canvas_h, uncovered_frac=0.56)
+
+    def fake_run_stack(proj, opts, *, progress=None, cancel=None,
+                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+        # The row above is the one this "run" wrote: same canvas, same id.
+        return SimpleNamespace(
+            output_dir="/tmp/x", run_id=run_id, n_frames_used=119,
+            canvas_shape=(canvas_h, canvas_w, 3),
+            cancelled=False, errors=[], excluded_frames=[],
+        )
+
+    monkeypatch.setattr("seestack.stack.stacker.run_stack", fake_run_stack)
+
+    class _FakeJM:
+        def maybe_flush(self, job) -> None:  # noqa: ANN001
+            pass
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        out = pipeline._stack_target(
+            Settings(data_root=str(solved_library)), jm=_FakeJM(),
+            job=Job(kind="stack"), lib=lib, safe="M_42")
+    finally:
+        lib.close()
+
+    listed = [r["field_fulls"] for r in _runs(client, "M_42") if r["id"] == run_id]
+    assert listed == [1.0]
+    assert out["field_fulls"] == listed[0]

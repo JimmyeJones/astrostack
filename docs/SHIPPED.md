@@ -1,5 +1,104 @@
 # Shipped — the record
 
+## 2026-10-09 (Builder) — observer #1095: a canvas is a bounding box, so its area was never the sky it covers
+
+### v0.492.47 — 🟠 BUG FIX (PRIORITY 2–3, autonomy + trust): `field_fulls_of_sky(uncovered_frac=…)`, `_covered_share`, `target_field_fulls`, `stacking_field_fulls`, `fieldsOfSkyLabel`, `_fields_of_sky_phrase`
+
+**Observer issue [#1095](https://github.com/JimmyeJones/astrostack/issues/1095)**, filed the morning of this run
+and triaged here (the Scout had not seen it). Verified against the code before any of it was believed, and it
+holds: **a single pointing read as up to 2.29 field-fulls of sky**, so the planner called **46 of the owner's 50
+single-field pictures "already a mosaic"** and stood their framing verdict down.
+
+**The bug.** `webapp/field_fulls.py::field_fulls_of_sky` is `canvas_area / frame_area` with drizzle divided out,
+and the canvas is the **axis-aligned bounding box of the union of the accepted frames' footprints** — so a
+night's pointing drift and field rotation push its corners outside every frame, and those empty corners were
+counted as sky the owner had photographed. Three places in the repo asserted what it reads on one pointing
+("A single-field stack is ≈1.0" in `field_fulls.py`, "every single-field target is bit-for-bit unchanged" in
+`perPixel.ts`, "nothing sits near the line by accident" at `routers/plan.py:231-238`), and all three were wrong
+on the owner's own data. The observer's rotated-bbox model reproduces the served figure to **0.4 % at the
+median** across his 49 modellable single-field targets, so the mechanism is established rather than asserted,
+and its two null hypotheses are dead (0 of 100 targets record more than one frame shape; drift alone is off by
+up to 43 %).
+
+**What he was shown.** The figure is the divisor behind four surfaces, and the consequence is not symmetrical:
+
+- **The planner withheld the advice it exists to give.** 46 of the 50 crossed `_MOSAIC_CANVAS_FIELD_FULLS = 1.3`
+  (claimed min 1.31, median 1.45, max 2.29), so `canvas_is_mosaic` was true and `seestack/nightplan.py:1405-1408`
+  and `:1770-1772` nulled `framing`, `mosaic` **and** `size_arcmin` on the row. Six rows lost a verdict the
+  catalog has, every one of them shot as a single pointing and every one of them exactly what the advice is for
+  — M 42 (85'), NGC 7000 (120'), IC 1396B (170') lost "shoot it in mosaic mode"; M 33 lost "about as wide as a
+  single frame". M 42's picture is 119 subs at one pointing with 43.8 % of its canvas empty, read as 2.22 fields
+  of sky. This is the half that is **not** forgiving in either direction: it refuses to say "shoot it wider" on
+  the grounds that the target is already being shot wide.
+- **The goal chip stated a false number of fields** — all 46 printed "goal ~N h (about 2 fields of sky)" on a
+  one-pointing picture, because `fieldsOfSkyLabel` floored its count at **2** and so rounded *up*, never down.
+- **Readiness rungs moved**: 9 / 12 / 11 of the 88 stacked targets land on a different rung at the Galaxy /
+  Nebula / Cluster goal, three of them shown "solid" or "close" on 6.3–7.2 h against an inflated 8.3–8.8 h goal
+  where the honest goal is 6.0 h and they are done.
+
+**The fix, and why this shape.** The honest number was already in the row: `stack_runs.uncovered_frac` — the
+share of the canvas no frame reached, measured by `seestack.stack.stacker.uncovered_fraction` — is a column of
+the row `target_field_fulls` already `SELECT`s its canvas from, so the area can be corrected to the **covered**
+area with no extra query and no file read, keeping these cheap endpoints' no-file-read promise. New
+`_covered_share` multiplies the ratio by `1 - uncovered_frac`; `target_field_fulls` reads the column beside the
+canvas, and `derived_light.stacking_field_fulls` takes it from the **same** row whose canvas it measures (the
+root stack, never the export — a crop changes both terms, and pairing one row's area with another's share would
+be two halves of two pictures). The **third** site is `pipeline._stack_target`, which computes the Jobs
+summary's figure from the canvas `run_stack` just returned rather than from a row: the share exists only on the
+row, so it now reads it back (its own `suppress`, falling back to the plain ratio) — otherwise the Jobs page
+would have called a drifted single pointing a two-field mosaic while the History listing two clicks away called
+it one field, which is the second definition of "depth" this module exists to prevent. Covered area is the *definition* of "how many field-fulls of sky", and on this
+library it is exact: the observer measured `|uncovered_frac − measured empty fraction|` at **0.0000 on 203 of
+203** rows that carry it, and **88 of 88** of the newest-stacking-run rows these four surfaces actually read.
+
+**The observer's other candidate denominator was declined, with the reason.** `n_frames_used /
+coverage_median_depth` is exactly 1.0 on a single pointing and is just as free — but a median depth over-counts
+an uneven raster (its own 5-panel example: claimed 6.10, median-honest **7.79**, mean-honest 5.99), i.e. it
+would have handed the owner's own shooting style a *larger* error in the other direction. Covered area has no
+such asymmetry: it is what "fields of sky" means.
+
+**No threshold was flipped.** The 1.3 mosaic line is the engine's own `AUTO_UNION_AREA_RATIO` and is untouched —
+this is a fix to the *measurement* that was crossing it, which is why M 42 lands at **1.25** (2.22 × 0.562) on
+the near side of a line nobody moved. And the correction can only ever make the figure **smaller**, so a goal
+can only get shorter and a depth deeper, never the reverse — with the existing `max(1.0, …)` clamp still
+flooring it, so a 99 %-empty canvas cannot lower a goal below the single-field goal either.
+
+**The rounding had to be honest too, or the fix would have been invisible on the chip.** A real single pointing's
+drift still lands above 1.0 after the correction (M 42 at 1.25), and `Math.max(2, Math.round(…))` would still
+have called that "about 2 fields of sky". `fieldsOfSkyLabel` now says **"a little over one field of sky"** below
+1.5 and counts fields from 1.5 up, where `Math.round` cannot answer less than 2 anyway — so the floor is gone
+rather than relocated. `seestack.nightplan._fields_of_sky_phrase` is the hand-written server-side mirror of that
+phrase and moved with it; `tests/test_per_panel_phrase_mirror.py` is the guard that would otherwise have let the
+two surfaces drift into dialects of each other, and it now pins the sub-two phrase on both sides as well as the
+template.
+
+**Rows with nothing to say are unchanged.** `uncovered_frac` is NULL on 668 of the owner's 756 stack-run rows
+(it is backfilled lazily, by a surface that grades a run), and those keep the plain area ratio they have always
+had — as do the pre-stack estimate in `routers/stack.py` (no coverage map exists yet) and anything outside
+`[0, 1)`. A canvas recorded as *wholly* uncovered is disbelieved rather than read as covering no sky:
+`uncovered_fraction` answers `None` for a canvas nothing covered, so a stored 1.0 cannot have come from a
+picture.
+
+**Tests: +11 Python, +1 vitest (one rewritten); 11 fail against `main`.** Fail-before shown by reverting the fix
+in a scratch copy: 6 of the new `tests/test_field_fulls.py` cases, both new `tests/webapp/test_plan.py` cases,
+both new `tests/webapp/test_stack_run_field_fulls.py` cases (one of which pins the Jobs summary and the History
+listing to **one** answer for one run), and the vitest label case. The end-to-end one is the consequence itself — a real single-pointing stack run on M 42 (canvas 1.5× the
+frame on each axis, 56 % of it empty) and `GET /api/plan/tonight` keeping `framing.level == "mosaic"`,
+`mosaic.panels >= 2` and `size_arcmin` on the row, with `field_fulls == 1.0`. Two deliberately pass **both**
+ways, because they are the guard-rails rather than the bug: a genuine 2×2-ish raster whose box is 56 % empty
+still reads 3.96 fields and still stands its framing verdict down, and a run carrying no `uncovered_frac` still
+answers exactly what it answered before.
+
+**Not covered, and said rather than assumed** (the issue's own "what this does not establish" holds): nothing
+here changes what a run *without* those columns falls back to, and nothing here addresses the uneven-depth
+trade on a genuine mosaic — a mean over the covered canvas is still a mean, and `perPixel.ts` documents why that
+is the conservative choice for these surfaces. Whether the six restored framing verdicts are ones the owner
+wants is his call; the claim is only that the app had them, judged them worth showing, and withheld them on a
+false premise.
+
+No config, schema, migration, on-disk, default or API-shape change — the served `field_fulls` field keeps its
+name, its type and its meaning, and now reports the sky the picture has data on.
+
 ## 2026-10-09 (Builder) — the other half of #1090: nothing between the walk and the stack re-asked how many files the folder held
 
 ### v0.492.46 — 🔴 BUG FIX (PRIORITY 2, autonomy): `_auto_stack_arrival_hold`, `_incoming_import_state`, `AUTO_STACK_ARRIVAL_META_KEY`, `heldSettlingLine`

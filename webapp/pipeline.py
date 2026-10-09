@@ -4487,10 +4487,25 @@ def _stack_target(
         with contextlib.suppress(Exception):
             _shape = native_frame_shape(proj)
             if _shape is not None and result.canvas_shape:
+                # The share of this canvas no frame reached lives on the row the
+                # stacker just wrote, not on the result — and the figure is wrong
+                # without it (`field_fulls_of_sky`: a canvas is a bounding box).
+                # Read here rather than skipped, because every *other* surface
+                # reads it off the row, and the Jobs summary quoting one field-full
+                # count while the Target page quotes another for the same run is
+                # the second definition of "depth" this module exists to prevent.
+                # Its own suppress: an unreadable row leaves the plain area ratio,
+                # which is what a run with no recorded share answers anyway.
+                _uncovered: float | None = None
+                with contextlib.suppress(Exception):
+                    _uncovered = next(
+                        (r.uncovered_frac for r in proj.iter_stack_runs()
+                         if r.id == result.run_id), None)
                 _field_fulls = field_fulls_of_sky(
                     result.canvas_shape[1], result.canvas_shape[0],
                     frame_w=_shape[0], frame_h=_shape[1],
                     drizzle_scale=drizzle_scale_of(opts_dict),
+                    uncovered_frac=_uncovered,
                 )
     finally:
         proj.close()

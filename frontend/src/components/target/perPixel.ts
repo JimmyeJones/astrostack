@@ -18,8 +18,9 @@
  *
  * The scale is `field_fulls` — how many single-frame field-fulls of sky the
  * run's subs were spread over, served per run by `webapp/field_fulls.py`
- * (canvas area ÷ one native frame's area, drizzle divided out). A single field
- * is 1.0, a 2×2 no-overlap mosaic 4.0, a 2×2 at 50 % overlap ~2.25.
+ * (canvas area ÷ one native frame's area, drizzle divided out, and the canvas's
+ * *uncovered* share subtracted where the run recorded one). A single field is
+ * 1.0, a 2×2 no-overlap mosaic 4.0, a 2×2 at 50 % overlap ~2.25.
  *
  * "The run's subs", not "the run's canvas", because a **finished picture is a
  * crop**: an editor export records the canvas it wrote while carrying the
@@ -34,9 +35,12 @@
  * area gives the depth of an *evenly shot* raster; a mosaic with one deep panel
  * and eight thin ones has pixels on both sides of it. That is the right
  * trade for these surfaces, because the alternative — the peak — is the very
- * substitution this module exists to undo, and because a ragged union canvas
- * counts its uncovered corners as area, so the figure errs *shallow*: it warns
- * a little early rather than a little late. Where a run carries a *measured*
+ * substitution this module exists to undo. It used to err *shallow* on top of
+ * that, because a ragged union canvas counted its uncovered corners as area —
+ * and on the owner's own single-field pictures that margin was not small
+ * (observer #1095: up to 2.29 fields of sky for one pointing), so the backend
+ * now subtracts the share the run measured as uncovered instead of leaning on
+ * the error being in the forgiving direction. Where a run carries a *measured*
  * per-pixel depth (`grain_deep_frames`, read off the coverage map) that number
  * is better — but it is only populated on a mosaic uneven enough to have levels
  * to compare, so nothing can be built on it alone.
@@ -91,13 +95,25 @@ export function perPixel(total: number, fieldFulls: number | null | undefined): 
  */
 export const A_TYPICAL_PART = "a typical part";
 
-/** "about 4 fields" / "about 2 fields" — how much sky the canvas spans, for a
- * sentence that has to explain why a total and a depth differ. Rounded to a
- * whole field: the precision is spurious (the canvas includes its uncovered
- * corners) and "about 4.3 fields of sky" reads as a measurement rather than the
- * rough scale it is. Never below 2, because this is only ever printed when the
- * canvas really does span more than one field. */
+/** "about 4 fields" / "a little over one field" — how much sky the canvas spans,
+ * for a sentence that has to explain why a total and a depth differ. Rounded to
+ * a whole field: the precision is spurious and "about 4.3 fields of sky" reads
+ * as a measurement rather than the rough scale it is.
+ *
+ * **Just over one field gets said in words, not rounded up to two.** This used
+ * to floor the count at 2 — on the reasoning that it is only printed when the
+ * canvas spans more than one field, so a figure rounding down to 1 should still
+ * read as at least 2. That made it state a *false number of fields*: a canvas at
+ * 1.2 is one pointing with some drift, and "about 2 fields of sky" is a claim
+ * about the sky that is simply wrong. Observer issue #1095 measured it on the
+ * owner's library — 46 of his 50 single-field pictures printed "about 2 fields
+ * of sky" — and while the backend overstating the area was the bigger half of
+ * that (`webapp/field_fulls.py` now subtracts a canvas's uncovered corners), a
+ * single pointing's real drift still lands above 1.0, so the rounding has to be
+ * honest too. Below 1.5 the scale is named rather than counted; from 1.5 up,
+ * `Math.round` cannot answer less than 2 anyway, so no floor is needed. */
 export function fieldsOfSkyLabel(fieldFulls: number | null | undefined): string {
-  const fields = Math.max(2, Math.round(canvasFieldFulls(fieldFulls)));
-  return `about ${fields} fields of sky`;
+  const fulls = canvasFieldFulls(fieldFulls);
+  if (fulls < 1.5) return "a little over one field of sky";
+  return `about ${Math.round(fulls)} fields of sky`;
 }

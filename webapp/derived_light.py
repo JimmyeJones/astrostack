@@ -152,6 +152,14 @@ def stacking_field_fulls(
     drizzle scale travels with the canvas for the same reason: it is the
     stacking run that drizzled, and an export's options record no scale at all.
 
+    The measured row's ``uncovered_frac`` travels with its canvas for the same
+    reason the drizzle scale does — it is the share of *that* canvas no frame
+    reached, so the figure is the sky the picture has data on rather than the
+    area of its bounding box (:func:`webapp.field_fulls.field_fulls_of_sky`).
+    Taking it from the row whose canvas is being counted is the load-bearing
+    part: an export records a cropped canvas and its own emptiness, and pairing
+    one row's area with another's share would be two halves of two pictures.
+
     ``native_shape`` is the target's native sub shape (one ``LIMIT 1`` read per
     target, which every caller already makes); ``None`` there — or any missing
     dimension — answers ``None``, i.e. "no scaling", exactly as before.
@@ -166,6 +174,7 @@ def stacking_field_fulls(
         frame_h=native_shape[1],
         drizzle_scale=drizzle_scale_from_options(
             getattr(measured, "options_json", None)),
+        uncovered_frac=getattr(measured, "uncovered_frac", None),
     )
 
 

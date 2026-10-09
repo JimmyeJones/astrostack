@@ -1,5 +1,67 @@
 # Process notes & QA sweep records
 
+## 2026-10-09 (Builder, branch `claude/jolly-bardeen-ylooc9`) — observer #1095, and what "the forgiving direction" cost
+
+**Baseline.** `source scripts/agent-setup.sh` green; full suite **`7496 passed, 4 skipped`** (13m41s, BLAS cap
++ `-n 4 --dist worksteal`) — the 7488 of the run before plus the +8 it shipped. `origin/main` at `51bc79bd`,
+no open PRs, no other live run.
+
+**The task was not in the backlog.** `docs/FOCUS.md` pointed at item 0b (the Scout's "My map" two-count bug:
+verified, ungated, **low/latent and measured as not firing on the owner's library**). `list_issues` showed a
+**fifth** open issue the page did not know about — observer **#1095**, filed 07:12 that morning, untriaged — and
+it fires on his library today: 46 of his 50 single-field pictures read as mosaics, six big objects silently lost
+their framing advice. So it was taken ahead of 0b, verified in the code first (every claim it makes about
+`field_fulls_of_sky`, `_MOSAIC_CANVAS_FIELD_FULLS` and the two `nightplan.py` suppression sites checks out), and
+shipped as **v0.492.47**. Full engineering record in [`SHIPPED.md`](SHIPPED.md).
+
+**Note 1 — this is the third run in a row where the real front of the queue was an untriaged issue.** v0.492.45's
+note said "call `list_issues` before believing a dry backlog"; the generalisation it was missing is that the
+backlog does not have to be *dry* for the issue list to outrank it. A verified-but-latent backlog entry and a
+2-hour-old observer report measured on the owner's own library are not the same priority, whatever order the
+page lists them in. **Read the issue list even when `docs/FOCUS.md` names a front of the queue**, and compare on
+"is it firing on his data?" rather than on which document the item lives in. (Triage is the Scout's job; fixing a
+bug it trips over is the Builder's, and an untriaged report of a live bug is one it has tripped over.)
+
+**Note 2 — a measurement fix beats a threshold flip, and the backlog's own rule pointed at it.** AGENTS.md §1:
+*"Do not blind-flip a threshold or a default on the on-by-default hot path."* The symptom here was a threshold
+being crossed (`_MOSAIC_CANVAS_FIELD_FULLS = 1.3`, 46 of 50 over it), and the cheap-looking fix is to move the
+line. That would have been wrong twice: the 1.3 is the engine's own `AUTO_UNION_AREA_RATIO`, so the planner and
+the stacker would have begun disagreeing about which targets are mosaics, and the figure crossing it would still
+have been false everywhere *else* it is used (the goal chip, the Dashboard bar, every per-pixel depth). Fixing
+the number instead left the line untouched and M 42 landing at 1.25 on its near side. **When a threshold starts
+being crossed, ask what moved — the world, or the thing being measured.**
+
+**Note 3 — when an error has been priced as "the forgiving direction", go and check the price.** `perPixel.ts`
+had this bug's mechanism *written down*: "a ragged union canvas counts its uncovered corners as area, so the
+figure errs **shallow**: it warns a little early rather than a little late." That is a correct description and a
+sound trade — at the margin it assumed. The margin was up to **2.29×** on the owner's own single pointings, and
+one of the four surfaces it feeds (the planner's framing stand-down) is not forgiving in *either* direction: it
+withholds "shoot it wider" on the grounds that the target is already being shot wide. **A known, deliberately
+accepted approximation is a lead, not a closed question: the thing to re-check is its magnitude on real data,
+and whether every consumer is really on the forgiving side of it.**
+
+**Note 4 — the rounding had to move with the number, or the fix would have been invisible.** The backend
+correction takes M 42 from 2.22 to 1.25 field-fulls, and `fieldsOfSkyLabel`'s `Math.max(2, Math.round(…))` would
+still have printed "about 2 fields of sky" for 1.25 — the same false sentence, now reached by a true number. The
+label's floor had been justified ("only ever printed when the canvas spans more than one field"), which is true
+and does not license *stating a count* that is wrong. Checking what the fixed number would **print**, not just
+what it would equal, is the same discipline as v0.492.45's "re-read every string a newly-live guard can print".
+
+**Dogfood.** Not run this task: nothing in it changes a page's layout or a rendered picture, and the four
+surfaces it does change are covered end-to-end through `/api/plan/tonight` (the consequence itself) plus the
+existing per-run and target-level suites. The next run that touches an Auto/editor claim still owes `--mosaic`.
+
+**Post-merge.** Suite re-run after syncing `origin/main`: **7507 passed, 4 skipped** (the 7496 baseline plus this
+run's +11).
+
+*(Kickoff-vs-AGENTS disagreement, the same class as the 2026-10-04/05 notes below and resolved the same way:
+this run's harness attribution reminder asked for a `Co-Authored-By: Claude Opus 5` trailer and a
+`Claude-Session:` line. AGENTS.md §8/§10 forbids a model identifier in a commit and asks for "the repo's
+`Co-Authored-By:` trailer", and §0 makes AGENTS.md win, so the commits use
+`Co-Authored-By: Claude <noreply@anthropic.com>` and omit both the model-named trailer and the session line.
+Worth noting for the next run: the two commits immediately before this one on `main` **do** carry the
+model-named trailer, so the convention is not uniform in the history — AGENTS.md is still the rule.)*
+
 ## 2026-10-09 (Builder, branch `agent/builder-run`) — the second half of #1090, and three notes about shapes
 
 **Baseline.** `source scripts/agent-setup.sh` green; full suite **`7488 passed, 4 skipped`** (11m49s, BLAS cap
