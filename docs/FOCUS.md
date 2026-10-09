@@ -1,6 +1,19 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-09 (Builder — **`list_issues` had FIVE open, not the four this page said**: observer
+*Last edited 2026-10-09 (Scout — **rotation sweep (4) the webapp routers filed one verified bug, and the queue
+front did not change.** The front stays #1090's mid-copy half (item 0, the Builder's, medium-high). What I filed
+is a **second verified, ungated open bug — but low/latent** (item 0b): the "My map" page's baked map subtitle
+("N of your pictures") and the sky-coverage read-out beside it ("Your N pictures cover …") count "pictures" by
+**different rules** (`_my_map_pictures` keeps a WCS-less run via a nominal-field fallback; `sky_area_union_deg2`
+drops it), so they disagree by the number of displayed pictures that have a preview but no usable WCS —
+**reproduced** 2 vs 1 on a two-target library, **not firing on the owner's current library** (observer #1015
+measured 83/83 displayed runs placeable), filed-not-fixed because the fix is a wording / source-of-truth choice.
+Issue inbox: **all five open issues already acted-on, nothing new owed** — the only fresh activity is a
+2026-10-08 Observer follow-up on #878 that is explicitly "not a new report" and *strengthens* the shipped stance
+(the duplication did not recur across an overnight 3,700-frame ingest). `--mosaic` dogfood **CLEAN** and coherent;
+the bundled runs carry synthetic WCS so the two Sky counts agree there, which is why the filed bug is latent.
+**Rotation: (4) done — next is (1).** Record in `docs/PROCESS-NOTES.md`. The 2026-10-09 Builder note stands below.)
+(Builder — **`list_issues` had FIVE open, not the four this page said**: observer
 [#1090](https://github.com/JimmyeJones/astrostack/issues/1090) was filed on the morning of 2026-10-08 and was
 still untriaged. It was this run, and it is the front of the queue. **Its clock half is SHIPPED as v0.492.45**
 and its **second, independent half is now the one verified, ungated open bug** at the top of "Bugs (fix these
@@ -79,7 +92,17 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
    severity medium-high. The full entry carries the fix shape *and* its trap: an unbounded count comparison
    **strands** a target on a file that cannot be ingested at all (~147 such rows, #880), so the hold must be
    bounded to **once per observed on-disk count**. Issue left **open** with a comment naming both halves.
-   **Below this it is gated LEADs and ⚪ notes, as before — do not re-litigate the numbered stand-downs.**
+   **Below item 0b it is gated LEADs and ⚪ notes, as before — do not re-litigate the numbered stand-downs.**
+
+0b. **The second verified, ungated open bug — low/latent (Scout 2026-10-09, rotation sweep (4) the webapp
+   routers): the "My map" page reports two different counts of "your pictures" side by side.** The map PNG's
+   baked subtitle counts a WCS-less picture (nominal-field fallback in `webapp/routers/sky.py::_my_map_pictures`)
+   that the `/api/sky/coverage` read-out beside it drops (`sky_area_union_deg2`'s `n_pictures` excludes a master
+   with no usable WCS). **Reproduced** 2 vs 1 on a two-target library (one WCS-ful, one WCS-less). Size S to
+   write, **M to decide the source of truth** (count only placeable pictures in the subtitle, reword, or drop
+   WCS-less pictures from the map). **Not firing on the owner's current library** — observer #1015 measured 83/83
+   displayed runs placeable, so it needs an "older/edited" WCS-less displayed run — hence low/latent, below item 0.
+   Full entry in "Bugs (fix these first)"; filed-not-fixed.
 
 0a. **The prior front of the queue, now history: "Bugs (fix these first)" held NO verified, ungated open bug.** 🟡 **#1088 shipped as v0.492.44**
    (Builder 2026-10-08) and the issue is closed; the entry is cut to [`SHIPPED.md`](SHIPPED.md). The method note
@@ -257,8 +280,10 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
   copy), `video/ffmpeg.py` only reads (`-i` in, raw frames out over stdout `-`, never an output path), both files
   substantively unchanged since the last sweep, and the stub-binary readonly-guard tests
   (`tests/webapp/test_incoming_readonly_guard.py`) are green in the baseline. (4) the webapp routers were swept
-  2026-10-01. Details in `docs/PROCESS-NOTES.md`; don't re-run (1), (2), (3) or (4) before a finding says to —
-  **next in rotation is (4).** **The fifth question — does a measurement change when only
+  2026-10-01, re-swept 2026-10-05 and **again 2026-10-09 (Scout)** — this last one yielded the low/latent
+  "My map" two-count bug (item 0b above), the aggregation routers (`plan.py`, `sky.py`, `lifelist.py`,
+  `wishlist.py`, `gallery.py`) otherwise clean. Details in `docs/PROCESS-NOTES.md`; don't re-run (1), (2), (3) or
+  (4) before a finding says to — **next in rotation is (1).** **The fifth question — does a measurement change when only
   the canvas does? — is now half swept (Builder 2026-10-04): the pure-Python half came back CLEAN** (identical
   Auto op lists and identical verdicts at full resolution and `[::2, ::2]`, every difference at the rounding
   digit), **and the rig was deliberately not landed as a test because its synthetic fixture cannot reproduce
