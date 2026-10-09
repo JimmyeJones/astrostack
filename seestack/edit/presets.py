@@ -770,12 +770,17 @@ def classify_target(rgb: np.ndarray | None,
 _MEASURE_MIN_SIDE_PX = 32
 
 
-def _measured_region(
+def measured_region(
     rgb: np.ndarray | None,
     coverage: np.ndarray | None,
     trim_crop: tuple[float, float, float, float] | None,
 ) -> tuple[np.ndarray | None, np.ndarray | None]:
     """``(rgb, coverage)`` narrowed to the rectangle Auto's own crop keeps.
+
+    Public because the editor's *preset-suggestion* endpoint is a fourth caller
+    of :func:`classify_target` living outside this module
+    (``webapp.routers.editor.build_preset_suggestion_for_run``) and has to ask
+    the question on the same pixels — see the end of this docstring.
 
     **Auto has to measure the picture it is about to make.** v0.409.0 took the sky
     gradient out of the plane the stretch target is read from and v0.410.0 the
@@ -814,6 +819,21 @@ def _measured_region(
     is nothing honest to narrow to (a degenerate or tiny rectangle). A coverage
     map that does not match the image is passed through untouched, exactly as
     :func:`_delevelled_luminance` already ignores it.
+
+    **And the archetype moves too, which the first instalment did not measure.**
+    The editor's "try this preset?" chip classifies through the *same*
+    :func:`classify_target`, from the webapp rather than from ``auto_recipe``, so
+    it was left reading the fringe after v0.410.1 narrowed the three measurements
+    inside this module. The fringe's extra grain inflates the ``6·sky_sigma``
+    signal threshold, which hides faint diffuse structure — exactly the mechanism
+    :func:`classify_target` records for a mosaic's panel steps — so ``ext_frac``
+    falls, ``star_share`` rises, and the verdict walks toward **cluster**.
+    Measured over 210 ragged four-panel canvases (seed × σ × fringe width): the
+    verdict flips on **21**, every one of them whole-canvas *cluster* against a
+    kept-rectangle *unsure*, the cheapest at a **9.8 % trim** — inside the band
+    AGENTS.md calls a healthy ragged edge. So the chip said *"your image looks
+    like a Star cluster"* about a mosaic on the strength of grain in a border its
+    own panel beside it says Auto trimmed away.
     """
     if rgb is None or trim_crop is None:
         return rgb, coverage
@@ -941,8 +961,8 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # Auto is byte-for-byte what it was, whatever map the caller supplies.
     # Measure the picture this recipe actually produces: when the border trim at
     # the bottom of this function is going to run, the fringe it deletes is not
-    # part of it (see :func:`_measured_region`).
-    m_rgb, m_cov = _measured_region(rgb, coverage, trim_crop if auto_crop else None)
+    # part of it (see :func:`measured_region`).
+    m_rgb, m_cov = measured_region(rgb, coverage, trim_crop if auto_crop else None)
     if rgb is not None:
         a = analyze_proxy(m_rgb, m_cov if is_mosaic else None, grain_ratio)
         sky_sigma = float(a["sky_sigma"])
@@ -1093,7 +1113,7 @@ def analyze_auto_inputs(
     fixed op list). Pure; reuses the exact same analysis ``auto_recipe`` consumes
     (``analyze_proxy`` + ``_noise_fraction`` + the FWHM→radius map + the trim
     rect) **on the same pixels** — the rectangle the recipe's own border trim
-    keeps (:func:`_measured_region`) — so the numbers reported here match the
+    keeps (:func:`measured_region`) — so the numbers reported here match the
     recipe it actually built, including ``coverage``, which must be passed here
     whenever it is passed to :func:`auto_recipe` or the reported sky level
     describes a different plane from the one the recipe's stretch target was
@@ -1133,8 +1153,8 @@ def analyze_auto_inputs(
     # else — so ``is_mosaic`` decides both, in one place. A single-field stack's
     # Auto is byte-for-byte what it was, whatever map the caller supplies.
     # Mirrors ``auto_recipe``: the cues explain the recipe, so they are read off
-    # the same pixels it measured (see :func:`_measured_region`).
-    m_rgb, m_cov = _measured_region(rgb, coverage, trim_crop if auto_crop else None)
+    # the same pixels it measured (see :func:`measured_region`).
+    m_rgb, m_cov = measured_region(rgb, coverage, trim_crop if auto_crop else None)
     if rgb is not None:
         a = analyze_proxy(m_rgb, m_cov if is_mosaic else None, grain_ratio)
         sky_sigma = float(a["sky_sigma"])

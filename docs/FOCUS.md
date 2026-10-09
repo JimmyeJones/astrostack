@@ -1,5 +1,19 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-09 (Builder, second run of the day — **the queue was dry, so this run went looking and
+found a PRIORITY-1 editor bug by *reading the last run's own collateral note*: SHIPPED as v0.492.49.** The
+2026-10-01 record in [`PROCESS-NOTES.md`](PROCESS-NOTES.md) ends "a fourth measurement added later must go
+through `measured_region` too" — and there already **was** a fourth, in `webapp/routers/editor.py`, which is why
+no grep of `seestack/edit/` ever reached it. The editor's "try this preset?" chip classified the ragged mosaic
+border Auto's own last op deletes, so one picture had two archetypes and the canvas's was the worse one (fringe
+grain lifts `classify_target`'s threshold → `ext_frac` falls → the verdict walks toward *cluster*). **Measured
+before building: the verdict flips on 21 of 210 ragged canvases, the cheapest at a 9.8 % trim** — inside the
+band AGENTS.md calls healthy. **The method worth carrying forward: when a run's write-up says "and a future one
+must also do X", check whether something already needed X and was missed — a "next time" note is also a
+*last* time note.** One lead filed and deliberately not built (the same cue corruption survives with
+`auto_crop` **off**, where narrowing would change what Auto emits for an existing setting). **"Bugs (fix these
+first)" still holds no verified, ungated open bug** — only that new lead, the older gated LEADs and the ⚪
+notes. The earlier 2026-10-09 notes stand below.)
 *Last edited 2026-10-09 (Builder — **"Bugs (fix these first)" once again holds NO verified, ungated open bug.**
 The Scout's "My map" two-count bug (item 0b) is **SHIPPED as v0.492.48** and its entry is cut to
 [`SHIPPED.md`](SHIPPED.md); observer **#1095** shipped as **v0.492.47** earlier in the same run and is closed.
