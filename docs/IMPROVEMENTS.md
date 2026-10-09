@@ -82,6 +82,33 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 VERIFIED + REPRODUCED (Scout 2026-10-09, rotation sweep (4) the webapp routers) — the "My map" page shows
+  two different counts of "your pictures" side by side: the map's baked subtitle counts a picture with no usable
+  WCS that the coverage read-out beside it drops.** *(Pillar: trust/friendliness — PRIORITY 3; size S to write,
+  **M to decide the source of truth**; severity **low/latent** — it needs a *displayed* picture whose master FITS
+  carries no stored WCS ("older/edited runs", `webapp/routers/sky.py:466`), and the owner's current library has
+  none that fire — observer #1015 **measured** 83/83 displayed runs placeable. Confidence: mechanism traced in the
+  code and **reproduced** end-to-end — a two-target library, one WCS-ful and one WCS-less, reads map
+  `len(pictures)=2` against coverage `n_pictures=1`.)*
+  `GET /api/sky/my-map.png` bakes `f"{len(pictures)} of your pictures …"` into the PNG from `_my_map_pictures`
+  (`sky.py:521`/`:389`), which **keeps** a run whose master has no stored WCS — it falls back to a nominal 1.3°
+  field and still appends it (`:462`–`:475`, "so it still lands somewhere honest … rather than being dropped").
+  The `GET /api/sky/coverage` read-out beside it renders `describeSkyCoverage(…, n_pictures)` → "Your N pictures
+  cover …", and `n_pictures` comes from `_measure_sky_coverage`→`sky_area_union_deg2`, which **drops** a WCS-less
+  master (`_stack_footprint`→`None`, excluded from `footprints`; `seestack/skyarea.py:244`). So the two "pictures"
+  counts on one screen disagree by exactly the number of displayed pictures that have a preview but no usable WCS.
+  (A lone WCS-less target is masked — `describeSkyCoverage` returns `""` at `n_pictures==0`, `skyCoverage.ts:54` —
+  but a **mix** shows e.g. "3 pictures cover …" under a map captioned "4 of your pictures".)
+  **Not a resilience sibling of v0.492.23**, which wrapped these same two functions in `except … continue` for a
+  corrupt DB (not 500-ing); this is the two *healthy* answers disagreeing. **Not #1015**, whose note was the
+  reverse direction (the map dropping a picture coverage still counts, via the UNKNOWN-crop branch the observer
+  measured does not fire). **The fix is a wording / source-of-truth decision, which is why it is filed not fixed:**
+  count only placeable pictures in the subtitle (matches coverage, but the map then silently omits the WCS-less
+  ones it still *draws*), or word the two so they are not both "N of your pictures", or drop WCS-less pictures from
+  the map entirely (loses the "lands somewhere honest" behaviour the code comment defends). A regression test
+  belongs in `tests/webapp/test_my_map_endpoint.py` + `test_sky_coverage.py` (both already have the WCS-less
+  fixture shape).
+
 - **⚪ VERIFIED BY ARITHMETIC (Builder 2026-10-04, found while fixing v0.492.33 in the same function) — two of
   `classify_target`'s three archetypes report a `confidence` that is **mathematically pinned to exactly 1.0**
   by their own branch guards, so the number carries no information.** *(Pillar: trust — size **S to change,
