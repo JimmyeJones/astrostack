@@ -1,6 +1,27 @@
 # Current focus — AstroStack
 
-*Last edited 2026-10-08 (Builder — **#1088 is SHIPPED as v0.492.44 and the issue is closed**, so
+*Last edited 2026-10-09 (Builder — **`list_issues` had FIVE open, not the four this page said**: observer
+[#1090](https://github.com/JimmyeJones/astrostack/issues/1090) was filed on the morning of 2026-10-08 and was
+still untriaged. It was this run, and it is the front of the queue. **Its clock half is SHIPPED as v0.492.45**
+and its **second, independent half is now the one verified, ungated open bug** at the top of "Bugs (fix these
+first)" — see item 0. What shipped: `_auto_stack_settle_hold`, the guard that exists to stop the hands-off chain
+publishing "a picture of a night that is not over", had **never held anything and structurally could not** — it
+asked `Project.newest_accepted_sub_time()`, which preferred `frames.source_mtime` on the strength of a docstring
+claiming it was "stamped at ingest". It is the *source file's own* mtime, so every timestamp-preserving copy
+records the **capture** time and the 20-minute window was spent before the first sub of a folder reached the DB
+(the observer measured it on **118 of 118** drop folders). Reproduced here end to end before the fix — subs
+ingested *that second* read as **504.0 h** old — and after it reads 0.0 h and holds. New `frames.ingested_at`
+stamped centrally in `Project.add_frame`; the answer is the **later** of arrival and capture, so the hold can
+only have become more cautious. Ungated `ALTER`, no `SCHEMA_VERSION` bump, every existing row NULL → an upgrade
+is unchanged until the next sub arrives. **What is still open is the mid-copy half**, which the observer was
+careful to say the clock would *not* have fixed, and which is what actually published a picture from **6 of 742
+subs**. **Method notes for the next run, in `docs/PROCESS-NOTES.md`: call `list_issues` before believing a dry
+backlog; read an observer issue's "explicitly not claimed" section, because a good one means two tasks; and when
+a fix turns a dormant guard on for the first time, re-read every string it will now print** (this one said
+"waiting on N still being shot" for a folder that is merely still copying). `docs/SHIPPED.md` is still the
+standing housekeeping task — 62,092 lines against the 64,000 ceiling. The 2026-10-08 note stands below.)
+(Builder — **#1088 is SHIPPED as v0.492.44 and the issue is closed**, so
+**"Bugs (fix these first)" once again held NO verified open bug at that point** — only the gated LEADs and ⚪ notes. The — **#1088 is SHIPPED as v0.492.44 and the issue is closed**, so
 **"Bugs (fix these first)" once again holds NO verified open bug — only the gated LEADs and ⚪ notes.** The
 "subs waiting in incoming/" note no longer offers a scan it cannot fulfil: the exclusion now comes from what the
 scan *recorded* as skipped (`SkippedCalibrationFolder.folder` → `webapp/calibrationskips.py`), **unioned** with
@@ -44,7 +65,20 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
 
 ## Front of the queue
 
-0. **"Bugs (fix these first)" holds NO verified, ungated open bug.** 🟡 **#1088 shipped as v0.492.44**
+0. **⭐ THE ONE VERIFIED, UNGATED OPEN BUG: the mid-copy half of [#1090](https://github.com/JimmyeJones/astrostack/issues/1090)**
+   (Builder 2026-10-09, filed with the v0.492.45 fix of its other half). **A walk-away stack is published from
+   the subs a folder had when the scan *walked* it, and nothing between the walk and the stack re-asks how many
+   the folder now holds** — so a drop folder caught mid-copy reads as a complete, settled target. It has fired:
+   the owner's `C_9` was published **and auto-edited from 6 of its 742 subs**, never QC-graded (`auto_grade`'s
+   `MIN_FRAMES_FOR_GRADING` is 10), then re-stacked from 609 seventy minutes later. **v0.492.45 does not cover
+   it and the observer measured why** — the folder's copy finished 35.9 min before the stack started, because
+   the job spent 39 min stacking the other target first, so the settle window had honestly expired. Size **M**;
+   severity medium-high. The full entry carries the fix shape *and* its trap: an unbounded count comparison
+   **strands** a target on a file that cannot be ingested at all (~147 such rows, #880), so the hold must be
+   bounded to **once per observed on-disk count**. Issue left **open** with a comment naming both halves.
+   **Below this it is gated LEADs and ⚪ notes, as before — do not re-litigate the numbered stand-downs.**
+
+0a. **The prior front of the queue, now history: "Bugs (fix these first)" held NO verified, ungated open bug.** 🟡 **#1088 shipped as v0.492.44**
    (Builder 2026-10-08) and the issue is closed; the entry is cut to [`SHIPPED.md`](SHIPPED.md). The method note
    worth carrying forward: **a false invariant written into three docstrings is a bug with three heads** —
    v0.455.0's "the two sets are identical, a folder could not fall between them" was in `plan_incoming_units`,
@@ -171,7 +205,13 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
    (lead filed under Infra).
 
 2. **Owner-approved, buildable now: empty** — everything shipped and cut to [`SHIPPED.md`](SHIPPED.md).
-3. **Open observer issues — FOUR open (Builder 2026-10-08, after closing #1088 in the run that fixed it).**
+3. **Open observer issues — FIVE open, FOUR of them owner-gated (Builder 2026-10-09).** #1090 is the fifth,
+   and it was open and untriaged while this page said four: filed 2026-10-08T07:21Z, verified and reproduced
+   2026-10-09, **clock half shipped as v0.492.45**, **mid-copy half filed into "Bugs"** (item 0), issue left
+   open with a comment naming both. The other four (#878, #880, #903, #1015) carry **no repo code work** and
+   stay owner-gated. ⚠️ A MATCHING COUNT IS NOT A MATCHING SET, and a *correct* count goes stale within hours:
+   call `list_issues` before believing a dry backlog. The 2026-10-08 text follows.
+   **The prior text — FOUR open (Builder 2026-10-08, after closing #1088 in the run that fixed it).**
    **#1088 is CLOSED** — verified, reproduced, fixed as **v0.492.44** and closed with a comment naming the
    version, all in one run (AGENTS.md: an issue whose work is done gets closed in the same run). The four
    that remain (#878, #880, #903, #1015) carry **no repo code work** and stay owner-gated. ⚠️ A MATCHING

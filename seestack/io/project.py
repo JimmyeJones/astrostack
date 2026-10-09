@@ -25,6 +25,7 @@ import hashlib
 import logging
 import os
 import sqlite3
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, fields
 from datetime import datetime, timezone
@@ -101,6 +102,23 @@ CREATE TABLE IF NOT EXISTS frames (
     -- source fingerprint: detect an in-place content swap at a reused path
     source_size_bytes   INTEGER,                -- source st_size at ingest/refresh
     source_mtime        REAL,                   -- source st_mtime at ingest/refresh
+    -- when this sub landed in *this library*, as a POSIX timestamp: the wall
+    -- clock at the moment the row was inserted, stamped centrally by
+    -- ``Project.add_frame``. NULL on every row written before the column
+    -- existed.
+    --
+    -- ``source_mtime`` above cannot answer that question, and reading it as if
+    -- it could is what made the walk-away settle window inert (observer issue
+    -- #1090): it is the *source file's own* mtime, so every copy that preserves
+    -- timestamps — which is every route this owner's subs arrive by — records
+    -- the moment of **capture**, weeks or months before the folder was dropped
+    -- in. It is also *re*-stamped when a non-preserving re-copy moves the mtime,
+    -- so the column is ambiguous by construction and cannot be repurposed (§9).
+    --
+    -- Added without a ``SCHEMA_VERSION`` bump, exactly like ``rejected_utc`` and
+    -- ``wcs_source``: ``_reconcile_table_columns`` adds it to an older project on
+    -- first open, so rolling the Docker image back does not brick a target.
+    ingested_at         REAL,
     -- header
     timestamp_utc       TEXT,                   -- ISO 8601
     exposure_s          REAL,
@@ -261,6 +279,11 @@ class FrameRow:
     aligned_cache_path: str | None = None
     source_size_bytes: int | None = None
     source_mtime: float | None = None
+    # When this sub landed in this library (POSIX seconds) — see the column
+    # comment in :data:`SCHEMA_SQL`. ``None`` means "stamp it now" to
+    # :meth:`Project.add_frame`, and is what every row written before the column
+    # existed carries.
+    ingested_at: float | None = None
     timestamp_utc: str | None = None
     exposure_s: float | None = None
     gain: float | None = None
@@ -513,7 +536,7 @@ def count_unreadable_frames(frames: Iterable["FrameRow"]) -> int:
 
 _INSERT_COLS = [
     "source_path", "cached_path", "aligned_cache_path",
-    "source_size_bytes", "source_mtime",
+    "source_size_bytes", "source_mtime", "ingested_at",
     "timestamp_utc", "exposure_s", "gain", "sensor_temp_c",
     "width_px", "height_px", "bayer_pattern",
     "ra_hint_deg", "dec_hint_deg",
@@ -524,6 +547,12 @@ _INSERT_COLS = [
     "mosaic_panel_id",
     "accept", "reject_reason", "user_override", "restored_utc", "rejected_utc",
 ]
+
+#: Where ``ingested_at`` sits in :data:`_INSERT_COLS`, so :meth:`Project.add_frame`
+#: can stamp it without branching per column on a bulk insert of thousands of
+#: rows. Derived rather than written down, so reordering the list above cannot
+#: silently stamp the wrong column.
+_INGESTED_AT_INSERT_IDX = _INSERT_COLS.index("ingested_at")
 
 #: ``frames.wcs_source`` values — who placed a sub whose WCS the app *derived*.
 #: The plate solver writes none (``NULL``), which is also what every row written
@@ -537,22 +566,35 @@ _INSERT_COLS = [
 WCS_SOURCE_STAR_MATCH = "star_match"
 WCS_SOURCE_REGISTERED = "registered"
 
-# The two ``frames`` columns :meth:`Project.frames_fingerprint` leaves out.
+# The three ``frames`` columns :meth:`Project.frames_fingerprint` leaves out.
 #
-# They record *when* automation set a sub aside and put it back — provenance
-# about the app's own bookkeeping, never the frame's own state — and every
-# change they accompany is already visible to the hash through ``accept``. So
-# they add nothing a cache holder can detect, while costing the one property the
-# fingerprint's own tests pin: that a frame set which returns to what it was is
-# a cache **hit** again rather than a permanent miss. (A restoration writes both
-# ``accept = 1`` and ``restored_utc``; the accept is what the derivation
-# depends on.)
+# ``restored_utc``/``rejected_utc`` record *when* automation set a sub aside and
+# put it back — provenance about the app's own bookkeeping, never the frame's own
+# state — and every change they accompany is already visible to the hash through
+# ``accept``. So they add nothing a cache holder can detect, while costing the
+# one property the fingerprint's own tests pin: that a frame set which returns to
+# what it was is a cache **hit** again rather than a permanent miss. (A
+# restoration writes both ``accept = 1`` and ``restored_utc``; the accept is what
+# the derivation depends on.)
+#
+# ``ingested_at`` is the same kind of fact — when the app first saw this row —
+# and it is excluded for a sharper reason, which its own test demonstrated rather
+# than argued: it is a **wall clock**, so hashing it broke
+# ``test_two_projects_with_the_same_frames_agree`` outright. Two libraries
+# holding the same subs are the same frame set however many seconds apart they
+# were scanned, and a cache key that says otherwise is not a key. It cannot hide
+# a change either: it is written once, by ``Project.add_frame``, and never
+# updated, so the only row that can carry a new value is a new row — which the
+# hash sees through every other column it has. Leaving it out also means the
+# column's arrival invalidates nothing on the owner's install: the hashed set is
+# the one it was before (§9).
 #
 # An *exclusion* list rather than an inclusion list on purpose: a column added
 # later is hashed unless someone deliberately names it here, so the failure mode
 # of forgetting is over-invalidation — the safe direction, and the same one the
 # method's docstring already accepts.
-_FINGERPRINT_PROVENANCE_COLS = frozenset({"restored_utc", "rejected_utc"})
+_FINGERPRINT_PROVENANCE_COLS = frozenset(
+    {"restored_utc", "rejected_utc", "ingested_at"})
 
 # Reject reason stamped on the Seestar's own on-device *stacked output* when it
 # was ingested into a target as if it were a raw sub (pre-v0.184.9 scans, before
@@ -1214,6 +1256,21 @@ class Project:
                 "ALTER TABLE stack_runs ADD COLUMN transparency_scale INTEGER")
         except sqlite3.OperationalError:
             pass  # already present
+        # When a sub landed in this library, as opposed to when it was shot —
+        # the fact the walk-away settle window needs and ``source_mtime`` cannot
+        # supply (see the column comment in ``SCHEMA_SQL``, observer #1090).
+        # Same un-gated, un-bumped shape as ``rejected_utc`` and ``wcs_source``
+        # above, for the same reason: the upgrade must stay rollable, and a build
+        # that has never heard of the column answers what it answered before.
+        # Additive; every existing row stays NULL, which
+        # :meth:`Project.newest_accepted_sub_time` reads as "no arrival on
+        # record" and falls back to exactly today's answer — so a pre-upgrade
+        # install is unchanged until its next sub arrives.
+        try:
+            self._conn.execute(
+                "ALTER TABLE frames ADD COLUMN ingested_at REAL")
+        except sqlite3.OperationalError:
+            pass  # already present
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     @contextmanager
@@ -1286,11 +1343,26 @@ class Project:
     # ---- frames ---------------------------------------------------------
 
     def add_frame(self, frame: FrameRow) -> int:
-        """Insert a single frame, returning its new id."""
+        """Insert a single frame, returning its new id.
+
+        **Stamps ``ingested_at`` with the wall clock when the row carries none**,
+        which is every ingest. Done here rather than at the ingest site for the
+        same reason :meth:`update_frame` stamps ``rejected_utc`` centrally: this
+        is the only ``INSERT INTO frames`` statement in the codebase, so "when
+        did this sub land here?" is answerable for every route a sub can arrive
+        by, including one written later, and no path can forget.
+
+        A caller that already knows the answer keeps it, which is what makes a
+        **merge** honest: :func:`seestack.io.merge._frame_without_id` copies the
+        row, so a sub moved from one target to another carries the arrival it
+        really had rather than reading as having just landed.
+        """
         assert self._conn is not None
         cols = ", ".join(_INSERT_COLS)
         placeholders = ", ".join("?" for _ in _INSERT_COLS)
         values = [_to_db(getattr(frame, c)) for c in _INSERT_COLS]
+        if frame.ingested_at is None:
+            values[_INGESTED_AT_INSERT_IDX] = time.time()
         cur = self._conn.execute(
             f"INSERT INTO frames({cols}) VALUES({placeholders})", values
         )
@@ -2028,31 +2100,48 @@ class Project:
         ]
 
     def newest_accepted_sub_time(self) -> float | None:
-        """When the most recent accepted sub arrived, as a POSIX timestamp — or
-        ``None`` when nothing accepted carries a time.
+        """When this target was most recently *active* — the later of "when its
+        newest accepted sub landed here" and "when its newest accepted sub was
+        shot" — as a POSIX timestamp, or ``None`` when nothing accepted carries a
+        time at all.
 
         The one question "is this target still being shot?" needs, and the whole
-        of it: two ``MAX()``s over an indexed-free but narrow scan, never a
+        of it: a couple of ``MAX()``s over an index-free but narrow scan, never a
         ``FrameRow``, because the walk-away scan asks it of **every** target on
         every poll and this owner's targets carry thousands of subs each.
 
-        Prefers ``source_mtime`` — the sub's own file time, stamped at ingest —
-        because it answers "when did this land here?", which is what a settle
-        window is about, and it is set for every frame ingested since the
-        fingerprint columns arrived. Falls back to ``timestamp_utc`` (the frame's
-        ``DATE-OBS``) for rows that predate them, which is close enough for the
-        same question and wrong only in the harmless direction (a sub shot long
-        ago and copied in today reads as old, so the target stacks *sooner*).
-        Both are ignored where NULL, so a library with neither simply has no
-        opinion and every caller must treat ``None`` as "don't hold".
+        **The later of the two on purpose, not one in preference to the other.**
+        ``ingested_at`` is arrival (:meth:`add_frame` stamps it) and
+        ``timestamp_utc``/``source_mtime`` are capture; either being recent means
+        this target is still moving, and taking the max can therefore only ever
+        report a *more* recent time than the pair did before ``ingested_at``
+        existed — so a caller that holds on a fresh answer can only become more
+        cautious, never less.
+
+        **``source_mtime`` is not an arrival time, and reading it as one is what
+        this method used to do** (observer issue #1090). Its docstring claimed it
+        was "stamped at ingest"; it is the *source file's own* ``st_mtime``
+        (:func:`seestack.io.ingest._source_fingerprint`), so on any copy that
+        preserves timestamps — every route this owner's subs arrive by, measured
+        on 118 of 118 of his drop folders — it is the capture time, hours to
+        months before the folder was dropped in, and a settle window asked of it
+        has already expired before the first sub of a folder is ingested. It is
+        kept in the answer because it *is* a capture time (see above) and because
+        a non-preserving re-copy re-stamps it, never as the arrival.
+
+        Rows are ignored where a column is NULL, so a library predating
+        ``ingested_at`` answers exactly as it did before (``source_mtime``, then
+        ``DATE-OBS``), and one with none of the three simply has no opinion —
+        every caller must treat ``None`` as "don't hold".
         """
         assert self._conn is not None
         row = self._conn.execute(
-            "SELECT MAX(source_mtime) FROM frames WHERE accept = 1"
+            "SELECT MAX(ingested_at), MAX(source_mtime) FROM frames "
+            "WHERE accept = 1"
         ).fetchone()
-        newest = row[0] if row else None
-        if newest is not None:
-            return float(newest)
+        stamps = [v for v in (row or ()) if v is not None]
+        if stamps:
+            return max(float(v) for v in stamps)
         row = self._conn.execute(
             "SELECT MAX(timestamp_utc) FROM frames "
             "WHERE accept = 1 AND timestamp_utc IS NOT NULL AND timestamp_utc != ''"
@@ -3425,6 +3514,7 @@ def _row_to_frame(row: sqlite3.Row) -> FrameRow:
         aligned_cache_path=row["aligned_cache_path"],
         source_size_bytes=row["source_size_bytes"],
         source_mtime=row["source_mtime"],
+        ingested_at=row["ingested_at"],
         timestamp_utc=row["timestamp_utc"],
         exposure_s=row["exposure_s"],
         gain=row["gain"],

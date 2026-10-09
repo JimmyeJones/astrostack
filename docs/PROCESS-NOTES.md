@@ -1,5 +1,67 @@
 # Process notes & QA sweep records
 
+## 2026-10-09 (Builder, branch `claude/jolly-bardeen-kn2j5d`) — a fifth open issue this page's count did not have, and a guard that had never once fired
+
+**Baseline.** `source scripts/agent-setup.sh` green; full suite `7482 passed, 4 skipped` (11m48s, BLAS cap +
+`-n 4 --dist worksteal`) — matching the +14 the 2026-10-08 run added to the 7468 baseline. CI green on
+`origin/main` at `cf948bbc`.
+
+**The thing worth carrying forward: `list_issues` found work the docs said was not there.** `docs/FOCUS.md`
+opened with *""Bugs (fix these first)" once again holds NO verified open bug"* and *"Open observer issues —
+FOUR open"*, both written honestly on 2026-10-08. `list_issues` returned **five**: **#1090**, filed
+2026-10-08T07:21Z — the same morning — and never triaged. It was the whole run. The page's own ⚠️ warning
+("A MATCHING COUNT IS NOT A MATCHING SET: don't trust any count here over `list_issues`") earned itself
+again, and this is the second kind of case: not a count that disagreed with the set, but a count that was
+*right when written* and three hours stale. **Call `list_issues` before believing a dry backlog**, Builder as
+well as Scout — a dry backlog is the condition under which a missed issue costs the most, because the
+alternative is manufacturing work.
+
+**What the issue was, and why it is two tasks.** `_auto_stack_settle_hold` — the guard whose own comment says
+stacking now would "publish a picture of a night that is not over" — asked
+`Project.newest_accepted_sub_time()`, which preferred `frames.source_mtime` on the strength of a docstring
+saying it was *"stamped at ingest"*. It is the **source file's own** `st_mtime`
+(`ingest._source_fingerprint` → `(st_size, st_mtime)`), so every timestamp-preserving copy records the
+*capture*. Reproduced in four lines of scratch script against the real `ingest_files`: subs written with
+`os.utime` three weeks back and ingested that second read as **504.0 h** old, so a 20-minute window does not
+hold. The observer's 118-of-118-folders measurement is the same fact at scale. Shipped as **v0.492.45**
+(`frames.ingested_at`).
+
+**And the half that shipping it did not fix, which the issue was careful about.** The observer explicitly did
+**not** claim the clock would have prevented the incident, and measured why: the folder's copy finished 35.9
+min before the stack began, because the job spent 39 min stacking the other target first, so the window had
+honestly expired. The live symptom — published and auto-edited from **6 of 742** subs — is a *second* cause:
+every guard in the chain is computed over frames **already ingested**, so a folder caught mid-copy reads as a
+complete, settled target. Filed as a verified Bugs entry rather than built, with the stranding trap worked out
+(a count comparison that is not bounded holds forever on an unreadable file — the owner has ~147 of those) and
+the bound named (hold at most once per observed on-disk count). **An observer issue with a well-argued "not
+claimed" section is two tasks, not one** — reading that section is what stopped this run shipping the clock and
+calling #1090 closed.
+
+**Two guards in this repo were smarter than the plan, and both are worth knowing about before adding a
+column.** (1) `tests/test_project_schema_drift.py::_assert_tables_are_fully_migrated` runs with
+`_reconcile_table_columns` **monkeypatched off**, so "the reconcile net will add it on open" is not enough: a
+new column in `SCHEMA_SQL` needs a real `_migrate_schema` step. The right shape is the *ungated*
+`try/except OperationalError` `ALTER` that `rejected_utc` and `wcs_source` use — no `SCHEMA_VERSION` bump, so
+a rollback of the Docker image cannot brick a target. (2) `frames_fingerprint` hashes every column it is not
+told to skip, and a **wall clock** cannot be in a cache key:
+`test_two_projects_with_the_same_frames_agree` failed outright, because two libraries holding the same subs
+are the same frame set however many seconds apart they were scanned. `ingested_at` joined
+`_FINGERPRINT_PROVENANCE_COLS`, which also means the column's arrival invalidates nothing on the owner's
+install. Neither was reasoned out in advance; both were found by running the existing suite early.
+
+**A fix that makes a dormant feature fire inherits its unread copy.** The hold has shipped since v0.390.1 and
+had never held anything, so its wording had never been read against real data. The Jobs clause said *"waiting
+on N still being shot"*; the dominant case is now a drop folder still **copying**, where that sentence reads as
+a bug to someone who is shooting nothing tonight. Reworded to *"still arriving"* with both causes named in the
+body. **Worth generalising: when a fix turns a guard on for the first time, read every string it will now
+print.**
+
+**Fail-befores, four, and why two were not enough.** The change has a read half (`MAX(ingested_at)` in the
+answer) and a write half (the central stamp in `add_frame`). Reverting the read fails the two settle tests;
+reverting the write fails the two ingest tests. The settle tests write `ingested_at` by hand, so they cannot
+prove the stamp exists — a run that had only reverted the read would have claimed a fail-before with a hole in
+it, which is the 2026-10-05 lesson in this file applied to a column rather than a module.
+
 ## 2026-10-08 (Builder, branch `claude/jolly-bardeen-19vz82`) — #1088 drained: the note's exclusion now comes from the scan, not from a walk that cannot agree with it (v0.492.44)
 
 **Baseline.** `7468 passed, 4 skipped` (13m22s, BLAS cap + `-n 4 --dist worksteal`), green and matching the

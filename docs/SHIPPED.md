@@ -1,5 +1,96 @@
 # Shipped — the record
 
+## 2026-10-09 (Builder) — the walk-away settle window had never held anything, because it was asking for a capture time
+
+### v0.492.45 — 🔴 BUG FIX (PRIORITY 2, autonomy): `frames.ingested_at`, `Project.add_frame`, `newest_accepted_sub_time`
+
+**Verified against the code from observer issue
+[#1090](https://github.com/JimmyeJones/astrostack/issues/1090)**, which was open and untriaged at the start of
+this run (five open issues, not the four `docs/FOCUS.md` said). Issue text is a lead, not a finding, so the
+mechanism was re-reproduced here end to end through the real `ingest_files` + `newest_accepted_sub_time` before a
+line was changed.
+
+**The bug.** `webapp/pipeline._auto_stack_settle_hold` is the guard that stops the hands-off chain publishing "a
+picture of a night that is not over". It holds while the newest accepted sub is younger than
+`auto_stack_settle_min` (20 min), and it asks `Project.newest_accepted_sub_time()`. That method preferred
+`frames.source_mtime`, whose docstring said it was *"the sub's own file time, stamped at ingest — because it
+answers 'when did this land here?'"*. **It is not stamped at ingest.** It is the *source file's own* `st_mtime`
+(`seestack/io/ingest._source_fingerprint` returns `(st_size, st_mtime)` of the file in `incoming/`), so on any
+copy that preserves timestamps — every route this owner's subs arrive by — it records the moment of **capture**.
+The window is therefore already spent before the first sub of a folder reaches the database, and the hold had
+never held anything and structurally could not.
+
+**Reproduced before the fix**, synthetic target, real functions: four subs written with `os.utime` three weeks
+back (a `cp -p`-shaped copy) and ingested *that second* read as having arrived **504.0 h ago**, so a 20-minute
+window *"DOES NOT HOLD"*. After the fix the same script reads **0.0 h ago** and *"HOLDS"*. The observer's own
+measurement on the live library is the same fact at scale: `source_mtime − DATE-OBS` is 8.8–42.1 s (p50 25.1 s)
+over all 56,751 accepted frames carrying both, and each drop folder's own last-entry-change is **later** than
+the newest file mtime inside it on **118 of 118 folders**, minimum gap 1.48 h.
+
+**What shipped.** A new `frames.ingested_at REAL` — the wall clock at insert — stamped **centrally in
+`Project.add_frame`**, for the reason `update_frame` stamps `rejected_utc` centrally: it is the only
+`INSERT INTO frames` statement in the codebase, so every route a sub can arrive by is covered, including one
+written later. `newest_accepted_sub_time()` now answers with the **later of arrival and capture**
+(`MAX(ingested_at), MAX(source_mtime)` in one statement — the same shape and cost as before), falling back to
+`DATE-OBS` exactly as it did. `source_mtime` is kept in the answer rather than replaced: it *is* a capture time,
+and a non-preserving re-copy re-stamps it, so the column is ambiguous by construction and could not be
+repurposed (§9).
+
+**The max rather than a preference, and that makes the change one-sided.** Either number being recent means the
+target is still moving, so taking the later of the two can only ever report a *more* recent time than the pair
+did before the column existed — the hold became more cautious and could not become less. Pinned by
+`test_the_answer_is_the_later_of_arrival_and_capture`, which checks both directions, including the
+re-copy case where capture wins and today's behaviour is unchanged.
+
+**Upgrade-safe, and the upgrade changes nothing until the next sub arrives (§9).** No `SCHEMA_VERSION` bump —
+the `ALTER` is ungated and `try/except OperationalError`, exactly like `rejected_utc` and `wcs_source`, so an
+older build can still open a DB this one wrote and a rollback of the Docker image does not brick a target; a DB
+already at version 22 gets the column from `_reconcile_table_columns` on open. Every existing row stays NULL,
+which the method reads as "no arrival on record" and answers from `source_mtime` as before.
+`test_a_project_predating_the_arrival_column_answers_exactly_as_before` makes that a test rather than a claim,
+and the repo's own `_assert_tables_are_fully_migrated` guard — which runs with the runtime backfill *disabled* —
+is what caught the missing migration step in the first place.
+
+**Two things the existing tests found that reasoning had not.** (1) The schema-drift guard refused the column
+until it had a real `_migrate_schema` step, not just the reconcile net. (2) `ingested_at` had to be added to
+`_FINGERPRINT_PROVENANCE_COLS`: it is a wall clock, so hashing it broke
+`test_two_projects_with_the_same_frames_agree` outright — two libraries holding the same subs are the same frame
+set however many seconds apart they were scanned. It can hide nothing (written once, never updated, so only a
+*new* row carries a new value and the hash sees that through every other column), and leaving it out means the
+column's arrival invalidates **no** cache on the owner's install.
+
+**A merged sub keeps the arrival it really had.** `merge._frame_without_id`'s `replace` carries the column, and
+`add_frame` stamps only a row that carries none, so a merge does not make the destination read as "still
+receiving subs" and hold its own walk-away stack over files that landed weeks ago
+(`test_a_merged_sub_keeps_the_arrival_it_really_had`).
+
+**And the sentence the owner will now actually see is honest.** The hold has shipped since v0.390.1 and has
+never fired, so its wording had never been read against real data: the Jobs clause said *"waiting on N still
+being shot"* and the alert was titled *"Still being shot"*. The dominant case is now a drop folder still
+**copying** — subs shot weeks ago, arriving now — where "still being shot" reads as a bug to someone who is
+shooting nothing tonight. Now *"waiting on N still arriving"* / *"Subs still arriving — waiting for the batch to
+settle"*, and the body names both causes (*"either you're shooting right now, or a folder is still copying
+in"*). Nothing removed, no layout change, no new surface.
+
+**What this deliberately does NOT fix, and it is filed, not forgotten.** #1090 names two independent causes of
+one symptom and the observer measured that fixing the clock would **not** have prevented the incident he saw: the
+folder's copy finished 35.9 min before the stack started, because the job spent 39 min stacking the other target
+first, so the window had honestly expired. The second cause — the hold is evaluated only over frames **already
+ingested**, so a folder caught mid-copy reads as settled whatever clock is used (7 of 742 files, published and
+auto-edited from 6) — needs the scan to re-ask what the folder now holds, and is filed as a verified entry at the
+top of "Bugs (fix these first)" with the un-strandable shape worked out. The issue stays **open** with a comment
+naming this version and that remainder.
+
+**Tests.** +3 `tests/test_ingest.py`, +3 `tests/webapp/test_autostack_settle.py`, +1 vitest assertion changed.
+**Four fail before**, each shown by a scratch revert of the half it guards: reverting the *read*
+(`MAX(ingested_at)` out of the answer) fails the two settle tests; reverting the *write* (the stamp out of
+`add_frame`) fails the two ingest tests — which matters because the settle tests write the column by hand and
+cannot prove the stamp. Three existing tests were updated, none loosened: `_age_every_sub` now ages the column
+the hold reads (a helper that aged only one would leave the fixture looking freshly-arrived however old it
+claimed to be), the two tests that NULL `source_mtime` to play an ancient library NULL the new column too, and
+the fingerprint pin is still an exact set, with its third member and the reason it is there.
+
+
 ## 2026-10-08 (Builder) — a note that offered a scan it could never fulfil
 
 ### v0.492.44 — 🟡 BUG FIX: `SkippedCalibrationFolder.folder`, `webapp/calibrationskips.py`, `_skip_folders`

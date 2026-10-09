@@ -181,6 +181,14 @@ def _frame_without_id(frame: FrameRow) -> FrameRow:
     all-sky one; the QC measurements; the accept/reject decision — describes the
     sub itself and travels verbatim.
 
+    ``ingested_at`` travelling verbatim is load-bearing rather than incidental: a
+    merge moves a sub between two targets of a library it is already in, so the
+    arrival it carries is the one it really had. Restamping it would make the
+    destination read as "still receiving subs" and hold its own walk-away stack
+    for a window (``webapp.pipeline._auto_stack_settle_hold``) over files that
+    landed weeks ago. :meth:`seestack.io.project.Project.add_frame` stamps only a
+    row that carries none, which is what lets this ``replace`` keep it.
+
     **Copied with ``replace`` rather than re-listed field by field.** The
     hand-written list this replaces silently dropped every column added to
     :class:`~seestack.io.project.FrameRow` after it was written —

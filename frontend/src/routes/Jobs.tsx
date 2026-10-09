@@ -1039,11 +1039,18 @@ export function heldForFilesLine(h: HeldForFiles): string {
 }
 
 /** One target the walk-away auto-stack is holding back because subs are **still
- * arriving** for it — the night is not over. Stacking now would re-stack every
- * night the target has, publish a picture of an unfinished night, and be
+ * arriving** for it — the batch is not all here. Stacking now would re-stack
+ * every night the target has, publish a picture of an unfinished night, and be
  * superseded by the next batch a few minutes later, so the scan waits for the
  * target to go quiet (`auto_stack_held_settling`). Nothing is skipped: the first
- * scan after the subs stop stacks it once, on the whole night. */
+ * scan after the subs stop stacks it once, on everything it has.
+ *
+ * **"Arriving", not "being shot".** The backend measures the later of when a sub
+ * landed in the library and when it was captured, so this fires just as readily
+ * on a drop folder that is still *copying* — subs shot weeks ago, arriving now,
+ * which is the case the owner actually met (observer #1090). Wording that says
+ * "still being shot" is wrong there, and wrong in the direction that reads as a
+ * bug to someone who is not shooting anything tonight. */
 export interface HeldSettling { target: string; quietMin: number; settleMin: number; }
 
 /** One target the scan re-stacked because its newest picture had come out much
@@ -1137,7 +1144,7 @@ export function pipelineSummary(r: Record<string, unknown>): {
     clauses.push(`held ${heldFiles.length} — some subs aren't on disk`);
   }
   if (heldSettling.length > 0) {
-    clauses.push(`waiting on ${heldSettling.length} still being shot`);
+    clauses.push(`waiting on ${heldSettling.length} still arriving`);
   }
   if (healed.length > 0) {
     clauses.push(
@@ -1431,11 +1438,12 @@ function JobResultActions({ job }: { job: Job }) {
         ) : null}
         {heldSettling.length ? (
           <Alert color="blue" variant="light" p="xs"
-            title="Still being shot — waiting for the night to settle">
+            title="Subs still arriving — waiting for the batch to settle">
             <Text size="xs">
-              {"New subs are still arriving for these, so the picture is not "}
-              {"made yet. Stacking after every batch would re-stack the whole "}
-              {"target over and over all night and hand you a picture of a night "}
+              {"New subs are still arriving for these — either you're shooting "}
+              {"right now, or a folder is still copying in — so the picture is "}
+              {"not made yet. Stacking after every batch would re-stack the "}
+              {"whole target over and over and hand you a picture of a night "}
               {"that isn't over. Nothing is skipped — the next check after the "}
               {"subs stop stacks each one, once, from everything it has. Open a "}
               {'target and use "Stack" if you want one now:'}
