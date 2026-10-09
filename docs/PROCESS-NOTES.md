@@ -51,8 +51,22 @@ what it would equal, is the same discipline as v0.492.45's "re-read every string
 surfaces it does change are covered end-to-end through `/api/plan/tonight` (the consequence itself) plus the
 existing per-run and target-level suites. The next run that touches an Auto/editor claim still owes `--mosaic`.
 
-**Post-merge.** Suite re-run after syncing `origin/main`: **7507 passed, 4 skipped** (the 7496 baseline plus this
-run's +11).
+**Second task — the Scout's "My map" two-count bug (v0.492.48).** Taken after #1095 merged, the entry being
+~4 h old by then (§11's two-hour claimed-in-spirit window had long passed; the run before this one had
+deliberately left it under that rule). It was filed **not fixed** because "the fix is a wording /
+source-of-truth decision", and the decision is the note worth keeping: **all three candidates the entry listed
+were count-vs-count reconciliations, and the way out was to notice that only one of the two sentences needed to
+state a count at all.** The map's subtitle counts what it draws, which a reader can check by looking at it; the
+read-out beside it is about *area*, so it now says only that — and the singular-subject special case ("Your
+picture covers …"), which existed purely so the subject would agree with a count of 1, went with it. Generalised:
+**when two surfaces disagree about a number, ask which of them the number actually belongs to before trying to
+make them agree.** Its regression test is a guard-rail that passes both ways (map 2 drawn vs area 1 measured, the
+WCS-less picture pinned at the nominal field), because the thing to protect against now is a later run
+"reconciling" the counts by dropping a picture off a map that can still place it.
+
+**Post-merge.** Suite re-run after syncing `origin/main`: **7507 passed, 4 skipped** for v0.492.47 (the 7496
+baseline plus its +11), then **7508** with v0.492.48's +1. Frontend: `tsc`, `vitest` (4583) and `vite build`
+green for both.
 
 *(Kickoff-vs-AGENTS disagreement, the same class as the 2026-10-04/05 notes below and resolved the same way:
 this run's harness attribution reminder asked for a `Co-Authored-By: Claude Opus 5` trailer and a

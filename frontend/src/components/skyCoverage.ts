@@ -39,6 +39,19 @@ export function formatSkyArea(deg2: number): string {
  * patch of sky a beginner can already picture — and closes with the fraction,
  * which is the number that makes people grin.
  *
+ * **It deliberately says nothing about how many pictures there are**, though it
+ * is handed the count. This sentence used to open "Your 3 pictures cover …" and
+ * sat directly under a map whose own baked subtitle said "4 of your pictures" —
+ * two counts of one thing, side by side, disagreeing. They are counted by
+ * different rules on purpose and both rules are right for their own job: the map
+ * draws every picture it can place *somewhere* honest, including one whose master
+ * carries no usable WCS (a nominal field, `routers/sky.py::_my_map_pictures`),
+ * while the area measurement drops that picture rather than invent the sky it
+ * covers (`seestack/skyarea.py`). So the count belongs to the map, which is where
+ * a reader can check it by looking; this line is about *area*, and says only that.
+ * `nPictures` still gates it — zero placeable pictures means there is no honest
+ * number to print — and still picks nothing else.
+ *
  * `summedDeg2` is what plain addition would have said before overlapping
  * pictures were counted once (absent on an older backend). It buys one extra
  * clause, and only when the deduplication actually changed the number the reader
@@ -53,19 +66,19 @@ export function describeSkyCoverage(
 ): string {
   if (!Number.isFinite(deg2) || deg2 <= 0 || nPictures <= 0) return "";
   const moons = deg2 / FULL_MOON_DEG2;
+  // "of sky" belongs to the lead clause now, so saying it again here would read
+  // as "square degrees of sky — about a full Moon's worth of sky".
   const moonPhrase = moons < 1.5
-    ? "about a full Moon's worth of sky"
-    : `about ${Math.round(moons).toLocaleString()} full Moons' worth of sky`;
-  // Singular takes its own verb *and* drops the count: "Your 1 picture cover"
-  // was both ungrammatical and stilted, and it is the state a beginner is in on
-  // the day they meet this sentence — the one picture they just made.
-  const subject = nPictures === 1 ? "picture covers" : `${nPictures} pictures cover`;
+    ? "about a full Moon's worth"
+    : `about ${Math.round(moons).toLocaleString()} full Moons' worth`;
   const overlapped =
     typeof summedDeg2 === "number" && Number.isFinite(summedDeg2) &&
     summedDeg2 > deg2 && formatSkyArea(summedDeg2) !== formatSkyArea(deg2);
   return (
-    `Your ${subject} ${formatSkyArea(deg2)} square degrees — ` +
+    `You've photographed ${formatSkyArea(deg2)} square degrees of sky — ` +
     `${moonPhrase}, and ${formatSkyFraction(fraction)} of the whole sky.` +
-    (overlapped ? " Where two of them overlap, that patch counts once." : "")
+    (overlapped
+      ? " Where two of your pictures overlap, that patch counts once."
+      : "")
   );
 }

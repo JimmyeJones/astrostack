@@ -220,3 +220,45 @@ def test_two_targets_on_the_same_sky_are_counted_once(client, solved_library,
     assert body["summed_deg2"] == pytest.approx(2 * _H * _W * _PX_DEG2, rel=1e-6)
     assert body["sky_fraction"] == pytest.approx(
         body["deg2"] / body["whole_sky_deg2"], rel=1e-9)
+
+
+def test_the_map_s_count_and_this_number_answer_different_questions(
+        client, solved_library):
+    """The two "your pictures" on one screen, and why they are allowed to differ.
+
+    ``GET /api/sky/my-map.png`` bakes *"N of your pictures"* into the PNG from
+    ``_my_map_pictures``, which **keeps** a run whose master has no stored WCS —
+    it falls back to a nominal field so the picture still lands somewhere honest
+    rather than being dropped — while this endpoint's ``n_pictures`` **drops** it
+    rather than invent the sky it covers. Both rules are right for their own job,
+    which is why the fix was to stop the *read-out* claiming a count of "your
+    pictures" at all (``frontend/src/components/skyCoverage.ts``) rather than to
+    reconcile the two counts.
+
+    So this pins the two rules themselves, in the one library shape where they
+    visibly differ. It passes before that fix as well as after it, deliberately:
+    it is the guard-rail against the two tempting "reconciliations" — dropping
+    the WCS-less picture off a map that can still place it, or giving the area a
+    guessed field — not against the bug.
+    """
+    from webapp.routers import sky as sky_router
+
+    first, second = _two_targets(client, solved_library)
+    _make_run(solved_library, first)                      # placeable
+    _make_run(solved_library, second, with_wcs=False)     # drawn, not measurable
+
+    body = client.get("/api/sky/coverage").json()
+    assert body["n_pictures"] == 1
+    assert body["deg2"] == pytest.approx(_H * _W * _PX_DEG2, rel=1e-6)
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        pictures, fingerprint = sky_router._my_map_pictures(lib)
+    finally:
+        lib.close()
+    assert len(pictures) == 2
+    assert len(fingerprint["runs"]) == 2
+    # …and the one with no WCS is drawn at the nominal field, not at a measured
+    # one, which is exactly why its area is not counted above.
+    assert {round(p.width_deg, 4) for p in pictures} == {
+        round(_W * _SCALE_DEG, 4), 1.3}

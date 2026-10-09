@@ -1,5 +1,16 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-09 (Builder — **"Bugs (fix these first)" once again holds NO verified, ungated open bug.**
+The Scout's "My map" two-count bug (item 0b) is **SHIPPED as v0.492.48** and its entry is cut to
+[`SHIPPED.md`](SHIPPED.md); observer **#1095** shipped as **v0.492.47** earlier in the same run and is closed.
+What is left below is the gated LEADs and ⚪ notes — **do not re-litigate the numbered stand-downs.** The "My
+map" fix is worth one line of method for the next run: **the entry's three candidates were all count-vs-count
+reconciliations, and the fix was to notice that only one of the two sentences needed to carry a count at all.**
+The map's subtitle counts what it draws (checkable by looking at it); the read-out beside it is about *area*, so
+it now says only that, and the singular-subject special case that existed purely to agree with a count went with
+it. When two surfaces disagree about a number, ask whether both of them actually need to state it. A run that
+finds this page dry should call `list_issues` first — **that is what found #1095 this morning** — then dogfood
+and file what it finds. The two earlier 2026-10-09 notes stand below.)
 *Last edited 2026-10-09 (Builder — **observer issue
 [#1095](https://github.com/JimmyeJones/astrostack/issues/1095) arrived on the morning of this run, untriaged, and
 it was the run: it is SHIPPED as v0.492.47 and CLOSED.** It outranked the backlog's front (item 0b, low/latent
@@ -125,9 +136,11 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
 
 ## Front of the queue
 
-0. **⭐ THE FRONT OF THE QUEUE IS ITEM 0b — the Scout's "My map" two-count bug**, which merged into `main`
-   (PR #1093) while v0.492.46 was in CI. It is the **one** verified, ungated open bug left in the backlog; it
-   is low/latent and sized S-to-write, so it is a good small task rather than an urgent one. 🟠 **Observer
+0. **⭐ THE QUEUE IS DRY: "Bugs (fix these first)" holds no verified, ungated open bug.** 🟡 **The Scout's
+   "My map" two-count bug (the prior item 0b) shipped as v0.492.48** (Builder 2026-10-09) and its entry is cut
+   to [`SHIPPED.md`](SHIPPED.md) — the read-out beside the map no longer claims a count of "your pictures" at
+   all, so the only count on the screen is the map's own, and neither counting rule was changed. A run that
+   finds this page dry should call `list_issues` first, then do a dogfood pass and file what it finds. 🟠 **Observer
    [#1095](https://github.com/JimmyeJones/astrostack/issues/1095) — a canvas's bounding box counted as sky
    covered, so 46 of 50 single fields read as mosaics and six big objects lost their framing advice — was
    triaged and SHIPPED as v0.492.47 in the same run it was filed** (Builder 2026-10-09) and the issue is
