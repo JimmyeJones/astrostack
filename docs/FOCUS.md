@@ -1,5 +1,18 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-09 (Builder, same run, second task — **the residual the first task filed is SHIPPED as
+v0.492.51, and the entry's own prescription is why it was one task rather than two.** The editor's *per-run*
+border-trim switch reached `…/editor/auto`, so **Auto honoured it** and with the trim off classified the whole
+canvas — while neither classification surface could see it (`api.presetSuggestion` posted no body at all; the
+feedback body is a cue; the run-scoped GET has none). So with the switch flipped, v0.492.50's divergence
+re-opened through the one input Auto takes and the classification did not. **The method note: when a fix makes
+two sites agree, the agreement is only as good as the narrowest input they share** — v0.492.50 made them agree
+about the *setting* and left them disagreeing about the *override*, which is the same bug one level down. The
+override now travels on all three requests, `None` still means the setting (so the default answer is
+byte-for-byte v0.492.50's), and both frontend query keys carry the flag because flipping the switch changes
+which question is asked rather than staling the answer. **"Bugs (fix these first)" now holds NO lead from this
+run at all** — only the older gated LEADs and the ⚪ notes; do not re-litigate the numbered stand-downs. The
+run's earlier notes stand below.)
 *Last edited 2026-10-09 (Builder, third run of the day — **the method that found v0.492.49 found another PRIORITY-1
 editor bug immediately: read the fix you just shipped as a lead.** v0.492.49 narrowed the *fourth*
 `classify_target` caller and wrote in its own docstring that `auto_recipe` "keys its taste profile on this very

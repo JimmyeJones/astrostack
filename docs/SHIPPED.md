@@ -1,5 +1,68 @@
 # Shipped — the record
 
+## 2026-10-09 (Builder) — the editor's per-run border-trim switch now reaches the two classification surfaces
+
+### v0.492.51 — 🟡 BUG FIX (PRIORITY 1, the editor): `_classify_run(auto_crop=…)`, `AutoFeedbackIn.auto_crop`, `api.presetSuggestion`, `api.sendAutoFeedback`, `api.getRunAutoPreferences`
+
+The residual **v0.492.50 filed rather than half-fixed**, taken in the shape its own entry
+prescribed: one task covering **both** classification surfaces, because fixing either alone moves
+the divergence instead of closing it.
+
+**The bug.** `Editor.tsx` keeps a per-run border-trim override (`autoCropOverride` → `autoCropArg`)
+so someone who normally keeps the full frame can let Auto crop this one picture, or the reverse. It
+reaches `…/editor/auto` and `…/editor/auto-analysis`, so **Auto honours it** — and with the trim off
+Auto classifies the **whole canvas** rather than the kept rectangle (v0.492.49's rule, and the right
+one: no crop runs, so the fringe is part of the picture the editor shows).
+
+Neither classification surface could see it:
+
+- `api.presetSuggestion` posted **no body at all**, so the chip's endpoint — which has accepted an
+  `auto_crop` override since v0.492.49 — always resolved the saved setting;
+- the feedback POST's body is a cue (`AutoFeedbackIn` had `cue`/`safe`/`run_id` and nothing else) and
+  the run-scoped auto-preferences **GET** has no body, so both fell back to the setting too.
+
+So with the switch flipped, Auto keyed the taste profile on one archetype while the tap was filed
+under another — **the exact divergence v0.492.50 closed, re-opened by the one input Auto takes and
+the classification did not.** It is narrower than v0.492.50's: it needs the owner to touch a per-run
+switch, and his library-wide setting is on, which is why it was filed as a lead rather than built in
+the same commit.
+
+**The fix.** The override now travels on all three requests, in the shape each one already uses:
+
+| surface | how it arrives |
+|---|---|
+| `…/editor/preset-suggestion` | the body it already accepted; `api.presetSuggestion` now sends it |
+| `…/editor/auto-preferences/feedback` | new optional `AutoFeedbackIn.auto_crop` |
+| `…/stack-runs/{id}/editor/auto-preferences` | a query param, because it is a GET |
+
+`_classify_run` takes `auto_crop: bool | None`, and `None` — every older frontend, and any caller
+that does not know — still resolves the saved `auto_crop_border` setting, so the **default answer is
+byte-for-byte what v0.492.50 gives**. Both frontend query keys gained the flag
+(`["preset-suggestion", safe, rid, autoCropArg]`, `["auto-prefs", safe, runId, autoCrop]`): flipping
+the switch changes *which question is being asked*, so a cached answer taken under the other setting
+is the wrong answer, not a stale one.
+
+No new UI element — `<AutoFeedback>` gained one prop from a value already in scope at
+`Editor.tsx:2464`.
+
+**Upgrade-safe (§9):** one optional request field, one optional query param, no response-shape,
+config, schema, migration, on-disk or default change. An older frontend sends neither and gets the
+setting; an older backend ignores both and does the same.
+
+**Tests (+8).** Python **+4** in `tests/webapp/test_editor.py` (the override on the feedback POST
+both ways; on the run-scoped GET, including omitted ⇒ the setting; **overriding a setting that is
+off**, which a test that only ever turns the override off cannot see; and the preset chip honouring
+it) — **3 of the 4 fail before** by reverting the production change in place, the chip's passing
+before because that endpoint already accepted the override and only the *client* was silent, which
+is what the frontend tests cover. Vitest **+4**: three in `autoCropBody.test.ts` pinning what each
+of the three callers puts on the wire, including that an omitted override sends **no key at all**
+rather than `null` and that an unscoped tap carries neither, all three verified failing against a
+reverted `client.ts`; and one in `AutoFeedback.test.tsx` that the component threads a given
+override into both of its requests. Three existing `AutoFeedback.test.tsx` assertions were
+**updated, not loosened** — the calls genuinely carry a third argument now, so they assert it
+(`undefined` where the test sets none, which is the pre-override behaviour).
+
+
 ## 2026-10-09 (Builder) — the owner's Auto feedback stopped being filed where Auto never looks
 
 ### v0.492.50 — 🟠 BUG FIX (PRIORITY 1 the editor / PRIORITY 2 autonomy): `classify_run_measured`, `_classify_run`, `build_preset_suggestion_for_run`

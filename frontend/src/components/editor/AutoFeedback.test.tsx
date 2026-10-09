@@ -5,12 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AUTO_FEEDBACK_CHIPS, AutoFeedback, autoFeedbackGroups } from "./AutoFeedback";
 import * as client from "../../api/client";
 
-function wrap(onRerun = () => {}, scope?: { safe: string; runId: number }) {
+function wrap(onRerun = () => {},
+  scope?: { safe: string; runId: number; autoCrop?: boolean }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <MantineProvider>
       <QueryClientProvider client={qc}>
-        <AutoFeedback onRerun={onRerun} safe={scope?.safe} runId={scope?.runId} />
+        <AutoFeedback onRerun={onRerun} safe={scope?.safe} runId={scope?.runId}
+          autoCrop={scope?.autoCrop} />
       </QueryClientProvider>
     </MantineProvider>,
   );
@@ -29,8 +31,11 @@ describe("AutoFeedback", () => {
     wrap(onRerun);
     fireEvent.click(await screen.findByRole("button", { name: "Too dark" }));
 
-    // With no run context the cue updates the global taste (no ctx argument).
-    await waitFor(() => expect(send).toHaveBeenCalledWith("too_dark", undefined));
+    // With no run context the cue updates the global taste (no ctx argument), and
+    // there is no per-run border-trim override to carry either — a tap outside the
+    // editor's own switch must look exactly like an older build's.
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith("too_dark", undefined, undefined));
     await waitFor(() => expect(onRerun).toHaveBeenCalled());
     // The "why" note surfaces once the profile is non-neutral.
     await screen.findByText(/running a bit brighter/);
@@ -46,11 +51,36 @@ describe("AutoFeedback", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Too dark" }));
 
     // The run-scoped profile is queried, and the cue carries the run context.
-    await waitFor(() => expect(getRun).toHaveBeenCalledWith("M31", 7));
+    // Neither carries a border-trim override here: this test sets none, so both
+    // must ask for the saved setting, which is the pre-override behaviour.
+    await waitFor(() => expect(getRun).toHaveBeenCalledWith("M31", 7, undefined));
     await waitFor(() =>
-      expect(send).toHaveBeenCalledWith("too_dark", { safe: "M31", runId: 7 }));
+      expect(send)
+        .toHaveBeenCalledWith("too_dark", { safe: "M31", runId: 7 }, undefined));
     // The archetype-scoped "why" note surfaces.
     await screen.findByText(/for your galaxies/);
+  });
+
+  it("carries the editor's per-run border-trim override on both requests, so the "
+    + "bucket is the one Auto keys on", async () => {
+    // The archetype a tap is filed under has to be the archetype `auto_recipe`
+    // keys on, and with the border trim off Auto keys on the whole canvas — a
+    // different archetype on a ragged mosaic (v0.492.50). The editor's per-run
+    // switch reaches `…/editor/auto`, so it has to reach these two as well, or the
+    // write side and the read side of the taste profile disagree again at exactly
+    // the moment the owner has told Auto to leave the fringe in.
+    const getRun = vi.spyOn(client.api, "getRunAutoPreferences")
+      .mockResolvedValue({ biases: {}, note: null, neutral: true });
+    const send = vi.spyOn(client.api, "sendAutoFeedback")
+      .mockResolvedValue({ biases: { brightness: 1 }, note: "Auto is running a bit brighter for you, based on your recent feedback.", neutral: false });
+
+    wrap(() => {}, { safe: "M31", runId: 7, autoCrop: false });
+    fireEvent.click(await screen.findByRole("button", { name: "Too dark" }));
+
+    await waitFor(() => expect(getRun).toHaveBeenCalledWith("M31", 7, false));
+    await waitFor(() =>
+      expect(send)
+        .toHaveBeenCalledWith("too_dark", { safe: "M31", runId: 7 }, false));
   });
 
   it("shows the why-note and Reset only when the profile is non-neutral", async () => {
@@ -78,11 +108,13 @@ describe("AutoFeedback", () => {
 
     wrap();
     fireEvent.click(await screen.findByRole("button", { name: "Core blown out" }));
-    await waitFor(() => expect(send).toHaveBeenCalledWith("core_clipped", undefined));
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith("core_clipped", undefined, undefined));
     await screen.findByText(/bright cores held back/);
 
     fireEvent.click(await screen.findByRole("button", { name: "Core looks flat" }));
-    await waitFor(() => expect(send).toHaveBeenCalledWith("core_flat", undefined));
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith("core_flat", undefined, undefined));
   });
 
   it("clusters the chips so the row reads as five questions, not eleven buttons", async () => {
