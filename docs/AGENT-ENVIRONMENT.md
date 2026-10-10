@@ -290,6 +290,27 @@ the repo.
 > against, and it presses **Reset** afterwards: the two taps write a real taste
 > into the scratch library's real profile.
 >
+> **A `_wait_job` 60 s timeout at `-n 8` is a load trap, not a red `main`**
+> *(added 2026-10-10, after it cost two runs a diagnosis)*. `tests/webapp/test_pipeline.py`'s helper
+> `_wait_job(client, job_id, timeout=60)` polls a real JobManager, and under eight parallel workers a
+> scan job can miss that window on a box that is otherwise fine. It has now surfaced on two different
+> tests — `test_an_ordinary_seestar_drop_says_nothing_about_its_skips` (2026-10-09) and
+> `test_a_scan_with_no_video_folders_says_nothing` (2026-10-10) — both of which pass **alone in
+> seconds** and are green in `main`'s CI. **Re-run the single test before calling `main` red**, and
+> check `main`'s own CI run while you are at it; it is the cheaper of the two answers.
+>
+> **…and since v0.492.58 it also prints the "why Auto shifted" note, before any
+> tap and after each one** *(added 2026-10-10)*. The toast above is **transient** —
+> `<Notifications />` auto-closes in 4 s — while the note is what the owner sees
+> every time they reopen that picture, so it is the claim worth reading and it was
+> the one surface of this row nothing printed. v0.492.57 is the bug that cost:
+> the note sat one line under a chip the row had just marked as unable to move the
+> picture and said *"Auto is running with less smoothing for you"* anyway. **Read
+> the two together** — a marked chip, its tap's sentence and the note must not
+> disagree about the same parameter. The pass also flags an **absent** note after
+> a tap as a finding, because the editor's **Reset** link lives inside it: no note
+> means no way to undo the taste the tap just taught.
+>
 > **The probe now prints that paragraph for you — read "what the Target page
 > SAYS"** *(added 2026-09-13 with v0.437.8)*. The shell block above is the
 > **server-side** half (the panel map and the health notes, straight off the

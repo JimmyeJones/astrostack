@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-10-10 (Builder) — the "why Auto shifted" note stops claiming a taste this picture has no room for, and the dogfood can finally read that note
+
+### v0.492.58 — 🟠 INFRA / dogfood instrument: `scripts/dogfood_editor.mjs` — the "why Auto shifted" note, before any tap and after each one
+
+**The collateral of v0.492.57, built in the same run, because v0.492.57 is a bug the Auto pass shipped
+three versions earlier could not have found.** That pass reads the chips, which of them the app marks as
+unable to move this picture, and the **toast** each tap produces — and nothing read the note. The toast is
+transient (`<Notifications />` auto-closes in 4 s); the note is what the owner sees **every time they
+reopen that picture**, and it is where the editor's **Reset** link is rendered. So the one line of this
+row that persists was the one line the instrument did not print.
+
+It now prints it three times per drive: once **before any tap** (a scratch library has taught Auto
+nothing, so a note here means the drive is reading a library an earlier pass taught and the taps start
+from a taste rather than from neutral), and once **after each of the two taps**, read after the settle
+because the note the tap earns comes from the run-scoped preferences read the chip row re-fetches. Read
+alongside the two readings already there, the three cannot disagree silently any more: a marked chip, its
+tap's sentence, and the note are all about the same parameter.
+
+One **finding**, not just a reading: an absent note after a tap is reported, because Reset lives inside
+it — no note means the taste the tap just taught cannot be undone.
+
+Text-based locators only, so `tests/test_dogfood_big_anchors.py`'s testid contract is untouched (it still
+passes, 9/9). Tooling only: no app code, no config, schema, on-disk, API or default change.
+
 ## 2026-10-10 (Builder) — the "why Auto shifted" note stops claiming a taste this picture has no room for
 
 ### v0.492.57 — 🟡 BUG FIX (PRIORITY 1, the editor): `presets.inert_bias_params`, `auto_prefs.describe_profile(inert_params=…)`, `auto_prefs.profile_of_biases`, `editor._run_inert_bias_params`

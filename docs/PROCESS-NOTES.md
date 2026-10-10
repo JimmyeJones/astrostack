@@ -1,5 +1,53 @@
 # Process notes & QA sweep records
 
+## 2026-10-10 (Builder) — "when a fix makes one surface honest, ask what else on that screen makes the same claim from different arithmetic"
+
+The method note behind **v0.492.57**, and the one worth carrying forward.
+
+Five runs had worked the Adaptive-Auto family by taking the previous fix as a lead, and each time the
+lead was a *sibling call site* — the fourth `classify_target` caller, then the fifth; the cue table read
+as a population, then the range table beside it. This run's lead was a different shape: not another
+caller of the same arithmetic, but **another sentence on the same screen making the same claim from
+arithmetic of its own**.
+
+v0.492.54 marks the chips the picture has no room for. v0.492.56 made the tap on a marked chip answer
+with its own sentence. One line below that row is the "why Auto shifted" note, and it was still saying
+*"Auto is running with less smoothing for you, based on your recent feedback."* — so after three versions
+of work the editor marked a chip as dead, answered its tap honestly, and then claimed the taste was in
+force, in that order, on one screen.
+
+**Why no amount of grepping the chips' own predicate would have found it: the two are different
+questions.** `inert_auto_cues` asks *"would one more step of this reach the recipe?"*; the note asserts
+*"Auto is running X for you"*, which is about the taste in force **now**. Neither implies the other, and
+the regression test says so out loud — three "too dark" taps leave the *cue* at `MAX_STEPS` (so the chip
+is marked) while the taste those taps built is in full force on the picture (so the note rightly claims
+it). A fix for one is not a fix for the other, and a shared helper would have been wrong.
+
+**Two smaller notes.**
+
+1. **The end-to-end predicate earns its keep a second time.** v0.492.54's record says comparing *emitted
+   op params* caught `min(…, _AUTO_DENOISE_MAX)`, which the `_PARAM_RANGE` analysis had missed because it
+   runs *after* the taste. The same clamp is the whole of this bug's noisy-stack mirror: the range clamp
+   alone calls that bias live (1.0 + 0.3 clipped to the 1.0 ceiling, still above the measured 1.0), and
+   only the op-param comparison sees both ends land on 0.6. **Price the faithful predicate before
+   reaching for the cheap one** — here it was free, because the knobs were already in hand.
+
+2. **A sentence that carries a control cannot be deleted, only narrowed.** The obvious fix — drop the
+   phrases that do nothing — would have made the note `None` on an all-stalled taste, and the editor's
+   **Reset** link is rendered *inside* that note. The honest version keeps every phrase and moves the
+   stalled ones into a clause. Worth a general rule: before removing a line of UI text, check what is
+   nested in it.
+
+**The dogfood could not have found this, and that was fixable** *(v0.492.58, same run)*. The Auto pass
+added one version earlier reads the chips, their marks and the **toast** each tap produces — and nothing
+read the note. It now prints the note before any tap and after each one, and flags an absent note after a
+tap as a finding (no note ⇒ no Reset ⇒ no way to undo the taste just taught). The general form is the one
+v0.492.55's record already states: **when "a probe could not have found this" appears again, ask what the
+tooling cannot reach.** Here the answer was not a surface that did not exist yet, but the *persistent*
+half of a surface the probe was already standing in front of — it read the toast, which is gone in 4 s,
+and not the line that is there every time the owner opens the picture.
+
+
 ## 2026-10-10 (Builder) — the `--mosaic --editor --big` dogfood for v0.492.54, and the probe it produced
 
 **The app: CLEAN. The new probe: two findings, both against itself, and then one against the app.**

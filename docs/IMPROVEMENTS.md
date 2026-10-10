@@ -3455,6 +3455,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.492.58 the editor dogfood reads the "why Auto shifted" note, before any tap and after each one (`scripts/dogfood_editor.mjs`) — the persistent half of the taste row the Auto pass was standing in front of
 - ✅ v0.492.57 the editor's "why Auto shifted" note stops claiming a taste this picture has no room for (`presets.inert_bias_params`, `auto_prefs.describe_profile(inert_params=…)`, `editor._run_inert_bias_params`) — found by reading v0.492.56's own fix as a lead
 - ✅ v0.492.56 a marked Auto feedback chip answers with its own sentence instead of the thanks (`AutoFeedback.tsx` `markedBefore`) — found by the dogfood's new Auto pass
 - ✅ v0.492.55 the editor dogfood clicks Auto-process and drives the Adaptive-Auto taste row (`scripts/dogfood_editor.mjs`)

@@ -23,7 +23,12 @@ at most six dict builds on the single `measured_auto_knobs` pass that GET alread
 removed** — every phrase survives, the stalled ones in a clause, because the taste is library-wide *and*
 because that note is the only place the editor's **Reset** link lives, so a note that went `None` would
 take a control with it. Frontend untouched: the note is a server-authored string and `describe_profile`
-stays its only author. The inbox was checked first — **four open, all previously acted-on and
+stays its only author.
+**And the collateral was built in the same run: v0.492.58.** v0.492.57 is a bug the Auto dogfood pass
+could not have found, and the reason is the same shape as last run's — it read the chips, their marks and
+the **toast**, and nothing read the note. The toast is gone in 4 s; the note is what the owner sees every
+time they reopen the picture, and it is where **Reset** is rendered. `dogfood_editor.mjs` now prints it
+before any tap and after each one, and flags an absent note as a finding. The inbox was checked first — **four open, all previously acted-on and
 owner-gated** — and there were **no open PRs**. Earlier notes stand below.)
 *Last edited 2026-10-10 (Builder, same run, tasks 2 and 3 — **the run's best finding came from building the
 instrument that could see the surface it had just changed. SHIPPED as v0.492.55 and v0.492.56.** Five runs

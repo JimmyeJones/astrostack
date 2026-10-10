@@ -432,6 +432,28 @@ if (!(await autoButton.count())) {
     console.log(`  [says] ${said}`);
   }
 
+  // The "why Auto shifted" note. Unlike the toast below it this one **persists**,
+  // which is why it is worth its own reading: a toast is gone in 4 s and the note
+  // is what the owner sees every time they open this picture. v0.492.57 is a bug
+  // this pass could not have found — the note sat one line under a chip the row
+  // had just marked as unable to move the picture and claimed *"Auto is running
+  // with less smoothing for you"* anyway, which is the same untruth the mark and
+  // the tap's own sentence exist to stop. It is also the only place the editor's
+  // **Reset** link lives, so an absent note is a missing control and not merely a
+  // missing sentence.
+  const whyAutoShifted = async () => {
+    const note = page.locator('div[class*="mantine-Alert-root"] p')
+      .filter({ hasText: /Auto (is running|would run) / }).first();
+    if (!(await note.count())) return "";
+    return (await note.innerText())
+      .replace(/\s+/g, " ").replace(/\s*Reset\s*$/, "").trim();
+  };
+  const noteBefore = await whyAutoShifted();
+  // A scratch library has taught Auto nothing, so there should be no note yet —
+  // printed either way, because a note here means the drive is reading a library
+  // an earlier pass taught and the taps below start from a taste, not neutral.
+  console.log(`  why Auto shifted, before any tap: ${noteBefore || "(nothing — neutral)"}`);
+
   const chips = page.locator('div[class*="mantine-Alert-root"] button[class*="mantine-Button-root"]');
   const n = await chips.count();
   if (!n) {
@@ -497,6 +519,17 @@ if (!(await autoButton.count())) {
       // ...and only now let the re-run the tap triggered finish, so the next
       // reading is taken against a settled preview.
       await settle();
+      // Read the persistent claim after the settle, not before it: the note the
+      // tap earns comes from the run-scoped preferences read the chip row
+      // re-fetches, and that is the request that knows which of the owner's
+      // tastes this picture can actually show.
+      const why = await whyAutoShifted();
+      console.log(`  why Auto shifted, after that tap: ${why || "NOTHING SAID"}`);
+      if (!why) {
+        findings++;
+        console.log(`  ! the taste "${label}" just taught has no note — and the`
+          + " Reset link lives inside it, so there is now no way to undo it");
+      }
       drain(`chip ${label}`);
       await page.screenshot({
         path: `${SHOTS}/editor-auto-chip-${kind}.png`, fullPage: true,
