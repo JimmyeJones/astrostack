@@ -812,6 +812,13 @@ class AutoPreferencesOut(BaseModel):
     the profile is unset — a never-configured library reads as neutral."""
 
     biases: dict[str, int] = {}
+    # On the **run-scoped** read this sentence is narrowed to the picture: a stored
+    # bias whose shift Auto's own clamps swallow on this image is moved into a
+    # clause that says so rather than claimed as something Auto *is* doing, because
+    # on the owner's deep clean mosaic it is not (``_run_inert_bias_params``). Every
+    # phrase is kept — the taste is library-wide, and this note is also where the
+    # Reset link lives. The library-wide GET and the feedback POST have no picture
+    # to measure, so they keep the plain claim, byte for byte.
     note: str | None = None
     neutral: bool = True
     # Recency decay (``auto_prefs.DECAY_DAYS``) quietly walks an unreinforced taste
@@ -853,6 +860,7 @@ def _auto_preferences_out(profile: dict,
                           object_type: str | None = None,
                           limit_note: str | None = None,
                           inert_cues: dict[str, str] | None = None,
+                          inert_params: tuple[str, ...] = (),
                           ) -> AutoPreferencesOut:
     """The profile as the editor needs it. With ``object_type`` (the archetype of
     the run being edited) the biases/note/neutral reflect that type's *effective*
@@ -860,12 +868,15 @@ def _auto_preferences_out(profile: dict,
     set — so the library-wide GET stays a global view while the per-run feedback
     response is scoped to the target the owner just judged.
 
-    ``limit_note`` and ``inert_cues`` are carried straight through — only the
-    feedback POST ever has the first and only the run-scoped GET the second, so
-    every other endpoint keeps its response byte-for-byte."""
+    ``limit_note``, ``inert_cues`` and ``inert_params`` are carried straight
+    through — only the feedback POST ever has the first and only the run-scoped GET
+    the other two, so every other endpoint keeps its response byte-for-byte.
+    ``inert_params`` does not become a field: it only narrows the ``note``, whose
+    wording ``describe_profile`` owns (see :func:`_run_inert_bias_params`)."""
     return AutoPreferencesOut(
         biases=auto_prefs_mod.effective_biases(profile, object_type),
-        note=auto_prefs_mod.describe_profile(profile, object_type),
+        note=auto_prefs_mod.describe_profile(profile, object_type,
+                                             inert_params=inert_params),
         neutral=auto_prefs_mod.is_neutral(profile, object_type),
         fade_note=auto_prefs_mod.fade_note(profile, object_type),
         limit_note=limit_note,
@@ -970,6 +981,28 @@ def _run_inert_cue_hints(knobs: dict[str, float] | None, profile: dict,
     return out
 
 
+def _run_inert_bias_params(knobs: dict[str, float] | None, profile: dict,
+                           object_type: str | None) -> tuple[str, ...]:
+    """The biased parameters whose stored taste cannot move this run's picture, for
+    the "why Auto shifted" note to say so instead of claiming them.
+
+    The note's sibling of :func:`_run_inert_cue_hints`, off the same single
+    ``measured_auto_knobs`` pass and with the same degradation: ``None`` knobs (an
+    unreadable proxy, or no run context) ⇒ ``()`` and the note is today's sentence
+    byte for byte. The predicate is ``presets.inert_bias_params`` — exact, because
+    it rebuilds the op params Auto emits with and without each bias through the
+    helpers ``auto_recipe`` is built from.
+
+    Only this endpoint has it, and that is the point: the note is a claim about a
+    *picture*, and the library-wide GET and the feedback POST have none (the POST
+    deliberately measures nothing, which is this feature's cost argument — the
+    run-scoped read the chips row re-fetches after every tap is what narrows the
+    note again, one request later)."""
+    if not knobs:
+        return ()
+    return presets_mod.inert_bias_params(knobs, profile, object_type)
+
+
 def _feedback_limit_note(cue: str, before: dict, after: dict,
                          object_type: str | None) -> str | None:
     """The plain-language line for a tap that cannot change the picture — or
@@ -1028,10 +1061,13 @@ def get_run_auto_preferences(safe: str, run_id: int,
 
     It also reports which feedback chips **cannot move this picture**
     (``inert_cues``), so the row can mark them before they are tapped instead of
-    answering the tap with an apology — see :func:`_run_inert_cue_hints`. That is
-    what this endpoint is for: it is the one request in the family that is about a
-    *picture* and runs before any tap, and the measurement it needs is the one it
-    is already making to classify the run.
+    answering the tap with an apology — see :func:`_run_inert_cue_hints` — and for
+    the same reason it narrows the ``note`` itself to the taste this picture can
+    actually show (:func:`_run_inert_bias_params`), because a chip marked as dead
+    under a note claiming Auto runs that way is the same untruth one line up. That
+    is what this endpoint is for: it is the one request in the family that is about
+    a *picture* and runs before any tap, and the measurement both answers need is
+    the one it is already making to classify the run.
 
     ``auto_crop`` is the editor's per-run border-trim override, as a query param
     because this is a GET (the two Auto endpoints take the same flag in a body).
@@ -1045,7 +1081,8 @@ def get_run_auto_preferences(safe: str, run_id: int,
         lib.close()
     return _auto_preferences_out(
         profile, object_type,
-        inert_cues=_run_inert_cue_hints(knobs, profile, object_type))
+        inert_cues=_run_inert_cue_hints(knobs, profile, object_type),
+        inert_params=_run_inert_bias_params(knobs, profile, object_type))
 
 
 class AutoFeedbackIn(BaseModel):

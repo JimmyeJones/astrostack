@@ -1,5 +1,88 @@
 # Shipped — the record
 
+## 2026-10-10 (Builder) — the "why Auto shifted" note stops claiming a taste this picture has no room for
+
+### v0.492.57 — 🟡 BUG FIX (PRIORITY 1, the editor): `presets.inert_bias_params`, `auto_prefs.describe_profile(inert_params=…)`, `auto_prefs.profile_of_biases`, `editor._run_inert_bias_params`
+
+**Found by reading v0.492.56's own fix as a lead**, which is the method the last five runs have paid for.
+v0.492.54 **marks** the Auto feedback chips the picture has no room for; v0.492.56 made the tap on a
+marked chip answer *"Auto is already smoothing as little as it will here. Tapping still teaches Auto for
+your other pictures."* instead of the thanks. **One line underneath that chips row sits the "why Auto
+shifted" note, and it was still saying the thing all three versions exist to stop:**
+
+```
+Auto is running with less smoothing for you, based on your recent feedback.
+```
+
+**Reproduced on the owner's own shape, both directions, against `origin/main`.** A deep clean stack
+(`noise_fraction` 0.000) measures `denoise_strength` **exactly 0.0**, so three "Over-smoothed" taps are
+clamped to the same 0.0 by `_nudge` and `auto_recipe` emits a **byte-identical op list** with the taste
+and without it — while the note claimed Auto was running that way. The mirror holds on a very noisy
+stack: the denoise is pinned at `_AUTO_DENOISE_MAX` and *"Auto is running with more noise reduction for
+you"* is equally false. Both were then pinned through the real endpoint — the run-scoped
+`…/editor/auto-preferences` GET — and **both fail before** in an `origin/main` worktree, the second
+printing the mixed sentence (*"a bit brighter **and** with more noise reduction"*) a reader has no way to
+split.
+
+**Why this was a separate bug and not covered by either predecessor.** The chips row and the note are two
+different questions about the same arithmetic. `inert_auto_cues` asks *"would one more step of this reach
+the recipe?"*; the note asserts *"Auto is running X for you"*, which is about **the taste in force now**.
+Neither implies the other, and the test pins exactly that: three "too dark" taps leave the *cue* at
+`MAX_STEPS` (so the chip is marked) while the taste those taps built is in full force on the picture (so
+the note rightly claims it).
+
+**The predicate is the same shape as its sibling's, and free for the same reason.**
+`presets.inert_bias_params(knobs, prefs, …)` rebuilds the **emitted op params** with and without each
+stored bias, through the same `auto_knob_values` / `auto_op_params` `auto_recipe` itself is built from —
+so it cannot drift from the recipe, and it catches the clamps that are not in `_PARAM_RANGE` at all
+(`min(…, _AUTO_DENOISE_MAX)` runs *after* the taste, which is the noisy case above and is exactly the
+mechanism the v0.492.54 analysis missed until the end-to-end predicate found it). The only image work is
+the single `measured_auto_knobs` pass the run-scoped GET already pays for to classify the run; the loop is
+one dict build per biased parameter, **at most six**. New `auto_prefs.profile_of_biases` is the "what if
+the taste were *this* instead?" stand-in it compares against — stamp-free and archetype-blind, and pinned
+as the same taste before anything was built on it.
+
+**Nothing is removed, and the note never disappears** (the UI rule, and a concrete control): every phrase
+survives, the stalled ones moved into a clause, because the taste is **library-wide** and will bite on the
+next noisier target — and because that note is the only place the editor's **Reset** link lives, so a note
+that went `None` would take a control with it. The three shapes:
+
+| the taste | the note |
+| --- | --- |
+| all of it in force | *"Auto is running a bit brighter for you, based on your recent feedback."* — byte for byte today's |
+| some in force | *"Auto is running a bit brighter for you, based on your recent feedback. It would also run with less smoothing, but it is already at its limit there on this picture — your other pictures will still get it."* |
+| none in force | *"Auto would run with less smoothing for you, based on your recent feedback, but it is already at its limit there on this picture — your other pictures will still get it."* |
+
+Both hedged shapes say the same two things the chips row's own legend already says, in the same words.
+The per-type archetype naming (*"… for your galaxies …"*) survives both, with a test, or the hedge would
+quietly widen the taste it describes.
+
+**The population was checked, not assumed.** `_BIAS_PHRASE` has exactly one consumer
+(`describe_profile`), `describe_profile` has exactly one caller (`editor._auto_preferences_out`), and the
+`biases` map the API also returns is typed in `client.ts` and rendered nowhere — so this note is the only
+surface in the app that claims what Auto's stored taste is doing, and there is no sibling to fix next run.
+
+**Scoped to the one request that has a picture.** Only the run-scoped GET passes `inert_params`
+(`editor._run_inert_bias_params`, beside `_run_inert_cue_hints` and degrading the same way — unreadable
+proxy ⇒ `()` ⇒ today's sentence). The library-wide GET keeps the plain claim, which is the right sentence
+*there*, and the feedback POST keeps it too because it deliberately measures nothing — that is this
+feature's whole cost argument, and the run-scoped read `AutoFeedback.tsx` re-fetches after every tap is
+what narrows the note again one request later.
+
+**Tests +14** (12 Python engine in `tests/test_auto_inert_cues.py`, 2 webapp), the two webapp ones **fail
+before** by running them against an `origin/main` worktree. The load-bearing one is
+`test_inert_bias_params_agree_with_the_recipe_itself` — four pictures × five stored tastes, asking
+`auto_recipe` directly with and without each bias, because three of the last five editor bugs in this area
+were a second copy of some arithmetic drifting from the first. `test_every_bias_phrase_reads_in_both_hedged_shapes`
+pins the whole `_BIAS_PHRASE` table through both new sentences, so a phrase added for the old one cannot
+read as nonsense in the new.
+
+**Frontend: no change at all** — the note is a server-authored string, and `describe_profile` stays its
+only author. **Upgrade-safe (§9):** no new field, no response-shape change, no config, schema, migration,
+on-disk or default change; `inert_params` omitted ⇒ the sentence every older response carried, byte for
+byte, and an older frontend renders the new string in the same `<Text>` it already renders.
+
+
 ## 2026-10-10 (Builder) — a marked Auto chip now answers with the truth, and the dogfood can see the taste row at all
 
 ### v0.492.56 — 🟡 BUG FIX (PRIORITY 1, the editor): `AutoFeedback.tsx` — `markedBefore`, `inert_cues` as the tap's answer

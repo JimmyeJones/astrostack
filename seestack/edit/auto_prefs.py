@@ -30,6 +30,7 @@ No webapp/DB imports — this is pure engine logic the webapp layer persists.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from typing import Any
 
 # --- the feedback vocabulary -------------------------------------------------
@@ -168,6 +169,23 @@ def empty_profile() -> dict[str, Any]:
     """A neutral profile — equivalent to no profile at all (today's Auto)."""
     return {"version": PROFILE_VERSION, "biases": {}, "counts": {},
             "stamps": {}, "by_type": {}}
+
+
+def profile_of_biases(biases: dict[str, int]) -> dict[str, Any]:
+    """A profile whose :func:`effective_biases` is exactly ``biases`` — for every
+    ``object_type`` and at any ``now``.
+
+    Not a store shape anybody persists: it is the "what if the taste were *this*
+    instead?" input a caller needs to ask what one of the stored biases is
+    actually doing to a picture. It carries no ``stamps`` (so recency decay never
+    touches it) and no ``by_type`` overrides (so the answer cannot depend on which
+    archetype it is read for), which is what makes it a faithful stand-in for a
+    taste the caller has already resolved — see
+    ``seestack.edit.presets.inert_bias_params``.
+    """
+    prof = empty_profile()
+    prof["biases"] = {param: int(step) for param, step in biases.items() if step}
+    return prof
 
 
 def _coerce_bucket(raw: Any, *, keep_zero: bool = False) -> dict[str, Any]:
@@ -527,9 +545,20 @@ def fade_note(profile: dict[str, Any] | None,
             "measured default unless you keep nudging it.")
 
 
+def _and_list(parts: list[str]) -> str:
+    """``[a]`` → "a"; ``[a, b]`` → "a and b"; more → "a, b, and c"."""
+    if len(parts) == 1:
+        return parts[0]
+    if len(parts) == 2:
+        return f"{parts[0]} and {parts[1]}"
+    return f"{', '.join(parts[:-1])}, and {parts[-1]}"
+
+
 def describe_profile(profile: dict[str, Any] | None,
                      object_type: str | None = None,
-                     now: float | None = None) -> str | None:
+                     now: float | None = None,
+                     inert_params: Iterable[str] | None = None,
+                     ) -> str | None:
     """A one-line, plain-language "why" note for the UI, or ``None`` when the
     profile is neutral for ``object_type``. e.g. "Auto is running a bit brighter
     and softer for you, based on your recent feedback." — so the owner always sees
@@ -538,23 +567,36 @@ def describe_profile(profile: dict[str, Any] | None,
     When ``object_type`` is given and it carries its own per-type override, the note
     names the archetype ("… for your galaxies …") so the owner understands the
     taste is scoped to that kind of target. A bias that recency decay has faded
-    away is already gone from the note — see :func:`fade_note`, which says so."""
+    away is already gone from the note — see :func:`fade_note`, which says so.
+
+    ``inert_params`` are the biased parameters that **cannot change the picture the
+    owner is looking at** — the taste is stored and real, but the value Auto
+    measured for *this* image already sits at the end of that parameter's
+    ``_PARAM_RANGE`` (or past an op's emit gate), so the shift is clamped away.
+    Those phrases move into a clause that says so instead of being claimed as
+    something Auto *is* doing, because on the owner's own shape they are not: a
+    deep clean stack measures ``denoise_strength`` 0.0, so a "with less smoothing"
+    taste changes nothing there, and the editor said it was running that way
+    anyway — one line under the chips row that marks the same limit (v0.492.54)
+    and the tap that reports it (v0.492.56). **Nothing is dropped**: the taste is
+    library-wide and will bite on the next noisier target, and the note is the only
+    place the Reset link lives, so a note that vanished would take a control with
+    it. Which parameters those are is the caller's question, not this one's — it
+    needs the knobs Auto measured from the picture
+    (``presets.inert_bias_params``). Omitted ⇒ today's sentence, byte for byte."""
     biases = effective_biases(profile, object_type, now)
     if not biases:
         return None
-    parts = [
-        _BIAS_PHRASE[(param, step > 0)]
-        for param, step in biases.items()
-        if (param, step > 0) in _BIAS_PHRASE
-    ]
-    if not parts:
+    dead = set(inert_params or ())
+    live: list[str] = []
+    stalled: list[str] = []
+    for param, step in biases.items():
+        phrase = _BIAS_PHRASE.get((param, step > 0))
+        if phrase is None:
+            continue
+        (stalled if param in dead else live).append(phrase)
+    if not live and not stalled:
         return None
-    if len(parts) == 1:
-        shifted = parts[0]
-    elif len(parts) == 2:
-        shifted = f"{parts[0]} and {parts[1]}"
-    else:
-        shifted = f"{', '.join(parts[:-1])}, and {parts[-1]}"
     # Name the archetype only when this type actually carries its own bias override
     # (otherwise it's the global taste, which applies to every kind of target — a
     # bucket that walked back to neutral keeps only its counts, not a bias).
@@ -564,4 +606,16 @@ def describe_profile(profile: dict[str, Any] | None,
     # falls back to the global taste, so naming the archetype would be a lie.
     if bucket and _bucket_biases(bucket, _now(now)):
         for_whom = f"for your {_TYPE_PLURAL.get(object_type, object_type)}"
-    return f"Auto is running {shifted} {for_whom}, based on your recent feedback."
+    if not stalled:
+        return (f"Auto is running {_and_list(live)} {for_whom}, "
+                "based on your recent feedback.")
+    # Both halves of the honest version say the same two things the chips row's
+    # own legend says: it will not move *this* picture, and the taste still counts
+    # everywhere else.
+    limit = ("but it is already at its limit there on this picture — your other "
+             "pictures will still get it.")
+    if not live:
+        return (f"Auto would run {_and_list(stalled)} {for_whom}, "
+                f"based on your recent feedback, {limit}")
+    return (f"Auto is running {_and_list(live)} {for_whom}, based on your recent "
+            f"feedback. It would also run {_and_list(stalled)}, {limit}")

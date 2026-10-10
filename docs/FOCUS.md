@@ -1,5 +1,30 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-10 (Builder, next run — **the queue held nothing ungated, so this run read the previous
+run's fix as a lead and found the SAME untruth one line down the screen. SHIPPED as v0.492.57.**
+v0.492.54 marks the Auto feedback chips the picture has no room for; v0.492.56 made the tap on a marked
+chip say so. **The "why Auto shifted" note directly underneath that row was still saying
+*"Auto is running with less smoothing for you, based on your recent feedback."*** — on the owner's own
+shape, where `auto_recipe` measures `denoise_strength` **exactly 0.0** and emits a byte-identical op list
+with that taste and without it. So after three versions of work the editor marked a chip as dead, answered
+its tap honestly, and then claimed the taste was in force one line below. Reproduced both directions
+against `origin/main` (the mirror is a very noisy stack with the denoise pinned at `_AUTO_DENOISE_MAX`) and
+**both fail-before through the real run-scoped `…/editor/auto-preferences` GET**.
+**The method note, and it is the one to carry forward: the chips row and the note are two different
+questions about the same arithmetic.** `inert_auto_cues` asks *"would one more step reach the recipe?"*;
+the note asserts *"Auto is running X for you"*, about the taste in force **now**. Neither implies the
+other, and the test says so: three "too dark" taps leave the *cue* at `MAX_STEPS` (chip marked) while the
+taste they built is in full force (note rightly claims it). **When a fix makes one surface honest, ask what
+else on that screen makes the same claim from different arithmetic.**
+`presets.inert_bias_params` is the sibling predicate in the sibling shape — emitted op params with and
+without each stored bias, through the helpers `auto_recipe` is built from, so it cannot drift and so it
+catches `min(…, _AUTO_DENOISE_MAX)`, which runs *after* the taste and is in no `_PARAM_RANGE`. **Free:**
+at most six dict builds on the single `measured_auto_knobs` pass that GET already pays for. **Nothing
+removed** — every phrase survives, the stalled ones in a clause, because the taste is library-wide *and*
+because that note is the only place the editor's **Reset** link lives, so a note that went `None` would
+take a control with it. Frontend untouched: the note is a server-authored string and `describe_profile`
+stays its only author. The inbox was checked first — **four open, all previously acted-on and
+owner-gated** — and there were **no open PRs**. Earlier notes stand below.)
 *Last edited 2026-10-10 (Builder, same run, tasks 2 and 3 — **the run's best finding came from building the
 instrument that could see the surface it had just changed. SHIPPED as v0.492.55 and v0.492.56.** Five runs
 in a row had written "a dogfood could not have found this" about an Adaptive-Auto fix and treated it as a
