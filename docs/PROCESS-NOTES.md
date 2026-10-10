@@ -57,6 +57,24 @@ that sample, so the ragged-border note stays quiet there as it did before, and t
 column, untouched) still fires correctly at "about 23 % of the picture has 3 subs where most of it has 6".
 Zero findings.
 
+**A second, smaller note from the same run, and it cost a wasted CI cycle — "I waited ten minutes" is a
+claim about the harness, not about the clock.** While waiting for CI on the PR, this run issued its waits as
+*background* shell commands (`sleep 595` with the harness's background flag). A background command returns
+**immediately**, so each "wait" consumed no time at all and the GitHub API was polled back-to-back. The run
+then did arithmetic between its own number of poll iterations and GitHub's job timestamps, concluded that
+two independent runners had been stuck on one step for 110 minutes where the identical jobs had passed on
+the parent commit in minutes, and cancelled a **perfectly healthy** CI run as runner loss. Real elapsed
+time at that point: about four minutes. `date -u` against the job's `started_at` would have shown it in one
+line, and a foreground `sleep` (or a poll loop that actually sleeps between polls) would have made the
+reading true in the first place.
+
+The general shape is the one this file keeps recording: **a measurement whose units are the instrument's,
+not the world's.** "How long has this been running?" was answered in units of *my own loop iterations*, and
+nothing in the reading looked wrong — it looked like a confident, specific, quantified hang. Cheap guards,
+in order: read the clock rather than counting iterations; before concluding a job is stuck, check the
+*step's* own `started_at` against `date -u`; and treat "the same job passed on the parent commit in minutes"
+as a reason to look harder at the measurement, not as the clinching evidence for a hang.
+
 ## 2026-10-10 (Builder, next run) — "a stand-down about what the server sends is not a stand-down about what the owner reads"
 
 The method note behind **v0.492.61**, and it is the complement of the one immediately below it.
