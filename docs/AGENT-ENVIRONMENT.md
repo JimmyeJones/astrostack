@@ -302,6 +302,18 @@ the repo.
 > which is the one symptom here a screenshot can never show — the v0.492.52 bug,
 > whose own record says a dogfood could not have found it.
 >
+> **The drive runs from a COPY, so it reaches the checkout via `ASTROSTACK_REPO`**
+> *(added 2026-10-10 with v0.492.60)*. `agent-dogfood.sh` does
+> `cp scripts/dogfood_editor.mjs "$PW_DIR/editor.mjs"` and runs `node editor.mjs`
+> from the scratch dir, so **`import.meta.url` is not in the repo** and any path
+> relative to the script resolves inside `/tmp/astrostack-dogfood/pw`. v0.492.59
+> read the cue table that way, found nothing, and degraded quietly — which made
+> the validation re-run look identical to a fix that had never been written. If a
+> drive needs a repo file, take the root from `ASTROSTACK_REPO` (the shell script
+> exports it on all three editor invocations) and **report the failure as a
+> finding**: a silent fallback in a finder is indistinguishable from the finder
+> working.
+>
 > **A `_wait_job` 60 s timeout at `-n 8` is a load trap, not a red `main`**
 > *(added 2026-10-10, after it cost two runs a diagnosis)*. `tests/webapp/test_pipeline.py`'s helper
 > `_wait_job(client, job_id, timeout=60)` polls a real JobManager, and under eight parallel workers a

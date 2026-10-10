@@ -40,19 +40,31 @@ const BUNDLED = [
 // contract between `AUTO_FEEDBACK_CHIPS` and `auto_prefs._CUE_STEP`, so this
 // drive cannot drift from either. The file carries trailing commas (it is read
 // by Python and by vitest, both of which tolerate them), so strip those before
-// `JSON.parse`. If it cannot be read — run from a different checkout, say — fall
-// back to the old behaviour of treating every button in the alert as a chip, by
-// leaving the list empty and letting the caller skip the filter.
-const EXPECTED_CHIP_LABELS = (() => {
-  const here = new URL(".", import.meta.url).pathname;
-  const file = `${here}../frontend/src/components/editor/autoFeedbackCues.cases.json`;
-  try {
-    const raw = readFileSync(file, "utf8").replace(/,(\s*[\]}])/g, "$1");
-    return JSON.parse(raw).cases.map((c) => c.label);
-  } catch (e) {
-    console.log(`  (could not read the shared cue table: ${e.message})`);
-    return [];
+// `JSON.parse`.
+//
+// **`agent-dogfood.sh` copies this script into the scratch dir and runs it from
+// there**, so `import.meta.url` is NOT in the checkout — the first version of
+// this looked up `../frontend/...` beside the copy, found nothing, and fell back
+// silently, which made a validation re-run look exactly like a fix that had
+// never been written. So: the repo root arrives as `ASTROSTACK_REPO` (the script
+// knows it), with the script's own directory and the cwd as fallbacks for a
+// direct `node scripts/dogfood_editor.mjs` run.
+const CUE_TABLE = "frontend/src/components/editor/autoFeedbackCues.cases.json";
+const [EXPECTED_CHIP_LABELS, CUE_TABLE_ERROR] = (() => {
+  const roots = [
+    process.env.ASTROSTACK_REPO,
+    `${new URL(".", import.meta.url).pathname}..`,
+    process.cwd(),
+  ].filter(Boolean);
+  for (const root of roots) {
+    try {
+      const raw = readFileSync(`${root}/${CUE_TABLE}`, "utf8")
+        .replace(/,(\s*[\]}])/g, "$1");
+      const labels = JSON.parse(raw).cases.map((c) => c.label);
+      if (labels.length) return [labels, null];
+    } catch { /* try the next root */ }
   }
+  return [[], `none of [${roots.join(", ")}] holds ${CUE_TABLE}`];
 })();
 
 const BASE = process.env.BASE_URL || "http://127.0.0.1:8811";
@@ -499,6 +511,15 @@ if (!(await autoButton.count())) {
     // **missing** chip, which is the one symptom in this family a probe that only
     // photographs the screen can never see (the v0.492.52 class).
     const expected = EXPECTED_CHIP_LABELS;
+    if (CUE_TABLE_ERROR) {
+      // Loud, and a finding, because the alternative is what happened the first
+      // time: the drive quietly treated every button as a chip and the run read
+      // as though the filter below had never been written. An instrument that
+      // cannot tell a chip from a suggestion has to say so.
+      findings++;
+      console.log(`  ! cannot read the shared cue table, so every button in the`
+        + ` alert is being treated as a feedback chip: ${CUE_TABLE_ERROR}`);
+    }
     const marked = [];
     const live = [];
     const others = [];

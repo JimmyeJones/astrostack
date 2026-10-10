@@ -74,6 +74,20 @@ a dogfood could not have found it. (3) **Fence each probe interaction.** A throw
 reading after it plus the Reset that hands the library back; the same throw now costs one line. The
 general form: *in a finder, the blast radius of one bad step should be one step.*
 
+**And the fix for that did not work on its first try, which is the fourth variant of one failure mode**
+*(v0.492.60)*. `agent-dogfood.sh` **copies** the drive into the scratch dir, so `import.meta.url` is not
+in the checkout; the relative lookup for the cue table found nothing, the `catch` returned an empty label
+list, and an empty list meant "skip the filter" — the old behaviour exactly. The validation re-run
+reproduced all three false findings and the dead mosaic drive, and read as though nothing had been
+written. **The lesson is not the path.** Four times in one run, this family failed by *reporting* rather
+than by crashing: the note that claimed a taste it did not have (v0.492.57), the probe that read the
+transient toast and not the persistent line (v0.492.58), the selector that tapped a suggestion and called
+it a chip (v0.492.59), and now a degradation that looked like success. **So: a finder may not fall back
+silently.** Failing to read the table is now itself a finding, and a repo file a drive needs arrives
+through `ASTROSTACK_REPO` rather than through a path relative to a script that gets copied. The fence from
+v0.492.59 is the one thing the bad re-run positively confirmed — the throw cost one reported line where
+the first run had cost the whole pass.
+
 
 ## 2026-10-10 (Builder) — the `--mosaic --editor --big` dogfood for v0.492.54, and the probe it produced
 

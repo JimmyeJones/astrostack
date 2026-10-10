@@ -1430,6 +1430,7 @@ if [ "$DO_PROBE" = 1 ] || [ "$DO_EDITOR" = 1 ]; then
         echo "-- driving the editor (adding every op; this takes a few minutes)"
         cp "$REPO/scripts/dogfood_editor.mjs" "$PW_DIR/editor.mjs"
         (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS" TARGET_SAFE="$SAFE" \
+           ASTROSTACK_REPO="$REPO" \
            TARGET_RUN_ID="$RUN_ID" node editor.mjs) || echo "warn: editor drive failed"
       else
         echo "-- --editor: no stacked target to edit, skipping"
@@ -1451,6 +1452,7 @@ if [ "$DO_PROBE" = 1 ] || [ "$DO_EDITOR" = 1 ]; then
         echo "-- driving the editor on the MOSAIC run (the one that matters, §1)"
         cp "$REPO/scripts/dogfood_editor.mjs" "$PW_DIR/editor.mjs"
         (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS/mosaic" \
+           ASTROSTACK_REPO="$REPO" \
            TARGET_SAFE="$MOSAIC_SAFE" TARGET_RUN_ID="$MOSAIC_RUN" node editor.mjs) \
           || echo "warn: mosaic editor drive failed"
       fi
@@ -1472,6 +1474,7 @@ if [ "$DO_PROBE" = 1 ] || [ "$DO_EDITOR" = 1 ]; then
         echo "-- driving the editor on the FULL-SIZE run (the only decimated preview)"
         cp "$REPO/scripts/dogfood_editor.mjs" "$PW_DIR/editor.mjs"
         (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS/big" \
+           ASTROSTACK_REPO="$REPO" \
            TARGET_SAFE="$BIG_SAFE" TARGET_RUN_ID="$BIG_RUN" node editor.mjs) \
           || echo "warn: full-size editor drive failed"
       fi

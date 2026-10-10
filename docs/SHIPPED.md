@@ -2,6 +2,29 @@
 
 ## 2026-10-10 (Builder) — the "why Auto shifted" note stops claiming a taste this picture has no room for, and the dogfood can finally read that note (and stops tapping a button that is not a chip)
 
+### v0.492.60 — 🟠 INFRA / dogfood instrument: the cue table is found from `ASTROSTACK_REPO`, and failing to find it is a finding
+
+**v0.492.59 did not work, and the way it failed is the point.** `agent-dogfood.sh` **copies** the drive
+into the scratch dir and runs it from there, so `import.meta.url` is not in the checkout: the lookup for
+`../frontend/src/components/editor/autoFeedbackCues.cases.json` found nothing, the `catch` returned an
+empty label list, and the empty list meant *"skip the filter"* — i.e. exactly the old behaviour. The
+validation re-run therefore reproduced all three false findings and the dead mosaic drive, and read as
+though the fix had never been written.
+
+So two changes, the second of which is the general lesson. (1) The repo root now travels as
+`ASTROSTACK_REPO` from the shell script that knows it, with the script's own directory and the cwd as
+fallbacks for a direct `node scripts/dogfood_editor.mjs` run — verified resolving 12 labels from a copy of
+the script in a scratch dir. (2) **A finder may not fall back silently.** Failing to read the table is now
+itself a reported finding (*"cannot read the shared cue table, so every button in the alert is being
+treated as a feedback chip"*), because a quiet degradation in an instrument is indistinguishable from the
+instrument working — which is the same failure mode, now in its third variant this run.
+
+The fence from v0.492.59 did work, and the re-run proves it: the marked-chip tap threw
+(`locator.click: Timeout 30000ms exceeded`) and cost **one reported line** instead of the whole pass,
+where the first run died outright.
+
+Tooling only: no app code, no config, schema, on-disk, API or default change.
+
 ### v0.492.59 — 🟠 INFRA / dogfood instrument: `scripts/dogfood_editor.mjs` — the chips come from the shared cue table, not from "every button in the alert"
 
 **Found by v0.492.58 on its first run**, on the 2×2 mosaic sample, which is the second time in three
