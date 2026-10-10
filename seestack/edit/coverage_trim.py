@@ -64,6 +64,16 @@ PANEL_LEVEL_MIN_PIXELS = 256
 # can only keep *more* of the picture. The worst case of this constant is leaving
 # fringe in, never fading a panel away.
 #
+# **That monotonicity was the safety argument and it was not true until D1's fifth
+# instalment** (added 2026-10-10, measured, not reasoned). With the plateau level
+# unbounded above, lowering this fraction could make the search *find* a window it
+# had previously declined on — at the overlap band, because the window test's
+# tolerance is relative — so the level went **up**: over 20 seeds of the owner's
+# dithered 2x2 shape, 13 violated monotonicity somewhere between 0.08 and 0.03 and
+# one of them doubled between 0.08 and 0.06. Clamping the plateau to the median
+# restores it on all 20, which is why the clamp is what makes this constant's own
+# reasoning hold rather than merely sounding like it does.
+#
 # Measured on the integer frame-count maps the mask actually reads (the
 # `_framecov.fits` sibling — *not* the weighted coverage), over 147 fully tiled
 # rasters (3x3 … 12x8, panel depths spanning 3-15 up to 50-500 subs, three seeds
@@ -280,6 +290,24 @@ def _continuum_level(vals: np.ndarray, peak: float) -> float:
     its covered depths. ``vals`` is already sorted ascending; ``peak`` is its last
     value, returned only if the median somehow is not positive.
 
+    **It is also the ceiling on a plateau the search *does* find — the fifth
+    instalment of D1, and the one the fourth left standing.** See
+    :func:`panel_coverage_level` for the mechanism; the short version is that the
+    plateau test's tolerance is *relative*, so its bandwidth grows with depth, and
+    on a continuum the only place a substantial share of the canvas fits inside one
+    bandwidth is high up — at the panel **overlap** band. The fourth instalment
+    only reached the canvases where no window anywhere is tight; where one is, the
+    pre-D1 answer came back unchanged. Measured over 20 seeds of the owner's own
+    dithered 2x2 shape: **7 of 20** took the plateau branch at the production
+    :data:`PANEL_LEVEL_MIN_FRAC` and returned **2.0x-2.3x the median**, i.e. the
+    overlap band, under a ``coverage_shares_version`` stamp certifying it was gone.
+    As a ceiling the median is the same statement it is as a fall-through: one
+    panel of a mosaic whose panels tile the canvas cannot be deeper than the depth
+    half the canvas sits at or below, because everything *under* a panel's own
+    depth is fringe. So a plateau at or below the median is kept as it always was
+    (every blocky fixture in the suite, and a 2x2 at 50 % overlap where the median
+    is 2x a panel, is byte-identical), and one above it is the overlap band.
+
     This is the fourth instalment of D1, and it is the one that was hiding behind
     the *word* "declines". :func:`panel_coverage_level` looked for the lowest level
     a real share of the canvas sits at and, finding none, returned the peak — on
@@ -366,6 +394,18 @@ def panel_coverage_level(covered: np.ndarray,
     pixels) still returns the peak, because there the function genuinely has no
     opinion to offer.
 
+    **The median is also the ceiling on a plateau this function does find**, and
+    that is the fifth instalment of D1 (the fourth is :func:`_continuum_level`'s
+    own). ``tol`` is *relative*, so the window test's bandwidth is ``tol`` × the
+    depth it is testing: a continuum of roughly even density therefore satisfies
+    "``need`` pixels inside one bandwidth" **only high up**, where the bandwidth is
+    widest — at the band where two panels overlap. The lowest *qualifying* window
+    is then the overlap band rather than one panel, which is D1's own bug arriving
+    through the branch the fourth instalment did not touch: measured over 20 seeds
+    of the owner's dithered 2x2 shape, 7 returned 2.0x-2.3x the median. A plateau
+    at or below the median is kept exactly as it was, so every blocky mosaic and
+    every single field in this suite answers to the digit as before.
+
     ``covered`` is the finite, strictly-positive coverage values (any shape; it is
     flattened). Returns ``None`` when there are none. **It can only ever return a
     value at or below the peak**, so it can only ever lower the threshold and keep
@@ -380,6 +420,10 @@ def panel_coverage_level(covered: np.ndarray,
     need = max(PANEL_LEVEL_MIN_PIXELS, int(np.ceil(min_frac * n)))
     if need > n:
         return peak
+    # The median covered depth, which is this function's answer twice over: the
+    # fall-through when no plateau exists, and the **ceiling** on one that does.
+    # Both say the same thing — see `_continuum_level`.
+    ceiling = _continuum_level(vals, peak)
     # A plateau is `need` consecutive sorted values that all sit within `tol` of
     # each other — i.e. that many pixels share one level. Vectorised: compare each
     # window's ends. The lowest such window is the thinnest real panel.
@@ -391,13 +435,18 @@ def panel_coverage_level(covered: np.ndarray,
         # between: its depths are a continuum, which is what a *dithered* mosaic
         # canvas is. The peak is the worst answer available there, and it is the
         # pre-D1 rule — see `_continuum_level`.
-        return _continuum_level(vals, peak)
+        return ceiling
     start = int(tight[0])
     # Take the level as the median of everything within `tol` of that window's
     # foot, so jitter around the plateau doesn't bias it toward either end.
     stop = int(np.searchsorted(vals, vals[start] * (1.0 + tol), side="right"))
     level = float(np.median(vals[start:max(stop, start + 1)]))
-    return min(level, peak) if level > 0 else peak
+    # …and never deeper than the median. `tol` is relative, so the window test's
+    # bandwidth grows with depth and a continuum can present a "plateau" at the
+    # panel-overlap band while holding none at one panel — the fifth instalment of
+    # D1. A plateau at or below the median is untouched, which is every blocky
+    # shape this suite measures.
+    return min(level, ceiling) if level > 0 else peak
 
 
 def _panel_reference(coverage: np.ndarray,

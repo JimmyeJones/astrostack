@@ -1,5 +1,51 @@
 # Process notes & QA sweep records
 
+## 2026-10-10 (Builder, next run) — "a fix that enters one branch has not fixed the rule"
+
+The method note behind **v0.492.63**, and it is the previous entry's own sequel: the note one screen down
+says a fall-through is a rule, and this run found that the *other* branch of the same `if` was wrong on the
+same input, for a reason nobody had asked about.
+
+v0.492.62 asked **"what does `panel_coverage_level` do when it finds no plateau?"** and answered it well.
+The question it did not ask is **"and what does it *find* on that input?"** The search's window test is
+`hi - lo <= tol * hi` — a *relative* tolerance, so the band it tests is `tol` × the depth it is testing at.
+On a continuum of roughly even density, "8 % of the canvas inside one band" is therefore satisfiable **only
+high up**, where the band is widest: at the depth where two panels overlap. So a dithered canvas does not
+merely fall through — **half the time it mis-fires**, qualifies at ~2× one panel, and returns D1's original
+answer from the branch the fix had just vouched for. Measured per seed on the same fixture: 13 of 20 decline,
+**7 present a phantom plateau** at 2.0–2.3× the median.
+
+**The general rule: when a fix adds a branch for a shape, check what the other branch does on that same
+shape.** A fall-through and a false positive are the same bug wearing different clothes, and they are
+reached by the same inputs — so a version stamp certifying the first was removed certifies the second too.
+The tell, and it is cheap: the fix's own fixture was *one seed*. A fixture whose branch depends on a random
+draw has to be exercised across the draw, or it is a claim about one canvas dressed as a claim about a shape.
+
+**A second, smaller rule fell out, and it is about where a safety argument lives.** `MASK_LEVEL_MIN_FRAC`
+justifies lowering the plateau floor for the all-sky mask with *"`panel_coverage_level` is monotone in this
+fraction … a lower level can only keep more of the picture"* — reasoned, never asserted, and **false**: a
+lower floor can make the search find a phantom it had declined on, so 13 of the 20 seeds went *up* somewhere
+between 0.08 and 0.03. The consequence was real and silent: the mask was **stricter** than the trim on
+exactly the owner's shape, fading photographed sky off "My map" and out of the `skyarea` tally. **A comment
+that argues monotonicity, boundedness or idempotence is a test that has not been written yet** — this one is
+four lines and it would have caught the fifth instalment without the observer report.
+
+**Dogfood record — `--mosaic --editor`, CLEAN, 0 findings, and it is a control and cannot be anything else.**
+Both probed targets "nothing overflowing, no console errors", editor drive clean, all 21 ops re-rendering,
+the Auto taste row driven end to end (live chip, marked chip, note, reset). The mosaic's Auto still reads
+**"8 % of ragged mosaic edge to trim"** — the same figure the last five runs recorded. That is the expected
+result, not reassurance: `webapp/sample_data.py`'s mosaic carries one fixed pointing error *per panel*, so
+its panel interiors are flat, it finds an honest plateau, and **the dogfood tool cannot reach this class of
+bug** — the same limitation the previous run recorded for the fourth instalment, and for the same reason the
+fixtures could not. Worth re-reading before a future run spends time there: the reachable gap is a *dithered*
+sample shape (per-sub, per-night re-framing on a union canvas two or three frames across), not another probe.
+
+**Kickoff vs AGENTS.md §10, unchanged and recorded for the record only:** this run's harness attribution
+reminder again asked for a `Co-Authored-By: Claude Opus 5` trailer and a `Claude-Session:` line. §10 forbids
+a model identifier in a commit and §8 asks for "the repo's `Co-Authored-By:` trailer", and AGENTS.md wins, so
+the commits use `Co-Authored-By: Claude <noreply@anthropic.com>` and omit both. Same resolution as the four
+earlier sightings below.
+
 ## 2026-10-10 (Builder, next run) — "a fall-through is a rule, and 'no opinion' is a claim about the input"
 
 The method note behind **v0.492.62**, and the fourth sighting of the class `tests/shapes.py` was created for.

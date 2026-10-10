@@ -1,5 +1,35 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-10 (Builder, next run — **the queue held nothing ungated for an eighth run, so this run
+read the previous run's fix as a lead and found the SAME bug in the branch that fix did not enter.
+SHIPPED as v0.492.63.**
+v0.492.62 made `panel_coverage_level` stop handing the peak back on a canvas whose depths are a continuum —
+through the branch where **no window anywhere** is tight. Its window test is `hi - lo <= tol * hi`, so the
+band it tests is `tol` × *the depth it tests at*: on a continuum of even density the only place 8 % of the
+canvas fits inside one band is **high up**, where the band is widest, i.e. where two panels overlap. There
+the search *qualifies*, the new fall-through is never reached, and the function returns ~2× one panel —
+**D1's original bug through the other branch, under the `coverage_shares_version = 3` stamp certifying it
+was gone.** Reproduced per seed on the same fixture: of 20 seeds of the owner's dithered 2×2 shape,
+**13 decline and 7 present a phantom plateau** at 2.0–2.3× the median. On those seven the ragged-border note
+fired at **0.313–0.352** (bar 0.05) against 0.184–0.210 after, and on three of them the "clean, even
+rectangle" the Trim offered kept ~80 % of the canvas with **22–24 % of it still ragged** (→ 0.8–2.0 %).
+The fix is the median as a **ceiling** as well as a fall-through — one panel of a mosaic whose panels tile
+the canvas cannot be deeper than the depth half the canvas sits at or below. `COVERAGE_SHARES_VERSION` → 4
+so the 203 rows stamped 3 heal off the `_framecov.fits` already on disk.
+**Free collateral worth knowing:** `MASK_LEVEL_MIN_FRAC`'s own safety argument — *"`panel_coverage_level` is
+monotone in this fraction"* — was **false**, 13 of the 20 seeds violating it between 0.08 and 0.03, which
+made the all-sky mask *stricter* than the trim on his shape and faded real photographed sky out of the
+`skyarea` tally. The cap restores it on all 20 and a test now asserts it.
+**The method note, and it is the one to carry forward: a fix that enters one branch has not fixed the rule.**
+v0.492.62 asked what the function does when it finds nothing. The unasked question was *what it finds on that
+input* — a scale-dependent test does not merely decline on a continuum, it **mis-fires**. **When a fix adds a
+branch for a shape, check what the other branch does on that same shape.** `tests/shapes.py` gains its sixth
+entry (*a continuum with no plateau vs one that presents a phantom*) and `assert_depths_are_a_continuum` is
+tightened, because with a cap in place "the reference is the median" is true on both branches and the old
+assertion would have let a fixture claim one while exercising the other. Tests **+6, fail-before 5** (the sixth is the fixture's own shape claim, which must hold either way; the other 69 tests in the three files pass under the revert, which is the control).
+The inbox was checked first — **four open, all previously acted-on and owner-gated** — and there were **no
+open PRs**. Earlier notes stand below.)*
+
 *Last edited 2026-10-10 (Builder, next run — **the queue held nothing ungated for a seventh run, and this
 time the work came from the INBOX: a new observer issue, verified against the code and reproduced.
 SHIPPED as v0.492.62.**

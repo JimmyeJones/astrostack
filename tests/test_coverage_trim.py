@@ -25,11 +25,13 @@ from tests.shapes import (
     assert_has_a_ragged_outline,
     assert_panels_thinner_than_the_reference,
     assert_reference_is_the_thinnest_panel,
+    assert_the_plateau_search_finds_a_phantom,
     assert_weighted,
     describe_coverage,
     level_share,
     panel_level,
     peak_over_panel,
+    plateau_search_level,
 )
 
 
@@ -202,6 +204,11 @@ def test_panel_reference_is_one_panel_not_the_overlap_peak():
         # Unequal panel depths and no overlap at all: the reference is the
         # *thinner* panel, which is what stops it being discarded whole.
         ("1x2 400/150", _tiled_mosaic(2, 1, overlap=0.0, depths=[400, 150]), 150.0),
+        # The control for D1's *fifth* instalment, and the one that proves its
+        # ceiling is a ceiling rather than a second rule: at 50 % overlap in both
+        # axes only 4/9 of this canvas is single-panel, so the median covered
+        # depth is **2x** one panel and the clamp has to stay out of the way.
+        ("2x2 @50%", _tiled_mosaic(2, 2, overlap=0.50), 30.0),
     ]:
         assert cov.max() > want, name  # the peak really is higher, i.e. the bug had room
         assert panel_coverage_level(cov[cov > 0]) == want, name
@@ -864,6 +871,123 @@ def test_the_blocky_mosaics_and_the_single_field_are_untouched():
     field = _single_field_with_fringe()
     assert panel_coverage_level(field[field > 0]) == field.max()
     assert largest_covered_rect(field) == (0.02, 0.02, 0.98, 0.98)
+
+
+# --- D1, fifth instalment: a continuum can present a PHANTOM plateau ----------
+#
+# The fourth instalment (above) gave `panel_coverage_level` an answer for a map
+# whose depths hold no plateau — but only through the branch where **no window
+# anywhere** is tight. The window test's tolerance is *relative*
+# (`hi - lo <= tol * hi`), so the band it tests is `tol` x the depth it tests at:
+# on a continuum of roughly even density the only place `PANEL_LEVEL_MIN_FRAC` of
+# the canvas fits inside one band is high up, where the band is widest — the band
+# where two panels **overlap**. The search then qualifies there, the fall-through
+# is never reached, and the function returns ~2x one panel: D1's own bug, through
+# the other branch, under a `coverage_shares_version` stamp certifying it was gone.
+#
+# Measured over 20 seeds of the dithered fixture above: 13 decline (the fourth
+# instalment's case) and **7 present a phantom plateau** at 2.0x-2.3x the median.
+# The fix is the median as a *ceiling* as well as a fall-through — one panel of a
+# mosaic whose panels tile the canvas cannot be deeper than the depth half the
+# canvas sits at or below, because everything under a panel's own depth is fringe.
+
+_PHANTOM_SEEDS = (1, 7, 9, 11, 12, 14, 18)
+
+
+def test_the_phantom_plateau_fixture_really_is_the_shape_its_name_claims():
+    """It vouches for: a dithered canvas (a continuum, same generator as above)
+    whose plateau search nevertheless **finds** a window, and finds it well above
+    one panel — so the fourth instalment's fall-through is never reached here and
+    the clamp is the only thing standing between this map and the pre-D1 answer.
+
+    Stated per seed, because which branch a dithered canvas takes is a property of
+    the canvas and not of the generator: the same fixture declines on seed 5.
+    """
+    for seed in _PHANTOM_SEEDS:
+        cov = _dithered_mosaic(seed=seed)
+        what = f"dithered 2x2 seed {seed}"
+        assert_the_plateau_search_finds_a_phantom(cov, ratio=1.9, what=what)
+        assert_has_a_ragged_outline(cov, what=what)
+        # The gap D1 lives in, stated against the median rather than against the
+        # production reference: a fixture's claim about its own shape must hold
+        # whether or not the rule under test is right.
+        covered = cov[cov > 0]
+        assert float(covered.max()) > 3.0 * float(np.median(covered)), (
+            describe_coverage(cov))
+    # ...and the fourth instalment's own fixture is the other case, which is the
+    # distinction this section exists for.
+    assert plateau_search_level(_dithered_mosaic()) is None
+
+
+def test_a_phantom_plateau_is_not_one_panels_depth():
+    """Fail-before: 309, 270, 280, 279, 268, 275 and 257 — the overlap band, i.e.
+    the pre-D1 rule arriving through the branch the fourth instalment left. Each is
+    2.0x-2.3x the median, on a map where the trim is meant to keep one panel."""
+    for seed in _PHANTOM_SEEDS:
+        cov = _dithered_mosaic(seed=seed)
+        covered = cov[cov > 0]
+        median = float(np.median(covered))
+        level = panel_coverage_level(covered)
+        assert level is not None
+        assert level == pytest.approx(median), describe_coverage(cov)
+        # Stated against the phantom rather than as a constant, so this cannot
+        # pass by the fixture drifting into the declining case.
+        assert level < 0.6 * plateau_search_level(cov), describe_coverage(cov)
+
+
+def test_the_phantom_plateaus_trim_delivers_the_even_rectangle_it_promises():
+    """The user-visible half, the same one #1109 turned on: the card says "Trim
+    border gives a clean, even rectangle", so the rectangle must be one by the
+    note's own yardstick.
+
+    Fail-before, per seed: **7.5 / 8.9 / 10.5 / 11.1 / 23.3 / 24.2 / 22.4 %** of
+    what the trim kept was still thin — on seeds 12, 14 and 18 it kept ~80 % of the
+    canvas and left a quarter of it ragged, because a threshold set at half the
+    *overlap* band keeps nothing coherent and the ladder then gives up and keeps
+    almost everything. After: 0.8-2.0 %.
+    """
+    for seed in _PHANTOM_SEEDS:
+        cov = _dithered_mosaic(seed=seed)
+        reference = panel_coverage_level(cov[cov > 0])
+        rect = largest_covered_rect(cov)
+        assert rect is not None, describe_coverage(cov)
+        h, w = cov.shape
+        inside = cov[int(rect[1] * h):int(rect[3] * h),
+                     int(rect[0] * w):int(rect[2] * w)]
+        covered_inside = inside[inside > 0]
+        assert covered_inside.size > 0
+        thin_inside = float(np.mean(covered_inside < 0.25 * reference))
+        assert thin_inside < 0.05, (
+            f"seed {seed}: the trim keeps {100 * _rect_area(rect):.1f}% of the "
+            f"canvas and {100 * thin_inside:.1f}% of it is still thin -- "
+            f"{describe_coverage(cov)}")
+
+
+def test_the_reference_is_monotone_in_how_substantial_a_level_must_be():
+    """The safety argument `MASK_LEVEL_MIN_FRAC` is written on, asserted rather
+    than reasoned — because it was false.
+
+    That constant lowers `min_frac` from 0.08 to 0.03 for the mask and justifies
+    it with "`panel_coverage_level` is monotone in this fraction … a lower level
+    can only keep *more* of the picture". Unbounded above, it was not: a lower
+    fraction can make the search **find** a phantom window it had declined on, so
+    the level went up. Fail-before: 13 of these 20 seeds violate it somewhere
+    between 0.08 and 0.03, seed 1 doubling from 145 to 305 between 0.08 and 0.06 —
+    i.e. the mask was *stricter* than the trim on exactly the owner's shape, and
+    faded real sky off the all-sky map and out of the photographed-area tally.
+    """
+    fracs = (PANEL_LEVEL_MIN_FRAC, 0.06, 0.05, 0.04, MASK_LEVEL_MIN_FRAC)
+    assert fracs == tuple(sorted(fracs, reverse=True))
+    for seed in range(1, 21):
+        cov = _dithered_mosaic(seed=seed)
+        covered = cov[cov > 0]
+        levels = [panel_coverage_level(covered, min_frac=f) for f in fracs]
+        for i in range(len(fracs) - 1):
+            (f_hi, hi), (f_lo, lo) = (fracs[i], levels[i]), (fracs[i + 1], levels[i + 1])
+            assert lo <= hi + 1e-9, (
+                f"seed {seed}: asking for a less substantial level ({f_lo} vs "
+                f"{f_hi}) RAISED the reference, {hi:.2f} -> {lo:.2f} -- "
+                f"{describe_coverage(cov)}")
 
 
 def test_a_map_too_small_to_have_a_distribution_still_keeps_the_peak():

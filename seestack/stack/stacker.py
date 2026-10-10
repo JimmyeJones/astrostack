@@ -2375,7 +2375,20 @@ COVERAGE_THIN_RATIO = 0.25
 #      canvas. See :func:`seestack.edit.coverage_trim._continuum_level`.
 #      Byte-identical on a single field, and on any mosaic that has a plateau
 #      (74 of the owner's 75) — only the fall-through changed.
-COVERAGE_SHARES_VERSION = 3
+#   4  …and the *reference* a plateau search does find is now capped at the same
+#      median. Rule 3 reached a dithered canvas only through the branch where no
+#      window anywhere is tight; the window test's tolerance is relative, so on a
+#      continuum a window can qualify at the panel **overlap** band, and there the
+#      pre-D1 answer came back under a stamp saying rule 3 had removed it.
+#      Measured over 20 seeds of the owner's dithered 2x2 shape: 7 took that
+#      branch and read the share against 2.0x-2.3x one panel — 0.313-0.352 against
+#      a 0.05 bar, where the capped reference gives 0.184-0.210, and the Trim they
+#      offered left 7.5-24.2 % of what it kept still thin. Byte-identical on a
+#      single field and on every blocky mosaic (including a 2x2 at 50 % overlap,
+#      where the median is 2x a panel and the cap must stay out of the way) — only
+#      a plateau found *above* the median moved. See
+#      :func:`seestack.edit.coverage_trim._continuum_level`.
+COVERAGE_SHARES_VERSION = 4
 
 # How many coverage pixels the panel-depth estimate reads. Panel depth is a
 # *distribution* statistic — where the plateaus sit — and a regular stride over a

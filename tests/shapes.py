@@ -42,6 +42,17 @@ deliberately small — these are the distinctions that actually bit:
   are dithered and re-framed night to night, so his depths are a **continuum**
   with no plateau anywhere, and that is the one shape where the function's
   fall-through decides the answer (see :func:`assert_depths_are_a_continuum`).
+* **a continuum with no plateau vs one that presents a PHANTOM plateau** — and
+  "dithered" is not one case but two, which is how D1 came back a fifth time. The
+  plateau search's tolerance is *relative*, so the window it tests is ``tol`` ×
+  the depth it tests at: a continuum of roughly even density satisfies it only
+  high up, where the window is widest, i.e. at the band where two panels
+  **overlap**. So one dithered canvas declines outright (the fourth instalment's
+  case) and the next hands back a level at 2x a panel — the pre-D1 answer — from
+  the *other* branch. Over 20 seeds of one dithered 2x2 shape, 13 declined and
+  **7 presented a phantom plateau**. A fixture that says "dithered" must therefore
+  say which of the two it is: :func:`assert_depths_are_a_continuum` or
+  :func:`assert_the_plateau_search_finds_a_phantom`.
 
 Nothing here changes a fixture that works for what it was built for. The
 deliverable is the assertion that says what each one **is**.
@@ -51,7 +62,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from seestack.edit.coverage_trim import panel_coverage_level
+from seestack.edit.coverage_trim import (
+    PANEL_LEVEL_MIN_FRAC,
+    PANEL_LEVEL_MIN_PIXELS,
+    PANEL_LEVEL_TOL,
+    panel_coverage_level,
+)
 
 
 def covered_values(cov) -> np.ndarray:
@@ -173,18 +189,88 @@ def assert_depths_are_a_continuum(cov, *, what: str = "fixture") -> None:
 
     Stated in the units the rule measures in, like :func:`panel_level`: the claim
     is that the *search* declines, not that some hand-rolled histogram is flat.
+
+    **And it asserts the search, not its answer** (tightened with D1's fifth
+    instalment). ``panel_coverage_level`` now *clamps* a plateau to the median, so
+    "the reference is the median" is true both when the search declines and when
+    it found a phantom plateau and was overruled — i.e. the old form of this
+    assertion would pass on either, and a fixture claiming the fall-through could
+    in fact be exercising the clamp. :func:`plateau_search_level` is what
+    distinguishes them.
     """
     v = covered_values(cov)
     assert v.size >= 256, (
         f"{what}: {describe_coverage(cov)} -- only {v.size} covered pixels, so "
         f"`panel_coverage_level` declines on sample size (PANEL_LEVEL_MIN_PIXELS) "
         f"rather than on the shape, and this fixture is not the case it claims")
+    found = plateau_search_level(cov)
+    assert found is None, (
+        f"{what}: {describe_coverage(cov)} -- the plateau search found a level at "
+        f"{found:.2f}, so this fixture exercises the clamp rather than the "
+        f"fall-through and cannot vouch for the no-plateau path")
     level = panel_level(cov)
     median = float(np.median(v))
     assert level == pytest_approx(median), (
         f"{what}: {describe_coverage(cov)} -- the reference is {level}, not the "
         f"median {median:.2f}, so a plateau *was* found and this fixture cannot "
         f"vouch for the no-plateau path")
+
+
+def plateau_search_level(cov) -> float | None:
+    """The level ``panel_coverage_level``'s plateau *search* lands on, **before**
+    the median ceiling is applied — or ``None`` when no window anywhere is tight
+    and the search declines.
+
+    The one thing in this module that mirrors production arithmetic rather than
+    calling it, and deliberately: the whole point is to see which **branch** a
+    fixture takes, which the clamped answer no longer reveals (a phantom plateau
+    and an honest decline both come back as the median). It reads the module's own
+    constants, so a fixture's claim still moves with the rule it is about; only the
+    four lines of the window test are restated. If those four lines ever change,
+    this is the place that has to follow — which is cheaper than a fixture that
+    silently stops exercising the case its name claims.
+    """
+    vals = np.sort(covered_values(cov))
+    n = vals.size
+    if n == 0:
+        return None
+    need = max(PANEL_LEVEL_MIN_PIXELS, int(np.ceil(PANEL_LEVEL_MIN_FRAC * n)))
+    if need > n:
+        return None
+    lo = vals[: n - need + 1]
+    hi = vals[need - 1:]
+    tight = np.flatnonzero(hi - lo <= PANEL_LEVEL_TOL * np.maximum(hi, 1e-12))
+    if tight.size == 0:
+        return None
+    start = int(tight[0])
+    stop = int(np.searchsorted(vals, vals[start] * (1.0 + PANEL_LEVEL_TOL),
+                               side="right"))
+    return float(np.median(vals[start:max(stop, start + 1)]))
+
+
+def assert_the_plateau_search_finds_a_phantom(cov, *, ratio: float = 1.5,
+                                              what: str = "fixture") -> None:
+    """The *other* dithered claim: this canvas's depths are a continuum, and the
+    plateau search nevertheless finds a window — above one panel, at the band
+    where panels overlap, because its tolerance is relative to the depth it tests.
+
+    This is the shape D1's fifth instalment is about, and the one no fixture in the
+    suite had: the fourth instalment's fall-through is never reached here, so a map
+    like this took the pre-D1 answer under a stamp certifying it was gone.
+    ``ratio`` is how far above the median the phantom must sit for the fixture to
+    be worth anything — at 1.0 the bug would have no room to be wrong.
+    """
+    v = covered_values(cov)
+    median = float(np.median(v))
+    found = plateau_search_level(cov)
+    assert found is not None, (
+        f"{what}: {describe_coverage(cov)} -- the plateau search declines here, so "
+        f"this is the fall-through case (assert_depths_are_a_continuum), not the "
+        f"phantom-plateau one")
+    assert found >= ratio * median, (
+        f"{what}: {describe_coverage(cov)} -- the search lands at {found:.2f}, only "
+        f"{found / max(median, 1e-12):.2f}x the median {median:.2f}, so the clamp "
+        f"has too little to do for this fixture to pin it")
 
 
 def uncovered_share(cov) -> float:

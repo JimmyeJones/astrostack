@@ -368,6 +368,53 @@ def test_a_dithered_mosaic_stamped_version_2_is_re_derived(tmp_path):
         proj.close()
 
 
+def test_a_phantom_plateau_mosaic_stamped_version_3_is_re_derived(tmp_path):
+    """Upgrade safety for D1's fifth instalment, and the same shape of heal one
+    version on: a dithered canvas whose plateau search *found* a window at the
+    overlap band read its share against ~2x one panel under a version-3 stamp
+    certifying the dithered case had been fixed. Bumping to 4 is what makes those
+    rows heal off the ``_framecov.fits`` already beside the master.
+
+    Fails before the bump: ``stale`` is False at version 3, so the overstated
+    share survives untouched.
+    """
+    from seestack.coverage_backfill import backfill_coverage_shares
+    from seestack.stack.stacker import COVERAGE_SHARES_VERSION
+    from tests.shapes import plateau_search_level
+    from tests.test_coverage_trim import _dithered_mosaic
+
+    assert COVERAGE_SHARES_VERSION >= 4
+    cov = _dithered_mosaic(seed=11)
+    fits_path = tmp_path / "out" / "ngc6960.fits"
+    _write_map(fits_path.with_name("ngc6960_framecov.fits"), cov)
+
+    # What the row holds today: the share measured against the phantom plateau,
+    # stamped version 3 — i.e. the rule that was meant to have removed it.
+    phantom = plateau_search_level(cov)
+    n = int(np.count_nonzero(cov > 0))
+    served = int(np.count_nonzero((cov > 0) & (cov < 0.25 * phantom))) / n
+    assert served > 0.30, served          # the note's bar is 0.05
+
+    proj, run_id = _project_with_run(
+        tmp_path, _run_for(cov, fits_path=str(fits_path), is_mosaic=True,
+                           coverage_max=float(cov[cov > 0].max()),
+                           coverage_thin_frac=served,
+                           coverage_shares_version=3))
+    try:
+        row = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert row.coverage_shares_version == 3
+        backfill_coverage_shares(proj, row)
+
+        assert row.coverage_thin_frac == pytest.approx(coverage_thin_fraction(cov))
+        assert row.coverage_thin_frac < 0.7 * served
+        assert row.coverage_shares_version == COVERAGE_SHARES_VERSION
+        again = next(r for r in proj.iter_stack_runs() if r.id == run_id)
+        assert again.coverage_thin_frac == pytest.approx(row.coverage_thin_frac)
+        assert again.coverage_shares_version == COVERAGE_SHARES_VERSION
+    finally:
+        proj.close()
+
+
 def test_a_single_field_stamped_under_the_old_rule_never_reopens_its_map(
         tmp_path, monkeypatch):
     """The rule that changed is the *reference*, and on a single field the old
