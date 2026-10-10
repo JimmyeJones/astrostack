@@ -47,6 +47,16 @@ why in exactly those words. So: a helper that collapses "no answer" and "the lar
 the same number will eventually be handed the case that distinguishes them, and it will not crash — it will
 **report**. That is the fourth time in six runs that a finder failed by reporting rather than by failing.
 
+**The validating dogfood pass (`--mosaic --editor`, after the fix): CLEAN, and as a control it is exactly as
+informative as the paragraph above predicts.** Both page sweeps clean ("nothing overflowing, no console
+errors"), both editor drives clean across all 21 ops and both Auto passes, and the number that matters:
+the mosaic's Auto still reads ***"8 % of ragged mosaic edge to trim"*** — the same figure the 2026-10-10
+Scout sweep and the three runs before it recorded. That is the fix's central claim ("byte-identical on every
+blocky mosaic") confirmed by driving it rather than by arithmetic. The health panel reports `thin=False` on
+that sample, so the ragged-border note stays quiet there as it did before, and the *grain* note (a different
+column, untouched) still fires correctly at "about 23 % of the picture has 3 subs where most of it has 6".
+Zero findings.
+
 ## 2026-10-10 (Builder, next run) — "a stand-down about what the server sends is not a stand-down about what the owner reads"
 
 The method note behind **v0.492.61**, and it is the complement of the one immediately below it.

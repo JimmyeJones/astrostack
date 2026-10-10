@@ -26,7 +26,15 @@ inputs the fix was written for.** This is the fourth finding of the class `tests
 that file gains its fifth entry (**blocky vs dithered panels**) and `assert_depths_are_a_continuum`.
 **One pre-existing test bug fell out**: a safety-property test scored `None` (= "keep the whole picture")
 as 0.0 and so read a rule that had become *maximally* safe as a violation; its sibling one screen down
-already had it right, in those words. Tests **+6, fail-before 4**. The inbox was checked first — **five
+already had it right, in those words. Tests **+7, fail-before 4**.
+**Validated by a `--mosaic --editor` dogfood after the fix: CLEAN, zero findings**, and the mosaic's Auto
+still reads *"8 % of ragged mosaic edge to trim"* — the same figure the last four runs recorded, which is
+the "byte-identical on every blocky mosaic" claim confirmed by *driving* it. The pass is a **control**
+here and cannot be anything else: `webapp/sample_data.py`'s mosaic carries one fixed pointing error *per
+panel*, not per sub, so its panel interiors are flat and it finds a plateau — **the dogfood tool cannot
+reach this class of bug either**, for exactly the reason the fixtures could not. Worth knowing before a
+future run spends time on it; details in [`PROCESS-NOTES.md`](PROCESS-NOTES.md).
+The inbox was checked first — **five
 open; #1109 was the new one and is now acted on, the other four previously acted-on and owner-gated** —
 and there were **no open PRs**. Earlier notes stand below.)*
 
