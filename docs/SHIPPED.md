@@ -1,5 +1,119 @@
 # Shipped — the record
 
+## 2026-10-10 (Builder, branch `claude/jolly-bardeen-wkpk92`) — the shape the tooling could not reach
+
+### v0.493.0 — 🟠 INFRA / instrument (PRIORITY 1 adjacent — it is the editor's own blind spot): a sixth sample shape whose coverage depths are a **continuum**, so the owner's actual mosaic canvas can finally be put in front of a browser and a test
+
+*(`webapp/sample_data._DitherPlan`, `_dithered_layout`, `_MosaicPanel.sub_origin` / `sub_date`,
+`SAMPLE_DITHERED_TARGET_NAME`, `SampleStatusOut.dithered_*`, `scripts/agent-dogfood.sh --dithered`,
+`tests/test_dogfood_dithered_anchors.py`.)*
+
+**Why, and it is the narrowest "why" in this file: the repo wrote the gap down twice and then worked around
+it twice.** v0.492.62 and v0.492.63 are D1's fourth and fifth instalments, both on *dithered* mosaic
+canvases, and both had to be reproduced on hand-rolled fixtures. v0.492.62's own write-up says why, in as
+many words:
+
+> `webapp/sample_data.py`'s mosaic carries one fixed pointing error **per panel**, not per sub, so its panel
+> interiors are flat and it finds a plateau — **the dogfood tool cannot reach this class of bug either**, for
+> exactly the reason the fixtures could not. Worth knowing before a future run spends time on it.
+
+Every mosaic in this repo — all three samples and every fixture — points **every sub of a panel at exactly
+the same place**. So each panel interior is flat, one depth holds a large share of the canvas, and
+`coverage_trim.panel_coverage_level` always finds its plateau. The owner's mosaics are the same handful of
+pointings revisited across many nights, each sub dithered and each night re-framed, on a union canvas two or
+three frame-widths across — so every panel edge lands somewhere new on every visit and the depth climbs in
+many small steps. That is the shape both findings live on, and nothing in the repo could produce it.
+
+**What shipped.** `shape="dithered"`: the small mosaic's sensor, grid and overlap exactly — it differs from
+it in *pointing discipline alone*, scale being `--big`'s question, so its canvas stays deliberately under the
+editor's 1500 px proxy cap — revisited over **eleven nights**, the whole raster re-framed between visits
+(±30 % of a frame) and each sub dithered within one (±10 %), two subs a panel a visit, with the fourth panel
+clouded out after the sixth night so the depth is uneven the way the blocky demos' 6/6/6/3 is. **78 subs, a
+1212×784 canvas, 7.2 % of it uncovered.** A new `_DitherPlan` carries the discipline and `_MosaicPanel` gains
+`sub_origins` / `sub_dates` with per-sub accessors; `None` is the blocky discipline, which is why both
+existing demos' generated pixels are **byte-identical** (their digest test is unchanged and passes).
+
+**One stack, both dithered branches — which is the instrument's whole value.** Measured through a real
+`run_stack`, not modelled:
+
+| map | plateau search | median | verdict |
+|---|---|---|---|
+| honest frame counts (`_framecov.fits`) | **21.0** | 11.0 | **phantom plateau, 1.91× the median** — D1's *fifth* instalment's own case |
+| weighted coverage | **declines** | 10.4 | **continuum, no tight window anywhere** — the *fourth*'s |
+
+No fixture in the suite held either. And the control is measured too: neither blocky sample can make either
+claim — both land their search at **0.5× the median** (3.0 against 6.0), which is the pre-existing "finds a
+level below one panel" case.
+
+**The surfaces it reaches are live on it, not self-hidden.** The stacker records `is_mosaic = True` (this
+shape is exactly the one `coverage_is_mosaic`'s documented false negative misses, so every mosaic surface in
+the app depends on the persisted flag, and it holds); `coverage_thin_frac` is **0.137** against a 0.05 bar, so
+the ragged-border note fires; `coverage_median_depth` is 11 and `coverage_max` 40; and Auto offers a trim.
+
+**Read that trim against this shape, not against the 15 % bar, and the flag says so on every pass.**
+AGENTS.md §1's "a trim above ~15 % of the canvas is a bug" is about a canvas a rectangle can nearly fill. An
+eleven-night re-framed raster has a real apron, and the honest ceiling is what the *coverage* allows:
+measured, the largest all-covered rectangle is **0.761** of this canvas, Auto keeps **0.697** — i.e. **91.6 %
+of what is available**, against a `TRIM_KEEP_RATIO` of 0.8 — and **inside what it keeps nothing is uncovered
+and 2.7 % is thin, against 13.7 % over the whole canvas**. So the rectangle it offers really is the clean one,
+the 30.3 % cut is honest, and **the number to watch is a move from 30.3 %**, not the bar. The flag prints
+exactly that sentence rather than crying wolf, and the end-to-end test asserts the *ratio* (kept ≥
+`TRIM_KEEP_RATIO` × ceiling) plus "nothing uncovered inside the rectangle" rather than the raw cut.
+
+**One real omission found and fixed in the same change, by a test:** `remove_sample` enumerates the shapes it
+sweeps, so the new demo was created by "Try it" and then left in the library for good by "remove it any time
+from the Dashboard". Its test fails before the one-line fix and passes after.
+
+**Chosen, not tuned.** Both spreads are measured: over 50 seeds of this layout **48 present a phantom at
+1.5–1.9× the median and one declines outright**, so the shape reproduces both dithered cases rather than one
+seed's accident. Dropping either spread back toward the blocky demos' (a 2 % sub dither, a 10 % re-frame)
+puts the canvas straight back on plateaus — every seed finds a level, and most find it *at* the median. The 78
+offsets are drawn from a fixed seed rather than written out, the same determinism the star catalogue relies
+on, so the sample is the same picture on every install and in every test run.
+
+**Upgrade-safe (§9).** Nothing an existing install runs changes: three additive, defaulted response fields on
+`/api/sample` (an older frontend ignores them; an older backend omitting them reads as "not loaded", which is
+right), one new value in the `shape` literal, a sixth reserved target name, and no config, DB-schema,
+on-disk, default or existing-API-shape change. The demo exists only after someone asks for it and is swept by
+the same one remove. `webapp/static/` untouched; no frontend change at all.
+
+**It found something on its first pass, which is the claim `tests/shapes.py` made for itself and is why this
+kind of work is worth a version.** On a `--mosaic --dithered` pass the dithered run's **panel depth map draws
+nothing at all**, and "How's my stack?" swaps the blocky run's per-panel sentence (*"part of this mosaic is
+thinner than the rest … it evens out as you keep shooting"*, with a **where**) for a border one (*"about 14 %
+of this picture is a thin edge … Trim border"*) — on a canvas whose fourth panel genuinely holds 12 subs
+against 22. Traced to `pointings.pointing_groups`: it separates panels by single-linkage at
+`PANEL_LINK_DIST_DEG` (0.25°), the 78 pointings chain into **one** cluster, it returns `None`, and by its own
+contract every per-panel caller then uses the target-wide population.
+
+**That is this sample's own limit, not a bug in the app, and the difference is measured rather than asserted.**
+The demo's sensor is 480×320 at 5″/px — a **0.667° frame** stepping panels 0.547°, a 2.2× margin on the link
+distance — where a real S30's 2.1° field steps 1.72°, a 6.9× one. So it under-represents that margin by
+**3.1×**, exactly the ratio of the two frames, and at this size the two properties do not overlap at all
+(night re-frame ±2 % of a frame → 4 clusters and a 2×2 map but a plateau; ±20 % → the continuum and one
+cluster; nothing in between gives both). The coverage shape is what nothing else in the repo can produce, so
+that is what the demo is for, and `--mosaic` is one flag away for the pointing half — it is the designed
+control. The limit is **asserted by a test** and explained inline in the flag's own output, so the silence
+reads as designed rather than as a regression; and the question it raises about a *real* install — what
+happens when nightly re-framing exceeds 0.25°, which on his optics needs about **0.42°**, 20 % of his field —
+is filed as a LEAD under "Bugs (fix these first)" with the boundary table and the one measurement the observer
+can supply. `PANEL_LINK_DIST_DEG` is deliberately **not** touched: it is the shared gate behind QC grading,
+photometric normalisation and quality weighting, and widening it merges genuine panels.
+
+**Tests (+13, and the fail-before is the instrument's own claim).** `tests/webapp/test_sample_data.py` +6
+(every sub points somewhere new and the blocky demo still does not; the layout is the phantom case, with a
+ragged outline; the end-to-end stack, asserting `is_mosaic`, both maps' branches, the live thin note and the
+trim's ratio; a sixth separate target swept by one remove — **fails before the `remove_sample` fix**; a fixed
+sky refused a centre; the API load) and `tests/test_dogfood_dithered_anchors.py` +6 (flag off by default and
+parsed and in the `-h` header; the shape literal the script POSTs is one the model accepts; the status key is
+one the response answers and is defaulted; all four surfaces it reads are served; the keys it takes off
+`/stack-runs` are ones that response really carries — it deliberately does *not* reach for
+`coverage_thin_frac` / `uncovered_frac` / `is_mosaic` there, because those are not on it; and the sample
+really has no honest plateau, **with the blocky sample asserted as the control**). And +1 pinning the limit above (the
+dithered pointings do *not* split and the map is `None`, with the blocky sample asserted as the control that
+does and draws a 2×2). `tests/shapes.py`'s module docstring now points at the sample, since that file is the
+vocabulary a future run reads first.
+
 ## 2026-10-10 (Builder, branch `claude/jolly-bardeen-ycrjq2`) — a dry queue, a dogfood pass, and the one thing it found
 
 ### v0.492.64 — 🟡 BUG FIX (PRIORITY 3, friendliness): the Calibration page's self-hiding "Repair them" button stops having its label clipped on phone width

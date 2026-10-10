@@ -852,3 +852,257 @@ def test_the_seeded_pair_is_what_the_closing_endpoint_then_names(client):
     assert names == [sample_data.SAMPLE_CLOSING_SHALLOW_TARGET_NAME,
                      sample_data.SAMPLE_CLOSING_DEEP_TARGET_NAME]
     assert plan["targets"][0]["total_exposure_s"] < plan["targets"][1]["total_exposure_s"]
+
+
+# --- the dithered mosaic demo (shape="dithered") ----------------------------
+#
+# What this sample exists for, in one sentence: it is the only data this repo can
+# produce whose per-pixel coverage depths are a **continuum**, which is the shape
+# the owner's own mosaics have (the same handful of pointings revisited across
+# many nights, every sub dithered, every night re-framed) and the shape D1's
+# fourth and fifth instalments live on. Every other mosaic here — fixture and
+# sample alike — is *blocky*: one fixed pointing per panel, flat interiors, a
+# plateau always found. See `tests/shapes.py`'s module docstring for the
+# vocabulary, and `webapp.sample_data.SAMPLE_DITHERED_TARGET_NAME` for why the
+# dogfood tool could not reach this class of bug until it existed.
+
+
+def test_the_dithered_sample_points_every_sub_somewhere_new(lib):
+    """The one structural difference from the blocky demos, stated as a property
+    rather than as a parameter: a panel's subs do not share a footprint.
+
+    This is *why* its depths are a continuum, so it is worth asserting directly —
+    a future change that collapsed the per-sub pointing back onto the panel would
+    leave every number below still plausible and the sample worthless.
+    """
+    blocky, _ = sample_data._mosaic_layout(sample_data._MOSAIC_SMALL)
+    for panel in blocky:
+        assert panel.sub_origins is None, (
+            "the blocky demo's panels must keep one pointing each")
+        assert panel.sub_origin(panel.n_subs - 1) == panel.origin
+
+    cfg = sample_data._MOSAIC_DITHERED
+    panels, window = sample_data._mosaic_layout(cfg)
+    assert [panel.n_subs for panel in panels] == [22, 22, 22, 12]
+    # Uneven depth, like the blocky demos' 6/6/6/3 — the fourth panel was
+    # clouded out after the sixth night (AGENTS.md §1).
+    assert len({panel.n_subs for panel in panels}) > 1
+    for panel in panels:
+        assert panel.sub_origins is not None
+        # Nearly every sub lands somewhere new; an exact collision is allowed
+        # (the offsets are integers), a *systematic* one is not.
+        assert len(set(panel.sub_origins)) >= panel.n_subs - 1
+        assert panel.sub_origin(0) == panel.origin
+    # Eleven distinct nights on the clock, and every DATE-OBS a real timestamp.
+    import datetime as _dt
+
+    stamps = [panel.sub_date(sub) for panel in panels for sub in range(panel.n_subs)]
+    assert len(stamps) == 78
+    assert len({s[:10] for s in stamps}) == sample_data._DITHERED_NIGHTS
+    for stamp in stamps:
+        _dt.datetime.fromisoformat(stamp)  # raises if the clock went invalid
+    # The canvas stays UNDER the editor's proxy cap on purpose: this demo differs
+    # from the small mosaic in pointing discipline alone, and scale is `big`'s
+    # question (its own test next door pins that the other way round).
+    from seestack.edit.proxy import PROXY_MAX_PX
+
+    assert max(window) <= PROXY_MAX_PX
+
+
+def test_the_dithered_layout_is_the_continuum_no_blocky_fixture_can_be(lib):
+    """The claim the sample is *for*, asserted on the footprint geometry alone —
+    no FITS, no stack, so it costs nothing and runs on every suite.
+
+    Stated in the units the rule measures in (`tests/shapes`), and stated as the
+    **branch** rather than the answer: since v0.492.63 `panel_coverage_level`
+    clamps a plateau to the median, so "the reference is the median" is true both
+    when the search declines and when it found a phantom and was overruled.
+    """
+    from tests import shapes
+
+    cfg = sample_data._MOSAIC_DITHERED
+    panels, window = sample_data._mosaic_layout(cfg)
+    cov = np.zeros((window[1], window[0]), dtype=np.float64)
+    for panel in panels:
+        for x, y in panel.sub_origins:
+            cov[y:y + cfg.frame_h, x:x + cfg.frame_w] += 1.0
+    cov[cov == 0] = np.nan
+
+    # The phantom-plateau case: the search *finds* a level, well above one panel,
+    # at the band where panels overlap — because its tolerance is relative to the
+    # depth it tests at. Measured 21.0 against a median of 11.0 (1.91x).
+    shapes.assert_the_plateau_search_finds_a_phantom(cov, what="dithered layout")
+    # …and the clamp is what keeps the reference honest on it.
+    assert shapes.panel_level(cov) == shapes.pytest_approx(
+        float(np.median(shapes.covered_values(cov))))
+    # A real ragged outline, which is what a re-framed raster's union canvas is.
+    shapes.assert_has_a_ragged_outline(cov, what="dithered layout")
+    assert 0.03 < shapes.uncovered_share(cov) < 0.15
+
+
+def test_the_dithered_sample_stacks_onto_a_canvas_with_no_plateau(lib):
+    """End to end through a real ``run_stack``: the property survives ingest, the
+    injected WCS and the stacker's own reprojection — which the geometry test
+    above cannot vouch for.
+
+    **One stack, both dithered branches**, which is the sample's whole value: the
+    honest per-pixel **frame count** presents the phantom plateau (D1's fifth
+    instalment's case) while the **weighted** coverage map, whose values are sums
+    of per-frame weights, has no tight window anywhere and declines (the
+    fourth's). No fixture in this repo held either before this demo existed.
+    """
+    from astropy.io import fits
+
+    from seestack.edit.coverage_trim import largest_covered_rect
+    from seestack.stack.stacker import coverage_thin_fraction
+    from tests import shapes
+
+    sample_data.load_sample(lib, shape="dithered")
+    entry = lib.find_target(sample_data.SAMPLE_DITHERED_TARGET_NAME)
+    proj = lib.open_target(entry.safe_name)
+    try:
+        result = run_stack(
+            proj,
+            StackOptions(sigma_clip=False, max_workers=1, output_name="dithered"),
+        )
+        assert result.n_frames_used == 78
+        assert result.n_align_failed == 0
+        run = next(iter(proj.iter_stack_runs()))
+        # The stacker's own verdict, not the coverage-distribution fallback: this
+        # shape is exactly the one `coverage_is_mosaic` is documented to miss, so
+        # every mosaic surface in the app depends on the persisted flag here.
+        assert run.is_mosaic is True
+
+        stem = Path(result.fits_path)
+        counts = fits.getdata(
+            stem.parent / f"{stem.stem}_framecov.fits").astype(np.float32)
+        shapes.assert_the_plateau_search_finds_a_phantom(
+            counts, what="dithered frame counts")
+        median = float(np.median(shapes.covered_values(counts)))
+        assert shapes.panel_level(counts) == shapes.pytest_approx(median)
+
+        weighted = fits.getdata(
+            stem.parent / f"{stem.stem}_coverage.fits").astype(np.float32)
+        if weighted.ndim == 3:
+            weighted = weighted[..., 0]
+        shapes.assert_weighted(weighted, what="dithered weighted coverage")
+        shapes.assert_depths_are_a_continuum(
+            weighted, what="dithered weighted coverage")
+
+        # And the two surfaces that read it are live on this sample rather than
+        # self-hidden: the ragged-border note fires (its bar is 5 %) and Auto
+        # offers a trim.
+        thin = coverage_thin_fraction(counts)
+        assert thin is not None and thin > 0.05
+        rect = largest_covered_rect(counts)
+        assert rect is not None
+        x0, y0, x1, y1 = rect
+        kept = (x1 - x0) * (y1 - y0)
+        # **Not the 15 % bar, and that is the point of recording it here.** That
+        # bar (AGENTS.md §1) is about a canvas a rectangle can nearly fill; an
+        # eleven-night re-framed raster has a real apron, and the honest ceiling
+        # is what the *coverage* allows. Measured: the largest all-covered
+        # rectangle is 0.761 of this canvas and the trim keeps 0.697 of it — 91 %
+        # of what is available, against a TRIM_KEEP_RATIO of 0.8 — with nothing
+        # uncovered inside what it keeps. So the shape to watch is the ratio, not
+        # the raw cut.
+        covered = np.isfinite(counts) & (counts > 0)
+        import seestack.edit.coverage_trim as ct
+
+        ceiling = ct._rect_area(ct._rect_from_mask(covered))
+        assert kept >= ct.TRIM_KEEP_RATIO * ceiling
+        h, w = counts.shape
+        inside = counts[int(round(y0 * h)):int(round(y1 * h)),
+                        int(round(x0 * w)):int(round(x1 * w))]
+        assert float(np.mean(~(np.isfinite(inside) & (inside > 0)))) == 0.0, (
+            "the rectangle Auto offers must not contain uncovered pixels")
+    finally:
+        proj.close()
+
+
+def test_the_dithered_sample_is_a_sixth_separate_target_and_is_swept_by_one_remove(
+        lib):
+    field = sample_data.load_sample(lib)
+    mosaic = sample_data.load_sample(lib, shape="mosaic")
+    dithered = sample_data.load_sample(lib, shape="dithered")
+    assert len({field.safe, mosaic.safe, dithered.safe}) == 3
+    assert dithered.n_frames == 78
+    # Idempotent, like every other shape.
+    assert sample_data.load_sample(lib, shape="dithered").safe == dithered.safe
+
+    dirs = [lib.targets_dir / s.safe for s in (field, mosaic, dithered)]
+    assert all(d.exists() for d in dirs)
+    assert sample_data.remove_sample(lib) is True
+    for shape in ("field", "mosaic", "dithered"):
+        assert sample_data.get_sample_status(lib, shape=shape).loaded is False
+    assert not any(d.exists() for d in dirs)
+
+
+def test_the_dithered_sample_points_at_m42_like_its_blocky_siblings(lib):
+    """A fixed patch of sky, so it refuses a centre rather than ignoring one."""
+    with pytest.raises(ValueError):
+        sample_data.load_sample(lib, shape="dithered", center=(10.0, 20.0))
+
+
+def test_api_loads_the_dithered_sample_on_request(client):
+    body = client.post("/api/sample", json={"shape": "dithered"}).json()
+    # The other shapes are untouched — this is a sixth target, not a replacement.
+    assert body["loaded"] is False
+    assert body["mosaic_loaded"] is False
+    assert body["big_loaded"] is False
+    assert body["dithered_loaded"] is True
+    assert body["dithered_n_frames"] == 78
+    safe = body["dithered_safe"]
+    assert client.get(f"/api/targets/{safe}").status_code == 200
+    # Additive and defaulted: the status GET answers the same shape.
+    assert client.get("/api/sample").json()["dithered_safe"] == safe
+
+
+def test_the_dithered_sample_cannot_vouch_for_the_per_panel_pointing_split(lib):
+    """The limit of the instrument, asserted rather than remembered — and the
+    blocky sample asserted as its control.
+
+    `pointings.pointing_groups` separates panels by single-linkage at
+    `PANEL_LINK_DIST_DEG` (0.25°), and this demo's 0.667° frame steps its panels
+    0.547° — a 2.2x margin where a real S30's 2.1° field has 6.9x. So the
+    re-frame that makes the depths a continuum also chains one panel to the next,
+    and every surface keyed on *where* a sub pointed (the depth map, the
+    per-panel grain note, per-panel QC grading and photometric normalisation)
+    falls back to the target-wide population here.
+
+    That is designed, not broken: the coverage shape is what nothing else in the
+    repo can produce, and `--mosaic` is one flag away for the pointing half. This
+    test exists so a future run reads the silence as the sample's own limit
+    instead of spending itself on a non-bug — and so that a change which
+    *accidentally* restored the split (narrowing a spread, and with it the
+    continuum) fails loudly here rather than quietly downgrading the instrument.
+    The full measurement is in `webapp/sample_data.py` beside `_DITHER_PLAN`, and
+    the lead about a *real* install whose nightly re-framing exceeds 0.25° is in
+    `docs/IMPROVEMENTS.md` under "Bugs (fix these first)".
+    """
+    from seestack.mosaicmap import mosaic_depth_map
+    from seestack.stack.pointings import MIN_POINTING_FRAMES, pointing_groups
+
+    def pointings(cfg):
+        panels, window = sample_data._mosaic_layout(cfg)
+        out = []
+        for panel in panels:
+            for sub in range(panel.n_subs):
+                out.append(sample_data._frame_center_deg(
+                    (0.0, 0.0), origin=panel.sub_origin(sub), window=window,
+                    frame=cfg.frame))
+        return out
+
+    dithered = pointings(sample_data._MOSAIC_DITHERED)
+    assert len(dithered) == 78
+    assert pointing_groups(dithered, min_members=MIN_POINTING_FRAMES) is None, (
+        "the dithered demo's pointings now split, so its depths are probably no "
+        "longer a continuum — check the table beside _DITHER_PLAN")
+    assert mosaic_depth_map([(ra, dec, 10.0) for ra, dec in dithered]) is None
+
+    # The control, and the reason the pair is worth running together.
+    blocky = pointings(sample_data._MOSAIC_SMALL)
+    assert pointing_groups(blocky, min_members=MIN_POINTING_FRAMES) is not None
+    blocky_map = mosaic_depth_map([(ra, dec, 10.0) for ra, dec in blocky])
+    assert blocky_map is not None
+    assert (blocky_map.rows, blocky_map.cols) == (2, 2)

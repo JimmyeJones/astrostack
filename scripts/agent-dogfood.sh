@@ -22,6 +22,9 @@
 #   scripts/agent-dogfood.sh --big           # ALSO a FULL-SIZE mosaic: the editor's preview is decimated
 #                                           #   (with --mosaic it also DIFFS the pair, which
 #                                           #    differ in scale alone — see step 4a-ter)
+#   scripts/agent-dogfood.sh --dithered     # ALSO the owner's OWN mosaic shape: every sub dithered,
+#                                           #   every night re-framed, so the coverage depths are a
+#                                           #   CONTINUUM instead of plateaus — see step 3b-bis
 #   scripts/agent-dogfood.sh --no-site       # leave the scratch install with no observing site
 #   scripts/agent-dogfood.sh --incoming-lag  # ALSO leave subs in incoming/ the library never imported
 #                                           #   (one of them damaged, and scanned, so the
@@ -138,6 +141,23 @@
 # ~250 lines of the PRIORITY-1 screen, pinned by jsdom alone. Even --editor,
 # which clicks every op in the Add menu, could not reach any of it. The owner's
 # own mosaics are ~3494x2470 and up, i.e. that is his everyday state.
+# --dithered exists because all three samples above are BLOCKY: each panel points
+# every one of its subs at exactly the same place, so each panel's interior is
+# flat, one coverage depth holds a large share of the canvas, and
+# `coverage_trim.panel_coverage_level` always finds its plateau. The owner's own
+# mosaics are the same handful of pointings revisited across many nights, each
+# sub dithered and each night re-framed, so his depths are a CONTINUUM. That is
+# the shape D1's fourth and fifth instalments live on (v0.492.62, v0.492.63), and
+# the fifth's own write-up says in as many words that this script could not reach
+# it: "webapp/sample_data.py's mosaic carries one fixed pointing error per panel,
+# not per sub, so its panel interiors are flat and it finds a plateau -- the
+# dogfood tool cannot reach this class of bug either". This flag is that closed.
+#
+# Measured on the sample it loads (78 subs, 11 nights, canvas 1212x784): the
+# frame-count map's plateau search finds a PHANTOM at 21 against a median of 11
+# (1.91x -- the panel-overlap band, D1's fifth instalment's own case) while the
+# WEIGHTED map declines outright (the fourth's). One stack, both branches.
+#
 # --big loads a third sample (`POST /api/sample` with {"shape":"big"}): the same
 # 2x2 mosaic — same grid, same 82 % step, same uneven depth, same hazy panel,
 # same ragged corners — shot with 900x600 panels, so its union canvas is
@@ -267,7 +287,7 @@ REPO="$PWD"
 
 DOGFOOD_DIR="${DOGFOOD_DIR:-${TMPDIR:-/tmp}/astrostack-dogfood}"
 DO_SERVE=0; DO_STACK=1; DO_PROBE=1; DO_BUILD=0; DO_EMPTY=0; DO_EDITOR=0; DO_MOSAIC=0
-DO_BIG=0; DO_DEEP=0
+DO_BIG=0; DO_DEEP=0; DO_DITHERED=0
 DO_SITE=1; DO_LAG=0; DO_CAL=0; DO_CLOSING=0; DO_RESTACK=0; DO_COMBINE=0
 # How many aged subs --incoming-lag leaves in the scratch incoming/, and how old
 # it makes them. Eleven days is the observer's own measurement; the count is
@@ -305,6 +325,7 @@ for arg in "$@"; do
     --editor) DO_EDITOR=1 ;;
     --mosaic) DO_MOSAIC=1 ;;
     --big) DO_BIG=1 ;;
+    --dithered) DO_DITHERED=1 ;;
     --no-site) DO_SITE=0 ;;
     --incoming-lag) DO_LAG=1 ;;
     --calibration) DO_CAL=1 ;;
@@ -718,6 +739,25 @@ if [ "$DO_BIG" = 1 ] && [ "$DO_EMPTY" = 0 ]; then
               | python -c 'import json,sys; print(json.load(sys.stdin).get("big_safe") or "")' \
               2>/dev/null || true)"
   echo "-- full-size target: ${BIG_SAFE:-<none>}"
+fi
+
+# 3b-bis. The dithered mosaic sample (--dithered): the same 2x2 at the same
+#     overlap and the same sensor as 3b, shot the way the owner actually shoots
+#     one -- every sub dithered, the whole raster re-framed between eleven nights
+#     -- so the per-pixel depth climbs in many small steps instead of sitting on
+#     plateaus. Its canvas stays UNDER the proxy cap on purpose: it differs from
+#     the small mosaic in pointing discipline alone, and scale is --big's
+#     question. See the block near the top of this file for what it is measured
+#     to hold.
+DITHERED_SAFE=""
+if [ "$DO_DITHERED" = 1 ] && [ "$DO_EMPTY" = 0 ]; then
+  echo "-- loading the bundled DITHERED mosaic sample (11 re-framed nights)"
+  curl -sf -X POST "$BASE/api/sample" -H 'Content-Type: application/json' \
+       -d '{"shape":"dithered"}' >/dev/null || echo "warn: dithered sample load failed"
+  DITHERED_SAFE="$(curl -sf "$BASE/api/sample" \
+                   | python -c 'import json,sys; print(json.load(sys.stdin).get("dithered_safe") or "")' \
+                   2>/dev/null || true)"
+  echo "-- dithered target: ${DITHERED_SAFE:-<none>}"
 fi
 
 # 4. A finished picture, so the picture-shaped surfaces (hero card, Gallery,
@@ -1228,6 +1268,7 @@ if [ "$DO_STACK" = 1 ]; then
   stack_target "$SAFE" "sample"
   stack_target "$MOSAIC_SAFE" "mosaic sample"
   stack_target "$BIG_SAFE" "full-size mosaic sample"
+  stack_target "$DITHERED_SAFE" "dithered mosaic sample"
 fi
 
 # 4a-bis. What the app says about the *shrunk* preview — the question only the
@@ -1346,6 +1387,81 @@ d = json.load(sys.stdin) or {}
 for note in d.get("notes", []):
     print("   [health/%s] %s" % (note.get("kind"), note.get("message")))
 ' 2>/dev/null || echo "   [health] could not read it"
+  fi
+fi
+
+# 4c-bis. THE DITHERED CANVAS'S OWN SHAPE (--dithered), which is the whole point
+#     of that flag and the one readout no other pass can produce. Four numbers,
+#     printed together: how deep one panel reads, how deep the deepest pixel is,
+#     what share of the picture the app calls a ragged border, and what Auto's
+#     trim would cut.
+#
+#     READ THE TRIM NUMBER AGAINST THIS SHAPE, NOT AGAINST THE 15% BAR. AGENTS.md
+#     §1's "a trim above ~15% is a bug" is about a canvas that is TILED, where a
+#     rectangle can hold nearly all of it. An eleven-night re-framed raster has a
+#     real apron: measured on this sample the largest all-covered rectangle is
+#     76.1% of the canvas, Auto keeps 69.7% (i.e. 91.6% of what the coverage
+#     allows, against a TRIM_KEEP_RATIO of 0.8), and inside what it keeps 0.0% is
+#     uncovered and 2.7% thin against 13.7% over the whole canvas. So the
+#     rectangle it offers really is the clean one. **What to watch is a MOVE from
+#     30.3%**, and especially a move upward with the thin-inside share moving with
+#     it. Printed, never asserted -- this script is a finder.
+if [ -n "$DITHERED_SAFE" ]; then
+  DITHERED_RUN="$(run_id_of "$DITHERED_SAFE")"
+  if [ -n "$DITHERED_RUN" ]; then
+    echo "-- the DITHERED canvas's own shape (the continuum no other sample has):"
+    curl -sf "$BASE/api/targets/$DITHERED_SAFE/stack-runs" \
+      | python -c '
+import json, sys
+runs = json.load(sys.stdin) or []
+r = runs[0] if runs else {}
+print("   [shape] canvas %sx%s from %s subs, coverage %s..%s"
+      % (r.get("canvas_w"), r.get("canvas_h"), r.get("n_frames_used"),
+         r.get("coverage_min"), r.get("coverage_max")))
+print("   [shape] recorded on this sample: 1212x784, 78 subs, 0..40, one panel 11")
+' 2>/dev/null || echo "   [shape] could not read the run listing"
+    curl -sf "$BASE/api/targets/$DITHERED_SAFE/stack-health" \
+      | python -c '
+import json, sys
+d = json.load(sys.stdin) or {}
+for note in d.get("notes", []):
+    print("   [health/%s] %s" % (note.get("kind"), note.get("message")))
+' 2>/dev/null || echo "   [health] could not read it"
+    curl -sf "$BASE/api/targets/$DITHERED_SAFE/mosaic-map" \
+      | python -c '
+import json, sys
+d = json.load(sys.stdin)
+if not d:
+    print("   [panel map] nothing at all -- EXPECTED on this shape, see the note below")
+else:
+    print("   [panel map] %d panels on a %dx%d grid, thin=%s"
+          % (len(d["panels"]), d["rows"], d["cols"], d["thin"] is not None))
+    print("   [panel map] %s" % d["text"])
+' 2>/dev/null || echo "   [panel map] could not read it"
+    echo "   [NB] the panel map and the per-panel grain note ARE silent here, by"
+    echo "        design and not as a bug: this demo's 0.667 deg frame steps its"
+    echo "        panels 0.547 deg against a 0.25 deg PANEL_LINK_DIST_DEG, a 2.2x"
+    echo "        margin where a real S30 has 6.9x, so a re-frame big enough to"
+    echo "        make the depths a continuum also chains one panel to the next."
+    echo "        Compare with --mosaic on the same pass: that is the control, and"
+    echo "        it DOES draw the map. A test pins both halves."
+    curl -sf "$BASE/api/targets/$DITHERED_SAFE/stack-runs/$DITHERED_RUN/editor/trim-suggestion" \
+      | python -c '
+import json, sys
+d = json.load(sys.stdin)
+crop = d.get("crop")
+if not d.get("is_mosaic"):
+    print("   [trim] the run does NOT read as a mosaic (that IS a bug on this shape)")
+elif not crop:
+    print("   [trim] none suggested (nothing worth trimming)")
+else:
+    kept = (crop["x1"] - crop["x0"]) * (crop["y1"] - crop["y0"])
+    cut = 1.0 - kept
+    note = "" if 0.25 <= cut <= 0.36 else "  <-- MOVED from the recorded 30.3%, look at it"
+    print("   [trim] Auto would cut %.1f%% of the canvas%s" % (100 * cut, note))
+    print("   [trim] (the 15% bar is for a TILED canvas; the recorded apron of")
+    print("   [trim]  this shape is 30.3% -- watch for a move, not the bar)")
+' 2>/dev/null || echo "   [trim] could not read the trim suggestion"
   fi
 fi
 
@@ -1477,6 +1593,29 @@ if [ "$DO_PROBE" = 1 ] || [ "$DO_EDITOR" = 1 ]; then
            ASTROSTACK_REPO="$REPO" \
            TARGET_SAFE="$BIG_SAFE" TARGET_RUN_ID="$BIG_RUN" node editor.mjs) \
           || echo "warn: full-size editor drive failed"
+      fi
+    fi
+    # …and the dithered mosaic, into its own shots dir. This is the only pass on
+    # which every coverage-shape surface — the border-trim card, the ragged-border
+    # note, the panel depth map, Auto's own trim — is being drawn over a canvas
+    # whose depths are a continuum, which is the owner's everyday state and was
+    # the tooling's blind spot until this flag existed.
+    if [ -n "$DITHERED_SAFE" ]; then
+      DITHERED_RUN="$(run_id_of "$DITHERED_SAFE")"
+      mkdir -p "$SHOTS/dithered"
+      if [ "$DO_PROBE" = 1 ]; then
+        echo "-- probing the running app on the DITHERED target"
+        (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS/dithered" \
+           TARGET_SAFE="$DITHERED_SAFE" TARGET_RUN_ID="$DITHERED_RUN" node probe.mjs) \
+          || echo "warn: dithered probe failed"
+      fi
+      if [ "$DO_EDITOR" = 1 ] && [ -n "$DITHERED_RUN" ]; then
+        echo "-- driving the editor on the DITHERED run (the owner's own canvas shape)"
+        cp "$REPO/scripts/dogfood_editor.mjs" "$PW_DIR/editor.mjs"
+        (cd "$PW_DIR" && BASE_URL="$BASE" SHOTS_DIR="$SHOTS/dithered" \
+           ASTROSTACK_REPO="$REPO" \
+           TARGET_SAFE="$DITHERED_SAFE" TARGET_RUN_ID="$DITHERED_RUN" node editor.mjs) \
+          || echo "warn: dithered editor drive failed"
       fi
     fi
     # …and the deep target, which is measured rather than photographed: row

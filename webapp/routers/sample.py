@@ -48,12 +48,20 @@ class SampleStatusOut(BaseModel):
     closing_loaded: bool = False
     closing_safe: str | None = None
     closing_n_frames: int = 0
+    # The sixth, opt-in demo: the same 2×2 mosaic with **every sub dithered and
+    # every night re-framed**, so its coverage depths are a continuum rather than
+    # a few flat plateaus — the one mosaic shape no fixture or dogfood pass could
+    # reach. Additive and defaulted, like every block above it.
+    dithered_loaded: bool = False
+    dithered_safe: str | None = None
+    dithered_n_frames: int = 0
 
 
 class SampleLoadIn(BaseModel):
     """Which demo to build. Absent body → the single field, as before."""
 
-    shape: Literal["field", "mosaic", "big", "deep", "closing"] = "field"
+    shape: Literal["field", "mosaic", "big", "deep", "dithered",
+                   "closing"] = "field"
     # Where to put it, for the one shape that has no fixed answer. A season closes
     # as a function of the target's right ascension against the *date*, so the
     # caller supplies the position (``seestack.nightplan.closing_sky_position``
@@ -70,6 +78,7 @@ def _to_out(
     big: sample_data.SampleStatus | None = None,
     deep: sample_data.SampleStatus | None = None,
     closing: sample_data.SampleStatus | None = None,
+    dithered: sample_data.SampleStatus | None = None,
 ) -> SampleStatusOut:
     return SampleStatusOut(
         loaded=status.loaded, safe=status.safe, n_frames=status.n_frames,
@@ -85,6 +94,9 @@ def _to_out(
         closing_loaded=bool(closing and closing.loaded),
         closing_safe=closing.safe if closing else None,
         closing_n_frames=closing.n_frames if closing else 0,
+        dithered_loaded=bool(dithered and dithered.loaded),
+        dithered_safe=dithered.safe if dithered else None,
+        dithered_n_frames=dithered.n_frames if dithered else 0,
     )
 
 
@@ -96,6 +108,7 @@ def _all_shapes(lib) -> SampleStatusOut:  # noqa: ANN001 — Library, kept local
         sample_data.get_sample_status(lib, shape="big"),
         sample_data.get_sample_status(lib, shape="deep"),
         sample_data.get_sample_status(lib, shape="closing"),
+        sample_data.get_sample_status(lib, shape="dithered"),
     )
 
 

@@ -82,6 +82,44 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
+  which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
+  (0.25°) loses its per-panel identity entirely, and every per-panel surface in the engine then silently
+  judges it against the whole target.** *(Pillar: autonomy + trust — PRIORITY 2–3; size **S to measure, M to
+  decide**; severity unknown-but-bounded, **and the one gating number is the owner's**. Confidence: the
+  mechanism is **reproduced end to end** on a real `run_stack` and the boundary is measured; whether his own
+  library reaches it is not.)*
+  **What is reproduced.** `seestack/stack/pointings.py::pointing_groups` tells one panel from the next by
+  single-linkage at `PANEL_LINK_DIST_DEG = 0.25°`, whose own comment reasons that *"a dither nudges a pointing
+  by arc-minutes (≲0.1°), while even the tightest mosaic steps adjacent panels by roughly half a field of view
+  (~0.5°) … 0.25° sits with a ~2× margin on both sides"*. That argument is about a dither, and says nothing
+  about a **re-frame between nights**, which moves the whole raster. Once two nights' rasters are offset by
+  enough, night A's panel 0 chains to night B's panel 1 and the clustering collapses to one group — at which
+  point `pointing_groups` returns `None` and, by its own documented contract, *"a single-pointing target, an
+  unsolved target and a mosaic too tightly packed to separate all keep today's behaviour"*, i.e. the
+  **target-wide** population. Measured on the new `shape="dithered"` sample (78 subs, 11 re-framed nights, a
+  real stack): 78 pointings → **one** cluster, `pointing_groups` → `None`, `/mosaic-map` → `null`, and "How's
+  my stack?" swaps its per-panel sentence (*"part of this mosaic is thinner than the rest … it evens out as
+  you keep shooting"*, with a **where**) for a border one (*"about 14 % of this picture is a thin edge … Trim
+  border gives a clean, even rectangle"*) — on a canvas whose fourth panel genuinely holds 12 subs against 22.
+  The blocky sample on the same pass splits into four and draws the 2×2 map, which is the control.
+  **The boundary, measured** (that sample's 0.667° frame stepping 0.547°, sub dither ±10 % of a frame):
+  per-night re-frame ±2 % → 4 clusters, ±5 % → 3, ±10 % → 2, ±20 % → **1 and the map is gone**. In degrees the
+  collapse sets in around **0.13° of re-frame against a 0.547° panel step**, i.e. at roughly a quarter of the
+  step — which is just the link distance being chained through.
+  **Why it is a lead and not a fix, and what to settle first.** Scaled to the owner's own optics the margin is
+  3.1× wider: an S30's 2.1° field steps a 2×2 at **1.72°**, so the same collapse needs about **0.42°** of
+  nightly re-framing — 20 % of his field. Plausible for a re-planned mosaic, unlikely for a plate-solved
+  repeat, and **nobody has the number**. It is cheap to get and the observer already reads the rows it needs:
+  cluster each mosaic target's `frames.ra_center_deg` / `dec_center_deg` by night and report the spread of the
+  per-night centroids, in degrees, against 0.25°. **Do not widen `PANEL_LINK_DIST_DEG` blind** — it is the
+  shared gate behind QC grading, photometric normalisation and quality weighting (its own comment lists them),
+  and widening it merges genuine panels, which is the failure those callers exist to prevent. If the number
+  does come back large, the honest shape is probably to cluster **within a night** and union the nights'
+  labels by proximity, not to move one constant. The sample's own limit is asserted in
+  `tests/webapp/test_sample_data.py::test_the_dithered_sample_cannot_vouch_for_the_per_panel_pointing_split`,
+  so the silence is read as designed until this is settled.
+
 - **LEAD (Builder 2026-10-09, filed with v0.492.49 — the half of that fix that reaches Auto's *own* measurement
   and is not a blind Builder change) — with the border-trim preference OFF, Auto's taste-profile archetype is
   still read off the ragged fringe's grain.** *(Pillar: editor — PRIORITY 1; size **S to write, M to decide**;
@@ -3448,6 +3486,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.493.0 **`scripts/agent-dogfood.sh --dithered` — a sixth sample shape whose coverage depths are a *continuum*, which is the owner's own mosaic canvas and the one shape neither the fixtures nor the dogfood tool could reach** (`webapp/sample_data._DitherPlan`, `_dithered_layout`, `_MosaicPanel.sub_origin`/`sub_date`, `SAMPLE_DITHERED_TARGET_NAME`, `SampleStatusOut.dithered_*`) — every mosaic in the repo put one fixed pointing on each panel, so interiors were flat and `panel_coverage_level` always found a plateau; v0.492.63's own write-up says in as many words that *"the dogfood tool cannot reach this class of bug either"*, and D1's fourth and fifth instalments both had to be reproduced by hand. 2x2 over eleven re-framed nights, 78 subs, canvas 1212x784: one stack now exercises **both** dithered branches — the frame-count map presents the phantom plateau at 21 against a median of 11 (1.91x) and the weighted map declines outright. Neither existing mosaic sample can make either claim (measured: both land at 0.5x the median). Additive: a sixth target, three defaulted response fields, no existing sample's pixels moved
 - ✅ v0.492.64 the Calibration page's self-hiding **"Repair them"** button stops having its label clipped on phone width (`Calibration.tsx`, the repair row's `<Group wrap="nowrap">`) — a flex child's default `min-width: auto` is its content width, so the repair message squeezed the `size="xs"` Button that `nowrap` forbids wrapping away; reproduced live by a `--calibration` dogfood at 70 px of content in a 67 px box both before (OVERFLOW) and after (clean), and the message now shrinks (`minWidth: 0`) while the button never does (`flexShrink: 0`)
 - ✅ v0.492.63 a *dithered* mosaic can no longer present the panel-**overlap** band as one panel (`coverage_trim.panel_coverage_level` caps a found plateau at `_continuum_level`'s median, `COVERAGE_SHARES_VERSION` → 4) — v0.492.62 reached only the branch where the plateau search declines; its window test's tolerance is relative, so on 7 of 20 seeds of the owner's own shape it *qualified* at 2.0–2.3x the median and handed back the pre-D1 answer under a stamp saying it was gone, firing the ragged-border note at 0.313–0.352 and offering a Trim that left 7.5–24.2 % of what it kept still thin
 - ✅ v0.492.62 the ragged-border note stops measuring a *dithered* mosaic against its deepest pixel (`coverage_trim._continuum_level`, `COVERAGE_SHARES_VERSION` → 3) — observer issue [#1109](https://github.com/JimmyeJones/astrostack/issues/1109): a continuum of depths has no 8 % plateau, so `panel_coverage_level` fell through to the peak — the pre-v0.389.2 rule — on 13 of the owner's 88 current pictures, overstating the thin edge 2.8–4.5x and offering a Trim that left 48–51 % of the thin area inside what it kept
