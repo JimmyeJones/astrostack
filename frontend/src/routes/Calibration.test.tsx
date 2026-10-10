@@ -330,6 +330,32 @@ describe("CalibrationView", () => {
     await waitFor(() => expect(set).toHaveBeenCalledWith(false));
   });
 
+  it("keeps the repair button's label intact when the message is long",
+    async () => {
+      // Phone width. The row is a `<Group wrap="nowrap">`, so neither child may
+      // wrap away — and a flex child's default `min-width: auto` is its content
+      // width, so the message (which did not shrink) squeezed the button and its
+      // label was clipped: measured at 70 px of content in a 67 px box by a
+      // `--calibration` dogfood, on the only state that renders this control.
+      // jsdom does no layout, so what is pinned is the pair of rules that make
+      // the row shrink correctly — the message yields, the button never does.
+      vi.spyOn(client.api, "listCalibrationMasters").mockResolvedValue([mk({})]);
+      vi.spyOn(client.api, "calibrationCoverage").mockResolvedValue(NO_COVERAGE);
+      vi.spyOn(client.api, "calibrationDefects").mockResolvedValue(censusOf({
+        state: "off",
+        message: "Repair these on every stack from now on",
+        detail: "Turns on the repair for every stack …",
+        action: "Repair them",
+      }));
+      renderView();
+
+      const button = await waitFor(() =>
+        screen.getByRole("button", { name: "Repair them" }));
+      expect(button.style.flexShrink).toBe("0");
+      const message = screen.getByText("Repair these on every stack from now on");
+      expect(message.style.minWidth).toBe("0");
+    });
+
   it("offers nothing when the server says there is nothing repairable",
     async () => {
       // A clean sensor and a refused map both arrive as `repair: null`, and the

@@ -197,14 +197,24 @@ export function CalibrationView() {
                 page-level banner (AGENTS.md §1, the standing IA rule). */}
             {repair ? (
               <Group justify="space-between" gap="sm" wrap="nowrap" p="sm">
+                {/* The message shrinks and wraps; the button never does. A flex
+                    child's default `min-width: auto` is its content width, so on
+                    phone width this message (which does not shrink) squeezed the
+                    `size="xs"` Button that `wrap="nowrap"` forbids wrapping away,
+                    and its label was clipped — measured at 70 px of content in a
+                    67 px box by a `--calibration` dogfood. The pair is the app's
+                    own idiom for a row that must stay one line (OpParamPanel,
+                    VideoCapturesCard). */}
                 <HintAnchor label={repair.detail} multiline w={320}>
-                  <Text size="sm" c={repair.state === "on" ? "teal.7" : undefined}>
+                  <Text size="sm" c={repair.state === "on" ? "teal.7" : undefined}
+                    style={{ minWidth: 0 }}>
                     {repair.message}
                   </Text>
                 </HintAnchor>
                 <Button size="xs" variant={repair.state === "on" ? "subtle" : "light"}
                   color={repair.state === "on" ? "gray" : "teal"}
                   loading={setRepair.isPending}
+                  style={{ flexShrink: 0 }}
                   onClick={() => setRepair.mutate(repair.state !== "on")}>
                   {repair.action}
                 </Button>

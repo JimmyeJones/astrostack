@@ -1,5 +1,77 @@
 # Process notes & QA sweep records
 
+## 2026-10-10 (Builder, branch `claude/jolly-bardeen-ycrjq2`) — D1's **sixth** instalment, looked for and NOT found: the median ceiling holds on uneven panel depth too, and the fixture that says otherwise is degenerate
+
+*(Baseline `origin/main` at `de39e52f` (`__version__` 0.492.63): **7591 passed, 4 skipped**, 14m02s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI on `main`
+green. `list_issues`: four open, all four owner-gated (#878, #880, #903, #1015) — nothing new, nothing owed.
+"Bugs (fix these first)" holds no verified, ungated open bug for a **ninth** run.)*
+
+**Why this sweep.** Two runs in a row found a real bug by reading the previous run's fix as a lead
+(v0.492.62 → .63), so this run asked the same question of v0.492.63. The cap it added is the **median**, and
+its safety argument is stated as a theorem: *"one panel of a mosaic whose panels tile the canvas cannot be
+deeper than the depth half the canvas sits at or below."* That is true for panels of **equal** depth. The
+owner's are not — `tests/shapes.py` says so in its own vocabulary (*"even vs uneven panel depth — the owner's
+panels are not equally deep"*), and all 20 seeds behind v0.492.63 are evenly deep. So: does the median sit
+**above** a thin panel when the deep panels hold more than half the canvas, and if so what breaks?
+
+**The arithmetic half is real.** Extending the suite's own `_dithered_mosaic` with per-pointing sub counts
+(3×3, 10 % overlap, 11 nights, ±12 px dither, ±40 px re-framing, eight pointings at 40 subs/night and one at
+6 — i.e. 440 vs 66 frames deep), the reference comes back at **296–346 on five seeds where the thin panel's
+own depth is 66–87**. The median is a ceiling, not a floor, so the theorem does not cover this shape: half
+the canvas sits at or below the median *of the deep population*, and a panel thinner than that is under it.
+
+**Every consequence is already guarded, which is why nothing was filed as a bug.** Measured per seed on the
+same canvases:
+* **the trim** keeps the thin panel whole — 100.0 % of its core on every seed. `TRIM_KEEP_RATIO`'s ladder
+  and the `FRINGE_OUTSIDE_FRAC`/`FRINGE_MAX_THICKNESS_FRAC` shape test (D1's second and third instalments)
+  are exactly the "a border is where the data runs out; a thin panel is data" discriminator this needs, and
+  they do not consult the median at all.
+* **the all-sky detail mask** (`render/thumbnail.stack_detail_mask` → "My map" alpha and `skyarea`'s tally)
+  finds the thin panel *exactly*: `MASK_LEVEL_MIN_FRAC = 0.03` returns **66.0**, the panel's own depth, and
+  the mask keeps **100 %** of it (91.5–93.6 % of the covered sky overall, against 81.9–84.5 % on the evenly
+  deep control). This is the constant's stated purpose working.
+* **the ragged-border note** is not moved by the thin panel on this shape: 0.19 even vs 0.22 uneven on the
+  same geometry, both sides of the 0.05 bar, i.e. the verdict is set by the fixture's own ramp ring.
+
+**The method note, and it is the one worth carrying forward: a dithered fixture's panel must be large
+relative to the re-framing drift, or it has no depth of its own to be measured at.** The first version of
+this probe *did* read "the mask drops 90.6–100 % of the thin panel" — on `_dithered_mosaic`'s default
+108×192 panel at `drift=40`. There the re-framing is **37 % of the panel's height**, so a panel holds almost
+no area at its own depth, the thin panel really is under 3 % of the canvas, and the mask declines on
+*sample size* rather than on the shape. Doubling the panel to 216×384 at the same drift — the owner's real
+proportion is far gentler still, his panels being ~1080×1920 — the same seeds read 100 %. **Any per-panel
+claim measured on a dithered fixture is a claim about `drift / panel` as much as about the rule**, so state
+that ratio before believing the number; `assert_panels_thinner_than_the_reference` checks that a fixture
+*has* a thin panel, not that the panel survived its own dither. (The continuum itself is not a fixture
+artefact — observer report #1109 measured it on 13 of the owner's own 88 pictures.)
+
+**The §2 big-picture dogfood (`--mosaic --editor --big --calibration --incoming-lag`) — coherent, ONE finding, now
+shipped as v0.492.64.** Page sweep at 1440 px and 420 px: **1 thing to look at**, the `/calibration` phone-width
+`OVERFLOW <span> 67px box vs 70px content — "Repair them"`, i.e. the 2026-10-09 measurement reproduced to the pixel
+on the one state that renders the control (`[defects] repair offer: off`). Everything else held: page heights in
+line with the standing DOGFOOD BASELINE (`/life-list [Still to shoot]` 14,513 px on a phone against 14,492);
+**all three editor drives — the field, the 2x2 mosaic and the full-size mosaic — reported `editor drive clean`**,
+all 21 ops re-rendering and the preview-vs-export advisories firing only where the 2.0x shrink makes them honest
+(sharpen, hot-pixel, star-reduction); Auto's trim on the mosaic **7.9 %** of the canvas, well inside AGENTS.md's
+~15 % bar; the Auto taste row marking exactly the two chips it cannot move (`Over-smoothed`, `Core looks flat`) and
+answering a marked tap with its own sentence; and the Target/Dashboard/Tonight paragraphs reading as one voice.
+Read as one paragraph, the only jarring pair was the Dashboard solving alert against three completed stacks — ruled
+out below.
+
+**Not re-litigated:** lowering `PANEL_LEVEL_MIN_FRAC` (measured worse at 0.04/0.02/0.01 — the search walks
+onto the reprojection ramp), and the four scalar levers closed under `FRINGE_OUTSIDE_FRAC`.
+
+**Checked and NOT filed: the Dashboard's "solving is required before you can stack anything".** The
+`--mosaic --editor --big --calibration --incoming-lag` pass shows that alert (no ASTAP in the container)
+on a run that had just stacked three targets, which reads like one of the app's own claims contradicting
+another — the exact class the dogfood instructions say to look for. It is not one: `wcs_json` is only ever
+written by `solve/runner.py`, `solve/bootstrap.py`, the stacker's `star_match_unsolved` (off by default) and
+`webapp/sample_data.py`, and it is the last of those that lets the **bundled samples** stack with no solver.
+A real Seestar sub carries no WCS — ingest never derives one — so the sentence is true for the owner's data
+and the dogfood's own stacks are not evidence against it. *A bundled sample that short-circuits a dependency
+is not a counter-example to a claim about real frames.*
+
 ## 2026-10-10 (Builder, next run) — "a fix that enters one branch has not fixed the rule"
 
 The method note behind **v0.492.63**, and it is the previous entry's own sequel: the note one screen down

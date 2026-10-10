@@ -303,15 +303,8 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 - **Minor / low-priority (traced, filed for completeness — fix only if touching these files).** *(Nine
   fixed sub-items and two closed-not-fixed notes moved out 2026-09-30 — [`SHIPPED.md`](SHIPPED.md) and
-  [`PROCESS-NOTES.md`](PROCESS-NOTES.md); the five below are what is still open.)*
-  - `frontend/src/routes/Calibration.tsx:198-211` the self-hiding **"Repair them"** button's label is clipped on
-    phone width — a `--mosaic --incoming-lag --calibration` dogfood measured the label span at 70 px content in a
-    67 px box (3 px). The `<Group wrap="nowrap">` holds the repair message `<Text>` (which does not shrink) and
-    the `size="xs"` Button, so on a ~360 px viewport the message squeezes the button and `nowrap` forbids it
-    wrapping. The button only renders when a master reports fixable defects, which is why earlier `--calibration`
-    passes that did not seed that state read "nothing overflowing". Fix when touching the file: let the message
-    shrink (`style={{ minWidth: 0 }}`) and keep the button intact (`style={{ flexShrink: 0 }}`), or let the Group
-    wrap on narrow widths. (Cosmetic/friendliness — PRIORITY 3; confidence: measured by the dogfood probe.)
+  [`PROCESS-NOTES.md`](PROCESS-NOTES.md); the `Calibration.tsx` clipped-label one shipped as v0.492.64 and is
+  cut to [`SHIPPED.md`](SHIPPED.md); the four below are what is still open.)*
   - `seestack/post/skymap.py:266` the **offline** galactic-plane fallback (astropy absent) draws the Milky Way
     curve with a linear-in-sin approximation that is up to ~29° off in declination. In this deployment astropy is
     a hard dependency, so the exact `except` branch is dead code and never renders — noted only so a future
@@ -3455,6 +3448,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.492.64 the Calibration page's self-hiding **"Repair them"** button stops having its label clipped on phone width (`Calibration.tsx`, the repair row's `<Group wrap="nowrap">`) — a flex child's default `min-width: auto` is its content width, so the repair message squeezed the `size="xs"` Button that `nowrap` forbids wrapping away; reproduced live by a `--calibration` dogfood at 70 px of content in a 67 px box both before (OVERFLOW) and after (clean), and the message now shrinks (`minWidth: 0`) while the button never does (`flexShrink: 0`)
 - ✅ v0.492.63 a *dithered* mosaic can no longer present the panel-**overlap** band as one panel (`coverage_trim.panel_coverage_level` caps a found plateau at `_continuum_level`'s median, `COVERAGE_SHARES_VERSION` → 4) — v0.492.62 reached only the branch where the plateau search declines; its window test's tolerance is relative, so on 7 of 20 seeds of the owner's own shape it *qualified* at 2.0–2.3x the median and handed back the pre-D1 answer under a stamp saying it was gone, firing the ragged-border note at 0.313–0.352 and offering a Trim that left 7.5–24.2 % of what it kept still thin
 - ✅ v0.492.62 the ragged-border note stops measuring a *dithered* mosaic against its deepest pixel (`coverage_trim._continuum_level`, `COVERAGE_SHARES_VERSION` → 3) — observer issue [#1109](https://github.com/JimmyeJones/astrostack/issues/1109): a continuum of depths has no 8 % plateau, so `panel_coverage_level` fell through to the peak — the pre-v0.389.2 rule — on 13 of the owner's 88 current pictures, overstating the thin edge 2.8–4.5x and offering a Trim that left 48–51 % of the thin area inside what it kept
 - ✅ v0.492.61 the editor stops putting the un-narrowed "why Auto shifted" claim back on screen the moment a chip is tapped (`AutoFeedback.tsx` `mergeMeasuredPreferences`) — the feedback POST measures no picture by design, and the row wrote its answer straight into the run-scoped cache, so on the owner's deep clean stack the first "Over-smoothed" tap re-asserted the exact sentence v0.492.57 deletes, one line under a toast saying the picture had not changed
