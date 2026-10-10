@@ -471,7 +471,7 @@ def limit_hint(cue: str) -> str | None:
     phrase = _UNCHANGED_PHRASE.get(cue)
     if phrase is None:
         return None
-    return (f"{phrase}. Tapping still teaches Auto for your other pictures.")
+    return f"{phrase}. Tapping still teaches Auto for your other pictures."
 
 
 def is_neutral(profile: dict[str, Any] | None,

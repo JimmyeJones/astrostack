@@ -388,6 +388,135 @@ for (const name of ["Undo", "Redo"]) {
   }
 }
 
+// --- ADAPTIVE AUTO: the one-click button and the taste row behind it --------
+//
+// Everything above this line drives the *pipeline*. Nothing in this repo's
+// tooling had ever clicked **Auto-process**, and the row it reveals — "How did
+// Auto do? Tap what you'd change:" — only exists inside the "What Auto-process
+// did" alert, so a probe that photographs the editor as it opens cannot see it
+// at all. That is why five consecutive Adaptive-Auto fixes (v0.492.49 through
+// v0.492.54) each recorded "a dogfood could not have found this".
+//
+// It runs LAST, after undo/redo, because clicking Auto rewrites the recipe and
+// every reading above is taken against the recipe the run opened with.
+//
+// Three questions a screenshot cannot answer:
+//
+//   * does Auto-process produce the alert, and what does the whole of it say
+//     when read as one paragraph? (four sentences are composed independently —
+//     what Auto did, what it measured, the values, the preset hint — and the
+//     recurring defect in this family is two of them disagreeing);
+//   * which chips does the app mark as unable to move this picture (v0.492.54),
+//     and is that plausible against what the recipe actually contains?
+//   * and the pair that matters: tapping a *live* chip and tapping a *marked*
+//     one must say different things. A marked chip answering "Thanks — Auto will
+//     lean that way for you" over a byte-identical re-render is the exact bug
+//     v0.492.53/.54 exist to stop, and it is invisible without the click.
+const autoButton = page.getByRole("button", { name: "Auto-process", exact: true }).first();
+if (!(await autoButton.count())) {
+  console.log("\nAuto-process: no button on this page — skipping the taste row");
+} else {
+  console.log("\n-- clicking Auto-process (the taste row only exists afterwards)");
+  await autoButton.click();
+  await settle();
+  drain("Auto-process");
+
+  const alert = page.locator('div[class*="mantine-Alert-root"]')
+    .filter({ hasText: "What Auto-process did" }).first();
+  if (!(await alert.count())) {
+    findings++;
+    console.log("  ! Auto-process: ran, but the \"What Auto-process did\" note never appeared");
+  } else {
+    // Read as one paragraph, on purpose — see the `advisories()` note above.
+    const said = (await alert.innerText()).replace(/\s+/g, " ").trim();
+    console.log(`  [says] ${said}`);
+  }
+
+  const chips = page.locator('div[class*="mantine-Alert-root"] button[class*="mantine-Button-root"]');
+  const n = await chips.count();
+  if (!n) {
+    findings++;
+    console.log("  ! Auto feedback: the chip row has no chips");
+  } else {
+    // A marked ("faded") chip is dimmed rather than disabled or hidden, so the
+    // mark is an opacity on an otherwise ordinary button — read it off the
+    // computed style rather than off a class, which is Mantine's business.
+    const marked = [];
+    const live = [];
+    for (let i = 0; i < n; i++) {
+      const chip = chips.nth(i);
+      const label = (await chip.innerText()).trim();
+      if (!label || label === "Reset") continue;
+      const faded = await chip.evaluate(
+        (el) => Number(getComputedStyle(el).opacity) < 0.95);
+      (faded ? marked : live).push(label);
+    }
+    console.log(`  chips live (${live.length}): ${live.join(" | ") || "none"}`);
+    console.log(`  chips marked as unable to move THIS picture (${marked.length}): ${marked.join(" | ") || "none"}`);
+    const legend = page.getByText(/Faded chips can.t change this picture/).first();
+    const hasLegend = (await legend.count()) > 0;
+    if (marked.length && !hasLegend) {
+      findings++;
+      console.log("  ! chips are faded with no legend saying what the fading means");
+    } else if (marked.length) {
+      console.log(`  [says] ${(await legend.innerText()).replace(/\s+/g, " ").trim()}`);
+    }
+
+    // Tap one of each kind and print what the app says back. The toast is the
+    // whole point: the two kinds must not get the same sentence.
+    for (const [kind, label] of [["live", live[0]], ["marked", marked[0]]]) {
+      if (!label) { console.log(`  (no ${kind} chip to tap)`); continue; }
+      await page.getByRole("button", { name: label, exact: true }).first().click();
+      // Read the toast FIRST, and poll for it rather than waiting out the
+      // render. `<Notifications />` is mounted with Mantine's default
+      // `autoClose`, which is **4 s** — so settling first (7 s plus network
+      // idle) reliably reads an empty page and reports "NOTHING SAID" about an
+      // app that said exactly the right thing. That is how this pass's own
+      // first run went, and it is worth a comment rather than a re-discovery.
+      const toast = await (async () => {
+        // The notification's own description node, and the **first non-empty**
+        // of them: the page carries several `mantine-Notifications-root`
+        // containers and all but one are empty, so taking the last match reads
+        // "" however long you wait — which is the other half of how this pass's
+        // first run reported "NOTHING SAID" twice.
+        const toasts = page.locator('[class*="mantine-Notification-description"]');
+        for (let waited = 0; waited < 4000; waited += 200) {
+          const said = (await toasts.allInnerTexts())
+            .map((t) => t.replace(/\s+/g, " ").trim())
+            .find(Boolean);
+          if (said) return said;
+          await page.waitForTimeout(200);
+        }
+        return "";
+      })();
+      console.log(`  tapped ${kind} chip "${label}" → ${toast || "NOTHING SAID"}`);
+      if (!toast) {
+        findings++;
+        console.log(`  ! tapping "${label}" said nothing at all`);
+      }
+      // ...and only now let the re-run the tap triggered finish, so the next
+      // reading is taken against a settled preview.
+      await settle();
+      drain(`chip ${label}`);
+      await page.screenshot({
+        path: `${SHOTS}/editor-auto-chip-${kind}.png`, fullPage: true,
+      });
+    }
+    // Hand the library back the way it was found: the taps above wrote a real
+    // taste into a real profile, and the next pass of this script (or a human
+    // poking a --serve'd app) would otherwise read a library this drive taught.
+    const resetLink = page.getByRole("button", { name: "Reset", exact: true }).first();
+    if (await resetLink.count()) {
+      await resetLink.click();
+      await settle();
+      console.log("  taste profile reset (the two taps above were real)");
+      drain("taste reset");
+    } else {
+      console.log("  ! no Reset link to undo the two taps — the scratch library keeps them");
+    }
+  }
+}
+
 await page.screenshot({ path: `${SHOTS}/editor-99-end.png`, fullPage: true });
 await browser.close();
 console.log(findings ? `\n${findings} thing(s) to look at` : "\neditor drive clean");

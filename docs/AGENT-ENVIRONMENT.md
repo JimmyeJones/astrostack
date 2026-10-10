@@ -273,6 +273,23 @@ the repo.
 > no failed request, then undoes and redoes. A few minutes on top of a normal
 > pass, which is why it is a flag rather than the default.
 >
+> **…and since v0.492.55 it finishes by clicking Auto-process and driving the
+> Adaptive-Auto taste row** *(added 2026-10-10)*. Everything before that drives
+> the *pipeline*; the row — *"How did Auto do? Tap what you'd change:"* — lives
+> **inside** the "What Auto-process did" alert, so it does not exist until the
+> button is pressed and a probe that photographs the editor as it opens cannot
+> see it at all. That is why **five consecutive Adaptive-Auto fixes (v0.492.49
+> through v0.492.54) each recorded "a dogfood could not have found this"**. The
+> pass prints the whole alert as one paragraph (read it the way the Target page's
+> paragraph is read — four of its sentences are composed independently of each
+> other), lists which chips the app marks as **unable to move this picture**
+> (v0.492.54) against which are live, and then **taps one of each and prints what
+> the app says back** — the two must not get the same sentence, which is exactly
+> the bug v0.492.53/.54 exist to stop and is invisible without the click. It runs
+> last, because clicking Auto rewrites the recipe every reading above is taken
+> against, and it presses **Reset** afterwards: the two taps write a real taste
+> into the scratch library's real profile.
+>
 > **The probe now prints that paragraph for you — read "what the Target page
 > SAYS"** *(added 2026-09-13 with v0.437.8)*. The shell block above is the
 > **server-side** half (the panel map and the health notes, straight off the
