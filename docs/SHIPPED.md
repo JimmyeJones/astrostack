@@ -1,5 +1,91 @@
 # Shipped — the record
 
+## 2026-10-10 (Builder, next run) — "dithered" was two cases, and the fix reached one of them
+
+### v0.492.63 — 🟠 BUG FIX (PRIORITY 1, the editor): `coverage_trim.panel_coverage_level` caps a found plateau at the median, so a continuum can no longer present the **overlap band** as one panel
+
+**Found by reading the previous run's own fix as a lead, and the lead was the *branch* it did not enter.**
+v0.492.62 gave `panel_coverage_level` an honest answer on a canvas whose depths are a continuum — but only
+through the branch where **no window anywhere** is tight. Its window test is
+`hi - lo <= tol * hi`: the band it tests is `tol` × *the depth it is testing at*, so on a continuum of
+roughly even density the only place `PANEL_LEVEL_MIN_FRAC` of the canvas fits inside one band is **high up**,
+where the band is widest — at the depth where two panels overlap. There the search qualifies, the
+fall-through is never reached, and the function returns ~2× one panel: **D1's original bug, arriving through
+the other branch, under the `coverage_shares_version = 3` stamp certifying it was gone.**
+
+**Reproduced on the same fixture, stated per seed, because which branch a dithered canvas takes is a
+property of the canvas and not of the generator.** Over 20 seeds of `_dithered_mosaic` (2×2, 11 re-framed
+nights, 876 subs — the shape built from observer report
+[#1109](https://github.com/JimmyeJones/astrostack/issues/1109)): **13 decline** (v0.492.62's case) and
+**7 present a phantom plateau** at **2.0×–2.3× the median**. On those seven, before → after:
+
+| | thin share (bar 0.05) | the Trim's rectangle | thin *inside* what it kept |
+|---|---|---|---|
+| seed 1 | 0.3251 → 0.2058 | 59.0 % → 59.4 % | 7.5 % → 1.0 % |
+| seed 7 | 0.3199 → 0.1840 | 67.6 % → 68.3 % | 8.9 % → 1.1 % |
+| seed 9 | 0.3254 → 0.2015 | 63.5 % → 64.3 % | 10.5 % → 1.0 % |
+| seed 11 | 0.3515 → 0.2095 | 63.8 % → 64.6 % | 11.1 % → 1.3 % |
+| seed 12 | 0.3341 → 0.2060 | 76.5 % → 62.3 % | 23.3 % → 2.0 % |
+| seed 14 | 0.3407 → 0.1880 | 80.9 % → 65.4 % | 24.2 % → 0.9 % |
+| seed 18 | 0.3128 → 0.1991 | 79.8 % → 64.7 % | 22.4 % → 0.8 % |
+
+The last three are the sharpest: a threshold set at half the *overlap* band keeps nothing coherent, the
+coverage-bound ladder in `largest_covered_rect` gives up and keeps ~80 % of the canvas, and **a quarter of
+what the "clean, even rectangle" kept was still ragged.** After the cap the share lands in the same
+0.184–0.210 band as the seeds that decline (0.192–0.258) — which is the point: the number a beginner reads
+should not depend on which branch of the search his canvas happens to take.
+
+**The fix is the median as a *ceiling*, not a second rule — and it is the same sentence v0.492.62's
+fall-through already is.** One panel of a mosaic whose panels tile the canvas cannot be deeper than the
+depth half the canvas sits at or below, because everything *under* a panel's own depth is fringe. So
+`_continuum_level` is now consulted twice in the same function: as the fall-through when no plateau exists,
+and as the cap on one that does. The module's standing guarantee is untouched — it can only ever return a
+value at or below the peak, so the worst case stays "leaving fringe in, never trimming a panel away".
+
+**Nothing blocky moved, and the control proves the cap is a cap.** Every shape in the suite that finds a
+plateau answers to the digit: the single field with a fringe, 2×2 @15 %, 3×3 @20 %, 3×3 @5 %, the 12×8
+raster, the 1×2 at 400/150 subs — and a new row, **2×2 @50 % overlap**, where only 4/9 of the canvas is
+single-panel so the median is **2× a panel** and the cap has to stay out of the way. It does. Weighted
+(jittered) coverage is unaffected for the reason the fixture is an integer frame count: jitter smears the
+bands so the phantom never qualifies there, and `_framecov.fits` is the map this path prefers anyway.
+
+**And it makes an existing safety argument true.** `MASK_LEVEL_MIN_FRAC` (0.03, the mask's own floor)
+is justified in its comment by *"`panel_coverage_level` is monotone in this fraction … a lower level can only
+keep more of the picture"*. Unbounded above it was **not**: a lower fraction can make the search *find* a
+phantom it had declined on, so the level went **up** — measured, **13 of those 20 seeds violate monotonicity
+somewhere between 0.08 and 0.03**, seed 2 jumping 143 → 194 between 0.08 and 0.06. That made the mask
+*stricter* than the trim on exactly the owner's shape, fading real photographed sky off the all-sky "My map"
+composite and out of the `skyarea` tally (`render/thumbnail.stack_detail_mask`). With the cap, all 20 hold,
+and the new test asserts it rather than restating the reasoning.
+
+**Upgrade-safe (§9).** `COVERAGE_SHARES_VERSION` → **4**, with the rule written out beside rules 1–3, so the
+owner's rows stamped 3 heal off the `_framecov.fits` already beside each master instead of waiting to be
+re-stacked — the same heal path v0.492.62 used, and the backfill is read-only on the map. No config, schema,
+on-disk, default or API-shape change; a single-field row is still never reopened (`stale` is gated on
+`is_mosaic is not False`).
+
+**The method note, and it is the one to carry forward: a fix that enters one branch has not fixed the
+*rule*.** v0.492.62 asked "what does this function do when it finds nothing?" and answered it. The question
+it did not ask is *"and what does it find on that input?"* — on a continuum the search does not merely
+decline, it **mis-fires**, because its tolerance is relative and therefore scale-dependent in the one
+dimension the input varies. **When a fix adds a branch for a shape, check what the *other* branch does on
+that same shape**; a fall-through and a false positive are the same bug wearing different clothes, and the
+stamp that certifies the first was removed certifies the second as well.
+
+**Tests +6** (4 in `test_coverage_trim.py`, 1 in `test_coverage_thin_fraction.py`, 1 in
+`test_coverage_backfill.py`), **fail-before verified in place on 5 of the 6** by reverting the one-line cap
+and the version bump: the three new coverage-trim behaviour tests, the thin share and the version-3 heal all
+fail, and **the other 69 tests in those three files pass**, which is the control that says nothing but the
+phantom branch moved. The sixth new test is the *fixture's own shape claim*, and it is written to hold
+whether or not the rule under test is right — it asks the mirrored search and the median, never the
+production reference, because a fixture that can only vouch for itself when the code is correct vouches for
+nothing.
+`tests/shapes.py` gains its **sixth** entry — *a continuum with no plateau vs one that presents a phantom* —
+plus `plateau_search_level` and `assert_the_plateau_search_finds_a_phantom`, and
+`assert_depths_are_a_continuum` is **tightened**: with a cap in place, "the reference is the median" is true
+both when the search declines and when it was overruled, so the old form of that assertion would have let a
+fixture claim the fall-through while exercising the cap.
+
 ## 2026-10-10 (Builder, next run) — the ragged-border note stops measuring a dithered mosaic against its deepest pixel
 
 ### v0.492.62 — 🟠 BUG FIX (PRIORITY 1, the editor): `coverage_trim._continuum_level` — `panel_coverage_level` no longer hands the **peak** back on a canvas whose depths are a continuum

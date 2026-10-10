@@ -138,6 +138,44 @@ def test_a_dithered_mosaics_thin_share_is_not_measured_against_its_peak():
     assert against_the_peak > 2.0 * share
 
 
+def test_a_dithered_mosaics_thin_share_survives_a_phantom_plateau():
+    """D1's fifth instalment, in the number the ragged-border note prints.
+
+    The fix above reaches a dithered canvas only when the plateau search declines
+    outright. Where its *relative* tolerance lets a window qualify at the panel
+    **overlap** band — 7 of 20 seeds of the same fixture — the share was measured
+    against ~2x one panel and the note was wrong again, from the other branch.
+
+    Fail-before, per seed: **0.3251, 0.3199, 0.3254, 0.3515, 0.3341, 0.3407,
+    0.3128** against a bar of 0.05. After: 0.184-0.210, in the same band as the
+    seeds that decline (0.192-0.258), which is the point — the share should not
+    depend on which branch a dithered canvas happens to take.
+    """
+    from seestack.edit.coverage_trim import panel_coverage_level
+    from tests.shapes import plateau_search_level
+    from tests.test_coverage_trim import _PHANTOM_SEEDS, _dithered_mosaic
+
+    for seed in _PHANTOM_SEEDS:
+        cov = _dithered_mosaic(seed=seed)
+        covered = cov[cov > 0]
+        phantom = plateau_search_level(cov)
+        median = float(np.median(covered))
+        # The fixture's own claim first, so this cannot pass for the wrong reason.
+        assert phantom is not None and phantom > 1.9 * median
+
+        share = coverage_thin_fraction(cov)
+        assert share is not None
+        assert 0.15 < share < 0.25, f"seed {seed}: {share}"
+        n = int(np.count_nonzero(cov > 0))
+        reference = panel_coverage_level(covered)
+        want = int(np.count_nonzero(
+            (cov > 0) & (cov < COVERAGE_THIN_RATIO * reference)))
+        assert share == pytest.approx(want / n)
+        against_the_phantom = int(np.count_nonzero(
+            (cov > 0) & (cov < COVERAGE_THIN_RATIO * phantom))) / n
+        assert against_the_phantom > 1.5 * share, f"seed {seed}"
+
+
 # --- the stack records it, and an older project migrates to NULL -------------
 
 

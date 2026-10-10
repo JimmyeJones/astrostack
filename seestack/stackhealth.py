@@ -95,6 +95,15 @@ _COVERAGE_MIN_PEAK = 4
 # area inside what it kept. The floor is *still* 5 %; the number it reads moved
 # again. See `seestack.edit.coverage_trim._continuum_level`.
 #
+# **…and "dithered" turned out to be two cases, which is the fifth instalment.**
+# v0.492.62 reached the dithered canvases where the plateau search declines
+# outright. Its tolerance is *relative*, so on a continuum a window can still
+# qualify at the panel **overlap** band — 7 of 20 seeds of the owner's own 2x2
+# shape — and there the pre-v0.389.2 answer came back from the other branch. Those
+# fired this note at 0.313-0.352 where the capped reference gives 0.184-0.210, and
+# the Trim they offered left 7.5-24.2 % of what it kept still thin. The floor is
+# 5 % for the third time; only the number moved.
+#
 # A mosaic panel genuinely thinner than its neighbours (the lopsided 12/1/1 this
 # floor was also calibrated on) is therefore no longer *this* note's business,
 # and never was: it is not a border to crop but a place to point the scope next,
