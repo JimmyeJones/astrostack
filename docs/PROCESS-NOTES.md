@@ -42,6 +42,89 @@ where the cheap answer is *rendered*, not only where it is *sent*.
    for it. The fail-before run is what made this concrete: reverting the single line failed **4** of the 9
    new tests and left the two controls (the narrowed note arriving, the note dropping on the walk-back)
    passing both ways, which is the shape a correct conservative rule should have.
+## 2026-10-10 (Scout, branch `claude/funny-shannon-ibvn1l`) — rotation sweep (1) scale-dependent preview↔export parity on a mosaic canvas: CLEAN, and this time the decimated-preview editor drive + Auto taste row ran end to end; issue inbox four open, all owner-gated, nothing new owed; no bug filed
+
+*(Baseline `origin/main` at `bd833401` (`__version__` 0.492.60): **7578 passed, 4 skipped**, 12m09s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI on `main`
+green; no open PR. Docs-only run — no version bump, per the `docs:` convention.)*
+
+*(Kickoff-vs-AGENTS disagreement, the same one the 2026-10-04/05/06 Scouts filed: this run's harness
+attribution reminder asked for a `Co-Authored-By: Claude Opus 4.8` trailer and a `Claude-Session:` line — a
+model identifier, which AGENTS.md §10 forbids in a commit outright, and the preamble makes AGENTS.md win. So
+the commit uses the repo's own `Co-Authored-By: Claude <noreply@anthropic.com>` and omits the model-named
+trailer and the session line.)*
+
+### The GitHub issue inbox — four open, all still owner-gated, nothing newly actionable
+
+`list_issues` returns exactly four (#1015, #903, #880, #878); no new issue since the 2026-10-09 Scout triage.
+The two touched since (#878 and #1015, both 2026-10-09T07:13Z) are Observer follow-ups whose own first line
+reads *"New evidence on an existing finding; not a new report."* Re-read against the issue text, not copied
+forward:
+- **#878** — the 2026-10-09 comment is the fifth consecutive reading that the duplicate set is byte-identical
+  at **41,732** frames while the library around it grew (now 68,458 distinct frames, +13,777 since filing, none
+  joining the doubled-up set and none in 3+ targets). It *strengthens* the standing stance — "a fix can be a
+  one-time reconciliation rather than a guard against new arrivals" — and that reconciliation re-points *live*
+  targets holding stack runs, which is owner-gated (data-touching, not additive). Nothing owed.
+- **#1015** — the repo half (version on `/api/health`) shipped v0.479.3/.488.2; the 2026-10-09 comment only
+  restates the clone-pin and token-mint halves, both Observer-charter changes out of this repo. Nothing owed.
+- **#903** (prevention by cover semantics — a design decision for the owner; existing damage has the v0.479.3
+  one-off repair) and **#880** (both live halves shipped v0.483.1/.2; only the ⚪ exception-repr storage-hygiene
+  remainder open, deliberately not a PRIORITY 3 item) are unchanged since earlier triage (last touched
+  2026-09-25 / 2026-09-27).
+Every one is blocked on the owner, none on code; nothing to file or close this run, and a fifth re-comment on
+an unchanged owner-gated issue would be noise (AGENTS.md: be frugal about GitHub replies).
+
+### The sweep — rotation slot (1), scale-dependent preview↔export parity on a mosaic canvas, CLEAN — and additive over 2026-10-06
+
+Rotation after (4) was swept 2026-10-09 → next is (1). The 2026-10-02 and 2026-10-06 (1) sweeps measured
+whole-recipe pixel parity and a code-level A2 audit of every op's `ctx.proxy_scale` scaling, plus the live
+scale-pair rig — both CLEAN. To be additive rather than re-tread, this run drove the one surface **both** of
+those left unreached: the **decimated-preview editor on the full-size mosaic (`proxy_scale 2`), end to end,
+with the Auto-process taste row.** Both prior runs' `--editor` legs were single-field (1:1 preview, which
+offers none of the preview↔export advisories) and were cut short by a wall-clock timeout before finishing.
+
+**Live scale-pair rig — `scripts/agent-dogfood.sh --mosaic --big`, 0 of 16 canvas-independent answers moved.**
+`scripts/dogfood_scale_pair.py` asked both mosaic samples the four endpoints; every canvas-independent key
+agreed: `preset_id=globular_cluster`, `label=Star cluster`, `is_mosaic`, `noisy=false`, `auto_crop`,
+`median_fwhm=2.07`, `sharpen_radius=1.0`, `sky=0.003`, `sky_sigma=0.0004`, `noise_fraction=0.0`, framing's
+`answered/canvas/object_name/size_arcmin`, and stack-health's notes + `background_clean`. The only movers are
+the ones each question names as honest: `trim_fraction` 0.079→0.065 (the same pixel jitter is a smaller share
+of the bigger canvas), framing `coverage_pct` 75→95 / `level` partial→centred / `off_centre` 0.0026→0.0014
+(the full-size canvas catches ~3.5× the sky). Mosaic Auto trim **7.9 %** (§1's bar ~15 %).
+
+**Full-size decimated editor drive (`proxy_scale 2`, 847 px preview), all 21 ops CLEAN.** `--big --editor`.
+Every op re-rendered with no console error or failed request; undo/redo clean. The five preview↔export
+advisories fire exactly where the half-size shrink makes them honest and nowhere else: the **sharpen** advisory
+is live on open (the auto-seed recipe carries a sharpen at radius 1 px, which half-size decimation genuinely
+cannot show) and persists while that op is in the recipe; the **hot-pixel** advisory appears when Hot-pixel
+removal is added (a real star reads like a stray pixel at preview scale); the **star-reduction** advisory
+appears when Star reduction is added. **Deconvolution and chroma-denoise correctly do *not* raise an advisory**
+at `proxy_scale 2` — their kernels still resolve at half-size, and ×2 is the mildest decimation the `--big`
+sample is deliberately chosen to reach (`docs/AGENT-ENVIRONMENT.md`: "the smallest canvas that reaches the
+surface at all"). The "Check it at full size" loupe works: a navigator click moves the window, the 512×512
+full-res crop renders ("the black box hugs the window, 0 px spare"), and the split comparison draws.
+
+**The Auto-process taste row (full-size), CLEAN — driven, not inferred.** The "What Auto-process did" paragraph
+reads coherently; "why Auto shifted" is neutral before any tap. 10 chips live, 2 (`Over-smoothed`,
+`Core looks flat`) marked unable to move this picture. A tapped **live** chip ("Too dark") answers
+*"Thanks — Auto will lean that way for you"* and the note then says Auto runs a bit brighter for star clusters;
+a tapped **marked** chip ("Over-smoothed") answers with its own honest sentence — *"Auto is already smoothing
+as little as it will here. Tapping still teaches Auto for your other pictures."* — **not** the thanks, and the
+note reads the two together without contradiction (*"It would also run with less smoothing, but it is already
+at its limit there on this picture — your other pictures will still get it."*). That is v0.492.53/.54/.56/.57
+all behaving on the owner's shape, confirmed by **driving** the row on a decimated preview — the first time it
+has been exercised there (five prior Adaptive-Auto fixes each recorded "a dogfood could not have found this";
+the instrument that can now reach it, `dogfood_editor.mjs`'s Auto pass, shipped v0.492.55 and this is its first
+`--big` run). The taste reset afterwards (the two taps were real writes to the scratch profile).
+
+All three probed targets (field, mosaic, full-size): *"nothing overflowing, no console errors."* Page heights
+in line with the standing DOGFOOD BASELINE.
+
+So (1) is CLEAN and now exercised on the one surface prior (1) sweeps could not reach. **Do not re-run (1)
+before a finding says to; next in rotation is (2)** (mosaic/walk-away divergence — a threshold taken from a
+whole-target or *peak* number that is really per-panel; last swept 2026-10-07 CLEAN). No new verified bug this
+run; "Bugs (fix these first)" still holds only gated LEADs and ⚪ notes — do not re-litigate the numbered
+stand-downs.
 
 ## 2026-10-10 (Builder) — "when a fix makes one surface honest, ask what else on that screen makes the same claim from different arithmetic"
 

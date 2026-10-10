@@ -39,6 +39,20 @@ first tap from a neutral profile waits for the refetch, and there was no note (a
 earlier either. Tests **+9 vitest** (4 pure, 5 jsdom), **fail-before 4 of them** by reverting the one line.
 The inbox was checked first — **four open, all previously acted-on and owner-gated** — and there were **no
 open PRs**. Earlier notes stand below.)
+*Last edited 2026-10-10 (Scout — **rotation sweep (1) scale-dependent preview↔export parity on a mosaic canvas:
+CLEAN, and the front of the queue did not change.** The backlog is still dry ("Bugs (fix these first)" holds
+only gated LEADs and ⚪ notes), the issue inbox is still four open and all owner-gated. What this sweep added
+over the 2026-10-02/-06 ones — which measured whole-recipe pixel parity, did the code-level A2 scaling audit,
+and ran the scale-pair rig — is the one surface both of those left unreached: the **decimated-preview editor
+drive (`proxy_scale 2`) and the Auto-process taste row, driven end to end on the full-size mosaic**. All 21 ops
+re-render clean; the scale-pair rig reads **0 of 16** canvas-independent answers moved; the five preview↔export
+advisories fire only where the half-size shrink makes them honest (sharpen, hot-pixel, star-reduction) and not
+for deconvolution/chroma-denoise whose kernels still resolve at ×2; the live vs. marked feedback chips get
+different sentences and the "why Auto shifted" note agrees with them (v0.492.53/.54/.56/.57 confirmed by
+*driving* them, not by arithmetic — the first time that row has been exercised on a decimated preview). Mosaic
+Auto trim **7.9 %**; all three probed targets "nothing overflowing, no console errors". Baseline suite **7578
+passed, 4 skipped**; no bug filed; **rotation advances to (2)**. Full record (and the recurring kickoff-vs-§10
+commit-trailer disagreement) in [`PROCESS-NOTES.md`](PROCESS-NOTES.md). Earlier notes stand below.)*
 *Last edited 2026-10-10 (Builder, next run — **the queue held nothing ungated, so this run read the previous
 run's fix as a lead and found the SAME untruth one line down the screen. SHIPPED as v0.492.57.**
 v0.492.54 marks the Auto feedback chips the picture has no room for; v0.492.56 made the tap on a marked
@@ -606,11 +620,17 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
 
 - **Mosaic-scale and walk-away behaviour is the open frontier**, not the single-field engine core.
 - **Rotation state.** (1) preview↔export parity on a mosaic canvas — **swept CLEAN 2026-10-02, re-swept CLEAN
-  2026-10-06 (Scout)**: the one-click Auto recipe renders proxy↔export within |Δ|≤0.0004/channel at proxy step 4,
-  all divergence entering at `tone.stretch`'s documented resolution dependence; the 2026-10-06 re-sweep confirmed
-  it from both ends — a code-level A2 audit (every pixel-unit op param scales by `ctx.scaled_px`/`proxy_scale`,
-  with documented floors/advisories where the sub-pixel shrink degenerates) and the live scale-pair rig reading
-  **0 of 16** canvas-independent answers moved on `--mosaic --big`. **Don't re-run (1).**
+  2026-10-06 and 2026-10-10 (Scout)**: the one-click Auto recipe renders proxy↔export within |Δ|≤0.0004/channel
+  at proxy step 4, all divergence entering at `tone.stretch`'s documented resolution dependence; the 2026-10-06
+  re-sweep confirmed it from both ends — a code-level A2 audit (every pixel-unit op param scales by
+  `ctx.scaled_px`/`proxy_scale`, with documented floors/advisories where the sub-pixel shrink degenerates) and
+  the live scale-pair rig reading **0 of 16** canvas-independent answers moved on `--mosaic --big`. The
+  **2026-10-10** re-sweep added the one surface both prior (1) sweeps left unreached — the **decimated-preview
+  editor drive (`proxy_scale 2`) and the Auto-process taste row, driven end to end on the full-size mosaic**: all
+  21 ops re-render clean, the five preview↔export advisories fire only where the half-size shrink makes them
+  honest (sharpen, hot-pixel, star-reduction) and not for deconvolution/chroma-denoise whose kernels still
+  resolve at ×2, and the live/marked feedback chips and "why Auto shifted" note agree
+  (v0.492.53/.54/.56/.57 confirmed by driving them, not by arithmetic). **Don't re-run (1).**
   (2) mosaic/walk-away divergence — a threshold taken from a whole-target or *peak* number that is really
   per-panel — swept 2026-10-03 (Scout, yielding the Tonight-planner bug **shipped v0.492.32**) and **re-swept
   CLEAN 2026-10-07 (Scout)**: the whole per-panel threshold family audited engine→webapp→frontend and run on the
@@ -626,7 +646,7 @@ disagree, the backlog's "Bugs (fix these first)" wins and this page is stale —
   2026-10-01, re-swept 2026-10-05 and **again 2026-10-09 (Scout)** — this last one yielded the low/latent
   "My map" two-count bug (item 0b above), the aggregation routers (`plan.py`, `sky.py`, `lifelist.py`,
   `wishlist.py`, `gallery.py`) otherwise clean. Details in `docs/PROCESS-NOTES.md`; don't re-run (1), (2), (3) or
-  (4) before a finding says to — **next in rotation is (1).** **The fifth question — does a measurement change when only
+  (4) before a finding says to — **next in rotation is (2)** (slot (1) swept CLEAN again 2026-10-10). **The fifth question — does a measurement change when only
   the canvas does? — is now half swept (Builder 2026-10-04): the pure-Python half came back CLEAN** (identical
   Auto op lists and identical verdicts at full resolution and `[::2, ::2]`, every difference at the rounding
   digit), **and the rig was deliberately not landed as a test because its synthetic fixture cannot reproduce
