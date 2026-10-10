@@ -2821,6 +2821,14 @@ export interface AutoPreferences {
    * whenever the tap moved something, on a tap with no run context, and on
    * every read endpoint. */
   limit_note?: string | null;
+  /** `{cue: why}` for the chips that cannot move **this** picture, so the row can
+   * mark them before they are tapped: the stored taste is at its limit, or the
+   * value Auto measured for this image already is (a deep clean mosaic has no
+   * smoothing to ease back; a very noisy one has none left to add). Only the
+   * run-scoped GET answers about a picture, so it is `{}` on the library-wide
+   * read and on the feedback POST. A marked chip is still worth tapping — the
+   * profile is library-wide — which is what each sentence says. */
+  inert_cues?: Record<string, string>;
 }
 
 /** The measured cues Auto-process read from a run's own data to build its recipe

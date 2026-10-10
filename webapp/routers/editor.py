@@ -416,6 +416,27 @@ def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | Non
         grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
 
 
+def _measured_region_for_run(project_dir: Path, run, auto_crop: bool):
+    """``(m_rgb, m_cov, proxy_scale)`` — the pixels Auto measures for a run.
+
+    The shared prologue of :func:`build_auto_recipe_for_run` and its mirrors: the
+    run's own proxy, the coverage map Auto measures against (``None`` off a
+    mosaic, see :func:`_auto_measure_coverage`), both narrowed to the rectangle
+    the recipe's border trim keeps (``presets.measured_region``) when the trim is
+    going to run at all.
+
+    A *function*, so a caller that needs two answers about the same picture —
+    the archetype and the measured knobs, which the editor's run-scoped
+    preferences GET does — reads the proxy once instead of twice."""
+    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
+    is_mosaic = _run_is_mosaic(run, load=True)
+    trim = _trim_rect_for_run(run) if is_mosaic else None
+    m_rgb, m_cov = presets_mod.measured_region(
+        rgb, _auto_measure_coverage(run, scale, is_mosaic),
+        trim if auto_crop else None)
+    return m_rgb, m_cov, scale
+
+
 def classify_run_measured(project_dir: Path, run, auto_crop: bool = True) -> dict:
     """``presets.classify_target`` on the picture Auto is about to make — the one
     place in the webapp that asks a run's coarse archetype.
@@ -444,12 +465,7 @@ def classify_run_measured(project_dir: Path, run, auto_crop: bool = True) -> dic
     trim switched off no crop runs, the fringe *is* part of the picture the editor
     shows, and the whole canvas is the honest thing to classify.
     """
-    rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
-    is_mosaic = _run_is_mosaic(run, load=True)
-    trim = _trim_rect_for_run(run) if is_mosaic else None
-    m_rgb, m_cov = presets_mod.measured_region(
-        rgb, _auto_measure_coverage(run, scale, is_mosaic),
-        trim if auto_crop else None)
+    m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run, auto_crop)
     return presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
 
 
@@ -809,6 +825,13 @@ class AutoPreferencesOut(BaseModel):
     # with no run context, and whenever the tap did move something. See
     # :func:`_feedback_limit_note`.
     limit_note: str | None = None
+    # ``{cue: why}`` for the chips that cannot move **this** picture, so the row
+    # can mark them *before* they are tapped rather than apologise afterwards —
+    # the taste is already at its limit, or the value Auto measured for this
+    # image is. Only the run-scoped read has a picture to answer about; the
+    # library-wide GET and the feedback POST leave it ``{}`` (an older frontend
+    # ignores the field either way, so every response stays compatible).
+    inert_cues: dict[str, str] = {}
 
 
 def _read_auto_preferences(lib) -> dict:
@@ -828,21 +851,25 @@ def _read_auto_preferences(lib) -> dict:
 
 def _auto_preferences_out(profile: dict,
                           object_type: str | None = None,
-                          limit_note: str | None = None) -> AutoPreferencesOut:
+                          limit_note: str | None = None,
+                          inert_cues: dict[str, str] | None = None,
+                          ) -> AutoPreferencesOut:
     """The profile as the editor needs it. With ``object_type`` (the archetype of
     the run being edited) the biases/note/neutral reflect that type's *effective*
     taste (global set + per-type override); with ``None`` they reflect the global
     set — so the library-wide GET stays a global view while the per-run feedback
     response is scoped to the target the owner just judged.
 
-    ``limit_note`` is carried straight through; only the feedback POST ever has
-    one, so every read endpoint keeps its response byte-for-byte."""
+    ``limit_note`` and ``inert_cues`` are carried straight through — only the
+    feedback POST ever has the first and only the run-scoped GET the second, so
+    every other endpoint keeps its response byte-for-byte."""
     return AutoPreferencesOut(
         biases=auto_prefs_mod.effective_biases(profile, object_type),
         note=auto_prefs_mod.describe_profile(profile, object_type),
         neutral=auto_prefs_mod.is_neutral(profile, object_type),
         fade_note=auto_prefs_mod.fade_note(profile, object_type),
         limit_note=limit_note,
+        inert_cues=inert_cues or {},
     )
 
 
@@ -880,6 +907,67 @@ def _classify_run(request: Request, safe: str, run_id: int,
         return classify_run_measured(project_dir, run, crop).get("cls")
     except Exception:  # noqa: BLE001 — classification is advisory; never sink feedback
         return None
+
+
+def _run_taste_context(request: Request, safe: str, run_id: int,
+                       auto_crop: bool | None = None,
+                       ) -> tuple[str | None, dict[str, float] | None]:
+    """``(archetype, measured knobs)`` for the run being edited — the two things a
+    taste profile has to be read against, from **one** pass over the proxy.
+
+    The archetype is :func:`_classify_run`'s answer and is used for exactly the
+    same reason (the bucket Auto keys the profile on). The knobs are the numbers
+    Auto measured from the picture, and they are what turns "which chips can move
+    this picture?" from a two-recipe-rebuild question per tap into a free one —
+    see :func:`_run_inert_cue_hints`.
+
+    Best-effort **in two stages, not one**: a failure to measure the knobs costs
+    the chip marks and nothing else, because the archetype is the older and more
+    load-bearing of the two answers — it decides which bucket the owner's taste is
+    read from, and losing it would silently fall the note back to the global taste
+    (the v0.492.50 symptom). ``(None, None)`` only when the proxy itself is
+    unreadable, which is exactly today's behaviour.
+
+    ``auto_crop`` is the editor's per-run border-trim override and gates the
+    narrowing as it does everywhere else (:func:`classify_run_measured`)."""
+    try:
+        project_dir, run = _run_info(request, safe, run_id)
+        crop = (bool(deps.get_settings(request).auto_crop_border)
+                if auto_crop is None else bool(auto_crop))
+        m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run, crop)
+        cls = presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale).get("cls")
+    except Exception:  # noqa: BLE001 — advisory; never 500 the editor's load
+        return None, None
+    try:
+        knobs = presets_mod.measured_auto_knobs(
+            m_rgb, m_cov,
+            grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
+    except Exception:  # noqa: BLE001 — the marks are the optional half
+        return cls, None
+    return cls, knobs
+
+
+def _run_inert_cue_hints(knobs: dict[str, float] | None, profile: dict,
+                         object_type: str | None) -> dict[str, str]:
+    """``{cue: why}`` for the chips that cannot move this run's picture — the
+    *before the tap* half of :func:`_feedback_limit_note`, which is the half worth
+    having: a chip marked before it is pressed is guidance; the same sentence
+    afterwards is an apology.
+
+    The predicate is ``presets.inert_auto_cues`` — exact, because it rebuilds the
+    op params Auto emits either side of each of the twelve taps through the same
+    helpers ``auto_recipe`` itself is built from, and free, because the only image
+    work is the single ``measured_auto_knobs`` pass the caller already made.
+    ``None`` knobs (an unreadable proxy, or no run context at all) ⇒ ``{}``, and
+    the row renders exactly as it always has."""
+    if not knobs:
+        return {}
+    out: dict[str, str] = {}
+    for cue in presets_mod.inert_auto_cues(knobs, profile, object_type):
+        hint = auto_prefs_mod.limit_hint(cue)
+        if hint:
+            out[cue] = hint
+    return out
 
 
 def _feedback_limit_note(cue: str, before: dict, after: dict,
@@ -938,16 +1026,26 @@ def get_run_auto_preferences(safe: str, run_id: int,
     next feedback tap. Falls back to the global taste when the run can't be
     classified. Read-only.
 
+    It also reports which feedback chips **cannot move this picture**
+    (``inert_cues``), so the row can mark them before they are tapped instead of
+    answering the tap with an apology — see :func:`_run_inert_cue_hints`. That is
+    what this endpoint is for: it is the one request in the family that is about a
+    *picture* and runs before any tap, and the measurement it needs is the one it
+    is already making to classify the run.
+
     ``auto_crop`` is the editor's per-run border-trim override, as a query param
     because this is a GET (the two Auto endpoints take the same flag in a body).
     Omitted ⇒ the saved ``auto_crop_border`` setting, i.e. what every older
     frontend asks for and gets today."""
-    object_type = _classify_run(request, safe, run_id, auto_crop)
+    object_type, knobs = _run_taste_context(request, safe, run_id, auto_crop)
     lib = deps.open_library(request)
     try:
-        return _auto_preferences_out(_read_auto_preferences(lib), object_type)
+        profile = _read_auto_preferences(lib)
     finally:
         lib.close()
+    return _auto_preferences_out(
+        profile, object_type,
+        inert_cues=_run_inert_cue_hints(knobs, profile, object_type))
 
 
 class AutoFeedbackIn(BaseModel):

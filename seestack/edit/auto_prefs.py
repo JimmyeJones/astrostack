@@ -451,6 +451,29 @@ def unchanged_note(cue: str) -> str | None:
     return None if phrase is None else f"That didn’t change this picture — {phrase}."
 
 
+def limit_hint(cue: str) -> str | None:
+    """The same limit as :func:`unchanged_note`, said **before** the tap — the line
+    the chips row shows on a chip that cannot move the picture in front of the
+    owner. ``None`` for a cue this module does not know.
+
+    Two sentences rather than one, because marking a chip raises a question the
+    after-the-fact note does not: *then why is it still here?* It is still here
+    because the taste profile is **library-wide**. "Less smoothing than you
+    measured" is a real preference, and the deep clean mosaic this picture happens
+    to be is simply the one target where Auto has no smoothing to ease back; the
+    next noisy one will. So the chip stays tappable and keeps recording — what the
+    hint corrects is the expectation that *this* picture will change.
+
+    Whether a given cue is in that state is the caller's question, not this one's:
+    it needs the knobs Auto measured from the picture, which is
+    ``presets.inert_auto_cues``.
+    """
+    phrase = _UNCHANGED_PHRASE.get(cue)
+    if phrase is None:
+        return None
+    return (f"{phrase}. Tapping still teaches Auto for your other pictures.")
+
+
 def is_neutral(profile: dict[str, Any] | None,
                object_type: str | None = None,
                now: float | None = None) -> bool:

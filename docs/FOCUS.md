@@ -1,5 +1,39 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-10 (Builder — **the queue held two leads and the right one was the one whose own
+write-up had already made the decision. SHIPPED as v0.492.54.** v0.492.53's lead reproduced and priced the
+second way an Auto feedback chip can be dead — the bias moves, `_nudge`'s range clamp swallows it — and
+named two cheaper homes for the answer, picking **(a)**: report it from the request that already measures
+the picture, so the chips row can **mark a dead chip before it is tapped** rather than apologise
+afterwards. That is what shipped, on the **run-scoped `…/editor/auto-preferences` GET** rather than on
+`…/editor/auto` (the Recipe response is a `Recipe`; the run-scoped read is the one the chips row already
+consumes, with the same `autoCrop` query key, and it was already classifying the run). **The numbers, on a
+1000×1500 proxy:** the twelve questions cost **0.145 ms** once the knobs are in hand; the one new
+measurement is **284 ms** beside the **313 ms** that GET already paid to classify; the predicate the lead
+cut is **1 233 ms per live tap**. The feedback POST's cost and response are byte-for-byte unchanged, and
+`AutoFeedback.tsx` re-fetches the read after a tap (a third "Too dark" can be the chip-killer) keeping the
+marks it has while that is in flight.
+**Four method notes.** (1) **Extract rather than mirror, and then prove it.** The lead's one prohibition
+was "do not mirror the clamp arithmetic in a second place — that drift caused three of the last five
+editor bugs", so `auto_recipe`'s measured-knob block *and* its tone/detail op assembly now go through
+`measured_auto_knobs` / `auto_knob_values` / `auto_op_params`, and the extraction was checked over **910
+recipe builds against `origin/main` — 0 differences** before anything was built on it. (2) **Pin the
+report against the thing it reports on, not against its own helper.**
+`test_inert_cues_agree_with_the_recipe_itself` asks `auto_recipe` directly, before and after each of the
+twelve taps, on four pictures from four stored tastes — a cue is reported inert *exactly* when the op list
+is byte-identical. (3) **A faithful end-to-end predicate finds the mechanism the analysis missed.** The
+lead listed the store cap and `_PARAM_RANGE`; comparing *emitted op params* also caught
+`min(…, _AUTO_DENOISE_MAX)`, which runs **after** the taste, so any measured denoise ≥ 0.9 kills
+"Over-smoothed" for all three of its steps. (4) **Two best-effort answers from one `try` is one answer too
+few** — the archetype decides which bucket the taste is read from (losing it is the v0.492.50 symptom)
+while the knobs only feed a hint, so they fail separately, with a test for it.
+**UI rule honoured:** nothing removed, nothing disabled. A dead chip is faded, has a tooltip, and the row
+gains one line of legend — because an inert tap is still a real library-wide preference, which is exactly
+what the sentence says.
+**"Bugs (fix these first)" now holds the *(ii)* half of that lead only — whether an inert chip should be
+given room rather than a label — plus the older gated LEADs and ⚪ notes; do not re-litigate the numbered
+stand-downs.** The inbox was checked first: **four open, all previously acted-on and owner-gated**, and
+there were **no open PRs**. Earlier notes stand below.)
 *Last edited 2026-10-09 (Builder, fifth run of the day — **the inbox was clear, there were no open PRs, and the
 bug came from asking the table NEXT TO the one that paid out last time. SHIPPED as v0.492.53.** v0.492.52 read
 `_CUE_STEP` as a population (*which parameters are reachable both ways?*); `_PARAM_RANGE`, immediately below it,
