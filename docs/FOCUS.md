@@ -1,5 +1,33 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-10 (Builder, same run, tasks 2 and 3 — **the run's best finding came from building the
+instrument that could see the surface it had just changed. SHIPPED as v0.492.55 and v0.492.56.** Five runs
+in a row had written "a dogfood could not have found this" about an Adaptive-Auto fix and treated it as a
+property of the bug. It was a property of the **probe**: the chips row lives *inside* the "What
+Auto-process did" alert, so it does not exist until the button is pressed, and nothing in this repo's
+tooling had ever pressed it — `dogfood_editor.mjs` drove the pipeline, `dogfood_probe.mjs` photographs the
+editor as it opens. **v0.492.55** adds an Auto pass to the editor drive: it clicks Auto-process, prints the
+alert as one paragraph, lists which chips the app marks as unable to move this picture against which are
+live, **taps one of each and prints what the app says back**, then presses Reset.
+On its first working run it did both jobs. It **confirmed v0.492.54 on the owner's shape** (full-size
+mosaic: 10 chips live, `Over-smoothed` and `Core looks flat` marked — exactly what the arithmetic predicts
+for a stack with no denoise and no highlight protection, and nothing more), and it **found a PRIORITY-1
+bug**: the marked chip still answered *"Thanks — Auto will lean that way for you"*, the exact sentence
+v0.492.53 exists to stop, one mechanism over. `_feedback_limit_note` only covers the tap whose dead end is
+in the **store**; a chip dead because the **picture** is at its limit moves the bias, so the server sends
+no `limit_note` and the row fell through to the thanks. **SHIPPED as v0.492.56**, free: the chip is already
+wearing the right sentence, so the mutation reads the mark the tapped chip carried and uses it — the POST
+still measures nothing, the server stays the only author of the wording, and Auto's no-op rebuild is now
+skipped (~0.6 s saved rather than spent).
+**Three method notes, all in [`PROCESS-NOTES.md`](PROCESS-NOTES.md).** (1) **When "a probe could not have
+found this" appears twice in a row, ask what the tooling cannot reach, not what the bug was hiding
+behind.** (2) A finder that waits for the page to go quiet **cannot read what the page says transiently** —
+`<Notifications />` auto-closes in 4 s and `settle()` waits 7 s plus idle. (3) `.at(-1)` on a locator's
+texts is **not** "the latest thing on screen": the page carries several `mantine-Notifications-root`
+containers and all but one are empty, so the last match is `""` however long you wait. Both probe bugs
+looked identical from outside — a confident *"the app said nothing"* — which is the dangerous failure mode
+for an instrument: it does not crash, it reports.
+The run's first task and its notes stand below.)
 *Last edited 2026-10-10 (Builder — **the queue held two leads and the right one was the one whose own
 write-up had already made the decision. SHIPPED as v0.492.54.** v0.492.53's lead reproduced and priced the
 second way an Auto feedback chip can be dead — the bias moves, `_nudge`'s range clamp swallows it — and

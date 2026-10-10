@@ -317,6 +317,83 @@ describe("autoFeedbackGroups", () => {
       expect(send).toHaveBeenCalledWith("over_smoothed", { safe: "M31", runId: 7 }, undefined));
   });
 
+  it("answers a MARKED chip with its own sentence, not with the thanks", async () => {
+    // The bug the dogfood's Auto pass caught on its first working run
+    // (v0.492.55): the server's `limit_note` only covers the tap whose dead end
+    // is in the **store** — the taste at its cap — because that is the half it
+    // can answer for free. A chip marked because the *picture* is at its limit
+    // moves the bias, so `limit_note` is null, and the row still said
+    // "Thanks — Auto will lean that way for you" over a byte-identical
+    // re-render. That is the exact sentence v0.492.53 exists to stop, one
+    // mechanism over. The chip is already wearing the right answer, so use it.
+    const hint = "Auto is already smoothing as little as it will here. Tapping still teaches Auto for your other pictures.";
+    vi.spyOn(client.api, "getRunAutoPreferences").mockResolvedValue({
+      biases: {}, note: null, neutral: true, inert_cues: { over_smoothed: hint },
+    });
+    vi.spyOn(client.api, "sendAutoFeedback").mockResolvedValue({
+      // The bias DID move — this is not the store-side case — so the server
+      // sends no `limit_note`, exactly as it does today.
+      biases: { denoise: -1 }, note: null, neutral: false, limit_note: null,
+    });
+    const shown = vi.spyOn(notifications, "show");
+    const onRerun = vi.fn();
+
+    wrap(onRerun, { safe: "M31", runId: 7 });
+    // Wait for the marks to land before tapping — the row renders its chips
+    // immediately and the legend only appears once the run-scoped read has
+    // answered, which is also the only moment the chip *looks* faded to a user.
+    await screen.findByText(/Faded chips can.t change this picture/);
+    fireEvent.click(screen.getByRole("button", { name: "Over-smoothed" }));
+
+    await waitFor(() => expect(shown).toHaveBeenCalled());
+    expect(shown.mock.calls[0][0].message).toBe(hint);
+    expect(shown.mock.calls[0][0].message).not.toMatch(/lean that way/);
+    // The recipe Auto would rebuild is byte-for-byte the one on screen, so there
+    // is nothing to re-render either.
+    expect(onRerun).not.toHaveBeenCalled();
+  });
+
+  it("still thanks a LIVE chip on the same picture", async () => {
+    // The control, and the half that proves the fix is not a blanket silencing:
+    // a chip that is not marked gets today's answer and today's re-run.
+    vi.spyOn(client.api, "getRunAutoPreferences").mockResolvedValue({
+      biases: {}, note: null, neutral: true,
+      inert_cues: { over_smoothed: "Auto is already smoothing as little as it will here. Tapping still teaches Auto for your other pictures." },
+    });
+    vi.spyOn(client.api, "sendAutoFeedback").mockResolvedValue({
+      biases: { brightness: 1 }, note: null, neutral: false, limit_note: null,
+    });
+    const shown = vi.spyOn(notifications, "show");
+    const onRerun = vi.fn();
+
+    wrap(onRerun, { safe: "M31", runId: 7 });
+    fireEvent.click(await screen.findByRole("button", { name: "Too dark" }));
+
+    await waitFor(() => expect(onRerun).toHaveBeenCalled());
+    expect(shown.mock.calls[0][0].message).toMatch(/Auto will lean that way/);
+  });
+
+  it("lets the server's limit_note win over the chip's mark", async () => {
+    // Both can be true at once (a marked chip tapped a fourth time). The
+    // server's sentence is about the tap that just happened, so it goes first.
+    vi.spyOn(client.api, "getRunAutoPreferences").mockResolvedValue({
+      biases: { denoise: -3 }, note: null, neutral: false,
+      inert_cues: { over_smoothed: "the mark's sentence" },
+    });
+    vi.spyOn(client.api, "sendAutoFeedback").mockResolvedValue({
+      biases: { denoise: -3 }, note: null, neutral: false,
+      limit_note: "That didn\u2019t change this picture \u2014 Auto is already smoothing as little as it will here.",
+    });
+    const shown = vi.spyOn(notifications, "show");
+
+    wrap(() => {}, { safe: "M31", runId: 7 });
+    await screen.findByText(/Faded chips can.t change this picture/);
+    fireEvent.click(screen.getByRole("button", { name: "Over-smoothed" }));
+
+    await waitFor(() => expect(shown).toHaveBeenCalled());
+    expect(shown.mock.calls[0][0].message).toMatch(/That didn.t change this picture/);
+  });
+
   it("says nothing about faded chips when every chip can move the picture", async () => {
     // The control: an empty/absent `inert_cues` must leave the row exactly as an
     // older build renders it — no legend, no dimming.

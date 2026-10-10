@@ -97,7 +97,11 @@ export function AutoFeedback(
     mutationFn: (cue: string) =>
       api.sendAutoFeedback(
         cue, scoped ? { safe: safe!, runId: runId! } : undefined, autoCrop),
-    onSuccess: (data) => {
+    onSuccess: (data, cue) => {
+      // The mark this chip was *already* carrying, read off the snapshot the tap
+      // was made against. It is the other half of the answer below, and it has
+      // to be read before `setQueryData` lands.
+      const markedBefore = prefs.data?.inert_cues?.[cue] ?? null;
       // Keep the marks we already have while the refresh below is in flight: the
       // POST answers about the *profile* and leaves `inert_cues` empty, so taking
       // its value literally would unmark every chip for a moment and then mark
@@ -107,14 +111,26 @@ export function AutoFeedback(
         inert_cues: old?.inert_cues ?? {},
       }));
       // A tap that cannot move this picture gets told so, instead of the thanks.
-      // The server decides it (`editor._feedback_limit_note`): when the stored
-      // taste had nowhere to go, Auto rebuilds a byte-identical recipe, so
-      // "Auto will lean that way for you" was a claim about a picture that did
-      // not change. That covers the fourth identical tap on any chip, and "Core
-      // looks flat" from the *first* tap on a picture Auto is not holding back
-      // (highlight protection starts off, so there is nothing to walk back).
-      // Nothing to re-run in that case either, so the rebuild is skipped.
-      const limit = data.limit_note ?? null;
+      // TWO sources, because the server can answer one of the two mechanisms for
+      // free and not the other:
+      //   * `limit_note` (`editor._feedback_limit_note`) is the tap whose dead
+      //     end is in the **store** — the taste was already at its cap, so the
+      //     effective biases did not move and the recipe is provably identical.
+      //     That covers the fourth identical tap on any chip, and "Core looks
+      //     flat" from the *first* tap on a picture Auto is not holding back.
+      //   * the chip's own **mark** is the tap whose dead end is in the
+      //     **picture**: the bias moves, but Auto's measured value already sits
+      //     at the end of that parameter's range, so the clamp swallows it. The
+      //     POST cannot see that without measuring the proxy (the cost argument
+      //     behind v0.492.54), and it does not have to — the row was given the
+      //     answer on load and the chip is wearing it.
+      // Without the second source a marked chip still answered "Thanks — Auto
+      // will lean that way for you", which is the exact sentence v0.492.53
+      // exists to stop, one mechanism over. Found by the dogfood's own Auto pass
+      // (v0.492.55) on its first working run.
+      // Nothing to re-run in either case — the recipe Auto would rebuild is
+      // byte-for-byte the one on screen — so the rebuild is skipped.
+      const limit = data.limit_note ?? markedBefore;
       notifications.show(
         limit
           ? { message: limit, color: "gray" }

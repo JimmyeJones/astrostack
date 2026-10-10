@@ -1,5 +1,66 @@
 # Process notes & QA sweep records
 
+## 2026-10-10 (Builder) — the `--mosaic --editor --big` dogfood for v0.492.54, and the probe it produced
+
+**The app: CLEAN. The new probe: two findings, both against itself, and then one against the app.**
+
+All three page sweeps (single field, 2×2 mosaic, full-size mosaic) reported *"nothing overflowing, no
+console errors"* at 1440 px and 420 px; all three editor drives were clean across all 21 ops; mosaic
+trim **7.9 %**, inside the band AGENTS.md calls a healthy ragged edge. The three Target-page paragraphs
+each read coherently — the full-size sample's "Nicely framed" against the 2×2's "bigger than this
+mosaic" is correct for the two canvases, not a disagreement.
+
+**For the first time in six runs the dogfood could see the thing the run had changed, and the reason it
+could not before is structural.** v0.492.49 … v0.492.53 each recorded "a dogfood could not have found
+this". The row this whole family lives on — *"How did Auto do? Tap what you'd change:"* — is rendered
+**inside** the "What Auto-process did" alert, so it does not exist until the button is pressed, and
+nothing in this repo's tooling had ever pressed it: `dogfood_editor.mjs` drove the *pipeline* and
+`dogfood_probe.mjs` photographs the editor in the state it opens in. **v0.492.55 adds the Auto pass.**
+
+**It confirmed v0.492.54 end-to-end on the owner's shape**, on the full-size mosaic:
+
+```
+chips live (10): Too dark | Too bright | Too soft | Over-sharpened | Too noisy |
+                 Colours too weak | Colours too strong | Too green | Too magenta | Core blown out
+chips marked as unable to move THIS picture (2): Over-smoothed | Core looks flat
+```
+
+That pair is exactly what the arithmetic predicts and nothing more — the stack is clean (`a ~0.003
+sky`), so `auto_recipe` emits no denoise op and "Over-smoothed" has nothing to ease back; highlight
+protection starts off, so "Core looks flat" walks back to where it already is. **Ten chips live is the
+discriminating half**: a report that marked everything would be useless.
+
+**Then it found a real bug, which is what it was for.** It taps one live chip and one marked chip and
+prints the toast, and both came back *"Thanks — Auto will lean that way for you"* — the exact sentence
+v0.492.53 exists to stop, one mechanism over, on the chip the app had just finished marking. Fixed as
+**v0.492.56**; the mechanism is in [`SHIPPED.md`](SHIPPED.md).
+
+**Two method notes about writing a finder, both paid for in this run.**
+
+1. **A finder that waits for the page to go quiet cannot read what the page says transiently.** The
+   first version read the toast after `settle()` — 7 s plus network idle — while `<Notifications />` is
+   mounted with Mantine's default `autoClose` of **4 s**. It printed `NOTHING SAID` twice about an app
+   that had said something both times. It now polls immediately after the click and settles afterwards.
+2. **`.at(-1)` on a locator's texts is not "the latest thing on screen".** Even with the timing fixed it
+   still read `NOTHING SAID`: the page carries several `mantine-Notifications-root` containers and all
+   but one are **empty**, so the last match is "" however long you wait. The fix is the notification's
+   own `mantine-Notification-description` node and the **first non-empty** of them. Both halves looked
+   identical from the outside — a confident "the app said nothing" — which is the dangerous failure mode
+   for an instrument: it does not crash, it reports.
+
+**And the general lesson, which is the reason this is worth a record rather than a line.** Five runs in
+a row wrote "a probe could not have found this" and treated it as a property of the bug. It was a
+property of the **probe**: the surface was one click away the whole time. When that sentence appears
+twice in a row, the next run should ask what the tooling cannot reach, not what the bug was hiding
+behind.
+
+**One observation, filed and not acted on.** Read as one paragraph, the "What Auto-process did" alert is
+dense: nine clauses of what Auto did, three measured cues, three tuned values, the preset hint, "these
+steps were chosen from your image", twelve chips in five groups, and (only when it applies) the new
+legend. Every part was added for a reason and the UI rule forbids removing any of it, so this is not a
+bug report — but the next run that touches this alert should ask whether the *order* still puts the
+useful sentence first, rather than adding a fourth sentence to it.
+
 ## 2026-10-09 (Builder, branch `claude/jolly-bardeen-7zt3ew`) — ask the table *next to* the one that just paid out
 
 **Baseline.** `source scripts/agent-setup.sh` green. Full suite **`7541 passed, 4 skipped`** at `-n 8` in
