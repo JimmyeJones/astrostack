@@ -1,5 +1,41 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-10 (Builder, next run — **the queue held nothing ungated for a ninth run, so this run
+built the INSTRUMENT the previous two had to work around, and it found something on its first pass.
+SHIPPED as v0.493.0.**
+v0.492.62 and v0.492.63 are D1's fourth and fifth instalments, both on *dithered* mosaic canvases, and both
+had to be reproduced on hand-rolled fixtures. The fifth wrote the reason down: *"`webapp/sample_data.py`'s
+mosaic carries one fixed pointing error **per panel**, not per sub, so its panel interiors are flat and it
+finds a plateau — **the dogfood tool cannot reach this class of bug either**, for exactly the reason the
+fixtures could not."* So `shape="dithered"` / `--dithered`: the small mosaic's sensor, grid and overlap
+exactly, revisited over **eleven re-framed nights** with every sub dithered. 78 subs, a 1212×784 canvas,
+7.2 % uncovered — and **one stack exercises both dithered branches**: the honest frame-count map presents the
+phantom plateau at **21 against a median of 11** (1.91×, D1's fifth's own case) while the weighted map
+**declines outright** (the fourth's). Neither blocky sample can make either claim (both land at 0.5× the
+median). Both existing demos' pixels are byte-identical and the recorded mosaic trim is still **7.9 %**.
+**What it found on its first pass, and the honest reading of it.** On `--mosaic --dithered` the dithered run's
+**panel depth map draws nothing at all**, and "How's my stack?" swaps the blocky run's per-panel sentence
+(*"part of this mosaic is thinner than the rest … it evens out as you keep shooting"*, with a **where**) for a
+border one (*"about 14 % of this picture is a thin edge … Trim border"*) — on a canvas whose fourth panel
+really does hold 12 subs against 22. Traced: `pointings.pointing_groups` separates panels by single-linkage at
+`PANEL_LINK_DIST_DEG` (0.25°), the 78 pointings chain into **one** cluster, it returns `None`, and every
+per-panel caller then uses the target-wide population. **That is the sample's own limit, measured:** its
+0.667° frame steps panels 0.547° (a 2.2× margin) where a real S30's 2.1° field steps 1.72° (6.9×), so it
+under-represents the margin by 3.1× and at this size the two properties do not overlap at all (±2 % re-frame →
+4 clusters but a plateau; ±20 % → the continuum and one cluster). So the limit is **asserted by a test** and
+explained in the flag's own output, and the question about a *real* install — nightly re-framing past 0.25°,
+which on his optics needs about **0.42°**, 20 % of his field — is filed as a LEAD under "Bugs (fix these
+first)" with the boundary table and the one measurement the observer can supply from rows it already reads.
+`PANEL_LINK_DIST_DEG` is deliberately **not** touched: it is the shared gate behind QC grading, photometric
+normalisation and quality weighting, and widening it merges genuine panels.
+**The method note, and it is the one to carry forward: when a run writes down that the tooling cannot reach a
+shape, that sentence is the next task.** Two runs recorded it and worked around it; the third built it, and
+the instrument earned its version on the first pass. A fixture that can only be read by the suite is half an
+instrument — the other half is the one a browser can be pointed at. Tests **+13**, one of them a real
+fail-before (`remove_sample` enumerates the shapes it sweeps, so the new demo was created by "Try it" and
+then left in the library for good). The inbox was checked first — **four open, all previously acted-on and
+owner-gated** — and there were **no open PRs**. Earlier notes stand below.)*
+
 *Last edited 2026-10-10 (Builder, next run — **the queue held nothing ungated for an eighth run, so this run
 read the previous run's fix as a lead and found the SAME bug in the branch that fix did not enter.
 SHIPPED as v0.492.63.**

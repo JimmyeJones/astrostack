@@ -54,6 +54,17 @@ deliberately small — these are the distinctions that actually bit:
   say which of the two it is: :func:`assert_depths_are_a_continuum` or
   :func:`assert_the_plateau_search_finds_a_phantom`.
 
+**And there is now a *sample* of each, not only fixtures** (added 2026-10-10).
+``webapp.sample_data``'s ``shape="dithered"`` demo — 2x2 panels over eleven
+re-framed nights, every sub dithered — is the owner's own canvas shape, and it
+makes both claims from one stack: its honest **frame-count** map presents the
+phantom plateau (21 against a median of 11) while its **weighted** coverage map
+declines outright. That matters because a fixture can only be read by this suite,
+and the shape's first two findings had to be reproduced by hand precisely because
+``scripts/agent-dogfood.sh`` could not put it in front of a browser either. Use
+the sample when the question is what the *app* says about such a canvas; use a
+fixture when the question is about one rule.
+
 Nothing here changes a fixture that works for what it was built for. The
 deliverable is the assertion that says what each one **is**.
 """

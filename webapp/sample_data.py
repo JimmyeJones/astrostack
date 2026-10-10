@@ -25,6 +25,7 @@ Design choices that keep it safe and self-contained:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -104,9 +105,36 @@ SAMPLE_CLOSING_TARGET_NAMES = (
     SAMPLE_CLOSING_DEEP_TARGET_NAME,
 )
 
+# The sixth, opt-in demo: the same 2×2 mosaic shot the way the owner actually
+# shoots one — **every sub dithered and every night re-framed** — so its coverage
+# depths are a *continuum* rather than a handful of flat plateaus.
+#
+# Why it exists, and it is the narrowest "why" of the six. Every mosaic above
+# puts its panels on a fixed grid and points every sub of a panel at exactly the
+# same place, so each panel interior is flat, one depth holds a large share of
+# the canvas, and ``coverage_trim.panel_coverage_level`` always finds its
+# plateau. The owner's mosaics are the same handful of pointings revisited across
+# many nights, each sub dithered and each night re-framed, on a union canvas two
+# or three frame-widths across — so every panel edge lands somewhere new on every
+# visit and the depth climbs in hundreds of small steps.
+#
+# That shape is where D1's **fourth and fifth** instalments live (v0.492.62 and
+# v0.492.63: the plateau search falling through to the peak on a continuum, and
+# then *finding* one at the panel-overlap band because its tolerance is relative
+# to the depth it tests at). Both had to be reproduced on hand-rolled fixtures,
+# and the fifth's own write-up records why: *"``webapp/sample_data.py``'s mosaic
+# carries one fixed pointing error per panel, not per sub, so its panel interiors
+# are flat and it finds a plateau — the dogfood tool cannot reach this class of
+# bug either, for exactly the reason the fixtures could not."* This demo is that
+# sentence closed. Its canvas stays **under** the editor's proxy cap on purpose,
+# so it differs from the small mosaic in *pointing discipline alone* — the scale
+# question is what ``big`` is for.
+SAMPLE_DITHERED_TARGET_NAME = "Sample: M42 mosaic (2×2, dithered nights)"
+
 #: Which demo to load / ask about. ``"field"`` is the default everywhere, so an
 #: existing caller (and the Dashboard button) is unchanged.
-SampleShape = Literal["field", "mosaic", "big", "deep", "closing"]
+SampleShape = Literal["field", "mosaic", "big", "deep", "dithered",
+                     "closing"]
 
 # Subfolder (inside the target dir) that holds the generated source subs, so a
 # ``remove_files=True`` delete of the target sweeps them away too.
@@ -449,6 +477,105 @@ _BIG_N_STARS = 700
 _BIG_SUBDIR = "sample_big_subs"
 
 
+# --- the dithered mosaic sample's own pointing discipline -------------------
+#
+# Eleven nights, two subs a panel a visit: the owner's own cadence scaled down by
+# about ten (his #1109 report is 876 subs over 11 re-framed nights on a 2×2), so
+# a dogfood pass costs one short stack rather than an hour. The two spreads are
+# what make the depths a continuum, and they are **measured, not guessed** — over
+# 50 seeds of this layout, 48 present a phantom plateau at 1.5–1.9× the median
+# covered depth and one declines outright, i.e. the shape reproduces both of the
+# two dithered cases `tests/shapes.py` distinguishes. Dropping either spread to a
+# few pixels puts the canvas straight back on plateaus: measured at a 2 % sub
+# dither and a 10 % re-frame, every seed finds a level, and most find it *at* the
+# median.
+#
+# ``panel_last_night`` is the uneven depth every mosaic demo here carries
+# (AGENTS.md §1 — a mosaic whose panels are equally deep leaves every per-panel
+# surface quiet): the fourth panel was clouded out after the sixth night, which
+# is this shape's version of the blocky demos' 6/6/6/3.
+#
+# The offsets are drawn from a fixed seed rather than written out as 78 integer
+# pairs, for the same reason the star catalogue is: ``np.random.default_rng``'s
+# stream is stable, so the sample is the same picture on every install and in
+# every test run, and the parameters above stay readable as parameters.
+#
+# ⚠️ **WHAT THIS DEMO CANNOT VOUCH FOR, and it is not a bug in the app: its
+# per-panel *pointing* split collapses, so every surface that clusters subs by
+# where they pointed is silent on it** — the depth map (`/mosaic-map`) answers
+# nothing at all, and "How's my stack?" says "about 14 % of this picture is a
+# thin edge … Trim border" where the blocky demo says "part of this mosaic is
+# thinner than the rest … it evens out as you keep shooting". Compare the two on
+# one `--mosaic --dithered` pass; the blocky one is the designed control.
+#
+# **Why, measured.** `pointings.pointing_groups` separates panels by
+# single-linkage at `PANEL_LINK_DIST_DEG` (0.25°), whose own comment reasons that
+# "a dither nudges a pointing by arc-minutes (≲0.1°), while even the tightest
+# mosaic steps adjacent panels by roughly half a field of view (~0.5°)". This
+# demo's sensor is 480x320 at 5"/px, i.e. a **0.667° frame** stepping 0.547° —
+# only a 2.2x margin — while a real S30's 2.1° field steps 1.72°, a 6.9x one. So
+# the demo under-represents that margin by 3.1x, exactly the ratio of the two
+# frames, and a re-frame big enough to make the depths a continuum is also big
+# enough to chain one panel to the next. The two properties do not overlap at
+# this size, measured at `sub_dither_frac` 0.10 over the night spread:
+#
+#     night re-frame   in degrees   coverage   pointing clusters / map
+#       +-2% of frame     0.013     plateau          4   2x2
+#       +-5%              0.033     plateau          3   2x2 (3 panels)
+#      +-10%              0.067     plateau          2   1x2
+#      +-15%              0.100     plateau          2   1x2
+#      +-20%              0.133     PHANTOM          1   none
+#      +-30% (shipped)    0.200     PHANTOM          1   none
+#
+# The coverage shape is what nothing else in the repo could produce, so that is
+# what this demo is for; the pointing split is live on `--mosaic`, which is one
+# flag away. The limit is asserted by a test rather than remembered, so a future
+# run reads the silence as designed rather than as a regression — and the lead it
+# raises (what happens on a *real* install whose nightly re-framing exceeds
+# 0.25°) is filed in `docs/IMPROVEMENTS.md` under "Bugs (fix these first)".
+_DITHERED_NIGHTS = 11
+_DITHERED_SUBS_PER_NIGHT = 2
+_DITHERED_NIGHT_SPREAD_FRAC = 0.30
+_DITHERED_SUB_DITHER_FRAC = 0.10
+_DITHERED_LAYOUT_SEED = 43
+_DITHERED_PANEL_LAST_NIGHT = (11, 11, 11, 6)
+_DITHERED_FIRST_NIGHT = date(2024, 11, 5)
+
+
+@dataclass(frozen=True)
+class _DitherPlan:
+    """How a *dithered* mosaic demo's subs are pointed, night by night.
+
+    ``night_spread_frac`` is how far the whole raster was re-framed between
+    visits and ``sub_dither_frac`` how far each sub moved within one, both as
+    fractions of a frame and both drawn as integers from ``seed``.
+    ``panel_last_night[i]`` is the first night panel ``i`` was *not* shot on.
+    """
+
+    nights: int
+    subs_per_night: int
+    night_spread_frac: float
+    sub_dither_frac: float
+    seed: int
+    first_night: date
+    panel_last_night: tuple[int, ...]
+
+
+_DITHER_PLAN = _DitherPlan(
+    nights=_DITHERED_NIGHTS,
+    subs_per_night=_DITHERED_SUBS_PER_NIGHT,
+    night_spread_frac=_DITHERED_NIGHT_SPREAD_FRAC,
+    sub_dither_frac=_DITHERED_SUB_DITHER_FRAC,
+    seed=_DITHERED_LAYOUT_SEED,
+    first_night=_DITHERED_FIRST_NIGHT,
+    panel_last_night=_DITHERED_PANEL_LAST_NIGHT,
+)
+# Stars per sky window rather than per frame, matching the small mosaic's on-sky
+# density (~3.6e-4 stars/px) over this shape's larger union canvas.
+_DITHERED_N_STARS = 350
+_DITHERED_SUBDIR = "sample_dithered_subs"
+
+
 @dataclass(frozen=True)
 class _MosaicSample:
     """One mosaic demo: its reserved name, its sensor, and where its subs live.
@@ -467,6 +594,14 @@ class _MosaicSample:
     noise_base: int
     object_name: str
     notes: str
+    #: The per-sub pointing discipline, for the dithered demo. ``None`` is the
+    #: blocky one both demos above have — one fixed pointing per panel, which is
+    #: what keeps their generated pixels byte-for-byte unchanged.
+    dither: _DitherPlan | None = None
+    #: Stride between panels in the per-sub noise seed. It must exceed a panel's
+    #: sub count or two panels would share a noise draw; 20 is what both blocky
+    #: demos were built with, so leaving it alone keeps their pixels identical.
+    noise_stride: int = 20
 
     @property
     def frame(self) -> tuple[int, int]:
@@ -500,9 +635,33 @@ _MOSAIC_BIG = _MosaicSample(
           "Dashboard.",
 )
 
+_MOSAIC_DITHERED = _MosaicSample(
+    shape="dithered",
+    name=SAMPLE_DITHERED_TARGET_NAME,
+    subdir=_DITHERED_SUBDIR,
+    # The small mosaic's sensor exactly: this demo differs from it in pointing
+    # discipline and nothing else, so a finding on one is a question about the
+    # other. (Scale is `big`'s question, and this canvas stays under the proxy
+    # cap so the two cannot be confused.)
+    frame_w=_WIDTH,
+    frame_h=_HEIGHT,
+    n_stars=_DITHERED_N_STARS,
+    # Its own noise stream again, and far enough from the other two that no sub
+    # of any demo shares a draw with a sub of another.
+    noise_base=1300,
+    object_name="M42 mosaic (sample, dithered nights)",
+    notes="A generated demo mosaic shot across eleven re-framed nights — "
+          "remove it any time from the Dashboard.",
+    dither=_DITHER_PLAN,
+    # A panel here holds up to `nights * subs_per_night` = 22 subs, so the blocky
+    # demos' stride of 20 would make two panels share a noise draw.
+    noise_stride=40,
+)
+
 _MOSAIC_SAMPLES: dict[str, _MosaicSample] = {
     _MOSAIC_SMALL.shape: _MOSAIC_SMALL,
     _MOSAIC_BIG.shape: _MOSAIC_BIG,
+    _MOSAIC_DITHERED.shape: _MOSAIC_DITHERED,
 }
 
 
@@ -516,6 +675,27 @@ class _MosaicPanel:
     signal_scale: float
     sky_scale: float
     night: str
+    #: Where each sub of this panel pointed, and each one's ``DATE-OBS``, for the
+    #: dithered demo. ``None`` ⇒ every sub used the panel's own ``origin`` and a
+    #: clock derived from ``night``, which is the blocky discipline both other
+    #: mosaics have — so their generated pixels *and* headers are unchanged.
+    sub_origins: tuple[tuple[int, int], ...] | None = None
+    sub_dates: tuple[str, ...] | None = None
+
+    def sub_origin(self, sub: int) -> tuple[int, int]:
+        """Where sub ``sub`` of this panel pointed, in catalog pixel coordinates."""
+        return self.origin if self.sub_origins is None else self.sub_origins[sub]
+
+    def sub_date(self, sub: int) -> str:
+        """``DATE-OBS`` for sub ``sub`` of this panel.
+
+        The fall-through is the two blocky demos' own expression, kept verbatim
+        so their headers do not move; a panel there is one night's work, so the
+        minute is the sub's place in a panel-major sequence.
+        """
+        if self.sub_dates is not None:
+            return self.sub_dates[sub]
+        return f"{self.night}T22:{10 + self.index * 12 + sub:02d}:00.000"
 
 
 def _mosaic_layout(cfg: _MosaicSample = _MOSAIC_SMALL,
@@ -525,7 +705,13 @@ def _mosaic_layout(cfg: _MosaicSample = _MOSAIC_SMALL,
     The pointing jitter scales with the sensor, so the union canvas's *ragged*
     fraction is the same on both mosaics — a bigger sample must be a bigger
     picture of the same thing, not a tidier one.
+
+    A demo carrying a :class:`_DitherPlan` is laid out by
+    :func:`_dithered_layout` instead: there a panel is not one pointing but one
+    pointing *per sub*.
     """
+    if cfg.dither is not None:
+        return _dithered_layout(cfg)
     step_x = int(round(cfg.frame_w * _MOSAIC_STEP_FRAC))
     step_y = int(round(cfg.frame_h * _MOSAIC_STEP_FRAC))
     jitter = [
@@ -557,6 +743,78 @@ def _mosaic_layout(cfg: _MosaicSample = _MOSAIC_SMALL,
     return panels, window
 
 
+def _dithered_layout(cfg: _MosaicSample,
+                     ) -> tuple[list[_MosaicPanel], tuple[int, int]]:
+    """The owner's own mosaic discipline: every sub pointed somewhere new.
+
+    The same 2×2 grid at the same :data:`_MOSAIC_STEP_FRAC` overlap as the blocky
+    demos, revisited over :attr:`_DitherPlan.nights` nights — the whole raster
+    re-framed between visits, each sub dithered within one. The union canvas is
+    therefore the bounding box of *every sub's* footprint rather than of four,
+    and the per-pixel depth climbs in many small steps instead of sitting on a
+    handful of levels: the shape ``coverage_trim.panel_coverage_level``'s
+    continuum branches exist for, and the one no fixture in this repo could
+    produce (see :data:`SAMPLE_DITHERED_TARGET_NAME`).
+
+    Draw order is (night, panel, sub) and a panel the plan says was not shot that
+    night takes no draws at all, so the stream — and the sample — is fixed.
+    """
+    plan = cfg.dither
+    assert plan is not None  # only called for a demo that carries one
+    step_x = int(round(cfg.frame_w * _MOSAIC_STEP_FRAC))
+    step_y = int(round(cfg.frame_h * _MOSAIC_STEP_FRAC))
+    rng = np.random.default_rng(plan.seed)
+    # Per panel: (x, y, DATE-OBS) for each of its subs, in the order they were
+    # shot, before the canvas origin is normalised to (0, 0).
+    raw: list[list[tuple[int, int, str]]] = [[] for _ in _MOSAIC_GRID]
+    for night in range(plan.nights):
+        night_x = int(round(
+            rng.uniform(-plan.night_spread_frac, plan.night_spread_frac) * cfg.frame_w))
+        night_y = int(round(
+            rng.uniform(-plan.night_spread_frac, plan.night_spread_frac) * cfg.frame_h))
+        when = plan.first_night + timedelta(days=night)
+        for i, (col, row) in enumerate(_MOSAIC_GRID):
+            if night >= plan.panel_last_night[i]:
+                continue
+            for sub in range(plan.subs_per_night):
+                dx = int(round(
+                    rng.uniform(-plan.sub_dither_frac, plan.sub_dither_frac) * cfg.frame_w))
+                dy = int(round(
+                    rng.uniform(-plan.sub_dither_frac, plan.sub_dither_frac) * cfg.frame_h))
+                # Five minutes a sub through one evening, panel-major within the
+                # night, so the clock stays a valid time whatever the cadence is
+                # and the nights' frames never interleave.
+                minute = 5 + (i * plan.subs_per_night + sub) * 5
+                raw[i].append((
+                    col * step_x + night_x + dx,
+                    row * step_y + night_y + dy,
+                    f"{when.isoformat()}T21:{minute:02d}:00.000",
+                ))
+    min_x = min(x for shots in raw for x, _, _ in shots)
+    min_y = min(y for shots in raw for _, y, _ in shots)
+    panels = []
+    for i, shots in enumerate(raw):
+        origins = tuple((x - min_x, y - min_y) for x, y, _ in shots)
+        dates = tuple(when for _, _, when in shots)
+        panels.append(_MosaicPanel(
+            index=i,
+            # The panel's nominal pointing is its first visit's — what anything
+            # asking "where is panel i?" means, and the blocky demos' `origin`.
+            origin=origins[0],
+            n_subs=len(origins),
+            signal_scale=_MOSAIC_HAZE_SIGNAL if i == _MOSAIC_HAZY_PANEL else 1.0,
+            sky_scale=_MOSAIC_HAZE_SKY if i == _MOSAIC_HAZY_PANEL else 1.0,
+            night=dates[0][:10],
+            sub_origins=origins,
+            sub_dates=dates,
+        ))
+    window = (
+        max(x for panel in panels for x, _ in panel.sub_origins) + cfg.frame_w,
+        max(y for panel in panels for _, y in panel.sub_origins) + cfg.frame_h,
+    )
+    return panels, window
+
+
 def _write_mosaic_fits(
     path: Path,
     *,
@@ -574,7 +832,7 @@ def _write_mosaic_fits(
         stars,
         noise_seed=noise_seed,
         star_shift=star_shift,
-        origin=panel.origin,
+        origin=panel.sub_origin(sub),
         signal_scale=panel.signal_scale,
         sky_scale=panel.sky_scale,
         frame=cfg.frame,
@@ -584,7 +842,7 @@ def _write_mosaic_fits(
     hdu.header["EXPTIME"] = 10.0
     hdu.header["GAIN"] = 80.0
     hdu.header["CCD-TEMP"] = -10.0
-    hdu.header["DATE-OBS"] = f"{panel.night}T22:{10 + panel.index * 12 + sub:02d}:00.000"
+    hdu.header["DATE-OBS"] = panel.sub_date(sub)
     # The owner's scope (AGENTS.md §1 — an S30, not the S50 the older sample
     # names), with the focal length that says so to anything deriving the model
     # from the frame rather than trusting the string.
@@ -736,8 +994,10 @@ def _load_mosaic_sample(lib: Library, cfg: _MosaicSample = _MOSAIC_SMALL) -> Sam
     windows onto **one** star catalog (so an overlap really holds the same
     stars), their depth is uneven, and one of them was shot through haze.
 
-    ``cfg`` picks the sensor: the small mosaic, or the full-size one whose union
-    canvas is past the editor's proxy cap.
+    ``cfg`` picks the sensor and the pointing discipline: the small mosaic, the
+    full-size one whose union canvas is past the editor's proxy cap, or the
+    dithered one whose every sub points somewhere new (``cfg.dither``, laid out
+    by :func:`_dithered_layout`) so its coverage depths are a continuum.
     """
     existing = get_sample_status(lib, shape=cfg.shape)
     if existing.loaded:
@@ -757,16 +1017,16 @@ def _load_mosaic_sample(lib: Library, cfg: _MosaicSample = _MOSAIC_SMALL) -> Sam
         sample_dir.mkdir(parents=True, exist_ok=True)
         # Filenames sort panel-major, so the ingested frames pair back up with
         # this list by sorted source path — the same pairing the field sample uses.
-        plan: list[tuple[_MosaicPanel, tuple[float, float]]] = []
+        plan: list[tuple[_MosaicPanel, int, tuple[float, float]]] = []
         for panel in panels:
             for sub, shift in enumerate(_dither_offsets(panel.n_subs)):
                 path = sample_dir / f"sample_p{panel.index}_{sub:03d}.fit"
                 _write_mosaic_fits(
                     path, stars=stars, panel=panel, sub=sub,
-                    noise_seed=cfg.noise_base + panel.index * 20 + sub,
+                    noise_seed=cfg.noise_base + panel.index * cfg.noise_stride + sub,
                     star_shift=shift, cfg=cfg,
                 )
-                plan.append((panel, shift))
+                plan.append((panel, sub, shift))
 
         cache = CacheManager(lib.target_dir(entry))
         sources = sorted(sample_dir.glob("*.fit"))
@@ -778,15 +1038,16 @@ def _load_mosaic_sample(lib: Library, cfg: _MosaicSample = _MOSAIC_SMALL) -> Sam
         frames = sorted(proj.iter_frames(), key=lambda f: f.source_path)
         # Non-strict, like the single-field loop above: a sub that failed to
         # ingest must leave the rest pairing correctly, not raise.
-        for frame, (panel, shift) in zip(frames, plan, strict=False):
+        for frame, (panel, sub, shift) in zip(frames, plan, strict=False):
             if frame.id is None:
                 continue
+            origin = panel.sub_origin(sub)
             ra, dec = _frame_center_deg(
-                shift, origin=panel.origin, window=window, frame=cfg.frame)
+                shift, origin=origin, window=window, frame=cfg.frame)
             proj.update_frame(
                 frame.id,
                 wcs_json=_wcs_header_text(
-                    shift, origin=panel.origin, window=window, frame=cfg.frame),
+                    shift, origin=origin, window=window, frame=cfg.frame),
                 ra_center_deg=ra,
                 dec_center_deg=dec,
                 pixscale_arcsec=_PIXSCALE_ARCSEC,
@@ -1215,7 +1476,8 @@ def remove_sample(lib: Library) -> bool:
     user asked for — and returns False only when none existed.
     """
     removed = False
-    names = [sample_target_name(shape) for shape in ("field", "mosaic", "big", "deep")]
+    names = [sample_target_name(shape)
+             for shape in ("field", "mosaic", "big", "deep", "dithered")]
     # The closing demo is a pair, so it contributes both of its names rather than
     # the one ``sample_target_name`` answers with — otherwise one remove would
     # leave the deeper half of it behind in the library for good.
