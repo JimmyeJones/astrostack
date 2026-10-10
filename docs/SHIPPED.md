@@ -1,5 +1,36 @@
 # Shipped — the record
 
+## 2026-10-10 (Builder, branch `claude/jolly-bardeen-ycrjq2`) — a dry queue, a dogfood pass, and the one thing it found
+
+### v0.492.64 — 🟡 BUG FIX (PRIORITY 3, friendliness): the Calibration page's self-hiding "Repair them" button stops having its label clipped on phone width
+
+**The last measured, ungated item in the "Minor / low-priority" bucket, drained on a run with no verified
+ungated bug left anywhere in "Bugs (fix these first)".** The repair row — the one action beside the
+sensor-defect census, and the only way to act on it outside an advanced checkbox inside the Stack form — is a
+`<Group justify="space-between" wrap="nowrap">` holding the repair message and a `size="xs"` Button. A flex
+child's default `min-width: auto` is its **content** width, so the message would not shrink; `wrap="nowrap"`
+forbids the row wrapping; and what gave way was the Button, whose label was then clipped.
+
+**Reproduced live, before and after, by the probe that found it.** A
+`--mosaic --editor --big --calibration --incoming-lag` dogfood on `origin/main` printed
+`[phone] /calibration: OVERFLOW <span> 67px box vs 70px content — "Repair them"
+(mantine-Button-label)` — the same 3 px the 2026-10-09 pass measured, and the *only* finding in the whole
+page sweep. After the fix the same pass reads **nothing overflowing** on `/calibration`.
+
+**The fix is the app's own idiom for a row that must stay one line** (`OpParamPanel`, `VideoCapturesCard`,
+`YourYearCard`): the message yields (`style={{ minWidth: 0 }}`, so it shrinks and wraps its own text) and
+the button never does (`style={{ flexShrink: 0 }}`). Nothing is removed, nothing moves, and the row keeps
+both its tooltip anchor and its action — the standing UI rule. The alternative the entry also named (letting
+the `Group` wrap on narrow widths) was not taken: it makes the row two lines tall on a page already measured
+long, where this keeps it one.
+
+**Tests +1 vitest** (`Calibration.test.tsx`, "keeps the repair button's label intact when the message is
+long"), **fail-before verified by reverting both style props in place**. jsdom does no layout, so what the
+test pins is the pair of rules rather than the pixel count — the pixel count is pinned by the dogfood probe,
+which is where it can be measured. No config, schema, migration, on-disk, default, API or engine change;
+frontend-only, and `tsc --noEmit`, `vitest run` and `vite build` all green.
+
+
 ## 2026-10-10 (Builder, next run) — "dithered" was two cases, and the fix reached one of them
 
 ### v0.492.63 — 🟠 BUG FIX (PRIORITY 1, the editor): `coverage_trim.panel_coverage_level` caps a found plateau at the median, so a continuum can no longer present the **overlap band** as one panel
