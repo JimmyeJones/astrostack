@@ -1,5 +1,177 @@
 # Shipped — the record
 
+## 2026-10-10 (Builder) — the "why Auto shifted" note stops claiming a taste this picture has no room for, and the dogfood can finally read that note (and stops tapping a button that is not a chip)
+
+### v0.492.60 — 🟠 INFRA / dogfood instrument: the cue table is found from `ASTROSTACK_REPO`, and failing to find it is a finding
+
+**v0.492.59 did not work, and the way it failed is the point.** `agent-dogfood.sh` **copies** the drive
+into the scratch dir and runs it from there, so `import.meta.url` is not in the checkout: the lookup for
+`../frontend/src/components/editor/autoFeedbackCues.cases.json` found nothing, the `catch` returned an
+empty label list, and the empty list meant *"skip the filter"* — i.e. exactly the old behaviour. The
+validation re-run therefore reproduced all three false findings and the dead mosaic drive, and read as
+though the fix had never been written.
+
+So two changes, the second of which is the general lesson. (1) The repo root now travels as
+`ASTROSTACK_REPO` from the shell script that knows it, with the script's own directory and the cwd as
+fallbacks for a direct `node scripts/dogfood_editor.mjs` run — verified resolving 12 labels from a copy of
+the script in a scratch dir. (2) **A finder may not fall back silently.** Failing to read the table is now
+itself a reported finding (*"cannot read the shared cue table, so every button in the alert is being
+treated as a feedback chip"*), because a quiet degradation in an instrument is indistinguishable from the
+instrument working — which is the same failure mode, now in its third variant this run.
+
+The fence from v0.492.59 did work, and the re-run proves it: the marked-chip tap threw
+(`locator.click: Timeout 30000ms exceeded`) and cost **one reported line** instead of the whole pass,
+where the first run died outright.
+
+Tooling only: no app code, no config, schema, on-disk, API or default change.
+
+### v0.492.59 — 🟠 INFRA / dogfood instrument: `scripts/dogfood_editor.mjs` — the chips come from the shared cue table, not from "every button in the alert"
+
+**Found by v0.492.58 on its first run**, on the 2×2 mosaic sample, which is the second time in three
+versions that the instrument's own new reading caught the instrument.
+
+The Auto pass enumerated chips as `div[mantine-Alert-root] button[mantine-Button-root]` — every button
+inside the "What Auto-process did" alert. That alert also carries one-click **suggestions**, and on the
+2×2 mosaic it offers *"Hold back highlights (0.05)"*. So the pass:
+
+```
+chips live (11): Hold back highlights (0.05) | Too dark | Too bright | …
+tapped live chip "Hold back highlights (0.05)" → NOTHING SAID
+! tapping "Hold back highlights (0.05)" said nothing at all
+why Auto shifted, after that tap: NOTHING SAID
+! the taste "Hold back highlights (0.05)" just taught has no note — and the Reset link lives inside it…
+```
+
+**Three false reports about a control that is neither a chip nor a taste** — and then the highlights op
+it really applied re-rendered the alert, the next locator timed out, and **the whole mosaic editor drive
+died** (`warn: mosaic editor drive failed`), taking the marked-chip reading, the Reset that hands the
+scratch library back, and everything after with it. One over-broad selector, a dead pass and a finding
+count that was pure noise: the failure mode this file's own comments single out, because *a finder that
+does not crash but reports* is the dangerous one.
+
+**Two fixes, and the first one buys a new capability.** The chip labels now come from
+`frontend/src/components/editor/autoFeedbackCues.cases.json` — already the contract between
+`AUTO_FEEDBACK_CHIPS` and `auto_prefs._CUE_STEP` (v0.492.52), so the drive cannot drift from either — and
+any other button in the alert is printed as *"other controls in this alert (not feedback chips, not
+tapped)"* rather than tapped. Because the pass now knows what *should* be there, it reports a **missing**
+chip as a finding, which is the one symptom in this family a probe that only photographs the screen can
+never see: *"a cue with no chip is a taste the owner cannot express"* is exactly the v0.492.52 bug, and
+the record for that one says in as many words that a dogfood could not have found it. It can now.
+
+Second, **each tap is fenced**. A throw inside one used to abort the drive; it now costs one reported
+line, and the other tap, the Reset and the rest of the pass still run. An unreadable cue table falls back
+to the old "every button is a chip" behaviour rather than reporting that all twelve are missing.
+
+Tooling only: no app code, no config, schema, on-disk, API or default change.
+`tests/test_dogfood_big_anchors.py` still green (9/9) — text and label matching, no testids added.
+
+## 2026-10-10 (Builder) — the "why Auto shifted" note stops claiming a taste this picture has no room for, and the dogfood can finally read that note
+
+### v0.492.58 — 🟠 INFRA / dogfood instrument: `scripts/dogfood_editor.mjs` — the "why Auto shifted" note, before any tap and after each one
+
+**The collateral of v0.492.57, built in the same run, because v0.492.57 is a bug the Auto pass shipped
+three versions earlier could not have found.** That pass reads the chips, which of them the app marks as
+unable to move this picture, and the **toast** each tap produces — and nothing read the note. The toast is
+transient (`<Notifications />` auto-closes in 4 s); the note is what the owner sees **every time they
+reopen that picture**, and it is where the editor's **Reset** link is rendered. So the one line of this
+row that persists was the one line the instrument did not print.
+
+It now prints it three times per drive: once **before any tap** (a scratch library has taught Auto
+nothing, so a note here means the drive is reading a library an earlier pass taught and the taps start
+from a taste rather than from neutral), and once **after each of the two taps**, read after the settle
+because the note the tap earns comes from the run-scoped preferences read the chip row re-fetches. Read
+alongside the two readings already there, the three cannot disagree silently any more: a marked chip, its
+tap's sentence, and the note are all about the same parameter.
+
+One **finding**, not just a reading: an absent note after a tap is reported, because Reset lives inside
+it — no note means the taste the tap just taught cannot be undone.
+
+Text-based locators only, so `tests/test_dogfood_big_anchors.py`'s testid contract is untouched (it still
+passes, 9/9). Tooling only: no app code, no config, schema, on-disk, API or default change.
+
+## 2026-10-10 (Builder) — the "why Auto shifted" note stops claiming a taste this picture has no room for
+
+### v0.492.57 — 🟡 BUG FIX (PRIORITY 1, the editor): `presets.inert_bias_params`, `auto_prefs.describe_profile(inert_params=…)`, `auto_prefs.profile_of_biases`, `editor._run_inert_bias_params`
+
+**Found by reading v0.492.56's own fix as a lead**, which is the method the last five runs have paid for.
+v0.492.54 **marks** the Auto feedback chips the picture has no room for; v0.492.56 made the tap on a
+marked chip answer *"Auto is already smoothing as little as it will here. Tapping still teaches Auto for
+your other pictures."* instead of the thanks. **One line underneath that chips row sits the "why Auto
+shifted" note, and it was still saying the thing all three versions exist to stop:**
+
+```
+Auto is running with less smoothing for you, based on your recent feedback.
+```
+
+**Reproduced on the owner's own shape, both directions, against `origin/main`.** A deep clean stack
+(`noise_fraction` 0.000) measures `denoise_strength` **exactly 0.0**, so three "Over-smoothed" taps are
+clamped to the same 0.0 by `_nudge` and `auto_recipe` emits a **byte-identical op list** with the taste
+and without it — while the note claimed Auto was running that way. The mirror holds on a very noisy
+stack: the denoise is pinned at `_AUTO_DENOISE_MAX` and *"Auto is running with more noise reduction for
+you"* is equally false. Both were then pinned through the real endpoint — the run-scoped
+`…/editor/auto-preferences` GET — and **both fail before** in an `origin/main` worktree, the second
+printing the mixed sentence (*"a bit brighter **and** with more noise reduction"*) a reader has no way to
+split.
+
+**Why this was a separate bug and not covered by either predecessor.** The chips row and the note are two
+different questions about the same arithmetic. `inert_auto_cues` asks *"would one more step of this reach
+the recipe?"*; the note asserts *"Auto is running X for you"*, which is about **the taste in force now**.
+Neither implies the other, and the test pins exactly that: three "too dark" taps leave the *cue* at
+`MAX_STEPS` (so the chip is marked) while the taste those taps built is in full force on the picture (so
+the note rightly claims it).
+
+**The predicate is the same shape as its sibling's, and free for the same reason.**
+`presets.inert_bias_params(knobs, prefs, …)` rebuilds the **emitted op params** with and without each
+stored bias, through the same `auto_knob_values` / `auto_op_params` `auto_recipe` itself is built from —
+so it cannot drift from the recipe, and it catches the clamps that are not in `_PARAM_RANGE` at all
+(`min(…, _AUTO_DENOISE_MAX)` runs *after* the taste, which is the noisy case above and is exactly the
+mechanism the v0.492.54 analysis missed until the end-to-end predicate found it). The only image work is
+the single `measured_auto_knobs` pass the run-scoped GET already pays for to classify the run; the loop is
+one dict build per biased parameter, **at most six**. New `auto_prefs.profile_of_biases` is the "what if
+the taste were *this* instead?" stand-in it compares against — stamp-free and archetype-blind, and pinned
+as the same taste before anything was built on it.
+
+**Nothing is removed, and the note never disappears** (the UI rule, and a concrete control): every phrase
+survives, the stalled ones moved into a clause, because the taste is **library-wide** and will bite on the
+next noisier target — and because that note is the only place the editor's **Reset** link lives, so a note
+that went `None` would take a control with it. The three shapes:
+
+| the taste | the note |
+| --- | --- |
+| all of it in force | *"Auto is running a bit brighter for you, based on your recent feedback."* — byte for byte today's |
+| some in force | *"Auto is running a bit brighter for you, based on your recent feedback. It would also run with less smoothing, but it is already at its limit there on this picture — your other pictures will still get it."* |
+| none in force | *"Auto would run with less smoothing for you, based on your recent feedback, but it is already at its limit there on this picture — your other pictures will still get it."* |
+
+Both hedged shapes say the same two things the chips row's own legend already says, in the same words.
+The per-type archetype naming (*"… for your galaxies …"*) survives both, with a test, or the hedge would
+quietly widen the taste it describes.
+
+**The population was checked, not assumed.** `_BIAS_PHRASE` has exactly one consumer
+(`describe_profile`), `describe_profile` has exactly one caller (`editor._auto_preferences_out`), and the
+`biases` map the API also returns is typed in `client.ts` and rendered nowhere — so this note is the only
+surface in the app that claims what Auto's stored taste is doing, and there is no sibling to fix next run.
+
+**Scoped to the one request that has a picture.** Only the run-scoped GET passes `inert_params`
+(`editor._run_inert_bias_params`, beside `_run_inert_cue_hints` and degrading the same way — unreadable
+proxy ⇒ `()` ⇒ today's sentence). The library-wide GET keeps the plain claim, which is the right sentence
+*there*, and the feedback POST keeps it too because it deliberately measures nothing — that is this
+feature's whole cost argument, and the run-scoped read `AutoFeedback.tsx` re-fetches after every tap is
+what narrows the note again one request later.
+
+**Tests +14** (12 Python engine in `tests/test_auto_inert_cues.py`, 2 webapp), the two webapp ones **fail
+before** by running them against an `origin/main` worktree. The load-bearing one is
+`test_inert_bias_params_agree_with_the_recipe_itself` — four pictures × five stored tastes, asking
+`auto_recipe` directly with and without each bias, because three of the last five editor bugs in this area
+were a second copy of some arithmetic drifting from the first. `test_every_bias_phrase_reads_in_both_hedged_shapes`
+pins the whole `_BIAS_PHRASE` table through both new sentences, so a phrase added for the old one cannot
+read as nonsense in the new.
+
+**Frontend: no change at all** — the note is a server-authored string, and `describe_profile` stays its
+only author. **Upgrade-safe (§9):** no new field, no response-shape change, no config, schema, migration,
+on-disk or default change; `inert_params` omitted ⇒ the sentence every older response carried, byte for
+byte, and an older frontend renders the new string in the same `<Text>` it already renders.
+
+
 ## 2026-10-10 (Builder) — a marked Auto chip now answers with the truth, and the dogfood can see the taste row at all
 
 ### v0.492.56 — 🟡 BUG FIX (PRIORITY 1, the editor): `AutoFeedback.tsx` — `markedBefore`, `inert_cues` as the tap's answer

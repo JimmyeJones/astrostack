@@ -1073,6 +1073,58 @@ def inert_auto_cues(knobs: dict[str, float],
     return tuple(inert)
 
 
+def inert_bias_params(knobs: dict[str, float],
+                      prefs: dict | None,
+                      object_type: str | None = None,
+                      now: float | None = None) -> tuple[str, ...]:
+    """The **stored** biases that cannot change this picture — the parameters whose
+    taste leaves every op param :func:`auto_recipe` emits byte-for-byte as it would
+    be without that bias at all.
+
+    The sibling of :func:`inert_auto_cues`, asked of the taste the owner has
+    already taught rather than of the next tap, because the editor makes two
+    different claims about the same arithmetic. The chips row asks *"would one more
+    step of this reach the recipe?"*; the "why Auto shifted" note asserts *"Auto is
+    running with less smoothing for you"*, which is a claim about the taste that is
+    in force now. On a deep clean stack — the owner's own shape — ``auto_recipe``
+    measures ``denoise_strength`` 0.0, so a three-step "less smoothing" taste is
+    clamped to the same 0.0 and no ``detail.denoise`` op is emitted either way: the
+    note's claim is false about the picture under it, while the chip one line above
+    is already marked and its tap already says so (v0.492.54, v0.492.56). The
+    mirror holds on a very noisy stack, where the denoise is pinned at
+    ``_AUTO_DENOISE_MAX`` and a "more noise reduction" taste adds nothing.
+
+    **Exact and free**, for the same two reasons as :func:`inert_auto_cues`: the
+    predicate is the emitted op params, rebuilt through the same
+    :func:`auto_knob_values` / :func:`auto_op_params` the recipe itself is built
+    from — so it cannot drift from it, and so it catches the clamps that are not in
+    ``auto_prefs._PARAM_RANGE`` at all (``_AUTO_DENOISE_MAX`` runs *after* the
+    taste) — and the only image work is the single :func:`measured_auto_knobs` pass
+    the caller already made. One dict build per biased parameter, at most six.
+
+    A bias is dropped from the comparison, never from the store: the taste is
+    library-wide and the caller's job is to say so.
+    """
+    from seestack.edit import auto_prefs
+
+    biases = auto_prefs.effective_biases(prefs, object_type, now)
+    if not biases:
+        return ()
+    # The picture as it is now, read off the real profile — the thing the note is
+    # about. ``profile_of_biases`` reproduces it exactly (``apply_profile`` reads
+    # nothing but ``effective_biases``), which is what the "…_is_the_same_taste"
+    # test pins, so the comparisons below differ from this in one bias and nothing
+    # else.
+    full = auto_op_params(auto_knob_values(knobs, prefs, object_type, now))
+    inert: list[str] = []
+    for param in biases:
+        without = {p: step for p, step in biases.items() if p != param}
+        if auto_op_params(auto_knob_values(
+                knobs, auto_prefs.profile_of_biases(without))) == full:
+            inert.append(param)
+    return tuple(inert)
+
+
 def auto_recipe(rgb: np.ndarray | None = None,
                 median_fwhm: float | None = None,
                 is_mosaic: bool = False,

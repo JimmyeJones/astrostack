@@ -1,5 +1,51 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-10 (Builder, next run — **the queue held nothing ungated, so this run read the previous
+run's fix as a lead and found the SAME untruth one line down the screen. SHIPPED as v0.492.57.**
+v0.492.54 marks the Auto feedback chips the picture has no room for; v0.492.56 made the tap on a marked
+chip say so. **The "why Auto shifted" note directly underneath that row was still saying
+*"Auto is running with less smoothing for you, based on your recent feedback."*** — on the owner's own
+shape, where `auto_recipe` measures `denoise_strength` **exactly 0.0** and emits a byte-identical op list
+with that taste and without it. So after three versions of work the editor marked a chip as dead, answered
+its tap honestly, and then claimed the taste was in force one line below. Reproduced both directions
+against `origin/main` (the mirror is a very noisy stack with the denoise pinned at `_AUTO_DENOISE_MAX`) and
+**both fail-before through the real run-scoped `…/editor/auto-preferences` GET**.
+**The method note, and it is the one to carry forward: the chips row and the note are two different
+questions about the same arithmetic.** `inert_auto_cues` asks *"would one more step reach the recipe?"*;
+the note asserts *"Auto is running X for you"*, about the taste in force **now**. Neither implies the
+other, and the test says so: three "too dark" taps leave the *cue* at `MAX_STEPS` (chip marked) while the
+taste they built is in full force (note rightly claims it). **When a fix makes one surface honest, ask what
+else on that screen makes the same claim from different arithmetic.**
+`presets.inert_bias_params` is the sibling predicate in the sibling shape — emitted op params with and
+without each stored bias, through the helpers `auto_recipe` is built from, so it cannot drift and so it
+catches `min(…, _AUTO_DENOISE_MAX)`, which runs *after* the taste and is in no `_PARAM_RANGE`. **Free:**
+at most six dict builds on the single `measured_auto_knobs` pass that GET already pays for. **Nothing
+removed** — every phrase survives, the stalled ones in a clause, because the taste is library-wide *and*
+because that note is the only place the editor's **Reset** link lives, so a note that went `None` would
+take a control with it. Frontend untouched: the note is a server-authored string and `describe_profile`
+stays its only author.
+**And the collateral was built in the same run: v0.492.58.** v0.492.57 is a bug the Auto dogfood pass
+could not have found, and the reason is the same shape as last run's — it read the chips, their marks and
+the **toast**, and nothing read the note. The toast is gone in 4 s; the note is what the owner sees every
+time they reopen the picture, and it is where **Reset** is rendered. `dogfood_editor.mjs` now prints it
+before any tap and after each one, and flags an absent note as a finding.
+**On its first run the new reading caught the instrument twice more — v0.492.59 and v0.492.60 — and the
+pattern is the run's real lesson: four times over, this family failed by REPORTING rather than by
+crashing.** (1) A note claiming a taste it did not have. (2) A probe reading the transient toast and not
+the persistent line. (3) A selector that swept up a one-click *suggestion* ("Hold back highlights (0.05)",
+offered on the 2x2 mosaic), tapped it as a chip, filed three false findings and then timed the whole mosaic
+drive out. (4) And v0.492.59's own fix degrading silently, because `agent-dogfood.sh` runs the drive from a
+**copy** so its relative path to the cue table found nothing and an empty label list meant "skip the
+filter" — the validation run read exactly like a fix that had never been written. So the chip labels now
+come from `autoFeedbackCues.cases.json` (already the chips/`_CUE_STEP` contract) via `ASTROSTACK_REPO`,
+anything else in the alert is named and left alone, **failing to read the table is itself a finding**, and
+each tap is fenced. The upside: the pass can now report a **missing** chip, which is the one symptom here
+a screenshot can never show — the v0.492.52 bug, whose own record says a dogfood could not have found it.
+**Validated on a third pass: both page sweeps clean, both editor drives clean across all 21 ops and both
+Auto passes, mosaic trim 8 %, ZERO findings** (four, all false, two passes earlier). Three method notes in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md), the general one being: **a finder may not fall back silently, and
+the blast radius of one bad step should be one step.** The inbox was checked first — **four open, all previously acted-on and
+owner-gated** — and there were **no open PRs**. Earlier notes stand below.)
 *Last edited 2026-10-10 (Builder, same run, tasks 2 and 3 — **the run's best finding came from building the
 instrument that could see the surface it had just changed. SHIPPED as v0.492.55 and v0.492.56.** Five runs
 in a row had written "a dogfood could not have found this" about an Adaptive-Auto fix and treated it as a

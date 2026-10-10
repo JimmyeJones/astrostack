@@ -3806,6 +3806,90 @@ def test_the_run_scoped_profile_marks_the_chips_that_cannot_move_this_picture(
     assert tapped.json()["inert_cues"] == {}
 
 
+def test_the_note_does_not_claim_a_taste_this_picture_has_no_room_for(
+        client, solved_library):
+    """The chips row marks the taps Auto has no room for, and the tap that lands on
+    one says so — and then the "why Auto shifted" note **one line underneath** said
+    *"Auto is running with more noise reduction for you"* about the very same
+    parameter. The note is a claim about the taste in force now, so
+    ``presets.inert_bias_params`` is asked about the stored bias rather than about
+    the next tap (``editor._run_inert_bias_params``).
+
+    This fixture's stack is noisy enough that Auto's denoise is already pinned at
+    ``_AUTO_DENOISE_MAX``, which is the owner's shape mirrored — on his deep clean
+    mosaic it is "with less smoothing" that has nowhere to go.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="notelimit")
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences"
+
+    # Taught library-wide (no run context), so the taste applies to every target and
+    # the two GETs below differ only in whether they have a picture to measure.
+    for _ in range(3):
+        client.post("/api/editor/auto-preferences/feedback",
+                    json={"cue": "too_noisy"})
+
+    body = client.get(url).json()
+    assert "too_noisy" in body["inert_cues"]  # the row already marks the chip
+    note = body["note"]
+    assert "is running with more noise reduction" not in note
+    assert note == (
+        "Auto would run with more noise reduction for you, based on your recent "
+        "feedback, but it is already at its limit there on this picture — your "
+        "other pictures will still get it.")
+    # Nothing is dropped: the taste is stored and library-wide, and the note is the
+    # only place the editor's Reset link lives.
+    assert body["biases"]["denoise"] == 3
+    assert body["neutral"] is False
+
+    # The library-wide GET has no picture to ask about, so it keeps the plain
+    # claim — which is the right sentence there, and byte-for-byte today's.
+    assert client.get("/api/editor/auto-preferences").json()["note"] == (
+        "Auto is running with more noise reduction for you, based on your recent "
+        "feedback.")
+    # So does the feedback POST, which deliberately measures nothing (this
+    # feature's whole cost argument); the run-scoped read the chips row re-fetches
+    # after every tap is what narrows it again, one request later.
+    tapped = client.post("/api/editor/auto-preferences/feedback",
+                         json={"cue": "too_noisy", "safe": safe, "run_id": rid})
+    assert tapped.json()["note"].startswith("Auto is running with more noise")
+
+
+def test_a_taste_this_picture_can_show_is_still_claimed_in_full(
+        client, solved_library):
+    """The control, on the same run: a brightness taste moves Auto's stretch here,
+    so the run-scoped note is byte-for-byte the sentence it has always been. The fix
+    narrows the note; it does not hedge it."""
+    from seestack.edit import auto_prefs as auto_prefs_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="notelive")
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences"
+
+    for _ in range(3):
+        client.post("/api/editor/auto-preferences/feedback",
+                    json={"cue": "too_dark"})
+    body = client.get(url).json()
+    assert body["note"] == ("Auto is running a bit brighter for you, based on your "
+                            "recent feedback.")
+    # And the two predicates really are different questions about the same
+    # parameter, which is why the note needed its own: three taps have the *cue* at
+    # its cap, so the chip is marked — while the taste those taps built is in full
+    # force on this picture, so the note claims it.
+    assert "too_dark" in body["inert_cues"]
+    assert body["biases"]["brightness"] == auto_prefs_mod.MAX_STEPS
+
+    # And mixed — the shape the owner will actually meet — keeps both halves, the
+    # live one as a claim and the stalled one as a clause.
+    for _ in range(3):
+        client.post("/api/editor/auto-preferences/feedback",
+                    json={"cue": "too_noisy"})
+    assert client.get(url).json()["note"] == (
+        "Auto is running a bit brighter for you, based on your recent feedback. It "
+        "would also run with more noise reduction, but it is already at its limit "
+        "there on this picture — your other pictures will still get it.")
+
+
 def test_a_saturated_taste_dims_its_own_chip_on_the_next_load(
         client, solved_library):
     """The store-side limit, reported *before* the fourth tap rather than after it.
