@@ -103,6 +103,41 @@ def test_the_threshold_is_a_share_of_one_panels_depth():
     assert coverage_thin_fraction(cov) == 0.25
 
 
+def test_a_dithered_mosaics_thin_share_is_not_measured_against_its_peak():
+    """Observer report #1109, and the number the ragged-border note prints.
+
+    A *dithered* mosaic's depths hold no plateau, so ``panel_coverage_level`` had
+    no level to point at and handed back the map's **peak** — the rule v0.389.2
+    exists to remove — under a ``coverage_shares_version = 2`` stamp saying it was
+    gone. Fail-before, on this fixture: **0.5181**, so "How's my stack?" told the
+    owner that 52 % of his picture was a thin edge (its bar is 0.05) and offered a
+    Trim that removed the wrong quarter of the canvas. Measured on his own 88
+    current pictures the served shares ran 0.438-0.573 where the honest reference
+    gives 0.119-0.188 — overstated 2.8x to 4.5x on 13 of them, every one a mosaic.
+    """
+    from seestack.edit.coverage_trim import panel_coverage_level
+    from tests.test_coverage_trim import _dithered_mosaic
+
+    cov = _dithered_mosaic()
+    covered = cov[cov > 0]
+    # The fixture's own claim, so this cannot pass for the wrong reason: the peak
+    # really is several times a typical panel, i.e. the bug had room to be wrong.
+    assert float(covered.max()) > 3.0 * float(np.median(covered))
+
+    share = coverage_thin_fraction(cov)
+    assert share is not None
+    assert share == pytest.approx(0.219, abs=0.01)
+    # ...which is exactly what the honest reference gives, and less than half what
+    # the peak gave. Stated as the arithmetic rather than as a second constant.
+    reference = panel_coverage_level(covered)
+    n = int(np.count_nonzero(cov > 0))
+    want = int(np.count_nonzero((cov > 0) & (cov < COVERAGE_THIN_RATIO * reference)))
+    assert share == pytest.approx(want / n)
+    against_the_peak = int(np.count_nonzero(
+        (cov > 0) & (cov < COVERAGE_THIN_RATIO * float(covered.max())))) / n
+    assert against_the_peak > 2.0 * share
+
+
 # --- the stack records it, and an older project migrates to NULL -------------
 
 
