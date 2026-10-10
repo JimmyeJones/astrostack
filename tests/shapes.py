@@ -36,6 +36,12 @@ deliberately small — these are the distinctions that actually bit:
   default) a coverage value is a sum of per-frame *weights*, not a frame count,
   so plateaus are found by relative tolerance and an integer-depth fixture
   exercises none of that.
+* **blocky vs dithered panels** — every mosaic fixture here puts its panels on a
+  fixed grid with flat interiors, so some depth always holds a real share of the
+  canvas and ``panel_coverage_level`` always finds a plateau. The owner's panels
+  are dithered and re-framed night to night, so his depths are a **continuum**
+  with no plateau anywhere, and that is the one shape where the function's
+  fall-through decides the answer (see :func:`assert_depths_are_a_continuum`).
 
 Nothing here changes a fixture that works for what it was built for. The
 deliverable is the assertion that says what each one **is**.
@@ -148,6 +154,37 @@ def assert_panels_thinner_than_the_reference(cov, *, share: float = 0.02,
         f"{what}: {describe_coverage(cov)} -- only {100 * got:.2f}% of the covered "
         f"canvas sits below the depth threshold, so this fixture cannot catch a "
         f"rule that crops thin panels away")
+
+
+def assert_depths_are_a_continuum(cov, *, what: str = "fixture") -> None:
+    """Assert the fixture's depths hold **no plateau at all** — the shape on which
+    :func:`seestack.edit.coverage_trim.panel_coverage_level` has no level to point
+    at and falls through to :func:`~seestack.edit.coverage_trim._continuum_level`.
+
+    The fifth entry in the list at the top of this module, and the same mechanism
+    as the other four: every "mosaic" fixture here is **blocky** — panels on a
+    fixed grid, each interior flat, so one depth holds a real share of the canvas
+    and the plateau search always finds one. The owner's mosaics are the same few
+    pointings revisited across many nights, each sub dithered and each night
+    re-framed, so every panel edge lands somewhere new on every visit and the
+    depth climbs in hundreds of small steps. Measured on his own library (observer
+    report #1109): 13 of 88 current pictures hold their largest level in under 8 %
+    of the sample, every one of them a mosaic.
+
+    Stated in the units the rule measures in, like :func:`panel_level`: the claim
+    is that the *search* declines, not that some hand-rolled histogram is flat.
+    """
+    v = covered_values(cov)
+    assert v.size >= 256, (
+        f"{what}: {describe_coverage(cov)} -- only {v.size} covered pixels, so "
+        f"`panel_coverage_level` declines on sample size (PANEL_LEVEL_MIN_PIXELS) "
+        f"rather than on the shape, and this fixture is not the case it claims")
+    level = panel_level(cov)
+    median = float(np.median(v))
+    assert level == pytest_approx(median), (
+        f"{what}: {describe_coverage(cov)} -- the reference is {level}, not the "
+        f"median {median:.2f}, so a plateau *was* found and this fixture cannot "
+        f"vouch for the no-plateau path")
 
 
 def uncovered_share(cov) -> float:

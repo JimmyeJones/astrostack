@@ -1,5 +1,91 @@
 # Shipped — the record
 
+## 2026-10-10 (Builder, next run) — the ragged-border note stops measuring a dithered mosaic against its deepest pixel
+
+### v0.492.62 — 🟠 BUG FIX (PRIORITY 1, the editor): `coverage_trim._continuum_level` — `panel_coverage_level` no longer hands the **peak** back on a canvas whose depths are a continuum
+
+**Observer report [#1109](https://github.com/JimmyeJones/astrostack/issues/1109), verified against the code
+and reproduced on a fixture shaped like the owner's.** v0.389.2 fixed `coverage_thin_fraction` to measure
+"thin" against **one panel's** depth instead of the coverage map's peak, and stamped every run
+`coverage_shares_version = 2` so a row measured under the old rule could be told apart. On 13 of the owner's
+88 current pictures the reference **is the peak** — the pre-fix rule — under that version-2 stamp.
+
+**The mechanism, and it is one word in the old code: "declines".** `panel_coverage_level` looks for the
+lowest coverage level that `PANEL_LEVEL_MIN_FRAC` (8 %) of the canvas sits at, and *"falls back to the peak
+when no level is substantial enough to name — i.e. when this function has no opinion, the old behaviour
+stands."* On a small or legacy map that reasoning is right, and `PANEL_LEVEL_MIN_PIXELS` still guards it.
+On a **dithered** mosaic it is not a lack of opinion at all — it is the one shape where the depth
+distribution is a *continuum*, and the pre-D1 rule was handed back under a stamp certifying it was gone.
+
+**Why the owner's mosaics are all that shape, and why no fixture in this repo was.** Every "mosaic" fixture
+here is **blocky**: panels on a fixed grid, each interior flat, so some depth always holds a real share of
+the canvas and the plateau search always finds one. His are the same few pointings revisited across many
+nights, each sub dithered and each night re-framed, on a union canvas two or three frame-widths across — so
+every panel edge lands somewhere new on every visit and the depth climbs in hundreds of small steps.
+Measured on his own library: **75 of 88 find a plateau and 74 of those return a level strictly below the
+peak** (D1's mechanism working); the other **13, every one a mosaic**, hold their largest single level in
+0.9–7.8 % of the sample.
+
+**What the owner was reading.** The card said *"About **56 %** of this picture is a thin edge … **Trim
+border gives a clean, even rectangle**"* — at a bar of 0.05, so 11× over. Served shares ran **0.438–0.573**
+where the honest reference gives **0.119–0.188**: the note overstating a mosaic's thin edge by **2.8× to
+4.5×** on ~7 distinct pictures (six of the thirteen are #878's hex-suffixed twins). And the action did not
+deliver either — the observer's own follow-up measured the trim keeping 82.8 % / 94.8 % / 96.4 % of three of
+those canvases with **51.4 % / 48.2 % / 48.1 % still thin inside what it kept**.
+
+**The fix, and why the median rather than a lower floor.** Lowering `PANEL_LEVEL_MIN_FRAC` is the obvious
+lever and the report measured it *worse*: at 0.04, 0.02 and 0.01 the plateau search walks all the way down
+onto the reprojection ramp and returns the fringe itself. The reference a continuum needs is not a lower
+substantiality bar, it is a **statistic** — and the median is the one that cannot overstate the picture,
+because by construction half the canvas sits at or below it (the same property
+`coverage_median_depth` exists for). It is at or below the peak always, so `panel_coverage_level`'s
+*"can only ever keep more"* guarantee is preserved rather than traded away. **Only the fall-through moved:**
+byte-identical on a single field, on every blocky mosaic in the audit's own table, and on any map under
+`PANEL_LEVEL_MIN_PIXELS` covered pixels, where there is no distribution to read and a "median" would be
+noise.
+
+**Measured on the new fixture, before → after.** A 2×2 dithered over 11 re-framed nights, 876 subs, integer
+frame count, peak 4.2× a typical panel:
+
+| | reference | thin share (bar 0.05) | trim keeps | thin **inside** what it keeps |
+|---|---|---|---|---|
+| before | 611 (the peak) | **0.5181** | 73.4 % | **44.2 %** |
+| after | 146 (the median) | **0.2192** | 62.8 % | **2.8 %** |
+
+So the second half of the card's promise is now kept too: the rectangle it offers really is the even one. It
+removes a little more, and what it removes is the fringe rather than the wrong quarter.
+
+**Upgrade-safe (§9) and this is the half that reaches his live install:** `COVERAGE_SHARES_VERSION` → **3**,
+so `backfill_coverage_shares` re-derives those 13 rows off the `_framecov.fits` sibling already beside each
+master, lazily, on the request that is already grading the run. His 203 measured runs are all stamped 2 and
+would otherwise have kept the note until every target happened to be stacked again. Nothing is dropped or
+rewritten — a stale row whose map is gone goes quiet *in memory* only, as it already did; a single field
+never reopens its map (the two references are the same number there); no schema change, no new column, no
+API shape change, no default flipped.
+
+**Tests +6, fail-before 4 of them** by reverting the one `return`. Three in `test_coverage_trim.py` (the
+fixture's own shape claim, the reference, and the trim's kept-rectangle promise: *"the trim keeps 73.4 % of
+the canvas and 44.2 % of it is still thin"*), one in `test_coverage_thin_fraction.py` (the note's number),
+one in `test_coverage_backfill.py` (a version-2 mosaic re-derives: 0.5180 → 0.2212, which fails outright at
+version 2), and one control pinning that the blocky shapes and the single field did not move.
+`tests/shapes.py` gains `assert_depths_are_a_continuum` and a fifth entry in its vocabulary — **blocky vs
+dithered panels** — because this is the fourth finding of one class and the pattern each time was a tested
+rule with an untested fixture assumption.
+
+**One pre-existing test bug fell out of it.** `test_the_trim_can_only_ever_keep_more_than_the_depth_threshold_alone`
+scored its answers with `_kept_fraction`, which maps `None` → 0.0 — but `None` from `largest_covered_rect`
+means *"keep the whole picture"*, the most generous answer of all. Its sibling one screen down already says
+so in those words and uses `_rect_area`; this one had simply never been handed a map that reached the
+branch, and once the gamma-draw maps got an honest reference it read a rule that had become *maximally* safe
+as a violation of the safety property it exists to pin. Now scored like its sibling, which strengthens it.
+
+**The method note worth carrying forward: a fall-through is a rule, and "no opinion" is a claim about the
+input.** This module's comment said the fall-through meant the function had nothing to say, and that was
+true of the shapes in front of whoever wrote it. It was false of the owner's, where the fall-through is
+*where the answer is decided* — and the version stamp beside it then certified the superseded rule as the
+new one. When a fix introduces a "when we can't tell, keep the old behaviour" branch, ask which real inputs
+land there, and whether they are the inputs the fix was written for.
+
 ## 2026-10-10 (Builder, next run) — the editor stops putting the un-narrowed claim back on screen the moment the owner taps
 
 ### v0.492.61 — 🟠 BUG FIX (PRIORITY 1, the editor): `AutoFeedback.mergeMeasuredPreferences` — the feedback POST's picture-blind `note` no longer reaches the screen

@@ -1,5 +1,35 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-10 (Builder, next run — **the queue held nothing ungated for a seventh run, and this
+time the work came from the INBOX: a new observer issue, verified against the code and reproduced.
+SHIPPED as v0.492.62.**
+[#1109](https://github.com/JimmyeJones/astrostack/issues/1109) says the ragged-border note overstates a
+mosaic's thin edge 3–4× on 13 of the owner's 88 current pictures, and the mechanism is one word in
+`panel_coverage_level`: **"declines"**. v0.389.2 made the note measure "thin" against one panel's depth
+instead of the map's peak and stamped every run `coverage_shares_version = 2` so an old row could be told
+apart. But the panel search needs a coverage level holding 8 % of the canvas, and when it finds none it
+*"falls back to the peak — i.e. when this function has no opinion, the old behaviour stands."* On a
+**dithered** mosaic that is not a lack of opinion: it is the one shape whose depths are a **continuum**, so
+the pre-fix rule was handed back under a stamp certifying it was gone. Reproduced on a new fixture (2×2
+dithered over 11 re-framed nights, 876 subs): thin share **0.5181 → 0.2192**, and — the sharper half — the
+thin share *inside the rectangle the Trim offers* **44.2 % → 2.8 %**, so the card's "clean, even rectangle"
+promise is now kept as well as its number. The fix is the **median** covered depth, not a lower floor
+(the report measured 0.04/0.02/0.01 all walking down onto the ramp and returning the fringe); the median
+cannot overstate the picture by construction and is at or below the peak always, so the module's "can only
+ever keep more" guarantee survives. `COVERAGE_SHARES_VERSION` → 3 so his 203 stamped rows heal off the
+`_framecov.fits` already on disk rather than waiting to be re-stacked.
+**The method note, and it is the one to carry forward: a fall-through is a rule, and "no opinion" is a claim
+about the INPUT.** The comment beside that branch was true of the shapes in front of whoever wrote it and
+false of the owner's, where the fall-through is where the answer is decided. **When a fix adds a "if we
+can't tell, keep the old behaviour" branch, ask which real inputs land there — and whether they are the
+inputs the fix was written for.** This is the fourth finding of the class `tests/shapes.py` exists for, so
+that file gains its fifth entry (**blocky vs dithered panels**) and `assert_depths_are_a_continuum`.
+**One pre-existing test bug fell out**: a safety-property test scored `None` (= "keep the whole picture")
+as 0.0 and so read a rule that had become *maximally* safe as a violation; its sibling one screen down
+already had it right, in those words. Tests **+6, fail-before 4**. The inbox was checked first — **five
+open; #1109 was the new one and is now acted on, the other four previously acted-on and owner-gated** —
+and there were **no open PRs**. Earlier notes stand below.)*
+
 *Last edited 2026-10-10 (Builder, next run — **the queue held nothing ungated again, so this run read the
 previous run's fix as a lead a sixth time — and the lead was not another piece of arithmetic, it was the
 CLIENT. SHIPPED as v0.492.61.**

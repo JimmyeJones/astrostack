@@ -1,5 +1,52 @@
 # Process notes & QA sweep records
 
+## 2026-10-10 (Builder, next run) — "a fall-through is a rule, and 'no opinion' is a claim about the input"
+
+The method note behind **v0.492.62**, and the fourth sighting of the class `tests/shapes.py` was created for.
+
+`panel_coverage_level` looks for the lowest coverage level that 8 % of the canvas sits at, and when it finds
+none it returns the map's peak. The comment beside that branch read: *"falls back to the peak when no level
+is substantial enough to name — i.e. when this function has no opinion, the old behaviour stands."* That
+sentence is doing two jobs, and only one of them is true. It is a correct statement about a **small or
+legacy** map, which is what `PANEL_LEVEL_MIN_PIXELS` is for. It is a false statement about a **dithered
+mosaic**, where the branch is not a shrug but *the place the answer is decided* — and the answer it gave was
+the pre-D1 rule, handed back under a `coverage_shares_version` stamp certifying that the pre-D1 rule was
+gone. 13 of the owner's 88 current pictures were being graded that way.
+
+**The general rule: when a fix adds a "if we can't tell, keep the old behaviour" branch, ask which real
+inputs land there — and whether they are the inputs the fix was written for.** A fall-through is not
+neutral ground. It is a second rule, written in the voice of an abstention, and it inherits none of the
+scrutiny the first rule got. The version stamp made it worse rather than better: a row measured by the old
+rule and a row that fell through to the old rule are indistinguishable from the outside, so the one
+mechanism built to catch this exact drift certified the drift as fixed.
+
+**Why no fixture here could have caught it, and why that is the fourth time.** Every mosaic fixture in this
+repo is **blocky** — panels on a fixed grid, each interior flat — so some depth always holds a real share of
+the canvas and the plateau search always succeeds. The owner's mosaics are the same few pointings dithered
+and re-framed night after night on a canvas two or three frame-widths across, so his depths are a
+*continuum* with no plateau anywhere. A1, D1 and the 2026-09-08 thin-note bug were all the same shape of
+mistake: the code was tested and the **fixture** was the untested assumption. `tests/shapes.py` therefore
+gains its fifth vocabulary entry (**blocky vs dithered panels**) and `assert_depths_are_a_continuum`, so a
+fixture that wants to vouch for the fall-through has to say so and be checked.
+
+**And the dogfood tool cannot reach it either — same reason, worth knowing before the next run spends time
+on it.** `webapp/sample_data.py`'s 2×2 mosaic sample carries `_MOSAIC_JITTER_PX`, one fixed pointing error
+**per panel**, not per sub, so each panel interior is flat and a plateau exists. A `--mosaic` or
+`--mosaic --big` pass is therefore a *control* for this fix (it confirms the blocky path did not move) and
+can never be an exercise of it. Making the bundled sample dither per sub would reach it, and is not a safe
+slice: that sample is pinned by numbers all over the suite and is the picture every screenshot shows. If a
+future run wants the instrument, build the dithered canvas as a second shape rather than changing this one.
+
+**One pre-existing test bug fell out, and its shape is the instrument failure mode this repo keeps hitting.**
+`test_the_trim_can_only_ever_keep_more_than_the_depth_threshold_alone` scored both sides with
+`_kept_fraction`, which maps `None` → 0.0. But `None` from `largest_covered_rect` means *"keep the whole
+picture"* — the most generous answer there is. Once the gamma-draw maps in that test got an honest reference
+some of them reached that branch, and the assertion read a rule that had become **maximally** safe as a
+violation of the safety property it exists to pin. Its sibling one screen down already had it right and says
+why in exactly those words. So: a helper that collapses "no answer" and "the largest possible answer" onto
+the same number will eventually be handed the case that distinguishes them, and it will not crash — it will
+**report**. That is the fourth time in six runs that a finder failed by reporting rather than by failing.
+
 ## 2026-10-10 (Builder, next run) — "a stand-down about what the server sends is not a stand-down about what the owner reads"
 
 The method note behind **v0.492.61**, and it is the complement of the one immediately below it.

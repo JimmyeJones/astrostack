@@ -2364,7 +2364,18 @@ COVERAGE_THIN_RATIO = 0.25
 #   2  measured against :func:`seestack.edit.coverage_trim.panel_coverage_level`
 #      — the same reference the trim itself uses, so the note and its action can
 #      no longer disagree. Byte-identical on a single field.
-COVERAGE_SHARES_VERSION = 2
+#   3  …and that reference no longer hands the **peak** back on a canvas whose
+#      depths are a continuum, which is what a *dithered* mosaic's is: rule 2
+#      asked for the lowest level holding 8 % of the canvas, found none there, and
+#      fell through to rule 1 under a stamp saying it had not. Measured over the
+#      owner's own 88 current pictures (observer report #1109): on 13 of them,
+#      every one a mosaic, the thin share read 0.438-0.573 where the honest
+#      reference gives 0.119-0.188 — the ragged-border note overstating a thin
+#      edge by 2.8x to 4.5x and offering a trim that removed a twentieth of the
+#      canvas. See :func:`seestack.edit.coverage_trim._continuum_level`.
+#      Byte-identical on a single field, and on any mosaic that has a plateau
+#      (74 of the owner's 75) — only the fall-through changed.
+COVERAGE_SHARES_VERSION = 3
 
 # How many coverage pixels the panel-depth estimate reads. Panel depth is a
 # *distribution* statistic — where the plateaus sit — and a regular stride over a

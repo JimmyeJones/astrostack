@@ -20,6 +20,7 @@ from seestack.edit.coverage_trim import (
     well_covered_mask,
 )
 from tests.shapes import (
+    assert_depths_are_a_continuum,
     assert_fully_tiled,
     assert_has_a_ragged_outline,
     assert_panels_thinner_than_the_reference,
@@ -418,13 +419,24 @@ def test_the_trim_can_only_ever_keep_more_than_the_depth_threshold_alone():
     """The safety property of the coverage bound, over random maps: the rectangle
     returned is never smaller than the one the depth threshold alone would give.
     So this guard, like D1's own fix, can only leave fringe in — never crop a
-    panel away."""
+    panel away.
+
+    **Scored with ``_rect_area``, not ``_kept_fraction``** *(2026-10-10)*. These
+    maps are a smooth gamma draw, i.e. the no-plateau shape `_continuum_level`
+    reaches, and once the reference is the median rather than the peak the honest
+    answer on some of them is ``None`` — "keep the whole picture". That is the
+    *most* generous answer of all, and ``_kept_fraction`` scores it 0.0, so this
+    assertion read a rule that had become maximally safe as a violation of the
+    safety property it is here to pin. The sibling below
+    (``test_the_border_rule_can_only_ever_keep_more_than_the_ladder_alone``)
+    already had it right and says why in the same words; this one had simply never
+    been handed a map that reached the branch."""
     rng = np.random.default_rng(7)
     for _ in range(40):
         cov = rng.gamma(2.0, 8.0, size=(60, 80)).astype(np.float32)
         cov[rng.random((60, 80)) < 0.1] = np.nan
-        strict = _kept_fraction(_rect_from_mask(well_covered_mask(cov)))
-        assert _kept_fraction(largest_covered_rect(cov)) >= strict - 1e-9
+        strict = _rect_area(_rect_from_mask(well_covered_mask(cov)))
+        assert _rect_area(largest_covered_rect(cov)) >= strict - 1e-9
 
 
 def test_a_diagonal_mosaics_genuinely_small_rectangle_is_still_offered():
@@ -724,3 +736,143 @@ def test_the_border_rule_can_only_ever_keep_more_than_the_ladder_alone():
         # picture", which is the most generous answer of all, not the least.
         assert (_rect_area(largest_covered_rect(cov))
                 >= _rect_area(_ladder_only_rect(cov)) - 1e-9), i
+
+
+# --- D1, fourth instalment: a DITHERED mosaic has no plateau to find ----------
+#
+# Observer report #1109, and the same mechanism as the three before it: the code
+# was tested and the *fixture* was the wrong assumption. Every mosaic above is
+# **blocky** — panels on a fixed grid, each interior flat — so one depth always
+# holds `PANEL_LEVEL_MIN_FRAC` of the canvas and the plateau search always finds
+# something. The owner's mosaics are the same few pointings revisited across many
+# nights, each sub dithered and each night re-framed, on a union canvas two or
+# three frame-widths across; every panel edge lands somewhere new on every visit,
+# so the depths are a continuum with no plateau anywhere. `panel_coverage_level`
+# then fell through to **the peak** — the rule D1 removed — under a
+# `coverage_shares_version = 2` stamp certifying that it was gone. Measured on
+# the owner's own 88 current pictures: 13 of them, every one a mosaic.
+
+def _dithered_mosaic(*, rows=2, cols=2, panel=(108, 192), overlap=0.30,
+                     subs=876, nights=11, dither=12, drift=40, seed=5):
+    """The owner's shape, and the one no fixture in this suite had: a mosaic whose
+    panel edges are **smeared** rather than tiled.
+
+    `rows x cols` nominal pointings, revisited on `nights` nights; each night the
+    whole mosaic is re-framed by up to `drift` px and each sub dithered by up to
+    `dither` px on top. Built with a difference array so the cost is one pass over
+    the subs plus one over the canvas rather than `subs` canvas-sized adds.
+
+    Deliberately an integer **frame count** (`master_*_framecov.fits` is what the
+    observer measured and what `run_stack` prefers when it stamps the shares), so
+    nothing here leans on weight jitter to smear the levels: the geometry alone
+    does it.
+    """
+    rng = np.random.default_rng(seed)
+    ph, pw = panel
+    step_r = int(round(ph * (1 - overlap)))
+    step_c = int(round(pw * (1 - overlap)))
+    pad = dither + drift
+    h = step_r * (rows - 1) + ph + 2 * pad
+    w = step_c * (cols - 1) + pw + 2 * pad
+    # Difference array: +1/-1 at each frame's corners, then two cumulative sums.
+    acc = np.zeros((h + 1, w + 1), dtype=np.int32)
+    per_panel = max(1, subs // (rows * cols * nights))
+    for _ in range(nights):
+        nr = int(rng.integers(-drift, drift + 1))
+        nc = int(rng.integers(-drift, drift + 1))
+        for j in range(rows):
+            for i in range(cols):
+                for _ in range(per_panel):
+                    r0 = j * step_r + pad + nr + int(rng.integers(-dither, dither + 1))
+                    c0 = i * step_c + pad + nc + int(rng.integers(-dither, dither + 1))
+                    r1, c1 = r0 + ph, c0 + pw
+                    acc[r0, c0] += 1
+                    acc[r1, c1] += 1
+                    acc[r0, c1] -= 1
+                    acc[r1, c0] -= 1
+    cov = np.cumsum(np.cumsum(acc, axis=0), axis=1)[:h, :w]
+    return cov.astype(np.float32)
+
+
+def test_the_dithered_fixture_really_is_the_shape_its_name_claims():
+    """It vouches for: no plateau anywhere (so the fall-through decides the
+    answer), a peak several times one typical panel's depth — the gap D1 lives in
+    — and a genuinely ragged outline, so a border trim has something honest to
+    remove. It is an integer frame count, so it says nothing about weighting."""
+    cov = _dithered_mosaic()
+    assert_depths_are_a_continuum(cov, what="dithered 2x2")
+    assert_has_a_ragged_outline(cov, what="dithered 2x2")
+    assert peak_over_panel(cov) > 3.0, describe_coverage(cov)
+    # ...and the discriminator the observer named: no *single* level is anywhere
+    # near substantial, which is what sends the search down the fall-through.
+    covered = cov[cov > 0]
+    _levels, counts = np.unique(np.rint(covered).astype(np.int64),
+                                return_counts=True)
+    assert counts.max() / covered.size < PANEL_LEVEL_MIN_FRAC, describe_coverage(cov)
+
+
+def test_a_dithered_mosaics_reference_is_not_the_overlap_peak():
+    """Fail-before: 616, the map's peak, i.e. the pre-D1 rule. One typical panel
+    here is ~146 frames deep and the deepest pixel — where eleven nights of
+    re-framed pointings happen to pile up — is 4.2x that."""
+    cov = _dithered_mosaic()
+    covered = cov[cov > 0]
+    level = panel_coverage_level(covered)
+    assert level is not None
+    assert level < 0.5 * float(covered.max()), describe_coverage(cov)
+    assert level == pytest.approx(float(np.median(covered)))
+
+
+def test_the_dithered_trim_now_delivers_the_even_rectangle_it_promises():
+    """The half of #1109 the follow-up measured, and the sharper of the two: the
+    card says "Trim border gives a clean, even rectangle", so the rectangle it
+    offers must actually *be* one by the note's own yardstick.
+
+    Fail-before, on this fixture: the trim kept 73.4 % of the canvas and **44.2 %
+    of what it kept was still thin** — it removed the wrong quarter and left the
+    mess behind. (On the owner's own pictures the observer measured 0.5145 inside
+    a trim keeping 82.8 %, and 0.4822 inside one keeping 94.8 %.) With the
+    reference honest the kept rectangle is 2.8 % thin.
+    """
+    cov = _dithered_mosaic()
+    reference = panel_coverage_level(cov[cov > 0])
+    rect = largest_covered_rect(cov)
+    assert rect is not None, describe_coverage(cov)
+    h, w = cov.shape
+    inside = cov[int(rect[1] * h):int(rect[3] * h), int(rect[0] * w):int(rect[2] * w)]
+    covered_inside = inside[inside > 0]
+    assert covered_inside.size > 0
+    thin_inside = float(np.mean(covered_inside < 0.25 * reference))
+    assert thin_inside < 0.05, (
+        f"the trim keeps {100 * _rect_area(rect):.1f}% of the canvas and "
+        f"{100 * thin_inside:.1f}% of it is still thin -- {describe_coverage(cov)}")
+
+
+def test_the_blocky_mosaics_and_the_single_field_are_untouched():
+    """The control, and the constraint on the fix: the fall-through is the *only*
+    thing that moved. Every shape in this suite that finds a plateau — the audit's
+    own table and the single field — answers exactly as it did before."""
+    for name, cov, want in [
+        ("2x2 @15%", _tiled_mosaic(2, 2, overlap=0.15), 30.0),
+        ("3x3 @20%", _tiled_mosaic(3, 3, overlap=0.20), 30.0),
+        ("3x3 @5%", _tiled_mosaic(3, 3, overlap=0.05), 30.0),
+        ("12x8 raster", _tiled_mosaic(12, 8, overlap=0.10, h=800, w=1200), 30.0),
+        ("1x2 400/150", _tiled_mosaic(2, 1, overlap=0.0, depths=[400, 150]), 150.0),
+    ]:
+        assert panel_coverage_level(cov[cov > 0]) == want, name
+        assert largest_covered_rect(cov) is None, name
+    field = _single_field_with_fringe()
+    assert panel_coverage_level(field[field > 0]) == field.max()
+    assert largest_covered_rect(field) == (0.02, 0.02, 0.98, 0.98)
+
+
+def test_a_map_too_small_to_have_a_distribution_still_keeps_the_peak():
+    """The one decline the fix leaves alone, and why it is not the same case: under
+    `PANEL_LEVEL_MIN_PIXELS` covered pixels there is no distribution to read, so a
+    "median" would be noise rather than a typical panel. Small and legacy maps keep
+    exactly the behaviour they have today."""
+    cov = np.array([[100.0, 100.0], [24.0, 26.0]])
+    covered = cov[cov > 0]
+    assert covered.size < 256
+    assert panel_coverage_level(covered) == 100.0
+    assert panel_coverage_level(covered) != pytest.approx(float(np.median(covered)))

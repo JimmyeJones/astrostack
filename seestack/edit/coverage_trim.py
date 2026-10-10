@@ -275,6 +275,59 @@ def _max_rectangle(mask: np.ndarray):
     return best
 
 
+def _continuum_level(vals: np.ndarray, peak: float) -> float:
+    """One panel's depth on a map that has **no plateau at all** — the median of
+    its covered depths. ``vals`` is already sorted ascending; ``peak`` is its last
+    value, returned only if the median somehow is not positive.
+
+    This is the fourth instalment of D1, and it is the one that was hiding behind
+    the *word* "declines". :func:`panel_coverage_level` looked for the lowest level
+    a real share of the canvas sits at and, finding none, returned the peak — on
+    the stated reasoning that "when this function has no opinion, the old
+    behaviour stands". On a **small or legacy** map that is right, and
+    :data:`PANEL_LEVEL_MIN_PIXELS` still guards it. On a *dithered* mosaic it is
+    not a lack of opinion at all: it is the one shape where the distribution is a
+    **continuum**, and the pre-D1 rule was handed back under a
+    ``coverage_shares_version`` stamp certifying that it was gone.
+
+    **Why a dithered canvas has no plateau, and why the owner's are all dithered.**
+    A plateau needs :data:`PANEL_LEVEL_MIN_FRAC` of the canvas at one depth. That
+    is a *blocky* canvas's shape: panels on a fixed grid, each interior flat. The
+    owner's mosaics are the same handful of pointings revisited across many
+    nights, each sub dithered and each night re-framed, on a union canvas only two
+    or three frame-widths across — so every panel edge lands at a different place
+    on every visit and the depth climbs in hundreds of small steps instead of
+    sitting on a few levels. Measured over the owner's own library (observer
+    report `#1109`, 88 current pictures): 75 find a plateau and 74 of those return
+    a level strictly below the peak — D1's mechanism working — while **13, every
+    one a mosaic, hold their largest single level in 0.9-7.8 % of the sample** and
+    so fell through to the peak.
+
+    **Why the median and not a lower floor.** Lowering
+    :data:`PANEL_LEVEL_MIN_FRAC` is the obvious lever and it is measured *worse*:
+    at 0.04, 0.02 and 0.01 the plateau search on those canvases walks all the way
+    down onto the reprojection ramp and returns the fringe itself. The reference a
+    continuum needs is not a lower substantiality bar; it is a statistic. The
+    median is the one that cannot overstate the picture — by construction half of
+    the canvas sits at or below it — which is the same property
+    :func:`seestack.stack.stacker.coverage_median_depth` exists for, and it is at
+    or below the peak always, so :func:`panel_coverage_level`'s "can only ever keep
+    more" guarantee is preserved rather than traded away.
+
+    **What it is worth, on the shapes it reaches.** The share "How's my stack?"
+    calls a ragged border ran 0.438-0.573 on those 13 against the peak and
+    0.119-0.188 against the median — the note was overstating a mosaic's thin edge
+    by **2.8x to 4.5x** and offering a "Trim border" that removed a twentieth of
+    the canvas. The distance-transform control the repo had already recorded
+    (*"none of the thin pixels on any of his 22 mosaics sits beyond half the
+    footprint's inscribed radius"*) holds against the median — 0.00 % beyond 0.5R
+    — and fails at 5.15 % against the peak, i.e. the number that closed that lead
+    described this rule rather than the deployed one.
+    """
+    median = float(np.median(vals))
+    return median if median > 0 else peak
+
+
 def panel_coverage_level(covered: np.ndarray,
                          min_frac: float = PANEL_LEVEL_MIN_FRAC,
                          tol: float = PANEL_LEVEL_TOL) -> float | None:
@@ -307,13 +360,17 @@ def panel_coverage_level(covered: np.ndarray,
     coverage is a sum of per-frame *weights* once quality weighting is on, so a
     30-sub panel reads as 30 ± jitter and integer bucketing would shatter it.
 
+    …and when the distribution holds **no plateau at all** the answer is
+    :func:`_continuum_level` — the median covered depth — not the peak. A map too
+    small to *have* a distribution (under :data:`PANEL_LEVEL_MIN_PIXELS` covered
+    pixels) still returns the peak, because there the function genuinely has no
+    opinion to offer.
+
     ``covered`` is the finite, strictly-positive coverage values (any shape; it is
-    flattened). Returns ``None`` when there are none, and falls back to the peak
-    when no level is substantial enough to name — i.e. when this function has no
-    opinion, the old behaviour stands. **It can only ever return a value at or
-    below the peak**, so it can only ever lower the threshold and keep *more* of
-    the picture: the worst case of this rule is leaving fringe in, never trimming
-    a panel away.
+    flattened). Returns ``None`` when there are none. **It can only ever return a
+    value at or below the peak**, so it can only ever lower the threshold and keep
+    *more* of the picture: the worst case of this rule is leaving fringe in, never
+    trimming a panel away.
     """
     vals = np.sort(np.asarray(covered, dtype=np.float64).ravel())
     n = vals.size
@@ -330,7 +387,11 @@ def panel_coverage_level(covered: np.ndarray,
     hi = vals[need - 1:]
     tight = np.flatnonzero(hi - lo <= tol * np.maximum(hi, 1e-12))
     if tight.size == 0:
-        return peak
+        # No window anywhere is tight, so this map has no plateaus to choose
+        # between: its depths are a continuum, which is what a *dithered* mosaic
+        # canvas is. The peak is the worst answer available there, and it is the
+        # pre-D1 rule — see `_continuum_level`.
+        return _continuum_level(vals, peak)
     start = int(tight[0])
     # Take the level as the median of everything within `tol` of that window's
     # foot, so jitter around the plateau doesn't bias it toward either end.
@@ -346,8 +407,10 @@ def _panel_reference(coverage: np.ndarray,
 
     The reference every fraction in this module is *of*: :data:`DEFAULT_MIN_FRAC`
     for "well covered", :data:`FRINGE_OUTSIDE_FRAC` for "effectively no data".
-    Falls back to the peak when :func:`panel_coverage_level` declines, which is the
-    behaviour that predates D1."""
+    Falls back to the peak only when :func:`panel_coverage_level` declines
+    outright — a map with under :data:`PANEL_LEVEL_MIN_PIXELS` covered pixels,
+    which is small enough to have no distribution to read. A map with a
+    distribution but no plateau gets :func:`_continuum_level`, not the peak."""
     cov = np.asarray(coverage, dtype=np.float32)
     if cov.ndim != 2 or cov.size == 0:
         return None

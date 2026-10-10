@@ -82,6 +82,19 @@ _COVERAGE_MIN_PEAK = 4
 # nothing about what the note described. The single-field control is unchanged to
 # the digit — the two references are the same number there.
 #
+# **And that calibration was *blocky*, which v0.492.62 is the second half of.**
+# Every shape in the table above puts its panels on a grid with flat interiors, so
+# one depth holds `PANEL_LEVEL_MIN_FRAC` of the canvas and the panel reference is
+# always found. The owner's mosaics are the same few pointings dithered and
+# re-framed night after night, so their depths are a **continuum** with no plateau
+# anywhere and `panel_coverage_level` fell through to the peak — the pre-v0.389.2
+# rule, under a stamp certifying it was gone. Measured on his own 88 current
+# pictures (observer report #1109): 13 of them, every one a mosaic, fired this
+# note at 0.438-0.573 where the honest reference gives 0.119-0.188, and the Trim
+# the note offers removed ~a twentieth of the canvas while leaving half the thin
+# area inside what it kept. The floor is *still* 5 %; the number it reads moved
+# again. See `seestack.edit.coverage_trim._continuum_level`.
+#
 # A mosaic panel genuinely thinner than its neighbours (the lopsided 12/1/1 this
 # floor was also calibrated on) is therefore no longer *this* note's business,
 # and never was: it is not a border to crop but a place to point the scope next,
