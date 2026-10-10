@@ -866,6 +866,213 @@ def measured_region(
     return arr[r0:r1, c0:c1], cov
 
 
+def measured_auto_knobs(
+    m_rgb: np.ndarray | None,
+    m_cov: np.ndarray | None = None,
+    *,
+    grain_ratio: float | None = None,
+) -> dict[str, float]:
+    """The Auto knobs **as measured from the picture**, before any taste profile.
+
+    Exactly what :func:`auto_recipe` reads off the image — sky level → stretch
+    target, measured σ → saturation and the denoise↔sharpen crossfade, plus the
+    two knobs Auto *sets* rather than measures (the 0.7 green removal, and
+    highlight protection off) — and it is ``auto_recipe`` that calls this, so
+    there is one copy of the arithmetic rather than two.
+
+    Both arguments are already **narrowed** (:func:`measured_region`): this is
+    the region the recipe's own border trim keeps, and ``m_cov`` is the coverage
+    map only on a mosaic, where the recipe's ``background.level_coverage`` pass
+    takes the panel steps out before the stretch sees them. An unmeasurable
+    image (``m_rgb`` ``None``) returns the neutral fallbacks, which is the old
+    "treated as clean" behaviour.
+
+    Public because the editor needs the knobs *without* the recipe: whether a
+    feedback chip can move this picture at all is a question about where the
+    measured value sits in its ``auto_prefs._PARAM_RANGE``, and answering it by
+    rebuilding the recipe either side of the tap costs a measured ~0.6 s a build
+    on a proxy the owner's size (see ``docs/SHIPPED.md`` under v0.492.54 for the
+    table). The caller measures once, then asks
+    :func:`inert_auto_cues` twelve times for free.
+    """
+    knobs: dict[str, float] = {
+        "target_bg": 0.20,
+        # Neutral fallback when the image can't be measured.
+        "saturation": 1.2,
+        # Crossfade weights: an unmeasurable image is treated as clean (sharpen
+        # full, no denoise) — matching the old boolean fallback.
+        "denoise_strength": 0.0,
+        "chroma_strength": 0.0,
+        "sharpen_amount": 0.5,
+        # SCNR before the saturation boost caps the green channel to the R/B
+        # neutral so the boost lifts real colour, not the residual OSC green
+        # cast. Gentle (0.7) and monotone — it can only *reduce* excess green,
+        # never invent colour.
+        "scnr_amount": 0.7,
+        # "Hold back highlights" starts *off*: the stretch's existing shoulder
+        # already rescues an ordinary core, and deciding from the image whether a
+        # core is clipping needs real-data threshold tuning (filed in
+        # docs/IMPROVEMENTS.md). It moves only when the owner says the core looks
+        # blown out.
+        "highlight_protect": 0.0,
+    }
+    if m_rgb is None:
+        return knobs
+    a = analyze_proxy(m_rgb, m_cov, grain_ratio)
+    sky_sigma = float(a["sky_sigma"])
+    noise_frac = _noise_fraction(sky_sigma)
+    # Darker sky → lift a little more (higher target grey), brighter → less.
+    knobs["target_bg"] = float(np.clip(0.24 - a["sky"] * 0.4, 0.14, 0.24))
+    # Chroma noise scales with the saturation boost, so ease off on a noisy
+    # stack (where a strong boost just amplifies colour speckle) and give a
+    # clean one the full lift — rather than the same fixed 1.2 for both.
+    knobs["saturation"] = float(np.clip(1.25 - sky_sigma * 6.0, 1.05, 1.25))
+    # Sharpen fades out as noise rises; denoise fades in. So a clean stack
+    # (noise_frac 0) gets full sharpen and no denoise, a very noisy one
+    # (noise_frac 1) full denoise and no sharpen — matching the old ends — and
+    # a mildly-noisy one a light touch of both instead of an abrupt switch.
+    knobs["sharpen_amount"] = round(0.5 * (1.0 - noise_frac), 3)
+    if noise_frac > 0.0:
+        # Match the denoise strength to the actual measured noise (the same
+        # estimator behind the editor's "From your image" one-click), scaled by
+        # the crossfade weight so it eases in across the band.
+        from seestack.edit.noise import suggest_denoise_strength
+
+        # Same stride correction as the σ above: ``_SIGMA_FULL`` is a
+        # full-resolution bar, so the strided read has to be put back on that
+        # grid before it is compared against it, or the strength this picks
+        # disagrees with the crossfade weight that gates it.
+        _, suggested = suggest_denoise_strength(m_rgb, grain_ratio)
+        base = suggested if suggested is not None else 0.5
+        knobs["denoise_strength"] = round(base * noise_frac, 3)
+        # The *colour* half of the same problem, on the same crossfade: what a
+        # noisy stack's sky shows after the wavelet pass is a low-frequency
+        # green/magenta drift the wavelet can't reach (it only shrinks fine
+        # scales). Ease it in with the noise, capped at _AUTO_CHROMA_MAX. A
+        # clean stack (noise_frac == 0) never gets the op at all.
+        knobs["chroma_strength"] = round(_AUTO_CHROMA_MAX * noise_frac, 3)
+    return knobs
+
+
+def auto_knob_values(knobs: dict[str, float],
+                     prefs: dict | None = None,
+                     object_type: str | None = None,
+                     now: float | None = None) -> dict[str, float]:
+    """``knobs`` shifted toward the stored taste, as :func:`auto_recipe` uses them.
+
+    Adaptive Auto: shift the data-driven values toward the owner's stored taste,
+    each re-clamped to a safe range. An empty/absent profile returns them
+    unchanged, so a never-configured library's Auto is byte-for-byte identical.
+
+    Then the one clamp that is applied *after* the profile: the automatic denoise
+    never reaches the glass-smooth end of the wavelet op (``_AUTO_DENOISE_MAX``),
+    so a learned "too noisy" bias can't push the one-click result back to a waxy
+    sky either.
+    """
+    values = dict(knobs)
+    if prefs is not None:
+        from seestack.edit import auto_prefs
+
+        adj = auto_prefs.apply_profile(
+            prefs,
+            target_bg=values["target_bg"],
+            saturation=values["saturation"],
+            sharpen_amount=values["sharpen_amount"],
+            denoise_strength=values["denoise_strength"],
+            scnr_amount=values["scnr_amount"],
+            highlight_protect=values["highlight_protect"],
+            object_type=object_type,
+            now=now,
+        )
+        values.update(adj)
+    values["denoise_strength"] = min(values["denoise_strength"], _AUTO_DENOISE_MAX)
+    return values
+
+
+def auto_op_params(values: dict[str, float],
+                   median_fwhm: float | None = None) -> dict[str, dict]:
+    """The tone/detail op params :func:`auto_recipe` emits for ``values`` — each
+    op's own "don't emit a sliver" gate and its rounding, in one place.
+
+    Keyed by op id, and an op whose gate is not met is simply **absent**, which
+    is what the recipe does with it. ``auto_recipe`` builds its op list from this
+    (it owns the *order*, which is load-bearing and documented there); the point
+    of the split is that "would one more step of this bias reach the recipe at
+    all?" is then a dict comparison against the same arithmetic the recipe is
+    built from, rather than a second copy of the gates that would drift from it.
+    """
+    out: dict[str, dict] = {}
+    if values["denoise_strength"] >= 0.05:
+        out["detail.denoise"] = {"method": "wavelet",
+                                 "strength": values["denoise_strength"]}
+    stretch: dict = {"mode": "stf", "target_bg": values["target_bg"]}
+    if values["highlight_protect"] >= 0.01:
+        # Only carried when a taste bias actually asked for it, so the default
+        # recipe's op list — which saved recipes and tests compare against — is
+        # unchanged rather than gaining a param pinned at its own default.
+        stretch["highlights"] = round(values["highlight_protect"], 3)
+    out["tone.stretch"] = stretch
+    if values["scnr_amount"] >= 0.05:
+        out["tone.scnr"] = {"amount": round(values["scnr_amount"], 3)}
+    out["tone.saturation"] = {"amount": round(values["saturation"], 3)}
+    if values["sharpen_amount"] >= 0.05:
+        out["detail.sharpen"] = {"amount": values["sharpen_amount"],
+                                 "radius": _sharpen_radius_from_fwhm(median_fwhm)}
+    if values["chroma_strength"] >= 0.05:
+        out["detail.chroma_denoise"] = {"strength": values["chroma_strength"]}
+    return out
+
+
+def inert_auto_cues(knobs: dict[str, float],
+                    prefs: dict | None,
+                    object_type: str | None = None,
+                    now: float | None = None) -> tuple[str, ...]:
+    """The feedback cues that **cannot change this picture** — a tap on any of
+    them leaves every op param :func:`auto_recipe` emits byte-for-byte as it is.
+
+    Two mechanisms, answered together because the owner cannot tell them apart.
+    *The taste is at its limit*: ``auto_prefs._clamp_step`` caps an accumulated
+    bias at ``MAX_STEPS``, so a fourth identical tap stores nothing new, and
+    ``_PARAM_MIN_STEP["highlights"] = 0`` floors the one one-sided knob. *This
+    picture is at its limit*: the bias moves, but the value Auto measured for
+    this image already sits at the end of that parameter's ``_PARAM_RANGE`` (or
+    on the wrong side of an op's emit gate), so ``_nudge`` clamps the shift away.
+    The second one is the ordinary state of a deep, clean mosaic, where
+    ``auto_recipe`` leaves ``denoise_strength`` at exactly 0.0 and an
+    "over-smoothed" tap has nothing to ease back — and the mirror image on a very
+    noisy one, pinned at ``_AUTO_DENOISE_MAX``.
+
+    **Exact, and free once ``knobs`` is in hand.** The predicate is the real one
+    — rebuild the emitted params either side of the tap, through the same
+    :func:`auto_knob_values` / :func:`auto_op_params` the recipe is built from —
+    but the only *image* work it needs is the single
+    :func:`measured_auto_knobs` pass the caller already paid for, so the twelve
+    questions are pure dict arithmetic — measured at **0.145 ms** for all
+    twelve against **~0.6 s** for a single recipe rebuild, which is why the
+    editor's feedback POST could not afford two of them per tap and why this
+    instead reports the whole set *before* any chip is tapped.)
+
+    Note that an inert cue is still worth recording, and the caller still should:
+    the taste profile is library-wide, so "less smoothing than you measured" is a
+    real preference that will bite on a noisier target tomorrow. What is not true
+    is that the tap changed *this* picture.
+
+    ``median_fwhm`` is deliberately not a parameter: it reaches only the sharpen
+    *radius*, which no cue touches, so it is identical either side of every tap
+    and cannot affect the comparison.
+    """
+    from seestack.edit import auto_prefs
+
+    base = auto_op_params(auto_knob_values(knobs, prefs, object_type, now))
+    inert: list[str] = []
+    for cue in auto_prefs.known_cues():
+        after = auto_prefs.record_feedback(prefs, cue, object_type=object_type,
+                                           now=now)
+        if auto_op_params(auto_knob_values(knobs, after, object_type, now)) == base:
+            inert.append(cue)
+    return tuple(inert)
+
+
 def auto_recipe(rgb: np.ndarray | None = None,
                 median_fwhm: float | None = None,
                 is_mosaic: bool = False,
@@ -948,13 +1155,6 @@ def auto_recipe(rgb: np.ndarray | None = None,
     :func:`analyze_proxy`; ``None``/``1.0`` ⇒ no correction, and an undecimated
     proxy is ``1.0`` by construction.
     """
-    target_bg = 0.20
-    saturation = 1.2          # neutral fallback when the image can't be measured
-    # Crossfade weights: an unmeasurable image is treated as clean (sharpen full,
-    # no denoise) — matching the old boolean fallback.
-    denoise_strength = 0.0
-    chroma_strength = 0.0
-    sharpen_amount = 0.5
     # The steps are only measured *out* where the recipe actually takes them
     # out — ``background.level_coverage`` is emitted on a mosaic and nowhere
     # else — so ``is_mosaic`` decides both, in one place. A single-field stack's
@@ -963,83 +1163,16 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # the bottom of this function is going to run, the fringe it deletes is not
     # part of it (see :func:`measured_region`).
     m_rgb, m_cov = measured_region(rgb, coverage, trim_crop if auto_crop else None)
-    if rgb is not None:
-        a = analyze_proxy(m_rgb, m_cov if is_mosaic else None, grain_ratio)
-        sky_sigma = float(a["sky_sigma"])
-        noise_frac = _noise_fraction(sky_sigma)
-        # Darker sky → lift a little more (higher target grey), brighter → less.
-        target_bg = float(np.clip(0.24 - a["sky"] * 0.4, 0.14, 0.24))
-        # Chroma noise scales with the saturation boost, so ease off on a noisy
-        # stack (where a strong boost just amplifies colour speckle) and give a
-        # clean one the full lift — rather than the same fixed 1.2 for both.
-        saturation = float(np.clip(1.25 - sky_sigma * 6.0, 1.05, 1.25))
-        # Sharpen fades out as noise rises; denoise fades in. So a clean stack
-        # (noise_frac 0) gets full sharpen and no denoise, a very noisy one
-        # (noise_frac 1) full denoise and no sharpen — matching the old ends — and
-        # a mildly-noisy one a light touch of both instead of an abrupt switch.
-        sharpen_amount = round(0.5 * (1.0 - noise_frac), 3)
-        if noise_frac > 0.0:
-            # Match the denoise strength to the actual measured noise (the same
-            # estimator behind the editor's "From your image" one-click), scaled by
-            # the crossfade weight so it eases in across the band.
-            from seestack.edit.noise import suggest_denoise_strength
-
-            # Same stride correction as the σ above: ``_SIGMA_FULL`` is a
-            # full-resolution bar, so the strided read has to be put back on that
-            # grid before it is compared against it, or the strength this picks
-            # disagrees with the crossfade weight that gates it.
-            _, suggested = suggest_denoise_strength(m_rgb, grain_ratio)
-            base = suggested if suggested is not None else 0.5
-            denoise_strength = round(base * noise_frac, 3)
-            # The *colour* half of the same problem, on the same crossfade: what a
-            # noisy stack's sky shows after the wavelet pass is a low-frequency
-            # green/magenta drift the wavelet can't reach (it only shrinks fine
-            # scales). Ease it in with the noise, capped at _AUTO_CHROMA_MAX. A
-            # clean stack (noise_frac == 0) never gets the op at all.
-            chroma_strength = round(_AUTO_CHROMA_MAX * noise_frac, 3)
-
-    # SCNR before the saturation boost caps the green channel to the R/B neutral
-    # so the boost lifts real colour, not the residual OSC green cast. Gentle
-    # (0.7) and monotone — it can only *reduce* excess green, never invent colour.
-    scnr_amount = 0.7
-    # "Hold back highlights" starts *off*: the stretch's existing shoulder already
-    # rescues an ordinary core, and deciding from the image whether a core is
-    # clipping needs real-data threshold tuning (filed in docs/IMPROVEMENTS.md).
-    # It moves only when the owner says the core looks blown out.
-    highlight_protect = 0.0
-    # Adaptive Auto: shift these data-driven values toward the owner's stored
-    # taste, each re-clamped to a safe range. An empty/absent profile returns them
-    # unchanged, so a never-configured library's Auto is byte-for-byte identical.
-    if prefs is not None:
-        from seestack.edit import auto_prefs
-
+    knobs = measured_auto_knobs(m_rgb, m_cov if is_mosaic else None,
+                                grain_ratio=grain_ratio)
+    object_type = None
+    if prefs is not None and rgb is not None:
         # Per-object-type taste: classify this image (galaxy/nebula/cluster) so a
         # bias learned on one archetype only shifts that archetype. An unclassified
         # image (cls None) falls back to the global taste — see auto_prefs.
-        object_type = (classify_target(m_rgb, m_cov if is_mosaic else None,
-                                       proxy_scale=proxy_scale)
-                       .get("cls") if rgb is not None else None)
-        adj = auto_prefs.apply_profile(
-            prefs,
-            target_bg=target_bg,
-            saturation=saturation,
-            sharpen_amount=sharpen_amount,
-            denoise_strength=denoise_strength,
-            scnr_amount=scnr_amount,
-            highlight_protect=highlight_protect,
-            object_type=object_type,
-        )
-        target_bg = adj["target_bg"]
-        saturation = adj["saturation"]
-        sharpen_amount = adj["sharpen_amount"]
-        denoise_strength = adj["denoise_strength"]
-        scnr_amount = adj["scnr_amount"]
-        highlight_protect = adj["highlight_protect"]
-
-    # Never let the automatic denoise reach the glass-smooth end of the wavelet
-    # op (see _AUTO_DENOISE_MAX). Applied after the taste profile so a learned
-    # "too noisy" bias can't push the one-click result back to a waxy sky either.
-    denoise_strength = min(denoise_strength, _AUTO_DENOISE_MAX)
+        object_type = classify_target(m_rgb, m_cov if is_mosaic else None,
+                                      proxy_scale=proxy_scale).get("cls")
+    values = auto_knob_values(knobs, prefs, object_type)
 
     ops: list[tuple[str, dict]] = []
     if is_mosaic:
@@ -1051,21 +1184,19 @@ def auto_recipe(rgb: np.ndarray | None = None,
         ("background.final_gradient", {"mode": "luminance"}),
         ("tone.color_calibrate", {"mode": "gray_star"}),
     ]
+    # Every tone/detail param below comes from one emitter — gate, rounding and
+    # all — so "does a taste bias actually reach the recipe?" is answerable
+    # without a second copy of this arithmetic (see :func:`auto_op_params`).
+    emitted = auto_op_params(values, median_fwhm)
     # Denoise (linear, before the stretch) once the crossfade calls for a
     # meaningful amount; skip a sub-step sliver so a near-clean stack carries no
     # no-op op.
-    if denoise_strength >= 0.05:
-        ops.append(("detail.denoise", {"method": "wavelet", "strength": denoise_strength}))
-    stretch_params: dict = {"mode": "stf", "target_bg": target_bg}
-    if highlight_protect >= 0.01:
-        # Only carried when a taste bias actually asked for it, so the default
-        # recipe's op list — which saved recipes and tests compare against — is
-        # unchanged rather than gaining a param pinned at its own default.
-        stretch_params["highlights"] = round(highlight_protect, 3)
-    ops.append(("tone.stretch", stretch_params))
-    if scnr_amount >= 0.05:  # a bias can dial the green removal down to nothing
-        ops.append(("tone.scnr", {"amount": round(scnr_amount, 3)}))
-    ops.append(("tone.saturation", {"amount": round(saturation, 3)}))
+    if "detail.denoise" in emitted:
+        ops.append(("detail.denoise", emitted["detail.denoise"]))
+    ops.append(("tone.stretch", emitted["tone.stretch"]))
+    if "tone.scnr" in emitted:  # a bias can dial the green removal down to nothing
+        ops.append(("tone.scnr", emitted["tone.scnr"]))
+    ops.append(("tone.saturation", emitted["tone.saturation"]))
     # A gentle contrast curve — the built-in galaxy/nebula presets ship an S-curve,
     # but the general Auto recipe was the flat exception (denoise → stretch → SCNR →
     # saturation → sharpen, no contrast shaping). `auto=True` + the identity default
@@ -1078,9 +1209,8 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # dim OSC stacks (2026-07-04); the "no sky brightening" half was only true of the
     # design, not the code, until v0.326.1 (see `seestack/edit/curve.py`).
     ops.append(("tone.curves", {"auto": True}))
-    if sharpen_amount >= 0.05:  # sharpening clean data helps; noisy data hurts
-        radius = _sharpen_radius_from_fwhm(median_fwhm)
-        ops.append(("detail.sharpen", {"amount": sharpen_amount, "radius": radius}))
+    if "detail.sharpen" in emitted:  # sharpening clean data helps; noisy data hurts
+        ops.append(("detail.sharpen", emitted["detail.sharpen"]))
     # Colour-blotch smoothing goes *last* among the tone/detail ops, deliberately.
     # It only ever rewrites colour (the luminance it returns is bit-identical to
     # its input), so running it after the saturation boost and the auto-contrast
@@ -1088,8 +1218,8 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # rather than a version of it that's about to be scaled up, and (b) it cannot
     # perturb the *data-driven* anchors ``tone.curves``/``detail.sharpen`` derive
     # at apply time — so every other part of Auto behaves exactly as it did.
-    if chroma_strength >= 0.05:
-        ops.append(("detail.chroma_denoise", {"strength": chroma_strength}))
+    if "detail.chroma_denoise" in emitted:
+        ops.append(("detail.chroma_denoise", emitted["detail.chroma_denoise"]))
     # Trim the ragged, low-coverage mosaic border last (after tone/detail ops), so
     # the auto result is cleanly framed. Only supplied when the trim is meaningful,
     # and only when the owner wants Auto to reframe at all (`auto_crop`).

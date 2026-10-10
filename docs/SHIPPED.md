@@ -1,5 +1,90 @@
 # Shipped — the record
 
+## 2026-10-10 (Builder) — the editor marks the Auto feedback chips that cannot move *this* picture
+
+### v0.492.54 — 🟡 BUG FIX (PRIORITY 1, the editor): `presets.measured_auto_knobs` / `auto_knob_values` / `auto_op_params` / `inert_auto_cues`, `auto_prefs.limit_hint`, `editor._measured_region_for_run` / `_run_taste_context` / `_run_inert_cue_hints`, `AutoPreferencesOut.inert_cues`
+
+The *(i) where to answer it* half of the LEAD v0.492.53 filed, built where that lead said to build it
+(**(a)**, the run-scoped read) and for the reason it gave: a chip marked **before** it is pressed is
+guidance; the same sentence afterwards is an apology.
+
+**What the owner sees.** The twelve chips under *"How did Auto do? Tap what you'd change:"* are still
+all there, all tappable — but the ones Auto has no room to honour on the picture on screen are faded,
+carry a tooltip saying why, and the row gains one line of legend: *"Faded chips can't change this
+picture — Auto is already at its limit there — but tapping still teaches Auto for your other
+pictures."* Nothing is removed or disabled, which is both the UI rule (AGENTS.md §1) and the truth: the
+taste profile is **library-wide**, so an inert tap is a real preference that will bite on a noisier
+target tomorrow. What the marking corrects is the expectation that *this* picture will change.
+
+**The predicate is the exact one, not a cheaper approximation of it.** For each of the twelve cues
+`inert_auto_cues` folds the cue into the profile with `auto_prefs.record_feedback` and rebuilds the op
+params Auto would emit either side of it — through the same `auto_knob_values` / `auto_op_params`
+helpers `auto_recipe` itself is now built from, so there is no second copy of the clamp arithmetic to
+drift (the lead's explicit warning: that drift caused three of the last five editor bugs in this area).
+It therefore catches all three ways a tap can be swallowed, including one the lead had not listed:
+
+1. **the store** — `_clamp_step` caps a bias at `MAX_STEPS` (the fourth identical tap), and
+   `_PARAM_MIN_STEP["highlights"] = 0` floors the one one-sided knob (so "Core looks flat" is dead from
+   the *first* tap on any picture Auto is not holding back). This is what v0.492.53's free
+   `_feedback_limit_note` already answered after the fact;
+2. **the measurement** — `_nudge` clamps the shift away because the value Auto measured for this image
+   already sits at the end of that parameter's `_PARAM_RANGE`;
+3. **the post-profile cap** — `denoise_strength = min(…, _AUTO_DENOISE_MAX)` runs *after* the taste, so
+   any measured denoise ≥ 0.9 makes "Over-smoothed" dead for all three of its steps, not just some.
+
+**The headroom, carried forward verbatim from the lead this closes half of** (it is the evidence the
+*still open* half turns on, and the lead that held it has been trimmed). Steps of room from the extreme
+of each measurement clamp, before `_nudge`'s range clamp swallows the shift — below / above:
+**brightness** 2 / 3 (clamp 0.14–0.24, range 0.10–0.30, step 0.02); **saturation** **1** / 5
+(clamp 1.05–1.25, range 1.00–1.50, step 0.05); **sharpen** **0** below, at its floor; **denoise**
+**0** below at its floor and **0** above at `_AUTO_DENOISE_MAX`. Only `green` (Auto *sets* it at 0.7,
+so `MAX_STEPS` binds first at exactly ±3) and the deliberately one-sided `highlights` match
+`_PARAM_RANGE`'s own comment about leaving "a little room to move".
+
+**The cost, measured on a 1000×1500 proxy** (the lead cut the obvious answer on exactly this number):
+
+| | |
+|---|---|
+| the twelve questions, once the knobs are in hand | **0.145 ms** |
+| `measured_auto_knobs` — the one new measurement, on the run-scoped GET | **284 ms** |
+| `classify_target` — what that same GET already paid | 313 ms |
+| two `auto_recipe` builds — the predicate as the lead priced it, *per live tap* | **1 233 ms** |
+
+So it lands on the one request in the family that is about a *picture* and runs before any tap, next to
+a measurement it was already making; the feedback POST's cost and response are byte-for-byte unchanged.
+Because the tap moves the profile (a third "Too dark" can be the chip-killer), `AutoFeedback.tsx`
+re-fetches the run-scoped read after a tap, keeping the marks it already has on screen while that is in
+flight so they update rather than blink.
+
+**The extraction is behaviour-preserving, and that was proved rather than assumed.** `auto_recipe`'s
+measured-knob block and its tone/detail op assembly now go through the three new helpers. Over **910
+recipe builds** — 2 seeds × 4 noise levels × mosaic/single × `auto_crop` on/off × with/without a FWHM ×
+14 stored profiles, plus the unmeasurable-image path — the op lists are **identical to `origin/main`'s,
+0 differences**.
+
+**Tests: +16, and all 16 fail against `origin/main`.** The load-bearing one is
+`tests/test_auto_inert_cues.py::test_inert_cues_agree_with_the_recipe_itself`: on four pictures, from
+four stored tastes, for all twelve cues, a cue is reported inert **exactly** when `auto_recipe` — asked
+directly — builds the byte-identical op list. That pins the report against the thing it is a report
+about, which is the only way this cannot drift. Beside it: the knobs are the numbers the recipe's own
+ops carry; the clean-stack and very-noisy cases from the lead's own repro; the one-sided highlight knob;
+a saturated taste; every cue has a sentence to show; an inert tap is still recorded. On the webapp side
+(`tests/webapp/test_editor.py`) the run-scoped GET's marks are checked against the run's *own* Auto
+recipe rather than against the same helper that produced them, the library-wide GET and the feedback
+POST still answer `{}`, an unreadable proxy leaves the row exactly as it was, and the report is shown to
+be *discriminating* (the brightness pair always has room, so a blanket "everything is dead" would fail).
+`Recipe.to_dict()` is **not** usable for any of this — it mints a fresh `uid` per op and stamps
+`updated_utc`, and it fails in the direction that hides the bug (every build reads as different, so
+every tap looks like it moved something); the comparison is on `(id, enabled, params)`.
+
+**Upgrade-safe (§9):** `inert_cues` is a new field with a `{}` default on an existing response model, so
+an older frontend ignores it; no setting, schema, path or default changed; `auto_prefs`' stored profile
+shape is untouched; and the two endpoints an older frontend calls answer byte-for-byte as before.
+
+**Still open, and deliberately:** whether an inert chip should be given *room* rather than a label —
+widening `_PARAM_RANGE` changes what Auto emits for an existing saturated profile, so it stays a design
+decision in `docs/IMPROVEMENTS.md` under the trimmed lead.
+
 ## 2026-10-09 (Builder) — an Auto feedback chip that cannot move the picture now says so
 
 ### v0.492.53 — 🟡 BUG FIX (PRIORITY 1, the editor): `auto_prefs._UNCHANGED_PHRASE` / `unchanged_note`, `editor._feedback_limit_note`, `AutoPreferencesOut.limit_note`

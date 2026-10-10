@@ -3738,3 +3738,142 @@ def test_a_run_the_rule_would_not_trim_is_left_alone(client, solved_library):
         f"/api/targets/{safe}/stack-runs/{rid}/editor/crop-health").json()
     assert body["stale"] is False
     assert body["suggested_keep_fraction"] is None
+
+
+# ---- Adaptive Auto — the chips that cannot move *this* picture --------------
+
+def test_the_run_scoped_profile_marks_the_chips_that_cannot_move_this_picture(
+        client, solved_library):
+    """The editor's chip row is served by the run-scoped preferences GET, and that
+    GET now says which of the twelve chips Auto has no room to honour on *this*
+    picture — so the row can dim them before they are tapped instead of answering
+    the tap with "Thanks — Auto will lean that way for you" over a byte-identical
+    re-render (``editor._run_inert_cue_hints``).
+
+    Two of the three mechanisms are picture-independent and are asserted exactly
+    here: highlight protection starts *off*, so "Core looks flat" has nothing to
+    walk back from the very first tap; and the third mechanism — the measured value
+    sitting at the end of its range — is checked against the run's own Auto recipe,
+    which is the only honest reference for it.
+    """
+    import seestack.edit.presets as presets
+    from seestack.edit import auto_prefs
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="inert")
+
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences").json()
+    inert = body["inert_cues"]
+    assert set(inert) <= set(auto_prefs.known_cues()), (
+        "a chip the row cannot render must never be reported")
+
+    # (1) The one one-sided knob. "Hold back highlights" starts at 0 and
+    # `_PARAM_MIN_STEP` floors the bias there, so "Core looks flat" is dead until
+    # something has asked for the cores to be held back.
+    assert "core_flat" in inert
+    assert inert["core_flat"].startswith("Auto is already leaving the bright cores")
+    assert inert["core_flat"].endswith(
+        "Tapping still teaches Auto for your other pictures.")
+
+    # (2) The measured limit, read off the run's own Auto recipe rather than off
+    # the same helper that produced the report. Auto only emits a sharpen above
+    # 0.05, and one step down is 0.10 — so a recipe with *no* sharpen op has a
+    # sharpen Auto has already measured to the floor, and "Over-sharpened" cannot
+    # take it lower whatever the owner taps. Same argument for the denoise at its
+    # cap: "Too noisy" has nothing left to add.
+    ops = client.post(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/auto").json()["ops"]
+    by_id = {o["id"]: o["params"] for o in ops}
+    assert "detail.sharpen" not in by_id, (
+        "this fixture's noisy stack is the one that pins the measured mechanism; "
+        "if Auto now sharpens it, pick a noisier run")
+    assert "over_sharpened" in inert
+    assert by_id["detail.denoise"]["strength"] >= presets._AUTO_DENOISE_MAX
+    assert "too_noisy" in inert
+
+    # (3) And it is a *discriminating* report, not a blanket one: Auto clamps its
+    # measured stretch target to 0.14–0.24 inside a 0.10–0.30 range, so the
+    # brightness pair always has a step of room in both directions.
+    assert "too_dark" not in inert and "too_bright" not in inert
+
+    # The library-wide GET has no picture to answer about, and the feedback POST
+    # deliberately measures nothing (that is this feature's whole cost argument),
+    # so both stay byte-for-byte what an older frontend already gets.
+    assert client.get("/api/editor/auto-preferences").json()["inert_cues"] == {}
+    tapped = client.post("/api/editor/auto-preferences/feedback",
+                         json={"cue": "too_dark", "safe": safe, "run_id": rid})
+    assert tapped.json()["inert_cues"] == {}
+
+
+def test_a_saturated_taste_dims_its_own_chip_on_the_next_load(
+        client, solved_library):
+    """The store-side limit, reported *before* the fourth tap rather than after it.
+    ``_feedback_limit_note`` already answers the tap that found the cap; this is the
+    same fact in the place that can stop the owner reaching for it again."""
+    from seestack.edit import auto_prefs
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="saturated")
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences"
+
+    assert "too_green" not in client.get(url).json()["inert_cues"]
+    for _ in range(auto_prefs.MAX_STEPS):
+        client.post("/api/editor/auto-preferences/feedback",
+                    json={"cue": "too_green", "safe": safe, "run_id": rid})
+    body = client.get(url).json()
+    assert "too_green" in body["inert_cues"]
+    assert "as much green as it will" in body["inert_cues"]["too_green"]
+    # ...and its walk-back is alive, which is what makes the pair usable.
+    assert "too_magenta" not in body["inert_cues"]
+
+
+def test_an_unreadable_proxy_leaves_the_chip_row_exactly_as_it_was(
+        client, solved_library, monkeypatch):
+    """The marking is advisory. If the measurement fails the response is the one
+    every older frontend already handles — no marks, no 500 — because a hint must
+    never cost the owner the editor."""
+    import webapp.routers.editor as editor_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="brokenproxy")
+
+    def boom(*a, **kw):
+        raise OSError("proxy gone")
+
+    monkeypatch.setattr(editor_mod, "_measured_region_for_run", boom)
+    r = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["inert_cues"] == {}
+    assert body["neutral"] is True and body["biases"] == {}
+
+
+def test_a_failed_knob_measurement_does_not_also_cost_the_archetype(
+        client, solved_library, monkeypatch):
+    """The two answers this GET resolves are not equally important. The archetype
+    decides *which bucket* the owner's taste is read from, so dropping it would
+    fall the "why Auto shifted" note back to the global taste — the v0.492.50
+    symptom. Losing the marks costs a hint. So the measurement that only feeds the
+    marks must fail on its own."""
+    import seestack.edit.presets as presets
+    import webapp.routers.editor as editor_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="knobsboom")
+
+    monkeypatch.setattr(presets, "classify_target",
+                        lambda rgb, cov=None, **kw: {"cls": "galaxy"})
+    client.post("/api/editor/auto-preferences/feedback",
+                json={"cue": "too_dark", "safe": safe, "run_id": rid})
+
+    def boom(*a, **kw):
+        raise ValueError("cannot measure")
+
+    monkeypatch.setattr(editor_mod.presets_mod, "measured_auto_knobs", boom)
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences").json()
+    assert body["inert_cues"] == {}
+    # The galaxy-scoped taste is still the one reported.
+    assert body["biases"]["brightness"] == 1
+    assert "for your galaxies" in (body["note"] or "")

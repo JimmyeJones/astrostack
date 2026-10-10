@@ -1,7 +1,7 @@
-import { Anchor, Button, Group, Stack, Text } from "@mantine/core";
+import { Anchor, Button, Group, Stack, Text, Tooltip } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../../api/client";
+import { api, type AutoPreferences } from "../../api/client";
 
 /** Adaptive Auto — one-tap feedback on the one-click Auto result.
  *
@@ -98,7 +98,14 @@ export function AutoFeedback(
       api.sendAutoFeedback(
         cue, scoped ? { safe: safe!, runId: runId! } : undefined, autoCrop),
     onSuccess: (data) => {
-      qc.setQueryData(prefsKey, data);
+      // Keep the marks we already have while the refresh below is in flight: the
+      // POST answers about the *profile* and leaves `inert_cues` empty, so taking
+      // its value literally would unmark every chip for a moment and then mark
+      // them again, which reads as a glitch rather than as an update.
+      qc.setQueryData(prefsKey, (old: AutoPreferences | undefined) => ({
+        ...data,
+        inert_cues: old?.inert_cues ?? {},
+      }));
       // A tap that cannot move this picture gets told so, instead of the thanks.
       // The server decides it (`editor._feedback_limit_note`): when the stored
       // taste had nowhere to go, Auto rebuilds a byte-identical recipe, so
@@ -114,15 +121,30 @@ export function AutoFeedback(
           : { message: "Thanks — Auto will lean that way for you", color: "violet" },
       );
       if (!limit) onRerun();
+      // Which chips are dead is a property of the *picture plus the profile*, and
+      // the tap just moved the profile: a third "too dark" can be the one that
+      // takes the stretch target to the end of its range, which kills the chip
+      // that was alive a moment ago. The POST deliberately doesn't measure the
+      // picture (that is this feature's whole cost argument), so refresh the
+      // run-scoped read in the background — the line above has already shown the
+      // owner the up-to-date note.
+      if (scoped) void qc.invalidateQueries({ queryKey: prefsKey });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
   const reset = useMutation({
     mutationFn: () => api.resetAutoPreferences(),
     onSuccess: (data) => {
-      qc.setQueryData(prefsKey, data);
+      qc.setQueryData(prefsKey, (old: AutoPreferences | undefined) => ({
+        ...data,
+        inert_cues: old?.inert_cues ?? {},
+      }));
       notifications.show({ message: "Auto reset to its data-driven default", color: "gray" });
       onRerun();
+      // Clearing the taste un-saturates every bias, so a chip that was dead
+      // because the stored taste had nowhere to go is alive again. Same reason
+      // as the feedback refresh above.
+      if (scoped) void qc.invalidateQueries({ queryKey: prefsKey });
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
@@ -133,6 +155,14 @@ export function AutoFeedback(
   // moved *everything*, which is the case that would otherwise look like the
   // "why Auto shifted" note silently disappearing.
   const fadeNote = prefs.data?.fade_note ?? null;
+  // `{cue: why}` for the chips that cannot move *this* picture — the server
+  // measured it (`editor._run_inert_cue_hints`), because the answer depends on
+  // where Auto's measured value sits in that parameter's range, which only the
+  // engine knows. Marked, never removed or disabled: the taste is library-wide,
+  // so the tap still teaches Auto for the owner's other targets, and each
+  // sentence says exactly that. `{}` whenever there is no picture to ask about.
+  const inert = prefs.data?.inert_cues ?? {};
+  const inertCount = Object.keys(inert).length;
 
   return (
     <Stack gap={4} mt={6}>
@@ -142,12 +172,29 @@ export function AutoFeedback(
           <Stack key={g.group} gap={2}>
             <Text size="10px" c="dimmed" tt="uppercase" fw={600}>{g.group}</Text>
             <Group gap={4}>
-              {g.chips.map((c) => (
-                <Button key={c.cue} size="compact-xs" variant="default" radius="xl"
-                  disabled={busy} onClick={() => feedback.mutate(c.cue)}>
-                  {c.label}
-                </Button>
-              ))}
+              {g.chips.map((c) => {
+                const hint = inert[c.cue];
+                const chip = (
+                  <Button key={c.cue} size="compact-xs" variant="default" radius="xl"
+                    disabled={busy} onClick={() => feedback.mutate(c.cue)}
+                    // Dimmed, not disabled or hidden. A disabled chip would take
+                    // away the one thing the tap still does (teach the
+                    // library-wide taste) and a hidden one would make the pair
+                    // look one-way, which is the bug v0.492.52 fixed.
+                    c={hint ? "dimmed" : undefined}
+                    opacity={hint ? 0.55 : undefined}>
+                    {c.label}
+                  </Button>
+                );
+                return hint
+                  ? (
+                    <Tooltip key={c.cue} label={hint} multiline w={260}
+                      withArrow position="top" events={{ hover: true, focus: true, touch: true }}>
+                      {chip}
+                    </Tooltip>
+                  )
+                  : chip;
+              })}
             </Group>
           </Stack>
         ))}
@@ -159,6 +206,16 @@ export function AutoFeedback(
             onClick={() => reset.mutate()} disabled={busy}>
             Reset
           </Anchor>
+        </Text>
+      ) : null}
+      {inertCount ? (
+        // The legend for the dimming, because a hover tooltip is not an
+        // explanation on a touch screen and a faded chip with no caption reads as
+        // broken. Says both halves: it won't move *this* picture, and the tap is
+        // still worth making.
+        <Text size="10px" c="dimmed">
+          Faded chips can’t change this picture — Auto is already at its limit
+          there — but tapping still teaches Auto for your other pictures.
         </Text>
       ) : null}
       {fadeNote ? <Text size="10px" c="dimmed">{fadeNote}</Text> : null}

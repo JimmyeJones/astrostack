@@ -94,10 +94,16 @@ describe("AutoFeedback", () => {
   });
 
   it("scopes feedback to the run's archetype when given safe/runId", async () => {
+    // Two answers, because a tap re-reads the run-scoped profile (the tap can be
+    // what kills a chip — see the refresh test below). The second answer is the
+    // profile the POST has just written; a mock that kept returning the *pre*-tap
+    // one would be describing a server that forgot the write.
+    const galaxyNote = "Auto is running a bit brighter for your galaxies, based on your recent feedback.";
     const getRun = vi.spyOn(client.api, "getRunAutoPreferences")
-      .mockResolvedValue({ biases: {}, note: null, neutral: true });
+      .mockResolvedValueOnce({ biases: {}, note: null, neutral: true })
+      .mockResolvedValue({ biases: { brightness: 1 }, note: galaxyNote, neutral: false });
     const send = vi.spyOn(client.api, "sendAutoFeedback")
-      .mockResolvedValue({ biases: { brightness: 1 }, note: "Auto is running a bit brighter for your galaxies, based on your recent feedback.", neutral: false });
+      .mockResolvedValue({ biases: { brightness: 1 }, note: galaxyNote, neutral: false });
 
     wrap(() => {}, { safe: "M31", runId: 7 });
     fireEvent.click(await screen.findByRole("button", { name: "Too dark" }));
@@ -279,6 +285,77 @@ describe("autoFeedbackGroups", () => {
     wrap();
     await screen.findByText(/running a bit brighter/);
     expect(screen.queryByText(/fading|faded/)).toBeNull();
+  });
+
+  it("marks the chips that cannot move this picture, without taking them away", async () => {
+    // The server measures which chips are dead on *this* picture
+    // (`editor._run_inert_cue_hints`) — the stored taste is at its limit, or the
+    // value Auto measured for the image is. Marked and explained, never removed
+    // or disabled: the taste profile is library-wide, so the tap still teaches
+    // Auto for the owner's other targets, and the UI rule forbids taking a
+    // control away in any case.
+    vi.spyOn(client.api, "getRunAutoPreferences").mockResolvedValue({
+      biases: {}, note: null, neutral: true,
+      inert_cues: {
+        over_smoothed: "Auto is already smoothing as little as it will here. Tapping still teaches Auto for your other pictures.",
+        core_flat: "Auto is already leaving the bright cores alone here. Tapping still teaches Auto for your other pictures.",
+      },
+    });
+    const send = vi.spyOn(client.api, "sendAutoFeedback")
+      .mockResolvedValue({ biases: { denoise: -1 }, note: null, neutral: false });
+
+    wrap(() => {}, { safe: "M31", runId: 7 });
+
+    // The legend, so the dimming is explained without a hover (a tooltip is not
+    // an explanation on a touch screen).
+    await screen.findByText(/Faded chips can.t change this picture/);
+    // Every chip is still there, and still tappable.
+    const dead = await screen.findByRole("button", { name: "Over-smoothed" });
+    expect(dead).not.toBeDisabled();
+    fireEvent.click(dead);
+    await waitFor(() =>
+      expect(send).toHaveBeenCalledWith("over_smoothed", { safe: "M31", runId: 7 }, undefined));
+  });
+
+  it("says nothing about faded chips when every chip can move the picture", async () => {
+    // The control: an empty/absent `inert_cues` must leave the row exactly as an
+    // older build renders it — no legend, no dimming.
+    vi.spyOn(client.api, "getRunAutoPreferences")
+      .mockResolvedValue({ biases: {}, note: null, neutral: true, inert_cues: {} });
+    wrap(() => {}, { safe: "M31", runId: 7 });
+    await screen.findByRole("button", { name: "Too dark" });
+    expect(screen.queryByText(/Faded chips/)).toBeNull();
+  });
+
+  it("refreshes the marks after a tap, since the tap can be what kills a chip", async () => {
+    // Which chips are dead depends on the picture *and* the profile, and a tap
+    // moves the profile — the third "Too dark" can be the one that takes Auto's
+    // stretch target to the end of its range. The feedback POST deliberately
+    // measures no picture (its response carries no marks), so the run-scoped read
+    // is re-fetched instead; until it lands, the marks already on screen stay put
+    // rather than blinking off and on.
+    const getRun = vi.spyOn(client.api, "getRunAutoPreferences")
+      .mockResolvedValueOnce({
+        biases: {}, note: null, neutral: true,
+        inert_cues: { core_flat: "Auto is already leaving the bright cores alone here. Tapping still teaches Auto for your other pictures." },
+      })
+      .mockResolvedValue({
+        biases: { brightness: 3 }, note: null, neutral: false,
+        inert_cues: {
+          core_flat: "Auto is already leaving the bright cores alone here. Tapping still teaches Auto for your other pictures.",
+          too_dark: "Auto is already lifting this picture as far as it will go. Tapping still teaches Auto for your other pictures.",
+        },
+      });
+    vi.spyOn(client.api, "sendAutoFeedback").mockResolvedValue({
+      biases: { brightness: 3 }, note: null, neutral: false,
+    });
+
+    wrap(() => {}, { safe: "M31", runId: 7 });
+    fireEvent.click(await screen.findByRole("button", { name: "Too dark" }));
+
+    await waitFor(() => expect(getRun).toHaveBeenCalledTimes(2));
+    // The legend survives the POST's mark-less response rather than flickering.
+    await screen.findByText(/Faded chips can.t change this picture/);
   });
 
   it("groups a caller's own chip list without touching the shipped one", () => {
