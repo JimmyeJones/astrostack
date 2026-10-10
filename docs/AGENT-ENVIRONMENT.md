@@ -290,6 +290,18 @@ the repo.
 > against, and it presses **Reset** afterwards: the two taps write a real taste
 > into the scratch library's real profile.
 >
+> **The Auto pass's chips come from `autoFeedbackCues.cases.json`, not from "every
+> button in the alert"** *(added 2026-10-10 with v0.492.59 — do not widen it back)*.
+> The "What Auto-process did" alert also carries one-click **suggestions** (the 2×2
+> mosaic offers *"Hold back highlights (0.05)"*), and the broad selector swept one
+> up, tapped it as a feedback chip, filed **three false findings** about a control
+> that is neither a chip nor a taste, and then the op it really applied re-rendered
+> the alert and **timed the whole mosaic drive out**. Anything in the alert that is
+> not in that table is now printed as *"other controls in this alert"* and left
+> alone. The upside of knowing the expected set: the pass reports a **missing** chip,
+> which is the one symptom here a screenshot can never show — the v0.492.52 bug,
+> whose own record says a dogfood could not have found it.
+>
 > **A `_wait_job` 60 s timeout at `-n 8` is a load trap, not a red `main`**
 > *(added 2026-10-10, after it cost two runs a diagnosis)*. `tests/webapp/test_pipeline.py`'s helper
 > `_wait_job(client, job_id, timeout=60)` polls a real JobManager, and under eight parallel workers a

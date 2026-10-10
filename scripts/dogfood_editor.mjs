@@ -27,7 +27,7 @@
 //
 // It is a FINDER, not a test: anything it reports still needs a real regression
 // test in the suite before it counts as fixed.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chromium } from "playwright";
 
 // Same bundled-browser dance as dogfood_probe.mjs, and for the same reason.
@@ -35,6 +35,25 @@ const BUNDLED = [
   process.env.CHROMIUM_PATH,
   `${process.env.PLAYWRIGHT_BROWSERS_PATH || "/opt/pw-browsers"}/chromium`,
 ].find((p) => p && existsSync(p));
+
+// The Adaptive-Auto chip labels, read from the table that is already the
+// contract between `AUTO_FEEDBACK_CHIPS` and `auto_prefs._CUE_STEP`, so this
+// drive cannot drift from either. The file carries trailing commas (it is read
+// by Python and by vitest, both of which tolerate them), so strip those before
+// `JSON.parse`. If it cannot be read — run from a different checkout, say — fall
+// back to the old behaviour of treating every button in the alert as a chip, by
+// leaving the list empty and letting the caller skip the filter.
+const EXPECTED_CHIP_LABELS = (() => {
+  const here = new URL(".", import.meta.url).pathname;
+  const file = `${here}../frontend/src/components/editor/autoFeedbackCues.cases.json`;
+  try {
+    const raw = readFileSync(file, "utf8").replace(/,(\s*[\]}])/g, "$1");
+    return JSON.parse(raw).cases.map((c) => c.label);
+  } catch (e) {
+    console.log(`  (could not read the shared cue table: ${e.message})`);
+    return [];
+  }
+})();
 
 const BASE = process.env.BASE_URL || "http://127.0.0.1:8811";
 const SHOTS = process.env.SHOTS_DIR || "/tmp/astrostack-dogfood/shots";
@@ -463,18 +482,53 @@ if (!(await autoButton.count())) {
     // A marked ("faded") chip is dimmed rather than disabled or hidden, so the
     // mark is an opacity on an otherwise ordinary button — read it off the
     // computed style rather than off a class, which is Mantine's business.
+    //
+    // **Which buttons are chips comes from the shared cue table, not from "every
+    // button in the alert."** The "What Auto-process did" alert also carries
+    // one-click *suggestions* — on the 2x2 mosaic sample it offers "Hold back
+    // highlights (0.05)" — and the broad locator swept one up, tapped it as if it
+    // were a feedback chip, reported "NOTHING SAID" and "the taste just taught
+    // has no note" about a control that had neither, and then the op it really
+    // applied re-rendered the alert and **timed the whole mosaic drive out**, so
+    // every reading after it was lost. Three false reports and a dead pass from
+    // one over-broad selector: the failure mode this file's own comments warn
+    // about, since a finder that does not crash but *reports* is the dangerous
+    // one. `autoFeedbackCues.cases.json` is already the contract between
+    // `AUTO_FEEDBACK_CHIPS` and `_CUE_STEP`, so it is the honest source for the
+    // labels too — and knowing what *should* be there lets this pass report a
+    // **missing** chip, which is the one symptom in this family a probe that only
+    // photographs the screen can never see (the v0.492.52 class).
+    const expected = EXPECTED_CHIP_LABELS;
     const marked = [];
     const live = [];
+    const others = [];
     for (let i = 0; i < n; i++) {
       const chip = chips.nth(i);
       const label = (await chip.innerText()).trim();
       if (!label || label === "Reset") continue;
+      if (expected.length && !expected.includes(label)) {
+        others.push(label);
+        continue;
+      }
       const faded = await chip.evaluate(
         (el) => Number(getComputedStyle(el).opacity) < 0.95);
       (faded ? marked : live).push(label);
     }
     console.log(`  chips live (${live.length}): ${live.join(" | ") || "none"}`);
     console.log(`  chips marked as unable to move THIS picture (${marked.length}): ${marked.join(" | ") || "none"}`);
+    if (others.length) {
+      console.log(`  other controls in this alert (not feedback chips, not tapped): ${others.join(" | ")}`);
+    }
+    const absent = expected.filter(
+      (l) => !live.includes(l) && !marked.includes(l));
+    // (Empty when the table could not be read, so the fallback reports nothing
+    // rather than reporting that every chip is missing.)
+    if (absent.length) {
+      findings++;
+      console.log(`  ! the chip row is MISSING ${absent.length} of the ${expected.length}`
+        + ` cues the shared table names: ${absent.join(" | ")} — a cue with no chip`
+        + " is a taste the owner cannot express (the v0.492.52 bug)");
+    }
     const legend = page.getByText(/Faded chips can.t change this picture/).first();
     const hasLegend = (await legend.count()) > 0;
     if (marked.length && !hasLegend) {
@@ -488,52 +542,62 @@ if (!(await autoButton.count())) {
     // whole point: the two kinds must not get the same sentence.
     for (const [kind, label] of [["live", live[0]], ["marked", marked[0]]]) {
       if (!label) { console.log(`  (no ${kind} chip to tap)`); continue; }
-      await page.getByRole("button", { name: label, exact: true }).first().click();
-      // Read the toast FIRST, and poll for it rather than waiting out the
-      // render. `<Notifications />` is mounted with Mantine's default
-      // `autoClose`, which is **4 s** — so settling first (7 s plus network
-      // idle) reliably reads an empty page and reports "NOTHING SAID" about an
-      // app that said exactly the right thing. That is how this pass's own
-      // first run went, and it is worth a comment rather than a re-discovery.
-      const toast = await (async () => {
-        // The notification's own description node, and the **first non-empty**
-        // of them: the page carries several `mantine-Notifications-root`
-        // containers and all but one are empty, so taking the last match reads
-        // "" however long you wait — which is the other half of how this pass's
-        // first run reported "NOTHING SAID" twice.
-        const toasts = page.locator('[class*="mantine-Notification-description"]');
-        for (let waited = 0; waited < 4000; waited += 200) {
-          const said = (await toasts.allInnerTexts())
-            .map((t) => t.replace(/\s+/g, " ").trim())
-            .find(Boolean);
-          if (said) return said;
-          await page.waitForTimeout(200);
+      // Each tap is fenced. A throw here used to abort the whole drive — the
+      // other tap, the Reset that hands the scratch library back, and every
+      // reading after them went with it, which is how one bad selector turned
+      // into a dead mosaic pass rather than one bad line.
+      try {
+        await page.getByRole("button", { name: label, exact: true }).first().click();
+        // Read the toast FIRST, and poll for it rather than waiting out the
+        // render. `<Notifications />` is mounted with Mantine's default
+        // `autoClose`, which is **4 s** — so settling first (7 s plus network
+        // idle) reliably reads an empty page and reports "NOTHING SAID" about an
+        // app that said exactly the right thing. That is how this pass's own
+        // first run went, and it is worth a comment rather than a re-discovery.
+        const toast = await (async () => {
+          // The notification's own description node, and the **first non-empty**
+          // of them: the page carries several `mantine-Notifications-root`
+          // containers and all but one are empty, so taking the last match reads
+          // "" however long you wait — which is the other half of how this pass's
+          // first run reported "NOTHING SAID" twice.
+          const toasts = page.locator('[class*="mantine-Notification-description"]');
+          for (let waited = 0; waited < 4000; waited += 200) {
+            const said = (await toasts.allInnerTexts())
+              .map((t) => t.replace(/\s+/g, " ").trim())
+              .find(Boolean);
+            if (said) return said;
+            await page.waitForTimeout(200);
+          }
+          return "";
+        })();
+        console.log(`  tapped ${kind} chip "${label}" → ${toast || "NOTHING SAID"}`);
+        if (!toast) {
+          findings++;
+          console.log(`  ! tapping "${label}" said nothing at all`);
         }
-        return "";
-      })();
-      console.log(`  tapped ${kind} chip "${label}" → ${toast || "NOTHING SAID"}`);
-      if (!toast) {
+        // ...and only now let the re-run the tap triggered finish, so the next
+        // reading is taken against a settled preview.
+        await settle();
+        // Read the persistent claim after the settle, not before it: the note the
+        // tap earns comes from the run-scoped preferences read the chip row
+        // re-fetches, and that is the request that knows which of the owner's
+        // tastes this picture can actually show.
+        const why = await whyAutoShifted();
+        console.log(`  why Auto shifted, after that tap: ${why || "NOTHING SAID"}`);
+        if (!why) {
+          findings++;
+          console.log(`  ! the taste "${label}" just taught has no note — and the`
+            + " Reset link lives inside it, so there is now no way to undo it");
+        }
+        drain(`chip ${label}`);
+        await page.screenshot({
+          path: `${SHOTS}/editor-auto-chip-${kind}.png`, fullPage: true,
+        });
+      } catch (e) {
         findings++;
-        console.log(`  ! tapping "${label}" said nothing at all`);
+        console.log(`  ! tapping the ${kind} chip "${label}" threw: ${e.message
+          .split("\n")[0]}`);
       }
-      // ...and only now let the re-run the tap triggered finish, so the next
-      // reading is taken against a settled preview.
-      await settle();
-      // Read the persistent claim after the settle, not before it: the note the
-      // tap earns comes from the run-scoped preferences read the chip row
-      // re-fetches, and that is the request that knows which of the owner's
-      // tastes this picture can actually show.
-      const why = await whyAutoShifted();
-      console.log(`  why Auto shifted, after that tap: ${why || "NOTHING SAID"}`);
-      if (!why) {
-        findings++;
-        console.log(`  ! the taste "${label}" just taught has no note — and the`
-          + " Reset link lives inside it, so there is now no way to undo it");
-      }
-      drain(`chip ${label}`);
-      await page.screenshot({
-        path: `${SHOTS}/editor-auto-chip-${kind}.png`, fullPage: true,
-      });
     }
     // Hand the library back the way it was found: the taps above wrote a real
     // taste into a real profile, and the next pass of this script (or a human

@@ -38,6 +38,18 @@ it). A fix for one is not a fix for the other, and a shared helper would have be
    stalled ones into a clause. Worth a general rule: before removing a line of UI text, check what is
    nested in it.
 
+**The `--mosaic --editor` dogfood record for this run.** The **app** was clean where it was reached:
+both page sweeps *"nothing overflowing, no console errors"* at desktop and phone widths, the single-field
+editor drive clean across all 21 ops **and** its Auto pass, mosaic Auto trim **8 %**, and v0.492.57
+confirmed in the browser on the owner's shape — the marked chip's tap said *"Auto is already smoothing as
+little as it will here"* and the note under it then read *"Auto is running a bit brighter for your star
+clusters, based on your recent feedback. It would also run with less smoothing, but it is already at its
+limit there on this picture — your other pictures will still get it."* On `origin/main` that same line
+folded the false half into the claim (*"a bit brighter and with less smoothing"*), and the per-type
+naming survived the hedge, which is what the archetype test pins.
+**Both findings it reported were against itself**, and that is now the pattern for three versions
+running — see v0.492.59 below.
+
 **The dogfood could not have found this, and that was fixable** *(v0.492.58, same run)*. The Auto pass
 added one version earlier reads the chips, their marks and the **toast** each tap produces — and nothing
 read the note. It now prints the note before any tap and after each one, and flags an absent note after a
@@ -46,6 +58,21 @@ v0.492.55's record already states: **when "a probe could not have found this" ap
 tooling cannot reach.** Here the answer was not a surface that did not exist yet, but the *persistent*
 half of a surface the probe was already standing in front of — it read the toast, which is gone in 4 s,
 and not the line that is there every time the owner opens the picture.
+
+**And then the new reading caught the instrument again, within one run** *(v0.492.59)*. The chip
+enumeration was "every button in the `mantine-Alert-root`", and the alert also carries one-click
+suggestions — on the 2×2 mosaic, *"Hold back highlights (0.05)"*. So the pass tapped it as a feedback
+chip, reported *"NOTHING SAID"* and *"the taste just taught has no note"* about a control that is neither
+a chip nor a taste, and then the highlights op it really applied re-rendered the alert, the next locator
+timed out and **the whole mosaic drive died** — taking the marked-chip reading and the Reset with it.
+**Three method notes from that.** (1) **A finder's selector is an assertion about the page, and deserves
+a source of truth.** `autoFeedbackCues.cases.json` already existed, as the contract between the chips and
+`_CUE_STEP`; the drive should have been reading it from the start. (2) **Knowing the expected set is
+worth more than filtering the observed one** — it is what lets the pass report a *missing* chip, the one
+symptom in this family a screenshot can never show, and the v0.492.52 record says in as many words that
+a dogfood could not have found it. (3) **Fence each probe interaction.** A throw in one tap cost every
+reading after it plus the Reset that hands the library back; the same throw now costs one line. The
+general form: *in a finder, the blast radius of one bad step should be one step.*
 
 
 ## 2026-10-10 (Builder) — the `--mosaic --editor --big` dogfood for v0.492.54, and the probe it produced

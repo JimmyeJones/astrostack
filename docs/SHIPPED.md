@@ -1,5 +1,47 @@
 # Shipped — the record
 
+## 2026-10-10 (Builder) — the "why Auto shifted" note stops claiming a taste this picture has no room for, and the dogfood can finally read that note (and stops tapping a button that is not a chip)
+
+### v0.492.59 — 🟠 INFRA / dogfood instrument: `scripts/dogfood_editor.mjs` — the chips come from the shared cue table, not from "every button in the alert"
+
+**Found by v0.492.58 on its first run**, on the 2×2 mosaic sample, which is the second time in three
+versions that the instrument's own new reading caught the instrument.
+
+The Auto pass enumerated chips as `div[mantine-Alert-root] button[mantine-Button-root]` — every button
+inside the "What Auto-process did" alert. That alert also carries one-click **suggestions**, and on the
+2×2 mosaic it offers *"Hold back highlights (0.05)"*. So the pass:
+
+```
+chips live (11): Hold back highlights (0.05) | Too dark | Too bright | …
+tapped live chip "Hold back highlights (0.05)" → NOTHING SAID
+! tapping "Hold back highlights (0.05)" said nothing at all
+why Auto shifted, after that tap: NOTHING SAID
+! the taste "Hold back highlights (0.05)" just taught has no note — and the Reset link lives inside it…
+```
+
+**Three false reports about a control that is neither a chip nor a taste** — and then the highlights op
+it really applied re-rendered the alert, the next locator timed out, and **the whole mosaic editor drive
+died** (`warn: mosaic editor drive failed`), taking the marked-chip reading, the Reset that hands the
+scratch library back, and everything after with it. One over-broad selector, a dead pass and a finding
+count that was pure noise: the failure mode this file's own comments single out, because *a finder that
+does not crash but reports* is the dangerous one.
+
+**Two fixes, and the first one buys a new capability.** The chip labels now come from
+`frontend/src/components/editor/autoFeedbackCues.cases.json` — already the contract between
+`AUTO_FEEDBACK_CHIPS` and `auto_prefs._CUE_STEP` (v0.492.52), so the drive cannot drift from either — and
+any other button in the alert is printed as *"other controls in this alert (not feedback chips, not
+tapped)"* rather than tapped. Because the pass now knows what *should* be there, it reports a **missing**
+chip as a finding, which is the one symptom in this family a probe that only photographs the screen can
+never see: *"a cue with no chip is a taste the owner cannot express"* is exactly the v0.492.52 bug, and
+the record for that one says in as many words that a dogfood could not have found it. It can now.
+
+Second, **each tap is fenced**. A throw inside one used to abort the drive; it now costs one reported
+line, and the other tap, the Reset and the rest of the pass still run. An unreadable cue table falls back
+to the old "every button is a chip" behaviour rather than reporting that all twelve are missing.
+
+Tooling only: no app code, no config, schema, on-disk, API or default change.
+`tests/test_dogfood_big_anchors.py` still green (9/9) — text and label matching, no testids added.
+
 ## 2026-10-10 (Builder) — the "why Auto shifted" note stops claiming a taste this picture has no room for, and the dogfood can finally read that note
 
 ### v0.492.58 — 🟠 INFRA / dogfood instrument: `scripts/dogfood_editor.mjs` — the "why Auto shifted" note, before any tap and after each one
