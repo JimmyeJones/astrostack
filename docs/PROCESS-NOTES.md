@@ -88,6 +88,27 @@ through `ASTROSTACK_REPO` rather than through a path relative to a script that g
 v0.492.59 is the one thing the bad re-run positively confirmed — the throw cost one reported line where
 the first run had cost the whole pass.
 
+**Validated on a third pass, and the mosaic drive is CLEAN with zero findings** (it reported four, all
+false, and died, two passes earlier):
+
+```
+chips live (10): Too dark | … | Core blown out
+chips marked as unable to move THIS picture (2): Over-smoothed | Core looks flat
+other controls in this alert (not feedback chips, not tapped): Hold back highlights (0.05)
+tapped live chip "Too dark" → Thanks — Auto will lean that way for you
+tapped marked chip "Over-smoothed" → Auto is already smoothing as little as it will here. …
+why Auto shifted, after that tap: Auto is running a bit brighter for your star clusters, based on
+  your recent feedback. It would also run with less smoothing, but it is already at its limit there
+  on this picture — your other pictures will still get it.
+taste profile reset (the two taps above were real)
+editor drive clean
+```
+
+The suggestion is named and left alone, both taps land on real chips, both sentences are the right ones,
+the hedged note is v0.492.57 on the mosaic target, and the Reset that hands the scratch library back runs.
+Both page sweeps were *"nothing overflowing, no console errors"* and the single-field drive was clean
+across all 21 ops too, so the whole pass is **0 findings**.
+
 
 ## 2026-10-10 (Builder) — the `--mosaic --editor --big` dogfood for v0.492.54, and the probe it produced
 

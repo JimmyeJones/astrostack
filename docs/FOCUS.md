@@ -28,7 +28,23 @@ stays its only author.
 could not have found, and the reason is the same shape as last run's — it read the chips, their marks and
 the **toast**, and nothing read the note. The toast is gone in 4 s; the note is what the owner sees every
 time they reopen the picture, and it is where **Reset** is rendered. `dogfood_editor.mjs` now prints it
-before any tap and after each one, and flags an absent note as a finding. The inbox was checked first — **four open, all previously acted-on and
+before any tap and after each one, and flags an absent note as a finding.
+**On its first run the new reading caught the instrument twice more — v0.492.59 and v0.492.60 — and the
+pattern is the run's real lesson: four times over, this family failed by REPORTING rather than by
+crashing.** (1) A note claiming a taste it did not have. (2) A probe reading the transient toast and not
+the persistent line. (3) A selector that swept up a one-click *suggestion* ("Hold back highlights (0.05)",
+offered on the 2x2 mosaic), tapped it as a chip, filed three false findings and then timed the whole mosaic
+drive out. (4) And v0.492.59's own fix degrading silently, because `agent-dogfood.sh` runs the drive from a
+**copy** so its relative path to the cue table found nothing and an empty label list meant "skip the
+filter" — the validation run read exactly like a fix that had never been written. So the chip labels now
+come from `autoFeedbackCues.cases.json` (already the chips/`_CUE_STEP` contract) via `ASTROSTACK_REPO`,
+anything else in the alert is named and left alone, **failing to read the table is itself a finding**, and
+each tap is fenced. The upside: the pass can now report a **missing** chip, which is the one symptom here
+a screenshot can never show — the v0.492.52 bug, whose own record says a dogfood could not have found it.
+**Validated on a third pass: both page sweeps clean, both editor drives clean across all 21 ops and both
+Auto passes, mosaic trim 8 %, ZERO findings** (four, all false, two passes earlier). Three method notes in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md), the general one being: **a finder may not fall back silently, and
+the blast radius of one bad step should be one step.** The inbox was checked first — **four open, all previously acted-on and
 owner-gated** — and there were **no open PRs**. Earlier notes stand below.)
 *Last edited 2026-10-10 (Builder, same run, tasks 2 and 3 — **the run's best finding came from building the
 instrument that could see the surface it had just changed. SHIPPED as v0.492.55 and v0.492.56.** Five runs
