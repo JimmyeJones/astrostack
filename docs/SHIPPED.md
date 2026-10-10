@@ -1,5 +1,53 @@
 # Shipped — the record
 
+## 2026-10-10 (Builder) — a marked Auto chip now answers with the truth, and the dogfood can see the taste row at all
+
+### v0.492.56 — 🟡 BUG FIX (PRIORITY 1, the editor): `AutoFeedback.tsx` — `markedBefore`, `inert_cues` as the tap's answer
+
+**Found by the instrument shipped one version earlier, on its first working run** — which is the whole
+argument for having built it. v0.492.55's Auto pass tapped a live chip and a marked chip and printed
+what the app said back, and the app said the same thing to both:
+
+```
+tapped live chip "Too dark" → Thanks — Auto will lean that way for you
+tapped marked chip "Over-smoothed" → Thanks — Auto will lean that way for you
+```
+
+**The mechanism, and why v0.492.53 did not already cover it.** `_feedback_limit_note` answers the tap
+whose dead end is in the **store** — the taste at `MAX_STEPS`, or the `highlights` floor — because that
+is the half the POST can settle for free (equal effective biases ⇒ every input to `auto_recipe` is
+equal). A chip marked because the **picture** is at its limit *does* move the bias, so `limit_note` is
+`null` and the row fell through to the thanks. v0.492.54 told the owner about that case **before** the
+tap and then contradicted itself **after** it.
+
+**The fix is free, because the answer was already on screen.** The chip is wearing the sentence: the
+run-scoped read hands the row `inert_cues` on load, so the mutation reads the mark the tapped chip was
+already carrying (from the snapshot the tap was made against, before `setQueryData` lands) and uses it
+when the server sends no `limit_note`. The POST is untouched — it still measures nothing, which is
+v0.492.54's whole cost argument — and the server stays the only author of the wording. Auto's rebuild is
+skipped too, as it already is for the store-side case and for the same reason: the recipe it would
+build is byte-for-byte the one on screen, so the tap now saves a measured ~0.6 s build plus a render
+instead of spending it on a no-op.
+
+Verified in the browser the probe drives, after the fix:
+
+```
+tapped live chip "Too dark" → Thanks — Auto will lean that way for you
+tapped marked chip "Over-smoothed" → Auto is already smoothing as little as it will here.
+                                     Tapping still teaches Auto for your other pictures.
+```
+
+**Tests: +3 vitest, and the first fails before.** The marked chip gets its own sentence, not the thanks,
+and does not re-run Auto; a **live** chip on the same picture still gets today's answer and today's
+re-run (so the fix is not a blanket silencing); and the server's `limit_note` still wins when both are
+true, because it is about the tap that just happened. One note the tests had to learn and the next run
+should not re-learn: the chip row renders its buttons immediately while the marks arrive with the
+run-scoped read, so a test must wait for the legend before tapping — which is also the only moment the
+chip *looks* faded to a user.
+
+**Upgrade-safe (§9):** frontend only, no API change, no new field; a response with no `inert_cues` (an
+older server) behaves exactly as v0.492.53 did.
+
 ## 2026-10-10 (Builder) — the editor marks the Auto feedback chips that cannot move *this* picture
 
 ### v0.492.54 — 🟡 BUG FIX (PRIORITY 1, the editor): `presets.measured_auto_knobs` / `auto_knob_values` / `auto_op_params` / `inert_auto_cues`, `auto_prefs.limit_hint`, `editor._measured_region_for_run` / `_run_taste_context` / `_run_inert_cue_hints`, `AutoPreferencesOut.inert_cues`
