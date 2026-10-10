@@ -1,5 +1,44 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-10 (Builder, next run — **the queue held nothing ungated again, so this run read the
+previous run's fix as a lead a sixth time — and the lead was not another piece of arithmetic, it was the
+CLIENT. SHIPPED as v0.492.61.**
+v0.492.57 made the run-scoped `…/editor/auto-preferences` GET stop claiming a taste the picture has no room
+for, and recorded the stand-down for its siblings in one sentence: the feedback POST *"deliberately
+measures nothing … the run-scoped read the chips row re-fetches after every tap is what narrows it again,
+one request later."* Every clause of that is true **of the server**. But `AutoFeedback.tsx` writes the
+POST's answer straight into the run-scoped query cache on success, so the un-narrowed sentence is what the
+owner *reads* until the refetch lands — and on the owner's own shape (a deep clean stack, where
+`auto_recipe` measures `denoise_strength` exactly 0.0 and "Over-smoothed" is marked) the **first** tap
+rendered
+```
+Auto is running with less smoothing for you, based on your recent feedback.
+```
+one line under a toast saying the picture had not changed. That is the exact sentence v0.492.57 exists to
+delete, re-asserted in direct answer to the tap, four versions into the work.
+**The method note, and it is the one to carry forward: a cost stand-down ("this endpoint will not measure
+that") bounds the server's answer, not the screen's.** Wherever one endpoint in a family can answer a
+question and a sibling cannot, the *merge* of the two answers is a place the honest answer can be
+overwritten by the cheap one — and that merge lives in whichever layer holds the cache, which is not the
+layer the stand-down was written in. Ask where the cheap answer is **rendered**, not only where it is sent.
+**The precedent was already in the same function, one field over:** that `setQueryData` had a four-line
+comment refusing to take the POST's `inert_cues` literally for the identical reason, written two versions
+earlier. `note` had simply *joined* `inert_cues` in being a claim about a picture — v0.492.57 is what moved
+it into that class, and nothing re-read the merge afterwards. So **when a fix gives an existing field a new
+dependency, re-read every place that field is copied.** The two are now one exported pure function,
+`mergeMeasuredPreferences(data, old, scoped)`, shared by the feedback and reset mutations, so a third
+picture-dependent field cannot be added without meeting the rule.
+**Server untouched and the stand-down respected:** the POST still measures no picture, its response is
+byte-for-byte what it was, `describe_profile` is still the only author of the wording, and the Python test
+that pins the POST's plain claim is unchanged. The kept note is safe because it can only *under*-claim
+(it has not heard about the step just taken); the one carve-out is the tap that walks the last bias back to
+neutral, where the server's own `neutral` flag is the free signal that there is no taste left to describe.
+**Nothing removed:** the note is also where **Reset** lives, so both cases were pinned separately — with a
+taste already stored the narrowed note and its Reset stay on screen unbroken through the tap; only the
+first tap from a neutral profile waits for the refetch, and there was no note (and no Reset) there a moment
+earlier either. Tests **+9 vitest** (4 pure, 5 jsdom), **fail-before 4 of them** by reverting the one line.
+The inbox was checked first — **four open, all previously acted-on and owner-gated** — and there were **no
+open PRs**. Earlier notes stand below.)
 *Last edited 2026-10-10 (Scout — **rotation sweep (1) scale-dependent preview↔export parity on a mosaic canvas:
 CLEAN, and the front of the queue did not change.** The backlog is still dry ("Bugs (fix these first)" holds
 only gated LEADs and ⚪ notes), the issue inbox is still four open and all owner-gated. What this sweep added

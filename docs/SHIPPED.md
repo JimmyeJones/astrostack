@@ -1,5 +1,71 @@
 # Shipped — the record
 
+## 2026-10-10 (Builder, next run) — the editor stops putting the un-narrowed claim back on screen the moment the owner taps
+
+### v0.492.61 — 🟠 BUG FIX (PRIORITY 1, the editor): `AutoFeedback.mergeMeasuredPreferences` — the feedback POST's picture-blind `note` no longer reaches the screen
+
+**Found by reading v0.492.57 as a lead, through the one surface that fix did not look at: the client.**
+v0.492.57 made the run-scoped `…/editor/auto-preferences` GET stop claiming a taste the picture in front of
+the owner has no room for, and its own write-up recorded the stand-down for the sibling endpoints in one
+sentence — *"the feedback POST … deliberately measures nothing (this feature's whole cost argument); the
+run-scoped read the chips row re-fetches after every tap is what narrows it again, one request later."*
+That is true of the server. It is not true of what the owner sees, because `AutoFeedback.tsx` writes the
+POST's answer **straight into the run-scoped query cache** on success — so the un-narrowed sentence is
+rendered immediately and only corrected when the refetch lands.
+
+**The sharpest form, and it is the owner's own shape.** A deep clean stack measures `denoise_strength`
+exactly 0.0, so "Over-smoothed" is marked (v0.492.54) and its tap answers *"That didn't change this
+picture — Auto is already smoothing as little as it will here"* (v0.492.56). With a neutral profile that
+very first tap then wrote, one line under that toast:
+
+```
+Auto is running with less smoothing for you, based on your recent feedback.
+```
+
+— the exact sentence v0.492.57 exists to delete, verified against `origin/main`'s own
+`auto_prefs.describe_profile`, beside the narrowed one the GET sends for the same profile
+(*"Auto **would** run with less smoothing for you … but it is already at its limit there on this picture —
+your other pictures will still get it."*). So after four versions of work the row marked the chip, answered
+its tap honestly, and then re-asserted the untruth in direct response to the tap.
+
+**The fix is the rule the file already applied one field over, made explicit and shared.** The same
+`setQueryData` was already refusing to take the POST's `inert_cues` literally — *"taking its value
+literally would unmark every chip for a moment and then mark them again, which reads as a glitch"* — and
+`note` has the identical property: it is the **second** of exactly two fields of `AutoPreferencesOut` that
+are claims about a *picture* rather than about the stored taste (`biases`, `neutral`, `fade_note` and
+`limit_note` are all about the store or the tap, and `describe_profile` is reached with `inert_params` from
+one call site only). Both now come from the last answer that *was* measured against this picture, through
+one exported pure function, `mergeMeasuredPreferences(data, old, scoped)`, used by the feedback mutation
+and the reset mutation alike.
+
+**Why a kept note is safe where the server's is not: it can only ever under-claim.** The kept sentence has
+not heard about the step just taken, which is honest a beat late; the server's describes a taste the
+picture cannot show, which is not honest at all. The one case it must not survive is the tap that walks the
+last bias back to neutral — there is then no taste left to describe, and the POST's `neutral` says so, so
+its `null` is taken and the "why Auto shifted" line goes with the taste it was explaining.
+
+**Nothing is removed and no control is delayed into unreachability** (the UI rule). The note is also where
+the editor's **Reset** link lives, so the two cases were checked separately: with a taste already stored the
+narrowed note — and its Reset — stays on screen unbroken through the tap, pinned by its own test; only the
+first tap from a *neutral* profile shows no note until the refetch answers, and there was no note (and no
+Reset) there a moment earlier either, so nothing the owner could reach is taken away.
+
+**Server untouched, stand-down respected.** The POST still measures no picture and its response is
+byte-for-byte what it was — the test that pins it (`test_the_note_does_not_claim_a_taste_this_picture_has
+_no_room_for`) is unchanged, as is every other Python test. `describe_profile` remains the only author of
+the wording; the client picks between two server-authored sentences and composes none.
+
+**Tests +9 (all vitest): 4 pure (**the measured note kept; no unmeasured note where there was none; dropped
+when the tap went neutral; the unscoped answer untouched**) and 5 in jsdom (**the un-narrowed claim never
+on screen while the refetch is in flight; the narrowed one arriving when it answers; the stored taste's
+note and Reset surviving the tap; the note dropping on the walk-back to neutral**). **Fail-before verified
+in place** by reverting the one line to `note: data.note` — **4 fail**, including the end-to-end one, and
+the two controls pass both ways on purpose. The existing "scopes feedback to the run's archetype" test
+passes unchanged and now exercises the "one request later" path it describes.
+
+Frontend only; no config, schema, migration, on-disk, default, request- or response-shape change. An older
+backend that sends no `inert_cues` reads exactly as before.
+
 ## 2026-10-10 (Builder) — the "why Auto shifted" note stops claiming a taste this picture has no room for, and the dogfood can finally read that note (and stops tapping a button that is not a chip)
 
 ### v0.492.60 — 🟠 INFRA / dogfood instrument: the cue table is found from `ASTROSTACK_REPO`, and failing to find it is a finding

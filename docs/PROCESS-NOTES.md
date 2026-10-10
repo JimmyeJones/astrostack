@@ -1,5 +1,47 @@
 # Process notes & QA sweep records
 
+## 2026-10-10 (Builder, next run) — "a stand-down about what the server sends is not a stand-down about what the owner reads"
+
+The method note behind **v0.492.61**, and it is the complement of the one immediately below it.
+
+That note says: when a fix makes one surface honest, ask what else on that screen makes the same claim
+from different arithmetic. This run asked the narrower question that the same fix leaves open — **who
+else puts a sentence on that line?** — and the answer was not another piece of arithmetic at all. It was
+the client.
+
+v0.492.57 narrowed the "why Auto shifted" note on the run-scoped GET, and recorded in the same breath
+that the feedback POST keeps the plain claim because it deliberately measures nothing, *"and the
+run-scoped read the chips row re-fetches after every tap is what narrows it again, one request later."*
+Every clause of that is true of the server. What it does not say — and what nobody checked — is that
+`AutoFeedback.tsx` writes the POST's answer **into the run-scoped query cache** on success, so the
+un-narrowed sentence is what the owner reads for as long as the refetch takes. On a neutral profile and a
+marked chip, which is the owner's own shape on his own data, the first tap therefore rendered the exact
+sentence the previous version shipped to delete, one line under a toast saying the picture had not
+changed.
+
+**The general rule: a cost stand-down ("this endpoint will not measure that") bounds the server's answer,
+not the screen's.** Whenever one endpoint in a family can answer a question and a sibling cannot, the
+merge of the two answers is a place where the honest one can be overwritten by the cheap one — and that
+merge lives in whichever layer holds the cache, which is not the layer the stand-down was written in. Ask
+where the cheap answer is *rendered*, not only where it is *sent*.
+
+**Two smaller notes.**
+
+1. **The precedent was already in the function, one field over.** The same `setQueryData` had a
+   four-line comment refusing to take the POST's `inert_cues` literally, for the identical reason, written
+   two versions earlier. So the fix was not a discovery about the code so much as the observation that
+   `note` had joined `inert_cues` in being a claim about a *picture* — v0.492.57 is what moved it into
+   that class, and nothing re-read the merge afterwards. **When a fix gives an existing field a new
+   dependency, re-read every place that field is copied.** The two are now one exported pure function, so
+   a third picture-dependent field cannot be added without meeting the rule.
+
+2. **"Keep the previous answer" needs a direction argument, and a carve-out.** A stale note is safe here
+   only because it can exclusively *under*-claim: it has not heard about the step just taken. The one case
+   where keeping it would over-claim in the other direction is the tap that walks the last bias back to
+   neutral — there is no taste left to describe — and the server's own `neutral` flag is the free signal
+   for it. The fail-before run is what made this concrete: reverting the single line failed **4** of the 9
+   new tests and left the two controls (the narrowed note arriving, the note dropping on the walk-back)
+   passing both ways, which is the shape a correct conservative rule should have.
 ## 2026-10-10 (Scout, branch `claude/funny-shannon-ibvn1l`) — rotation sweep (1) scale-dependent preview↔export parity on a mosaic canvas: CLEAN, and this time the decimated-preview editor drive + Auto taste row ran end to end; issue inbox four open, all owner-gated, nothing new owed; no bug filed
 
 *(Baseline `origin/main` at `bd833401` (`__version__` 0.492.60): **7578 passed, 4 skipped**, 12m09s with

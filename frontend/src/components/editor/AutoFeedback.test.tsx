@@ -3,7 +3,12 @@ import { notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AUTO_FEEDBACK_CHIPS, AutoFeedback, autoFeedbackGroups } from "./AutoFeedback";
+import {
+  AUTO_FEEDBACK_CHIPS,
+  AutoFeedback,
+  autoFeedbackGroups,
+  mergeMeasuredPreferences,
+} from "./AutoFeedback";
 import autoFeedbackCueCases from "./autoFeedbackCues.cases.json";
 import * as client from "../../api/client";
 
@@ -216,6 +221,177 @@ describe("AutoFeedback", () => {
     wrap();
     // Chips render, but there's no why-note/Reset for a neutral profile.
     await screen.findByRole("button", { name: "Too dark" });
+    expect(screen.queryByText("Reset")).toBeNull();
+  });
+});
+
+describe("mergeMeasuredPreferences", () => {
+  // The rule in one place: the feedback POST and the reset DELETE measure no
+  // picture, so the two picture-shaped fields of their answer come from the last
+  // run-scoped read instead of from them.
+  const narrowed = "Auto would run with less smoothing for you, based on your recent feedback, but it is already at its limit there on this picture — your other pictures will still get it.";
+  const unnarrowed = "Auto is running with less smoothing for you, based on your recent feedback.";
+  const marks = { over_smoothed: "Auto is already smoothing as little as it will here. Tapping still teaches Auto for your other pictures." };
+
+  it("keeps the note that was measured against this picture", () => {
+    const merged = mergeMeasuredPreferences(
+      { biases: { denoise: -3 }, note: unnarrowed, neutral: false },
+      { biases: { denoise: -2 }, note: narrowed, neutral: false, inert_cues: marks },
+      true,
+    );
+    expect(merged.note).toBe(narrowed);
+    expect(merged.inert_cues).toEqual(marks);
+    // Everything that is a claim about the *store* comes from the server, which
+    // has just written it.
+    expect(merged.biases).toEqual({ denoise: -3 });
+  });
+
+  it("shows no note rather than an unmeasured one when there was none", () => {
+    // The owner's own shape, and the worst case: a neutral profile, a first tap
+    // on a chip the row has already marked as unable to move this picture. The
+    // server's sentence for it is the exact claim the narrowing exists to stop,
+    // so it waits for the read that can narrow it instead of flashing first.
+    const merged = mergeMeasuredPreferences(
+      { biases: { denoise: -1 }, note: unnarrowed, neutral: false },
+      { biases: {}, note: null, neutral: true, inert_cues: marks },
+      true,
+    );
+    expect(merged.note).toBeNull();
+  });
+
+  it("drops the note when the tap walked the last bias back to neutral", () => {
+    // The one case the kept note must not survive: there is no taste left to
+    // describe, so holding the old sentence would over-claim in the other
+    // direction — and the "why Auto shifted" line (with its Reset link) is
+    // meant to go with the taste it was explaining.
+    const merged = mergeMeasuredPreferences(
+      { biases: {}, note: null, neutral: true },
+      { biases: { denoise: -1 }, note: narrowed, neutral: false, inert_cues: marks },
+      true,
+    );
+    expect(merged.note).toBeNull();
+    expect(merged.neutral).toBe(true);
+  });
+
+  it("uses the server's note untouched when there is no picture", () => {
+    // Unscoped there is nothing to narrow against, so the library-wide answer is
+    // the right one and must stay byte-for-byte what an older build renders.
+    const merged = mergeMeasuredPreferences(
+      { biases: { denoise: -3 }, note: unnarrowed, neutral: false },
+      { biases: {}, note: null, neutral: true },
+      false,
+    );
+    expect(merged.note).toBe(unnarrowed);
+    expect(merged.inert_cues).toEqual({});
+  });
+});
+
+describe("AutoFeedback — the note after a tap", () => {
+  const HINT = "Auto is already smoothing as little as it will here. Tapping still teaches Auto for your other pictures.";
+  const UNNARROWED = "Auto is running with less smoothing for you, based on your recent feedback.";
+  const NARROWED = "Auto would run with less smoothing for you, based on your recent feedback, but it is already at its limit there on this picture — your other pictures will still get it.";
+
+  it("never shows the POST's un-narrowed claim while the refresh is in flight", async () => {
+    // v0.492.57 made the run-scoped read stop claiming a taste the picture has no
+    // room for. The feedback POST has no picture and still sends the plain claim
+    // — by design, it measures nothing — and this row wrote that answer straight
+    // into the cache, so on the owner's own shape the first "Over-smoothed" tap
+    // put the exact sentence back on screen, one line under a toast saying the
+    // picture had not changed. The refetch below is left in flight on purpose:
+    // that window is the bug.
+    const getRun = vi.spyOn(client.api, "getRunAutoPreferences")
+      .mockResolvedValueOnce({
+        biases: {}, note: null, neutral: true, inert_cues: { over_smoothed: HINT },
+      })
+      .mockReturnValue(new Promise<client.AutoPreferences>(() => {}));
+    vi.spyOn(client.api, "sendAutoFeedback").mockResolvedValue({
+      biases: { denoise: -1 }, note: UNNARROWED, neutral: false, limit_note: null,
+    });
+    const shown = vi.spyOn(notifications, "show");
+
+    wrap(() => {}, { safe: "M31", runId: 7 });
+    await screen.findByText(/Faded chips can.t change this picture/);
+    fireEvent.click(screen.getByRole("button", { name: "Over-smoothed" }));
+
+    // The tap has landed (its answer is the chip's own sentence) and the
+    // run-scoped read is being re-fetched.
+    await waitFor(() => expect(shown).toHaveBeenCalled());
+    await waitFor(() => expect(getRun).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/is running with less smoothing/)).toBeNull();
+    // And the marks are still there, which is the same rule one line up.
+    await screen.findByText(/Faded chips can.t change this picture/);
+  });
+
+  it("shows the narrowed note once the run-scoped read answers", async () => {
+    // The other half: nothing is swallowed. The sentence the owner ends up with
+    // is the one measured against their picture, and it still carries Reset.
+    vi.spyOn(client.api, "getRunAutoPreferences")
+      .mockResolvedValueOnce({
+        biases: {}, note: null, neutral: true, inert_cues: { over_smoothed: HINT },
+      })
+      .mockResolvedValue({
+        biases: { denoise: -1 }, note: NARROWED, neutral: false,
+        inert_cues: { over_smoothed: HINT },
+      });
+    vi.spyOn(client.api, "sendAutoFeedback").mockResolvedValue({
+      biases: { denoise: -1 }, note: UNNARROWED, neutral: false, limit_note: null,
+    });
+
+    wrap(() => {}, { safe: "M31", runId: 7 });
+    await screen.findByText(/Faded chips can.t change this picture/);
+    fireEvent.click(screen.getByRole("button", { name: "Over-smoothed" }));
+
+    await screen.findByText(/would run with less smoothing/);
+    expect(screen.queryByText(/is running with less smoothing/)).toBeNull();
+    await screen.findByText("Reset");
+  });
+
+  it("keeps the note it already had, and its Reset, across the tap", async () => {
+    // A taste the owner has already built: the narrowed sentence stays on screen
+    // through the tap rather than being replaced by the plain claim, so the Reset
+    // link never blinks out either.
+    vi.spyOn(client.api, "getRunAutoPreferences")
+      .mockResolvedValueOnce({
+        biases: { denoise: -2 }, note: NARROWED, neutral: false,
+        inert_cues: { over_smoothed: HINT },
+      })
+      .mockReturnValue(new Promise<client.AutoPreferences>(() => {}));
+    vi.spyOn(client.api, "sendAutoFeedback").mockResolvedValue({
+      biases: { denoise: -3 }, note: UNNARROWED, neutral: false, limit_note: null,
+    });
+    const shown = vi.spyOn(notifications, "show");
+
+    wrap(() => {}, { safe: "M31", runId: 7 });
+    await screen.findByText(/would run with less smoothing/);
+    fireEvent.click(screen.getByRole("button", { name: "Over-smoothed" }));
+
+    await waitFor(() => expect(shown).toHaveBeenCalled());
+    await screen.findByText(/would run with less smoothing/);
+    expect(screen.queryByText(/is running with less smoothing/)).toBeNull();
+    expect(screen.getByText("Reset")).toBeTruthy();
+  });
+
+  it("drops the note when a tap walks the last bias back to neutral", async () => {
+    // The guard on the exception: once the profile is neutral there is no taste
+    // to describe, so the kept sentence must not outlive it.
+    vi.spyOn(client.api, "getRunAutoPreferences")
+      .mockResolvedValueOnce({
+        biases: { denoise: -1 },
+        note: "Auto is running with less smoothing for you, based on your recent feedback.",
+        neutral: false, inert_cues: {},
+      })
+      .mockReturnValue(new Promise<client.AutoPreferences>(() => {}));
+    vi.spyOn(client.api, "sendAutoFeedback").mockResolvedValue({
+      biases: {}, note: null, neutral: true, limit_note: null,
+    });
+    const shown = vi.spyOn(notifications, "show");
+
+    wrap(() => {}, { safe: "M31", runId: 7 });
+    await screen.findByText(/less smoothing/);
+    fireEvent.click(screen.getByRole("button", { name: "Too noisy" }));
+
+    await waitFor(() => expect(shown).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText(/less smoothing/)).toBeNull());
     expect(screen.queryByText("Reset")).toBeNull();
   });
 });

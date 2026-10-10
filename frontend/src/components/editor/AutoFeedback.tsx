@@ -66,6 +66,52 @@ export function autoFeedbackGroups(
   return out;
 }
 
+/** The run-scoped preferences answer to render after a tap, given the one the
+ * server has just sent and the one already on screen. Pure.
+ *
+ * Two of `AutoPreferences`' fields are claims about the **picture** rather than
+ * about the stored taste, and the two endpoints that answer a tap — the feedback
+ * POST and the reset DELETE — deliberately measure no picture (that is this
+ * feature's whole cost argument: the measurement is ~0.6 s on a proxy the owner's
+ * size, and the run-scoped read this row re-fetches afterwards is the request
+ * that pays for it). So their answers to those two must not be taken literally:
+ *
+ *   * `inert_cues` comes back `{}`. Taking it literally would unmark every chip
+ *     for a moment and then mark them again, which reads as a glitch rather than
+ *     as an update.
+ *   * `note` comes back **un-narrowed**. It says "Auto is running with less
+ *     smoothing for you" where the run-scoped read had moved that phrase into a
+ *     clause saying Auto has no room for it on this picture
+ *     (`editor._run_inert_bias_params`). On the owner's own shape — a deep clean
+ *     stack, where Auto measures no smoothing at all — that is the exact untruth
+ *     the narrowing exists to stop, and it lands in direct answer to a tap whose
+ *     own toast one line up has just said the picture did not change.
+ *
+ * So both keep the last answer that *was* measured against this picture, until
+ * the refresh lands. The kept note can only ever under-claim — it has not heard
+ * about the step just taken — never over-claim, which is the direction that
+ * matters: a sentence about a taste the owner is still building is honest a beat
+ * late, and a sentence about a taste the picture cannot show is not honest at
+ * all. The one case it must not survive is the tap that walked the last bias
+ * back: there is then no taste left to describe, the server's `neutral` says so,
+ * and the "why Auto shifted" line goes with the taste it was explaining.
+ *
+ * Unscoped there is no picture to narrow anything against, so the server's answer
+ * is already the right one and is used byte-for-byte, exactly as an older build
+ * renders it.
+ */
+export function mergeMeasuredPreferences(
+  data: AutoPreferences,
+  old: AutoPreferences | undefined,
+  scoped: boolean,
+): AutoPreferences {
+  return {
+    ...data,
+    note: scoped && !data.neutral ? (old?.note ?? null) : data.note,
+    inert_cues: old?.inert_cues ?? {},
+  };
+}
+
 export function AutoFeedback(
   { onRerun, safe, runId, autoCrop }: {
     onRerun: () => void; safe?: string; runId?: number;
@@ -102,14 +148,12 @@ export function AutoFeedback(
       // was made against. It is the other half of the answer below, and it has
       // to be read before `setQueryData` lands.
       const markedBefore = prefs.data?.inert_cues?.[cue] ?? null;
-      // Keep the marks we already have while the refresh below is in flight: the
-      // POST answers about the *profile* and leaves `inert_cues` empty, so taking
-      // its value literally would unmark every chip for a moment and then mark
-      // them again, which reads as a glitch rather than as an update.
-      qc.setQueryData(prefsKey, (old: AutoPreferences | undefined) => ({
-        ...data,
-        inert_cues: old?.inert_cues ?? {},
-      }));
+      // The POST answers about the *profile* and measures no picture, so neither
+      // of its two picture-shaped answers is taken literally while the refresh
+      // below is in flight — the marks stay put, and so does the narrowed "why
+      // Auto shifted" note. See `mergeMeasuredPreferences`.
+      qc.setQueryData(prefsKey, (old: AutoPreferences | undefined) =>
+        mergeMeasuredPreferences(data, old, scoped));
       // A tap that cannot move this picture gets told so, instead of the thanks.
       // TWO sources, because the server can answer one of the two mechanisms for
       // free and not the other:
@@ -151,10 +195,8 @@ export function AutoFeedback(
   const reset = useMutation({
     mutationFn: () => api.resetAutoPreferences(),
     onSuccess: (data) => {
-      qc.setQueryData(prefsKey, (old: AutoPreferences | undefined) => ({
-        ...data,
-        inert_cues: old?.inert_cues ?? {},
-      }));
+      qc.setQueryData(prefsKey, (old: AutoPreferences | undefined) =>
+        mergeMeasuredPreferences(data, old, scoped));
       notifications.show({ message: "Auto reset to its data-driven default", color: "gray" });
       onRerun();
       // Clearing the taste un-saturates every bias, so a chip that was dead
