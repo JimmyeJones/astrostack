@@ -3,22 +3,27 @@
 // The loupe renders a 512 px window of the picture through the same recipe, and
 // what makes that honest rather than a second lie is that every op which
 // measures the *whole* image is handed what the whole-image render measured
-// (`EditContext.fit`). Four ops take a whole-array measurement by a route `fit`
-// cannot reach: noise reduction and deconvolution normalise by the picture's own
-// 0.5–99.5th percentile span, colour-blotch smoothing and hot-pixel removal read
-// its sky level and noise floor. Handed a window they measure the window, so how
-// strong they look there is not the strength the export applies — measured at up
-// to 3.9 % of full scale for the wavelet default on a star-poor patch (the open
-// LEAD in `docs/IMPROVEMENTS.md` carries the table; the backend declares the four
-// op by op and `tests/test_edit_window_fidelity.py` pins every one of them).
+// (`EditContext.fit`). Three ops take a whole-array measurement by a route `fit`
+// cannot reach: noise reduction's wavelet and TV methods converge against the
+// whole array inside skimage, and colour-blotch smoothing and hot-pixel removal
+// read its sky level and noise floor. Handed a window they measure the window, so
+// how strong they look there is not the strength the export applies — the backend
+// declares the three op by op and `tests/test_edit_window_fidelity.py` pins every
+// one of them, with the numbers.
 //
-// Three of those four are *why the reader is here*. The preview's own advisories
-// say hot-pixel removal is skipped entirely, deconvolution understates and
-// bilateral noise reduction previews weaker than it exports, and all three send
-// them to this control — "at the threshold you've set". So the window was being
-// cited as the authority for the ops it is least faithful on, and said nothing
-// about it. Until the measurement is carried, this sentence is the fix: cheap,
-// honest, and it changes nothing about what the editor renders or exports.
+// Two of those three are *why the reader is here*. The preview's own advisories
+// say hot-pixel removal is skipped entirely and bilateral noise reduction
+// previews weaker than it exports, and both send them to this control — "at the
+// threshold you've set". So the window is still being cited as the authority for
+// ops it re-measures, and this sentence is the honest answer: cheap, and it
+// changes nothing about what the editor renders or exports.
+//
+// It was four ops and three advisories until v0.493.9. The percentile span both
+// restoration ops normalise by was listed here as unreachable and turned out to
+// be carryable, which made deconvolution window-faithful outright — so the
+// "deconvolution understates on the proxy" advisory now sends the reader
+// somewhere that can actually answer it. Before repeating "`fit` cannot reach
+// this", check that it still cannot.
 //
 // "Every other step here is applying exactly what your export will" is not a
 // flourish. Every other op in the loupe's scope renders a frozen window whose

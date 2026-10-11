@@ -255,7 +255,7 @@ def _info(client, run_id: int, recipe: str) -> dict:
 def test_it_names_the_ops_whose_strength_the_window_re_measures(
         client, built_library):
     """The loupe's honesty rests on every op being handed the *whole* picture's
-    measurements, and four take one by a route ``EditContext.fit`` cannot reach —
+    measurements, and three take one by a route ``EditContext.fit`` cannot reach —
     they re-measure the 512 px crop, so the strength shown there is not the
     export's. The control says which ones, from each op's own
     ``OpSpec.window_unfaithful``; a recipe with none of them stays silent."""
@@ -277,11 +277,23 @@ def test_it_names_the_ops_whose_strength_the_window_re_measures(
 
 
 def test_the_ops_the_preview_sends_here_are_named_here(client, built_library):
-    """Why the field is worth having. Three of the four "the preview isn't the
-    export" advisories — hot-pixel removal skipped, deconvolution understates,
-    bilateral denoise previews weaker — send the reader to this control *at the
-    threshold they set*, and all three are ops the window re-measures. So the two
-    answers have to arrive together: the histogram's advisory, and this list."""
+    """Why the field is worth having, and what shrinking the list looks like.
+
+    Three of the four "the preview isn't the export" advisories — hot-pixel
+    removal skipped, deconvolution understates, bilateral denoise previews weaker
+    — send the reader to this control *at the threshold they set*. Two of those
+    three are still ops the window re-measures, so the two answers have to arrive
+    together: the histogram's advisory, and this list.
+
+    **Deconvolution is the third, and since v0.493.9 it is deliberately absent
+    from the list while its advisory still speaks** — ``_deconvolve`` now carries
+    its percentile span through ``EditContext.fit``, which was its only
+    whole-array measurement, so the window renders the picture's own pixels and
+    the advisory that sends the reader here can finally be answered here. The
+    recipe below fires that advisory *and* asserts the silence, because a control
+    that kept apologising for an op it had been fixed for would be the same defect
+    this field exists about, pointing the other way.
+    """
     run_id = _big(client, built_library, basename="bothends")
     recipe = _enc([
         {"uid": "hp", "id": "detail.hot_pixels", "enabled": True,
@@ -302,7 +314,7 @@ def test_the_ops_the_preview_sends_here_are_named_here(client, built_library):
 
     info = _info(client, run_id, recipe)
     assert info["available"] is True
-    assert info["unvouched_ops"] == ["Hot-pixel removal", "Deconvolution"]
+    assert info["unvouched_ops"] == ["Hot-pixel removal"]
 
 
 def test_a_disabled_op_is_not_named_and_a_repeated_one_is_named_once(
