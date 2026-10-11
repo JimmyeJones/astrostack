@@ -1,5 +1,24 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Scout — **rotation sweep (2) mosaic & walk-away per-panel divergence: CLEAN, and the
+front of the queue did not change.** The front stays the gated `PANEL_LINK_DIST_DEG` re-framing LEAD (item 0 in
+"Bugs"); the rest of that section is the older gated LEADs and ⚪ notes — do not re-litigate the numbered
+stand-downs. Baseline suite **7608 passed, 4 skipped**; no open PRs; no bug filed; `IMPROVEMENTS.md` left
+untouched. **The sweep's own question — "any threshold taken from a whole-target or *peak* number that is
+really per-panel" — came back CLEAN two ways, and the reason is worth carrying forward: the per-panel/peak
+machinery is now deep enough that the whole-target frame count no longer reaches a per-pixel threshold on a
+mosaic.** Every caller that needs per-panel depth passes it — the walk-away min-frames hold routes through
+`typical_panel_depth` (so a 3×3 one-pass-in is held as speckle, not published), the auto-reject *method*
+choice routes through `auto_reject_depth` (so κ-σ is not picked for a mosaic below `kappa_min_frames`
+per-pixel), and the depth surfaces divide by `stacking_field_fulls` with `uncovered_frac` subtracted and read
+the source stack's canvas on a re-render (the #1095 correction). The `--mosaic --dithered` dogfood confirmed
+it on the screen: the blocky mosaic's server panel-map, grain-uneven note and frontend readiness/next-best-move
+all agree and are per-panel-aware; the dithered continuum's panel-map silence is the **already-filed,
+test-pinned v0.493.0 LEAD**, not a new bug. The inbox was checked first — **four open, all previously acted-on
+and owner-gated** (the two with 2026-10-09 activity are Observer follow-ups that open "not a new report").
+**Rotation: (2) done — next is (3)** (filesystem side effects of ASTAP/ffmpeg with a stub binary). Full record
+in [`PROCESS-NOTES.md`](PROCESS-NOTES.md). Earlier notes stand below.)*
+
 *Last edited 2026-10-11 (Builder, next run — **the queue held nothing ungated for an ELEVENTH run, so this
 run took the previous one's carry-forward sentence as the task. It paid twice.
 SHIPPED as v0.493.3 and v0.493.4.**

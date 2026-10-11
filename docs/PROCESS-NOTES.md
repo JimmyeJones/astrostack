@@ -1,5 +1,54 @@
 # Process notes & QA sweep records
 
+## 2026-10-11 (Scout, branch `claude/funny-shannon-g6ttkc`) — rotation sweep (2) mosaic & walk-away per-panel divergence: CLEAN, queue front unchanged
+
+*(Baseline `origin/main` at `385c2b68` (`__version__` 0.493.4). Full suite green — **7608 passed, 4 skipped**
+at `-n 8`. No open PRs. "Bugs (fix these first)" holds no verified, ungated open bug — the gated
+`PANEL_LINK_DIST_DEG` re-framing LEAD stays the front.)*
+
+**Inbox first, as always: four open, all previously acted-on and owner-gated, nothing new owed.** #1015
+(stale Observer clone) and #878 (historical duplication residue) each carry 2026-10-09 Observer follow-ups
+that open *"New evidence on an existing finding; not a new report"* and only add measurements to findings
+whose app-half fixes already shipped (version on `/api/health` v0.479.3; the merge/reconcile feature
+v0.482.1–.2) — the remaining halves are owner actions (mint the read-only token; click Combine) and an
+Observer-charter change (pin the clone), none of them this repo's to carry. #903 and #880 are older and
+already acted-on. No comment warranted (AGENTS.md's post-frugality rule).
+
+**Rotation sweep (2): any threshold taken from a whole-target or *peak* number that is really per-panel —
+CLEAN, two ways.**
+
+*Code side.* The per-panel/peak machinery is comprehensive and every caller that needs a per-panel number
+passes it, so the whole-target frame count never reaches a per-pixel threshold on a mosaic:
+`stacker.auto_reject_depth` (thinnest substantial panel, for "can the rejection method bite anywhere?"),
+`typical_panel_depth` (frame-weighted median panel depth, for "is the *picture* speckle?"),
+`panel_frame_counts` (the shared grid-snapped clustering), and `rejection_reach(…, depth=…)`. The two
+frame-count thresholds that would otherwise mis-fire on a mosaic both route through them: the walk-away
+auto-stack min-frames hold (`pipeline._auto_stack_panel_depth` → `typical_panel_depth`, so a 3×3 one pass in
+is held as one-sub-deep speckle rather than published) and the auto-reject *method* choice
+(`run_stack` / `estimate_stack` pass `depth=auto_reject_depth(_frame_radecs(frames))`, so κ-σ is not picked
+for a mosaic whose per-pixel depth is below `kappa_min_frames`). On the depth surfaces, `derived_light.
+stacking_field_fulls` divides by `field_fulls_of_sky` with the row's own `uncovered_frac` subtracted (the
+#1095 correction) and reads the *source* stack's canvas on a re-render, so a cropped export cannot claim a
+depth its pixels never had. The user-facing celebration count (`beforeafter.panel_labels` "N frames
+stacked") is a literal total, not a per-pixel claim — not in scope.
+
+*Dogfood side (`--mosaic --dithered`).* Both mosaic targets coherent, no overflow, no console errors, server
+log clean (every "error"-matching line is a `level=ERROR` log query returning 200). On the **blocky** 2×2 the
+server panel-map ("a little behind at the top-right: about 30 s against 1 min on a typical panel") and the
+`health/grain_uneven` note ("about 23% of the picture has 3 subs where most has 6, ~1.4× grainier") agree
+with the frontend readiness/next-best-move ("a typical part of this picture has 1 min so far", "part of this
+one is thinner than the rest"), all per-panel-aware. On the **dithered** continuum the panel-map and
+per-panel grain note are silent and the coverage note falls back to the border sentence ("About 14% of this
+picture is a thin edge … Trim border") — which is the **already-filed, test-pinned** v0.493.0 LEAD behaviour
+(`pointing_groups` → one cluster → `None` on this sample's exaggerated re-framing), not a new finding. The
+readiness goal scaling with field-fulls ("goal ~11.5 h (about 6 fields of sky)" on the dithered sample) is
+inflated by that same exaggerated re-framing, which the LEAD already prices as a sample artefact (the sample
+over-represents the margin 3.1× vs a real S30); the card itself tells the owner the background is already
+clean and more time only buys fainter detail, so no user-facing over-shoot claim stands. Nothing filed.
+
+**Rotation: (2) done — next is (3)** (filesystem side effects of ASTAP/ffmpeg with a stub binary). `FOCUS.md`
+front-of-queue note added; `IMPROVEMENTS.md` left untouched (no bug to file).
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-jo7j7n`) — the carry-forward note was the whole task: every per-night surface, re-read on a many-night target
 
 *(Baseline `origin/main` at `f8957359` (`__version__` 0.493.2). CI on `main` green. No open PRs. "Bugs (fix
