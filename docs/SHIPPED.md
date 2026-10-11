@@ -1,5 +1,64 @@
 # Shipped — the record
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-4dlv4a`, second task) — the fix filed for the ⭐ gradient/de-levelling bug, measured before it shipped: it fixes that bug and makes two other cases worse
+
+### v0.493.12 — the candidate de-level yardstick is held as a one-change replica and its two regressions are asserted: `tests/test_auto_delevel_yardstick_candidate.py`, `_delevelled_luminance`'s detrended-yardstick shape
+
+*(Python **+10 items**, one new file. **No production code changed at all** — this is a measured stand-down,
+not a fix, and the thing it stands down from was never built. Full suite re-run green.)*
+
+**The bug is real and stays open.** v0.493.10 reproduced it: a light-pollution ramp of ~49 % of the sky
+running *across* a mosaic's panel strips pushes every genuine sky level past `_LEVEL_MAX_SIGMA_RATIO`,
+`_delevelled_luminance` declines, and Auto reads a sky level **2.08× the truth** — the finished mosaic ~7.8 %
+darker than the identical stack laid out as a single field. That entry named the fix (*"judge the guard on a
+plane with the smooth shape taken out … while still subtracting the step from the raw plane"*) and said it
+needed a before/after first, because it changes what Auto emits for every mosaic.
+
+**This is that before/after, and it says do not ship it.** Reported sky level as a ratio of the identical
+no-step scene, over four seeds:
+
+| case | today | the candidate |
+|---|---|---|
+| ramp **across** the strips, 5 / 20 / 50 % of sky — *the filed bug* | 2.08–2.12× | **1.00–1.02×** |
+| ramp **along** the strips, 20 % | 2.08–2.11× | **2.69–2.79×** |
+| ramp **along** the strips, 50 % | 2.09–2.11× | **5.37–5.42×** |
+| faint object-filled canvas, blob 0.15 | 1.44–1.46× | **1.70–1.73×** |
+| faint object-filled canvas, blob 0.20 | 1.30–1.33× | **1.80–1.84×** |
+
+At half a sky of ramp running along the strips the candidate is **2.6× worse than the bug it fixes**.
+
+**Why, and this is the part worth keeping.** Detrending the whole canvas removes two different things at
+once: the smooth shape **common to every panel** (which the guard should ignore — it is not panel structure)
+and the smooth shape that **differs between** panels (which the guard must *see*, because it is exactly the
+sky difference a per-level median would otherwise swallow as a "panel step"). An across-strip ramp is the
+first; an along-strip ramp is the second, and today's guard refuses it *correctly*. The candidate's yardstick
+destroys the evidence for the second along with the first. The same blindness explains the other regression:
+a smooth object spanning a strip is also degree-2-ish, so the detrend flattens it too and the guard stops
+recognising the one canvas it exists to refuse. Measured in the quantity the constant is compared against,
+the two populations close from ~9–17× apart to **3.7×**, and the faintest filled canvas ends up only ~1.3×
+clear of the bar — **so moving the constant does not rescue the candidate either: both ends move together.**
+
+**And the prerequisite the entry named was not where the risk was** — worth recording, because the next run
+will re-cost this. The entry said to bound one thing first: *"a degree-2 surface only partly absorbs panel
+steps, so the detrended plane is not a free yardstick either."* Measured, that absorption is large —
+**35–49 % of a 0.012 panel step** — so the entry is right that the detrended plane cannot be used to
+*measure* a step. But the candidate never does: every subtracted step stays on the raw plane, and swapping
+only the mask moves it by **under 1 %** on a gradient-free mosaic. The named caution was satisfied, and the
+real cost was somewhere else entirely. **A prerequisite that checks out is not evidence that the fix is
+safe** — it only retires the risk it was about.
+
+**Pinned rather than written down**, which is v0.493.11's lesson one subsystem over: the candidate lives in
+the new test file as a **one-change replica** of `_delevelled_luminance` — asserted to be one change, by
+reproducing the real function's own pixels to within 8e-4 (a tenth of the smallest panel offset the fixture
+carries) on a plane with no smooth shape to remove — and both regressions are asserted over four seeds, with
+the merit of the idea asserted too (the across-strip fix really does land at 1.00–1.02×). So nobody can ship
+this shape without the suite saying what it costs, and nobody can dismiss the idea either.
+
+**What a real fix has to do first:** separate "common to all panels" from "differs between panels" before
+picking a yardstick — asking the flatness question per level *pair* rather than per level, or projecting the
+fitted surface onto the coverage geometry, are the two shapes worth costing. Until then the bug stays open at
+the top of "Bugs" with both halves of the evidence under it.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-4dlv4a`) — the editor's "From your image" buttons offered numbers their own sliders have no stop for, and the bounds they clamped to were five hand-kept copies of the declaration
 
 ### v0.493.11 — every editor suggestion lands on its control's own stops: `registry.param_spec` / `param_grid` / `snap_to_param`, `suggest_asinh_stretch`, `suggest_levels_points`, `suggest_levels_gamma`, `suggest_denoise_strength`, `_strength_grid`, `psf_sigma_for_fwhm` / `sharpen_radius_for_fwhm` / `star_size_for_fwhm`
