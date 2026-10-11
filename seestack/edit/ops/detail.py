@@ -179,6 +179,17 @@ def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         # max(), crushing the sky noise to ~0 of the range so denoise does nothing.
         # Scale by the 0.5–99.5th percentile and DON'T clip the highlights, so the
         # sky noise occupies a meaningful fraction of the range and stars survive.
+        #
+        # This is a **whole-image** measurement and it is NOT carried through
+        # ``ctx.fit``, so a windowed render (the "check it at full size" loupe)
+        # measures its own: on a star-poor 512 px window of an 1800x2400 canvas the
+        # span comes back **99 % narrower** than the picture's, and the window's own
+        # grain is then thresholded as if it were the signal. Freezing it is a
+        # measured *partial* fix and not a safe one — each method carries a second
+        # whole-array dependence of its own (BayesShrink's per-subband σ, and
+        # skimage's bilateral colour LUT, built from the array's min/max) — so it is
+        # filed as a LEAD in docs/IMPROVEMENTS.md with the numbers rather than
+        # flipped here. Read that before changing this.
         lo = float(np.nanpercentile(img, 0.5))
         hi = float(np.nanpercentile(img, 99.5))
         if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
@@ -531,6 +542,10 @@ def _deconvolve(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         psf /= psf.sum()
         # Joint robust scale (shared across channels → no colour shift); keep
         # highlights (don't clip stars away) — RL only needs non-negativity.
+        # Whole-image, and re-measured on a windowed render exactly as the denoise
+        # above is — same LEAD, and here freezing it measured *worse* on two of
+        # three windows, because ten Richardson-Lucy passes from a flat guess
+        # amplify even the proxy span's 0.02 % difference from the canvas's.
         lo = float(np.nanpercentile(img, 1.0))
         hi = float(np.nanpercentile(img, 99.5))
         if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:

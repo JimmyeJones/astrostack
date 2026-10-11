@@ -4,8 +4,9 @@ Every editor render runs the whole recipe from the top — that is the live
 preview's contract and it is not negotiable. But several ops don't only
 transform pixels: they **measure the whole image first** and derive a number
 from it (the stretch's per-channel robust median and σ, the tone curve's
-derived control points, "Neutralize background"'s sky medians, and — by far the
-dominant cost — colour calibration's star detection and white-balance solve).
+derived control points, "Neutralize background"'s sky medians, the star mask's
+bright-star reference behind the two ``stars.*`` ops, and — by far the dominant
+cost — colour calibration's star detection and white-balance solve).
 Dragging one slider therefore re-solves a star field that cannot have changed,
 on every debounced frame, twice over (the preview PNG and the histogram are two
 requests running the same recipe on the same proxy).

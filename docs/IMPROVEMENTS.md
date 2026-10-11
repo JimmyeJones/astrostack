@@ -82,6 +82,54 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **LEAD (Builder 2026-10-11, filed with v0.493.5 — the two whole-array measurements that fix found and could
+  not safely carry) — `detail.denoise` and `detail.deconvolve` normalise by a percentile span of the array
+  they are handed, so the "check it at full size" loupe re-measures it on its own 512 px window; freezing it
+  is a *partial* fix whose SIGN is method-dependent.** *(Pillar: editor — PRIORITY 1; size **S to write, M to
+  decide**; severity low — the loupe is a diagnostic window and no saved picture is affected. Confidence: the
+  span divergence is **measured** end to end, and so is the fix's failure to close it.)*
+  **What is measured, and it is not in doubt.** Both ops open with `lo, hi = nanpercentile(img, 0.5|1.0),
+  nanpercentile(img, 99.5)` and normalise by that span before doing anything — deliberately robust, because on
+  linear data one hot star sets `max()` and crushes the sky noise the ops work on into nothing. It is a
+  whole-picture property. On an 1800×2400 canvas (bright core + stars + a ragged mosaic edge), the span a
+  512 px window measures for itself against the whole canvas's: **−99.0 %** on a star-poor patch (its own
+  grain fills the entire range), **−13.7 %** over a bright core, **+3.3 %** at the ragged edge. The whole
+  **proxy**'s is **−0.02 %** — a strided decimation is an unbiased sample of the pixel values — so the
+  whole-image render's number is the one a window wants, exactly as for the star mask v0.493.5 fixed.
+  **Why it was NOT built, with the table that stopped it.** Mean |difference| from the whole render's own
+  pixels in the window, as a share of its 99th-percentile level, today → with the span frozen from the proxy:
+
+  | op / method | star-poor window | bright core | ragged edge |
+  |---|---|---|---|
+  | `denoise` wavelet (the default) | 3.91 % → **1.74 %** | 0.01 % → 0.01 % | 0.01 % → 0.01 % |
+  | `denoise` tv | 1.82 % → **0.12 %** | 0.14 % → 0.11 % | 0.09 % → 0.11 % |
+  | `denoise` bilateral | 5.90 % → **0.53 %** | 0.12 % → 0.09 % | 0.08 % → 0.08 % |
+  | `deconvolve` | 0.83 % → **0.29 %** | 0.23 % → **0.51 %** | 0.43 % → **0.50 %** |
+
+  On a *second*, smaller fixture (560×760 canvas, 256 px window, span −95.5 % / +25.6 %) the same freeze gave
+  tv 0.0024 → **0.0007**, wavelet 0.0081 → 0.0077, and **bilateral 0.0025 → 0.0063 — worse.** So: a clear win
+  for tv, a partial win for the wavelet default, and **unpredictable for bilateral and for deconvolve.**
+  **The reason, and it is the thing to settle first.** Each method carries a *second* whole-array dependence
+  that `EditContext.fit` cannot reach, so freezing the span fixes the input and leaves the rest: wavelet
+  BayesShrink derives its per-subband threshold from the array it is handed; skimage's `denoise_bilateral`
+  builds its colour-distance lookup table from that array's own `min()/max()`; and `richardson_lucy` iterates
+  from a flat 0.5 guess with `clip=False`, which over ten passes amplifies even the proxy span's 0.02 %
+  difference from the canvas's around sharp stars — which is why the deconvolve column moves the wrong way on
+  two windows out of three. **Do not flip the freeze on the strength of the span measurement alone**; the
+  honest shapes, cheapest first: **(a)** freeze the span *and* seed RL from the picture's own scale, measured
+  on the same two fixtures; **(b)** hand skimage an explicitly bounded range for the bilateral LUT so the
+  window and the picture quantise alike; **(c)** accept that these two ops cannot be made window-faithful and
+  say so on the loupe instead, the way `star_reduce_differs_on_proxy` says it for the preview — which is
+  **cheap, honest and reaches the user**, and is probably the right first slice. The measurement harness is
+  two synthetic canvases and about thirty lines; the tables above are its output, so (a) and (b) are each an
+  afternoon with a decision at the end rather than a guess.
+  **All four unfaithful ops are now pinned with their numbers** in
+  `tests/test_edit_window_fidelity.py::_NOT_WINDOW_FAITHFUL` (v0.493.6), which also found the other two —
+  `detail.chroma_denoise`'s `_robust_sky` (2.3e-03 on a bright core) and `detail.hot_pixels`' per-channel
+  sky and noise floor (2.9e-04), the latter in a **stack hot-path** module and therefore not a fix to make
+  from the editor's side. Fixing any of the four fails that file until its entry goes, so this entry cannot
+  rot silently.
+
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
   (0.25°) loses its per-panel identity entirely, and every per-panel surface in the engine then silently
@@ -3486,6 +3534,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.493.6 **the guard that should have caught v0.493.5: the loupe's "which ops measure the whole image?" list is asserted op by op** (new `tests/test_edit_window_fidelity.py`, 52 items, 4.1 s) — that list lived in prose in four places and nothing checked it, which is the same lesson v0.493.3/.4 carried forward about a constant whose justification is prose. For every op the loupe re-runs on its window: whole-canvas render vs a 224 px window of it with the whole render's `fitted` frozen on, compared over the window's interior (inset 56 px, wider than any parameter's spatial reach), on an uneven canvas × three windows (star-poor / bright core / ragged edge). **Eleven ops come back bit-identical (exactly 0.0)** and the four that do not are listed with their reason and their number — `detail.denoise` 9.3e-03 and `detail.deconvolve` 1.4e-04 (the open LEAD), plus the two the guard *found*: `detail.chroma_denoise`'s `_robust_sky` 2.3e-03 and `detail.hot_pixels`' per-channel sky/noise floor 2.9e-04, the latter in a **stack hot-path** module. Nothing tuned: the 1e-9 tolerance sits ~8,600× under the smallest real divergence with no case between. **6 failed, 46 passed** against the commit before v0.493.5. The swept set is derived from the registry minus exactly what the loupe handles itself (geometry disabled, the three background fields replayed), so a new op fails the sweep until someone looks at it, and a stale exception fails it too
+- ✅ v0.493.5 **"check it at full size" built its star mask from the 512 px window instead of from the picture** (`starmask.star_mask`'s two normalising references now go through `EditContext.fit`) — found by reading the loupe's own comment as a promise: it says what makes a full-resolution window honest *"rather than a second lie"* is that the ops which measure the whole image — *"stretch, auto contrast, colour calibration, background neutralize"* — are handed the whole-image render's fits, and `star_mask` normalises **twice** against the whole array (`hi`, the 99.9th percentile of the white top-hat, and the mask's own post-blur peak) without being on that list or on its two other copies. It lands on the one control the loupe exists for: *"star reduction differs"* is one of the four preview advisories, and the editor sends the reader here to judge it. Measured on a cluster-plus-starless canvas, picture reference `hi` 0.3325: the whole **proxy** reads 0.3301 (**0.7 % off**, because the footprint decimates with it) while a 512 px window reads **0.0259** on the starless side and **0.6329** over the cluster — wrong in both directions, so no floor or cap on the window's own number would do. `stars.reduce` 0.0071 → **0.000000** and `stars.boost_nebula` 0.0205 → **0.000001** against the whole render's own pixels; on an 1800×2400 canvas, 5.81 % → 0.03 % and 16.26 % → 0.00 %. Every whole-image render — preview, export and the mask overlay — supplies no frozen fits and is byte-identical, pinned both ways; the live preview's fit cache now carries the two forward as a free second effect
 - ✅ v0.493.4 **a night of two subs is no longer graded "hazy" because one of them was set aside** (`session_recap.NIGHT_HAZY_MIN_FRAMES`, `_night_verdict(…, n_frames)`) — the sharpness half of that verdict refuses to speak under `SESSION_QUALITY_MIN_FRAMES` *measured* subs; the hazy half is a **share** (`buckets["cloudy"] / len(rows)` against 0.4) and had **no denominator floor at all**, so one transparency rejection out of two subs read as 50 % cloud. Not a harmless word: hazy returns *before* sharpness is looked at, bars the "best night" nod by name, and renders on the Nights-card row carrying the one-click "set this night aside" button. Reproduced through `nights_breakdown` on a real `Project` (`n_frames=2 n_kept=1 buckets={'cloudy': 1} verdict='hazy'`); a night that did record four subs is still graded hazy on the identical *rate*, and the denominator is a **required** argument so no later caller can re-acquire the bug by not passing it
 - ✅ v0.493.3 **"it stopped early — worth a look" stops firing on a target the owner simply came *back to* after three or four weeks** (`session_recap.SIDEREAL_DRIFT_MIN_PER_DAY`, `EARLY_STOP_LOOKBACK_DAYS` 30 → 14) — the yardstick is a clock time and the sky does not keep clock time: a sidereal day is four minutes short, so every object comes round **3.94 min earlier each night** and across the 30-day window the drift alone was **118 min** against a 90 min bar. Measured on the real function: a return 23–28 nights after the last run was told it had stopped ~1 h 45 m early with nothing wrong (silent at 21, silent again at 29 once the priors fall out). `EARLY_STOP_MAX_PRIOR_NIGHTS`’ own comment had priced the drift of *darkness* (~1 h a month) and never the drift of the **target** (~2 h, twice as fast and always in the firing direction); the inequality is now asserted by a test rather than argued in prose
 - ✅ v0.493.2 the Storage page's **share-of-disk badge** stops having its own number clipped on every phone-width screen (`Storage.tsx`, `TargetRow`'s headline `<Group wrap="nowrap">`) — the figures side already yielded (`minWidth: 0`) but the badge never declared that it would not, so a proportional flex shrink handed it the remainder: `[phone] /storage: CLIPPED LABEL 24px box vs 26px word — "39%"` on all three probed targets, and a clip inside a badge survives any amount of scrolling. Third instance of one shape (v0.465.3, v0.492.64) and the same cure, `flexShrink: 0`; reproduced live before and after
