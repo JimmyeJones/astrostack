@@ -82,6 +82,48 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **LEAD (Builder 2026-10-11, filed with v0.493.5 — the two whole-array measurements that fix found and could
+  not safely carry) — `detail.denoise` and `detail.deconvolve` normalise by a percentile span of the array
+  they are handed, so the "check it at full size" loupe re-measures it on its own 512 px window; freezing it
+  is a *partial* fix whose SIGN is method-dependent.** *(Pillar: editor — PRIORITY 1; size **S to write, M to
+  decide**; severity low — the loupe is a diagnostic window and no saved picture is affected. Confidence: the
+  span divergence is **measured** end to end, and so is the fix's failure to close it.)*
+  **What is measured, and it is not in doubt.** Both ops open with `lo, hi = nanpercentile(img, 0.5|1.0),
+  nanpercentile(img, 99.5)` and normalise by that span before doing anything — deliberately robust, because on
+  linear data one hot star sets `max()` and crushes the sky noise the ops work on into nothing. It is a
+  whole-picture property. On an 1800×2400 canvas (bright core + stars + a ragged mosaic edge), the span a
+  512 px window measures for itself against the whole canvas's: **−99.0 %** on a star-poor patch (its own
+  grain fills the entire range), **−13.7 %** over a bright core, **+3.3 %** at the ragged edge. The whole
+  **proxy**'s is **−0.02 %** — a strided decimation is an unbiased sample of the pixel values — so the
+  whole-image render's number is the one a window wants, exactly as for the star mask v0.493.5 fixed.
+  **Why it was NOT built, with the table that stopped it.** Mean |difference| from the whole render's own
+  pixels in the window, as a share of its 99th-percentile level, today → with the span frozen from the proxy:
+
+  | op / method | star-poor window | bright core | ragged edge |
+  |---|---|---|---|
+  | `denoise` wavelet (the default) | 3.91 % → **1.74 %** | 0.01 % → 0.01 % | 0.01 % → 0.01 % |
+  | `denoise` tv | 1.82 % → **0.12 %** | 0.14 % → 0.11 % | 0.09 % → 0.11 % |
+  | `denoise` bilateral | 5.90 % → **0.53 %** | 0.12 % → 0.09 % | 0.08 % → 0.08 % |
+  | `deconvolve` | 0.83 % → **0.29 %** | 0.23 % → **0.51 %** | 0.43 % → **0.50 %** |
+
+  On a *second*, smaller fixture (560×760 canvas, 256 px window, span −95.5 % / +25.6 %) the same freeze gave
+  tv 0.0024 → **0.0007**, wavelet 0.0081 → 0.0077, and **bilateral 0.0025 → 0.0063 — worse.** So: a clear win
+  for tv, a partial win for the wavelet default, and **unpredictable for bilateral and for deconvolve.**
+  **The reason, and it is the thing to settle first.** Each method carries a *second* whole-array dependence
+  that `EditContext.fit` cannot reach, so freezing the span fixes the input and leaves the rest: wavelet
+  BayesShrink derives its per-subband threshold from the array it is handed; skimage's `denoise_bilateral`
+  builds its colour-distance lookup table from that array's own `min()/max()`; and `richardson_lucy` iterates
+  from a flat 0.5 guess with `clip=False`, which over ten passes amplifies even the proxy span's 0.02 %
+  difference from the canvas's around sharp stars — which is why the deconvolve column moves the wrong way on
+  two windows out of three. **Do not flip the freeze on the strength of the span measurement alone**; the
+  honest shapes, cheapest first: **(a)** freeze the span *and* seed RL from the picture's own scale, measured
+  on the same two fixtures; **(b)** hand skimage an explicitly bounded range for the bilateral LUT so the
+  window and the picture quantise alike; **(c)** accept that these two ops cannot be made window-faithful and
+  say so on the loupe instead, the way `star_reduce_differs_on_proxy` says it for the preview — which is
+  **cheap, honest and reaches the user**, and is probably the right first slice. The measurement harness is
+  two synthetic canvases and about thirty lines; the tables above are its output, so (a) and (b) are each an
+  afternoon with a decision at the end rather than a guess.
+
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
   (0.25°) loses its per-panel identity entirely, and every per-panel surface in the engine then silently
