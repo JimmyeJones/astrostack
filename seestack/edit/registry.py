@@ -151,6 +151,12 @@ class EditContext:
     # docstring for the measurement. An op that measures the whole array and is
     # not on this list is the next instance of that bug.
     #
+    # Where the measurement genuinely *cannot* be carried — it happens inside
+    # skimage, or in a stack hot-path module the editor has no business
+    # reshaping — the op says so instead, in :attr:`OpSpec.window_unfaithful`,
+    # and the loupe names it to the reader rather than quietly showing a
+    # strength the export will not apply. Four ops do today.
+    #
     # ``fit`` is the channel that fixes it: an op asks for its fitted value by
     # name and gets either the value a previous whole-image render measured (when
     # the caller supplied one) or its own fresh measurement, which is recorded so
@@ -361,6 +367,30 @@ class OpSpec:
     #   instead of re-fitting there — see :meth:`EditContext.replay_field`. Set it
     #   only for an op that is genuinely additive: a multiplicative or
     #   pixel-reordering op replayed this way would be wrong.
+
+    #: Why a *window* of the picture does not render like the picture for this
+    #: op — or ``None``, which is every other op in the editor.
+    #:
+    #: The loupe ("check it at full size") re-runs the recipe on one 512 px crop
+    #: and hands every op the whole-image render's own measurements through
+    #: :meth:`EditContext.fit`; that channel is the whole reason a window of the
+    #: picture can be trusted to *be* the picture. Four ops take a whole-array
+    #: measurement by a route ``fit`` cannot reach — a percentile span whose
+    #: freeze is a partial fix with a method-dependent sign, and a sky level and
+    #: noise floor read inside a **stack hot-path** module — so handed a window
+    #: they measure the window, and the strength they show there is not the
+    #: strength the export applies. Declaring it makes the loupe say so, which is
+    #: the honest thing available until the measurement is carried (the open LEAD
+    #: in ``docs/IMPROVEMENTS.md``). It changes no render and no export.
+    #:
+    #: **A declaration rather than a list, because the list kept being wrong.**
+    #: Which ops measure the whole image was written out in prose in four places
+    #: and the star mask was on none of them for the whole life of the loupe
+    #: (v0.493.5). ``tests/test_edit_window_fidelity.py`` asserts this field
+    #: against a measured divergence, op by op and in both directions: a newly
+    #: unfaithful op fails that file until it declares itself, and a fixed one
+    #: fails it until the declaration goes.
+    window_unfaithful: str | None = None
 
     def defaults(self) -> dict[str, Any]:
         return {p.key: p.default for p in self.params}

@@ -8,6 +8,7 @@ import {
   loupeMarkerRect, loupePreviewCrop, loupeWhereText,
 } from "./loupe";
 import { splitClipLeft, splitFraction, splitLeftPct } from "./splitCompare";
+import { unvouchedOpsCaption } from "./windowFidelity";
 
 /** What the split's left half is, said plainly. It is the preview blown up, not
  *  a second render, so it *will* look soft — and that softness is the answer to
@@ -122,6 +123,9 @@ export function FullSizeCheck({
   const marker = loupeMarkerFromWindow(window_.data?.window)
     ?? loupeMarkerRect(spot.fx, spot.fy, size, shownSourceW, shownSourceH);
   const where = loupeWhereText(window_.data?.window);
+  // Which of this recipe's ops the window cannot vouch for, from the server's
+  // own per-op declaration — null when there are none, which takes no line.
+  const unvouched = unvouchedOpsCaption(info.data);
   // The rendered window's own pixel size — the box both halves of the split are
   // drawn in, so the preview blow-up lands on the same patch at the same scale.
   const winW = window_.data?.window?.width ?? size;
@@ -157,6 +161,18 @@ export function FullSizeCheck({
           <Text size="sm" c="dimmed" data-testid="full-size-check-caption">
             {loupeCaption(size, info.data.proxy_scale)}
           </Text>
+          {/* …and the one thing it cannot promise, named. Three of the four
+              advisories that send the reader here are about ops that re-measure
+              the window, so the control answering them has to say which ones
+              rather than quietly show a strength the export won't apply. One
+              conditional line, above the picture because it is read before the
+              picture is judged, and absent entirely on a recipe with none of
+              them — which is Auto's own. */}
+          {unvouched ? (
+            <Text size="xs" c="dimmed" data-testid="full-size-check-unvouched">
+              {unvouched}
+            </Text>
+          ) : null}
           <Group align="flex-start" gap="md" wrap="wrap">
             {/* The navigator: the same preview, with the window marked. Clicking
                 moves the window — the only control this needs, and the picture

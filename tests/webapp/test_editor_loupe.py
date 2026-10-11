@@ -245,6 +245,104 @@ def test_a_refusal_the_user_can_undo_is_marked_apart_from_one_they_cannot(
     assert body["fixable"] is False
 
 
+# --- the one thing it cannot vouch for ---------------------------------------
+
+def _info(client, run_id: int, recipe: str) -> dict:
+    return client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe-info",
+                      params={"recipe": recipe}).json()
+
+
+def test_it_names_the_ops_whose_strength_the_window_re_measures(
+        client, built_library):
+    """The loupe's honesty rests on every op being handed the *whole* picture's
+    measurements, and four take one by a route ``EditContext.fit`` cannot reach —
+    they re-measure the 512 px crop, so the strength shown there is not the
+    export's. The control says which ones, from each op's own
+    ``OpSpec.window_unfaithful``; a recipe with none of them stays silent."""
+    run_id = _big(client, built_library, basename="unvouched")
+
+    quiet = _info(client, run_id, _enc(FLAT_RECIPE))
+    assert quiet["available"] is True
+    assert quiet["unvouched_ops"] == []
+
+    noisy = _info(client, run_id, _enc([
+        {"uid": "dn", "id": "detail.denoise", "enabled": True,
+         "params": {"method": "wavelet", "strength": 0.6}},
+        {"uid": "sh", "id": "detail.sharpen", "enabled": True,
+         "params": {"amount": 1.0, "radius": 2.0}},
+        *FLAT_RECIPE]))
+    # Sharpening is window-faithful and must not be named: an advisory that
+    # over-claims is the thing this control was built to stop being.
+    assert noisy["unvouched_ops"] == ["Noise reduction"]
+
+
+def test_the_ops_the_preview_sends_here_are_named_here(client, built_library):
+    """Why the field is worth having. Three of the four "the preview isn't the
+    export" advisories — hot-pixel removal skipped, deconvolution understates,
+    bilateral denoise previews weaker — send the reader to this control *at the
+    threshold they set*, and all three are ops the window re-measures. So the two
+    answers have to arrive together: the histogram's advisory, and this list."""
+    run_id = _big(client, built_library, basename="bothends")
+    recipe = _enc([
+        {"uid": "hp", "id": "detail.hot_pixels", "enabled": True,
+         "params": {"sigma": 4.0}},
+        # 0.5 px is what `deconv_understates_on_proxy` fires on at this
+        # fixture's stride of 2: the advisory and the list have to be read
+        # together, so the recipe has to make the advisory actually speak.
+        {"uid": "dc", "id": "detail.deconvolve", "enabled": True,
+         "params": {"iterations": 8, "psf_sigma": 0.5}},
+        *FLAT_RECIPE])
+
+    hist = client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/histogram",
+                      params={"recipe": recipe})
+    assert hist.status_code == 200, hist.text
+    body = hist.json()
+    assert body["hot_pixels_preview_skipped"] is True
+    assert body["deconv_preview_understates"] is True
+
+    info = _info(client, run_id, recipe)
+    assert info["available"] is True
+    assert info["unvouched_ops"] == ["Hot-pixel removal", "Deconvolution"]
+
+
+def test_a_disabled_op_is_not_named_and_a_repeated_one_is_named_once(
+        client, built_library):
+    """A disabled op applies nothing, so warning about it would be noise; and the
+    Add menu has no duplicate guard, so a recipe can carry one op twice — a name
+    said twice in one sentence reads like a mistake rather than like two ops."""
+    run_id = _big(client, built_library, basename="dedupe")
+
+    off = _info(client, run_id, _enc([
+        {"uid": "dn", "id": "detail.denoise", "enabled": False,
+         "params": {"method": "bilateral", "strength": 0.9}}, *FLAT_RECIPE]))
+    assert off["unvouched_ops"] == []
+
+    twice = _info(client, run_id, _enc([
+        {"uid": "d1", "id": "detail.denoise", "enabled": True,
+         "params": {"method": "wavelet", "strength": 0.3}},
+        {"uid": "d2", "id": "detail.denoise", "enabled": True,
+         "params": {"method": "tv", "strength": 0.7}}, *FLAT_RECIPE]))
+    assert twice["unvouched_ops"] == ["Noise reduction"]
+
+
+def test_every_named_op_is_one_the_registry_declares(client, built_library):
+    """The labels are the registry's own, not a copy: the editor builds a sentence
+    naming controls, and a sentence naming a control by a name the control does
+    not have is worse than no sentence. (The *membership* claim is measured op by
+    op in ``tests/test_edit_window_fidelity.py``; this is the wiring.)"""
+    from seestack.edit.registry import all_specs
+
+    declared = {s.label for s in all_specs() if s.window_unfaithful}
+    assert declared, "no op declares window_unfaithful — the field has gone"
+
+    run_id = _big(client, built_library, basename="alldeclared")
+    ops = [{"uid": f"u{i}", "id": s.id, "enabled": True, "params": {}}
+           for i, s in enumerate(all_specs()) if s.window_unfaithful]
+    info = _info(client, run_id, _enc([*ops, *FLAT_RECIPE]))
+    assert set(info["unvouched_ops"]) == declared
+    assert len(info["unvouched_ops"]) == len(declared)
+
+
 def test_the_advisories_it_answers_keep_speaking_through_a_geometry_refusal(
         client, built_library):
     """Why ``fixable`` is worth a field: the four "the preview isn't the export"

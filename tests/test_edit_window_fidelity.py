@@ -83,6 +83,13 @@ _PARAMS: dict[str, dict] = {
 #: costed yet. An op in this table is asserted to be *measurably* unfaithful, so
 #: fixing one fails this file until its entry goes, and an op that is **not** in
 #: it must be exact.
+#:
+#: **The table documents; the registry decides.** Since v0.493.7 each of these
+#: ops carries the same claim as :attr:`~seestack.edit.registry.OpSpec.window_unfaithful`,
+#: which is what the loupe reads to *tell the reader* which ops it cannot vouch
+#: for — so the sweeps below parametrize off the registry and
+#: :func:`test_the_declared_exceptions_are_the_ones_measured_here` pins the two
+#: together. A fifth copy of a prose list is the bug this file exists about.
 _NOT_WINDOW_FAITHFUL: dict[str, str] = {
     "detail.denoise":
         "the 0.5-99.5th percentile span it normalises by is a whole-image "
@@ -126,6 +133,12 @@ def _in_scope() -> list[str]:
     """Every op the loupe re-runs on its window — from the registry, not a list."""
     return sorted(s.id for s in all_specs()
                   if not s.id.startswith("geometry.") and not s.additive_field)
+
+
+def _declared_unfaithful() -> list[str]:
+    """Which ops *say* a window of them is not the picture — from the registry,
+    because that declaration is what the editor reads to name them on screen."""
+    return sorted(s.id for s in all_specs() if s.window_unfaithful)
 
 
 def _canvas() -> np.ndarray:
@@ -204,7 +217,7 @@ def _divergence(op_id: str, where: str, *, freeze: bool) -> float:
 # --- the sweep ---------------------------------------------------------------
 
 @pytest.mark.parametrize("where", sorted(_WINDOWS))
-@pytest.mark.parametrize("op_id", [i for i in _in_scope() if i not in _NOT_WINDOW_FAITHFUL])
+@pytest.mark.parametrize("op_id", [i for i in _in_scope() if i not in _declared_unfaithful()])
 def test_a_frozen_window_is_the_picture(op_id, where):
     err = _divergence(op_id, where, freeze=True)
     assert err <= _FAITHFUL_TOL, (
@@ -213,12 +226,13 @@ def test_a_frozen_window_is_the_picture(op_id, where):
         f"onto it. Either it measures something from the whole array that it does "
         f"not carry through EditContext.fit — route it through ctx.fit, and put it "
         f"on the four lists that enumerate those ops — or, if that genuinely "
-        f"cannot be done, add it to _NOT_WINDOW_FAITHFUL with the reason and the "
-        f"number, the way the four entries there do.")
+        f"cannot be done, declare OpSpec.window_unfaithful on it with the reason "
+        f"(which also makes the loupe name it to the reader) and record the "
+        f"number in _NOT_WINDOW_FAITHFUL, the way the four entries there do.")
 
 
 @pytest.mark.parametrize("where", sorted(_WINDOWS))
-@pytest.mark.parametrize("op_id", sorted(_NOT_WINDOW_FAITHFUL))
+@pytest.mark.parametrize("op_id", _declared_unfaithful())
 def test_the_unfaithful_ops_are_unfaithful_in_the_same_direction(op_id, where):
     """Freezing never makes one of them *worse* than re-measuring, which is the
     only claim the open LEAD rests on — and the reason none of them is simply
@@ -229,14 +243,16 @@ def test_the_unfaithful_ops_are_unfaithful_in_the_same_direction(op_id, where):
     assert frozen == pytest.approx(loose, abs=1e-12)
 
 
-@pytest.mark.parametrize("op_id", sorted(_NOT_WINDOW_FAITHFUL))
+@pytest.mark.parametrize("op_id", _declared_unfaithful())
 def test_a_documented_exception_is_still_a_real_one(op_id):
     """So a fix cannot leave a stale excuse behind: an op listed as unfaithful has
     to be measurably unfaithful on at least one of the three windows."""
     worst = max(_divergence(op_id, w, freeze=True) for w in _WINDOWS)
     assert worst > _FAITHFUL_TOL, (
-        f"{op_id} now renders every window exactly like the picture — delete its "
-        f"_NOT_WINDOW_FAITHFUL entry so the sweep above covers it.")
+        f"{op_id} now renders every window exactly like the picture — clear its "
+        f"OpSpec.window_unfaithful declaration (so the editor stops warning about "
+        f"it) and delete its _NOT_WINDOW_FAITHFUL entry, and the sweep above "
+        f"covers it from then on.")
 
 
 # --- the sweep covers the registry, not a list -------------------------------
@@ -252,6 +268,25 @@ def test_every_op_in_scope_has_parameters_to_be_swept_with():
 
 def test_the_exception_table_names_real_ops_in_scope():
     assert set(_NOT_WINDOW_FAITHFUL) <= set(_in_scope())
+
+
+def test_the_declared_exceptions_are_the_ones_measured_here():
+    """The registry's declaration and this file's table are one list.
+
+    ``OpSpec.window_unfaithful`` is what the loupe reads to name the ops it
+    cannot vouch for (v0.493.7), and this table is where the numbers behind that
+    claim live. Two homes for one list is how the prose lists this whole file
+    exists about came to be wrong, so: the registry must declare exactly the ops
+    measured unfaithful here, and each declaration must say *why* — an empty
+    string is a flag with no sentence behind it, which the editor would have to
+    render as a bare name.
+    """
+    assert _declared_unfaithful() == sorted(_NOT_WINDOW_FAITHFUL), (
+        "OpSpec.window_unfaithful and _NOT_WINDOW_FAITHFUL disagree about which "
+        "ops a window of the picture cannot reproduce. The sweeps above measure "
+        "the registry's answer; fix whichever of the two is wrong.")
+    for op_id in _declared_unfaithful():
+        assert (get_op(op_id).window_unfaithful or "").strip(), op_id
 
 
 def test_the_ops_outside_the_sweep_are_the_two_the_loupe_handles_itself():

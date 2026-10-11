@@ -2901,6 +2901,11 @@ export interface LoupeInfo {
    *  Optional: a backend that predates it simply doesn't say, and the editor
    *  then stays as quiet as it always was. */
   fixable?: boolean;
+  /** Labels of this recipe's enabled ops whose full-size *window* is not the
+   *  picture — they measure the whole image through a channel the window can't
+   *  carry, so the strength they show there isn't the export's. See
+   *  `windowFidelity.ts`. Absent on a backend older than v0.493.7. */
+  unvouched_ops?: string[];
   proxy_scale: number;
   size_px: number;
   canvas_width: number | null;

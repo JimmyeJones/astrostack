@@ -1852,6 +1852,15 @@ def put_recipe(safe: str, run_id: int, body: dict, request: Request) -> dict:
 # the 512 px window's own brightest pixel. Measured, a star-poor window's
 # reference came back 27x low. Anything added to the editor that measures the
 # whole array belongs in ``EditContext.fit`` before it reaches this control.
+#
+# And where it genuinely cannot go there — the measurement happens inside skimage,
+# or in a stack hot-path module — the op declares
+# :attr:`~seestack.edit.registry.OpSpec.window_unfaithful` and this control *says
+# so*, by name, in :func:`_loupe_unvouched_labels`. Four ops do, and three of them
+# are the subject of three of the four advisories above, which all send the reader
+# here "at the threshold you've set": so until that LEAD is settled, the window
+# was being cited as the authority for the very ops it re-measures. Naming them is
+# the half of the fix that changes nothing about what the editor renders.
 
 #: How big a full-resolution window the loupe reads, in source pixels. Small on
 #: purpose: it is one modest render on the request path, affordable on the owner's
@@ -1901,6 +1910,30 @@ def _loupe_geometry_problem(rec: Recipe) -> str | None:
                     "the full-size view can't line up with the preview. Move the "
                     "crop after the background steps to check it at full size.")
     return None
+
+
+def _loupe_unvouched_labels(rec: Recipe) -> list[str]:
+    """The enabled ops in ``rec`` whose window render is not the picture's, by
+    label, in recipe order.
+
+    One list, read off each op's own
+    :attr:`~seestack.edit.registry.OpSpec.window_unfaithful` declaration rather
+    than written out here, because a prose copy of "which ops measure the whole
+    image" is exactly what was wrong for the whole life of this control
+    (v0.493.5). The labels are the registry's own, so the sentence the editor
+    builds cannot come to call a control something the control is not called.
+
+    Deduped: the Add menu has no duplicate guard, and a name said twice in one
+    sentence reads like a mistake rather than like two ops.
+    """
+    out: list[str] = []
+    for op in rec.ops:
+        if not op.enabled:
+            continue
+        spec = get_op(op.id)
+        if spec is not None and spec.window_unfaithful and spec.label not in out:
+            out.append(spec.label)
+    return out
 
 
 def _loupe_window(full_h: int, full_w: int, rec: Recipe,
@@ -2048,6 +2081,12 @@ class LoupeInfoOut(BaseModel):
     #: ahead of a background pass). False for the two nothing can be done about:
     #: a picture the preview already shows whole, and a run with no image file.
     fixable: bool = False
+    #: The labels of this recipe's enabled ops whose window render is *not* the
+    #: picture's — see :func:`_loupe_unvouched_labels`. Empty for a recipe with
+    #: none, which is Auto's own until a detail op is added, so the honest caveat
+    #: costs the quiet case nothing. Additive: an older frontend ignores it and
+    #: stays exactly as silent as it was.
+    unvouched_ops: list[str] = []
     proxy_scale: float = 1.0
     size_px: int = LOUPE_SIZE_PX
     canvas_width: int | None = None
@@ -2085,7 +2124,8 @@ async def loupe_info(safe: str, run_id: int, request: Request,
         return LoupeInfoOut(available=problem is None, reason=problem,
                             fixable=problem is not None,
                             proxy_scale=float(scale),
-                            canvas_height=shape[0], canvas_width=shape[1])
+                            canvas_height=shape[0], canvas_width=shape[1],
+                            unvouched_ops=_loupe_unvouched_labels(rec))
 
     return await run_in_threadpool(work)
 

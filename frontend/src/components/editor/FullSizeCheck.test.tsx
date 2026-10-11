@@ -124,6 +124,33 @@ describe("FullSizeCheck", () => {
       .toBeInTheDocument();
   });
 
+  it("names the ops whose strength the window re-measures", async () => {
+    // Three of the four advisories that send the reader here are about ops that
+    // measure the whole picture and have to re-measure the window — so the
+    // control answering them has to say which ones, rather than quietly showing a
+    // strength the export will not apply.
+    wrap({ unvouched_ops: ["Noise reduction", "Deconvolution"] });
+    fireEvent.click(await screen.findByTestId("full-size-check-open"));
+    expect(await screen.findByTestId("full-size-check-unvouched")).toHaveTextContent(
+      "Noise reduction and Deconvolution measure your whole picture's");
+  });
+
+  it("takes no line when there is nothing it cannot vouch for", async () => {
+    wrap({ unvouched_ops: [] });
+    fireEvent.click(await screen.findByTestId("full-size-check-open"));
+    await screen.findByTestId("full-size-check-image");
+    expect(screen.queryByTestId("full-size-check-unvouched")).not.toBeInTheDocument();
+  });
+
+  it("stays quiet on a backend that cannot answer which ops those are", async () => {
+    // Additive field: an older container sends nothing and the modal reads exactly
+    // as it did before this existed.
+    wrap();
+    fireEvent.click(await screen.findByTestId("full-size-check-open"));
+    await screen.findByTestId("full-size-check-image");
+    expect(screen.queryByTestId("full-size-check-unvouched")).not.toBeInTheDocument();
+  });
+
   it("says where in the picture it is looking, from the server's own answer", async () => {
     // The click only ever reports a fraction of the *preview*; with a crop in the
     // recipe that maps somewhere the browser cannot compute. The server sends the

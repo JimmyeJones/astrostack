@@ -1,5 +1,33 @@
 # Process notes & QA sweep records
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-yelkmv`) — the editor-dogfood record for v0.493.7, and the one thing that pass cannot see
+
+**The pass: `scripts/agent-dogfood.sh --big --editor`. CLEAN** — three editor drives (field sample, mosaic,
+full-size mosaic), all three "editor drive clean", nothing overflowing, no console errors, no failed
+requests. The full-size drive is the only one whose preview is decimated (canvas 1693×1150, shrunk to 1/2),
+so it is the only one on which the loupe is on the screen at all; it opened the modal, moved the window on a
+navigator click, read "This is the middle of your picture." → "This is the top-left of your picture.", turned
+the split on, and measured **0 px** of spare black beside the window. v0.493.7's new line was **correctly
+absent**: the recipe loaded at that moment is Auto's own, which carries `detail.sharpen` (whose advisory does
+speak) and none of the four ops the window cannot vouch for, so `unvouched_ops` is empty and the modal says
+nothing extra. That is the quiet case, confirmed on a real page rather than argued.
+
+**THE INSTRUMENT GAP, AND IT IS THE CARRY-FORWARD: the modal's paragraph can only ever be read on Auto's own
+recipe, so no dogfood pass can see the sentence it says most.** Two things in `scripts/dogfood_editor.mjs`
+cause it together, and neither is wrong on its own: `driveFullSizeCheck()` is called at line ~325, **before**
+the Add-menu loop begins, and that loop **removes each op right after adding it** (add → settle → read the
+advisories → Remove), so there is no point in the drive at which a detail op is in the recipe *and* the modal
+is open. Re-opening it at the end reaches the same state, because the loop leaves nothing behind and the Auto
+taste-chip section that follows re-reads Auto's recipe anyway. So this pass can report that the line stays
+quiet and can never report what it says — the modal's caveat, and any later sentence put in it, is pinned by
+jsdom alone, which is the same complaint the drive's own header comment makes about the rest of the screen
+("~250 lines of the priority-1 screen whose only coverage is jsdom").
+**The cheap shape, for whoever takes it:** add one op the window cannot vouch for (Noise reduction is in the
+menu's **Common** shortlist, so it needs no "More operations" click), call `driveFullSizeCheck()` again, then
+remove it — about ten lines, and it would have printed v0.493.7's sentence on a real screen instead of
+leaving it to two jsdom tests. The four testids the modal is read through are already a list in that function
+(`caption`, `caveat`, `where`, `split`), so nothing else needs touching.
+
 ## 2026-10-11 (Scout, branch `claude/funny-shannon-g6ttkc`) — rotation sweep (2) mosaic & walk-away per-panel divergence: CLEAN, queue front unchanged
 
 *(Baseline `origin/main` at `385c2b68` (`__version__` 0.493.4). Full suite green — **7608 passed, 4 skipped**

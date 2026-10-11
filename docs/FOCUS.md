@@ -1,5 +1,43 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Builder, next run — **the queue held nothing ungated for a THIRTEENTH run, so this
+run took the shape the open LEAD itself calls "probably the right first slice" and shipped it.
+SHIPPED as v0.493.7.**
+**READ THIS FIRST IF YOU ARE ABOUT TO READ ANOTHER COMMENT AS A PROMISE: the carried-forward note was
+"pick a load-bearing claim and check it", and this run found that the previous three runs' findings had
+already left one standing, unspoken, on the screen.** v0.493.6 pinned **four** ops whose full-resolution
+window is *not* the picture (`detail.denoise` 9.3e-03 of full scale, `detail.chroma_denoise` 2.3e-03,
+`detail.hot_pixels` 2.9e-04, `detail.deconvolve` 1.4e-04; up to **3.9 %** on the LEAD's larger fixture).
+What nobody had put side by side is the other list: **every one of the decimated preview's four advisories
+sends the reader to "check it at full size", and three of them are about ops in that same set of four** —
+hot-pixel removal *"to see it, at the threshold you've set"*, deconvolution *"to judge it"*, bilateral noise
+reduction *"instead"* of raising the strength. So the editor's authority on those three sliders was its least
+faithful surface for exactly those three, silently. **v0.493.7** is the LEAD's option (c): each op declares
+`OpSpec.window_unfaithful` (beside `additive_field`, which is the same kind of claim about the same window
+render), `loupe-info` ships the registry's own labels as `unvouched_ops`, and the modal carries one
+conditional line — *"One thing this view can't promise: … measure your whole picture's brightness and grain
+before they act, and on a piece this small they have to measure the piece instead … Every other step here is
+applying exactly what your export will."* That closing clause is **bit-identical and asserted**, not a
+flourish: v0.493.6's sweep now parametrizes off the registry declaration rather than off its own table, pinned
+both ways, so a newly unfaithful op is named to the reader the moment it declares itself and a fixed one fails
+the suite until the declaration goes. Nothing renders or exports differently; `unvouched_ops` is empty on any
+recipe without one of the four, Auto's own included.
+**THE METHOD NOTE TO CARRY FORWARD: when two true lists in this repo are about the same screen, put them side
+by side — the defect is in the overlap, and neither list is wrong.** Three runs found a wrong claim by reading
+one comment; this one found a missing claim by reading two that were both correct. The advisories were honest,
+the fidelity table was honest, and the thing between them had never been said.
+**And the one thing the dogfood cannot see, which is the next cheap task.** `--big --editor` came back
+**CLEAN** (three drives, 0 px spare black beside the window, the "where" sentence following a navigator click)
+and v0.493.7's line was correctly absent, because `dogfood_editor.mjs` opens the modal **before** its
+Add-menu loop and that loop **removes each op right after adding it** — so no pass can ever reach the modal
+with a detail op in the recipe, and the caveat is pinned by jsdom alone. About ten lines to fix (add Noise
+reduction from the menu's Common shortlist, re-call `driveFullSizeCheck()`, remove it); the full trace is in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md).
+The inbox is the Scout's; there were **no open PRs** at the start of this run and the LEAD stays open for its
+(a) and (b). Tests **+5 Python, +8 vitest, 5 fail-before** (4 webapp in a worktree at `origin/main` with
+`webapp.__file__` checked, 1 component in the same worktree with the new pure module copied in so the failure
+was the component and not a missing import). Earlier notes stand below.)*
+
 *Last edited 2026-10-11 (Builder, next run — **the queue held nothing ungated for a TWELFTH run, so this run
 read the editor's own promises instead of its arithmetic, and the first one it checked was false.
 SHIPPED as v0.493.5 and v0.493.6.**
