@@ -566,6 +566,13 @@ def _deconvolve(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
 register(OpSpec(
     id="detail.hot_pixels", label="Hot-pixel removal", group="detail", stage="linear", glossary="hot-pixel",
     apply=_hot_pixels, proxy_safe=True,
+    window_unfaithful=(
+        "`seestack.bg.hot_pixels._suppress` reads the sky level and the noise "
+        "floor from the whole array, per channel, so a window re-reads both from "
+        "the window — and this op is skipped on the decimated preview, which "
+        "makes the loupe the only place its threshold is ever seen. Not costed: "
+        "the obvious fix reshapes a stack hot-path module for the editor's sake. "
+        "Worst measured 2.9e-04 of full scale (tests/test_edit_window_fidelity.py)."),
     help="Remove stray single bright or dark pixels (stuck sensor pixels) that "
          "calibration missed, without softening real stars.",
     params=[EditParam("sigma", "Threshold (σ)", "float", default=5.0, min=2.0, max=10.0,
@@ -577,6 +584,13 @@ register(OpSpec(
 register(OpSpec(
     id="detail.denoise", label="Noise reduction", group="detail", stage="linear", glossary="noise",
     apply=_denoise, proxy_safe=True, heavy=True,  # skimage restoration — slow on the proxy
+    window_unfaithful=(
+        "the 0.5-99.5th percentile span every method normalises by is a "
+        "whole-image measurement, and freezing it is a partial fix whose sign is "
+        "method-dependent: BayesShrink derives its own per-subband sigma and "
+        "skimage's bilateral builds its colour LUT from the array's own min/max "
+        "(open LEAD, docs/IMPROVEMENTS.md). Worst measured 9.3e-03 of full scale, "
+        "on a star-poor window (tests/test_edit_window_fidelity.py)."),
     help="Smooth away background grain while keeping stars and detail. Tip: use the "
          "'From your image' button to set a strength from your own noise level.",
     params=[
@@ -595,6 +609,12 @@ register(OpSpec(
 register(OpSpec(
     id="detail.chroma_denoise", label="Colour-blotch smoothing", group="detail", glossary="noise",
     stage="any", apply=_chroma_denoise, proxy_safe=True, heavy=True,  # wide filter
+    window_unfaithful=(
+        "`_robust_sky` takes the whole array's luminance median and MAD to decide "
+        "how much smoothing a bright pixel keeps, so a window takes them from the "
+        "window. Not costed: its own docstring argues the number shapes a taper "
+        "rather than gating anything. Worst measured 2.3e-03 of full scale, on a "
+        "bright core (tests/test_edit_window_fidelity.py)."),
     help="Even out the patchy green/magenta colour drift across the sky that "
          "ordinary noise reduction leaves behind. It only touches colour, so "
          "stars, detail and sharpness are untouched.",
@@ -632,6 +652,12 @@ register(OpSpec(
     id="detail.deconvolve", label="Deconvolution", group="detail", stage="linear",
     glossary="deconvolution",
     apply=_deconvolve, proxy_safe=True, heavy=True,  # iterative Richardson-Lucy — slow on the proxy
+    window_unfaithful=(
+        "the same whole-image percentile span as `detail.denoise`, and freezing it "
+        "measured *worse* on two windows of three — ten Richardson-Lucy passes from "
+        "a flat 0.5 guess with clip=False amplify even a 0.02 % difference in it "
+        "(open LEAD, docs/IMPROVEMENTS.md). Worst measured 1.4e-04 of full scale "
+        "(tests/test_edit_window_fidelity.py)."),
     help="Recover sharpness lost to seeing by reversing the star blur. It's a heavy "
          "effect, so the live preview may take a moment to update while it's on.",
     params=[

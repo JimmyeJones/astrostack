@@ -1,5 +1,67 @@
 # Shipped — the record
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-yelkmv`) — the full-size check was cited as the authority for the three ops it re-measures, and said nothing about it
+
+### v0.493.7 — "check it at full size" names the ops whose strength it cannot vouch for: `OpSpec.window_unfaithful`, `loupe-info.unvouched_ops`, `windowFidelity.ts`
+
+*(Python +4 items in `tests/webapp/test_editor_loupe.py` and +1 in `tests/test_edit_window_fidelity.py`;
+frontend +8 vitest. 5 fail-before: the four webapp ones in a `git worktree` at `origin/main` with
+`webapp.__file__` checked to resolve inside it, the component one in the same worktree with the new **pure**
+module copied in so the failure was the component and not a missing import — the trap
+`docs/AGENT-ENVIRONMENT.md` documents.)*
+
+**This is option (c) of the LEAD filed with v0.493.5** — "accept that these ops cannot be made
+window-faithful and say so on the loupe instead … cheap, honest and reaches the user, and is probably the
+right first slice". It is the only one of that LEAD's three shapes that changes nothing about what the
+editor renders or exports, and the one the other two are gated behind a decision for.
+
+**The thing that makes it worth a version rather than a note.** The decimated live preview carries four
+advisories, and *every one of them* sends the reader to this control. Three of them are about ops the window
+**re-measures**: "hot-pixel removal isn't shown on this downscaled preview — Check it at full size to see
+it, **at the threshold you've set**", "deconvolution previews weaker … Check it at full size to judge it",
+and "bilateral noise reduction previews weaker than it exports — don't raise the strength to make the
+preview look clean, Check it at full size instead". So the one surface the editor offers as the authority on
+those three sliders was the surface least faithful on exactly those three, and it had no sentence about it.
+The numbers are v0.493.6's: `detail.denoise` 9.3e-03 of full scale, `detail.chroma_denoise` 2.3e-03,
+`detail.hot_pixels` 2.9e-04, `detail.deconvolve` 1.4e-04 — and from the LEAD's own larger fixture, up to
+**3.9 %** for the wavelet default on a star-poor window.
+
+**It is a declaration on the op, not a fifth list.** `OpSpec.window_unfaithful` (a reason string, beside
+`additive_field`, which is the same kind of claim about the same window render) is set at each of the four
+registration sites in `seestack/edit/ops/detail.py` with its mechanism and its measured worst case.
+`webapp/routers/editor.py::_loupe_unvouched_labels` reads it off the enabled ops of the recipe — in recipe
+order, deduped, because the Add menu has no duplicate guard — and `loupe-info` ships the **registry's own
+labels** in a new `unvouched_ops`, so the sentence cannot come to call a control something the control is
+not called. `frontend/src/components/editor/windowFidelity.ts` builds one line, shown under the modal's lead
+caption on the `full-size-check-unvouched` testid: *"One thing this view can't promise: Noise reduction and
+Deconvolution measure your whole picture's brightness and grain before they act, and on a piece this small
+they have to measure the piece instead — so how strong they look here can differ from your export. Every
+other step here is applying exactly what your export will."*
+
+**That last clause is the half that keeps the control worth opening, and it is asserted, not asserted-ish.**
+Every other op in the loupe's scope renders a frozen window bit-identical to the picture it was cut from —
+`tests/test_edit_window_fidelity.py`'s sweep, which now parametrizes off the **registry** rather than off
+its own table, with `test_the_declared_exceptions_are_the_ones_measured_here` pinning the two together in
+both directions. So a newly unfaithful op fails that file until it declares itself (and is then named to the
+reader automatically), and a fixed one fails it until the declaration goes. Two homes for one list is the
+bug that whole file exists about; this keeps it at one.
+
+**Why it takes no line on the quiet picture.** `unvouched_ops` is empty for any recipe without one of the
+four, which includes Auto's own — the editor's standing complaint is that it is too busy, so the caveat is
+one conditional `xs` line inside a modal that is already open, and nothing at all otherwise. No new card, no
+banner, nothing added to the always-on surface.
+
+**Upgrade-safe, and deliberately inert.** No config, schema, migration, on-disk, default or render change;
+`unvouched_ops` is an **added** response field with an empty default, so an older frontend reads nothing and
+stays exactly as silent as it was, and a newer frontend against an older container does the same. `OpSpec`
+is not persisted and `EditOpOut` is a curated projection, so the new field does not reach the ops schema.
+
+**What is still open, and it is the LEAD's other two shapes:** (a) freeze the percentile span *and* seed
+Richardson-Lucy from the picture's own scale; (b) hand skimage an explicitly bounded range so the window and
+the picture quantise alike. Both need the two-fixture measurement in the LEAD before anything is flipped —
+the sign is method-dependent and bilateral measured **worse** on one of the two fixtures. The entry in
+`docs/IMPROVEMENTS.md` stays open for them.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-49tltx`) — the loupe measured the picture it was cut out of, and now the list of ops that must not is asserted
 
 ### v0.493.6 — 🔵 COVERAGE (the guard that should have caught v0.493.5): the loupe's "which ops measure the whole image?" list is now **asserted**, op by op

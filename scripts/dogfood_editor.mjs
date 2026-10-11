@@ -208,6 +208,10 @@ async function driveFullSizeCheck() {
   // notes: three sentences about one window, written in three files.
   for (const [tag, id] of [
     ["caption", "full-size-check-caption"],
+    // The one thing the window cannot promise, when this recipe has an op it
+    // cannot vouch for (v0.493.7). Part of the same paragraph: the question is
+    // whether the four sentences can be held at once, not whether each exists.
+    ["caveat", "full-size-check-unvouched"],
     ["where", "full-size-check-where"],
     ["split", "full-size-check-split-caption"],
   ]) {
