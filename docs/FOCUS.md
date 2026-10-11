@@ -1,5 +1,42 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Builder, same run, second task — **the method note from the task above, applied
+once more, found a reproduced defect on the mosaic hot path. FILED as ⭐, not fixed. SHIPPED as v0.493.10
+(comment + tests only, no behaviour change).**
+**START HERE NEXT RUN: the ⭐ entry at the top of Bugs is the first ungated item that section has carried in
+fourteen runs.** `analyze_proxy` reads Auto's sky level off
+`_detrended_luminance(_delevelled_luminance(lum, coverage))` — the delevel runs **first**, so the plane its own
+guard judges "does this still look like sky?" on still carries the light-pollution ramp the next call is about
+to remove. A level's spread grows with the ramp while its grain yardstick does not, so at a ramp of only
+**49 % of the sky** across the panel strips **every genuine sky level** crosses `_LEVEL_MAX_SIGMA_RATIO = 3.0`
+and the delevel declines outright: reported sky **0.0838 against 0.0404** for the identical stack as a single
+field (**2.08×**), the stretch goal 7.8 % low, the finished mosaic **7.1 % darker**. That is v0.409.0's own
+defect reachable again through v0.410.0's guard, and refusing to level is **pure loss** — the ramp is
+perpendicular to the strips, so it adds nothing to the panel-to-panel differences (asserted). The fix is the
+**ordering**, not the constant; it changes the `sky` mask and so what Auto emits for every mosaic, which is why
+this run filed it with the before/after table instead of flipping it. **Do not move the constant** — the object
+end of its separation is real (16.4–25.5). `tests/test_auto_level_sigma_margin.py` pins the whole sweep *as it
+behaves today*, so the fix makes that file fail; the entry's table is what to compare against.
+**How it was found, which is the note to keep carrying.** Not by reading the code for bugs — by checking the
+**figures** behind a constant. `_LEVEL_MAX_SIGMA_RATIO`'s comment recorded "0.24–0.36 where the canvas is sky
+carrying an object and 5.1–12.5 where the canvas *is* the object". **Neither reproduces**: 0.89–0.95 and
+16.4–25.5. The conclusion held (3.0 is a separation, ~17× wide) but both margins were misreported in opposite
+directions — the recorded band implies **8.3–12.5×** of headroom above sky where there is **3.15×**, and 1.7×
+below the object population where there is 5.47×. It was the *small* margin, honestly measured, that made the
+gradient worth sweeping at all. So: **v0.493.3/.4 said a constant whose justification is prose has nothing
+checking it; v0.493.6 said the same of a list; v0.493.9 said the same of a figure inside an asserted list.
+This says the figure is where the next bug is hiding — check the numbers, not the reasoning.** Three more
+candidates of the same shape are sitting in `seestack/edit/presets.py` alone (`_LEVEL_MIN_SHARE`'s "unmoved
+for every share from 0.002 to 0.05", the `3.0` star-share separation at 0.24–0.36 vs 5.1–12.5, the
+`classify_target` decimation table at steps 1/2/3/4/6/8).
+**The trap that nearly made this a false report.** A coverage map that does **not** describe the image's own
+panel steps puts two different offsets inside one level, and the guard then *correctly* refuses it — which
+looks exactly like the bug above. The first sweep (2-level and 6-level maps over a 4-panel image) read 3.05 and
+5.10 and was a fixture artefact; matched fixtures read 0.91–0.97 and level fine. **Match the coverage map to
+the image before believing a refusal.**
+Tests **+16** in one new file. Full suite **7695 passed, 7 skipped**. No render, export, config, schema, path,
+default or API shape touched. Earlier notes stand below.)*
+
 *Last edited 2026-10-11 (Builder, next run — **the open LEAD's remaining (a) and (b) are CLOSED, with the
 measurement it asked for. SHIPPED as v0.493.9.**
 **READ THIS FIRST IF YOU ARE ABOUT TO BELIEVE A MEASUREMENT THAT SAYS A FIX MAKES THINGS WORSE.** The LEAD's
