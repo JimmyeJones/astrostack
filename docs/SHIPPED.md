@@ -89,6 +89,17 @@ mechanism, not the tally" hold on all six, unchanged. And a quiet mosaic's own s
 ordinary single-field stack's one-click Auto is **byte-for-byte** what it was: `_delevelled_luminance`'s
 callers pass a coverage map only for a mosaic, and it still declines on the first line without one.
 
+**The `--mosaic --editor` dogfood came back CLEAN on both passes, and its own limit is worth writing down.**
+Both page sweeps "nothing overflowing, no console errors", both editor drives clean across all 21 ops in the
+Add menu, and the mosaic run's health card reads *"The panels of this mosaic evened out — the sky matches
+across the joins, so where the picture looks grainier that is a difference in depth, not a step in the sky."*
+Auto's own summary on the mosaic says *"Measured from your image: a ~0.003 sky before stretching"* and
+*"stretched sky level 0.24"*. **But the bundled 2×2 sample has essentially no sky gradient** (0.003 of sky
+against the 0.05-and-up ramps this fix is about), so the pass confirms there is no regression on a clean
+mosaic and **cannot reach the defect at all** — every figure above comes from the fixtures. A dogfood sample
+carrying a real light-pollution ramp would make this measurable through the live app, and is worth having the
+next time this area is touched.
+
 **Upgrade safety.** No setting, no schema, no path, no API shape, no default. The function is a *measurement*
 used by `analyze_proxy` and `classify_target`; nothing is persisted by it, and an existing saved recipe
 renders exactly as it did. What changes is the `target_bg` (and the preset *suggestion*) a **new** Auto run

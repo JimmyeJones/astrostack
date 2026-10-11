@@ -82,6 +82,39 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **LEAD (Builder 2026-10-11, filed with v0.493.13 — the cost that fix knowingly took, with the shape that
+  gets it back) — the de-levelling's joint fit runs six whole-canvas passes where a strided plane would do,
+  and Auto's mosaic analysis got ~76 % slower.** *(Pillar: performance behind priority 1 — size **S to write,
+  M to be sure of**; severity low, it is seconds on a button the owner presses by hand. Confidence: **measured
+  both ways**, see the figures below; whether the strided estimate is as good is *not* measured, which is why
+  this is a lead.)*
+  **What is measured.** `_delevelled_luminance` now alternates `fit_sky_poly` against the per-level steps
+  (`_LEVEL_FIT_PASSES = 6`), and each pass costs one whole-canvas poly fit plus one sigma-clipped median per
+  level. On a 1500×1500 proxy carrying a gradient and real panel steps: the pass itself **476 → 1771 ms**,
+  `auto_recipe` **1433 → 2522 ms**, and the preset-suggestion endpoint's `classify_target`
+  **1121 → 2011 ms**. Three passes would be 2116 ms for `auto_recipe` and leave 0.0019 of `target_bg` error
+  instead of 0.0008 — a fifth of a slider step instead of a twelfth — so the pass count is a real knob and
+  the measurement for it is in `tests/test_auto_delevel_joint_fit.py`. A canvas whose panels are already
+  level exits after 1–5 passes, so the bill only lands on a mosaic that really has steps.
+  **The shape worth costing, and why it should be nearly free.** Everything the loop produces is tiny: the
+  steps are one scalar per coverage level and the surface is six polynomial coefficients. `fit_sky_poly`
+  already fits *per-tile medians* ("~600 samples instead of millions", its own docstring), and
+  `_robust_stats` already caps its sample at 250 000 strided pixels — so both halves of the alternation are
+  subsampling estimators being handed every pixel six times over. Running the alternation on a **strided**
+  copy of the plane (and the coverage map, and the sky mask) and only evaluating the final surface at full
+  size should cut it by ~stride², with the guard's own `level_sigma` measured on the strided residual exactly
+  as `_robust_stats` would have strided it anyway.
+  **What has to be settled first, and it is not the stride.** `fit_sky_poly` returns an *evaluated surface*,
+  not its coefficients, so a strided fit gives a strided surface and the full-size one cannot be recovered
+  without either exposing the coefficients or re-fitting once at full size on the last pass. Exposing them is
+  the clean move (`eval_poly_surface` is already public and takes them), but it is a change to a primitive
+  three other passes share, so it wants its own before/after on the per-frame flatten and the final-gradient
+  pass rather than being done in passing. **And measure the answer, not the speed:** re-run
+  `tests/test_auto_delevel_joint_fit.py`'s 75-case grid with the strided loop and show the goal errors are
+  unchanged, because a stride that moves them is not an optimisation. Do **not** reach for a smaller
+  `_LEVEL_FIT_PASSES` instead without re-running that grid — the 0.0008 bound is what makes the fix safe on
+  the on-by-default path.
+
 - **LEAD (Builder 2026-10-11, filed with v0.493.11 — the half of that fix that reaches Auto's own output
   and is therefore not a blind Builder change) — Auto writes a recipe whose numbers the editor's own
   sliders have no stop for, and the readout beside each one shows a third number.** *(Pillar: editor +

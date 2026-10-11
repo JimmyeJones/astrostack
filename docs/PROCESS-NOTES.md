@@ -1,5 +1,63 @@
 # Process notes & QA sweep records
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-7pe02n`) — two method notes from fixing the ⭐ de-levelling bug: the yardstick a sweep is scored on is a design decision, and one raster shape is not a measurement
+
+The fix itself is in [`SHIPPED.md`](SHIPPED.md) under v0.493.13. These two are about *how* it was found, and
+both of them were got wrong first.
+
+**1. Ask what one unit of your metric does to the screen, before you trust the sweep.** The first sweep scored
+candidate fixes on the **reported sky level** as a ratio of the identical single-field stack — the yardstick
+the filed entry used and the one `tests/test_auto_delevel_yardstick_candidate.py` asserted. On that metric the
+design that eventually shipped looks **worse** on a quiet 2×2 raster (1.00× → 1.10×), which is exactly the
+kind of number that kills a candidate. Re-scored on `target_bg` — the stretch goal Auto actually emits, on a
+**0.01-step** control — that "10 % regression" is **0.0004 of one slider step** and the real defect is 48 of
+75 cases over *half* a step. The reported sky is a median's position inside a percentile window, so a
+sub-grain residual moves it by 10 % while moving the picture by nothing. **A metric that is not in the units
+the owner can see will rank candidates by the wrong thing, and it will do it convincingly.**
+
+**2. One raster shape is not a measurement, and this subsystem is the proof.** The filed repro, the
+v0.493.12 candidate and the first two shapes tried this run were all measured on the **1×4 strip raster** the
+bug was filed on. The first shape that came back clean there — fit the smooth surface to the *de-stepped*
+plane, which is the literal "separate common from differing" the entry's design note asks for — **regressed a
+2×3 raster by 75 %**, which is the owner's own geometry. The reason is structural rather than bad luck: the
+identification problem here *depends on the raster*. On a 1×N strip a ramp can run perpendicular to every
+panel, so there is a "shape common to all panels" to find; on a 2D raster no linear gradient is common to all
+panels, so the thing the candidate relies on does not exist; and the panel count sets how much of a staircase
+a degree-2 surface can mimic (measured: the first fit absorbs 72 % of it on a 2×2 against ~5 % on a 1×4).
+**AGENTS.md §1 says judge every Auto claim on a tiled mosaic at the owner's scale; the sharper form this run
+earned is "on more than one raster shape".** `tests/test_auto_delevel_joint_fit.py` carries five (1×2, 1×4,
+2×2, 2×3, 3×3) and is the fixture to reach for the next time anything in `seestack/edit/presets.py` touches a
+coverage map.
+
+**A third, smaller one: when two candidate fixes have both been measured and both failed, the next move is
+not a third candidate.** v0.493.10 closed "move the constant" with numbers; v0.493.12 closed "detrend the
+plane first" with numbers. What both failures had in common was named in v0.493.12's own diagnosis — the
+quantity the guard is handed is **under-determined** — and the fix was to make it identifiable (fit the
+surface and the steps against each other) rather than to find a better way of reading an answer that was not
+in the data. Two measured dead ends are a hint about the question, not an invitation to guess again.
+
+**And one dead end closed this run that nobody had written down.** `bg.coverage_leveling` — the op whose
+behaviour `_delevelled_luminance` exists to mirror — judges a level against **3× the canvas's retained sky
+spread**, not against the grain, and that bar *rises* with a gradient. So the op levels a mosaic the
+measurement refuses, which reads like exactly the divergence to close ("make the measurement mirror the op",
+which is the function's own stated design principle). Measured, it is the worst of the four shapes tried:
+**0.0844** of `target_bg` error, the entire 0.14–0.24 range of the knob, because levelling by a
+gradient-contaminated step flattens a smooth ramp into a sawtooth the next pass cannot remove. v0.410.0's
+choice of the grain over the canvas spread is vindicated with numbers, and the alternative is now asserted in
+`tests/test_auto_delevel_joint_fit.py` so it cannot be re-proposed on the strength of that principle.
+
+**A rule disagreement, recorded because AGENTS.md §2 says to.** The harness hands every session an
+attribution block whose trailer is `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>` — and AGENTS.md §8
+says to end a commit with the repo's trailer while **§8 and §10 both forbid putting a model identifier in a
+commit**. The repo's own 1,100-odd commits carry the model-named form, so the convention and the rule have
+been in conflict for a while and nobody wrote it down. AGENTS.md wins (its own §0 says so, and the harness
+block itself defers to repo instructions), so v0.493.13 is committed with
+`Co-Authored-By: Claude <noreply@anthropic.com>` — which is also exactly the git author identity
+`scripts/agent-setup.sh` pins, so it is the repo's trailer with the forbidden part removed. **If the owner
+would rather have the model in the trailer, the fix is to change AGENTS.md §8/§10, not to keep breaking
+it silently.** Nothing about the owner's email changed: §10's hard rule there is untouched, and the pre-push
+identity guard passed.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-4dlv4a`) — an assertion that reads the file it is checking is not a check; the sweep for a second instance, and where the exposure actually is
 
 **The question that found v0.493.11 in about a minute was not "is this number right?" but "what could change

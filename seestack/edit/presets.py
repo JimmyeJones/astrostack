@@ -198,8 +198,17 @@ _LEVEL_OBJECT_SIGMA = 2.0
 #: identical single field — v0.409.0's own defect, switched back on by a
 #: gradient. "Flat" is simply not a question you can ask of a plane that still
 #: carries a gradient; with the smooth shape fitted out first (see
-#: :func:`_delevelled_luminance`) the two populations this constant separates are
-#: unchanged and the gradient no longer walks sky into the object end.
+#: :func:`_delevelled_luminance`) the gradient no longer walks sky into the object
+#: end at all — the ratio is flat across a factor of ten of ramp. **The sky end of
+#: the separation is where it was (0.89-0.95 -> 0.90-0.98) and the object end came
+#: down ~2.3x** (16.4-25.5 -> 6.4-11.3 on a canvas an object fills), because it is
+#: measured against a residual now rather than against the object's own
+#: unexplained profile. So the separation is ~3.5x rather than ~17x, which is a
+#: smaller loss than it looks and is measured rather than argued: the step this
+#: pass subtracts is a residual from the same surface, so levelling a canvas the
+#: object fills no longer subtracts the object's own level, and every amplitude
+#: that newly levels measures a *lower* error in what Auto emits than refusing it
+#: did (``test_the_window_the_guard_reopened_is_harmless``).
 _LEVEL_MAX_SIGMA_RATIO = 3.0
 
 #: How many times :func:`_delevelled_luminance` re-fits the smooth sky surface
@@ -209,11 +218,25 @@ _LEVEL_MAX_SIGMA_RATIO = 3.0
 #: and each pass hands the fit a flatter staircase and recovers more of it. It is
 #: a geometric contraction, and the residual it leaves is measured in
 #: ``tests/test_auto_delevel_joint_fit.py`` as the error in the ``target_bg`` Auto
-#: actually emits: on a quiet 2x3 raster **0.0061 at one pass, 0.0019 at three,
-#: 0.0008 at six** against a 0.01-step control. Six is where every geometry
-#: measured sits under a tenth of a slider step; the loop also stops early once
-#: nothing moves (:data:`_LEVEL_FIT_SETTLED`), so a canvas with no smooth shape to
-#: disentangle pays for two.
+#: actually emits: on a quiet 2x3 raster **0.0061 at one pass, 0.0030 at two,
+#: 0.0019 at three, 0.0008 at six** against a 0.01-step control. Six is where every
+#: geometry measured sits under a tenth of a slider step.
+#:
+#: **It is not free, and the number is this.** Each pass costs one
+#: :func:`~seestack.bg.sky_poly.fit_sky_poly` plus one sigma-clipped median per
+#: level, so on a 1500x1500 proxy carrying a gradient and real panel steps
+#: ``auto_recipe`` measures **1433 ms -> 2522 ms** (three passes would be 2116 ms)
+#: and the preset-suggestion endpoint's ``classify_target`` 1121 -> 2011 ms. That
+#: is once per Auto analysis, not per render, and it buys removing an error of up
+#: to two whole slider steps from 48 of 75 measured cases — but the cheap way to
+#: get it back is filed in ``docs/IMPROVEMENTS.md`` (run the alternation on a
+#: strided plane: the steps are scalars and the surface is six coefficients, so
+#: neither needs every pixel).
+#:
+#: The loop also stops early once nothing moves
+#: (:data:`_LEVEL_FIT_SETTLED`): measured over five raster geometries, a canvas
+#: whose panels are **already level** exits after 1-5 passes, while one with steps
+#: to recover runs all six.
 _LEVEL_FIT_PASSES = 6
 
 #: The alternation stops once no level's step moved by more than this share of the
@@ -273,19 +296,31 @@ def _delevelled_luminance(lum: np.ndarray,
     Measured as the error in the ``target_bg`` Auto emits, against the identical
     stack laid out as a single field, over five raster geometries x fifteen scenes
     x four seeds: the worst case **0.0229 -> 0.0137** and the cases over half a
-    slider step **48 of 75 -> 8 of 75** — and all eight remaining are a canvas the
+    slider step **48 of 75 -> 7 of 75** — and all seven remaining are a canvas the
     object fills, where the guard refuses and this function does nothing at all, as
-    before. The whole sweep is in ``tests/test_auto_delevel_joint_fit.py``.
+    before. No case is worse than it was by more than **0.0008** of the goal, and
+    only ever on a mosaic with no smooth shape, where the old arithmetic was exact.
+    The whole sweep is in ``tests/test_auto_delevel_joint_fit.py``.
 
     Only the *shape* is subtracted — the canvas's own robust median is put back —
     so, like the detrend beside it, this changes how flat the plane is and never
     how bright it is.
 
+    One consequence worth stating, because it moves a claim: the part of a
+    staircase the surface explains is deliberately **left in the surface**, so this
+    pass no longer puts the panels on one level *by itself* — it leaves ~20 % of a
+    0.024 staircase behind, and :func:`_detrended_luminance` removes exactly that
+    part on the next line. Both callers compose the two, so the property to hold it
+    to is the composition's, and that one is stronger than the pass alone ever
+    made: a panel spread of 0.00052 against 0.00075 before on a quiet mosaic, and
+    0.00052 against **0.02279** once the same canvas carries a ramp.
+
     Declines, returning ``lum`` unchanged, whenever there is nothing it can
     honestly do: no coverage map, a map that doesn't match the luminance, fewer
     than two levels big enough to measure, or a canvas with too little sky to fit
-    a surface through at all. Its callers pass a map **only for a mosaic** — the runs whose recipe carries the leveling pass — so a single-field
-    stack's Auto never reaches here at all.
+    a surface through at all. Its callers pass a map **only for a mosaic** — the
+    runs whose recipe carries the leveling pass — so a single-field stack's Auto
+    never reaches here at all.
     """
     if coverage is None:
         return lum
