@@ -558,6 +558,7 @@ from seestack.session_recap import (  # noqa: E402
     FWHM_DRIFT_ABS_PX,
     FWHM_DRIFT_RATIO,
     NIGHT_HAZY_CLOUD_FRACTION,
+    NIGHT_HAZY_MIN_FRAMES,
     _night_verdict,
     night_frame_ids,
     nights_breakdown,
@@ -839,20 +840,71 @@ def test_a_nights_baseline_never_includes_the_night_being_judged(tmp_path):
 
 
 def test_night_verdict_pure_helper():
-    # Hazy overrides everything once the cloud fraction clears the floor.
-    assert _night_verdict(3.0, 3.0, NIGHT_HAZY_CLOUD_FRACTION) == "hazy"
-    assert _night_verdict(None, None, 1.0) == "hazy"
+    # Hazy overrides everything once the cloud fraction clears the floor — on a
+    # night that recorded enough subs for a share of them to say anything.
+    assert _night_verdict(3.0, 3.0, NIGHT_HAZY_CLOUD_FRACTION, 10) == "hazy"
+    assert _night_verdict(None, None, 1.0, 10) == "hazy"
+    # The denominator floor, both sides of it: one rejection out of two subs is
+    # half the night and still not a statement about the weather.
+    assert _night_verdict(None, None, 0.5, 2) == ""
+    assert _night_verdict(None, None, 1.0, NIGHT_HAZY_MIN_FRAMES - 1) == ""
+    assert _night_verdict(None, None, 1.0, NIGHT_HAZY_MIN_FRAMES) == "hazy"
     # No median and no cloud problem → no verdict.
-    assert _night_verdict(None, 3.0, 0.0) == ""
+    assert _night_verdict(None, 3.0, 0.0, 10) == ""
     # Soft only when BOTH the relative and absolute floors are cleared.
     best = 3.0
     soft = best * FWHM_DRIFT_RATIO + 0.01
     assert soft - best >= FWHM_DRIFT_ABS_PX
-    assert _night_verdict(soft, best, 0.0) == "soft"
+    assert _night_verdict(soft, best, 0.0, 10) == "soft"
     # Just under either floor stays sharp.
-    assert _night_verdict(best + FWHM_DRIFT_ABS_PX * 0.5, best, 0.0) == "sharp"
+    assert _night_verdict(best + FWHM_DRIFT_ABS_PX * 0.5, best, 0.0, 10) == "sharp"
     # The best night itself is sharp, never soft.
-    assert _night_verdict(best, best, 0.0) == "sharp"
+    assert _night_verdict(best, best, 0.0, 10) == "sharp"
+
+
+def test_a_two_sub_night_is_not_graded_hazy_by_one_of_its_two_subs(tmp_path):
+    """The hazy verdict is a *share* — "40 % of this night was lost to cloud" —
+    and a share needs a denominator big enough to mean something. It had none,
+    so on a night of two subs one transparency rejection read as 50 % cloud and
+    graded the whole night "hazy": a weather verdict from a single frame, sitting
+    beside the one-click "set this night aside" button and outranking every other
+    reading of the night (hazy takes precedence over sharp, and bars the "best
+    night" nod).
+
+    The sharpness half of the same verdict has always refused to speak under
+    ``SESSION_QUALITY_MIN_FRAMES`` measured subs. This is that floor's other
+    half, and the shape it matters on is the owner's: a mosaic revisited across
+    many nights records a handful of subs per visit (see ``--dithered``), so the
+    short night is the ordinary night rather than the odd one.
+
+    Nothing is hidden by the silence — the row still carries its own
+    ``reject_buckets``, which is where the fact belongs.
+    """
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        night = datetime(2026, 8, 1, 21, 0)
+        proj.add_frame(_frame(night, fwhm_px=3.0))
+        proj.add_frame(_frame(night + timedelta(minutes=10), accept=False,
+                              reject_reason="transparency", fwhm_px=3.0))
+        row = nights_breakdown(proj)[0]
+        assert row.n_frames == 2
+        assert row.reject_buckets == {"cloudy": 1}   # the fact is still there…
+        assert row.verdict == ""                     # …and no weather verdict
+
+        # A night that did record enough subs for the share to say something is
+        # still graded hazy, on the very same rejection *rate*.
+        later = night + timedelta(days=1)
+        kept = NIGHT_HAZY_MIN_FRAMES // 2
+        for i in range(NIGHT_HAZY_MIN_FRAMES):
+            proj.add_frame(_frame(
+                later + timedelta(minutes=10 * i), fwhm_px=3.0,
+                accept=i < kept,
+                reject_reason=None if i < kept else "transparency"))
+        newest = nights_breakdown(proj)[0]
+        assert newest.n_frames == NIGHT_HAZY_MIN_FRAMES
+        assert newest.verdict == "hazy"
+    finally:
+        proj.close()
 
 
 # --- Focus & sharpness through the night (focus_trend) ----------------------
@@ -1708,6 +1760,85 @@ def test_early_stop_ignores_nights_from_a_different_season():
            for d in range(4)]
     recent = [_night_frames(datetime(2026, 8, 1), start_h=21, end_h=22.0)]
     assert early_stop(_ends(old + recent)) is None
+
+
+def test_early_stop_is_silent_when_only_the_sky_moved():
+    """The yardstick is a clock time, and the sky does not keep clock time: a
+    sidereal day is four minutes short of a solar one, so every object comes
+    round that much earlier each night and a target shot until it got low
+    *stops* earlier each night with nothing wrong at all.
+
+    Across a month that drift is ~118 minutes, past ``EARLY_STOP_MIN_MINUTES``
+    on its own — so with the old 30-day window a target simply **returned to**
+    after three or four weeks was told it had stopped an hour and three quarters
+    early. This fixture is that night and nothing else: four nights of habit,
+    then a return 26 nights later stopping at *exactly* the time the sky itself
+    moved the stop to.
+
+    The stamps are built directly rather than through ``_night_frames`` because
+    the point of the fixture is a stop time to the minute, and a 10-minute
+    cadence cannot land on one.
+    """
+    from seestack.session_recap import SIDEREAL_DRIFT_MIN_PER_DAY, early_stop
+
+    last_prior = datetime(2026, 8, 5, 2, 0)
+    priors = [last_prior - timedelta(days=d) for d in (3, 2, 1, 0)]
+    gap = 26
+    drifted = (last_prior + timedelta(days=gap)
+               - timedelta(minutes=SIDEREAL_DRIFT_MIN_PER_DAY * gap))
+    stamps = [p.isoformat() for p in priors] + [drifted.isoformat()]
+    assert early_stop(stamps) is None
+
+
+def test_the_early_stop_window_cannot_let_the_skys_own_drift_reach_the_bar():
+    """The window and the bar are one decision, not two: however old the oldest
+    night the median may be taken over, the drift it carries has to stay a
+    minority of what the note is willing to call a stall — or the note can be
+    made to fire by the calendar, which is what the test above measures.
+
+    Asserted rather than left in a comment because the comment was *wrong*: it
+    priced the drift of darkness (~1 h a month) and not the drift of the target
+    itself (~2 h a month, twice as fast and always in the firing direction).
+    Moving either constant on its own now fails here.
+    """
+    from seestack.session_recap import (
+        EARLY_STOP_LOOKBACK_DAYS,
+        EARLY_STOP_MIN_MINUTES,
+        SIDEREAL_DRIFT_MIN_PER_DAY,
+    )
+
+    drift = EARLY_STOP_LOOKBACK_DAYS * SIDEREAL_DRIFT_MIN_PER_DAY
+    assert drift < EARLY_STOP_MIN_MINUTES, (
+        f"the sky alone moves a stop by {drift:.0f} min across the window, "
+        f"which the {EARLY_STOP_MIN_MINUTES:.0f} min bar reads as a stall")
+    # …and with room left over for what that bar is really about: how much a
+    # person's own stopping time wanders from one night to the next.
+    assert drift <= 0.7 * EARLY_STOP_MIN_MINUTES
+
+
+def test_early_stop_judges_a_target_shot_inside_the_window_and_not_one_outside():
+    """Both edges of the window in one place. A real stall against nights that
+    are still recent is exactly what the note is for, and the shortening does
+    not stand it down: here the drift is ~45 minutes of a 225-minute shortfall,
+    a minority of the evidence, which is the property the window buys.
+
+    The same stall against nights three weeks old says nothing — that is what
+    the shorter window costs, and it is deliberate: with no run inside the
+    fortnight there is no recent habit to judge against, and nearly half of the
+    225 minutes would be the sky's own clock rather than a stall.
+    """
+    from seestack.session_recap import early_stop
+
+    tonight = datetime(2026, 8, 20, 22, 15)      # stopped at 22:15
+    recent = [datetime(2026, 8, d, 2, 0) for d in (7, 8, 9, 10)]
+    stop = early_stop([p.isoformat() for p in recent] + [tonight.isoformat()])
+    assert stop is not None
+    assert stop.n_nights_compared == 4
+    assert stop.minutes_earlier == 225.0
+
+    stale = [p - timedelta(days=10) for p in recent]
+    assert early_stop([p.isoformat() for p in stale]
+                      + [tonight.isoformat()]) is None
 
 
 def test_early_stop_holds_its_tongue_just_under_the_threshold():

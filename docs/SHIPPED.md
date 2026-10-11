@@ -1,5 +1,173 @@
 # Shipped — the record
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-jo7j7n`) — the carry-forward sentence paid twice: a window priced against the wrong drift, and a share with no denominator
+
+### v0.493.4 — 🟡 TRUST / friendliness (PRIORITY 2–3): a night of two subs is no longer graded "hazy" because one of them was set aside
+
+*(`seestack/session_recap.py` — `NIGHT_HAZY_MIN_FRAMES`, `_night_verdict`'s hazy branch and its one call
+site in `nights_breakdown`.)*
+
+**Found by the same sweep as v0.493.3, in the same function, and it is the same shape of mistake.** The
+per-night verdict has two halves and only one of them had a floor. Sharpness refuses to speak under
+`SESSION_QUALITY_MIN_FRAMES` (4) measured subs — *"a one- or two-frame median is the frame, not the night"*.
+Haze is a **share**: `cloud_fraction = buckets["cloudy"] / len(rows)`, graded against
+`NIGHT_HAZY_CLOUD_FRACTION = 0.4`, and it had no denominator floor at all.
+
+**Reproduced through `nights_breakdown` on a real `Project`** (three ordinary nights, then a night of two
+subs with one `transparency` rejection):
+
+```
+2026-08-04  n_frames=2 n_kept=1 buckets={'cloudy': 1} verdict='hazy'   median_fwhm=None
+2026-08-03  n_frames=4 n_kept=4 buckets={}            verdict='sharp'  median_fwhm=3.0
+2026-08-02  n_frames=4 n_kept=4 buckets={}            verdict='sharp'  median_fwhm=3.0
+2026-08-01  n_frames=4 n_kept=4 buckets={}            verdict='sharp'  median_fwhm=3.0
+```
+
+One frame, and the night is weather. It is not a harmless word either: `hazy` **takes precedence over every
+other reading** of the night (the function returns before it looks at sharpness at all), it bars the "best
+night" nod by name (`verdict == "sharp"` is a condition of `is_best`), and it renders on the Nights-card row
+that carries the one-click *"set this night aside"* button — so the app is grading a night unusable on the
+strength of a single rejected sub, right next to the control that discards it.
+
+**Why this is the owner's shape and not a corner case.** A mosaic revisited across many nights records a
+handful of subs per visit: the app's own `--dithered` sample is 6 a night across eleven nights, and
+v0.493.1's whole subject was a per-night floor being met eleven times over on exactly that shape. At six
+subs a night, **three** cloud rejections grade the night — at two subs, one does.
+
+**The fix.** `NIGHT_HAZY_MIN_FRAMES = SESSION_QUALITY_MIN_FRAMES`, and `_night_verdict` takes `n_frames` —
+the denominator `cloud_fraction` was computed over — so the gate is `n_frames >= NIGHT_HAZY_MIN_FRAMES and
+cloud_fraction >= NIGHT_HAZY_CLOUD_FRACTION`. Deliberately *the same number* as the sharpness floor: a
+different population (every sub, not only the measured ones) but the same question, so the two halves of one
+verdict cannot come to different conclusions about how little data is too little. The argument is not
+aliased silently — the constant says it in full.
+
+**Nothing is hidden.** The row keeps its `n_set_aside` count and its own `reject_buckets`, which is where
+"one sub went to cloud" belongs; what is withheld is only the one-word judgement about the night. The
+parameter is **required, not defaulted**: a defaulted `n_frames` would have let any later caller re-acquire
+the bug by not knowing to pass it, which is the trap `recent_night_pace_s`'s `night_of` has a whole guard
+test for.
+
+**Upgrade-safe (§9):** engine-only, read-only, derived at request time from rows already stored. No config,
+settings default, schema, migration or on-disk change; `NightSummary.verdict` keeps its type and its four
+values, and the API shape is untouched. Strictly quieter: a night that was graded `hazy` on ≥ 4 subs still
+is, bit for bit.
+
+**Tests +1, and one existing test made stronger.** The new
+`test_a_two_sub_night_is_not_graded_hazy_by_one_of_its_two_subs` drives `nights_breakdown` end to end and
+fails before (`verdict == 'hazy'`), then asserts that a night which *did* record four subs is still graded
+hazy on the identical rejection **rate**, so the fix cannot be read as a stand-down.
+`test_night_verdict_pure_helper` gains the denominator at its six call sites plus three new cases either
+side of the floor — the signature change is what makes every caller state the population it is judging.
+
+**One existing test's fixture was extended, deliberately, and it is the measurement of the blast radius.**
+`tests/webapp/test_target_nights.py::test_nights_serialises_verdict_and_reject_buckets` stamped **2 of 3**
+subs cloudy and asserted `"hazy"` on the wire — a 3-sub night, i.e. exactly the shape now below the floor.
+Its subject is the *serialisation*, not the sample size, so it is handed a fourth sub on the same night
+(`_extra_sub_on_the_same_night`) and keeps asserting `"hazy"` at a 50 % share, with `n_frames == 4` now
+pinned too. Nothing was loosened: the assertion set grew. That one test is also the whole blast radius —
+it is the only place in the suite that asserted `"hazy"` on fewer than four subs (`hazy_verdict` in
+`stackhealth.py`, which `test_transparency_mosaic.py` and `test_gallery.py` exercise, is a different
+function about a stack run and is untouched).
+
+### v0.493.3 — 🔴 TRUST / friendliness (PRIORITY 2–3): "it stopped early — worth a look" stops firing on a target the owner simply came back to after three or four weeks
+
+*(`seestack/session_recap.py` — `SIDEREAL_DRIFT_MIN_PER_DAY`, `EARLY_STOP_LOOKBACK_DAYS`
+30 → 14 days, and the comment on `EARLY_STOP_MAX_PRIOR_NIGHTS` that had the arithmetic backwards.)*
+
+**Where it came from.** The previous run's carry-forward note, verbatim: *"a walk-away threshold calibrated
+PER NIGHT is a threshold the mosaic owner meets eleven times more often … every per-night surface in the app
+is worth re-reading on a many-night target."* This is the second hit from that one sentence (v0.493.1 was
+the first) and it needed no detector either — the bug is in a constant's own comment.
+
+**What the card says, and why it is wrong.** `early_stop` answers *"did the Seestar stop before you meant it
+to?"* for an owner who was asleep, and it is deliberately judged against the target's **own** recent stop
+times rather than a clock, so a night ended on purpose at the usual hour never trips it. The Dashboard's
+"Last night" card and the newest row of the Target page's Nights card both read it:
+
+```
+M 42 stopped getting subs at 00:17 — about 1 h 45 m earlier than its last 4 nights.
+Worth a look if you didn't stop on purpose.
+```
+
+The yardstick is a **clock time**, and the sky does not keep clock time. A sidereal day is 23 h 56 m 04 s,
+so every object comes round about **3.94 minutes earlier each solar night** — 24 h over a year. A target
+shot until it got low therefore *stops* that much earlier tonight than last night, with nothing wrong and
+nobody doing anything differently. Across the 30-day window the note was comparing over, that is **118
+minutes** — past the 90-minute bar on its own.
+
+**And the comment that sized the window had priced the wrong drift.** `EARLY_STOP_MAX_PRIOR_NIGHTS` said, in
+as many words: *"Recent ones only, because the yardstick is a clock time and darkness itself moves with the
+season: over a month it shifts by roughly an hour at mid-latitudes, which `EARLY_STOP_MIN_MINUTES`
+deliberately clears."* Darkness does move about an hour a month. The **target** moves two hours a month —
+twice as fast, and always in the direction that fires the note. The window was sized against the slower of
+the two drifts and the faster one walks straight through it.
+
+**Measured on the real function**, not reasoned about: four nights of habit ending at 02:00, then a return
+*n* nights later stopping at exactly the time the sky itself moved the stop to — the same construction
+that is now the regression test:
+
+| return after | natural stop | what the card said |
+|---|---|---|
+| 7 nights | 01:32 | silent |
+| 14 nights | 01:04 | silent |
+| 21 nights | 00:37 | silent |
+| **23 nights** | 00:29 | **"90.7 min earlier than its last 4 nights"** |
+| **26 nights** | 00:17 | **"102.5 min earlier than its last 4 nights"** |
+| 29 nights | 00:05 | silent |
+
+So the false positive is a **six-night-wide band**, bounded below by the bar (90 ÷ 3.94 ≈ 22.9 days of drift)
+and above by the window itself (past ~28 nights the four priors fall out of the 30-day lookback, only two
+remain, and `EARLY_STOP_MIN_PRIOR_NIGHTS` silences it). "A target returned to after three or four weeks" is
+not an edge case for this owner: he is a heavy mosaic user with **26 mosaics** and many targets across many
+nights, so a target getting a run of nights and then being picked up again a few weeks later is the ordinary
+shape of his library — and this note is one of the few things that speaks to him unprompted in the morning.
+
+**The fix is the window, and it is derived rather than picked.** `EARLY_STOP_LOOKBACK_DAYS` 30 → **14**, with
+`SIDEREAL_DRIFT_MIN_PER_DAY` named beside it and the inequality that ties them **asserted by a test** rather
+than argued in a comment (which is how the wrong arithmetic survived in the first place): across a fortnight
+the drift comes to ~55 minutes, 61 % of the bar, leaving ~35 minutes for the ordinary scatter of when
+somebody actually stops — which is the other thing that bar has to clear, and the one it was written for. At
+no point inside a 14-day window can the drift alone reach 90 minutes, so the band above cannot exist at any
+pattern of nights.
+
+**What it costs, stated plainly and pinned by a test.** A target with no run inside the fortnight is no
+longer judged at all — so a *genuine* stall on a target last shot three weeks ago now goes unmentioned,
+where before it would have been reported (with up to half the quoted shortfall being the sky). That is the
+right answer by this module's own stated preference — *"the cost of a wrong 'you lost half a night' in the
+morning is much higher than the cost of missing a marginal one"*, and *"silence is the default on purpose"* —
+and the live `livesession` "capture seems to have gone quiet" note still covers the night as it happens.
+
+**The other lever, measured and not taken (read this before re-opening it).** The richer fix is to *correct*
+the drift — subtract `SIDEREAL_DRIFT_MIN_PER_DAY × elapsed_days` from each prior's shortfall — which keeps
+the full 30-day reach and removes the artefact exactly. It was costed and declined for this run: the
+correction moves **six pinned numbers** in existing tests (`210.0`, `240.0`, `450.0`, `570.0`, `150.0`,
+`570.0`), and it leaves `test_early_stop_holds_its_tongue_just_under_the_threshold` sitting **0.4 minutes**
+above the bar instead of 10 — a knife-edge that any later tweak would flip. The rendered sentence would not
+change in any of them (`roughDuration` buckets to 15 min below 2 h and 30 min above, and 210 → 200.7 is still
+"3.5 h"), so if a future run wants the reach back, that is the shape and those are the numbers to expect.
+
+**Upgrade-safe (§9):** one module constant and its documentation. No config field, no settings default, no
+schema or migration, no on-disk layout, no endpoint or response shape — `EarlyStopOut` is unchanged and both
+surfaces read it as before. The change is strictly *quieter*: it can only ever withhold a note, never invent
+one, so an install that upgrades mid-week cannot be told anything new about a night it already saw.
+
+**Tests +3** in `tests/test_session_recap.py`, all three failing before (verified by reverting the constant
+in a scratch copy):
+
+* `test_early_stop_is_silent_when_only_the_sky_moved` — the 26-night return at the drifted stop. Fails
+  before with a 102.5-minute verdict.
+* `test_the_early_stop_window_cannot_let_the_skys_own_drift_reach_the_bar` — the inequality, so moving
+  either constant alone fails here. Fails before at 118 min against a 90 min bar.
+* `test_early_stop_judges_a_target_shot_inside_the_window_and_not_one_outside` — both edges in one place: a
+  real 225-minute stall against nights 11–14 days old still fires (and the drift is a minority of it, ~45 of
+  225), while the same stall against nights three weeks old is deliberately silent. The second half fails
+  before.
+
+Nothing weakened, skipped or loosened; the thirteen existing tests in `tests/test_session_recap.py` that
+name `early_stop`, and the three in `tests/webapp/`, pass unchanged — every one of their fixtures spans five
+days or less, where the drift is under 16 minutes and nowhere near the bar. That is also the control for the
+fail-before: under the reverted constant those thirteen still pass and only the three new ones fail.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-zsys8j`) — a whole-journey dogfood, and the two things it said
 
 ### v0.493.2 — 🟡 FRIENDLINESS (PRIORITY 3): the Storage page's share-of-disk badge stops having its own number clipped on every phone-width screen
