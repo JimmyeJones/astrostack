@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from seestack.edit.registry import snap_to_param
+
 #: The display-space grey the midtone (gamma) suggestion aims the image's typical
 #: tone at, after the black/white points are applied. Exposed so the webapp can
 #: tell the user *what goal* the suggested gamma solves for ("lands the sky at
@@ -39,17 +41,23 @@ def suggest_levels_points(
     when there are too few finite pixels or the two points would collapse to a
     near-empty range (``white - black < min_gap``), which the op treats as
     identity anyway.
+
+    Both points come back as the op's own sliders can hold them — clamped to the
+    ``EditParam``'s range and snapped to its step
+    (:func:`seestack.edit.registry.snap_to_param`) — and the ``min_gap`` test is
+    applied to the *snapped* pair, because the gap that matters is the one the op
+    will actually be given.
     """
     finite = rgb[np.isfinite(rgb)]
     if finite.size < 100:
         return None
-    black = float(np.percentile(finite, lo_pct))
-    white = float(np.percentile(finite, hi_pct))
-    black = min(max(black, 0.0), 1.0)
-    white = min(max(white, 0.0), 1.0)
+    black = float(snap_to_param("tone.levels", "black",
+                                float(np.percentile(finite, lo_pct))))
+    white = float(snap_to_param("tone.levels", "white",
+                                float(np.percentile(finite, hi_pct))))
     if white - black < min_gap:
         return None
-    return round(black, 3), round(white, 3)
+    return black, white
 
 
 def suggest_levels_gamma(
@@ -75,7 +83,10 @@ def suggest_levels_gamma(
     (leave gamma at 1.0) when there aren't enough finite pixels, the range is
     degenerate, the median doesn't sit strictly between black and white, or the
     resulting lift is too small to matter (``< min_lift``). NaN = uncovered and is
-    excluded. The result is clamped to the op's ``[0.1, 5.0]`` range.
+    excluded. The result comes back as the op's own slider can hold it — clamped
+    to the ``EditParam``'s range and snapped to its step
+    (:func:`seestack.edit.registry.snap_to_param`), read off the declaration
+    rather than from a copy of the bounds here.
     """
     rng = white - black
     if rng <= 0:
@@ -92,4 +103,11 @@ def suggest_levels_gamma(
     gamma = np.log(x_m) / np.log(target)
     if not np.isfinite(gamma) or gamma < min_lift:
         return None
-    return round(float(min(max(gamma, 0.1), 5.0)), 3)
+    snapped = float(snap_to_param("tone.levels", "gamma", gamma))
+    # Snapping can only move the lift by half a step, but a caller asking for a
+    # ``min_lift`` nearer 1.0 than that could have it land back on the identity —
+    # which is "leave gamma alone", i.e. no suggestion, not a button that does
+    # nothing.
+    if snapped <= 1.0:
+        return None
+    return snapped

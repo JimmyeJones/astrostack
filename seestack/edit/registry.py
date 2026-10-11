@@ -22,7 +22,9 @@ when the recipe has none).
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any, Callable, Literal
 
 import numpy as np
@@ -435,6 +437,97 @@ def _ensure_loaded() -> None:
     if not _loaded:
         _loaded = True
         from seestack.edit import ops  # noqa: F401  (import side effects register ops)
+
+
+# ---- putting a measured number *on* a control ------------------------------
+#
+# Several surfaces measure a number from the picture and then offer it as a value
+# for one op's parameter: the "From your image" / "From your stars" buttons, the
+# blown-core solver, the denoise estimate. Such a number has to be a number the
+# control can actually hold. A value off the parameter's own step grid cannot be
+# reached by dragging its slider, and the editor renders the readout beside that
+# slider at two decimals — so a suggestion of ``0.077`` on a 0.01-step control
+# puts "black 0.077" on the button and ``0.08`` in the box next to it, two
+# numbers for one picture.
+#
+# The bounds and the step are declared once, on the op's :class:`EditParam`.
+# These helpers are the only readers, so a module that has to land a value on a
+# control never keeps its own copy of that control's range. Five modules did keep
+# one, as prose — "kept in step with the ``EditParam`` in
+# ``seestack/edit/ops/detail.py``" — with nothing checking any of them, and the
+# one test that checked a grid at all checked a module against its own copy.
+# ``tests/test_edit_suggestion_grid.py`` is the assertion those comments were
+# standing in for.
+
+
+def param_spec(op_id: str, key: str) -> EditParam:
+    """The :class:`EditParam` ``op_id`` declares for ``key``.
+
+    Raises :class:`KeyError` for an unknown op or parameter: a caller naming a
+    control that does not exist is a bug to see, not a value to fall back from.
+    """
+    spec = get_op(op_id)
+    if spec is None:
+        raise KeyError(f"no such edit op: {op_id!r}")
+    for p in spec.params:
+        if p.key == key:
+            return p
+    raise KeyError(f"edit op {op_id!r} has no parameter {key!r}")
+
+
+def _step_decimals(step: float) -> int:
+    """Decimal places in ``step`` as it was written.
+
+    ``0.1 + 7 * 0.1`` is ``0.7999999999999999`` in binary floating point, so a
+    value built by walking the grid has to be rounded back to the precision the
+    step was declared at or it lands one float's width off the control's own stop
+    — which is exactly the "not quite the suggestion" this exists to prevent.
+    """
+    return max(0, -int(Decimal(str(float(step))).as_tuple().exponent))
+
+
+def param_grid(op_id: str, key: str) -> list[float]:
+    """Every value ``op_id``'s ``key`` control can be set to, ascending.
+
+    ``min`` through ``max`` inclusive at the parameter's own ``step`` — the stops
+    its slider actually has. Empty when the parameter declares no bounds or no
+    step, since there is then nothing to enumerate.
+    """
+    p = param_spec(op_id, key)
+    if p.min is None or p.max is None or not p.step:
+        return []
+    nd = _step_decimals(p.step)
+    n = int(math.floor((p.max - p.min) / p.step + 1e-9))
+    return [round(p.min + i * p.step, nd) for i in range(n + 1)]
+
+
+def snap_to_param(op_id: str, key: str, value: float,
+                  minimum: float | None = None) -> float | int:
+    """``value`` as ``op_id``'s ``key`` control can actually hold it.
+
+    Clamped to the parameter's own ``[min, max]`` and rounded onto its ``step``
+    grid, anchored at ``min`` exactly as the control's stops are. ``minimum``
+    raises the floor above the parameter's own, for a caller that must never
+    offer a no-op; the floor is itself moved up to the first stop at or above it,
+    so the result is on the grid whatever floor is asked for. An ``int``
+    parameter comes back an ``int``; a parameter with no declared step is clamped
+    and otherwise left alone.
+    """
+    p = param_spec(op_id, key)
+    v = float(value)
+    lo = float(p.min) if p.min is not None else -math.inf
+    hi = float(p.max) if p.max is not None else math.inf
+    if minimum is not None:
+        lo = min(max(float(minimum), lo), hi)
+    v = min(max(v, lo), hi)
+    if p.step:
+        nd = _step_decimals(p.step)
+        anchor = float(p.min) if p.min is not None else 0.0
+        floor_v = round(anchor + math.ceil((lo - anchor) / p.step - 1e-9) * p.step, nd)
+        cap_v = round(anchor + math.floor((hi - anchor) / p.step + 1e-9) * p.step, nd)
+        v = round(anchor + round((v - anchor) / p.step) * p.step, nd)
+        v = min(max(v, floor_v), cap_v)
+    return int(round(v)) if p.type == "int" else float(v)
 
 
 # ---- shared numeric helpers (NaN-aware) ------------------------------------

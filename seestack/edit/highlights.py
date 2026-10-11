@@ -36,7 +36,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from seestack.edit.noise import estimate_noise_sigma
-from seestack.edit.registry import as_rgb, luminance
+from seestack.edit.registry import as_rgb, luminance, param_grid
 
 #: Display luminance at or above which a pixel counts as "at the ceiling". The
 #: stretch clips to 1.0, so a blown core is a plateau of exactly 1.0; the small
@@ -85,11 +85,6 @@ _TARGET_FLAT = 0.10
 #: stretch now reserves the shoulder display room of its own, so the guard is
 #: back to catching only genuinely hopeless cores.)*
 _MIN_IMPROVEMENT = 0.05
-
-#: The op's slider bounds/step (``tone.stretch``'s ``highlights`` param).
-_STRENGTH_STEP = 0.05
-_STRENGTH_MIN = 0.05
-_STRENGTH_MAX = 1.0
 
 
 @dataclass(frozen=True)
@@ -149,9 +144,15 @@ def _largest_bright_component(bright: np.ndarray) -> tuple[np.ndarray, int] | No
 
 
 def _strength_grid() -> list[float]:
-    """The op's own slider steps, ascending — the only values worth suggesting."""
-    n = int(round((_STRENGTH_MAX - _STRENGTH_MIN) / _STRENGTH_STEP)) + 1
-    return [round(_STRENGTH_MIN + i * _STRENGTH_STEP, 2) for i in range(n)]
+    """The op's own slider stops, ascending, minus the no-op at the bottom.
+
+    Read off the ``highlights`` ``EditParam`` rather than from a copy of its
+    bounds here, which is what this module used to keep: a strength off those
+    stops cannot be reached by dragging the slider, and the editor's readout
+    beside it would print a different number from the button that offered it. 0
+    is dropped because a suggestion to change nothing is not a suggestion.
+    """
+    return [v for v in param_grid("tone.stretch", "highlights") if v > 0.0]
 
 
 def measure_blown_core(display: np.ndarray,

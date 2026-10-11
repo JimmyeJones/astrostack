@@ -16,17 +16,19 @@ import warnings
 
 import numpy as np
 
-from seestack.edit.registry import as_rgb
+from seestack.edit.registry import as_rgb, snap_to_param
 
 # Normalized background σ at (or above) which the strongest denoise is suggested.
 # Noise is measured in units of the image's own robust signal range (see
 # ``estimate_noise_sigma``), so this threshold is comparable across gain/exposure.
 _SIGMA_FULL = 0.05
-# Never suggest a stronger cut than the op allows, nor a no-op — a suggestion the
-# user clicks should always do *something* mild even on a clean image.
+# Never suggest a no-op — a suggestion the user clicks should always do
+# *something* mild even on a clean image. This is **this module's** floor and not
+# a copy of the op's: the op's own min is 0 ("off"), while the range and step the
+# answer is clamped and snapped to are read from the ``detail.denoise``
+# ``EditParam`` itself (:func:`seestack.edit.registry.snap_to_param`), so a
+# strength this module offers is always one the slider has a stop for.
 _STRENGTH_MIN = 0.1
-_STRENGTH_MAX = 1.0
-_STRENGTH_STEP = 0.05
 # Floor on ``grain_lag_ratio``. A real reprojection kernel's correlation bottoms
 # out around 0.54 (measured: 1.00 / 0.69 / 0.65 / 0.64 at lags 1..4 on a
 # ~0.7 px-correlated field), so this is a rail against a measuring window that
@@ -155,8 +157,8 @@ def suggest_denoise_strength(rgb: np.ndarray,
                              ) -> tuple[float | None, float | None]:
     """``(noise_sigma, strength)`` for the denoise op, or ``(None, None)`` when
     the image can't be measured. ``strength`` scales linearly with the normalized
-    noise up to ``_SIGMA_FULL``, clamped to the op's usable range and rounded to
-    its slider step.
+    noise up to ``_SIGMA_FULL``, clamped to the op's usable range and snapped to
+    its own slider step.
 
     ``grain_ratio`` is :func:`grain_lag_ratio` for the grid ``rgb`` lives on, for
     a caller measuring a *decimated* proxy: ``_SIGMA_FULL`` is a full-resolution
@@ -170,6 +172,6 @@ def suggest_denoise_strength(rgb: np.ndarray,
     if grain_ratio is not None and np.isfinite(grain_ratio) and 0 < grain_ratio <= 1:
         sigma = float(sigma * grain_ratio)
     raw = sigma / _SIGMA_FULL
-    strength = max(_STRENGTH_MIN, min(_STRENGTH_MAX, raw))
-    strength = round(strength / _STRENGTH_STEP) * _STRENGTH_STEP
-    return round(sigma, 4), round(strength, 2)
+    strength = snap_to_param("detail.denoise", "strength", raw,
+                             minimum=_STRENGTH_MIN)
+    return round(sigma, 4), float(strength)
