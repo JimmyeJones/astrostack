@@ -115,6 +115,46 @@ the mechanism. All four now say three ops instead of four and carry the instruct
 
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-yelkmv`) — the full-size check was cited as the authority for the three ops it re-measures, and said nothing about it
 
+### v0.493.8 — the editor dogfood can finally *read* the full-size check's caveat: `dogfood_editor.mjs` opens that modal twice, and the second time with an op in the recipe
+
+*(Tooling only — `scripts/dogfood_editor.mjs` and `docs/AGENT-ENVIRONMENT.md`. Verified by the pass itself:
+`--big --editor`, **both editor drives clean, 0 findings**.)*
+
+**v0.493.7's own carry-forward note was this, and it was written because that run could not show its own
+sentence.** `driveFullSizeCheck()` ran before the Add-menu loop, on whatever recipe the editor *loaded* —
+Auto's own, which carries none of the four ops whose full-resolution window re-measures itself — and the loop
+adds each op and then **removes** it. So there was no moment in the drive at which one of those four was in
+the recipe *and* the modal was open: the caveat line was pinned by jsdom alone, and the pass could only report
+that it stayed quiet, which is the same complaint that file's own header makes about the rest of the screen.
+
+**The fix is a second pass of the same function**, after undo/redo: add **Noise reduction** — a *probe target,
+not a list* (largest measured divergence, 9.3e-03 of full scale, and in the menu's Common shortlist so no
+expansion is needed), re-open the modal into `editor-loupe-11-*.png`, remove it again by the selected row the
+way the loop does. What it prints is the **server's** answer, derived from each op's `OpSpec.window_unfaithful`:
+
+```
+full-size check: re-opened with "Noise reduction" in the recipe
+   [caveat] One thing this view can't promise: Noise reduction measures your whole picture's
+   brightness and grain before it acts, and on a piece this small it has to measure the piece
+   instead — so how strong it looks here can differ from your export. Every other step here is
+   applying exactly what your export will.
+```
+
+**The thing that nearly made it a bad instrument, and it is the note worth keeping.** `FullSizeCheck` keeps
+`spot` and `split` in **component state, and closing the modal does not unmount it.** The first version of
+this change clicked the same navigator corner as the first pass and clicked the split toggle blind, and
+reported **three findings that were all its own doing**: *"the marker did not follow the click"* (it had opened
+already at the top-left, where the first pass left it) and both halves of the split *"missing after turning the
+comparison on"* (it had turned it **off**). That is the v0.492.59 failure mode exactly — a probe filing false
+findings about a control that is working — so the function now takes the corner to click as a parameter and
+reads the toggle's **label** before pressing it, which is the only thing on screen that says which way a toggle
+points. Both drives then came back clean. **Any second interaction with a surface this drive has already
+touched needs the same question asked: what did the first pass leave behind?**
+
+Screenshot tags are a parameter too (`01` / `11`), so the second pass no longer overwrites the first's
+`editor-loupe-01-open.png` — a pass whose two states land in one file can only ever be read as one.
+No shipped code, no config, schema, migration, on-disk, default or API change.
+
 ### v0.493.7 — "check it at full size" names the ops whose strength it cannot vouch for: `OpSpec.window_unfaithful`, `loupe-info.unvouched_ops`, `windowFidelity.ts`
 
 *(Python +4 items in `tests/webapp/test_editor_loupe.py` and +1 in `tests/test_edit_window_fidelity.py`;

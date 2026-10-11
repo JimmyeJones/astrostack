@@ -1,5 +1,47 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Builder, next run — **the open LEAD's remaining (a) and (b) are CLOSED, with the
+measurement it asked for. SHIPPED as v0.493.9.**
+**READ THIS FIRST IF YOU ARE ABOUT TO BELIEVE A MEASUREMENT THAT SAYS A FIX MAKES THINGS WORSE.** The LEAD's
+own table is why the span freeze sat unbuilt for six days: it recorded freezing as *worse* for
+`detail.deconvolve` on two windows of three and for bilateral on one fixture, and said the sign was
+"method-dependent". Re-measured on two fresh fixtures with the crop's own zero-padded boundary term held
+constant, the freeze is **better or equal on all 24 cells**. The earlier sign was two errors partly
+cancelling — the span error and the boundary error push opposite ways on some windows, so removing one of
+them reads as a regression to a harness that does not inset past the convolution reach. **A number that says
+"don't fix this" earns the same scepticism as one that says "ship it".**
+**What shipped.** Both restoration ops take `lo, hi` from `ctx.fit("span", …)`. For `detail.deconvolve` the
+span was its *only* whole-array measurement (`richardson_lucy` starts from a flat 0.5 guess and iterates
+locally), so it is **window-faithful outright** — 8.5e-05 → 9.8e-08 of full scale, ~700×, remainder float32
+FFT round-off — and its `window_unfaithful` declaration is **gone**: the loupe names two ops instead of
+three, and one of the three advisories that send a reader there ("deconvolution previews weaker … check it
+at full size **to judge it**") is answerable where it sends them for the first time. `detail.denoise` keeps
+its declaration, narrowed: bilateral **~90×** better (the method its own advisory names), wavelet 1.3–1.5×,
+tv 2.7× where the span dominates and **2 % worse on the bright core** — pinned that way on purpose, because
+tv's residue is `denoise_tv_chambolle`'s whole-array *stopping energy*, not its span. `eps=0` makes tv exact
+and would change every export, so it is written down, not flipped. (b)'s suspect — skimage's bilateral
+colour LUT — is **measured not to matter** (2.2e-05 → 1e-06 when pinned too) and was not built. No
+whole-image render moves.
+**AND THE SECOND FINDING, WHICH IS THE ONE TO CARRY FORWARD. An asserted list whose FIGURES are prose has
+nothing checking the figures.** v0.493.6 pinned *which* ops a window cannot reproduce and wrote *how far* as
+prose in the same dict. Two of the three were wrong within **four days**: `detail.chroma_denoise` as
+"2.3e-03 on a bright core" when it is **3.2e-03 on the ragged edge**, `detail.hot_pixels` as 2.9e-04 when it
+is **7.2e-04 on the star-poor side** — each understated *and* on the wrong window. That is v0.493.6's own
+lesson one level down, and v0.493.3/.4's one level down again. `_NOT_WINDOW_FAITHFUL` now holds
+`(worst, window, why)` with both checked, the three registry declarations stopped repeating the numbers, and
+a declaration that re-quotes one is refused by the suite. **Next run: go looking for another asserted claim
+whose supporting NUMBER is unasserted — there will be more, and the four days is the point.**
+**And a "cannot" is a claim with a shelf life.** Four prose copies (`registry.py` twice,
+`routers/editor.py`, `windowFidelity.ts`) said the span was a measurement `fit` *cannot reach*. It was four
+lines. The sentence was true of the *decision* and got written down as if it were true of the mechanism;
+all four now carry the instruction to re-check a "cannot" before repeating it.
+There were **no open PRs** at the start of this run; v0.493.8 merged during it and is merged in here. Bugs
+is now **LEAD-only and all of them gated** on owner data or a decision (mosaic re-framing, Auto's fringe
+archetype, the inert feedback tap, `classify_target`'s pinned confidence, the solve-time refusal, the
+half-range charge). Tests **+7 Python, 7 fail-before** (a worktree at `origin/main` with
+`seestack.edit.ops.detail.__file__` checked; the change edits existing modules only, so the add-a-module
+trap does not apply). `--mosaic --editor --big` dogfood clean. Earlier notes stand below.)*
+
 *Last edited 2026-10-11 (Builder, next run — **the queue held nothing ungated for a THIRTEENTH run, so this
 run took the shape the open LEAD itself calls "probably the right first slice" and shipped it.
 SHIPPED as v0.493.7.**
@@ -26,13 +68,19 @@ recipe without one of the four, Auto's own included.
 by side — the defect is in the overlap, and neither list is wrong.** Three runs found a wrong claim by reading
 one comment; this one found a missing claim by reading two that were both correct. The advisories were honest,
 the fidelity table was honest, and the thing between them had never been said.
-**And the one thing the dogfood cannot see, which is the next cheap task.** `--big --editor` came back
-**CLEAN** (three drives, 0 px spare black beside the window, the "where" sentence following a navigator click)
-and v0.493.7's line was correctly absent, because `dogfood_editor.mjs` opens the modal **before** its
-Add-menu loop and that loop **removes each op right after adding it** — so no pass can ever reach the modal
-with a detail op in the recipe, and the caveat is pinned by jsdom alone. About ten lines to fix (add Noise
-reduction from the menu's Common shortlist, re-call `driveFullSizeCheck()`, remove it); the full trace is in
-[`PROCESS-NOTES.md`](PROCESS-NOTES.md).
+**And the one thing the dogfood could not see — BUILT in the same run as v0.493.8, so do not re-take it.**
+`--big --editor` came back **CLEAN** (three drives, 0 px spare black beside the window, the "where" sentence
+following a navigator click) and v0.493.7's line was correctly absent, because `dogfood_editor.mjs` opened the
+modal **before** its Add-menu loop and that loop **removes each op right after adding it** — so no pass could
+ever reach the modal with a detail op in the recipe, and the caveat was pinned by jsdom alone. **v0.493.8**
+adds Noise reduction from the menu's Common shortlist after undo/redo, re-opens the modal and removes it
+again, and the pass now prints the caveat off a real page. **Its first version filed three findings that were
+all its own doing** — `FullSizeCheck` keeps `spot` and `split` in component state and closing the modal does
+not unmount it, so the probe clicked the first pass's corner (the marker rightly did not move) and toggled the
+split *off* before asserting its halves. **THE SECOND METHOD NOTE TO CARRY FORWARD: a probe's second
+interaction with a surface is a different test from its first, because the first left state behind — read the
+current state off the screen rather than assuming it.** Full trace in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md); both drives now end **clean, 0 findings**.
 The inbox is the Scout's; there were **no open PRs** at the start of this run and the LEAD stays open for its
 (a) and (b). Tests **+5 Python, +8 vitest, 5 fail-before** (4 webapp in a worktree at `origin/main` with
 `webapp.__file__` checked, 1 component in the same worktree with the new pure module copied in so the failure

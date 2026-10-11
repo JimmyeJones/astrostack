@@ -1,5 +1,40 @@
 # Process notes & QA sweep records
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-yelkmv`, second task) — a probe that interacts with a surface twice has to ask what the first pass left behind
+
+**v0.493.8 built the instrument the note below asked for, and its first version filed three findings that were
+all its own doing.** The change is a second `driveFullSizeCheck()` after undo/redo, with **Noise reduction**
+added to the recipe so the modal has its caveat to say. The first version reused the function unchanged, and
+the full-size drive came back **"3 thing(s) to look at"**:
+
+```
+  ! full-size check: clicking the navigator did not move the window marker
+  ! full-size check: full-size-check-split-before missing after turning the comparison on
+  ! full-size check: full-size-check-split-divider missing after turning the comparison on
+```
+
+**All three were the probe, and the cause is one line of React.** `FullSizeCheck` holds `spot` and `split` in
+component state and the Mantine `<Modal>` closing does **not** unmount it, so the second pass opens onto the
+window the first pass left at the top-left, with the preview comparison already **on**. The function then
+clicked the same navigator corner (so the marker genuinely did not move — `after === before` is true and the
+app is right) and clicked the split toggle blind (so it turned the comparison **off**, and then asserted its
+two halves were present). The tell was in the pass's own output and easy to miss: the second `[where]` read
+*"This is the top-left of your picture."* **before** any click, which is the first pass's answer.
+
+**This is the v0.492.59 failure mode again** — a probe filing false findings about a control that works — and
+it is the second time this file records it on this same script. The fix makes the function genuinely
+re-runnable rather than papering over the readings: the navigator corner is a **parameter** (`{fx, fy}`, and
+the second pass takes the opposite corner), the split toggle's **label** is read before it is pressed (the only
+thing on screen that says which way a toggle points), and the screenshot tag is a parameter too so the second
+pass stops overwriting `editor-loupe-01-open.png`. Both drives then came back **clean, 0 findings**, with the
+caveat printed off the running page.
+
+**THE RULE, AND IT GENERALISES PAST THIS SCRIPT: a probe's second interaction with a surface is a different
+test from its first, because the first one left state behind.** Component state, a toggle's direction, a
+window's position, a scroll offset — none of it resets when a modal closes. Before re-using a drive function,
+ask what the earlier call left behind, and prefer *reading the current state off the screen* over assuming it.
+A probe that assumes gets the one outcome worse than no finding: a finding that is wrong.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-yelkmv`) — the editor-dogfood record for v0.493.7, and the one thing that pass cannot see
 
 **The pass: `scripts/agent-dogfood.sh --big --editor`. CLEAN** — three editor drives (field sample, mosaic,
@@ -11,6 +46,9 @@ the split on, and measured **0 px** of spare black beside the window. v0.493.7's
 absent**: the recipe loaded at that moment is Auto's own, which carries `detail.sharpen` (whose advisory does
 speak) and none of the four ops the window cannot vouch for, so `unvouched_ops` is empty and the modal says
 nothing extra. That is the quiet case, confirmed on a real page rather than argued.
+
+**↳ DONE, same run, as v0.493.8 — and it cost one false-findings pass on the way; read the paragraph below
+this one before touching `driveFullSizeCheck()` again.**
 
 **THE INSTRUMENT GAP, AND IT IS THE CARRY-FORWARD: the modal's paragraph can only ever be read on Auto's own
 recipe, so no dogfood pass can see the sentence it says most.** Two things in `scripts/dogfood_editor.mjs`

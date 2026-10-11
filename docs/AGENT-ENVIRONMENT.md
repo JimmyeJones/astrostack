@@ -273,6 +273,35 @@ the repo.
 > no failed request, then undoes and redoes. A few minutes on top of a normal
 > pass, which is why it is a flag rather than the default.
 >
+> **It opens "Check it at full size" TWICE, and the second time is the only one
+> that can read the modal's caveat** *(added 2026-10-11 with v0.493.8)*. The first
+> `driveFullSizeCheck()` runs before the Add-menu loop, on whatever recipe the
+> editor *loaded* — which is Auto's own, and Auto's carries none of the four ops
+> whose full-resolution window re-measures itself (v0.493.7). The loop then adds
+> each op and **removes it again**, so for v0.493.7's whole first pass there was no
+> moment at which one of those four was in the recipe *and* the modal was open: the
+> caveat line was pinned by jsdom alone and the pass could only report that it
+> stayed quiet. So after undo/redo the drive adds **Noise reduction** (a *probe
+> target*, not a list: the largest measured divergence, and in the menu's Common
+> shortlist so it needs no expansion), re-opens the modal into
+> `editor-loupe-11-*.png`, and removes it. The modal is read as **one paragraph of
+> four sentences** — `caption`, `caveat`, `where`, `split` — and the caveat's own
+> list of op names is the *server's* answer, derived from each op's
+> `OpSpec.window_unfaithful`, so it is worth reading rather than counting.
+>
+> > **And the trap that cost that change its first pass: `FullSizeCheck` keeps
+> > `spot` and `split` in component state, and closing the modal does not unmount
+> > it.** So the second `driveFullSizeCheck()` opens onto the window the *first*
+> > one left at the top-left, with the preview comparison already on — and the
+> > version that clicked the same navigator corner and clicked the toggle blind
+> > reported **three findings** that were all its own doing ("the marker did not
+> > follow the click"; both halves of the split "missing after turning the
+> > comparison on" — it had turned it off). The function now takes the corner to
+> > click and reads the toggle's **label** before pressing it, which is the only
+> > thing on screen that says which way a toggle points. Any second interaction
+> > with a surface this drive has already touched needs the same question asked:
+> > *what did the first pass leave behind?*
+>
 > **…and since v0.492.55 it finishes by clicking Auto-process and driving the
 > Adaptive-Auto taste row** *(added 2026-10-10)*. Everything before that drives
 > the *pipeline*; the row — *"How did Auto do? Tap what you'd change:"* — lives
