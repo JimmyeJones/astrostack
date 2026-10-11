@@ -118,18 +118,45 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   **Why it is filed and not fixed in the same run, and what NOT to do.** **Do not move the constant** — the
   object end of its separation is real and measured (16.4–25.5 where the canvas is the object, so 3.0 has
   5.5× below it and 3.2× above a quiet sky), and raising it to clear a 97 % gradient would eat most of the
-  object margin the guard exists for. The fix is to judge the guard on a plane with the *smooth* shape taken
-  out — measure `level_sigma` (and the `sky` mask) on `_detrended_luminance(lum)` while still subtracting the
-  step from the raw plane — which is a change to the `sky` mask and therefore to **what Auto emits for every
-  mosaic, on the on-by-default hot path**, so it needs the no-gradient parity above re-measured before and
-  after, plus the object-filled guard re-checked (it must still refuse) and `classify_target`'s verdicts on
-  the bundled samples. One other shape worth costing first: a degree-2 surface only *partly* absorbs panel
-  steps (`_delevelled_luminance`'s own docstring says so), so the detrended plane is not a free yardstick
-  either — bound that bias before trusting it.
+  object margin the guard exists for. The fix this entry proposed was to judge the guard on a plane with the
+  *smooth* shape taken out — measure `level_sigma` (and the `sky` mask) on `_detrended_luminance(lum)` while
+  still subtracting the step from the raw plane.
+  **⚠️ THAT CANDIDATE IS NOW MEASURED AND IT MUST NOT SHIP AS FILED (Builder 2026-10-11, v0.493.12). It fixes
+  this bug and makes two other cases worse, one of them worse than the bug.** Reported sky level as a ratio of
+  the identical no-step scene, over four seeds:
+
+  | case | today | the candidate |
+  |---|---|---|
+  | ramp **across** the strips, 5 / 20 / 50 % of sky — *this bug* | 2.08–2.12× | **1.00–1.02×** |
+  | ramp **along** the strips, 20 % | 2.08–2.11× | **2.69–2.79×** |
+  | ramp **along** the strips, 50 % | 2.09–2.11× | **5.37–5.42×** |
+  | faint object-filled canvas, blob 0.15 | 1.44–1.46× | **1.70–1.73×** |
+  | faint object-filled canvas, blob 0.20 | 1.30–1.33× | **1.80–1.84×** |
+
+  **The diagnosis, and it is the part to build on.** Detrending the whole canvas removes two different things
+  at once: the smooth shape that is *common to every panel* (which the guard should ignore — it is not panel
+  structure) and the smooth shape that *differs between* panels (which the guard must see — it is exactly the
+  sky difference a per-level median would otherwise swallow as a "panel step"). An across-strip ramp is the
+  first; an along-strip ramp is the second, and today's guard correctly refuses it. A single `level_sigma`, on
+  any one plane, cannot tell those apart — nor a smooth *object* spanning a strip from smooth sky, which is
+  the second regression. **So the quantity the guard is given is under-determined, and no plane swap and no
+  move of the constant fixes it**: under the candidate the sky end of the separation barely moves (it is
+  already flat) while the object end is pulled down by the same detrend, so the two populations close from
+  ~9–17× apart to **3.7×** and the faintest filled canvas sits only ~1.3× clear of the bar. Whatever is built
+  here has to separate "common to all panels" from "differs between panels" *first* — e.g. by asking the
+  question per level-pair rather than per level, or by projecting the fitted surface onto the coverage
+  geometry — and only then pick a yardstick.
+  **The prerequisite this entry named turned out not to be the risk**, which is worth knowing before
+  re-costing: a degree-2 surface does absorb **35–49 %** of a 0.012 panel step, so the detrended plane cannot
+  be used to *measure* a step — but the candidate never does, and swapping only the mask moves the step by
+  **under 1 %** on a gradient-free mosaic. The cost was somewhere else entirely.
   **The whole sweep, the two populations and the step in the user-visible numbers are pinned** in
   `tests/test_auto_level_sigma_margin.py` (v0.493.10) **as they behave today**, with the boundary
-  parametrized — so the fix makes that file fail, which is the point, and the numbers above are what it should
-  be compared against. This entry cannot rot silently.
+  parametrized — so a fix makes that file fail, which is the point, and the numbers above are what it should
+  be compared against. **The candidate and its two costs are pinned in
+  `tests/test_auto_delevel_yardstick_candidate.py` (v0.493.12)**, which holds it as a one-change replica
+  (asserted to be one change) and asserts both regressions over four seeds, so this stand-down carries numbers
+  a test keeps honest rather than a paragraph. This entry cannot rot silently.
 
 - **LEAD (Builder 2026-10-11, filed with v0.493.11 — the half of that fix that reaches Auto's own output
   and is therefore not a blind Builder change) — Auto writes a recipe whose numbers the editor's own
@@ -3583,6 +3610,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.493.12 **the fix filed for the ⭐ gradient/de-levelling bug, measured before it shipped — it fixes that bug and makes two other cases worse, one of them worse than the bug** (new `tests/test_auto_delevel_yardstick_candidate.py`; **no production code changed**) — the ⭐ entry proposed judging `_delevelled_luminance`'s guard on a detrended plane. Reported sky level as a ratio of the identical no-step scene, four seeds: the across-strip ramp it was filed for goes **2.08–2.12× → 1.00–1.02×**, but an **along**-strip ramp goes 2.08–2.11× → **2.69–2.79×** at 20 % and 2.09–2.11× → **5.37–5.42×** at 50 %, and a faint object-filled canvas 1.44× → **1.71×** / 1.31× → **1.82×**. The reason is that detrending the whole canvas removes the smooth shape *common to every panel* (which the guard should ignore) **and** the shape that *differs between* panels (which it must see, and which today it refuses on correctly) — plus a smooth object spanning a strip. So the quantity is under-determined and **moving the constant cannot rescue it**: the two populations close from ~9–17× apart to 3.7× because both ends move together. The entry's own named prerequisite turned out not to be the risk — the degree-2 surface does absorb **35–49 %** of a panel step, but the candidate keeps every step on the raw plane and the mask swap moves it **under 1 %**; a prerequisite that checks out is not evidence the fix is safe. Candidate and costs are **asserted**, as a one-change replica proven to be one change, so neither the idea nor its price can be lost
 - ✅ v0.493.11 **the editor's ten "From your image" / "From your stars" buttons offered numbers their own sliders have no stop for, and the bounds they clamped to were five hand-kept copies of the declaration** (new `registry.param_spec` / `param_grid` / `snap_to_param`; `suggest_asinh_stretch`, `suggest_levels_points`, `suggest_levels_gamma`, `suggest_denoise_strength`, `highlights._strength_grid`, and the three new named `*_for_fwhm` helpers in `routers/editor.py` all route through them) — **six of the ten were off their control's step grid** and five printed it in the button's own label at a precision the readout beside it rounds away: *"From your image (black 0.077)"* beside a box reading `0.08`, over a slider whose stops are 0.07 and 0.08. Measured: `tone.levels.gamma` **2.415** against a 0.05 step (0.023 off, 46 % of a step, and its readout value 2.42 is not a stop either), `tone.stretch.stretch` 0.393, `tone.stretch.black` 0.047, `tone.levels.black/white` 0.077/0.796, `detail.deconvolve.psf_sigma` 1.36 against a 0.1 step. The cause is this file's own bug class one level down again: each one clamped to a **copy** of the op's `EditParam`, kept as prose in five modules (*"kept in step with the EditParam in seestack/edit/ops/detail.py"*), and the one test that checked a grid at all asserted a module against its **own** copy of the numbers — circular, so it would have passed unchanged if the op's step had moved. Now the declaration is read: no module keeps a slider's range, the strength is solved *after* its black point is snapped so the number offered is the one the picture gets, and `tests/test_edit_suggestion_grid.py` runs the real measurement for all ten, asserts the two-decimal readout can show every one of them, and pins the free registry-wide guard — **every numeric parameter's default is on its own control's stops**, clean across all 36. Nothing renders or exports differently; the gamma promise *"lands the sky at ~25 % grey"* measures 0.2502 → **0.2574** against its own 0.01 tolerance. Auto's own knobs are the open half, filed below. Free collateral: `routers/stack.py::render_stretch_suggestion` feeds the same solver to the History **Adjust** sliders, which are `step={0.01}` with `toFixed(2)` readouts — they used to seed at 0.828/0.056 and print 0.83/0.06, and now agree, with no frontend change
 - ✅ v0.493.9 **the "check it at full size" loupe re-measured both restoration ops' percentile span on its own 512 px crop, and the span was carryable after all** (`_denoise` and `_deconvolve` take `lo, hi` from `ctx.fit("span", …)`; `detail.deconvolve`'s `OpSpec.window_unfaithful` declaration is gone) — the **(a)** and **(b)** halves of the v0.493.5 LEAD, answered with the two-fixture measurement it asked for rather than with a flip. The LEAD's own table said freezing the span measured *worse* for deconvolve on two windows of three and for bilateral on one fixture; re-measured with the boundary term held constant it is **better on 11 of 12 cells**, and the sign it saw was two errors cancelling. For `detail.deconvolve` the span was its **only** whole-array measurement — `richardson_lucy` starts from a flat 0.5 guess and iterates with local convolutions — so carrying it makes the window the picture outright: **8.5e-05 → 9.8e-08** of full scale, ~700×, the remainder being float32 FFT round-off over two different transform sizes. That retires one of the three advisories the loupe was being cited for and could not answer ("deconvolution previews weaker … check it at full size **to judge it**"). `detail.denoise` keeps its declaration, narrowed to what is left and why: **bilateral 2.9e-03 → 3.2e-05** (~90×, and it is the method the advisory names), **wavelet** 1.3–1.5× on every window, **tv** 2.7× where the span error dominates and 2 % *worse* on the bright core — because tv's residual is `denoise_tv_chambolle`'s whole-array stopping energy, not its span, and BayesShrink's is its per-subband coefficient variance plus a shallower decomposition on a smaller array. Neither is reachable through skimage's public API; `eps=0` would make tv exact and **change every export**, so it is written down, not flipped. The colour LUT skimage's bilateral builds from the array's min/max — the LEAD's third suspect — is **measured not to matter** (2.2e-05 → 1e-06 when pinned as well) and was not built. No whole-image render moves: with no `frozen_fits`, `fit` measures exactly as before. **And the figures are assertions now**: two of the three in `_NOT_WINDOW_FAITHFUL` were wrong within four days of being written (`chroma_denoise` 2.3e-03 → 3.2e-03, `hot_pixels` 2.9e-04 → 7.2e-04, each understated *and* on the wrong window), which is this file's own bug class one level down — the worst case and the window it occurs on are checked, the registry declarations stopped repeating them, and a test refuses a declaration that re-quotes one
 - ✅ v0.493.8 **the editor dogfood can finally *read* the full-size check's caveat** (`scripts/dogfood_editor.mjs` opens that modal twice — the second time after adding **Noise reduction** — and `driveFullSizeCheck()` now takes its navigator corner and its screenshot tag as parameters) — v0.493.7's own carry-forward: the first open runs on Auto's recipe, which carries none of the four window-unfaithful ops, and the Add-menu loop removes each op right after adding it, so no pass could ever reach that modal with one of them in the recipe. **The first version of this filed three false findings** because `FullSizeCheck` keeps `spot` and `split` in component state and closing the modal does not unmount it — the probe clicked the same corner and toggled the split *off*, then reported its halves missing (the v0.492.59 failure mode). It now reads the toggle's label before pressing it; `--big --editor` comes back **clean, 0 findings**, printing the caveat off a real page

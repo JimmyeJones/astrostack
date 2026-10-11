@@ -1,5 +1,48 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Builder, same run, second task — **took the ⭐ at the front of the queue, measured
+the fix it proposes, and the fix is WRONG. SHIPPED as v0.493.12 — a test file and nothing else; no
+production code moved.**
+**START HERE NEXT RUN: the ⭐ entry is still item 0 of "Bugs" and the bug is still real — but its proposed
+fix is now ruled out with numbers, so do not build it.** v0.493.10 reproduced the defect (an across-strip
+light-pollution ramp of ~49 % of the sky makes `_delevelled_luminance` decline, Auto reads a sky level
+**2.08× the truth**, the mosaic finishes ~7.8 % dark) and named the fix: judge the guard on a detrended
+plane. Measured over four seeds, reported sky as a ratio of the identical no-step scene: the across-strip
+ramp **2.08–2.12× → 1.00–1.02×** — so the idea does reach the bug — but an **along**-strip ramp goes
+2.08–2.11× → **2.69–2.79×** at 20 % and 2.09–2.11× → **5.37–5.42×** at 50 %, and a faint object-filled canvas
+1.44× → **1.71×** and 1.31× → **1.82×**. At half a sky of along-strip ramp the candidate is **2.6× worse than
+the bug it fixes**.
+**WHY, AND IT IS THE DESIGN NOTE TO CARRY FORWARD: detrending the whole canvas removes two different things
+at once, and the guard needs one of them.** The smooth shape *common to every panel* is not panel structure
+and the guard should ignore it; the smooth shape that *differs between* panels **is** the sky difference a
+per-level median would otherwise swallow as a "panel step", and today's guard refuses on it **correctly**. A
+whole-canvas detrend destroys the evidence for both. The same blindness explains the second regression — a
+smooth object spanning a strip is degree-2-ish too. **So `level_sigma` on any single plane is an
+under-determined measurement, and moving the constant cannot rescue it either**: under the candidate the two
+populations close from ~9–17× apart to **3.7×** because both ends move together, leaving the faintest filled
+canvas ~1.3× clear of the bar. Whatever is built here separates "common to all panels" from "differs between
+panels" **first** — per level *pair* rather than per level, or the fitted surface projected onto the coverage
+geometry are the two shapes worth costing.
+**AND A METHOD NOTE THAT IS NOT ABOUT THIS SUBSYSTEM: a prerequisite that checks out is not evidence the fix
+is safe.** The entry named exactly one thing to bound first — *"a degree-2 surface only partly absorbs panel
+steps, so the detrended plane is not a free yardstick either"* — and bounding it was the first thing this run
+did. It is real and large (**35–49 %** of a 0.012 panel step) and **completely beside the point**, because
+the candidate keeps every subtracted step on the raw plane and the mask-only swap moves it **under 1 %**. The
+named caution retired the risk it was about and said nothing about the two that mattered. Clearing a
+prerequisite is permission to keep measuring, not permission to ship.
+**Pinned, not written down** — v0.493.11's lesson one subsystem over. `tests/test_auto_delevel_yardstick_candidate.py`
+holds the candidate as a **one-change replica of `_delevelled_luminance`, asserted to be one change** (it
+reproduces the real function's pixels to within 8e-4, a tenth of the fixture's smallest panel offset, on a
+plane with no smooth shape to remove), and asserts both regressions over four seeds **and the idea's merit**.
+So the next run can neither ship this shape unknowingly nor dismiss the idea.
+**One trap this run fell into and climbed out of, because v0.493.10 had written the warning down.** The first
+"single field" control was the same *stepped* scene measured without a coverage map — which is the
+contaminated number, not the truth — and it read 0.48× instead of 2.08×, i.e. it made the bug look like the
+opposite bug. The real control is a scene with **no panel steps**. That is verbatim the "mismatched fixtures
+are why the first measurement of this was wrong" note at the top of `test_auto_level_sigma_margin.py`, and
+reading it is what caught it. Tests **+10 Python, one new file, no production code changed.** Earlier notes
+stand below.)*
+
 *Last edited 2026-10-11 (Builder, next run — **the carried-forward note was "go looking for another
 asserted claim whose supporting NUMBER is unasserted — there will be more". It took one hour and the
 answer was worse than unasserted: it was CIRCULAR. SHIPPED as v0.493.11.**
