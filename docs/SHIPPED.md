@@ -2,6 +2,73 @@
 
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-jo7j7n`) — the carry-forward sentence paid twice: a window priced against the wrong drift, and a share with no denominator
 
+### v0.493.4 — 🟡 TRUST / friendliness (PRIORITY 2–3): a night of two subs is no longer graded "hazy" because one of them was set aside
+
+*(`seestack/session_recap.py` — `NIGHT_HAZY_MIN_FRAMES`, `_night_verdict`'s hazy branch and its one call
+site in `nights_breakdown`.)*
+
+**Found by the same sweep as v0.493.3, in the same function, and it is the same shape of mistake.** The
+per-night verdict has two halves and only one of them had a floor. Sharpness refuses to speak under
+`SESSION_QUALITY_MIN_FRAMES` (4) measured subs — *"a one- or two-frame median is the frame, not the night"*.
+Haze is a **share**: `cloud_fraction = buckets["cloudy"] / len(rows)`, graded against
+`NIGHT_HAZY_CLOUD_FRACTION = 0.4`, and it had no denominator floor at all.
+
+**Reproduced through `nights_breakdown` on a real `Project`** (three ordinary nights, then a night of two
+subs with one `transparency` rejection):
+
+```
+2026-08-04  n_frames=2 n_kept=1 buckets={'cloudy': 1} verdict='hazy'   median_fwhm=None
+2026-08-03  n_frames=4 n_kept=4 buckets={}            verdict='sharp'  median_fwhm=3.0
+2026-08-02  n_frames=4 n_kept=4 buckets={}            verdict='sharp'  median_fwhm=3.0
+2026-08-01  n_frames=4 n_kept=4 buckets={}            verdict='sharp'  median_fwhm=3.0
+```
+
+One frame, and the night is weather. It is not a harmless word either: `hazy` **takes precedence over every
+other reading** of the night (the function returns before it looks at sharpness at all), it bars the "best
+night" nod by name (`verdict == "sharp"` is a condition of `is_best`), and it renders on the Nights-card row
+that carries the one-click *"set this night aside"* button — so the app is grading a night unusable on the
+strength of a single rejected sub, right next to the control that discards it.
+
+**Why this is the owner's shape and not a corner case.** A mosaic revisited across many nights records a
+handful of subs per visit: the app's own `--dithered` sample is 6 a night across eleven nights, and
+v0.493.1's whole subject was a per-night floor being met eleven times over on exactly that shape. At six
+subs a night, **three** cloud rejections grade the night — at two subs, one does.
+
+**The fix.** `NIGHT_HAZY_MIN_FRAMES = SESSION_QUALITY_MIN_FRAMES`, and `_night_verdict` takes `n_frames` —
+the denominator `cloud_fraction` was computed over — so the gate is `n_frames >= NIGHT_HAZY_MIN_FRAMES and
+cloud_fraction >= NIGHT_HAZY_CLOUD_FRACTION`. Deliberately *the same number* as the sharpness floor: a
+different population (every sub, not only the measured ones) but the same question, so the two halves of one
+verdict cannot come to different conclusions about how little data is too little. The argument is not
+aliased silently — the constant says it in full.
+
+**Nothing is hidden.** The row keeps its `n_set_aside` count and its own `reject_buckets`, which is where
+"one sub went to cloud" belongs; what is withheld is only the one-word judgement about the night. The
+parameter is **required, not defaulted**: a defaulted `n_frames` would have let any later caller re-acquire
+the bug by not knowing to pass it, which is the trap `recent_night_pace_s`'s `night_of` has a whole guard
+test for.
+
+**Upgrade-safe (§9):** engine-only, read-only, derived at request time from rows already stored. No config,
+settings default, schema, migration or on-disk change; `NightSummary.verdict` keeps its type and its four
+values, and the API shape is untouched. Strictly quieter: a night that was graded `hazy` on ≥ 4 subs still
+is, bit for bit.
+
+**Tests +1, and one existing test made stronger.** The new
+`test_a_two_sub_night_is_not_graded_hazy_by_one_of_its_two_subs` drives `nights_breakdown` end to end and
+fails before (`verdict == 'hazy'`), then asserts that a night which *did* record four subs is still graded
+hazy on the identical rejection **rate**, so the fix cannot be read as a stand-down.
+`test_night_verdict_pure_helper` gains the denominator at its six call sites plus three new cases either
+side of the floor — the signature change is what makes every caller state the population it is judging.
+
+**One existing test's fixture was extended, deliberately, and it is the measurement of the blast radius.**
+`tests/webapp/test_target_nights.py::test_nights_serialises_verdict_and_reject_buckets` stamped **2 of 3**
+subs cloudy and asserted `"hazy"` on the wire — a 3-sub night, i.e. exactly the shape now below the floor.
+Its subject is the *serialisation*, not the sample size, so it is handed a fourth sub on the same night
+(`_extra_sub_on_the_same_night`) and keeps asserting `"hazy"` at a 50 % share, with `n_frames == 4` now
+pinned too. Nothing was loosened: the assertion set grew. That one test is also the whole blast radius —
+it is the only place in the suite that asserted `"hazy"` on fewer than four subs (`hazy_verdict` in
+`stackhealth.py`, which `test_transparency_mosaic.py` and `test_gallery.py` exercise, is a different
+function about a stack run and is untouched).
+
 ### v0.493.3 — 🔴 TRUST / friendliness (PRIORITY 2–3): "it stopped early — worth a look" stops firing on a target the owner simply came back to after three or four weeks
 
 *(`seestack/session_recap.py` — `SIDEREAL_DRIFT_MIN_PER_DAY`, `EARLY_STOP_LOOKBACK_DAYS`

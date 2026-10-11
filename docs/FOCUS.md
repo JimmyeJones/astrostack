@@ -1,5 +1,46 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Builder, next run — **the queue held nothing ungated for an ELEVENTH run, so this
+run took the previous one's carry-forward sentence as the task. It paid twice.
+SHIPPED as v0.493.3 and v0.493.4.**
+**The sentence was "every per-night surface in the app is worth re-reading on a many-night target", and the
+cheapest way to read one turned out to be against its OWN COMMENT.** Both findings are in
+`seestack/session_recap.py`, both are constants whose docstrings argued for them and argued *wrongly*, and
+neither needed a dogfood pass or a detector.
+**v0.493.3 — "it stopped early — worth a look" fired on a target the owner simply came back to.**
+`early_stop` judges a night against the median stop time of the target's own recent nights, over a 30-day
+window, and calls a 90-minute shortfall a stall. The yardstick is a **clock time, and the sky does not keep
+clock time**: a sidereal day is four minutes short, so every object comes round **3.94 min earlier each
+night** and across 30 days the drift alone is **118 min**. Measured on the real function (four nights of
+habit, then a return *n* nights later stopping at exactly the drifted time): silent at 7/14/21 nights,
+**fires at 23 (90.7 min) and 26 (102.5 min)**, silent again at 29 once the priors fall out of the window —
+a six-night-wide band of pure arithmetic, and "a target picked up again after three or four weeks" is the
+ordinary shape of a library with 26 mosaics. `EARLY_STOP_MAX_PRIOR_NIGHTS`' comment had sized the window
+against the drift of **darkness** (~1 h a month) and never mentioned the drift of the **target** (~2 h,
+twice as fast and always in the firing direction). Window 30 → **14 days**, with the inequality now
+**asserted by a test**. The richer lever — correcting the drift instead of shortening the window, which
+keeps the reach — is costed in `SHIPPED.md`: it moves six pinned numbers and leaves one boundary test
+0.4 minutes from its bar. Read that before re-opening it.
+**v0.493.4 — a night of two subs was graded "hazy" because one of them was set aside.** The same verdict's
+sharpness half refuses to speak under `SESSION_QUALITY_MIN_FRAMES` (4) measured subs; its hazy half is a
+**share** (`cloudy / len(rows)` against 0.4) and had **no denominator floor at all**. Reproduced through
+`nights_breakdown`: `n_frames=2 n_kept=1 buckets={'cloudy': 1} verdict='hazy'`. Not a harmless word — hazy
+returns *before* sharpness is looked at, bars the "best night" nod by name, and renders on the row carrying
+the one-click "set this night aside" button. `NIGHT_HAZY_MIN_FRAMES = SESSION_QUALITY_MIN_FRAMES`, and
+`_night_verdict` now takes the denominator as a **required** argument.
+**THE METHOD NOTE, AND IT IS THE ONE TO CARRY FORWARD: a floor that gates *speaking* is safe; a floor that
+gates anything else is where this class of bug lives.** Eight per-night surfaces came back CLEAN in the same
+sweep and every one of them fails *silent* below its floor (the table is in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md) — **do not re-sweep them**). The two that broke are the two whose
+floor gated something else: a **window** (how old may a yardstick be — and the calendar could reach the bar
+by itself) and a **share** (the ratio was guarded, the denominator was not). So on the next per-night rule:
+ask what the number is protecting, and whether anything other than the user's night can reach it.
+**And the sibling of that, in the comments: a constant whose justification is prose has nothing checking
+it.** Both of these were wrong for months with a green suite. Both now carry their arithmetic as an
+assertion.
+The inbox was checked first — **four open, all previously acted-on and owner-gated** — and there were **no
+open PRs**. Tests **+4 Python, 4 fail-before**. Earlier notes stand below.)*
+
 *Last edited 2026-10-11 (Builder, next run — **the queue held nothing ungated for a TENTH run, so this run
 walked the whole journey instead of taking an eleventh D1 instalment, and the pass said two things.
 SHIPPED as v0.493.1 and v0.493.2.**

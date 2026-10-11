@@ -558,6 +558,7 @@ from seestack.session_recap import (  # noqa: E402
     FWHM_DRIFT_ABS_PX,
     FWHM_DRIFT_RATIO,
     NIGHT_HAZY_CLOUD_FRACTION,
+    NIGHT_HAZY_MIN_FRAMES,
     _night_verdict,
     night_frame_ids,
     nights_breakdown,
@@ -839,20 +840,71 @@ def test_a_nights_baseline_never_includes_the_night_being_judged(tmp_path):
 
 
 def test_night_verdict_pure_helper():
-    # Hazy overrides everything once the cloud fraction clears the floor.
-    assert _night_verdict(3.0, 3.0, NIGHT_HAZY_CLOUD_FRACTION) == "hazy"
-    assert _night_verdict(None, None, 1.0) == "hazy"
+    # Hazy overrides everything once the cloud fraction clears the floor — on a
+    # night that recorded enough subs for a share of them to say anything.
+    assert _night_verdict(3.0, 3.0, NIGHT_HAZY_CLOUD_FRACTION, 10) == "hazy"
+    assert _night_verdict(None, None, 1.0, 10) == "hazy"
+    # The denominator floor, both sides of it: one rejection out of two subs is
+    # half the night and still not a statement about the weather.
+    assert _night_verdict(None, None, 0.5, 2) == ""
+    assert _night_verdict(None, None, 1.0, NIGHT_HAZY_MIN_FRAMES - 1) == ""
+    assert _night_verdict(None, None, 1.0, NIGHT_HAZY_MIN_FRAMES) == "hazy"
     # No median and no cloud problem → no verdict.
-    assert _night_verdict(None, 3.0, 0.0) == ""
+    assert _night_verdict(None, 3.0, 0.0, 10) == ""
     # Soft only when BOTH the relative and absolute floors are cleared.
     best = 3.0
     soft = best * FWHM_DRIFT_RATIO + 0.01
     assert soft - best >= FWHM_DRIFT_ABS_PX
-    assert _night_verdict(soft, best, 0.0) == "soft"
+    assert _night_verdict(soft, best, 0.0, 10) == "soft"
     # Just under either floor stays sharp.
-    assert _night_verdict(best + FWHM_DRIFT_ABS_PX * 0.5, best, 0.0) == "sharp"
+    assert _night_verdict(best + FWHM_DRIFT_ABS_PX * 0.5, best, 0.0, 10) == "sharp"
     # The best night itself is sharp, never soft.
-    assert _night_verdict(best, best, 0.0) == "sharp"
+    assert _night_verdict(best, best, 0.0, 10) == "sharp"
+
+
+def test_a_two_sub_night_is_not_graded_hazy_by_one_of_its_two_subs(tmp_path):
+    """The hazy verdict is a *share* — "40 % of this night was lost to cloud" —
+    and a share needs a denominator big enough to mean something. It had none,
+    so on a night of two subs one transparency rejection read as 50 % cloud and
+    graded the whole night "hazy": a weather verdict from a single frame, sitting
+    beside the one-click "set this night aside" button and outranking every other
+    reading of the night (hazy takes precedence over sharp, and bars the "best
+    night" nod).
+
+    The sharpness half of the same verdict has always refused to speak under
+    ``SESSION_QUALITY_MIN_FRAMES`` measured subs. This is that floor's other
+    half, and the shape it matters on is the owner's: a mosaic revisited across
+    many nights records a handful of subs per visit (see ``--dithered``), so the
+    short night is the ordinary night rather than the odd one.
+
+    Nothing is hidden by the silence — the row still carries its own
+    ``reject_buckets``, which is where the fact belongs.
+    """
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        night = datetime(2026, 8, 1, 21, 0)
+        proj.add_frame(_frame(night, fwhm_px=3.0))
+        proj.add_frame(_frame(night + timedelta(minutes=10), accept=False,
+                              reject_reason="transparency", fwhm_px=3.0))
+        row = nights_breakdown(proj)[0]
+        assert row.n_frames == 2
+        assert row.reject_buckets == {"cloudy": 1}   # the fact is still there…
+        assert row.verdict == ""                     # …and no weather verdict
+
+        # A night that did record enough subs for the share to say something is
+        # still graded hazy, on the very same rejection *rate*.
+        later = night + timedelta(days=1)
+        kept = NIGHT_HAZY_MIN_FRAMES // 2
+        for i in range(NIGHT_HAZY_MIN_FRAMES):
+            proj.add_frame(_frame(
+                later + timedelta(minutes=10 * i), fwhm_px=3.0,
+                accept=i < kept,
+                reject_reason=None if i < kept else "transparency"))
+        newest = nights_breakdown(proj)[0]
+        assert newest.n_frames == NIGHT_HAZY_MIN_FRAMES
+        assert newest.verdict == "hazy"
+    finally:
+        proj.close()
 
 
 # --- Focus & sharpness through the night (focus_trend) ----------------------

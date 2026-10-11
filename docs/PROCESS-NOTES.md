@@ -1,5 +1,54 @@
 # Process notes & QA sweep records
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-jo7j7n`) — the carry-forward note was the whole task: every per-night surface, re-read on a many-night target
+
+*(Baseline `origin/main` at `f8957359` (`__version__` 0.493.2). CI on `main` green. No open PRs. "Bugs (fix
+these first)" holds no verified, ungated open bug for an **eleventh** run — so this run took the previous
+one's carry-forward sentence as the task instead of inventing one.)*
+
+**The sentence, verbatim from `FOCUS.md`:** *"a walk-away threshold calibrated PER NIGHT is a threshold the
+mosaic owner meets eleven times more often … every per-night surface in the app is worth re-reading on a
+many-night target — that is the one property the new `--dithered` sample has that no sweep had used it for,
+and it is cheaper to ask than any arithmetic audit."* It was. **Two bugs, both in
+`seestack/session_recap.py`, both found by reading constants against their own comments**, no dogfood pass
+and no detector involved: **v0.493.3** (the early-stop window priced the wrong drift) and **v0.493.4** (the
+hazy verdict had no denominator). Full accounts in [`SHIPPED.md`](SHIPPED.md).
+
+**The method note worth carrying forward: a floor and the thing it is a floor *against* must be written down
+together, because a comment is where this class of bug hides.** Both findings are constants whose own
+docstrings argued for them — and argued wrongly. `EARLY_STOP_MAX_PRIOR_NIGHTS` said the 30-day window
+cleared the drift of *darkness* (~1 h a month) and never mentioned the drift of the **target** (~2 h a month,
+twice as fast and always in the firing direction). `NIGHT_HAZY_CLOUD_FRACTION`'s comment described a share
+and never asked what it was a share **of**. In both cases the fix is small and the *argument* is the work, so
+both now carry the inequality as an assertion rather than as prose: a comment cannot be run, and these two
+were wrong for months with a green suite.
+
+### The sweep itself — every per-night surface, and what each one does on a six-subs-a-night target
+
+Read on the owner's shape (a mosaic revisited across many nights: a handful of subs per visit, ~60 s of kept
+integration, nothing discarded). The question asked of each: **does a short-but-honest night get read as a
+night that went wrong?**
+
+| surface | per-night gate | verdict |
+|---|---|---|
+| `clearNights.estimateClearNights` | `MIN_PRODUCTIVE_NIGHT_S` 120 s | **fixed v0.493.1** (previous run) |
+| `session_recap.early_stop` | `EARLY_STOP_LOOKBACK_DAYS` 30 d vs a 90 min bar | **BUG → v0.493.3** |
+| `session_recap._night_verdict` (hazy) | `NIGHT_HAZY_CLOUD_FRACTION` 0.4, no denominator | **BUG → v0.493.4** |
+| `session_recap.recent_night_pace_s` | same 120 s floor as `clearNights` | CLEAN — the Python twin's only answer under the floor is `None`, i.e. silence, and the two windows/filters still agree line for line (they are mirrored by hand, so this was checked rather than assumed) |
+| `session_recap._night_verdict` (soft) | `SESSION_QUALITY_MIN_FRAMES` 4 measured | CLEAN — and already hardened against the sibling class: `_typical_other_fwhm` is a leave-one-out **median** precisely because the old minimum made the "soft" badge grow with the library (13.7 % → 78.6 % over forty nights, measured in its own docstring) |
+| `session_recap.focus_trend` / `transparency_trend` | `*_MIN_FRAMES` 6 measured | CLEAN — both floors gate *speaking*, so a short night falls to silence |
+| `livesession.grade_conditions` | `CONDITIONS_MIN_FRAMES` 5 | CLEAN — verdict is `unknown` under the floor and the UI says so |
+| `livesession` quiet note | `QUIET_MIN_FRAMES` 6 **and** `QUIET_MIN_SESSION_MINUTES` 20 | CLEAN — two floors, both must clear, both fail silent; its own comment already works the six-10 s-subs case ("six 10 s subs span a minute") |
+| `activity_calendar.sharpest_night` | `SHARPEST_MIN_MEASURED` 5, `SHARPEST_MIN_NIGHTS` 2 | CLEAN — a positive highlight, withheld rather than inverted |
+| `activity_calendar` off-night | `OFF_NIGHT_MIN_BASELINE_NIGHTS` 4, ratio bars | CLEAN — a *ratio* against a median of per-night medians, so it does not scale with how short the nights are |
+
+**The pattern, and it is the one to take to the next per-night surface:** a floor that gates *speaking* is
+safe in every case above. The two that broke are the two where the floor gated something else — a **window**
+(`early_stop`: the gate was "how old may a yardstick be", and the answer decided whether the calendar could
+masquerade as a stall) and a **share** (`_night_verdict`: the gate was on the numerator's ratio and nobody
+guarded the denominator). So: when a per-night rule is not simply "say nothing below N", ask what the N is
+protecting and whether anything else can reach the same number by another route.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-zsys8j`) — the big-picture dogfood came due, and both of its findings came from READING rather than from a detector
 
 *(Baseline `origin/main` at `33d9249f` (`__version__` 0.493.0): **7604 passed, 4 skipped**, 14m30s with

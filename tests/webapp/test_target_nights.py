@@ -58,18 +58,48 @@ def test_nights_lists_two_nights_newest_first(client, solved_library, data_root)
     assert nights[1]["n_frames"] == 1
 
 
+def _extra_sub_on_the_same_night(data_root: Path, safe: str) -> None:
+    """One more accepted sub a minute after this target's last one — the same
+    night, simply with another frame in it.
+
+    The synth library ships three subs, and since v0.493.4 the hazy verdict
+    needs ``NIGHT_HAZY_MIN_FRAMES`` *recorded* subs before a share of them says
+    anything about the weather (one rejection out of two is not a forecast). So
+    a test about serialising ``"hazy"`` has to hand the night enough subs to
+    earn the word; the share itself is what it is testing.
+    """
+    from seestack.io.project import FrameRow
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            stamps = [f.timestamp_utc for f in proj.iter_frames() if f.timestamp_utc]
+            when = (datetime.fromisoformat(max(stamps))
+                    + timedelta(minutes=1)).isoformat()
+            proj.add_frame(FrameRow(
+                source_path=f"/dump/{safe}/{when}_extra.fit",
+                timestamp_utc=when, exposure_s=10.0))
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
 def test_nights_serialises_verdict_and_reject_buckets(client, solved_library, data_root):
-    # 2 of 3 subs set aside as cloudy (67% ≥ the 40% floor) → a "hazy" night.
+    # 2 of 4 subs set aside as cloudy (50% ≥ the 40% floor) → a "hazy" night.
+    _extra_sub_on_the_same_night(data_root, "M_42")
     _stamp(data_root, "M_42", {
         0: {"accept": False, "reject_reason": "auto:grade:transparency"},
         1: {"accept": False, "reject_reason": "auto:grade:sky"},
     })
     nights = client.get("/api/targets/M_42/nights").json()
     assert len(nights) == 1
+    assert nights[0]["n_frames"] == 4
     assert nights[0]["verdict"] == "hazy"
     assert nights[0]["reject_buckets"] == {"cloudy": 2}
     assert nights[0]["n_set_aside"] == 2
-    assert nights[0]["n_kept"] == 1
+    assert nights[0]["n_kept"] == 2
 
 
 def _add_measured_night(

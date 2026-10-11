@@ -722,13 +722,29 @@ def _panel_rescale_factors(
 # A night's one-word verdict is advisory — a plain label + a gentle highlight,
 # never a gate and never changes data — grounded only in metrics already stored:
 #   "hazy"  — a large share of the night's subs were set aside as *cloudy* (the
-#             transparency/sky reject bucket): the sky, not focus, was the problem.
+#             transparency/sky reject bucket): the sky, not focus, was the
+#             problem — on a night that recorded enough subs for a share of them
+#             to say anything at all (NIGHT_HAZY_MIN_FRAMES).
 #   "soft"  — its median FWHM is materially worse than the target's *sharpest*
 #             night, reusing the same relative+absolute floors the cross-session
 #             drift nudge already uses, so the two always agree.
 #   "sharp" — a usable median FWHM and neither hazy nor soft.
-#   ""      — too few measured subs to judge sharpness (and not hazy).
+#   ""      — too few subs to judge, either way.
 NIGHT_HAZY_CLOUD_FRACTION = 0.4  # ≥ 40% of the night's subs lost to cloud → "hazy"
+
+#: How many subs a night must have recorded before the *share* of them lost to
+#: cloud says anything about the night. The sharpness half of this same verdict
+#: already refuses to speak under :data:`SESSION_QUALITY_MIN_FRAMES` measured
+#: subs; the hazy half had no denominator floor at all, so a night of two subs
+#: with one transparency rejection read as 50 % cloud and was graded "hazy" — a
+#: weather verdict from a single frame, outranking every other reading of the
+#: night, on the row that carries the one-click "set this night aside" button.
+#: Deliberately the same number as the sharpness floor: a different population
+#: (every sub, not only the measured ones) but the same question, so the two
+#: halves of one verdict cannot disagree about how little data is too little.
+#: A night under the floor still carries its own ``reject_buckets``, so nothing
+#: is hidden — only the one-word judgement is withheld.
+NIGHT_HAZY_MIN_FRAMES = SESSION_QUALITY_MIN_FRAMES
 
 
 @dataclass
@@ -784,17 +800,22 @@ def _typical_other_fwhm(medians: list[float], skip: int) -> float | None:
 
 
 def _night_verdict(
-    median_fwhm: float | None, typical_fwhm: float | None, cloud_fraction: float
+    median_fwhm: float | None, typical_fwhm: float | None, cloud_fraction: float,
+    n_frames: int,
 ) -> str:
     """One-word plain verdict for a night, from already-stored metrics only.
 
     Hazy (a big chunk of the night lost to cloud) takes precedence over any
-    sharpness judgement; then a night materially softer than the target's
-    *typical other* night is "soft" (same floors, and the same baseline choice,
-    as the drift nudge — see ``_typical_other_fwhm``); a night with a usable
-    median FWHM that is neither is "sharp"; otherwise "" (not enough measured to
-    judge)."""
-    if cloud_fraction >= NIGHT_HAZY_CLOUD_FRACTION:
+    sharpness judgement — but only once the night recorded enough subs for a
+    *share* of them to mean anything (:data:`NIGHT_HAZY_MIN_FRAMES`; ``n_frames``
+    is every sub the night recorded, kept and set aside, which is the denominator
+    ``cloud_fraction`` was computed over). Then a night materially softer than
+    the target's *typical other* night is "soft" (same floors, and the same
+    baseline choice, as the drift nudge — see ``_typical_other_fwhm``); a night
+    with a usable median FWHM that is neither is "sharp"; otherwise "" (not
+    enough measured to judge)."""
+    if (n_frames >= NIGHT_HAZY_MIN_FRAMES
+            and cloud_fraction >= NIGHT_HAZY_CLOUD_FRACTION):
         return "hazy"
     if median_fwhm is None:
         return ""
@@ -933,7 +954,8 @@ def nights_breakdown(
         cloud_fraction = buckets.get("cloudy", 0) / len(rows) if rows else 0.0
         typical_fwhm = (_typical_other_fwhm(medians, judgeable_at[s_idx])
                         if s_idx in judgeable_at else None)
-        verdict = _night_verdict(median_fwhm, typical_fwhm, cloud_fraction)
+        verdict = _night_verdict(
+            median_fwhm, typical_fwhm, cloud_fraction, len(rows))
         # The "best" nod is a positive highlight, so only a genuinely good
         # ("sharp") night earns it — never a clouded ("hazy") night whose few
         # survivors happen to be sharp. ``best_fwhm`` is the min over the
