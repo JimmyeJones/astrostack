@@ -95,6 +95,12 @@ FWHM-derived suggestions got named functions (`psf_sigma_for_fwhm`, `sharpen_rad
 `star_size_for_fwhm`) so the sweep can run them across the whole FWHM range the QC layer reports
 (1.5–12 px) with no library behind them; the endpoints are now two lines each.
 
+**Free collateral, and it is a second surface.** `suggest_asinh_stretch` has another caller:
+`routers/stack.py::render_stretch_suggestion` seeds the History **"Adjust"** sliders from it, and those two
+sliders are `min={0} max={1} step={0.01}` with `toFixed(2)` readouts — so opening Adjust used to seed them
+at 0.828 / 0.056, print `0.83` / `0.06` beside them, and leave each thumb between two stops. They now agree
+with the number they were handed, without a line changing in `History.tsx`.
+
 **Upgrade-safe (§9).** Response field names, types and nullability are unchanged on all six endpoints; an
 older frontend reads the same shapes and simply receives a rounder number. No stored recipe is rewritten,
 no default moves, nothing on disk changes, and **no render or export changes at all** — a suggestion is a

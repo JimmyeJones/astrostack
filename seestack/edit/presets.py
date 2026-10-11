@@ -177,10 +177,28 @@ _LEVEL_OBJECT_SIGMA = 2.0
 #: spread over before that level is refused outright. Mirrors
 #: ``coverage_leveling._RESCUE_MAX_SIGMA_RATIO``, and is the guard that keeps a
 #: panel a nebula genuinely fills from having the nebula's own level subtracted
-#: out of it: sky is flat, a region full of nebulosity is not. Measured over six
-#: scenes it reads **0.24–0.36** where the canvas is sky carrying an object and
-#: **5.1–12.5** where the canvas *is* the object, so this separates two
-#: populations rather than tuning a margin.
+#: out of it: sky is flat, a region full of nebulosity is not.
+#:
+#: **It separates two populations, and the margins are 3.2x and 5.5x** — measured
+#: on fixtures whose panel steps and coverage map describe the *same* mosaic, it
+#: reads **0.89–0.95** where the canvas is sky carrying an object and **16.4–25.5**
+#: where the canvas *is* the object, so 3.0 is in the gap rather than on either
+#: edge. ``tests/test_auto_level_sigma_margin.py`` asserts both figures; this
+#: comment used to record 0.24–0.36 and 5.1–12.5, which **neither reproduces**
+#: and which implied ~8–12x of headroom above sky where there is 3.2x. That is the
+#: number anyone tightening this constant would reason from, so it is asserted now
+#: rather than written down (v0.493.10, and the same lesson as v0.493.9: a figure
+#: inside an asserted claim is as unchecked as a list inside a prose one).
+#:
+#: **Known defect, filed, do not "fix" it by moving this number.** The guard is
+#: applied to a plane that still carries the light-pollution gradient, because
+#: ``analyze_proxy`` runs ``_detrended_luminance(_delevelled_luminance(...))`` in
+#: that order — so a smooth ramp of only ~49 % of the sky, running across the
+#: panel strips, pushes **every genuine sky level** over 3.0 and the delevel
+#: declines outright. Reported sky level 2.08x the truth, the stretch goal 7.8 %
+#: low, the finished mosaic 7.1 % darker than the identical single field: v0.409.0's
+#: own defect, switched back on by a gradient. The fix is the ordering, not the
+#: constant — see docs/IMPROVEMENTS.md.
 _LEVEL_MAX_SIGMA_RATIO = 3.0
 
 
@@ -268,11 +286,12 @@ def _delevelled_luminance(lum: np.ndarray,
     # adjacent-pixel differences, the estimator ``analyze_proxy`` reports σ with).
     # It must not be the canvas's sigma-clipped spread: on the image this guard
     # exists for — one the target genuinely fills — that spread *is* the object,
-    # so it floats above everything and the guard never fires. Measured across six
-    # scenes, the ratio below reads 0.24–0.36 on canvases that are sky with an
-    # object on them and 5.1–12.5 on canvases that are object, which is what makes
-    # 3.0 a separation rather than a tuning. Reported in units of the image's own
-    # robust range, so it is put back into the pixels' units here.
+    # so it floats above everything and the guard never fires. The two populations
+    # the ratio separates, and the two margins it leaves, are measured and
+    # asserted in ``tests/test_auto_level_sigma_margin.py``; see
+    # ``_LEVEL_MAX_SIGMA_RATIO`` for them and for the filed defect in the *order*
+    # this is applied in. Reported in units of the image's own robust range, so it
+    # is put back into the pixels' units here.
     from seestack.edit.noise import estimate_noise_sigma
 
     lum_c = lum[valid]
