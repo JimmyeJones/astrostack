@@ -26,13 +26,19 @@ recipe without one of the four, Auto's own included.
 by side — the defect is in the overlap, and neither list is wrong.** Three runs found a wrong claim by reading
 one comment; this one found a missing claim by reading two that were both correct. The advisories were honest,
 the fidelity table was honest, and the thing between them had never been said.
-**And the one thing the dogfood cannot see, which is the next cheap task.** `--big --editor` came back
-**CLEAN** (three drives, 0 px spare black beside the window, the "where" sentence following a navigator click)
-and v0.493.7's line was correctly absent, because `dogfood_editor.mjs` opens the modal **before** its
-Add-menu loop and that loop **removes each op right after adding it** — so no pass can ever reach the modal
-with a detail op in the recipe, and the caveat is pinned by jsdom alone. About ten lines to fix (add Noise
-reduction from the menu's Common shortlist, re-call `driveFullSizeCheck()`, remove it); the full trace is in
-[`PROCESS-NOTES.md`](PROCESS-NOTES.md).
+**And the one thing the dogfood could not see — BUILT in the same run as v0.493.8, so do not re-take it.**
+`--big --editor` came back **CLEAN** (three drives, 0 px spare black beside the window, the "where" sentence
+following a navigator click) and v0.493.7's line was correctly absent, because `dogfood_editor.mjs` opened the
+modal **before** its Add-menu loop and that loop **removes each op right after adding it** — so no pass could
+ever reach the modal with a detail op in the recipe, and the caveat was pinned by jsdom alone. **v0.493.8**
+adds Noise reduction from the menu's Common shortlist after undo/redo, re-opens the modal and removes it
+again, and the pass now prints the caveat off a real page. **Its first version filed three findings that were
+all its own doing** — `FullSizeCheck` keeps `spot` and `split` in component state and closing the modal does
+not unmount it, so the probe clicked the first pass's corner (the marker rightly did not move) and toggled the
+split *off* before asserting its halves. **THE SECOND METHOD NOTE TO CARRY FORWARD: a probe's second
+interaction with a surface is a different test from its first, because the first left state behind — read the
+current state off the screen rather than assuming it.** Full trace in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md); both drives now end **clean, 0 findings**.
 The inbox is the Scout's; there were **no open PRs** at the start of this run and the LEAD stays open for its
 (a) and (b). Tests **+5 Python, +8 vitest, 5 fail-before** (4 webapp in a worktree at `origin/main` with
 `webapp.__file__` checked, 1 component in the same worktree with the new pure module copied in so the failure
