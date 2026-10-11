@@ -131,6 +131,54 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   parametrized — so the fix makes that file fail, which is the point, and the numbers above are what it should
   be compared against. This entry cannot rot silently.
 
+- **LEAD (Builder 2026-10-11, filed with v0.493.11 — the half of that fix that reaches Auto's own output
+  and is therefore not a blind Builder change) — Auto writes a recipe whose numbers the editor's own
+  sliders have no stop for, and the readout beside each one shows a third number.** *(Pillar: editor +
+  trust — PRIORITY 1; size **S to write, M to decide**; severity low-to-medium — nothing renders wrong,
+  but every knob Auto sets disagrees with the box next to it and jumps on the first nudge. Confidence:
+  **reproduced on a real `auto_recipe`** and the arithmetic traced; what the right answer costs is not
+  measured, which is why this is a lead.)*
+  **What is reproduced.** v0.493.11 put all ten of the editor's "From your image" suggestions on their
+  control's own stops (the measurement table is in [`SHIPPED.md`](SHIPPED.md) under that version). The
+  same defect is on the **on-by-default** path and was deliberately left: `presets.measured_auto_knobs`
+  hands `auto_recipe` continuous values — `target_bg` is a bare `np.clip(0.24 - sky * 0.4, 0.14, 0.24)`
+  and `saturation` a bare `np.clip(1.25 - sky_sigma * 6.0, 1.05, 1.25)`, neither rounded at all, while
+  `sharpen_amount`, `denoise_strength` and `chroma_strength` are rounded to **three** decimals — and
+  `auto_recipe` writes them straight into the op params. Measured on a real `auto_recipe` over the
+  `test_edit_stretch` linear fixture: `tone.stretch.target_bg = 0.23710031710565088` on a **0.01**-step
+  control, and `tone.saturation.amount = 1.242` on a **0.05**-step control whose stops are 1.20 and 1.25,
+  with `StackOptionControl`'s `decimalScale={2}` readout printing **1.24**. So the recipe holds one
+  number, the box shows a second and the slider can only be a third — on the picture Auto made, which is
+  the first thing the owner opens.
+  **And it is reproduced on the BUNDLED SAMPLE through the live app, not only on a fixture — so
+  `scripts/agent-dogfood.sh --editor` can see it and is the way to judge any fix.** Read straight off a
+  running dogfood install's saved Auto recipe for `Sample_Orion_Nebula_M42`:
+  `tone.stretch.target_bg = 0.23880698146298526` (stops 0.23 / 0.24) and
+  `tone.saturation.amount = 1.248` (stops 1.20 / 1.25). The **"What Auto-process did"** sentence on the
+  same screen says *"stretched sky level 0.24, saturation 1.25×"* — so that sentence, the slider's readout
+  and the recipe are three different numbers for each of those two knobs, on the default editor surface,
+  today. (`detail.sharpen` came back on-grid on this sample — `amount` 0.5, `radius` 1.0 — because a clean
+  stack puts `noise_frac` at 0 and the crossfade's endpoint happens to be a stop; that is luck, not a
+  property, and `denoise_strength` / `chroma_strength` are the same three-decimal arithmetic the moment the
+  sample is noisy.)
+  **Why it was not built, and what to settle first.** Snapping Auto's knobs changes what **every**
+  auto-edited export renders, on the hot path, which AGENTS.md §1 forbids doing blind — and the honest
+  shape is a real choice, not a round:
+  **(a)** snap the knobs where `auto_recipe` writes them (`snap_to_param` already exists and is
+  asserted), which makes the recipe honest and moves every Auto picture by up to half a step —
+  imperceptible on `target_bg`, visible on nothing measured so far, but it is still a change to his
+  stored-recipe output and it should be *shown* on a `--mosaic --editor` dogfood before it ships;
+  **(b)** leave the recipe alone and make the **readout** show the value it actually holds (derive
+  `decimalScale` from the param's own step, or raise it), which changes no render at all but adds a
+  decimal to every slider on the page and still leaves a value the slider cannot be dragged back to;
+  **(c)** both — snap what Auto emits *and* keep the readout honest for a hand-typed value.
+  (a) is probably right and (b) is the free one; **do not blind-flip either.** The cheap evidence nobody
+  has: whether half a step of `saturation` or `target_bg` is visible side by side on a real picture at
+  the owner's scale, which `scripts/agent-dogfood.sh --mosaic --editor` can answer in one pass.
+  `tests/test_edit_suggestion_grid.py::test_autos_own_knobs_are_still_off_the_grid_and_that_is_filed_not_fixed`
+  pins the current behaviour, so this is read as designed until it is settled — and fails the day it is,
+  which is the signal to close this entry.
+
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
   (0.25°) loses its per-panel identity entirely, and every per-panel surface in the engine then silently
@@ -3535,6 +3583,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.493.11 **the editor's ten "From your image" / "From your stars" buttons offered numbers their own sliders have no stop for, and the bounds they clamped to were five hand-kept copies of the declaration** (new `registry.param_spec` / `param_grid` / `snap_to_param`; `suggest_asinh_stretch`, `suggest_levels_points`, `suggest_levels_gamma`, `suggest_denoise_strength`, `highlights._strength_grid`, and the three new named `*_for_fwhm` helpers in `routers/editor.py` all route through them) — **six of the ten were off their control's step grid** and five printed it in the button's own label at a precision the readout beside it rounds away: *"From your image (black 0.077)"* beside a box reading `0.08`, over a slider whose stops are 0.07 and 0.08. Measured: `tone.levels.gamma` **2.415** against a 0.05 step (0.023 off, 46 % of a step, and its readout value 2.42 is not a stop either), `tone.stretch.stretch` 0.393, `tone.stretch.black` 0.047, `tone.levels.black/white` 0.077/0.796, `detail.deconvolve.psf_sigma` 1.36 against a 0.1 step. The cause is this file's own bug class one level down again: each one clamped to a **copy** of the op's `EditParam`, kept as prose in five modules (*"kept in step with the EditParam in seestack/edit/ops/detail.py"*), and the one test that checked a grid at all asserted a module against its **own** copy of the numbers — circular, so it would have passed unchanged if the op's step had moved. Now the declaration is read: no module keeps a slider's range, the strength is solved *after* its black point is snapped so the number offered is the one the picture gets, and `tests/test_edit_suggestion_grid.py` runs the real measurement for all ten, asserts the two-decimal readout can show every one of them, and pins the free registry-wide guard — **every numeric parameter's default is on its own control's stops**, clean across all 36. Nothing renders or exports differently; the gamma promise *"lands the sky at ~25 % grey"* measures 0.2502 → **0.2574** against its own 0.01 tolerance. Auto's own knobs are the open half, filed below. Free collateral: `routers/stack.py::render_stretch_suggestion` feeds the same solver to the History **Adjust** sliders, which are `step={0.01}` with `toFixed(2)` readouts — they used to seed at 0.828/0.056 and print 0.83/0.06, and now agree, with no frontend change
 - ✅ v0.493.9 **the "check it at full size" loupe re-measured both restoration ops' percentile span on its own 512 px crop, and the span was carryable after all** (`_denoise` and `_deconvolve` take `lo, hi` from `ctx.fit("span", …)`; `detail.deconvolve`'s `OpSpec.window_unfaithful` declaration is gone) — the **(a)** and **(b)** halves of the v0.493.5 LEAD, answered with the two-fixture measurement it asked for rather than with a flip. The LEAD's own table said freezing the span measured *worse* for deconvolve on two windows of three and for bilateral on one fixture; re-measured with the boundary term held constant it is **better on 11 of 12 cells**, and the sign it saw was two errors cancelling. For `detail.deconvolve` the span was its **only** whole-array measurement — `richardson_lucy` starts from a flat 0.5 guess and iterates with local convolutions — so carrying it makes the window the picture outright: **8.5e-05 → 9.8e-08** of full scale, ~700×, the remainder being float32 FFT round-off over two different transform sizes. That retires one of the three advisories the loupe was being cited for and could not answer ("deconvolution previews weaker … check it at full size **to judge it**"). `detail.denoise` keeps its declaration, narrowed to what is left and why: **bilateral 2.9e-03 → 3.2e-05** (~90×, and it is the method the advisory names), **wavelet** 1.3–1.5× on every window, **tv** 2.7× where the span error dominates and 2 % *worse* on the bright core — because tv's residual is `denoise_tv_chambolle`'s whole-array stopping energy, not its span, and BayesShrink's is its per-subband coefficient variance plus a shallower decomposition on a smaller array. Neither is reachable through skimage's public API; `eps=0` would make tv exact and **change every export**, so it is written down, not flipped. The colour LUT skimage's bilateral builds from the array's min/max — the LEAD's third suspect — is **measured not to matter** (2.2e-05 → 1e-06 when pinned as well) and was not built. No whole-image render moves: with no `frozen_fits`, `fit` measures exactly as before. **And the figures are assertions now**: two of the three in `_NOT_WINDOW_FAITHFUL` were wrong within four days of being written (`chroma_denoise` 2.3e-03 → 3.2e-03, `hot_pixels` 2.9e-04 → 7.2e-04, each understated *and* on the wrong window), which is this file's own bug class one level down — the worst case and the window it occurs on are checked, the registry declarations stopped repeating them, and a test refuses a declaration that re-quotes one
 - ✅ v0.493.8 **the editor dogfood can finally *read* the full-size check's caveat** (`scripts/dogfood_editor.mjs` opens that modal twice — the second time after adding **Noise reduction** — and `driveFullSizeCheck()` now takes its navigator corner and its screenshot tag as parameters) — v0.493.7's own carry-forward: the first open runs on Auto's recipe, which carries none of the four window-unfaithful ops, and the Add-menu loop removes each op right after adding it, so no pass could ever reach that modal with one of them in the recipe. **The first version of this filed three false findings** because `FullSizeCheck` keeps `spot` and `split` in component state and closing the modal does not unmount it — the probe clicked the same corner and toggled the split *off*, then reported its halves missing (the v0.492.59 failure mode). It now reads the toggle's label before pressing it; `--big --editor` comes back **clean, 0 findings**, printing the caveat off a real page
 - ✅ v0.493.7 **"check it at full size" now names the ops whose strength it cannot vouch for** (`OpSpec.window_unfaithful` on the four, `loupe-info.unvouched_ops`, `frontend/src/components/editor/windowFidelity.ts`) — option **(c)** of the v0.493.5 LEAD, and the only one of its three shapes that changes no render. **Every one of the decimated preview's four advisories sends the reader to this control, and three of them are about ops the window re-measures** (hot-pixel removal "at the threshold you've set", deconvolution "to judge it", bilateral denoise "instead" of raising the strength) — so the editor's authority on those three sliders was its least faithful surface for them, silently. Now one conditional line inside the already-open modal names them and says the rest matches exactly, which is bit-identical and asserted: the v0.493.6 sweep parametrizes off the **registry** declaration rather than its own table, pinned both ways, so a new unfaithful op is named to the reader the moment it declares itself and a fixed one fails the suite until the declaration goes. Empty on any recipe without one of the four, Auto's own included; `unvouched_ops` is an added field with an empty default, so an older frontend stays as silent as it was

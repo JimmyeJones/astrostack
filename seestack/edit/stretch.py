@@ -35,6 +35,8 @@ import math
 
 import numpy as np
 
+from seestack.edit.registry import snap_to_param
+
 #: The display-space grey the strength suggestion lands the image's sky median
 #: at — a clean dark-sky level. It is deliberately *lower* than the STF
 #: autostretch's 0.20: asinh's curve is far gentler than STF's midtones transfer
@@ -84,8 +86,12 @@ def suggest_asinh_stretch(
     there are too few finite pixels, the data has no dynamic range, or the sky
     median doesn't sit above the chosen black floor.
 
-    Both values are clamped to the op's ``[0, 1]`` slider range and rounded to a
-    slider-friendly precision.
+    Both values come back as the op's own sliders can actually hold them —
+    clamped to the ``EditParam``'s range and snapped to its step
+    (:func:`seestack.edit.registry.snap_to_param`), read off the declaration
+    rather than from a copy of it here. The strength is solved *after* the black
+    point has been snapped, so the number offered is the one the picture will get:
+    the op it was solved against is the op that will render it.
     """
     img = np.asarray(rgb, dtype=np.float64)
     finite = img[np.isfinite(img)]
@@ -112,7 +118,7 @@ def suggest_asinh_stretch(
     # ``black`` slider that lands ``shadows`` at that floor.
     floor = float(np.percentile(norm, black_pct))
     black = (2.0 + (floor - median) / sigma) / 6.0
-    black = min(max(black, 0.0), 1.0)
+    black = float(snap_to_param("tone.stretch", "black", black))
 
     # Reproduce asinh's own shadow clip (from this black) so the strength we
     # solve for is faithful to what the op will actually do.
@@ -139,4 +145,4 @@ def suggest_asinh_stretch(
                 hi_s = mid
         stretch = 0.5 * (lo_s + hi_s)
 
-    return round(float(stretch), 3), round(float(black), 3)
+    return float(snap_to_param("tone.stretch", "stretch", stretch)), black

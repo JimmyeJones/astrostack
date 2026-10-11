@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from seestack.edit import highlights as hl
+from seestack.edit.registry import param_grid
 from seestack.render.thumbnail import asinh_stretch, autostretch
 
 
@@ -63,8 +64,9 @@ def test_the_suggested_strength_really_reopens_the_core():
     assert flat_at(found.strength) <= hl._TARGET_FLAT
     # Smallest step that does the job: one step down still leaves the core blown
     # (unless the suggestion is already the slider's floor).
-    below = round(found.strength - hl._STRENGTH_STEP, 2)
-    if below >= hl._STRENGTH_MIN:
+    grid = hl._strength_grid()
+    below = grid[grid.index(found.strength) - 1] if grid.index(found.strength) else None
+    if below is not None:
         assert flat_at(below) > hl._TARGET_FLAT
 
 
@@ -158,12 +160,21 @@ def test_degenerate_inputs_return_no_suggestion_rather_than_raising():
 
 def test_strength_grid_is_the_ops_own_slider_steps():
     """A suggestion the slider can't represent would show as 'not at the
-    suggestion' forever."""
+    suggestion' forever — so the grid is checked against the ``highlights``
+    ``EditParam`` itself, not against a copy of its bounds in this module.
+
+    That copy is what the old version of this test asserted against, which made
+    it a check of the module against itself: it would have passed unchanged if
+    the op's step had moved to 0.01 and every suggestion had gone off-grid. The
+    wider sweep over every editor suggestion is in
+    ``tests/test_edit_suggestion_grid.py``.
+    """
+    stops = param_grid("tone.stretch", "highlights")
     grid = hl._strength_grid()
-    assert grid[0] == pytest.approx(hl._STRENGTH_MIN)
-    assert grid[-1] == pytest.approx(hl._STRENGTH_MAX)
-    assert all(round(v / hl._STRENGTH_STEP) * hl._STRENGTH_STEP == pytest.approx(v)
-               for v in grid)
+    # Every stop the op has, except the no-op at the bottom.
+    assert grid == [v for v in stops if v > 0.0]
+    assert grid[0] == pytest.approx(min(v for v in stops if v > 0.0))
+    assert grid[-1] == pytest.approx(max(stops))
 
 
 def test_local_gradient_ignores_non_finite_neighbours():

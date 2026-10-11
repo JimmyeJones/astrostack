@@ -45,7 +45,7 @@ from seestack.edit.proxy import (
     load_frame_coverage,
 )
 from seestack.edit.recipe import Recipe, preview_crop_of_recipe, recipe_from_dict
-from seestack.edit.registry import EditContext, get_op
+from seestack.edit.registry import EditContext, get_op, snap_to_param
 from seestack.stack.output import pack_unit
 from seestack.edit import auto_prefs as auto_prefs_mod
 from seestack.edit import presets as presets_mod
@@ -1233,8 +1233,23 @@ def previous_recipe(safe: str, run_id: int, request: Request) -> PreviousRecipeO
 # Gaussian FWHM → σ, and the bounds the deconvolution op's ``psf_sigma`` accepts
 # (kept in step with the EditParam definition in seestack/edit/ops/detail.py).
 _FWHM_TO_SIGMA = 1.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))  # ≈ 0.4247
-_PSF_SIGMA_MIN = 0.5
-_PSF_SIGMA_MAX = 5.0
+
+
+def psf_sigma_for_fwhm(fwhm: float) -> float:
+    """The deconvolution PSF σ to offer for a measured median star ``fwhm``.
+
+    σ = FWHM / (2·√(2·ln2)), landed on the ``psf_sigma`` slider's own stops
+    (:func:`seestack.edit.registry.snap_to_param`) rather than on a pair of
+    bounds copied here — the two numbers this module used to keep. A σ between
+    two stops is one the user cannot drag back to, and the button's own label
+    would print it at a precision the readout beside it rounds away.
+
+    Named rather than inlined in the endpoint so the sweep in
+    ``tests/test_edit_suggestion_grid.py`` can run it across the whole FWHM range
+    the QC layer reports, with no library behind it.
+    """
+    return float(snap_to_param("detail.deconvolve", "psf_sigma",
+                               fwhm * _FWHM_TO_SIGMA))
 
 
 class PsfSuggestionOut(BaseModel):
@@ -1249,7 +1264,8 @@ class PsfSuggestionOut(BaseModel):
 def psf_suggestion(safe: str, request: Request) -> PsfSuggestionOut:
     """Suggest a deconvolution PSF σ from the target's median star FWHM, so the
     user doesn't have to hand-guess a Gaussian width — the QC layer already
-    measured it. σ = FWHM / (2·√(2·ln2)), clamped to the op's slider range."""
+    measured it. σ = FWHM / (2·√(2·ln2)), landed on the op's own slider stops —
+    see :func:`psf_sigma_for_fwhm`."""
     lib, proj = deps.open_target_project(request, safe)
     try:
         fwhm = proj.median_fwhm()
@@ -1258,16 +1274,20 @@ def psf_suggestion(safe: str, request: Request) -> PsfSuggestionOut:
         lib.close()
     if fwhm is None or fwhm <= 0:
         return PsfSuggestionOut(fwhm_px=None, psf_sigma=None)
-    sigma = max(_PSF_SIGMA_MIN, min(_PSF_SIGMA_MAX, fwhm * _FWHM_TO_SIGMA))
-    return PsfSuggestionOut(fwhm_px=round(fwhm, 3), psf_sigma=round(sigma, 2))
+    return PsfSuggestionOut(fwhm_px=round(fwhm, 3),
+                            psf_sigma=psf_sigma_for_fwhm(fwhm))
 
 
-# The sharpen op's radius slider bounds/step (kept in step with the EditParam in
-# seestack/edit/ops/detail.py). A good unsharp-mask radius is on the scale of the
-# star's own blur, so we reuse the FWHM→σ conversion the PSF suggestion uses.
-_SHARPEN_RADIUS_MIN = 0.5
-_SHARPEN_RADIUS_MAX = 10.0
-_SHARPEN_RADIUS_STEP = 0.5
+def sharpen_radius_for_fwhm(fwhm: float) -> float:
+    """The unsharp-mask radius to offer for a measured median star ``fwhm``.
+
+    A good radius is on the scale of the star's own blur, so this reuses the
+    FWHM→σ conversion the PSF suggestion uses and lands the result on the
+    ``radius`` slider's own stops. The three bounds this file used to keep "in
+    step with the EditParam" by hand are gone; the declaration is read instead.
+    """
+    return float(snap_to_param("detail.sharpen", "radius",
+                               fwhm * _FWHM_TO_SIGMA))
 
 
 class SharpenSuggestionOut(BaseModel):
@@ -1283,8 +1303,8 @@ class SharpenSuggestionOut(BaseModel):
 def sharpen_suggestion(safe: str, request: Request) -> SharpenSuggestionOut:
     """Suggest an unsharp-mask radius from the target's median star FWHM, so the
     user doesn't hand-guess — mirrors the PSF-from-stars button. The star's
-    Gaussian σ (= FWHM / 2·√(2·ln2)) is the natural detail scale to enhance;
-    clamped to the op's slider range and rounded to its step."""
+    Gaussian σ (= FWHM / 2·√(2·ln2)) is the natural detail scale to enhance,
+    landed on the op's own slider stops — see :func:`sharpen_radius_for_fwhm`."""
     lib, proj = deps.open_target_project(request, safe)
     try:
         fwhm = proj.median_fwhm()
@@ -1293,18 +1313,19 @@ def sharpen_suggestion(safe: str, request: Request) -> SharpenSuggestionOut:
         lib.close()
     if fwhm is None or fwhm <= 0:
         return SharpenSuggestionOut(fwhm_px=None, radius=None)
-    raw = fwhm * _FWHM_TO_SIGMA
-    radius = max(_SHARPEN_RADIUS_MIN, min(_SHARPEN_RADIUS_MAX, raw))
-    radius = round(radius / _SHARPEN_RADIUS_STEP) * _SHARPEN_RADIUS_STEP
-    return SharpenSuggestionOut(fwhm_px=round(fwhm, 3), radius=round(radius, 2))
+    return SharpenSuggestionOut(fwhm_px=round(fwhm, 3),
+                                radius=sharpen_radius_for_fwhm(fwhm))
 
 
-# The star-reduction op's ``size`` slider bounds/step (kept in step with the
-# EditParam in seestack/edit/ops/stars.py). ``size`` is a star-scale in pixels —
-# the same physical quantity the FWHM measures — so the median star FWHM is the
-# natural data-driven default, rounded to the op's integer step and clamped.
-_STAR_SIZE_MIN = 1
-_STAR_SIZE_MAX = 8
+def star_size_for_fwhm(fwhm: float) -> int:
+    """The star-reduction ``size`` to offer for a measured median star ``fwhm``.
+
+    ``size`` is a star-scale in pixels — the same physical quantity the FWHM
+    measures — so the median FWHM maps straight across, landed on the ``size``
+    slider's own integer stops read from the ``EditParam`` rather than from the
+    pair of bounds this file used to keep.
+    """
+    return int(snap_to_param("stars.reduce", "size", fwhm))
 
 
 class StarSizeSuggestionOut(BaseModel):
@@ -1321,8 +1342,8 @@ class StarSizeSuggestionOut(BaseModel):
 def star_size_suggestion(safe: str, request: Request) -> StarSizeSuggestionOut:
     """Suggest a star-reduction ``size`` from the target's median star FWHM, so the
     user doesn't hand-guess how big their stars are — mirrors the sharpen/PSF
-    from-stars buttons. ``size`` is a star-scale in px, so the FWHM maps directly:
-    rounded to the op's integer step and clamped to its slider range."""
+    from-stars buttons. ``size`` is a star-scale in px, so the FWHM maps directly
+    onto the op's own integer stops — see :func:`star_size_for_fwhm`."""
     lib, proj = deps.open_target_project(request, safe)
     try:
         fwhm = proj.median_fwhm()
@@ -1331,8 +1352,8 @@ def star_size_suggestion(safe: str, request: Request) -> StarSizeSuggestionOut:
         lib.close()
     if fwhm is None or fwhm <= 0:
         return StarSizeSuggestionOut(fwhm_px=None, size=None)
-    size = int(max(_STAR_SIZE_MIN, min(_STAR_SIZE_MAX, round(fwhm))))
-    return StarSizeSuggestionOut(fwhm_px=round(fwhm, 3), size=size)
+    return StarSizeSuggestionOut(fwhm_px=round(fwhm, 3),
+                                 size=star_size_for_fwhm(fwhm))
 
 
 class DenoiseSuggestionOut(BaseModel):

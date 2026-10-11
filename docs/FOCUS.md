@@ -1,5 +1,91 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Builder, next run — **the carried-forward note was "go looking for another
+asserted claim whose supporting NUMBER is unasserted — there will be more". It took one hour and the
+answer was worse than unasserted: it was CIRCULAR. SHIPPED as v0.493.11.**
+**READ THIS FIRST IF YOU ARE ABOUT TO TRUST A TEST THAT ASSERTS A CLAIM.** `test_highlight_suggestion.py
+::test_strength_grid_is_the_ops_own_slider_steps` has existed since the blown-core solver shipped and its
+docstring states the consequence exactly — *"A suggestion the slider can't represent would show as 'not at
+the suggestion' forever"*. It asserted the module's grid against **the module's own copy** of the op's
+bounds, so it would have passed unchanged if `tone.stretch.highlights`' step had moved to 0.01 and every
+suggestion had gone off-grid. **An assertion that reads the same file it is checking is not a check**, and
+that is one level below v0.493.6's lesson (a list in prose) and v0.493.3/.4's (a constant in prose): here
+the figures *were* asserted — against themselves.
+**And the defect it was hiding was on the screen the whole time.** Ten "From your image" / "From your
+stars" buttons, each handing a measured number to one op parameter; **six emitted a value that control has
+no stop for**, and five printed it in the button's own label at a precision the readout beside it rounds
+away. *"From your image (black 0.077)"* sat next to a box reading `0.08`, over a slider whose stops are
+0.07 and 0.08 — three numbers for one knob, on the PRIORITY-1 surface. Worst: `tone.levels.gamma` **2.415**
+against a 0.05 step, **0.023 off (46 % of a step)**, and 2.42 is not a stop either. The five sets of bounds
+they clamped to were **copies** of the `EditParam`, kept as prose in five modules ("kept in step with the
+EditParam in seestack/edit/ops/detail.py"), and not one of them was checked.
+**What shipped.** Three helpers where the declaration lives — `registry.param_spec` / `param_grid` /
+`snap_to_param` — and **no module keeps a slider's range any more**. Two places needed more than a round at
+the end: `suggest_asinh_stretch` snaps its black point **before** solving the strength (so the number
+offered is solved against the black the picture gets — `highlights.py`'s own rule, one file over), and
+`suggest_levels_points` applies `min_gap` to the *snapped* pair. Nothing renders or exports differently; the
+gamma promise *"lands the sky at ~25 % grey"* measures **0.2502 → 0.2574** against its own 0.01 tolerance,
+which is tight enough to be worth knowing.
+**THE METHOD NOTE TO CARRY FORWARD, AND IT IS THE SHARPEST ONE YET: ask what a test would still pass with.**
+Four runs have now found a defect by reading a justification. This one found it by reading an *assertion* —
+and the question that cracked it in one minute was not "is this number right?" but **"what could change
+without this test noticing?"**. A test that imports the module it checks and compares it to that module's
+own constants answers nothing. Go through the editor's other self-referential assertions with that
+question; `tests/test_edit_suggestion_grid.py` is the shape of the answer — it declares the population and
+then **runs the real measurement** for each member, so a suggestion that stops being settable fails on its
+own output rather than on a table.
+**And the survey that question deserves was run, so do not redo it blind.** The whole `tests/` tree carries
+**226** assertions mentioning an `_UPPER_CASE` name, which is too coarse a net to be a population; narrowed
+to an assertion against a **private constant of an editor or Auto module** it is **55 in 12 files**, and all
+55 were read (the record, with the one near-instance named, is in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md)). Almost none is this shape — they use the constant as a yardstick for a measured property, which is exactly right
+(`test_color_cal`'s clamp bounds, `test_auto_level_sigma_margin`'s two populations either side of
+`_LEVEL_MAX_SIGMA_RATIO`, `test_auto_recipe_proxy_parity`'s `_PARITY_BUDGET`), and the two "mirror" files
+that look most like it are the counter-example worth copying: `test_auto_summary_mirror` and
+`test_auto_feedback_cues_mirror` compare the module's table to an **independent** source (a shared JSON
+fixture, a hand-written case table, and `test_edit_op_effect`'s `_EFFECT` against the **registry's**
+registered set), which is what made the circular one stand out. **And the lesson is sharper than "look for a
+tautology": the one tautological line the sweep did find (`scnr_noise_sigma(1.0) == _SCNR_NOISE_SIGMA`) is
+harmless, because nothing re-derives that number. What made the highlights test dangerous was the
+DUPLICATED NUMBER behind it — hunt the second home of a value, not the vacuous assertion.** **So the remaining
+exposure is not in `tests/` — it is wherever a value is produced by one file and consumed by a surface that
+re-derives it.** The next place to look with that question is the frontend's own copies: the editor's
+descriptor-driven forms get `min`/`max`/`step` from the server, but `StackOptionControl` carries its own
+numbers for what the schema does not say — and **it carries two different ones for the same question**:
+the slider branch falls back to `field.step ?? (isInt ? 1 : 0.01)` (line 86) and the plain-number branch to
+`field.step ?? (type === "int" ? 1 : 0.1)` (line 147), a 10× difference in one file with nothing comparing
+them. Harmless for the editor *today* — all 36 numeric `EditParam`s declare a step, which the new sweep
+incidentally establishes — so this is a question to ask of the **stacking** `StackOptionField`s that share
+the control, not a bug to fix here. Ask it with the same question: what could change without anything
+noticing?
+**AND THE HALF DELIBERATELY NOT BUILT, FILED WITH ITS NUMBERS — item 0 in "Bugs".** The identical defect is
+on the **on-by-default** path: a real `auto_recipe` writes `tone.stretch.target_bg =
+0.23710031710565088` into the recipe (0.01-step control) and `tone.saturation.amount = 1.242` (0.05-step,
+stops at 1.20/1.25, readout showing 1.24). Snapping those changes every auto-edited export, so the LEAD
+names its three shapes — (a) snap what Auto emits, (b) make the readout honest instead, (c) both — with (b)
+free and (a) needing a `--mosaic --editor` look first. **Do not blind-flip it**, and note the new test pins
+the current behaviour so it fails the day someone settles it.
+**The `--mosaic --editor` dogfood came back CLEAN both passes** (both page sweeps "nothing overflowing, no
+console errors", both editor drives clean across every op in the Add menu, and the Auto taste row's
+`Hold back highlights (0.05)` reads as a real stop) — **and it turned the filed LEAD from a fixture
+measurement into a live one**, which is the part worth having: the running install's own saved Auto recipe
+for the bundled sample holds `target_bg = 0.23880698146298526` and `saturation = 1.248` while the "What
+Auto-process did" sentence on the same screen says *"stretched sky level 0.24, saturation 1.25×"*. Three
+numbers per knob on the default editor surface, reachable by the tool — so that is how to judge any fix for
+it, and it is written into the entry.
+**A free registry-wide guard came with the sweep**: every numeric parameter's **default** is now asserted to
+be a value its own control can hold — clean across all 36 today, so an op added with an unreachable default
+is caught at the registry rather than by someone noticing the readout disagrees with the picture.
+There was **one open PR** at the start of this run (#1125, v0.493.10, pushed 28 minutes earlier — a live run
+on `presets.py`, so this run stayed out of that file entirely and took v0.493.**11**, per §11's "a second
+PR's number goes above whatever the first is holding"). **It merged during this run and is merged in here,
+and it changes the front of the queue: its ⭐ gradient/de-levelling entry is now item 0 in "Bugs" and the
+first ungated bug that section has carried in fourteen runs — take that before either of the two LEADs this
+run left.** Tests **+18 Python** (the new sweep), **2 fail-before** over 20 measured values from 6 (op, param)
+pairs, in a worktree at `origin/main` in two passes so the engine half and the endpoint half each fail on
+their own arithmetic; three existing assertions strengthened. Frontend untouched — the readout was already
+right, the numbers reaching it were not. Earlier notes stand below.)*
+
 *Last edited 2026-10-11 (Builder, same run, second task — **the method note from the task above, applied
 once more, found a reproduced defect on the mosaic hot path. FILED as ⭐, not fixed. SHIPPED as v0.493.10
 (comment + tests only, no behaviour change).**

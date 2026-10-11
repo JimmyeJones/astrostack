@@ -236,7 +236,18 @@ def _set_fwhm(data_root, safe, values):
 
 
 def test_psf_suggestion_from_median_fwhm(client, built_library, data_root):
+    """And the σ it answers is one the ``psf_sigma`` slider has a stop for.
+
+    It used to be ``round(σ, 2)``: on this very FWHM that is **1.27**, against a
+    control whose step is 0.1 — a value the slider cannot be dragged to, printed
+    on a button beside a readout that shows 1.27 and a thumb that sits between
+    two stops. Asserted against the op's own ``EditParam`` rather than against a
+    tolerance, so the step moving is a failure here rather than a silent
+    off-grid suggestion (``tests/test_edit_suggestion_grid.py`` sweeps all ten).
+    """
     import math
+
+    from seestack.edit.registry import param_grid, param_spec
 
     _set_fwhm(data_root, "M_42", [2.0, 3.0, 4.0])
     r = client.get("/api/targets/M_42/editor/psf-suggestion")
@@ -244,7 +255,10 @@ def test_psf_suggestion_from_median_fwhm(client, built_library, data_root):
     body = r.json()
     assert body["fwhm_px"] == 3.0  # median of 2, 3, 4
     expected_sigma = 3.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
-    assert abs(body["psf_sigma"] - round(expected_sigma, 2)) < 0.01
+    step = param_spec("detail.deconvolve", "psf_sigma").step
+    assert body["psf_sigma"] in param_grid("detail.deconvolve", "psf_sigma")
+    # The nearest stop to the real σ, not merely a nearby one.
+    assert abs(body["psf_sigma"] - expected_sigma) <= step / 2 + 1e-9
 
 
 def test_psf_suggestion_none_without_fwhm(client, built_library):
@@ -269,10 +283,15 @@ def test_sharpen_suggestion_from_median_fwhm(client, built_library, data_root):
     assert r.status_code == 200
     body = r.json()
     assert body["fwhm_px"] == 3.0  # median of 2, 3, 4
-    # radius ≈ the star's Gaussian σ, rounded to the op's 0.5 step, in [0.5, 10].
+    # radius ≈ the star's Gaussian σ, on the op's own stops — read off the
+    # ``EditParam`` rather than re-implementing its step here, which is the copy
+    # this change removed from three modules.
+    from seestack.edit.registry import param_grid, param_spec
+
     expected = 3.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
-    expected = round(round(expected / 0.5) * 0.5, 2)
-    assert body["radius"] == expected
+    assert body["radius"] in param_grid("detail.sharpen", "radius")
+    assert abs(body["radius"] - expected) <= param_spec(
+        "detail.sharpen", "radius").step / 2 + 1e-9
 
 
 def test_sharpen_suggestion_none_without_fwhm(client, built_library):

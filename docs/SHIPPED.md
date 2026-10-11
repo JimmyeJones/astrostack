@@ -1,5 +1,128 @@
 # Shipped — the record
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-4dlv4a`) — the editor's "From your image" buttons offered numbers their own sliders have no stop for, and the bounds they clamped to were five hand-kept copies of the declaration
+
+### v0.493.11 — every editor suggestion lands on its control's own stops: `registry.param_spec` / `param_grid` / `snap_to_param`, `suggest_asinh_stretch`, `suggest_levels_points`, `suggest_levels_gamma`, `suggest_denoise_strength`, `_strength_grid`, `psf_sigma_for_fwhm` / `sharpen_radius_for_fwhm` / `star_size_for_fwhm`
+
+*(Python **+18 items** in the new `tests/test_edit_suggestion_grid.py`, plus two existing assertions
+strengthened in `tests/webapp/test_editor.py` and one in `tests/test_highlight_suggestion.py` that was
+checking a module against its own copy of the numbers. **2 of the 18 fail before**, over 20 measured
+values from 6 (op, param) pairs — shown in a `git worktree` at `origin/main` with
+`seestack.edit.stretch.__file__` and friends checked to resolve inside it, the additive registry helpers
+and the test copied in, in two passes so the engine half and the endpoint half each fail on their own
+arithmetic. Frontend untouched: the readout was already right, the numbers reaching it were not. No
+`webapp/static/`, no config, no schema, no on-disk, no API shape change.)*
+
+**What was wrong.** The editor offers ten one-click suggestions — "From your image", "From your stars" —
+each of which measures the picture and hands the result to one op parameter. **Six of the ten emitted a
+value that parameter's slider has no stop for**, and five of those printed it in the button's own label
+at a precision the readout beside it rounds away. Measured on this repo's own fixtures:
+
+| button | control (step) | what it emitted | the readout beside it | nearest stop |
+|---|---|---|---|---|
+| Levels — black | `tone.levels.black` (0.01) | **0.077** | 0.08 | 0.08 |
+| Levels — white | `tone.levels.white` (0.01) | **0.796** | 0.80 | 0.80 |
+| Levels — midtones | `tone.levels.gamma` (0.05) | **2.415** | 2.42 | 2.40 |
+| Stretch — strength | `tone.stretch.stretch` (0.01) | **0.393** | 0.39 | 0.39 |
+| Stretch — black | `tone.stretch.black` (0.01) | **0.047** | 0.05 | 0.05 |
+| Deconvolution — σ | `detail.deconvolve.psf_sigma` (0.1) | **1.36** | 1.36 | 1.40 |
+
+So *"From your image (black 0.077)"* sat next to a box reading `0.08`, over a slider whose stops are 0.07
+and 0.08 and nothing between — three numbers for one knob, on the surface AGENTS.md §1 ranks first. The
+gamma row is the worst of them: **0.023 off its stop on the measured worst case**, 46 % of a whole step,
+and its own readout value (2.42) is not a stop either. The other four buttons — sharpen radius, denoise
+strength, star size, hold-back-highlights — were already on grid, which is the control group.
+
+**And the reason is the one this repo has now found four times.** The bounds each of these clamped to were
+**copies** of the op's `EditParam`, kept in five modules as prose: *"The sharpen op's radius slider
+bounds/step (kept in step with the EditParam in `seestack/edit/ops/detail.py`)"*, *"The star-reduction
+op's `size` slider bounds/step (kept in step with the EditParam in …)"*, *"The op's slider bounds/step
+(`tone.stretch`'s `highlights` param)"*, and two more. Nothing checked a single one of them. The one test
+in the repo that checked a grid at all —
+`test_highlight_suggestion.py::test_strength_grid_is_the_ops_own_slider_steps`, whose docstring states the
+consequence exactly (*"A suggestion the slider can't represent would show as 'not at the suggestion'
+forever"*) — asserted the module's grid against **the module's own `_STRENGTH_MIN/_MAX/_STEP`**, so it
+would have passed unchanged if the op's step had moved to 0.01 and every suggestion had gone off-grid.
+That is v0.493.6's lesson one level down again: **an asserted claim whose supporting figures are
+unasserted is an unasserted claim**, and here the assertion was circular rather than merely absent.
+
+**What shipped, and why it is the registry's job.** Three helpers in
+`seestack/edit/registry.py`, where the `EditParam` is declared:
+
+* `param_spec(op_id, key)` — the declaration itself, raising `KeyError` for an op or parameter that does
+  not exist (a caller naming a control that isn't there is a bug to see, not a value to fall back from);
+* `param_grid(op_id, key)` — every stop the control has, ascending;
+* `snap_to_param(op_id, key, value, minimum=None)` — the value as the control can hold it: clamped to the
+  parameter's own `[min, max]` and rounded onto its `step` grid **anchored at `min`**, exactly as the
+  control's stops are. `minimum` raises the floor for a caller that must never offer a no-op (the denoise
+  estimate's 0.1, which is *its* floor and not the op's 0), and the floor is itself moved up to the first
+  real stop, so no floor can produce a value between two.
+
+Every suggestion now goes through them and **no module keeps a copy of a slider's range any more** —
+`_PSF_SIGMA_MIN/_MAX`, two sets of `_SHARPEN_RADIUS_MIN/_MAX/_STEP`, `_STAR_SIZE_MIN/_MAX`,
+`highlights._STRENGTH_MIN/_MAX/_STEP` and `noise._STRENGTH_MAX/_STEP` are gone, and the one copy
+deliberately left (in `presets.py`, because the Auto path is not this change's business — see below) is
+**pinned to the declaration by the new sweep** rather than trusted.
+
+**Two places where the honest fix was more than a round at the end.**
+`suggest_asinh_stretch` solves the strength *against* a black point, so the black point is snapped
+**before** the solve and the strength is solved against the black the picture will actually get — the rule
+`seestack/edit/highlights.py` already states for its own solver (*"the op it was solved against is the op
+that will render it"*). `suggest_levels_points` applies its `min_gap` test to the **snapped** pair, because
+the gap that decides whether the suggestion is worth making is the gap the op will be given. And
+`suggest_levels_gamma` returns `None` if snapping lands it back on 1.0 — unreachable at its own
+`min_lift=1.05` default, but a caller asking for a smaller lift would otherwise get a button that does
+nothing.
+
+**Measured: nothing the suggestions promise stops being true.** The two existing tests that check a
+suggestion *does the thing it says* both pass unchanged, and the margin is worth recording because the
+gamma slider's 0.05 step is genuinely coarse. On `tests/displayspace.py`'s real stretched stack, the
+midtone suggestion's *"lands the sky at ~25 % grey"*: 0.2502 before snapping, **0.2574 after** (gamma
+1.079 → 1.1) — 0.0074 against the test's 0.01 tolerance, so the promise survives with room, and the
+number offered is now one the owner can actually set. On the asinh side the strength's sky landing moves
+by 0.0006–0.0021 of display grey against a 0.03 tolerance. The three from-the-stars suggestions move by
+at most half a step by construction; the deconvolution σ for a 3.0 px median FWHM goes 1.27 → **1.3**.
+
+**The sweep is the part to build on.** `tests/test_edit_suggestion_grid.py` declares the population and
+then **runs the real measurement** for each member rather than quoting a number, so a suggestion that
+stops being settable fails on its own output — the shape `tests/test_edit_window_fidelity.py` established.
+It asserts three things: every suggested value is inside its parameter's range and on its stops; every one
+of them is representable in the two-decimal readout `StackOptionControl` renders
+(`decimalScale={2}`), which is the label-vs-box half; and — the registry-wide guard that came free —
+**every numeric parameter's `default` is a value its own control can hold**, clean today across all 36 of
+them and now asserted, so an op added with an unreachable default is caught at the registry. The three
+FWHM-derived suggestions got named functions (`psf_sigma_for_fwhm`, `sharpen_radius_for_fwhm`,
+`star_size_for_fwhm`) so the sweep can run them across the whole FWHM range the QC layer reports
+(1.5–12 px) with no library behind them; the endpoints are now two lines each.
+
+**Free collateral, and it is a second surface.** `suggest_asinh_stretch` has another caller:
+`routers/stack.py::render_stretch_suggestion` seeds the History **"Adjust"** sliders from it, and those two
+sliders are `min={0} max={1} step={0.01}` with `toFixed(2)` readouts — so opening Adjust used to seed them
+at 0.828 / 0.056, print `0.83` / `0.06` beside them, and leave each thumb between two stops. They now agree
+with the number they were handed, without a line changing in `History.tsx`.
+
+**Upgrade-safe (§9).** Response field names, types and nullability are unchanged on all six endpoints; an
+older frontend reads the same shapes and simply receives a rounder number. No stored recipe is rewritten,
+no default moves, nothing on disk changes, and **no render or export changes at all** — a suggestion is a
+value the user clicks, never a value the app applies on its own. Auto's own knobs are deliberately
+untouched, which is the open half:
+
+**The half NOT built, filed as a measured lead in [`IMPROVEMENTS.md`](IMPROVEMENTS.md).** The same defect
+exists on the on-by-default path: `measured_auto_knobs` hands `auto_recipe` continuous values, so a real
+`auto_recipe` run writes `tone.stretch.target_bg = 0.23710031710565088` into the recipe (a 0.01-step
+control) and `tone.saturation.amount = 1.242` (a 0.05-step control whose stops are 1.20 and 1.25, with the
+readout showing 1.24). Snapping those would change what **every** auto-edited export renders, which
+AGENTS.md §1 forbids doing blind — so it is filed with its numbers, and
+`test_autos_own_knobs_are_still_off_the_grid_and_that_is_filed_not_fixed` pins it where it can be seen:
+the day someone settles it, that test says so.
+
+**The `--editor --mosaic` dogfood this change ran turned that lead from a fixture measurement into a live
+one, which is the part worth having.** Read off the running install's own saved Auto recipe for the bundled
+sample: `tone.stretch.target_bg = 0.23880698146298526` and `tone.saturation.amount = 1.248`, while the
+**"What Auto-process did"** sentence on the same screen says *"stretched sky level 0.24, saturation
+1.25×"*. Three different numbers for each knob — the sentence, the slider readout and the recipe — on the
+editor's default surface, reachable by the dogfood tool, which is how any fix for it should be judged.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-ddjooe`) — "it cannot be carried" had a short shelf life: the loupe's percentile span was carryable, and the figures excusing the ops that are not were two-thirds wrong
 
 ### v0.493.9 — both restoration ops take their percentile span from `ctx.fit`, which makes `detail.deconvolve` window-faithful outright: `_denoise`, `_deconvolve`, `OpSpec.window_unfaithful`, `_NOT_WINDOW_FAITHFUL`
