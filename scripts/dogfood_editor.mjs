@@ -174,7 +174,7 @@ for (const line of await advisories()) {
 // The button's absence is *correct* on a small stack, so a pass that does not
 // reach it says so rather than reporting nothing — the same reason the shell
 // prints `location_source` and the `proxy_scale` it measured.
-async function driveFullSizeCheck() {
+async function driveFullSizeCheck(tag = "01", spot = { fx: 0.15, fy: 0.2 }) {
   const unavailable = page.getByTestId("full-size-check-unavailable");
   const open = page.getByTestId("full-size-check-open");
   if (!(await open.count())) {
@@ -226,7 +226,7 @@ async function driveFullSizeCheck() {
       console.log(`  ! full-size check: ${id} is missing from the open modal`);
     }
   }
-  await page.screenshot({ path: `${SHOTS}/editor-loupe-01-open.png`, fullPage: true });
+  await page.screenshot({ path: `${SHOTS}/editor-loupe-${tag}-open.png`, fullPage: true });
 
   // Move the window: the navigator is the modal's only control, and "did the
   // marker follow the click?" is a question only a browser can answer.
@@ -239,8 +239,12 @@ async function driveFullSizeCheck() {
     const box = await nav.first().boundingBox();
     if (box) {
       // A corner, not the centre: the window is clamped inside the canvas, so
-      // a corner click is also the case where the clamp does something.
-      await page.mouse.click(box.x + box.width * 0.15, box.y + box.height * 0.2);
+      // a corner click is also the case where the clamp does something. **Which**
+      // corner is the caller's, because `FullSizeCheck` keeps its `spot` in
+      // component state and the modal closing does not unmount it — a second pass
+      // clicking the first pass's point would move nothing and report that the
+      // marker did not follow the click. (v0.493.8: it did exactly that.)
+      await page.mouse.click(box.x + box.width * spot.fx, box.y + box.height * spot.fy);
       await page.waitForTimeout(6000);
       const after = await page.evaluate(() => {
         const m = document.querySelector('[data-testid="full-size-check-marker"]');
@@ -268,8 +272,18 @@ async function driveFullSizeCheck() {
   if (!(await toggle.count())) {
     console.log("full-size check: no preview comparison offered for this window");
   } else {
-    await toggle.first().click();
-    await page.waitForTimeout(1500);
+    // It is a *toggle*, and `split` survives the modal closing exactly as `spot`
+    // does — so a second pass that clicks it blind turns the comparison OFF and
+    // then reports its two halves missing. Read which way it points first; its
+    // label is the only thing that says.
+    const label = (await toggle.first().innerText()).trim();
+    if (/^Compare/.test(label)) {
+      await toggle.first().click();
+      await page.waitForTimeout(1500);
+    } else {
+      console.log("full-size check: the comparison was already on from an earlier"
+        + " pass in this modal — asserting it rather than toggling it off");
+    }
     for (const id of ["full-size-check-split-before", "full-size-check-split-divider"]) {
       if (!(await page.getByTestId(id).count())) {
         findings++;
@@ -290,7 +304,7 @@ async function driveFullSizeCheck() {
       await page.mouse.up();
       await page.waitForTimeout(800);
     }
-    await page.screenshot({ path: `${SHOTS}/editor-loupe-02-split.png`, fullPage: true });
+    await page.screenshot({ path: `${SHOTS}/editor-loupe-${tag}-split.png`, fullPage: true });
     drain("full-size check (split)");
   }
 
@@ -420,6 +434,64 @@ for (const name of ["Undo", "Redo"]) {
     drain(name);
   } else {
     console.log(`${name}: unavailable at this point in the history`);
+  }
+}
+
+// --- the full-size check again, on a recipe it cannot fully vouch for --------
+//
+// `driveFullSizeCheck()` above ran on whatever recipe the editor *loaded*, which
+// is Auto's own — and Auto's carries none of the four ops whose full-resolution
+// window re-measures itself (v0.493.7: the percentile span in `detail.denoise`
+// and `detail.deconvolve`, the sky estimates in `detail.chroma_denoise` and
+// `detail.hot_pixels`). The Add-menu loop adds each op and then *removes* it, so
+// there was no moment in this drive at which one of those four was in the recipe
+// **and** the modal was open: the modal's caveat line — and any later sentence
+// put in it — was pinned by jsdom alone, and no pass could report what it says.
+// That is the same complaint this file's own header makes about the rest of the
+// screen. So: add one, open the modal again, read the paragraph, take it back off.
+//
+// "Noise reduction" is a **probe target, not a list.** It is the op with the
+// largest measured window divergence (9.3e-03 of full scale, on a star-poor
+// window) and it sits in the Add menu's Common shortlist, so it needs no
+// expansion. What the modal then prints is the *server's* answer, derived from
+// each op's `OpSpec.window_unfaithful` — that is the authoritative list, and the
+// thing worth reading as one paragraph with the three sentences beside it.
+const PROBE_LABEL = "Noise reduction";
+const probe = ops.find((o) => o.label === PROBE_LABEL);
+if (!probe) {
+  findings++;
+  console.log(`  ! no "${PROBE_LABEL}" in the Add menu — the full-size check's`
+    + " caveat line cannot be reached, so nothing read it this pass");
+} else {
+  await page.getByRole("button", { name: "Add operation" }).click();
+  await page.waitForTimeout(500);
+  let added = false;
+  try {
+    await page.locator("[role='menuitem']").nth(probe.index).click({ timeout: 5000 });
+    added = true;
+  } catch (e) {
+    findings++;
+    console.log(`  ! could not add ${PROBE_LABEL} to re-read the full-size check: `
+      + e.message.split("\n")[0]);
+    await page.keyboard.press("Escape");
+  }
+  if (added) {
+    await settle();
+    console.log(`full-size check: re-opened with "${PROBE_LABEL}" in the recipe`);
+    // The opposite corner from the first pass, for the reason in
+    // `driveFullSizeCheck`: the window is still where that pass left it.
+    await driveFullSizeCheck("11", { fx: 0.8, fy: 0.75 });
+    // Hand the recipe back the way it was found, the same reason and the same
+    // way the loop above does it: by the selected row, never by position.
+    const remove = page.locator('[aria-pressed="true"] [aria-label="Remove"]');
+    if (await remove.count()) {
+      await remove.first().click();
+      await settle();
+      drain(`${PROBE_LABEL} (removed)`);
+    } else {
+      findings++;
+      console.log(`  ! ${PROBE_LABEL} stayed in the recipe after the re-read`);
+    }
   }
 }
 
