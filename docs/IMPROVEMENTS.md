@@ -82,6 +82,55 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **⭐ REPRODUCED END TO END (Builder 2026-10-11, filed with v0.493.10 — found by checking the figures behind
+  `_LEVEL_MAX_SIGMA_RATIO` rather than the constant) — a light-pollution gradient of only ~49 % of the sky
+  switches the mosaic de-levelling OFF, and Auto then measures its stretch goal off a sky level **2.08× the
+  truth**. v0.409.0's own defect, reachable again.** *(Pillar: editor + image quality — PRIORITY 1/4; size
+  **S to fix, M to be sure of** — the fix changes what Auto emits for every mosaic, so it needs the
+  before/after below re-run. Severity **medium**: it needs a mosaic *and* a gradient, and the owner is a
+  heavy mosaic user shooting from one fixed home site. Confidence: **reproduced** through `_delevelled_luminance`,
+  `analyze_proxy`, `auto_recipe` and a rendered `apply_recipe`, with the boundary measured; the one thing not
+  measured is how strong his own gradients are.)*
+  **The mechanism, and it is an ordering.** `analyze_proxy` reads the sky level off
+  `_detrended_luminance(_delevelled_luminance(lum, coverage))` — the de-levelling runs **first**, so the plane
+  its own guard asks *"does what is left of this level look like sky?"* of still carries the smooth ramp that
+  `_detrended_luminance` is about to remove. A level's spread therefore grows linearly with the gradient while
+  the grain it is judged against does not, and `_LEVEL_MAX_SIGMA_RATIO = 3.0` is crossed by **sky**. The
+  guard's own stated purpose is a level *"a nebula or a galaxy fills"*; a smooth gradient is not that.
+  **Measured** (300×600 proxy, four panels, 0.103 sky, ramp running *across* the panel strips so every panel
+  sees all of it — the worst and the commonest orientation; worst level ratio against the 3.0 bar):
+
+  | ramp, as a share of sky | worst ratio | de-levels? | reported sky | same stack, one field | `target_bg` |
+  |---|---|---|---|---|---|
+  | 0 % | 0.95 | yes | 0.0404 | 0.0404 | 0.2238 |
+  | 19 % | 1.81 | yes | 0.0405 | 0.0404 | 0.2238 |
+  | **49 %** | **3.82** | **no** | **0.0838** | 0.0404 | **0.2065** |
+  | 97 % | 7.14 | no | 0.0838 | 0.0404 | 0.2065 |
+
+  It is a **step**, not a drift: below the bar the mosaic's measured sky is within 0.15 % of the identical
+  stack laid out as a single field; above it, 2.08× — and the finished one-click picture comes out **7.1 %
+  darker** than the single field. That is v0.409.0's sentence verbatim (*"the level Auto sets its stretch
+  target from still read 0.075 for a mosaic against 0.024 for the identical stack laid out as a single
+  field … Auto was choosing the goal for one image by measuring another"*), reachable again through the guard
+  v0.410.0 added. **And refusing to level is pure loss here**: the ramp is perpendicular to the strips, so it
+  contributes *nothing* to the panel-to-panel differences — asserted — and the steps are the same size at
+  every gradient strength.
+  **Why it is filed and not fixed in the same run, and what NOT to do.** **Do not move the constant** — the
+  object end of its separation is real and measured (16.4–25.5 where the canvas is the object, so 3.0 has
+  5.5× below it and 3.2× above a quiet sky), and raising it to clear a 97 % gradient would eat most of the
+  object margin the guard exists for. The fix is to judge the guard on a plane with the *smooth* shape taken
+  out — measure `level_sigma` (and the `sky` mask) on `_detrended_luminance(lum)` while still subtracting the
+  step from the raw plane — which is a change to the `sky` mask and therefore to **what Auto emits for every
+  mosaic, on the on-by-default hot path**, so it needs the no-gradient parity above re-measured before and
+  after, plus the object-filled guard re-checked (it must still refuse) and `classify_target`'s verdicts on
+  the bundled samples. One other shape worth costing first: a degree-2 surface only *partly* absorbs panel
+  steps (`_delevelled_luminance`'s own docstring says so), so the detrended plane is not a free yardstick
+  either — bound that bias before trusting it.
+  **The whole sweep, the two populations and the step in the user-visible numbers are pinned** in
+  `tests/test_auto_level_sigma_margin.py` (v0.493.10) **as they behave today**, with the boundary
+  parametrized — so the fix makes that file fail, which is the point, and the numbers above are what it should
+  be compared against. This entry cannot rot silently.
+
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
   (0.25°) loses its per-panel identity entirely, and every per-panel surface in the engine then silently
