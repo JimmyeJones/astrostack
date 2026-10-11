@@ -12,27 +12,30 @@ from typing import Any
 import numpy as np
 
 from seestack.edit.recipe import OpInstance, Recipe, validate_ops
+from seestack.edit.registry import snap_to_param
 
-# Gaussian FWHM → σ, and the sharpen op's radius bounds/step (kept in step with
-# the EditParam in seestack/edit/ops/detail.py). A good unsharp-mask radius is on
-# the scale of the star's own blur (its Gaussian σ), so the median star FWHM is
-# the natural data-driven default — the same conversion the editor's
-# sharpen-from-stars button uses.
+# Gaussian FWHM → σ. A good unsharp-mask radius is on the scale of the star's own
+# blur (its Gaussian σ), so the median star FWHM is the natural data-driven
+# default — the same conversion the editor's sharpen-from-stars button uses, and
+# now landed on the same control's stops by the same helper, so the two surfaces
+# cannot offer the owner two different radii for one measurement.
 _FWHM_TO_SIGMA = 1.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))  # ≈ 0.4247
-_SHARPEN_RADIUS_MIN = 0.5
-_SHARPEN_RADIUS_MAX = 10.0
-_SHARPEN_RADIUS_STEP = 0.5
 
 
 def _sharpen_radius_from_fwhm(median_fwhm: float | None) -> float:
     """Map a target's median star FWHM to an unsharp-mask radius (≈ the star's
-    Gaussian σ), clamped to the op's slider range and rounded to its step.
-    Falls back to the op's 2.0 default when no FWHM is available."""
+    Gaussian σ), landed on the ``radius`` slider's own stops. Falls back to the
+    op's 2.0 default when no FWHM is available.
+
+    The three bounds this module used to keep "in step with the EditParam" by
+    hand are gone — the declaration is read instead
+    (:func:`~seestack.edit.registry.snap_to_param`). That was the last copy of a
+    slider's range left in the repo after v0.493.11.
+    """
     if median_fwhm is None or median_fwhm <= 0:
         return 2.0
-    raw = median_fwhm * _FWHM_TO_SIGMA
-    radius = max(_SHARPEN_RADIUS_MIN, min(_SHARPEN_RADIUS_MAX, raw))
-    return round(round(radius / _SHARPEN_RADIUS_STEP) * _SHARPEN_RADIUS_STEP, 2)
+    return float(snap_to_param("detail.sharpen", "radius",
+                               median_fwhm * _FWHM_TO_SIGMA))
 
 
 def _ops(*pairs: tuple[str, dict]) -> list[OpInstance]:
@@ -1131,10 +1134,28 @@ def auto_knob_values(knobs: dict[str, float],
     return values
 
 
+def _emitted(op_id: str, key: str, value: float, gate: float) -> float | None:
+    """``value`` as ``op_id``'s ``key`` control can actually hold it, or ``None``
+    when Auto should not emit the op at all.
+
+    Two reasons for ``None``, and they are different: ``value`` is below ``gate``
+    — the op's own "don't emit a sliver" rule, read off the **measured** value so
+    the op *list* in an Auto recipe is exactly what it was — or the snapped value
+    is the control's own zero, which is what a sliver becomes once it is landed
+    on a real stop (``detail.sharpen``'s amount moves in 0.1s against a 0.05
+    gate, so this is reachable rather than theoretical).
+    """
+    if value < gate:
+        return None
+    snapped = float(snap_to_param(op_id, key, value))
+    return snapped if snapped > 0.0 else None
+
+
 def auto_op_params(values: dict[str, float],
                    median_fwhm: float | None = None) -> dict[str, dict]:
     """The tone/detail op params :func:`auto_recipe` emits for ``values`` — each
-    op's own "don't emit a sliver" gate and its rounding, in one place.
+    op's own "don't emit a sliver" gate, and every number **landed on a stop its
+    own control has**, in one place.
 
     Keyed by op id, and an op whose gate is not met is simply **absent**, which
     is what the recipe does with it. ``auto_recipe`` builds its op list from this
@@ -1142,26 +1163,57 @@ def auto_op_params(values: dict[str, float],
     of the split is that "would one more step of this bias reach the recipe at
     all?" is then a dict comparison against the same arithmetic the recipe is
     built from, rather than a second copy of the gates that would drift from it.
+
+    **Every value goes through :func:`~seestack.edit.registry.snap_to_param`**,
+    because a recipe param between two of its slider's stops is a number the
+    owner cannot drag back to: before v0.493.14 a real Auto run wrote
+    ``tone.stretch.target_bg = 0.2388…`` on a 0.01-step control and
+    ``tone.saturation.amount = 1.248`` on a 0.05-step one, the readout beside
+    each showed a rounder number, the "What Auto did" sentence a third, and the
+    first nudge of either slider jumped the picture. The shift is at most half a
+    stop — the finest distinction the control offers, so not one the owner could
+    have asked for by hand — and what it costs the *picture* is measured in
+    ``tests/test_auto_knob_grid.py`` against that same yardstick: on five
+    realistic canvases, mosaics included, the snap moves the worst pixel by
+    1.1-2.7 of 255 where **one click** of the same sliders moves it by 5.2-17.9,
+    and shifts 0.001-0.7 % of the picture by a whole level against 5-96 %. A
+    taste bias still moves every knob it
+    moved before, because each ``auto_prefs._PARAM_STEP`` is a whole number of
+    its control's stops and the grid is anchored at the parameter's ``min`` —
+    asserted in the same file.
     """
     out: dict[str, dict] = {}
-    if values["denoise_strength"] >= 0.05:
-        out["detail.denoise"] = {"method": "wavelet",
-                                 "strength": values["denoise_strength"]}
-    stretch: dict = {"mode": "stf", "target_bg": values["target_bg"]}
-    if values["highlight_protect"] >= 0.01:
+    denoise = _emitted("detail.denoise", "strength",
+                       values["denoise_strength"], 0.05)
+    if denoise is not None:
+        out["detail.denoise"] = {"method": "wavelet", "strength": denoise}
+    stretch: dict = {"mode": "stf",
+                     "target_bg": float(snap_to_param("tone.stretch",
+                                                      "target_bg",
+                                                      values["target_bg"]))}
+    highlights = _emitted("tone.stretch", "highlights",
+                          values["highlight_protect"], 0.01)
+    if highlights is not None:
         # Only carried when a taste bias actually asked for it, so the default
         # recipe's op list — which saved recipes and tests compare against — is
         # unchanged rather than gaining a param pinned at its own default.
-        stretch["highlights"] = round(values["highlight_protect"], 3)
+        stretch["highlights"] = highlights
     out["tone.stretch"] = stretch
-    if values["scnr_amount"] >= 0.05:
-        out["tone.scnr"] = {"amount": round(values["scnr_amount"], 3)}
-    out["tone.saturation"] = {"amount": round(values["saturation"], 3)}
-    if values["sharpen_amount"] >= 0.05:
-        out["detail.sharpen"] = {"amount": values["sharpen_amount"],
+    scnr = _emitted("tone.scnr", "amount", values["scnr_amount"], 0.05)
+    if scnr is not None:
+        out["tone.scnr"] = {"amount": scnr}
+    out["tone.saturation"] = {"amount": float(snap_to_param("tone.saturation",
+                                                            "amount",
+                                                            values["saturation"]))}
+    sharpen = _emitted("detail.sharpen", "amount",
+                       values["sharpen_amount"], 0.05)
+    if sharpen is not None:
+        out["detail.sharpen"] = {"amount": sharpen,
                                  "radius": _sharpen_radius_from_fwhm(median_fwhm)}
-    if values["chroma_strength"] >= 0.05:
-        out["detail.chroma_denoise"] = {"strength": values["chroma_strength"]}
+    chroma = _emitted("detail.chroma_denoise", "strength",
+                      values["chroma_strength"], 0.05)
+    if chroma is not None:
+        out["detail.chroma_denoise"] = {"strength": chroma}
     return out
 
 
