@@ -1,5 +1,88 @@
 # Shipped — the record
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-zsys8j`) — a whole-journey dogfood, and the two things it said
+
+### v0.493.1 — 🔴 TRUST / autonomy (PRIORITY 2–3): the readiness card stops telling a multi-night mosaic owner their nights "kept almost nothing" and sending them to check focus and framing
+
+*(`frontend/src/components/clearNights.ts` — `DUD_NIGHT_KEPT_SHARE`, `estimateClearNights`'s
+`productive.length === 0` branch; `clearNights.test.ts`'s `night()` fixture.)*
+
+**What the app said, on its own sample.** A `--mosaic --dithered --editor --big` dogfood read the Target
+page's prescriptive cards as one paragraph — which is what that pass is for — and on the **dithered**
+target (`shape="dithered"`, v0.493.0: a 2×2 mosaic revisited over eleven re-framed nights) the readiness
+card said:
+
+```
+Is it enough yet? · goal ~11.5 h (about 6 fields of sky) · 13 min of ~11.5 h — a good start …
+· Your last 5 nights on this target kept almost nothing, so there's no pace to judge by yet
+  — worth checking focus and framing before counting on more nights.
+```
+
+**Every clause of that second sentence is false, and the app's own rows say so.**
+`/api/targets/<T>/nights` for that target, on every one of its eleven nights:
+`n_frames 6, n_kept 6, n_set_aside 0, reject_buckets {}, verdict "sharp"`, `median_fwhm_px ≈ 2.04`. Not one
+sub was discarded; the focus is graded sharp by the app's own measurement; and the framing verdict rendered
+**one card down** reads *"🎯 Nicely framed — completely inside this mosaic"*. The 2×2 blocky sample on the
+same pass (21 subs, two nights) is the control and stays quiet.
+
+**The mechanism, in one constant and one word.** `MIN_PRODUCTIVE_NIGHT_S = 120` asks *"is there a pace here
+to divide by?"* — a floor on **kept integration per night**, calibrated so a test frame or two cannot drag
+the ETA's median down. When no recent night clears it, `estimateClearNights` returned the all-duds
+sentence. But "no night cleared the floor" has two causes that want **opposite** answers:
+
+* the nights went out and **threw most of their subs away** (cloud, dew, a bump) — the case the sentence
+  was written for, where "check focus and framing" is the useful thing to say; or
+* the nights were simply **short** and kept everything they caught — which is exactly what a mosaic
+  revisited across many nights looks like. Six subs a visit at 10 s is **60 s** of kept exposure against a
+  120 s floor, on a target that discarded nothing.
+
+The owner is a heavy mosaic user shooting the same pointings across many nights (AGENTS.md §1), so the
+second cause is his everyday state and the first is the rare one.
+
+**The fix is to make the scold agree with what it claims.** The branch now also asks whether those nights
+*discarded* most of what they recorded — `n_kept` against `n_frames`, summed over the lookback — and when
+they did not it falls through to this module's own documented default: *"say nothing rather than guess …
+when there's no usable pace"* (`null`, which both render sites already treat as self-hide, and which
+`nightsToGo` was already being handed in this case). **No ETA anywhere changes**: `MIN_PRODUCTIVE_NIGHT_S`
+is untouched, the pace median is untouched, `clearNightsFromPace` — the Dashboard's half, which divides a
+server-precomputed pace — is untouched, and the genuine all-duds sentence still fires with its wording
+byte-for-byte.
+
+`DUD_NIGHT_KEPT_SHARE = 0.5` is not a new line in the sand: it is where
+`seestack.livesession.CONDITIONS_POOR_KEEP_RATE` already draws it, and that function's comment is this
+bug in one sentence — *"a sharp night that is being thrown away by cloud and a soft night that is all
+being kept are different problems, and averaging them into one adjective would hide both."* Measured in
+**frames**, not seconds, because that is what "kept" means here and what the two cards that already quote
+a keep percentage use (`LastNightCard`, `SessionRecapCard`); a night's `exposure_s` can be 0 when a sub
+carries no `EXPTIME`, and a share of zero is not a judgement about anybody's focus.
+
+**The method note, and it is the one to carry forward: the fixture could not express the distinction, so
+the rule was never asked the question.** `clearNights.test.ts`'s `night()` helper set
+`n_kept = n_frames` *and* `exposure_s = kept_exposure_s`, so **every night in the suite kept 100 % of what
+it caught** — and the existing "advises checking focus when recent nights kept essentially nothing" test
+was passing on nights that had discarded nothing at all. A branch whose whole subject is the gap between
+*recorded* and *kept* had no fixture that could open that gap. **When a test helper derives one field from
+another, it has decided an answer rather than asked a question** — and the branch under it is untested in
+exactly the direction that matters. The helper now takes `nKept` separately and the all-duds test states
+its own case (three 60-sub sessions keeping 1, 1 and 2), which is what makes it a control here: it still
+passes under the revert.
+
+**Reproduced live in both directions.** Before, on `origin/main`, the sentence above. After, the same
+`--dithered` pass on the same target: the card reads *"13 min of ~11.5 h — a good start — more time pulls
+out fainter detail. Measured on your own picture: the background already looks clean at 13 min…"* and
+nothing else — one less sentence on a page the owner already found busy, and the one removed was wrong.
+
+**Nothing removed (§1):** the sentence is not deleted, it is *conditioned*. A target whose recent nights
+really did keep almost nothing gets it, unchanged, with its focus-and-framing advice intact.
+
+**Upgrade-safe (§9):** frontend-only, display-only — no config, schema, migration, on-disk, default, API
+or engine change.
+
+**Tests +2 vitest, 3 fail-before** (the two new ones plus the divide-by-zero guard, verified by deleting
+the three added lines); the all-duds test passes under that revert, which is the control. Python
+**7604 passed / 4 skipped**; `tsc --noEmit`, `vitest run` (4609) and `vite build` all green.
+
+
 ## 2026-10-10 (Builder, branch `claude/jolly-bardeen-wkpk92`) — the shape the tooling could not reach
 
 ### v0.493.0 — 🟠 INFRA / instrument (PRIORITY 1 adjacent — it is the editor's own blind spot): a sixth sample shape whose coverage depths are a **continuum**, so the owner's actual mosaic canvas can finally be put in front of a browser and a test
