@@ -428,7 +428,22 @@ def test_a_single_field_stacks_auto_is_untouched_by_a_coverage_map():
 def test_delevelling_leaves_a_mosaic_with_no_steps_where_it_already_was():
     """The other half of upgrade safety: it removes *steps*, so a canvas whose
     panels are already level is measured exactly as it was — while a stepped one
-    really is flattened."""
+    really is flattened.
+
+    **The flattening claim is made of the composition, and v0.493.13 is why.**
+    ``_delevelled_luminance`` now fits the smooth sky surface and the per-level
+    steps against each other, so the part of a staircase a degree-2 surface can
+    absorb is deliberately *left in the surface* rather than charged to the step —
+    which is what stops a smooth gradient being flattened into a sawtooth. On its
+    own the pass therefore leaves ~0.005 of this fixture's 0.024 staircase behind;
+    ``_detrended_luminance``, which both callers compose it with on the next line
+    (``analyze_proxy``, ``classify_target``), removes exactly that part. So the
+    honest claim is about the plane the sky level is actually read off, and it is
+    a *stronger* one than the pass alone ever made: **0.00052** here against
+    **0.00075** before the change, and 0.00052 against **0.02279** once the same
+    canvas carries a light-pollution ramp (see
+    ``tests/test_auto_delevel_joint_fit.py``).
+    """
     cov = _panel_coverage()
 
     def panel_medians(plane):
@@ -445,9 +460,14 @@ def test_delevelling_leaves_a_mosaic_with_no_steps_where_it_already_was():
     # injects offsets spanning 0.024 (−0.008 … +0.016).
     stepped = _scene(0.004, seed=13, mosaic=True)[..., :3].mean(axis=2)
     before = panel_medians(stepped)
-    after = panel_medians(_delevelled_luminance(stepped, cov))
+    after = panel_medians(_detrended_luminance(_delevelled_luminance(stepped, cov)))
     assert max(before) - min(before) > 0.02, before
     assert max(after) - min(after) < 0.002, after
+    # And the pass alone does *not* claim it, on purpose — the surface keeps the
+    # part of the staircase it can explain. Asserted so the division of labour
+    # between the two passes cannot drift back without this failing.
+    alone = panel_medians(_delevelled_luminance(stepped, cov))
+    assert 0.002 < max(alone) - min(alone) < 0.010, alone
 
 
 def test_a_canvas_the_object_fills_is_left_alone_rather_than_flattened():
@@ -764,13 +784,24 @@ def test_the_fringe_really_does_walk_the_archetype_toward_a_star_cluster():
     ``6·sky_sigma`` term of the signal threshold, and faint diffuse structure
     disappears under it — so ``ext_frac`` falls, ``star_share`` rises, and a
     nebulous field reads as a star cluster. Measured over these six canvases
-    (σ = 0.02): whole-canvas **cluster on 5**, kept-rectangle on **0**.
+    (σ = 0.02): whole-canvas **cluster on 1**, kept-rectangle on **0**.
+
+    **It used to be 5 of 6, and v0.493.13 is why it is 1.** ``classify_target``
+    reads its geometry off ``_detrended_luminance(_delevelled_luminance(...))``,
+    and the de-levelling now fits the smooth sky surface and the per-level steps
+    against each other instead of charging a level's whole median to its step — so
+    the ragged rim's own levels come out flatter, the ``6·sky_sigma`` term of the
+    signal threshold is inflated less, and the faint diffuse structure mostly
+    survives the fringe. The premise this test exists for still holds (the fringe
+    *can* carry the verdict, on one canvas of six), and the per-pair cue
+    directions below — which this test's own comment calls the mechanism rather
+    than the tally — hold on **all six**, unchanged.
     """
     pairs = [_archetypes(band, seed)
              for band in (14, 20, 24) for seed in (34, 89)]
     whole_cluster = sum(1 for w, _k in pairs if w["cls"] == "cluster")
     kept_cluster = sum(1 for _w, k in pairs if k["cls"] == "cluster")
-    assert whole_cluster >= 4, whole_cluster      # the fringe can say "cluster"
+    assert whole_cluster >= 1, whole_cluster      # the fringe can say "cluster"
     assert kept_cluster < whole_cluster           # ...and the kept picture does not
     # The direction of both cues, on every one of them — the mechanism, not the
     # tally, so a numerics change that moves a verdict still has to move these.
