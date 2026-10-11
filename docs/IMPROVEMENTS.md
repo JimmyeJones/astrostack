@@ -119,10 +119,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   six passes the residual this fix accepts is byte-**invisible** in what Auto emits: the recipe for a quiet
   mosaic is identical to the one the same stack gets as a single field, across all five geometries × two
   seeds (`test_the_measured_cost_is_below_the_controls_own_resolution`). So the question for a smaller pass
-  count is no longer "how much goal error?" but **"does the emitted recipe change at all?"** — run that same
-  assertion at three passes (0.0019, a fifth of a stop, so it will change the emitted stop on some fraction
-  of positions rather than none) and the answer is a yes/no instead of a judgement about a sub-step number.
-  That is the cheap half of this entry and it does not need the stride work first.
+  count is no longer "how much goal error?" but **"does the emitted recipe change at all?"** — a yes/no
+  instead of a judgement about a sub-step number, and it does not need the stride work first.
+  **The arithmetic says the likely answer is no, so measure it rather than assuming either way.** A residual
+  changes the emitted stop only where it straddles a half-step boundary: over uniformly distributed
+  positions, **0.0008 (six passes) moves the stop on ~8 %, 0.0019 (three passes) on ~19 %, 0.0061 (one
+  pass) on ~60 %**. So three passes roughly doubles how often Auto's mosaic recipe differs from the
+  identical single field's, which is the thing v0.493.13 existed to close — i.e. the pass count is probably
+  *not* where the ~76 % comes back from, and the strided plane is. Run
+  `test_the_measured_cost_is_below_the_controls_own_resolution` at three passes to settle it in one command.
 
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`

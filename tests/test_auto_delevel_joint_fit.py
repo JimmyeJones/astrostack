@@ -389,10 +389,21 @@ def test_the_measured_cost_is_below_the_controls_own_resolution():
     The residual above is a cost to the *measurement*. What reaches his picture
     is the measurement landed on ``tone.stretch.target_bg``'s own 0.01 stops
     (v0.493.14), and 0.0002-0.0008 is a twelfth of one of those — so on a quiet
-    mosaic the recipe Auto writes is now **byte-identical** to the one it writes
-    for the same stack laid out as a single field. Asserted here rather than in
-    the snapping test because this is the number that makes v0.493.13's trade
-    free in the output, and it is this file's figures that bound it.
+    mosaic the recipe Auto writes is **byte-identical** to the one it writes for
+    the same stack laid out as a single field, on every one of these ten cases.
+    Asserted here rather than in the snapping test because this is the number
+    that makes v0.493.13's trade free in the output, and it is this file's
+    figures that bound it.
+
+    **And it is these ten cases, not a theorem** — which is the useful half. A
+    residual only changes the emitted stop when it straddles a half-step
+    boundary, so an error of 0.0008 moves the stop on ~8 % of uniformly
+    distributed positions and one of 0.0019 (what three fit passes leave, see
+    :func:`test_the_pass_count_is_a_measured_choice_not_a_round_number`) on
+    ~19 %. That arithmetic is why "would fewer passes be free?" is now a
+    yes/no question with a likely answer of **no**, where before it was a
+    judgement about a sub-step number — and why this assertion failing is a
+    reason to look at the de-levelling rather than to relax it.
     """
     for name, geom in _GEOMS.items():
         rows, cols = geom["rows"], geom["cols"]

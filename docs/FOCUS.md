@@ -7,9 +7,12 @@ entry is cut. SHIPPED as v0.493.14.** Take the next item; do not go looking for 
 passes, and Auto's mosaic analysis ~76 % slower for them.** That entry names the strided shape and what has
 to be settled first (`fit_sky_poly` returns an evaluated surface, not its coefficients), **and v0.493.14 added
 an update to it that makes its other half — the pass count — a yes/no instead of a judgement**: `target_bg`
-is now landed on its control's 0.01 stops, at six passes the residual is byte-invisible in the emitted
-recipe, so "is three passes enough?" is answerable by re-running one assertion rather than by arguing about a
-sub-step number. That is the cheap half and it needs no stride work first.
+is now landed on its control's 0.01 stops, at six passes the residual is invisible in the emitted recipe on
+all ten measured cases, so "is three passes enough?" is answerable by re-running one assertion rather than by
+arguing about a sub-step number. **The arithmetic says the answer is probably no** — a residual moves the
+emitted stop where it straddles a half-step boundary, so 0.0008 (six passes) does on ~8 % of positions and
+0.0019 (three passes) on ~19 % — which points the speed work at the strided plane rather than at the pass
+count, and is worth knowing before spending a run on the wrong half.
 
 **What v0.493.14 did, and the transferable part is the yardstick, again.** Auto wrote `target_bg = 0.2388…`
 into a recipe whose control steps in 0.01s, and `saturation = 1.248` on a 0.05 grid — so the recipe, the
