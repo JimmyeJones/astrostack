@@ -1257,7 +1257,8 @@ def library_session_recap(
 # the owner normally shoots until 03:00 shows up plainly against that; a night
 # the owner ended deliberately at their usual time does not, however short it
 # was. Judging it against the owner's own habit is what keeps this off the many
-# nights that end early on purpose.
+# nights that end early on purpose — provided the habit is recent enough to still
+# be about the same sky, which is what EARLY_STOP_LOOKBACK_DAYS is for.
 
 #: How many earlier nights must be datable before there is a "usual" to compare
 #: against. Three is the smallest number a median means anything over, and it
@@ -1265,19 +1266,43 @@ def library_session_recap(
 #: is equally "usual" and any claim about it would be invented.
 EARLY_STOP_MIN_PRIOR_NIGHTS = 3
 
-#: How many earlier nights the median is taken over. Recent ones only, because
-#: the yardstick is a clock time and darkness itself moves with the season: over
-#: a month it shifts by roughly an hour at mid-latitudes, which
-#: :data:`EARLY_STOP_MIN_MINUTES` deliberately clears.
+#: How many earlier nights the median is taken over. Recent ones only — see
+#: :data:`EARLY_STOP_LOOKBACK_DAYS` for what "recent" has to mean here, and why
+#: it is a narrower word than it looks.
 EARLY_STOP_MAX_PRIOR_NIGHTS = 5
 
-#: How far back a night may sit and still count toward the "usual" stop.
-EARLY_STOP_LOOKBACK_DAYS = 30.0
+#: How much earlier in the clock day a target reaches any given altitude after
+#: one more solar day — with nothing wrong, and nobody doing anything
+#: differently. A sidereal day is 23 h 56 m 04 s, so the whole sky comes round
+#: about four minutes early each night (24 h over a year), and a target shot
+#: until it got low therefore *stops* that much earlier tonight than last night.
+SIDEREAL_DRIFT_MIN_PER_DAY = 1440.0 / 365.25  # about 3.94
 
-#: How much earlier than usual is worth mentioning. Well past both the seasonal
-#: drift above and the ordinary night-to-night scatter of when someone goes to
-#: bed, because the cost of a wrong "you lost half a night" in the morning is
-#: much higher than the cost of missing a marginal one.
+#: How far back a night may sit and still count toward the "usual" stop.
+#:
+#: **This is the window that keeps the sky's own clock from reading as a stall**,
+#: so it is derived rather than picked: the drift above only ever moves a stop
+#: *earlier*, so a yardstick night far enough back makes tonight look short
+#: however tonight actually went. A fortnight of it comes to ~55 minutes, well
+#: inside :data:`EARLY_STOP_MIN_MINUTES` with ~35 left over for the ordinary
+#: scatter of when somebody stops — which is the other thing that bar has to
+#: clear, and the one it was written for.
+#:
+#: A month — what this was until v0.493.3 — does not clear the drift at all:
+#: across it the sky alone moves a stop by ~118 minutes, and a target returned to
+#: **23 to 28 nights** after its last run was told it had stopped an hour and
+#: three quarters early on arithmetic and nothing else (measured on the real
+#: function; at 29 nights the priors fall out of the window and it goes quiet
+#: again, which is why that band has an upper edge rather than running on). What
+#: the shorter window costs is that a target with no run inside the fortnight is
+#: not judged at all — the right answer when there is no recent habit to judge it
+#: against, and the direction this module prefers everywhere else.
+EARLY_STOP_LOOKBACK_DAYS = 14.0
+
+#: How much earlier than usual is worth mentioning. Well past both the sky's
+#: drift across the window above and the ordinary night-to-night scatter of when
+#: someone goes to bed, because the cost of a wrong "you lost half a night" in
+#: the morning is much higher than the cost of missing a marginal one.
 EARLY_STOP_MIN_MINUTES = 90.0
 
 
@@ -1377,10 +1402,12 @@ def early_stop(
 
     ``None`` — say nothing — whenever the answer would be a guess rather than a
     measurement: fewer than ``min_prior_nights`` earlier nights to form a habit
-    from, none of them recent enough to still describe the same season, or a
-    shortfall inside ``min_minutes``. Silence is the default on purpose; a wrong
-    "you lost half a night" told to someone over breakfast costs far more than a
-    missed one.
+    from, none of them recent enough to still describe the same sky (the drift
+    that makes "recent" load-bearing is :data:`SIDEREAL_DRIFT_MIN_PER_DAY`, and
+    the window it sizes is :data:`EARLY_STOP_LOOKBACK_DAYS`), or a shortfall
+    inside ``min_minutes``. Silence is the default on purpose; a wrong "you lost
+    half a night" told to someone over breakfast costs far more than a missed
+    one.
 
     Pure and offline — it reads nothing but the stamps it is handed.
     """
