@@ -1,5 +1,99 @@
 # Shipped — the record
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-7pe02n`) — the ⭐ gradient/de-levelling bug is fixed, by stopping the guard being asked an under-determined question
+
+### v0.493.13 — the smooth sky surface and the per-level steps are fitted against each other: `_delevelled_luminance`, `_LEVEL_FIT_PASSES`, `_LEVEL_FIT_SETTLED`, `fit_sky_poly`
+
+*(Python **+15 items** in a new `tests/test_auto_delevel_joint_fit.py`, which replaces
+`tests/test_auto_delevel_yardstick_candidate.py` (retired — its subject is a candidate for a bug that is now
+fixed, and its measured dead end is re-asserted in the new file against the shipped design);
+`tests/test_auto_level_sigma_margin.py` and `tests/test_auto_noise_measure.py` re-measured. **14 of the 15
+new items fail on `origin/main`** (checked in a worktree). Full suite re-run green. +~105 lines of production
+code in one function, no new dependency, no API or config change, no on-disk change.)*
+
+**The bug, as filed and reproduced in v0.493.10.** `analyze_proxy` reads the sky level Auto's stretch target
+comes from off `_detrended_luminance(_delevelled_luminance(lum, coverage))`. The de-levelling asked *"does
+what is left of this coverage level look like sky?"* of the **raw** plane, so a smooth light-pollution ramp of
+only ~49 % of the sky pushed every genuine sky level past `_LEVEL_MAX_SIGMA_RATIO = 3.0`, the whole pass
+declined, and Auto measured its goal off a plane that still had the panel staircase in it: reported sky
+**2.08× the truth**, the stretch goal 7.8 % low, the finished mosaic **7.1 % darker** than the identical stack
+laid out as a single field. v0.409.0's own defect, switched back on by a gradient.
+
+**v0.493.12 ruled out the fix the entry proposed** (judge the guard on a detrended copy): it fixed that case
+and made a ramp running *along* the strips **2.6× worse than the bug**. The diagnosis it left is what this
+change is built on — *detrending the whole canvas removes the smooth shape **common to every panel** (which
+the guard should ignore) and the shape that **differs between** panels (which the guard must see) at the same
+time, and a single `level_sigma` on any one plane cannot tell those apart, nor a smooth object spanning a
+strip from smooth sky.*
+
+**So the quantity was under-determined, and the fix is to stop asking one plane for it.** A coverage level's
+own median is *its own patch of whatever smooth shape the canvas carries* **plus** whatever step the panel
+really has, and neither is identifiable a level at a time. The two are now fitted **against each other**: the
+smooth surface is fitted (`fit_sky_poly`, the same primitive the two background passes and
+`_detrended_luminance` already use) to the plane with the current step estimate removed, then every level's
+step is re-measured as its residual *from that surface*, and round again. A smooth shape — shared by every
+panel or not — lands in the surface; what the surface cannot explain is the step. **The guard then asks its
+flatness question of the residual, which is the only plane on which it is well posed**, and the smooth shape
+the fit kept is left for `_detrended_luminance` to remove on the very next line, exactly as the recipe's
+`background.final_gradient` removes it from the picture.
+
+**Measured as the error in the `target_bg` Auto actually emits** — the stretch goal, on a 0.01-step control —
+against the goal the identical stack laid out as a single field gets, over **five raster geometries × fifteen
+scenes × four seeds**:
+
+| | before | shipped | the v0.493.12 candidate | mirroring the op's own bar |
+|---|---|---|---|---|
+| worst \|error\| over 75 cases | 0.0229 | **0.0137** | 0.0844 | 0.0844 |
+| cases over half a slider step | **48** of 75 | **7** of 75 | 46 of 75 | 48 of 75 |
+
+and all seven remaining are a canvas a bright object fills, where the guard refuses and the pass does nothing
+at all — identical to before. **No case in the grid is worse than before by more than 0.0008 of the goal** (a
+twelfth of one slider step), and only ever on a mosaic with no smooth shape, where the old arithmetic was
+exact. On the geometry the bug was filed on the goal error goes **0.0194–0.0196 → under 0.0003** at every ramp
+strength from the boundary to ten times past it.
+
+**The sweep is wider than the entry, and that is the part worth keeping.** The filed repro was a 1×4 strip
+raster, which is the only geometry either earlier candidate was measured on. **Today's defect was on every
+geometry and every smooth shape, not just that one**: 1.18× on a 1×2, 1.47× on a 2×2, 1.67–1.70× on a 2×3,
+2.07–2.12× on a 3×3, for a ramp of any orientation, for a vignette-like radial residual, and for a faint
+canvas-filling object. The owner is a heavy mosaic user shooting 2×2 and larger rasters from one fixed
+suburban site (AGENTS.md §1), so the 2D rasters are his shape and the gradient is a given — and they were the
+cases nobody had measured. All five are in the new test file, and the two ruled-out alternatives are asserted
+against the shipped design on two of them, so neither can be re-proposed on the strength of a paragraph.
+
+**What it costs, named.** (i) A degree-2 surface fitted to a plane that still holds the staircase absorbs part
+of it — the entry's own named prerequisite, **35–49 % of a 0.012 step**, and **72 %** of the staircase on a
+quiet 2×2 where it is the only structure there is — so one pass is not a fix. The alternation is a geometric
+contraction and `_LEVEL_FIT_PASSES = 6` is where every geometry measured sits under a tenth of a slider step
+(a quiet 2×3: **0.0061 at one pass, 0.0030 at two, 0.0019 at three, 0.0008 at six**), with `_LEVEL_FIT_SETTLED`
+stopping the loop early — asserted to be a saving and not a behaviour. (ii) **The pass no longer flattens the
+panels on its own**, on purpose: it leaves the part of a staircase the surface explains *in* the surface,
+which is what stops a gradient being sawtoothed, and `_detrended_luminance` takes that part out next. The
+claim moved to the composition, where it is *stronger* — the plane the sky level is read off measures a panel
+spread of **0.00052** against 0.00075 before on a quiet mosaic, and 0.00052 against **0.02279** once the same
+canvas carries a ramp. (iii) The object end of `_LEVEL_MAX_SIGMA_RATIO`'s separation came **down by ~2.3×**
+(16.42–25.50 → 6.43–11.34 on a blob 0.6), so the separation is 3.5× rather than ~17× and a band of faint
+canvas-filling objects (~0.10–0.25 on that fixture) is now measured where it used to be refused. **That is
+not a loss of the protection the margin was for, and it is measured rather than argued:** the step is a
+residual from the surface too, so the object's own profile is in the surface and not in the step, and *every*
+newly-levelled amplitude measures a **lower** goal error than refusing it did (0.0158 → **0.0003** at 0.10,
+0.0134 → 0.0100 at 0.15, 0.0110 → 0.0095 at 0.20, 0.0088 → 0.0081 at 0.25). Amplitudes above the band are
+refused exactly as before. (iv) Cost: **+4 % on a 900×1500 proxy and +14 % on 1500×1500** (`PROXY_MAX_PX` is
+1500), on a path that runs once per Auto analysis rather than per render.
+
+**Two collateral measurements, both improvements, both re-pinned.** `classify_target` reads its geometry off
+the same composition, so the ragged-fringe canvases that used to read as a **star cluster on 5 of 6** now do
+on **1 of 6** — the rim's own levels come out flatter, the `6·sky_sigma` term of its signal threshold is
+inflated less, and the faint diffuse structure survives. The per-pair cue directions that test calls "the
+mechanism, not the tally" hold on all six, unchanged. And a quiet mosaic's own sky level is unmoved, so an
+ordinary single-field stack's one-click Auto is **byte-for-byte** what it was: `_delevelled_luminance`'s
+callers pass a coverage map only for a mosaic, and it still declines on the first line without one.
+
+**Upgrade safety.** No setting, no schema, no path, no API shape, no default. The function is a *measurement*
+used by `analyze_proxy` and `classify_target`; nothing is persisted by it, and an existing saved recipe
+renders exactly as it did. What changes is the `target_bg` (and the preset *suggestion*) a **new** Auto run
+computes for a mosaic — which is the defect being fixed, and is what every one of the figures above is about.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-4dlv4a`, second task) — the fix filed for the ⭐ gradient/de-levelling bug, measured before it shipped: it fixes that bug and makes two other cases worse
 
 ### v0.493.12 — the candidate de-level yardstick is held as a one-change replica and its two regressions are asserted: `tests/test_auto_delevel_yardstick_candidate.py`, `_delevelled_luminance`'s detrended-yardstick shape

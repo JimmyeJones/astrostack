@@ -1,5 +1,67 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Builder, next run — **the ⭐ at the front of "Bugs" is FIXED and the entry is cut.
+SHIPPED as v0.493.13.** Take the next item; do not go looking for this one.
+
+**START HERE NEXT RUN: "Bugs" now starts with the v0.493.11 LEAD — Auto writes recipe numbers its own sliders
+have no stop for.** That entry names its three shapes, says (b) is free and (a) needs a `--mosaic --editor`
+dogfood look first, and it is reproducible on the bundled sample through the live app. It is the front of the
+queue.
+
+**What v0.493.13 did, in one sentence, because the shape of the answer is the transferable part.** The guard
+was being asked a question no single plane can answer — *"is what is left of this coverage level flat?"* — and
+two runs had already tried to answer it better (move the constant: measured and closed in v0.493.10; detrend
+the plane first: measured and closed in v0.493.12, worse than the bug). The fix was to notice **why** both
+failed: a level's own median is *its patch of whatever smooth shape the canvas carries* **plus** its step, and
+neither is identifiable a level at a time. So the surface and the steps are now fitted **against each other**
+(`fit_sky_poly` on the plane with the current steps removed → each step re-measured as its residual from that
+surface → round again, six times), and the guard is asked of the residual, which is the one plane on which the
+question is well posed. **When two candidate fixes have both been measured and both failed, the next move is
+not a third candidate — it is to find the quantity that is under-determined and make it identifiable.**
+
+**THE METHOD NOTE TO CARRY FORWARD, AND IT IS WORTH MORE THAN THE FIX: the yardstick a measurement is judged
+by is as much a design decision as the measurement, and this run changed its mind about it twice.** The first
+sweep scored candidates on the *reported sky level* as a ratio of the identical single-field stack — which is
+what the filed entry used, and what v0.493.12's test asserts. On that yardstick the shipped design looks
+**worse** on a quiet 2×2 raster (1.00× → 1.10×) and a candidate that fixes nothing looks fine. The number that
+decides anything is the one the owner can see: `target_bg`, the stretch goal, on a **0.01-step control**. Re-run
+on that, the "10 % regression" is **0.0004 of a slider step** and the real defect is 48 of 75 cases over half a
+step. The reported sky is a median's position inside a percentile window, so a sub-grain residual moves it by
+10 % while moving the picture by nothing. **Before trusting a sweep, ask what one unit of its metric does to the
+screen.**
+
+**And the second thing this run got wrong first, which is the §1 rule arriving by a new door.** The candidate
+sweep that ruled out v0.493.12's fix, and the first two shapes tried this run, were all measured on the **1×4
+strip raster the bug was filed on** — and the first shape that looked clean there (fit the smooth surface to
+the *de-stepped* plane) **regressed a 2×3 raster by 75 %**, which is the owner's own geometry. One hour of
+measurement on five geometries instead of one is what turned a plausible fix into a ruled-out one and then into
+the right one. AGENTS.md §1 says judge every Auto claim on a tiled mosaic at the owner's scale; **the sharper
+form is "on more than one raster shape", because the identification problem this subsystem has depends on the
+raster** — on a 1×N strip a ramp can be perpendicular to every panel, on a 2D raster no linear gradient is, and
+the panel count sets how much of a staircase a degree-2 surface can mimic.
+
+**A free finding that came with the wider sweep, and it is bigger than the filed bug was.** The defect was
+**not** confined to the across-strip 1×4 case the entry reproduced. Today's reported sky was wrong on *every*
+raster shape and for *every* smooth shape: **1.18× on a 1×2, 1.47× on a 2×2, 1.67–1.70× on a 2×3, 2.07–2.12×
+on a 3×3**, for a ramp of any orientation, for a vignette-like radial residual, and for a faint canvas-filling
+object. The owner shoots 2×2 and larger from one fixed suburban site, so those were his cases and they were
+the unmeasured ones. All five geometries are now in `tests/test_auto_delevel_joint_fit.py`, which is the
+fixture to reach for the next time anything in `seestack/edit/presets.py` touches a coverage map.
+
+**Three costs were taken knowingly, each asserted rather than written down** (the full table is in
+[`SHIPPED.md`](SHIPPED.md) under v0.493.13): the pass no longer flattens the panels *on its own* — it leaves
+the part of a staircase its surface explains in the surface, and `_detrended_luminance` takes that out on the
+next line, so the claim moved to the composition where it is stronger; `_LEVEL_MAX_SIGMA_RATIO`'s object-end
+margin came down ~2.3× and a band of faint filled canvases is now measured where it used to be refused (every
+one of them measures a *lower* goal error than refusing did, which is the measurement that makes it safe); and
+six fit passes cost +4–14 % on a proxy-sized canvas. **`tests/test_auto_delevel_yardstick_candidate.py` was
+retired into the new file** — its subject was a candidate for a bug that is now fixed — and its measured dead
+end is re-asserted there against the shipped design, together with a second one this run closed (mirroring the
+real op's own bar, which is laxer under a gradient and looks like the obvious divergence to close: **0.0844**
+of goal error, the whole range of the knob).
+
+Earlier notes stand below.)*
+
 *Last edited 2026-10-11 (Builder, same run, second task — **took the ⭐ at the front of the queue, measured
 the fix it proposes, and the fix is WRONG. SHIPPED as v0.493.12 — a test file and nothing else; no
 production code moved.**

@@ -190,16 +190,36 @@ _LEVEL_OBJECT_SIGMA = 2.0
 #: rather than written down (v0.493.10, and the same lesson as v0.493.9: a figure
 #: inside an asserted claim is as unchecked as a list inside a prose one).
 #:
-#: **Known defect, filed, do not "fix" it by moving this number.** The guard is
-#: applied to a plane that still carries the light-pollution gradient, because
-#: ``analyze_proxy`` runs ``_detrended_luminance(_delevelled_luminance(...))`` in
-#: that order — so a smooth ramp of only ~49 % of the sky, running across the
-#: panel strips, pushes **every genuine sky level** over 3.0 and the delevel
-#: declines outright. Reported sky level 2.08x the truth, the stretch goal 7.8 %
-#: low, the finished mosaic 7.1 % darker than the identical single field: v0.409.0's
-#: own defect, switched back on by a gradient. The fix is the ordering, not the
-#: constant — see docs/IMPROVEMENTS.md.
+#: **It is asked of the residual from the fitted sky surface, and that is what
+#: makes it well posed** (v0.493.13). Asked of the raw plane it was not: a smooth
+#: light-pollution ramp of only ~49 % of the sky pushed **every genuine sky
+#: level** over 3.0 and the delevel declined outright, so Auto read a sky level
+#: 2.08x the truth and the finished mosaic came out 7.1 % darker than the
+#: identical single field — v0.409.0's own defect, switched back on by a
+#: gradient. "Flat" is simply not a question you can ask of a plane that still
+#: carries a gradient; with the smooth shape fitted out first (see
+#: :func:`_delevelled_luminance`) the two populations this constant separates are
+#: unchanged and the gradient no longer walks sky into the object end.
 _LEVEL_MAX_SIGMA_RATIO = 3.0
+
+#: How many times :func:`_delevelled_luminance` re-fits the smooth sky surface
+#: and the per-level steps against each other. One pass is not enough: a degree-2
+#: surface fitted to a plane that still holds the panel staircase absorbs part of
+#: it (**35-49 %** of a 0.012 step, measured), so the first step estimate is low,
+#: and each pass hands the fit a flatter staircase and recovers more of it. It is
+#: a geometric contraction, and the residual it leaves is measured in
+#: ``tests/test_auto_delevel_joint_fit.py`` as the error in the ``target_bg`` Auto
+#: actually emits: on a quiet 2x3 raster **0.0061 at one pass, 0.0019 at three,
+#: 0.0008 at six** against a 0.01-step control. Six is where every geometry
+#: measured sits under a tenth of a slider step; the loop also stops early once
+#: nothing moves (:data:`_LEVEL_FIT_SETTLED`), so a canvas with no smooth shape to
+#: disentangle pays for two.
+_LEVEL_FIT_PASSES = 6
+
+#: The alternation stops once no level's step moved by more than this share of the
+#: image's own grain — at which point another pass cannot change which levels the
+#: guard keeps, nor move a step by anything the picture could show.
+_LEVEL_FIT_SETTLED = 0.05
 
 
 def _delevelled_luminance(lum: np.ndarray,
@@ -226,14 +246,45 @@ def _delevelled_luminance(lum: np.ndarray,
     can only answer what the op itself answers: two panels that happen to share a
     frame count are one bin here exactly as they are one bin there.
 
+    **A level's median is not a step on its own, and v0.493.13 is about that.** On
+    a canvas carrying any smooth sky shape — light pollution, a flat residual, a
+    canvas-filling nebula — a coverage level's own median is *its own patch of that
+    shape* plus whatever step the panel really has, and the two cannot be told
+    apart one level at a time. Subtracting the sum flattens a smooth ramp into a
+    sawtooth the next pass cannot remove (measured: a reported sky level 2.7-5.4x
+    the truth), and asking "is what is left of this level flat?" of the raw plane
+    makes the gradient itself look like an object and refuses every level
+    (**2.08x**, this function's filed defect).
+
+    Both failures are the same under-determination, so the surface and the steps
+    are fitted **against each other** instead: the smooth surface is fitted to the
+    plane with the current step estimate taken out
+    (:func:`~seestack.bg.sky_poly.fit_sky_poly`, the same primitive the two
+    background passes and :func:`_detrended_luminance` use), then every level's
+    step is re-measured as its residual *from that surface*, and round again
+    (:data:`_LEVEL_FIT_PASSES`). A smooth shape — one every panel shares or one
+    that differs between them — lands in the surface; what the surface cannot
+    explain is the step. The guard then asks its flatness question of that
+    residual, which is the only plane on which it is well posed, and the smooth
+    shape the fit kept is left in place for :func:`_detrended_luminance` to remove
+    next, exactly as the recipe's ``background.final_gradient`` removes it from the
+    picture.
+
+    Measured as the error in the ``target_bg`` Auto emits, against the identical
+    stack laid out as a single field, over five raster geometries x fifteen scenes
+    x four seeds: the worst case **0.0229 -> 0.0137** and the cases over half a
+    slider step **48 of 75 -> 8 of 75** — and all eight remaining are a canvas the
+    object fills, where the guard refuses and this function does nothing at all, as
+    before. The whole sweep is in ``tests/test_auto_delevel_joint_fit.py``.
+
     Only the *shape* is subtracted — the canvas's own robust median is put back —
     so, like the detrend beside it, this changes how flat the plane is and never
     how bright it is.
 
     Declines, returning ``lum`` unchanged, whenever there is nothing it can
-    honestly do: no coverage map, a map that doesn't match the luminance, or fewer
-    than two levels big enough to measure. Its callers pass a map **only for a
-    mosaic** — the runs whose recipe carries the leveling pass — so a single-field
+    honestly do: no coverage map, a map that doesn't match the luminance, fewer
+    than two levels big enough to measure, or a canvas with too little sky to fit
+    a surface through at all. Its callers pass a map **only for a mosaic** — the runs whose recipe carries the leveling pass — so a single-field
     stack's Auto never reaches here at all.
     """
     if coverage is None:
@@ -288,10 +339,8 @@ def _delevelled_luminance(lum: np.ndarray,
     # exists for — one the target genuinely fills — that spread *is* the object,
     # so it floats above everything and the guard never fires. The two populations
     # the ratio separates, and the two margins it leaves, are measured and
-    # asserted in ``tests/test_auto_level_sigma_margin.py``; see
-    # ``_LEVEL_MAX_SIGMA_RATIO`` for them and for the filed defect in the *order*
-    # this is applied in. Reported in units of the image's own robust range, so it
-    # is put back into the pixels' units here.
+    # asserted in ``tests/test_auto_level_sigma_margin.py``. Reported in units of
+    # the image's own robust range, so it is put back into the pixels' units here.
     from seestack.edit.noise import estimate_noise_sigma
 
     lum_c = lum[valid]
@@ -306,6 +355,44 @@ def _delevelled_luminance(lum: np.ndarray,
     # object into the sky (measured: a large coloured nebula stopped being read as
     # one at all). The op next door masks for the same reason.
     sky = valid & (detrended <= (_med + _LEVEL_OBJECT_SIGMA * spread))
+
+    # Pass 3 — the smooth sky surface and the per-level steps, fitted against each
+    # other (see the docstring: a level's median on its own is its own patch of
+    # the smooth shape *plus* its step, and neither is identifiable one level at a
+    # time). Each round hands the fit a flatter staircase, so it absorbs less of
+    # it and the next step estimate is closer; ``_LEVEL_FIT_SETTLED`` stops the
+    # loop as soon as that has stopped paying for itself.
+    from seestack.bg.sky_poly import fit_sky_poly
+
+    steps: dict[int, float] = {level: 0.0 for level in big}
+    surface: np.ndarray | None = None
+    for _ in range(_LEVEL_FIT_PASSES):
+        step_map = np.zeros(lum.shape, dtype=np.float32)
+        for level, region in regions.items():
+            step_map[region] = np.float32(steps[level])
+        fitted = fit_sky_poly(lum - step_map, sky)
+        if fitted is None or not np.all(np.isfinite(fitted)):
+            break
+        surface = fitted
+        residual = lum - surface
+        moved = 0.0
+        for level, region in regions.items():
+            region_sky = region & sky
+            if lum[region_sky].size < _LEVEL_MIN_PIXELS:
+                continue
+            med, _sigma = _robust_stats(residual[region_sky])
+            if np.isfinite(med):
+                moved = max(moved, abs(float(med) - steps[level]))
+                steps[level] = float(med)
+        if moved <= _LEVEL_FIT_SETTLED * grain:
+            break
+    if surface is None:
+        # No sky surface could be fitted at all (too little sky, a non-finite
+        # fit) — measure the image exactly as it is today, which is what this
+        # whole function does when it cannot measure.
+        return lum
+
+    residual = lum - surface
     per_level: dict[int, float] = {}
     for level, region in regions.items():
         region_sky = region & sky
@@ -315,19 +402,20 @@ def _delevelled_luminance(lum: np.ndarray,
             # level exactly as it came in, which is what this whole function does
             # when it cannot measure.
             continue
-        _, level_sigma = _robust_stats(detrended[region_sky])
+        # The residual's own spread, which a constant step cannot move (the
+        # estimator is sigma-clipped), so this is "what is left in this level once
+        # both the smooth shape and this level's own step are accounted for".
+        _, level_sigma = _robust_stats(residual[region_sky])
         if not np.isfinite(level_sigma) or level_sigma > _LEVEL_MAX_SIGMA_RATIO * grain:
             # What is left of this level does not look like sky — it is a level a
             # nebula or a galaxy fills, and reading the object's level as a sky
             # offset would subtract real flux. The op refuses one for the same
             # reason, by a test of the same shape.
             continue
-        med, _sigma = _robust_stats(pixels)
-        if np.isfinite(med):
-            per_level[level] = float(med)
+        per_level[level] = steps[level]
     if len(per_level) < 2:
         return lum
-    reference, _ = _robust_stats(lum[valid & sky])
+    reference, _ = _robust_stats(residual[valid & sky])
     if not np.isfinite(reference):
         return lum
     out = np.array(lum, dtype=np.float32, copy=True)
