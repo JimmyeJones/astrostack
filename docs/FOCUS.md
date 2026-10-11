@@ -1,5 +1,47 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Builder, next run — **the queue held nothing ungated for a TWELFTH run, so this run
+read the editor's own promises instead of its arithmetic, and the first one it checked was false.
+SHIPPED as v0.493.5 and v0.493.6.**
+**READ THIS FIRST IF YOU ARE ABOUT TO SWEEP CONSTANTS AGAIN: the carried-forward note was "a constant whose
+justification is prose has nothing checking it". Its sibling is bigger. A LIST whose justification is prose
+has nothing checking it either** — and the editor had the same list written out in **four** places.
+The loupe's own comment block says what makes a full-resolution window honest *"rather than a second lie"*:
+that the ops which measure the **whole** image — *"stretch, auto contrast, colour calibration, background
+neutralize"* — are handed the whole-image render's fits. Four items. `starmask.star_mask` normalises
+**twice** against the whole array (the 99.9th percentile of the white top-hat, and the mask's own post-blur
+peak) and was on none of the four copies. So **"check it at full size" built its star mask from the 512 px
+window's own brightest pixel** — on the one control it exists for, since *"star reduction differs"* is one of
+the four advisories it answers.
+**v0.493.5** routes both references through `EditContext.fit`. Measured against the picture's own `hi` of
+0.3325: the whole **proxy** reads 0.3301 (**0.7 % off** — the footprint decimates with it, so this is nearly
+free), a starless window **0.0259** (12.8× low) and one over the cluster **0.6329** (1.9× high) — **wrong in
+both directions, so no floor or cap on the window's own number would have done**. `stars.reduce`
+0.0071 → **0.000000**, `stars.boost_nebula` 0.0205 → **0.000001**. Nothing on a whole-image render moves:
+`fit` measures whenever no `frozen_fits` were supplied, which is every preview and every export.
+**v0.493.6 is the guard, and it is the part to build on.** `tests/test_edit_window_fidelity.py` sweeps
+**every** op the loupe re-runs on its window — the set derived from the **registry**, minus exactly what the
+loupe handles itself — and asserts the frozen window *is* the picture. Eleven ops come back **bit-identical**;
+the four that do not are listed with their number. **6 failed / 46 passed against the commit before
+v0.493.5**, i.e. it fails on the defect it was written for. A new op fails it until someone looks at the op.
+**WHAT THE GUARD FOUND, AND IT IS THE NEXT THING TO COST:** two more whole-array measurements nobody had
+named — `detail.chroma_denoise`'s `_robust_sky` (whole-array luminance median + MAD, **2.3e-03** on a bright
+core) and `detail.hot_pixels`' per-channel sky and noise floor in `seestack.bg.hot_pixels._suppress`
+(**2.9e-04**), the latter in a **stack hot-path** module, so the fix is not one to make from the editor's
+side. Plus the LEAD filed this run: the percentile span in `detail.denoise` / `detail.deconvolve`, which is
+−99 % on a star-poor window and **must not be blind-frozen** — the table is in `IMPROVEMENTS.md` and the sign
+is method-dependent, because each method carries a *second* whole-array dependence `fit` cannot reach.
+**THE METHOD NOTE TO CARRY FORWARD: this repo's comments make load-bearing claims, and the cheapest audit
+left is to pick one and check it.** Not a threshold — a *promise*: "this is honest because X", "every caller
+does Y", "the list is these four". Three runs in a row have now found a defect by reading a justification
+rather than by writing a detector, and this one took about an hour from reading the comment to the
+measurement. Where the claim is an enumeration, the fix is not to correct the prose (v0.493.5 corrected it in
+all four places and that still leaves the next op exposed) — **it is to make the enumeration an assertion**,
+which is what v0.493.6 is and what cost less than the bug hunt did.
+The inbox was checked first — **four open (#1015, #903, #880, #878), all previously acted-on and
+owner-gated** — and there were **no open PRs** at the start. Tests **+62 items** (10 star mask, 52 the new
+sweep), **5 fail-before for the fix and 6 for the guard**. Earlier notes stand below.)*
+
 *Last edited 2026-10-11 (Scout — **rotation sweep (2) mosaic & walk-away per-panel divergence: CLEAN, and the
 front of the queue did not change.** The front stays the gated `PANEL_LINK_DIST_DEG` re-framing LEAD (item 0 in
 "Bugs"); the rest of that section is the older gated LEADs and ⚪ notes — do not re-litigate the numbered
