@@ -116,6 +116,13 @@ AGENTS.md §1 forbids doing blind — so it is filed with its numbers, and
 `test_autos_own_knobs_are_still_off_the_grid_and_that_is_filed_not_fixed` pins it where it can be seen:
 the day someone settles it, that test says so.
 
+**The `--editor --mosaic` dogfood this change ran turned that lead from a fixture measurement into a live
+one, which is the part worth having.** Read off the running install's own saved Auto recipe for the bundled
+sample: `tone.stretch.target_bg = 0.23880698146298526` and `tone.saturation.amount = 1.248`, while the
+**"What Auto-process did"** sentence on the same screen says *"stretched sky level 0.24, saturation
+1.25×"*. Three different numbers for each knob — the sentence, the slider readout and the recipe — on the
+editor's default surface, reachable by the dogfood tool, which is how any fix for it should be judged.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-ddjooe`) — "it cannot be carried" had a short shelf life: the loupe's percentile span was carryable, and the figures excusing the ops that are not were two-thirds wrong
 
 ### v0.493.9 — both restoration ops take their percentile span from `ctx.fit`, which makes `detail.deconvolve` window-faithful outright: `_denoise`, `_deconvolve`, `OpSpec.window_unfaithful`, `_NOT_WINDOW_FAITHFUL`

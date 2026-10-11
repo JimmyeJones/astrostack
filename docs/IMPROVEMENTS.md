@@ -150,6 +150,17 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   with `StackOptionControl`'s `decimalScale={2}` readout printing **1.24**. So the recipe holds one
   number, the box shows a second and the slider can only be a third — on the picture Auto made, which is
   the first thing the owner opens.
+  **And it is reproduced on the BUNDLED SAMPLE through the live app, not only on a fixture — so
+  `scripts/agent-dogfood.sh --editor` can see it and is the way to judge any fix.** Read straight off a
+  running dogfood install's saved Auto recipe for `Sample_Orion_Nebula_M42`:
+  `tone.stretch.target_bg = 0.23880698146298526` (stops 0.23 / 0.24) and
+  `tone.saturation.amount = 1.248` (stops 1.20 / 1.25). The **"What Auto-process did"** sentence on the
+  same screen says *"stretched sky level 0.24, saturation 1.25×"* — so that sentence, the slider's readout
+  and the recipe are three different numbers for each of those two knobs, on the default editor surface,
+  today. (`detail.sharpen` came back on-grid on this sample — `amount` 0.5, `radius` 1.0 — because a clean
+  stack puts `noise_frac` at 0 and the crossfade's endpoint happens to be a stop; that is luck, not a
+  property, and `denoise_strength` / `chroma_strength` are the same three-decimal arithmetic the moment the
+  sample is noisy.)
   **Why it was not built, and what to settle first.** Snapping Auto's knobs changes what **every**
   auto-edited export renders, on the hot path, which AGENTS.md §1 forbids doing blind — and the honest
   shape is a real choice, not a round:

@@ -65,6 +65,14 @@ stops at 1.20/1.25, readout showing 1.24). Snapping those changes every auto-edi
 names its three shapes — (a) snap what Auto emits, (b) make the readout honest instead, (c) both — with (b)
 free and (a) needing a `--mosaic --editor` look first. **Do not blind-flip it**, and note the new test pins
 the current behaviour so it fails the day someone settles it.
+**The `--mosaic --editor` dogfood came back CLEAN both passes** (both page sweeps "nothing overflowing, no
+console errors", both editor drives clean across every op in the Add menu, and the Auto taste row's
+`Hold back highlights (0.05)` reads as a real stop) — **and it turned the filed LEAD from a fixture
+measurement into a live one**, which is the part worth having: the running install's own saved Auto recipe
+for the bundled sample holds `target_bg = 0.23880698146298526` and `saturation = 1.248` while the "What
+Auto-process did" sentence on the same screen says *"stretched sky level 0.24, saturation 1.25×"*. Three
+numbers per knob on the default editor surface, reachable by the tool — so that is how to judge any fix for
+it, and it is written into the entry.
 **A free registry-wide guard came with the sweep**: every numeric parameter's **default** is now asserted to
 be a value its own control can hold — clean across all 36 today, so an op added with an unreachable default
 is caught at the registry rather than by someone noticing the readout disagrees with the picture.
