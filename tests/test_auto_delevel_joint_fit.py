@@ -300,6 +300,25 @@ def _rgb(lum: np.ndarray) -> np.ndarray:
 
 
 def _target_bg(lum: np.ndarray, cov: np.ndarray) -> float:
+    """The stretch goal Auto *measures* for this canvas.
+
+    Read off ``measured_auto_knobs`` on exactly the pixels ``auto_recipe`` hands
+    it, rather than off the built recipe, and the distinction is load-bearing
+    since **v0.493.14**: the recipe's ``target_bg`` is now landed on its
+    control's own 0.01 stops, and every number this file is about — the fix's own
+    residual cost (0.0002-0.0008), the pass-count convergence (0.0061 -> 0.0008)
+    — is *smaller than one of those stops*, so reading the recipe would return a
+    column of exact zeros and measure nothing. The measurement is continuous and
+    stays so; only what reaches the slider is quantised. (That the costs this
+    file bounds are now literally invisible in what Auto emits is asserted in
+    :func:`test_the_measured_cost_is_below_the_controls_own_resolution`.)
+    """
+    m_rgb, m_cov = P.measured_region(_rgb(lum), cov, None)
+    return float(P.measured_auto_knobs(m_rgb, m_cov)["target_bg"])
+
+
+def _emitted_target_bg(lum: np.ndarray, cov: np.ndarray) -> float:
+    """What the recipe actually carries — the same number, on its control's grid."""
     stretch = next(op for op in P.auto_recipe(_rgb(lum), median_fwhm=2.5,
                                               is_mosaic=True, coverage=cov).ops
                    if op.id == "tone.stretch")
@@ -362,6 +381,30 @@ def test_a_quiet_mosaic_is_what_it_was_to_well_inside_a_slider_step():
             assert err < 0.001, (name, seed, err)
     # Not zero, and that is the honest statement: it is a measured cost, bounded.
     assert worst > 0.0
+
+
+def test_the_measured_cost_is_below_the_controls_own_resolution():
+    """And the same cost as the owner can actually see it: not at all.
+
+    The residual above is a cost to the *measurement*. What reaches his picture
+    is the measurement landed on ``tone.stretch.target_bg``'s own 0.01 stops
+    (v0.493.14), and 0.0002-0.0008 is a twelfth of one of those — so on a quiet
+    mosaic the recipe Auto writes is now **byte-identical** to the one it writes
+    for the same stack laid out as a single field. Asserted here rather than in
+    the snapping test because this is the number that makes v0.493.13's trade
+    free in the output, and it is this file's figures that bound it.
+    """
+    for name, geom in _GEOMS.items():
+        rows, cols = geom["rows"], geom["cols"]
+        cov = _coverage(rows, cols, geom["frames"])
+        flat = np.full(cov.shape, float(geom["frames"][0]), dtype=np.float32)
+        for seed in (13, 5):
+            mosaic = _scene(seed=seed, rows=rows, cols=cols,
+                            offsets=geom["offsets"])
+            single = _scene(seed=seed, rows=rows, cols=cols,
+                            offsets=tuple(0.0 for _ in geom["offsets"]))
+            assert (_emitted_target_bg(mosaic, cov)
+                    == _emitted_target_bg(single, flat)), (name, seed)
 
 
 # --------------------------------------------------------------------------- #

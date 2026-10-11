@@ -1,5 +1,49 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Builder, next run — **the v0.493.11 LEAD that FOCUS pointed at is settled and the
+entry is cut. SHIPPED as v0.493.14.** Take the next item; do not go looking for this one.
+
+**START HERE NEXT RUN: "Bugs" now starts with the v0.493.13 LEAD — the de-levelling's six whole-canvas fit
+passes, and Auto's mosaic analysis ~76 % slower for them.** That entry names the strided shape and what has
+to be settled first (`fit_sky_poly` returns an evaluated surface, not its coefficients), **and v0.493.14 added
+an update to it that makes its other half — the pass count — a yes/no instead of a judgement**: `target_bg`
+is now landed on its control's 0.01 stops, at six passes the residual is byte-invisible in the emitted
+recipe, so "is three passes enough?" is answerable by re-running one assertion rather than by arguing about a
+sub-step number. That is the cheap half and it needs no stride work first.
+
+**What v0.493.14 did, and the transferable part is the yardstick, again.** Auto wrote `target_bg = 0.2388…`
+into a recipe whose control steps in 0.01s, and `saturation = 1.248` on a 0.05 grid — so the recipe, the
+readout beside it and the "What Auto did" sentence were three numbers for one knob, and the first nudge
+jumped the picture. The fix is one line of routing (`auto_op_params` → `snap_to_param`), and the whole job was
+the *evidence*, because it moves what every auto-edited export renders. **The bar that decides it is not a
+count of display levels — it is the control's own resolution.** Half a stop is the finest distinction the
+control offers, so the question is "is this smaller than the smallest change the owner could ask for by
+hand?", and the answer is measured rather than argued: the snap moves the picture 1.05–2.73 of 255 at the
+worst pixel against 5.2–17.9 for *one click* of the same sliders, and shifts 0.001–0.70 % of the picture by a
+whole level against 5–96 %. **When a change is bounded by a control's own granularity, compare it to one
+click of that control — not to zero, and not to a number of levels somebody picked.**
+
+**Two notes that are not about this subsystem.**
+
+**(1) A fixture too small to measure on is not a small version of the owner's data — and this time it was
+canvas AREA, not geometry.** The first render comparison ran on 140×180 scenes and read as catastrophic: a
+*tenth* of a `target_bg` step moved the picture 17.3 of 255 and a whole step 19.6, i.e. every change the same
+size and no comparison meaning anything. It bisects to `tone.curves` with `auto=True`, which derives its
+midtone lift from its own stretched input: on ~25 k pixels that derivation is unstable (drop the curve and the
+same change is 0.94). From ~250×320 up it is proportionate again (+0.001 → 0.28, +0.002 → 0.79, +0.005 →
+2.25, +0.01 → 4.77). AGENTS.md §1 says judge an Auto claim on a mosaic at the owner's scale; **the sharper
+form is that a fixture has to be big enough for the quantity you are measuring to be stable in it**, and the
+Auto recipe's own last op sets that floor.
+
+**(2) A test whose yardstick is finer than the control it quotes has to say which of the two it reads.**
+v0.493.13's `tests/test_auto_delevel_joint_fit.py` measured goal error off the *built recipe*. Snapping
+quantises that to 0.01, and every number that file is about — the residual it accepts (0.0002–0.0008), the
+pass-count convergence (0.0061 → 0.0008) — is smaller than one stop, so it would have returned a column of
+exact zeros and measured nothing. It now reads `measured_auto_knobs`, with the distinction written down. **The
+measurement is continuous and stays so; only what reaches the slider is quantised.**
+
+Earlier notes stand below.)*
+
 *Last edited 2026-10-11 (Builder, next run — **the ⭐ at the front of "Bugs" is FIXED and the entry is cut.
 SHIPPED as v0.493.13.** Take the next item; do not go looking for this one.
 

@@ -76,9 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- **Auto's own knobs land off their controls' stops** (the v0.493.11 LEAD at the front of "Bugs") —
-  branch `claude/jolly-bardeen-kmpmon`, Builder 2026-10-11. Taking shape **(a)**, with the
-  render-cost measurement the entry asks for.
+*No live claims.*
 
 ---
 
@@ -116,54 +114,15 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   unchanged, because a stride that moves them is not an optimisation. Do **not** reach for a smaller
   `_LEVEL_FIT_PASSES` instead without re-running that grid — the 0.0008 bound is what makes the fix safe on
   the on-by-default path.
-
-- **LEAD (Builder 2026-10-11, filed with v0.493.11 — the half of that fix that reaches Auto's own output
-  and is therefore not a blind Builder change) — Auto writes a recipe whose numbers the editor's own
-  sliders have no stop for, and the readout beside each one shows a third number.** *(Pillar: editor +
-  trust — PRIORITY 1; size **S to write, M to decide**; severity low-to-medium — nothing renders wrong,
-  but every knob Auto sets disagrees with the box next to it and jumps on the first nudge. Confidence:
-  **reproduced on a real `auto_recipe`** and the arithmetic traced; what the right answer costs is not
-  measured, which is why this is a lead.)*
-  **What is reproduced.** v0.493.11 put all ten of the editor's "From your image" suggestions on their
-  control's own stops (the measurement table is in [`SHIPPED.md`](SHIPPED.md) under that version). The
-  same defect is on the **on-by-default** path and was deliberately left: `presets.measured_auto_knobs`
-  hands `auto_recipe` continuous values — `target_bg` is a bare `np.clip(0.24 - sky * 0.4, 0.14, 0.24)`
-  and `saturation` a bare `np.clip(1.25 - sky_sigma * 6.0, 1.05, 1.25)`, neither rounded at all, while
-  `sharpen_amount`, `denoise_strength` and `chroma_strength` are rounded to **three** decimals — and
-  `auto_recipe` writes them straight into the op params. Measured on a real `auto_recipe` over the
-  `test_edit_stretch` linear fixture: `tone.stretch.target_bg = 0.23710031710565088` on a **0.01**-step
-  control, and `tone.saturation.amount = 1.242` on a **0.05**-step control whose stops are 1.20 and 1.25,
-  with `StackOptionControl`'s `decimalScale={2}` readout printing **1.24**. So the recipe holds one
-  number, the box shows a second and the slider can only be a third — on the picture Auto made, which is
-  the first thing the owner opens.
-  **And it is reproduced on the BUNDLED SAMPLE through the live app, not only on a fixture — so
-  `scripts/agent-dogfood.sh --editor` can see it and is the way to judge any fix.** Read straight off a
-  running dogfood install's saved Auto recipe for `Sample_Orion_Nebula_M42`:
-  `tone.stretch.target_bg = 0.23880698146298526` (stops 0.23 / 0.24) and
-  `tone.saturation.amount = 1.248` (stops 1.20 / 1.25). The **"What Auto-process did"** sentence on the
-  same screen says *"stretched sky level 0.24, saturation 1.25×"* — so that sentence, the slider's readout
-  and the recipe are three different numbers for each of those two knobs, on the default editor surface,
-  today. (`detail.sharpen` came back on-grid on this sample — `amount` 0.5, `radius` 1.0 — because a clean
-  stack puts `noise_frac` at 0 and the crossfade's endpoint happens to be a stop; that is luck, not a
-  property, and `denoise_strength` / `chroma_strength` are the same three-decimal arithmetic the moment the
-  sample is noisy.)
-  **Why it was not built, and what to settle first.** Snapping Auto's knobs changes what **every**
-  auto-edited export renders, on the hot path, which AGENTS.md §1 forbids doing blind — and the honest
-  shape is a real choice, not a round:
-  **(a)** snap the knobs where `auto_recipe` writes them (`snap_to_param` already exists and is
-  asserted), which makes the recipe honest and moves every Auto picture by up to half a step —
-  imperceptible on `target_bg`, visible on nothing measured so far, but it is still a change to his
-  stored-recipe output and it should be *shown* on a `--mosaic --editor` dogfood before it ships;
-  **(b)** leave the recipe alone and make the **readout** show the value it actually holds (derive
-  `decimalScale` from the param's own step, or raise it), which changes no render at all but adds a
-  decimal to every slider on the page and still leaves a value the slider cannot be dragged back to;
-  **(c)** both — snap what Auto emits *and* keep the readout honest for a hand-typed value.
-  (a) is probably right and (b) is the free one; **do not blind-flip either.** The cheap evidence nobody
-  has: whether half a step of `saturation` or `target_bg` is visible side by side on a real picture at
-  the owner's scale, which `scripts/agent-dogfood.sh --mosaic --editor` can answer in one pass.
-  `tests/test_edit_suggestion_grid.py::test_autos_own_knobs_are_still_off_the_grid_and_that_is_filed_not_fixed`
-  pins the current behaviour, so this is read as designed until it is settled — and fails the day it is,
-  which is the signal to close this entry.
+  **↳ UPDATE (Builder 2026-10-11, with v0.493.14 — the pass count is cheaper to decide than this entry
+  assumed).** `target_bg` is now landed on its control's own 0.01 stops before it reaches the recipe, and at
+  six passes the residual this fix accepts is byte-**invisible** in what Auto emits: the recipe for a quiet
+  mosaic is identical to the one the same stack gets as a single field, across all five geometries × two
+  seeds (`test_the_measured_cost_is_below_the_controls_own_resolution`). So the question for a smaller pass
+  count is no longer "how much goal error?" but **"does the emitted recipe change at all?"** — run that same
+  assertion at three passes (0.0019, a fifth of a stop, so it will change the emitted stop on some fraction
+  of positions rather than none) and the answer is a yes/no instead of a judgement about a sub-step number.
+  That is the cheap half of this entry and it does not need the stride work first.
 
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
@@ -3569,6 +3528,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.493.14 **the on-by-default half of v0.493.11: every number Auto writes into the recipe is now one its own slider can hold** (`auto_op_params` routes all seven through `registry.snap_to_param`; new `_emitted` carries the two reasons an op is dropped; `_sharpen_radius_from_fwhm` drops `_SHARPEN_RADIUS_MIN/_MAX/_STEP` — the last copy of a slider's range in the repo; new `tests/test_auto_knob_grid.py`) — a real Auto run wrote `tone.stretch.target_bg = 0.2388…` on a **0.01**-step control and `tone.saturation.amount = 1.248` on a **0.05**-step one while the readout beside each showed a rounder number and the "What Auto did" sentence a third, so one knob carried three numbers and the first nudge jumped the picture. The lead was gated on what half a step *costs*, and the yardstick is the control's own resolution, not a count of display levels: rendered both ways on five realistic canvases, the snap moves the picture by **1.05–2.73 of 255** at the worst pixel (mean 0.17–0.39, **0.001–0.70 %** of pixels by a whole level) against **5.2–17.9** for *one click* of the same controls (mean 0.4–2.6, **5–96 %** of pixels) — 2–5× less at the worst pixel and 100–1000× less of the picture. A noisy stack does not move at all, because its knobs sit on clip ends that are already stops, which is why the two single-field samples hid it. Verified through the live app: both bundled samples' saved Auto recipes now read `target_bg 0.24` / `saturation 1.25`, the numbers the sentence and the readout already showed. Option **(b)** is answered rather than skipped — **no float parameter declares a step finer than two decimals**, so the existing `decimalScale={2}` readout is exact for every value a control can hold and a third decimal would show nothing; asserted, so the day a 0.001-step parameter is added the test names the readout as the fix. A taste tap still moves every knob it moved, because each `auto_prefs._PARAM_STEP` is a whole number of its control's stops and the grid is anchored at `min` — now read as code, not trusted as a comment. No stored recipe is rewritten
 - ✅ v0.493.13 **the ⭐ gradient/de-levelling bug is fixed — the smooth sky surface and the per-level steps are now fitted against each other instead of a flatness proxy being asked of one plane** (`_delevelled_luminance`, `_LEVEL_FIT_PASSES`, `_LEVEL_FIT_SETTLED`; new `tests/test_auto_delevel_joint_fit.py`, `tests/test_auto_delevel_yardstick_candidate.py` retired into it) — a level's own median is its patch of the canvas's smooth shape **plus** its step, and neither is identifiable a level at a time, which is why asking the raw plane "does this look like sky?" refused every level under a 49 % ramp (**2.08× the truth**, the mosaic 7.1 % dark) and why v0.493.12's detrended yardstick made an along-strip ramp 2.6× worse than the bug. Now `fit_sky_poly` is fitted to the plane with the current steps removed, each step is re-measured as its residual from that surface, and the guard is asked of **that** residual. Measured as the error in the `target_bg` Auto emits, five raster geometries × fifteen scenes × four seeds: worst **0.0229 → 0.0137**, cases over half a slider step **48 of 75 → 7 of 75** (all seven a canvas an object fills, where the pass still does nothing), no case worse than before by more than 0.0008, and the filed geometry **0.0195 → under 0.0003** at every ramp strength. **The defect was on every geometry, not just the 1×4 it was filed on** — 1.47× on a 2×2, 1.67–1.70× on a 2×3, 2.07–2.12× on a 3×3, for a ramp of any orientation, a vignette-like radial residual and a faint filled canvas — and the owner's own rasters were the unmeasured ones. Costs named and asserted: six fit passes (one recovers 28 % of a quiet 2×2's staircase, six recover 82 %), the pass no longer flattens the panels *alone* (the composition does, and better: 0.00052 vs 0.00075 quiet, 0.00052 vs 0.02279 under a ramp), the object end of the 3.0 separation down ~2.3× with every newly-levelled amplitude measuring a **lower** goal error than refusing it did, +4–14 % on a proxy-sized canvas. Collateral: `classify_target`'s ragged-fringe canvases read as a star cluster on 1 of 6 rather than 5 of 6. A single-field stack's Auto is byte-for-byte unchanged
 - ✅ v0.493.12 **the fix filed for the ⭐ gradient/de-levelling bug, measured before it shipped — it fixes that bug and makes two other cases worse, one of them worse than the bug** (new `tests/test_auto_delevel_yardstick_candidate.py`; **no production code changed**) — the ⭐ entry proposed judging `_delevelled_luminance`'s guard on a detrended plane. Reported sky level as a ratio of the identical no-step scene, four seeds: the across-strip ramp it was filed for goes **2.08–2.12× → 1.00–1.02×**, but an **along**-strip ramp goes 2.08–2.11× → **2.69–2.79×** at 20 % and 2.09–2.11× → **5.37–5.42×** at 50 %, and a faint object-filled canvas 1.44× → **1.71×** / 1.31× → **1.82×**. The reason is that detrending the whole canvas removes the smooth shape *common to every panel* (which the guard should ignore) **and** the shape that *differs between* panels (which it must see, and which today it refuses on correctly) — plus a smooth object spanning a strip. So the quantity is under-determined and **moving the constant cannot rescue it**: the two populations close from ~9–17× apart to 3.7× because both ends move together. The entry's own named prerequisite turned out not to be the risk — the degree-2 surface does absorb **35–49 %** of a panel step, but the candidate keeps every step on the raw plane and the mask swap moves it **under 1 %**; a prerequisite that checks out is not evidence the fix is safe. Candidate and costs are **asserted**, as a one-change replica proven to be one change, so neither the idea nor its price can be lost
 - ✅ v0.493.11 **the editor's ten "From your image" / "From your stars" buttons offered numbers their own sliders have no stop for, and the bounds they clamped to were five hand-kept copies of the declaration** (new `registry.param_spec` / `param_grid` / `snap_to_param`; `suggest_asinh_stretch`, `suggest_levels_points`, `suggest_levels_gamma`, `suggest_denoise_strength`, `highlights._strength_grid`, and the three new named `*_for_fwhm` helpers in `routers/editor.py` all route through them) — **six of the ten were off their control's step grid** and five printed it in the button's own label at a precision the readout beside it rounds away: *"From your image (black 0.077)"* beside a box reading `0.08`, over a slider whose stops are 0.07 and 0.08. Measured: `tone.levels.gamma` **2.415** against a 0.05 step (0.023 off, 46 % of a step, and its readout value 2.42 is not a stop either), `tone.stretch.stretch` 0.393, `tone.stretch.black` 0.047, `tone.levels.black/white` 0.077/0.796, `detail.deconvolve.psf_sigma` 1.36 against a 0.1 step. The cause is this file's own bug class one level down again: each one clamped to a **copy** of the op's `EditParam`, kept as prose in five modules (*"kept in step with the EditParam in seestack/edit/ops/detail.py"*), and the one test that checked a grid at all asserted a module against its **own** copy of the numbers — circular, so it would have passed unchanged if the op's step had moved. Now the declaration is read: no module keeps a slider's range, the strength is solved *after* its black point is snapped so the number offered is the one the picture gets, and `tests/test_edit_suggestion_grid.py` runs the real measurement for all ten, asserts the two-decimal readout can show every one of them, and pins the free registry-wide guard — **every numeric parameter's default is on its own control's stops**, clean across all 36. Nothing renders or exports differently; the gamma promise *"lands the sky at ~25 % grey"* measures 0.2502 → **0.2574** against its own 0.01 tolerance. Auto's own knobs are the open half, filed below. Free collateral: `routers/stack.py::render_stretch_suggestion` feeds the same solver to the History **Adjust** sliders, which are `step={0.01}` with `toFixed(2)` readouts — they used to seed at 0.828/0.056 and print 0.83/0.06, and now agree, with no frontend change

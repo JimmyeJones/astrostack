@@ -24,6 +24,7 @@ import numpy as np
 import pytest
 
 from seestack.edit import auto_prefs, presets
+from seestack.edit.registry import snap_to_param
 
 
 def _scene(sigma: float, *, h: int = 220, w: int = 260, seed: int = 5) -> np.ndarray:
@@ -55,14 +56,27 @@ def _ops(recipe) -> list[tuple[str, bool, dict]]:
 
 def test_measured_knobs_are_the_numbers_the_recipe_is_built_from():
     """``measured_auto_knobs`` is not a second opinion about the picture: with a
-    neutral profile its values are exactly what the recipe's own ops carry."""
+    neutral profile its values are exactly what the recipe's own ops carry —
+    each landed on the stop its own control has, which since v0.493.14 is the
+    one transformation between the two (``snap_to_param``, see
+    ``tests/test_auto_knob_grid.py``). The *measurement* is still continuous;
+    what the recipe can hold is not.
+    """
     rgb = _scene(0.0004)
     knobs = presets.measured_auto_knobs(rgb)
     ops = dict((op.id, op.params) for op in presets.auto_recipe(rgb).ops)
-    assert ops["tone.stretch"]["target_bg"] == knobs["target_bg"]
-    assert ops["tone.saturation"]["amount"] == round(knobs["saturation"], 3)
-    assert ops["tone.scnr"]["amount"] == round(knobs["scnr_amount"], 3)
-    assert ops["detail.sharpen"]["amount"] == knobs["sharpen_amount"]
+
+    def stop(op_id, key, knob):
+        return snap_to_param(op_id, key, knobs[knob])
+
+    assert ops["tone.stretch"]["target_bg"] == stop("tone.stretch", "target_bg",
+                                                    "target_bg")
+    assert ops["tone.saturation"]["amount"] == stop("tone.saturation", "amount",
+                                                    "saturation")
+    assert ops["tone.scnr"]["amount"] == stop("tone.scnr", "amount",
+                                              "scnr_amount")
+    assert ops["detail.sharpen"]["amount"] == stop("detail.sharpen", "amount",
+                                                   "sharpen_amount")
     # A clean stack carries no denoise op at all, which is the whole mechanism.
     assert knobs["denoise_strength"] == 0.0
     assert "detail.denoise" not in ops

@@ -27,7 +27,11 @@ import pytest
 from seestack.edit.highlights import suggest_highlight_protect
 from seestack.edit.levels import suggest_levels_gamma, suggest_levels_points
 from seestack.edit.noise import suggest_denoise_strength
-from seestack.edit.presets import measured_auto_knobs
+from seestack.edit.presets import (
+    auto_knob_values,
+    auto_op_params,
+    measured_auto_knobs,
+)
 from seestack.edit.registry import (
     all_specs,
     param_grid,
@@ -294,49 +298,64 @@ def test_every_numeric_default_is_a_value_its_own_control_can_hold():
     assert not offenders, "; ".join(offenders)
 
 
-def test_the_one_remaining_copy_of_a_controls_bounds_still_matches_it():
-    """``seestack/edit/presets.py`` keeps its own copy of the sharpen radius
-    slider's bounds, because the Auto path rounds the radius itself.
+def test_no_module_keeps_a_copy_of_a_controls_bounds_any_more():
+    """The fifth and last copy is gone too (**v0.493.14**), so the guard is now
+    that there is nothing left to pin.
 
-    It is the last of the five copies, left in place deliberately — Auto's own
-    arithmetic is not this change's business (see the LEAD in
-    ``docs/IMPROVEMENTS.md``) — so the copy is pinned to the declaration instead
-    of trusted. Four days was all it took for the last two prose figures in this
-    repo to go wrong.
+    ``seestack/edit/presets.py`` kept its own ``_SHARPEN_RADIUS_MIN/_MAX/_STEP``
+    because the Auto path rounded the radius itself, and v0.493.11 left it in
+    place deliberately — Auto's own arithmetic was not that change's business —
+    pinning it to the declaration rather than trusting it. Auto now reads the
+    declaration through ``snap_to_param`` like everything else, so the names are
+    deleted; this fails the day one comes back.
     """
     from seestack.edit import presets
 
-    p = param_spec("detail.sharpen", "radius")
-    declared = (p.min, p.max, p.step)
-    copied = (presets._SHARPEN_RADIUS_MIN,
-              presets._SHARPEN_RADIUS_MAX,
-              presets._SHARPEN_RADIUS_STEP)
-    assert declared == copied
+    left = [n for n in dir(presets) if n.startswith("_SHARPEN_RADIUS")]
+    assert not left, f"a copy of a slider's bounds is back in presets.py: {left}"
 
 
-def test_autos_own_knobs_are_still_off_the_grid_and_that_is_filed_not_fixed():
-    """The hot-path half of the same defect, pinned where it can be seen.
+def test_autos_sharpen_radius_is_the_number_the_from_your_stars_button_offers():
+    """And the reason that copy mattered: two surfaces, one measurement.
 
-    ``measured_auto_knobs`` hands ``auto_recipe`` continuous values — the stretch
-    target is a bare ``np.clip`` of a measured sky, the saturation a bare clip of
-    a measured σ — which land in the recipe Auto writes. So Auto's own sliders
-    carry numbers their stops do not have, the readout shows a third, and the
-    first nudge snaps the picture. Snapping them would change what every
-    auto-edited export renders, on the on-by-default path, which AGENTS.md §1
-    forbids doing blind: it is filed as a measured LEAD in
-    ``docs/IMPROVEMENTS.md`` instead.
-
-    Recorded as an assertion so the day someone decides it, this file says so.
+    ``presets._sharpen_radius_from_fwhm`` (what Auto writes into the recipe) and
+    ``editor.sharpen_radius_for_fwhm`` (what the "From your stars" button offers)
+    answer the same question about the same median FWHM, and used to do it with
+    two different pieces of arithmetic — one reading the declaration, one a copy
+    of it. Over the whole range the QC layer reports they now agree exactly,
+    which is the property the copy could only promise.
     """
-    off = []
+    from seestack.edit import presets
+    from webapp.routers.editor import sharpen_radius_for_fwhm
+
+    for fwhm in [round(1.5 + 0.1 * i, 1) for i in range(106)]:
+        assert (presets._sharpen_radius_from_fwhm(fwhm)
+                == sharpen_radius_for_fwhm(fwhm)), fwhm
+    # And the one case the button never sees: no FWHM at all falls back to the
+    # op's own default, which is itself a stop.
+    assert presets._sharpen_radius_from_fwhm(None) == param_spec(
+        "detail.sharpen", "radius").default
+
+
+def test_autos_own_knobs_are_on_the_grid_too_now():
+    """The hot-path half of the same defect, **fixed in v0.493.14**.
+
+    ``measured_auto_knobs`` still hands ``auto_recipe`` continuous values — the
+    measurement is continuous and stays so — but ``auto_op_params`` now lands
+    every one of them on its control's own stops before it reaches an op param,
+    so the recipe, the readout beside it and the "What Auto did" sentence are one
+    number instead of three. The whole population, the taste profiles and what
+    snapping cost the picture are in ``tests/test_auto_knob_grid.py``; this is
+    the line that used to assert the opposite, kept here so the two halves of
+    v0.493.11's defect are answered in one place.
+    """
     for seed in range(4):
         knobs = measured_auto_knobs(_linear_scene(seed=seed, star_max=30000.0))
-        for knob, (op_id, key) in (("target_bg", ("tone.stretch", "target_bg")),
-                                   ("saturation", ("tone.saturation", "amount"))):
-            v = float(knobs[knob])
+        emitted = auto_op_params(auto_knob_values(knobs))
+        for op_id, key in (("tone.stretch", "target_bg"),
+                           ("tone.saturation", "amount")):
+            v = float(emitted[op_id][key])
             grid = param_grid(op_id, key)
-            if grid and not any(abs(v - stop) <= 1e-9 for stop in grid):
-                off.append(f"{knob}={v} ({op_id}.{key}, step {param_spec(op_id, key).step})")
-    assert off, ("Auto's knobs now land on their controls' stops — the LEAD in "
-                 "docs/IMPROVEMENTS.md has been settled, so close it and delete "
-                 "this test")
+            assert any(abs(v - stop) <= 1e-9 for stop in grid), (
+                f"{op_id}.{key} = {v} is not a stop of "
+                f"{param_spec(op_id, key).step}")
