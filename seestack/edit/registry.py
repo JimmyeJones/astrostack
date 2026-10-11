@@ -136,10 +136,20 @@ class EditContext:
     # image* and derive a number from it: the stretch takes each channel's robust
     # median and σ, auto-contrast reads the sky mode, colour calibration solves a
     # white balance from the star field, "Neutralize background" takes the sky's
-    # per-channel medians. Handed a *window* of the picture those all fit the
-    # window, so a 512×512 crop comes back stretched and colour-balanced
+    # per-channel medians, and the star mask the two ``stars.*`` ops gate on
+    # normalises against the picture's own brightest star cores
+    # (:mod:`seestack.edit.starmask`). Handed a *window* of the picture those all
+    # fit the window, so a 512×512 crop comes back stretched and colour-balanced
     # differently from the picture it was cut out of — which is why a render of a
     # region can't simply re-run the recipe at ``proxy_scale = 1``.
+    #
+    # **This list is load-bearing, so keep it true.** The star mask was missing
+    # from it (and from the two copies in ``webapp/edit_fit_cache.py`` and the
+    # loupe) for as long as the loupe existed, which is how a control built to let
+    # someone judge star reduction at full size came to show them a star mask
+    # normalised to the 512 px window — see ``starmask.star_mask``'s own
+    # docstring for the measurement. An op that measures the whole array and is
+    # not on this list is the next instance of that bug.
     #
     # ``fit`` is the channel that fixes it: an op asks for its fitted value by
     # name and gets either the value a previous whole-image render measured (when

@@ -1,5 +1,83 @@
 # Shipped — the record
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-49tltx`) — the loupe measured the picture it was cut out of
+
+### v0.493.5 — 🟠 BUG FIX (PRIORITY 1, the editor): "check it at full size" built its star mask from the 512 px window instead of from the picture
+
+*(`seestack/edit/starmask.py::star_mask` — the two normalising references now go through
+`EditContext.fit`; the three copies of the "ops that measure the whole image" list in
+`seestack/edit/registry.py`, `webapp/edit_fit_cache.py` and `webapp/routers/editor.py` corrected.)*
+
+**Found by reading the loupe's own comment as a promise and checking it.** It says, in as many words, that
+what makes a full-resolution window honest *"rather than a second lie"* is that **the ops that measure the
+whole image (stretch, auto contrast, colour calibration, background neutralize) are handed the fits the
+whole-image render made."* That list is four items long and it is wrong: `seestack.edit.starmask.star_mask`
+normalises **twice** against the whole array — `hi`, the 99.9th percentile of the white top-hat, and the
+mask's own post-blur peak — and it was not on it, nor on the two other copies of the same list. So the
+window built its star mask from its own brightest pixel.
+
+**And it lands on the one control the loupe exists for.** Four editor advisories say the decimated preview
+is not the export, and *"star reduction differs"* is one of them; its own docstring (v0.456.x) closes with
+*"the editor says that and asks the user to judge the strength on the export"* — and "check it at full size"
+is the place the editor sends them to do it. `stars.reduce` and `stars.boost_nebula` are the two ops that
+gate on that mask.
+
+**Measured**, on a 1000×1100 synthetic canvas with a star cluster in one corner and a nearly starless far
+side (the ordinary shape of a tiled mosaic), reference `hi` as the picture's own:
+
+| where the reference is read | `hi` | against the picture's |
+|---|---|---|
+| the whole canvas (what the export does) | 0.3325 | — |
+| the whole **proxy**, stride 3 | 0.3301 | **0.7 % low** |
+| a 512 px window on the starless side | 0.0259 | **12.8× low** |
+| a 512 px window over the cluster | 0.6329 | **1.9× high** |
+
+The dim window's reference being 13× low means its own sky *grain* normalises up to a full-strength mask, so
+the loupe erodes noise the export leaves alone. Measured as mean |difference| from the whole render's own
+pixels in that window, as a share of its 99th-percentile level: **`stars.reduce` 0.0071 → 0.000000** and
+**`stars.boost_nebula` 0.0205 → 0.000001**. On the 1800×2400 canvas the probe started from, where the window
+is 0.6 % of the picture, the same two came back **5.81 % → 0.03 %** and **16.26 % → 0.00 %**.
+
+**Why freezing the *proxy's* number is right, and not a third approximation.** The export measures on the
+full canvas; the only whole-image render the loupe has is the decimated proxy. For a value-percentile that is
+nearly free (a strided decimation samples the pixel population), and for this top-hat it is nearly free too
+**because the footprint shrinks by the same factor** — the measurement stays at the same physical scale, and
+the table above is the proof: 0.7 %, against 12.8× and 1.9× for the two windows. The window's own number is
+wrong in **both** directions, so no floor or cap on it would do; the picture's is the only right one.
+
+**Nothing on any whole-image render moves by a bit.** `fit` returns `compute()` whenever the caller supplied
+no `frozen_fits`, which is every live preview, every export, and the star-mask overlay endpoint — pinned by
+`test_a_mask_with_no_context_is_the_mask_the_channel_measures` (byte-equality with the `ctx=None` path) and
+by the round-trip test. The references are keyed by the **full-resolution** geometry that decides them
+(`size_px`, plus `grow` for the peak) rather than by the derived pixel footprint, which is 1 px on the proxy
+against 4 px on the window and would therefore never match — and that keying also stops two masks of
+different sizes inside one op from sharing a reference that describes only one of them.
+
+**A free second effect:** the live preview's fit cache (v0.382.2) now carries these two forward across
+renders of an unchanged prefix, so dragging a slider below a star op no longer re-runs a full-proxy
+`grey_opening` + percentile to get the same two numbers.
+
+**Tests** +10 items in `tests/test_edit_starmask.py`, **five fail-before** (verified in a `git worktree` at
+`origin/main`): the two that pin the channel, the both-directions measurement, and the two window-parity
+properties. The two controls — *an unfrozen window disagrees* — pass before and after by design, since they
+describe what the window does today; their bars sit under the measured divergence so a kinder fixture fails
+the control rather than passing the property for free.
+
+**The list is corrected in all four places it is written down** — `registry.py`'s `fit` comment,
+`edit_fit_cache.py`'s docstring, the loupe's own comment block and `tests/test_edit_frozen_fits.py`'s
+docstring (which said "four editor ops" and is where the count was a load-bearing claim). Each now says that
+an op which measures the whole array belongs on it, because that is the hole this came through.
+
+**Two more whole-array measurements were found in the same read and deliberately NOT fixed** — the robust
+percentile span in `detail.denoise` and `detail.deconvolve`, filed as a measured LEAD in
+[`IMPROVEMENTS.md`](IMPROVEMENTS.md) and named in a comment at each site. The short reason: freezing the span
+is a *partial* fix whose sign is method-dependent, because each method carries a second whole-array
+dependence that `fit` cannot reach.
+
+**No** config, settings, schema, migration, on-disk, default, endpoint or response-shape change; the engine
+gains no import. The one API change is internal and additive: `star_mask` reads `ctx.fit` when it has a
+context.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-jo7j7n`) — the carry-forward sentence paid twice: a window priced against the wrong drift, and a share with no denominator
 
 ### v0.493.4 — 🟡 TRUST / friendliness (PRIORITY 2–3): a night of two subs is no longer graded "hazy" because one of them was set aside

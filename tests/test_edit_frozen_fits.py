@@ -1,13 +1,25 @@
 """Frozen fits: rendering one *region* of a picture the way the whole picture renders.
 
-Four editor ops don't merely transform pixels — they first measure the **whole
+Several editor ops don't merely transform pixels — they first measure the **whole
 image** and derive a number from it: the stretch takes each channel's robust
 median and σ, auto-contrast reads the sky mode, colour calibration solves a white
 balance from the star field, "Neutralize background" takes the sky's per-channel
-medians. Hand any of them a 512×512 window and it fits *the window*, so the
-window comes back stretched and colour-balanced differently from the picture it
-was cut out of. That is why a render of a region cannot simply re-run the recipe
-at ``proxy_scale = 1``.
+medians, and the star mask the two ``stars.*`` ops gate on normalises against the
+picture's own brightest star cores. Hand any of them a 512×512 window and it fits
+*the window*, so the window comes back stretched and colour-balanced differently
+from the picture it was cut out of. That is why a render of a region cannot
+simply re-run the recipe at ``proxy_scale = 1``.
+
+**That list said "four" until v0.493.5, and the count was the bug.** The star
+mask measures the whole array and was on none of the four copies of the list
+(here, ``seestack/edit/registry.py``, ``webapp/edit_fit_cache.py`` and the
+loupe's own comment), so the window built its star mask from its own brightest
+pixel — on "star reduction", one of the four advisories the loupe exists to
+answer. Its tests live in ``tests/test_edit_starmask.py``, next to the mask. **Two
+more whole-array measurements are known and still unfrozen** — the percentile
+span in ``detail.denoise`` / ``detail.deconvolve`` — and freezing them is *not*
+a safe patch: see the measured LEAD in ``docs/IMPROVEMENTS.md``. If you add an op
+that measures the whole array, it belongs on the list either way.
 
 ``EditContext.fit`` is the channel that fixes it: a whole-image render records
 what each op fitted, and a second render over a window is handed those values

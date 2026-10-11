@@ -1838,12 +1838,20 @@ def put_recipe(safe: str, run_id: int, body: dict, request: Request) -> dict:
 # So: render one small window of the picture at full resolution, through the same
 # recipe, and show it. What makes that honest rather than a second lie is the two
 # channels shipped in v0.328.2 and v0.328.6 — the ops that measure the *whole*
-# image (stretch, auto contrast, colour calibration, background neutralize) are
-# handed the fits the whole-image render made, and the ops that fit a *sky model*
-# (the three ``background.*`` passes) have the field they subtracted replayed onto
-# the window instead of re-fitted there. Without those a window of a bright core
-# would come back stretched and flattened differently from the picture it was cut
-# out of, and the beginner would be tuning sharpening through the wrong tone curve.
+# image (stretch, auto contrast, colour calibration, background neutralize, and
+# the star mask the two ``stars.*`` ops gate on) are handed the fits the
+# whole-image render made, and the ops that fit a *sky model* (the three
+# ``background.*`` passes) have the field they subtracted replayed onto the window
+# instead of re-fitted there. Without those a window of a bright core would come
+# back stretched and flattened differently from the picture it was cut out of, and
+# the beginner would be tuning sharpening through the wrong tone curve.
+#
+# The star mask joined that list late and the gap is worth remembering: "star
+# reduction differs" is one of the four advisories above, so the window was the
+# only place the reader was told to judge it — and it was building the mask from
+# the 512 px window's own brightest pixel. Measured, a star-poor window's
+# reference came back 27x low. Anything added to the editor that measures the
+# whole array belongs in ``EditContext.fit`` before it reaches this control.
 
 #: How big a full-resolution window the loupe reads, in source pixels. Small on
 #: purpose: it is one modest render on the request path, affordable on the owner's
