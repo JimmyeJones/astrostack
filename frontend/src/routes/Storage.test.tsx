@@ -127,6 +127,43 @@ describe("StorageView", () => {
     await waitFor(() => expect(clear).toHaveBeenCalledWith("m_42", "proxies"));
   });
 
+  it("keeps the share-of-disk badge's label intact beside a long figures line",
+    async () => {
+      // Phone width. The card headline is a `<Group wrap="nowrap">` holding the
+      // target's name + figures and the share badge, so neither child may wrap
+      // away — and a flex child's default `min-width: auto` is its content
+      // width, so the two shrank in proportion and the badge lost the race: a
+      // dogfood measured "39%" as 26 px of word inside a 24 px box on every
+      // phone-width pass of this page. jsdom does no layout, so what is pinned
+      // is the pair of rules that make the row shrink correctly — the figures
+      // yield (`minWidth: 0`), the badge never does (`flexShrink: 0`).
+      const target = {
+        safe: "ngc_7000_north_america_nebula",
+        name: "NGC 7000 North America Nebula",
+        total_bytes: 390 * 1024 ** 3, output_bytes: 120 * 1024 ** 3,
+        cache_bytes: 270 * 1024 ** 3, stage1_bytes: 90 * 1024 ** 3,
+        stage2_bytes: 90 * 1024 ** 3, thumbs_bytes: 45 * 1024 ** 3,
+        proxies_bytes: 45 * 1024 ** 3, n_stack_runs: 12,
+      };
+      vi.spyOn(client.api, "getStorage").mockResolvedValue(mkStorage({
+        targets: [target],
+        total_bytes: 1000 * 1024 ** 3,
+        cache_bytes: 270 * 1024 ** 3,
+      }));
+
+      renderStorage();
+      // Mantine renders the text inside the badge's own label span, so the
+      // rule under test is on the badge root above it.
+      const label = await waitFor(() => screen.getByText("39%"));
+      const badge = label.closest('[class*="mantine-Badge-root"]') as HTMLElement;
+      expect(badge).not.toBeNull();
+      expect(badge.style.flexShrink).toBe("0");
+      // ...and the half that was already right, asserted so a later edit can't
+      // "fix" the row by taking the figures' licence to shrink away instead.
+      const name = screen.getByText(target.name);
+      expect((name.parentElement as HTMLElement).style.minWidth).toBe("0");
+    });
+
   it("shows a zero for an older backend that doesn't report the proxy cache", async () => {
     const target = {
       safe: "m_42", name: "M 42", total_bytes: 100, output_bytes: 40,

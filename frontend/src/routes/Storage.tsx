@@ -84,7 +84,19 @@ function TargetRow({ row, total }: { row: TargetStorage; total: number }) {
             {" · "}{row.n_stack_runs} stack{row.n_stack_runs === 1 ? "" : "s"}
           </Text>
         </div>
-        <Badge variant="light" color="gray">{pct.toFixed(0)}%</Badge>
+        {/* The figures shrink and wrap; the share badge never does. A flex
+            child's default `min-width: auto` is its content width, and
+            `wrap="nowrap"` forbids this row a second line, so the two children
+            shrank in proportion and what gave way was the badge: a `--mosaic
+            --dithered --editor --big` dogfood measured "39%" as 26 px of word
+            in a 24 px box on every phone-width pass of this page. A badge is a
+            whole short fact with no "read the rest elsewhere", so the clip is
+            unreadable rather than merely truncated. Same pair, same reason, as
+            the Calibration repair row (v0.492.64), OpParamPanel and
+            VideoCapturesCard. */}
+        <Badge variant="light" color="gray" style={{ flexShrink: 0 }}>
+          {pct.toFixed(0)}%
+        </Badge>
       </Group>
 
       <Progress.Root size="lg" mt="sm">

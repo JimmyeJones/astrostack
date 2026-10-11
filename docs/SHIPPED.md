@@ -2,6 +2,47 @@
 
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-zsys8j`) — a whole-journey dogfood, and the two things it said
 
+### v0.493.2 — 🟡 FRIENDLINESS (PRIORITY 3): the Storage page's share-of-disk badge stops having its own number clipped on every phone-width screen
+
+*(`frontend/src/routes/Storage.tsx` — `TargetRow`'s headline `<Group wrap="nowrap">`.)*
+
+**What the probe printed**, on all three probed targets of the same pass, at 420 px:
+
+```
+[phone] /storage: CLIPPED LABEL 24px box vs 26px word — "39%" (scrolling cannot reveal it)
+```
+
+Two pixels, and `clippedLabels`' own docstring says why two pixels matter here: *"a `Badge` is a label, not
+prose: there is no 'read the rest elsewhere' for it … and because the clip is **inside** the badge, it
+survives any amount of scrolling."* The badge is the one figure that answers the question the page exists
+for — *which target is eating my disk?* — for an owner whose raws are on a NAS and who reaches this page
+from a phone.
+
+**The mechanism, third time of asking.** The card headline is a `<Group justify="space-between"
+wrap="nowrap">` holding the target's name and figures on one side and the share badge on the other. The
+figures side already carried `minWidth: 0`, so it *may* shrink — but a flex row shrinks its children in
+proportion to their base sizes, and the badge never declared that it would not. So the long figures line
+took most of the squeeze and handed the rest to the badge, which clips its label. Identical shape to
+v0.465.3 (`ActiveJobsBadge`, 60 px in a 63 px box in the header) and v0.492.64 (the Calibration repair
+button, 67 px against 70 px).
+
+**The fix is the app's own idiom, and the half that was missing.** `flexShrink: 0` on the badge, completing
+the pair the row already had half of (OpParamPanel, VideoCapturesCard, the Calibration repair row). The
+alternative `clippedLabels` names — `min-width: max-content` — would also stop the clip but lets the row
+overflow the card when the figures cannot give way; here they can (`minWidth: 0`), so `flexShrink: 0` keeps
+the whole row inside the card. Nothing moves, nothing wraps, nothing is removed.
+
+**Reproduced live before and after by the probe that found it:** the finding above on `origin/main`, and
+*"nothing overflowing, no console errors"* on both probed targets of the verifying `--dithered` pass.
+
+**Upgrade-safe (§9):** frontend-only, display-only — no config, schema, migration, on-disk, default, API or
+engine change.
+
+**Tests +1 vitest** ("keeps the share-of-disk badge's label intact beside a long figures line"),
+fail-before verified by reverting the one style prop in place. jsdom does no layout, so what the test pins
+is the pair of rules — the figures yield, the badge never does; the pixel count is pinned by the dogfood
+probe, which is where it can be measured.
+
 ### v0.493.1 — 🔴 TRUST / autonomy (PRIORITY 2–3): the readiness card stops telling a multi-night mosaic owner their nights "kept almost nothing" and sending them to check focus and framing
 
 *(`frontend/src/components/clearNights.ts` — `DUD_NIGHT_KEPT_SHARE`, `estimateClearNights`'s

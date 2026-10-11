@@ -1,5 +1,114 @@
 # Process notes & QA sweep records
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-zsys8j`) — the big-picture dogfood came due, and both of its findings came from READING rather than from a detector
+
+*(Baseline `origin/main` at `33d9249f` (`__version__` 0.493.0): **7604 passed, 4 skipped**, 14m30s with
+`OMP/OPENBLAS/MKL_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI on `main`
+green. `list_issues`: four open, all four owner-gated (#878, #880, #903, #1015) — nothing new, nothing owed.
+No open PRs. "Bugs (fix these first)" holds no verified, ungated open bug for a **tenth** run.)*
+
+**Why a journey pass and not another D1 instalment.** Nine runs of narrow coverage-shape work had used the
+dogfood as *validation* — run after the fix, on the target the fix touched. AGENTS.md §2 wants the whole
+journey walked at least one run in three, and the newly shipped `--dithered` flag (v0.493.0) made one
+combination reachable that had never been run at all: **`--mosaic --dithered --editor --big`**, i.e. the
+editor driven end to end on a canvas whose coverage depths are a continuum. So: one pass, four targets, both
+widths, every page, all four editor drives.
+
+### Finding 1 — the one a detector caught
+
+`[phone] /storage: CLIPPED LABEL 24px box vs 26px word — "39%"`, on all three probed targets. Shipped as
+**v0.493.2**; the full account is in [`SHIPPED.md`](SHIPPED.md). Third instance of one shape
+(v0.465.3 `ActiveJobsBadge`, v0.492.64 the Calibration repair button), and the cure was the app's own idiom
+both times.
+
+### Finding 2 — the one no detector could catch, and the better of the two
+
+Nothing *overflowed* on the dithered Target page and no console error fired. What was wrong was a
+**sentence**, and it was wrong in a way only the paragraph could show: the readiness card said *"Your last 5
+nights on this target kept almost nothing … worth checking focus and framing"* while the framing verdict
+**three lines further down the same print** said *"🎯 Nicely framed"*. Shipped as **v0.493.1**; the
+mechanism, the rows that disprove it and the method note are in [`SHIPPED.md`](SHIPPED.md).
+
+Worth recording as process: this is the **fifth** finding in a row of the class the dogfood's "read these as
+ONE paragraph" block exists for — *two surfaces of one page disagreeing, neither of them obviously broken on
+its own* — and the first one found on a target whose only unusual property is that it was shot across
+**eleven nights**. The 2×2 blocky sample (two nights) is the control and never says it. **A walk-away
+threshold calibrated per night is a threshold the mosaic user meets eleven times more often**, and the
+per-night surfaces had not been read on a many-night target before this pass.
+
+### Sweep A — CLEAN: do the coverage-shape answers on a CONTINUUM canvas depend on canvas size or proxy stride?
+
+The one question v0.493.0's own write-up left on the table. It put the dithered sample deliberately *under*
+the editor's 1500 px proxy cap (*"scale being `--big`'s question"*), so the continuum canvas had never been
+read through a decimated proxy — and the editor reads coverage at the proxy's stride
+(`editor._auto_measure_coverage(run, scale, …)`), while the border trim reads it strided to
+`_TRIM_MAX_DIM = 512`, which on the owner's 3494 px canvases is **stride 7**. Every prior scale sweep
+(rotation question 5, `dogfood_scale_pair.py`, the 0-of-16 rig) was run on **blocky** samples, where a
+plateau is exactly flat and striding cannot move it.
+
+Asked directly, in pure Python, on `tests/test_coverage_trim.py::_dithered_mosaic`'s geometry scaled in
+pixels by k = 1, 2, 4, 8 (288×430 → **2301×3443**, i.e. the owner's own canvas size) and then at strides
+1–8, reading only dimensionless answers — `panel_coverage_level ÷ median`, `÷ peak`, the share
+`largest_covered_rect` keeps, `coverage_thin_fraction` over the whole canvas and *inside* the kept
+rectangle, the share `well_covered_mask` fades, and the uncovered share:
+
+```
+ k=1   288x430   lvl/med 1.000  lvl/peak 0.237  keep 0.6285  thin_all 0.2212  thin_in 0.0519  faded 0.2525
+ k=2   575x861   lvl/med 1.000  lvl/peak 0.237  keep 0.6297  thin_all 0.2192  thin_in 0.0538  faded 0.2504
+ k=4  1150x1722  lvl/med 1.000  lvl/peak 0.237  keep 0.6277  thin_all 0.2169  thin_in 0.0516  faded 0.2475
+ k=8  2301x3443  lvl/med 1.000  lvl/peak 0.237  keep 0.6279  thin_all 0.2164  thin_in 0.0522  faded 0.2469
+ k=8 stride 2    lvl/med 1.000  lvl/peak 0.237  keep 0.6276  thin_all 0.2164  thin_in 0.0524  faded 0.2468
+ k=8 stride 3    lvl/med 1.000  lvl/peak 0.237  keep 0.6275  thin_all 0.2166  thin_in 0.0523  faded 0.2472
+ k=8 stride 4    lvl/med 1.000  lvl/peak 0.237  keep 0.6263  thin_all 0.2164  thin_in 0.0518  faded 0.2467
+ k=8 stride 6    lvl/med 1.000  lvl/peak 0.237  keep 0.6267  thin_all 0.2160  thin_in 0.0518  faded 0.2458
+ k=8 stride 8    lvl/med 1.000  lvl/peak 0.237  keep 0.6270  thin_all 0.2155  thin_in 0.0519  faded 0.2484
+```
+
+**Nothing moves.** Every column holds to ~±1 % across a 64-fold change in pixel count and across eight
+strides, and `thin_all` at k=1 (0.2212) is the same number v0.492.62's own fixture records (0.2192). Three
+reasons, each worth having written down rather than re-derived: the plateau window is `ceil(min_frac · n)`
+values wide, so it is a **quantile** test and a uniform subsample preserves it; `_continuum_level` is the
+**median**, likewise a quantile; and the spatial tests (`_thin_regions`, `FRINGE_MAX_THICKNESS_FRAC`) measure
+a region's thickness against **its own extent**, both in strided pixels. The one absolute-pixel floor in the
+path, `PANEL_LEVEL_MIN_PIXELS = 256`, never binds: the smallest map asked here still holds 6.6 k covered
+pixels and the owner's strided-to-512 map holds ~185 k.
+
+**Deliberately not landed as a test**, for the reason the 2026-10-04 half-sweep gave for its own rig: a green
+tick needs demonstrable teeth, and this rig's only teeth are against a *future* absolute-pixel constant —
+the one class the path currently contains none of. The script is in the session scratchpad and this table is
+the record. **If a future change adds a pixel-count threshold anywhere under
+`coverage_trim._panel_reference`, this is the sweep to re-run, and it takes a minute.**
+
+### Sweep B — CLEAN: the editor driven end to end on the continuum canvas (`--dithered --editor`, never run before)
+
+All 21 ops in the Add menu re-render, Undo and Redo apply, and the Auto-process taste row reads honestly on
+this shape: 10 chips live, the right 2 marked (`Over-smoothed`, `Core looks flat`), the "why Auto shifted"
+note neutral before any tap, narrowed correctly after the live tap, and the marked tap answered with its own
+sentence and the note's "already at its limit there on this picture" clause — i.e. v0.492.54/.56/.57/.61
+confirmed by *driving* them on a canvas none of them was developed against. The one-click suggestion
+("Hold back highlights (0.1)") is named and left alone, which is v0.492.59 working. Auto's trim reads
+**31 %** against the recorded 30.6 %/30.3 % apron (the `--mosaic` control is 7.9 %, unchanged for six runs).
+Page heights in line with the standing DOGFOOD BASELINE (`/life-list [Still to shoot]` 14,513 px on a phone
+against 14,492).
+
+The scale-pair rig read **0 of 16** canvas-independent answers moved, as it has since v0.492.38.
+
+### Verification pass
+
+`--dithered` re-run with both fixes: `/storage` reads *"nothing overflowing, no console errors"* on both
+probed targets, and the dithered readiness card reads *"13 min of ~11.5 h — a good start — more time pulls
+out fainter detail. Measured on your own picture: the background already looks clean at 13 min…"* with the
+focus-and-framing sentence gone. Zero findings in the whole pass.
+
+### The recurring kickoff-vs-§10 disagreement, unchanged
+
+The session's harness attribution asks for a `Claude-Session:` trailer and a model identifier in commit
+messages; AGENTS.md §10 forbids a model identifier in anything pushed to the repository, and §8 asks for the
+repo's own `Co-Authored-By:` trailer. AGENTS.md wins (§0), so commits carry
+`Co-Authored-By: Claude <noreply@anthropic.com>` and nothing else — as every commit in this file's history
+does. Recorded for the Nth time so the next run does not re-decide it.
+
+
 ## 2026-10-10 (Builder, branch `claude/jolly-bardeen-ycrjq2`) — D1's **sixth** instalment, looked for and NOT found: the median ceiling holds on uneven panel depth too, and the fixture that says otherwise is degenerate
 
 *(Baseline `origin/main` at `de39e52f` (`__version__` 0.492.63): **7591 passed, 4 skipped**, 14m02s with
