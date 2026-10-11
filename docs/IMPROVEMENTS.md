@@ -76,7 +76,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **Auto's own knobs land off their controls' stops** (the v0.493.11 LEAD at the front of "Bugs") —
+  branch `claude/jolly-bardeen-kmpmon`, Builder 2026-10-11. Taking shape **(a)**, with the
+  render-cost measurement the entry asks for.
 
 ---
 
