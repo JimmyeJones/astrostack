@@ -7,16 +7,25 @@ import {
   nightWord,
 } from "./clearNights";
 
-/** One night's summary, newest-first order supplied by the caller. Only the two
- *  fields the estimate reads are interesting; the rest carry sane filler. */
-function night(keptExposureS: number, nFrames = 60): NightSummary {
+/** One night's summary, newest-first order supplied by the caller. Only the
+ *  fields the estimate reads are interesting; the rest carry sane filler.
+ *
+ *  `nKept` defaults to `nFrames` — a night that kept everything it caught,
+ *  which is what an ordinary short mosaic night looks like. It is a parameter
+ *  because the helper used to tie `n_kept` to `n_frames` *and* `exposure_s` to
+ *  `kept_exposure_s`, so no fixture here could tell "threw its subs away" from
+ *  "was simply short" — which is exactly the distinction the all-duds branch
+ *  turned out to be missing. */
+function night(keptExposureS: number, nFrames = 60, nKept = nFrames): NightSummary {
   return {
     start_utc: "2026-01-01T21:00:00Z",
     end_utc: "2026-01-02T02:00:00Z",
     n_frames: nFrames,
-    n_kept: nFrames,
-    n_set_aside: 0,
-    exposure_s: keptExposureS,
+    n_kept: nKept,
+    n_set_aside: nFrames - nKept,
+    // What the night recorded is independent of what it kept: a dud night
+    // records a full session's worth and keeps a sliver of it.
+    exposure_s: nFrames > 0 ? (keptExposureS * nFrames) / Math.max(nKept, 1) : 0,
     kept_exposure_s: keptExposureS,
     median_fwhm_px: 3.2,
     verdict: "sharp",
@@ -94,7 +103,11 @@ describe("estimateClearNights", () => {
   });
 
   it("advises checking focus when recent nights kept essentially nothing", () => {
-    const e = estimateClearNights(2 * HOUR, [night(0), night(0), night(30)]);
+    // Three real sessions of 60 subs each that kept 1, 1 and 2 of them — the
+    // case this branch exists for, and now stated as such: what makes it a dud
+    // is the *discarding*, not the short kept total.
+    const e = estimateClearNights(
+      2 * HOUR, [night(0, 60, 1), night(0, 60, 1), night(30, 60, 2)]);
     expect(e).not.toBeNull();
     expect(e?.nights).toBeNull();          // no ETA — nothing honest to divide by
     expect(e?.paceSeconds).toBe(0);
@@ -103,9 +116,36 @@ describe("estimateClearNights", () => {
     expect(e?.text).toContain("checking focus");
   });
 
+  it("does not call a SHORT night a dud, or send the owner to check focus",
+    () => {
+      // The owner's own shape, and the reason this branch needed splitting: a
+      // 2x2 mosaic revisited across eleven nights takes 6 subs a visit and
+      // keeps all 6 — `n_kept` 6 of 6, `n_set_aside` 0, every night graded
+      // `sharp` — which is 60 s of kept exposure against a 120 s pace floor.
+      // Nothing was discarded and nothing is wrong, so there is no pace to
+      // quote and nothing to report: the card self-hides rather than claiming
+      // the nights "kept almost nothing" and prescribing a focus check, which
+      // it did on the app's own `--dithered` sample.
+      const mosaicNights = Array.from({ length: 5 }, () => night(60, 6));
+      expect(estimateClearNights(11 * HOUR, mosaicNights)).toBeNull();
+    });
+
+  it("still says nothing when a night's exposure is unreadable", () => {
+    // `exposure_s` is a sum of EXPTIME headers and can be 0 on subs that carry
+    // none. A share of zero is not a judgement about anybody's focus, so the
+    // dud test refuses rather than firing on the division.
+    const blank = [night(0, 60, 60), night(0, 60, 60)];
+    expect(estimateClearNights(2 * HOUR, blank)).toBeNull();
+  });
+
   it("never divides by zero or returns a non-finite estimate", () => {
-    const e = estimateClearNights(2 * HOUR, [night(0), night(0)]);
-    expect(e?.nights).toBeNull();
+    // Two nights with no kept exposure at all: whichever way the branch below
+    // goes, no number comes out. They kept every sub they caught, so the answer
+    // is silence; a pair that really did discard its subs gets `nights: null`
+    // (the all-duds test above). Neither can divide.
+    expect(estimateClearNights(2 * HOUR, [night(0), night(0)])).toBeNull();
+    const dud = estimateClearNights(2 * HOUR, [night(0, 60, 1), night(0, 60, 1)]);
+    expect(dud?.nights).toBeNull();
     // …and a nonsense gap is refused outright rather than propagated.
     expect(estimateClearNights(Number.NaN, [night(HOUR), night(HOUR)])).toBeNull();
     expect(estimateClearNights(Number.POSITIVE_INFINITY, [night(HOUR), night(HOUR)]))

@@ -28,6 +28,25 @@ export const PACE_LOOKBACK_NIGHTS = 5;
  * a session — counting it would drag the median down and inflate the ETA. */
 const MIN_PRODUCTIVE_NIGHT_S = 120;
 
+/** Below this share of the subs a night *recorded* did it really keep "almost
+ * nothing".
+ *
+ * `MIN_PRODUCTIVE_NIGHT_S` answers "is there a pace here to divide by?" and
+ * nothing else. It says nothing about *why* not, and the two reasons want
+ * opposite sentences: a night that went out and threw most of its subs away
+ * (cloud, dew, a bump) is worth telling the owner about, while a night that was
+ * simply **short** and kept everything it got is an ordinary multi-night mosaic
+ * and there is nothing to report. The same distinction, in the same words, as
+ * `seestack.livesession.grade_conditions`: *"a sharp night that is being thrown
+ * away by cloud and a soft night that is all being kept are different
+ * problems"* — and at the same place, its `CONDITIONS_POOR_KEEP_RATE`.
+ *
+ * Measured in **frames**, which is what "kept" means here and what the two
+ * cards that already quote a keep percentage use (`LastNightCard`,
+ * `SessionRecapCard`): a night's `exposure_s` can be 0 on a sub whose header
+ * carries no EXPTIME, and a share of zero is not a judgement about focus. */
+const DUD_NIGHT_KEPT_SHARE = 0.5;
+
 /** How close to done a target has to be before a *compact* surface (a Dashboard
  * row, a Tonight planner row) names the number of nights left. Past it the
  * figure stops being encouragement and starts reading as a scold ("6 nights
@@ -67,8 +86,11 @@ function median(xs: number[]): number {
  * Returns null — say nothing rather than guess — when the goal is already met,
  * when there's no night history, or when fewer than two nights have really
  * accrued anything (one night is not a pace). The one non-numeric answer is the
- * all-duds case: recent nights recorded subs but kept essentially none of them,
+ * all-duds case: recent nights recorded subs and **discarded most of them**,
  * where the useful thing to say is "check focus", not a division by ~zero.
+ * Nights that merely came up *short* of the pace floor while keeping what they
+ * caught — a mosaic revisited across many nights — take the null, not the
+ * scold; see :data:`DUD_NIGHT_KEPT_SHARE`.
  */
 export function estimateClearNights(
   gapSeconds: number,
@@ -87,6 +109,29 @@ export function estimateClearNights(
   );
 
   if (productive.length === 0) {
+    // No recent night cleared the pace floor, so there is no pace to divide by
+    // — but *why* splits in two, and this branch used to answer both with the
+    // one sentence written for the first:
+    //
+    //   * the nights went out and came back having kept next to nothing, where
+    //     "check focus and framing" is the actionable answer; or
+    //   * the nights were simply **short** and kept everything they got, which
+    //     is what a mosaic revisited across many nights looks like. Measured on
+    //     the app's own dithered sample (`--dithered`): eleven nights of 6 subs,
+    //     `n_kept` 6 of 6 and `n_set_aside` 0 on every one, 60 s of kept
+    //     exposure against this floor's 120 s. The card told the owner their
+    //     last five nights "kept almost nothing" and sent them to check focus
+    //     and framing — on a target whose every night is graded `sharp` and
+    //     whose framing verdict one card down reads "Nicely framed".
+    //
+    // So the scold now has to agree with what it claims. When the nights kept
+    // what they caught, fall through to this module's own default and say
+    // nothing rather than guess (the doc comment above: "say nothing rather
+    // than guess ... when there's no usable pace").
+    const recorded = withFrames.reduce((t, n) => t + n.n_frames, 0);
+    const kept = withFrames.reduce(
+      (t, n) => t + (Number.isFinite(n.n_kept) ? n.n_kept : 0), 0);
+    if (!(recorded > 0 && kept < DUD_NIGHT_KEPT_SHARE * recorded)) return null;
     // Every recent night went out and came back with (next to) nothing kept.
     // There's no pace to divide by, and the actionable answer isn't an ETA.
     return {

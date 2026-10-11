@@ -1,5 +1,48 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Builder, next run — **the queue held nothing ungated for a TENTH run, so this run
+walked the whole journey instead of taking an eleventh D1 instalment, and the pass said two things.
+SHIPPED as v0.493.1 and v0.493.2.**
+**Read this first if you are about to sweep arithmetic again: both findings came from READING, not from a
+detector, and the better one is a SENTENCE.** Nothing overflowed on the dithered Target page and no console
+error fired. What was wrong is that the readiness card said *"Your last 5 nights on this target kept almost
+nothing … worth checking focus and framing"* **three lines above** a framing verdict reading *"🎯 Nicely
+framed"*, on a target whose every night reports `n_frames 6, n_kept 6, n_set_aside 0, reject_buckets {}`
+and `verdict "sharp"`. `MIN_PRODUCTIVE_NIGHT_S = 120` asks *"is there a pace to divide by?"*; the branch
+read it as *"did these nights fail?"*. Six subs a visit at 10 s is **60 s** against that floor — which is
+simply what a mosaic revisited across many nights looks like. **v0.493.1** conditions the scold on the
+nights having actually *discarded* most of what they recorded (`n_kept` vs `n_frames`, the bar
+`livesession.CONDITIONS_POOR_KEEP_RATE` already draws) and otherwise takes the module's own "say nothing
+rather than guess" default. No ETA moves. **v0.493.2** is the detector's one hit, third of its exact shape:
+`[phone] /storage: CLIPPED LABEL 24px box vs 26px word — "39%"`, cured with `flexShrink: 0` as in v0.465.3
+and v0.492.64.
+**THE METHOD NOTE, AND IT IS THE ONE TO CARRY FORWARD: a walk-away threshold calibrated PER NIGHT is a
+threshold the mosaic owner meets eleven times more often.** The blocky 2×2 sample (two nights) is the
+control and never says it; the eleven-night sample does. Every per-night surface in the app is worth
+re-reading on a many-night target — that is the one property the new `--dithered` sample has that no sweep
+had used it for, and it is cheaper to ask than any arithmetic audit. **Its sibling, in the test suite:
+`clearNights.test.ts`'s `night()` helper tied `n_kept` to `n_frames` and `exposure_s` to `kept_exposure_s`,
+so every fixture kept 100 % of what it caught and the all-duds test was passing on nights that had
+discarded nothing. When a test helper derives one field from another, it has decided an answer rather than
+asked a question** — and the branch under it is untested in exactly the direction that matters.
+**Two sweeps came back CLEAN and both are recorded with their numbers in [`PROCESS-NOTES.md`](PROCESS-NOTES.md)
+— do not re-run either.** (A) **Do the coverage-shape answers on a CONTINUUM canvas depend on canvas size or
+proxy stride?** No: the dimensionless table (`panel_coverage_level ÷ median` and `÷ peak`, the share
+`largest_covered_rect` keeps, `coverage_thin_fraction` whole-canvas and inside the kept rectangle, the
+`well_covered_mask` fade) holds to ~±1 % from a 288×430 fixture up to the owner's own **2301×3443**, and
+across strides 1–8 — which matters because the editor reads coverage at the proxy's stride and the trim
+reads it strided to `_TRIM_MAX_DIM = 512`, i.e. **stride 7** on his canvases. Every earlier scale sweep was
+run on *blocky* samples. The reasons it is invariant (quantile window, median reference, self-relative
+thickness) are written down; the one absolute-pixel floor, `PANEL_LEVEL_MIN_PIXELS = 256`, never binds.
+**Not landed as a test** — its only teeth are against a future pixel-count threshold — so if one is ever
+added under `coverage_trim._panel_reference`, that is the sweep to re-run and it takes a minute.
+(B) **`--dithered --editor`, never run before:** all 21 ops re-render, Undo/Redo apply, and the Auto taste
+row's marking, note narrowing and marked-tap sentence all read correctly on a canvas none of
+v0.492.54/.56/.57/.61 was developed against. Auto's trim reads **31 %** against the recorded 30.6 % apron;
+the `--mosaic` control is still **7.9 %**. Scale-pair rig still **0 of 16**.
+The inbox was checked first — **four open, all previously acted-on and owner-gated** — and there were **no
+open PRs**. Tests **+3 vitest, 4 fail-before**. Earlier notes stand below.)*
+
 *Last edited 2026-10-10 (Builder, next run — **the queue held nothing ungated for a ninth run, so this run
 built the INSTRUMENT the previous two had to work around, and it found something on its first pass.
 SHIPPED as v0.493.0.**
