@@ -1,6 +1,54 @@
 # Shipped — the record
 
-## 2026-10-11 (Builder, branch `claude/jolly-bardeen-49tltx`) — the loupe measured the picture it was cut out of
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-49tltx`) — the loupe measured the picture it was cut out of, and now the list of ops that must not is asserted
+
+### v0.493.6 — 🔵 COVERAGE (the guard that should have caught v0.493.5): the loupe's "which ops measure the whole image?" list is now **asserted**, op by op
+
+*(New `tests/test_edit_window_fidelity.py` — 52 items, 4.1 s.)*
+
+**v0.493.5's root cause was a list in prose, in four places, that nothing checked.** `star_mask` measured
+the whole array and was on none of them, so the editor's "check it at full size" window built its star mask
+from its own brightest pixel for as long as the loupe has existed. Correcting the four copies (v0.493.5 did)
+leaves the next op in exactly the same position — which is the same lesson v0.493.3 and v0.493.4 carried
+forward about a *constant* whose justification is prose. **A list whose justification is prose has nothing
+checking it either.**
+
+**The property, and it is exact.** For every op the loupe re-runs on its window: render it over the whole
+canvas, render it again over a 224 px window of that canvas at the same scale with the whole render's
+`fitted` frozen onto it, and compare the window's **interior** (inset 56 px, wider than the spatial reach of
+every parameter in the table) against the same pixels of the whole render. Measured on an uneven canvas — a
+bright object with a dense star cluster in one corner, a nearly starless far side, green blotches, single
+hot pixels, a ragged NaN edge — over three windows each (star-poor, bright core, ragged edge):
+
+| | window divergence, frozen |
+|---|---|
+| `tone.stretch`, `tone.curves`, `tone.levels`, `tone.saturation`, `tone.scnr`, `tone.white_balance`, `tone.color_calibrate`, `tone.neutralize_background`, `detail.sharpen`, `stars.reduce`, `stars.boost_nebula` | **exactly 0.0** |
+| `detail.denoise` | 9.3e-03 |
+| `detail.chroma_denoise` | 2.3e-03 |
+| `detail.hot_pixels` | 2.9e-04 |
+| `detail.deconvolve` | 1.4e-04 |
+
+**So there is nothing tuned here**: the faithful ops are bit-identical and the tolerance (1e-9) sits ~8,600×
+under the smallest real divergence, with no case in between. The four that are not faithful are listed in
+`_NOT_WINDOW_FAITHFUL` **with the reason and the number** — two of them are the open LEAD filed with
+v0.493.5 (the percentile span), and the two the guard *found* are named for the first time:
+`detail.chroma_denoise`'s `_robust_sky` (whole-array luminance median + MAD) and `detail.hot_pixels`'
+per-channel sky and noise floor in `seestack.bg.hot_pixels._suppress`, whose obvious fix would reshape a
+**stack hot-path** module for the editor and so is not one.
+
+**It fails on the defect it was written for.** Run against `origin/main` at the commit before v0.493.5 in a
+`git worktree`: **6 failed, 46 passed** — `stars.reduce` and `stars.boost_nebula` on all three windows,
+worst 3.6e-01 of full scale.
+
+**Three more assertions keep the sweep honest** rather than letting it rot: the swept set is derived from
+the **registry** (`all_specs()` minus `geometry.*` minus `additive_field`, which is exactly what the loupe
+handles itself — it disables the geometry ops and replays the three background fields), so a newly
+registered op fails `test_every_op_in_scope_has_parameters_to_be_swept_with` until someone looks at it; a
+documented exception must still be *measurably* unfaithful, so a fix cannot leave a stale excuse behind; and
+the six ops outside the sweep are named, so "every other op" is checkable.
+
+Test-only: no production code, and no config, schema, migration, on-disk, default, endpoint or
+response-shape change.
 
 ### v0.493.5 — 🟠 BUG FIX (PRIORITY 1, the editor): "check it at full size" built its star mask from the 512 px window instead of from the picture
 
