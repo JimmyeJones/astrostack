@@ -1856,11 +1856,17 @@ def put_recipe(safe: str, run_id: int, body: dict, request: Request) -> dict:
 # And where it genuinely cannot go there — the measurement happens inside skimage,
 # or in a stack hot-path module — the op declares
 # :attr:`~seestack.edit.registry.OpSpec.window_unfaithful` and this control *says
-# so*, by name, in :func:`_loupe_unvouched_labels`. Four ops do, and three of them
-# are the subject of three of the four advisories above, which all send the reader
-# here "at the threshold you've set": so until that LEAD is settled, the window
-# was being cited as the authority for the very ops it re-measures. Naming them is
-# the half of the fix that changes nothing about what the editor renders.
+# so*, by name, in :func:`_loupe_unvouched_labels`. Three ops do, and two of them
+# are the subject of two of the four advisories above, which all send the reader
+# here "at the threshold you've set" — so for those two the window is still being
+# cited as the authority for an op it re-measures, and naming them is the half of
+# the fix that changes nothing about what the editor renders.
+#
+# It was four ops and three advisories until v0.493.9, and the one that left is
+# the reason to re-check the other three rather than quote this comment: the
+# percentile span both restoration ops normalise by turned out to be carryable
+# after all, which made "deconvolution understates on the proxy" — an advisory
+# that exists to send the reader *here* — answerable here for the first time.
 
 #: How big a full-resolution window the loupe reads, in source pixels. Small on
 #: purpose: it is one modest render on the request path, affordable on the owner's

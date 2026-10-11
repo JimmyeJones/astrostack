@@ -440,19 +440,22 @@ for (const name of ["Undo", "Redo"]) {
 // --- the full-size check again, on a recipe it cannot fully vouch for --------
 //
 // `driveFullSizeCheck()` above ran on whatever recipe the editor *loaded*, which
-// is Auto's own — and Auto's carries none of the four ops whose full-resolution
-// window re-measures itself (v0.493.7: the percentile span in `detail.denoise`
-// and `detail.deconvolve`, the sky estimates in `detail.chroma_denoise` and
-// `detail.hot_pixels`). The Add-menu loop adds each op and then *removes* it, so
-// there was no moment in this drive at which one of those four was in the recipe
+// is Auto's own — and Auto's carries none of the three ops whose full-resolution
+// window re-measures itself (`detail.denoise`'s wavelet/TV convergence inside
+// skimage, and the sky estimates in `detail.chroma_denoise` and
+// `detail.hot_pixels`; it was four until v0.493.9 routed the percentile span
+// both restoration ops normalise by through `EditContext.fit`, which made
+// `detail.deconvolve` window-faithful). The Add-menu loop adds each op and then
+// *removes* it, so there was no moment in this drive at which one of them was in the recipe
 // **and** the modal was open: the modal's caveat line — and any later sentence
 // put in it — was pinned by jsdom alone, and no pass could report what it says.
 // That is the same complaint this file's own header makes about the rest of the
 // screen. So: add one, open the modal again, read the paragraph, take it back off.
 //
 // "Noise reduction" is a **probe target, not a list.** It is the op with the
-// largest measured window divergence (9.3e-03 of full scale, on a star-poor
-// window) and it sits in the Add menu's Common shortlist, so it needs no
+// largest measured window divergence (8.0e-03 of full scale, on a star-poor
+// window — `tests/test_edit_window_fidelity.py` holds and asserts the figure)
+// and it sits in the Add menu's Common shortlist, so it needs no
 // expansion. What the modal then prints is the *server's* answer, derived from
 // each op's `OpSpec.window_unfaithful` — that is the authoritative list, and the
 // thing worth reading as one paragraph with the three sentences beside it.

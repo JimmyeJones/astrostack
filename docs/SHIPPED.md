@@ -1,5 +1,118 @@
 # Shipped — the record
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-ddjooe`) — "it cannot be carried" had a short shelf life: the loupe's percentile span was carryable, and the figures excusing the ops that are not were two-thirds wrong
+
+### v0.493.9 — both restoration ops take their percentile span from `ctx.fit`, which makes `detail.deconvolve` window-faithful outright: `_denoise`, `_deconvolve`, `OpSpec.window_unfaithful`, `_NOT_WINDOW_FAITHFUL`
+
+*(Python +7 items across `tests/test_edit_window_fidelity.py` (the per-method gain table, the deconvolve
+step, the asserted figures) and a rewritten expectation in `tests/webapp/test_editor_loupe.py`;
+frontend untouched but re-checked (`tsc`, 4,617 vitest, `vite build`) because a comment in
+`windowFidelity.ts` had become false. **7 fail-before**, in a `git worktree` at `origin/main` with
+`seestack.edit.ops.detail.__file__` checked to resolve inside it — the change edits existing modules
+only, so the add-a-module trap in `docs/AGENT-ENVIRONMENT.md` does not apply. `--mosaic --editor --big`
+dogfood clean.)*
+
+**This closes the (a) and (b) halves of the LEAD filed with v0.493.5**, whose (c) shipped as v0.493.7.
+That LEAD's instruction was *"do not flip the freeze on the strength of the span measurement alone"* and
+*"the honest shapes, cheapest first"* — (a) freeze the span and seed Richardson-Lucy from the picture's
+own scale, (b) bound skimage's bilateral colour LUT — *"each an afternoon with a decision at the end
+rather than a guess"*. This is that afternoon. Both ops now call
+`ctx.fit("span", …)`, and the two shapes the LEAD proposed turned out to be, respectively, unnecessary
+and unneeded.
+
+**The LEAD's own table had the sign wrong, and the reason is worth keeping.** It recorded freezing the
+span as measuring *worse* for `deconvolve` on two windows of three (0.23 % → 0.51 %, 0.43 % → 0.50 %) and
+for `bilateral` on the smaller fixture (0.0025 → 0.0063), and that observation is what stopped the fix
+for six days. Re-measured on two fresh fixtures (1800×2400 with a 512 px window, 560×760 with 256 px,
+compared over the window's interior so the crop's own boundary term is held constant), the span freeze is
+**better or equal on all 24 cells** and never worse. The earlier sign was two errors partly cancelling:
+the span error and the zero-padded crop boundary push in opposite directions on some windows, so a
+harness that does not inset past the convolution reach reads the removal of one of them as a regression.
+**A measurement that says a fix makes things worse deserves the same scepticism as one that says it
+helps.**
+
+**`detail.deconvolve` is now window-faithful and its declaration is gone.** The span was its *only*
+whole-array measurement — `skimage.restoration.richardson_lucy` starts from a flat 0.5 guess and iterates
+with local convolutions, taking nothing else from the array it is handed — so carrying it closes the gap
+rather than narrowing it. On `tests/test_edit_window_fidelity.py`'s own fixture, mean |difference| from
+the whole render's own pixels as a share of full scale, over the three windows:
+
+| | bright core | ragged edge | star-poor |
+|---|---|---|---|
+| re-measured (before) | 8.5e-05 | 4.4e-05 | 9.6e-05 |
+| span carried (after) | 9.8e-08 | 8.7e-08 | 1.4e-07 |
+
+~700×, and the remainder is not a measurement: `scipy.signal.convolve` picks `fft` for the 224 px window
+and the 560×700 canvas alike (checked with `choose_conv_method`), and two transforms of different size
+accumulate float32 in different orders. That is why the sweep gained a second tolerance tier,
+`_FLOAT_NOISE_TOL`, at 2e-6 — ~14× over the worst of those three and ~350× under the smallest
+*worst-window* defect still in the table, so neither margin is thin.
+
+**Why that one matters more than its size.** *"Deconvolution previews weaker than it exports — Check it
+at full size **to judge it**"* is one of the decimated preview's four advisories, and v0.493.7's whole
+finding was that three of the four send the reader to a control that re-measured exactly the op they are
+about. One of those three is now answerable where it sends them. The loupe names two ops instead of three.
+
+**`detail.denoise` keeps its declaration, narrowed to what is actually left.** The span was most of it but
+not all, and the residue is per-method — the table is now executable, as
+`test_the_carried_span_is_most_of_the_denoise_gap`, pinned to ±30 % because these are deterministic means
+over ~10⁵ pixels and the band is for a library bump:
+
+| method | bright core | ragged edge | star-poor |
+|---|---|---|---|
+| wavelet (default) | 1.04e-04 → 7.00e-05 | 1.05e-04 → 7.74e-05 | 1.02e-02 → 7.97e-03 |
+| tv | 5.29e-03 → **5.41e-03** | 6.30e-03 → 5.75e-03 | 9.96e-04 → 3.73e-04 |
+| bilateral | 2.86e-03 → 3.19e-05 | 2.60e-03 → 3.08e-05 | 8.47e-04 → 1.56e-07 |
+
+**bilateral ~90×**, and it is the method the preview's advisory names by name (*"don't raise the strength
+to make the preview look clean, Check it at full size instead"*), so it is the one that most needed to be
+right. **wavelet** 1.3–1.5× everywhere. **tv** 2.7× where the span error dominates, and **2 % worse on the
+bright core** — written into the test on purpose, so the entry cannot be read as the monotone claim it is
+not. The causes, traced in skimage rather than guessed: `denoise_tv_chambolle` breaks when
+`|ΔE| < eps·E_init`, a **whole-array** energy, so a window converges a different number of iterations;
+and BayesShrink's threshold is `σ²/√(mean(d²) − σ²)` over each subband's own coefficients, on a
+decomposition whose depth is `dwtn_max_level(shape) − 3` and therefore shallower on a smaller array.
+Neither is reachable through skimage's public API. Forcing `eps=0` makes tv measure **0.0000 %** on every
+window — and would also change what every export renders, on an op Auto can put in a recipe, so it is
+written down rather than flipped. Protecting tv's one 2 % cell by leaving the span re-measured would cost
+bilateral its 90×.
+
+**(b) is answered by a measurement and was not built.** The LEAD named skimage's bilateral colour LUT —
+built from the array's own `min()`/`max()` over `bins=10000` — as the third whole-array dependence. It is
+real and it is negligible: after the span is carried, pinning the LUT's domain as well (a joint scaling of
+the array and `sigma_color`, under which `_compute_color_lut` and the kernel's index are exactly
+invariant) takes the residue from **2.2e-05 to 1e-06** of full scale, two orders under the smallest defect
+still declared. So no code was added for it.
+
+**Nothing on a whole-image render moves.** With no `frozen_fits`, `EditContext.fit` calls the same
+`nanpercentile` pair it always did and merely records the number; every preview, every export and the
+mask overlay are byte-identical. The live preview's fit cache carries the span forward as a free second
+effect, the way v0.493.5's star-mask references are carried. The one assumption is the one v0.493.5
+established: the loupe freezes what the **decimated proxy** measured, and a strided decimation is an
+unbiased sample of the pixel values — measured here at within **±0.5 %** of the canvas's span at strides
+2, 3, 4 and 6, against the window's own error of **−99 % to +26 %**.
+
+**And the second finding, which is this file's own bug class one level down.** v0.493.6 asserted *which*
+ops a window cannot reproduce and recorded *how far* as prose in the same dict. Two of the three figures
+were wrong within four days of being written, both understated and both attributed to the wrong window:
+`detail.chroma_denoise` as "2.3e-03 on a bright core" when it is **3.2e-03 on the ragged edge**, and
+`detail.hot_pixels` as "2.9e-04" when it is **7.2e-04 on the star-poor side**. Nothing was checking them,
+exactly as nothing was checking the list v0.493.6 exists about or the constants v0.493.3/.4 were wrong
+about. So `_NOT_WINDOW_FAITHFUL` now holds `(worst divergence, the window it is worst on, why)` and
+`test_the_recorded_divergence_is_the_measured_one` checks both; the three `OpSpec.window_unfaithful`
+strings stopped repeating the numbers and say where they live instead; and
+`test_the_declared_exceptions_are_the_ones_measured_here` now refuses a declaration that re-quotes a
+figure, because a number with two homes drifts in one of them. **A list whose justification is prose has
+nothing checking it — and neither does a FIGURE inside an asserted list.**
+
+**The method note to carry forward: a "cannot" is a claim with a shelf life.** Four prose copies
+(`seestack/edit/registry.py` twice, `webapp/routers/editor.py`,
+`frontend/src/components/editor/windowFidelity.ts`) all said the percentile span was a measurement
+`EditContext.fit` *cannot reach*. It was four lines of work. The sentence had been true of the
+*decision* — nobody had measured which way the freeze went — and was written down as if it were true of
+the mechanism. All four now say three ops instead of four and carry the instruction to re-check a
+"cannot" before repeating it.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-yelkmv`) — the full-size check was cited as the authority for the three ops it re-measures, and said nothing about it
 
 ### v0.493.8 — the editor dogfood can finally *read* the full-size check's caveat: `dogfood_editor.mjs` opens that modal twice, and the second time with an op in the recipe

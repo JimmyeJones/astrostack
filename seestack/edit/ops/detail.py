@@ -180,20 +180,44 @@ def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         # Scale by the 0.5–99.5th percentile and DON'T clip the highlights, so the
         # sky noise occupies a meaningful fraction of the range and stars survive.
         #
-        # This is a **whole-image** measurement and it is NOT carried through
-        # ``ctx.fit``, so a windowed render (the "check it at full size" loupe)
-        # measures its own: on a star-poor 512 px window of an 1800x2400 canvas the
-        # span comes back **99 % narrower** than the picture's, and the window's own
-        # grain is then thresholded as if it were the signal. Freezing it is a
-        # measured *partial* fix and not a safe one — each method carries a second
-        # whole-array dependence of its own (BayesShrink's per-subband σ, and
-        # skimage's bilateral colour LUT, built from the array's min/max) — so it is
-        # filed as a LEAD in docs/IMPROVEMENTS.md with the numbers rather than
-        # flipped here. Read that before changing this.
-        lo = float(np.nanpercentile(img, 0.5))
-        hi = float(np.nanpercentile(img, 99.5))
-        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
-            lo, hi = float(img.min()), float(img.max())
+        # It is a **whole-image** measurement, so it goes through ``ctx.fit``: a
+        # windowed render (the "check it at full size" loupe) is handed the span the
+        # whole-image render measured instead of making its own. A window's own span
+        # is wrong by −99 % to +26 % of the picture's — on a star-poor patch its own
+        # grain fills the entire range, and the grain is then thresholded as if it
+        # were the signal — while the decimated proxy's is within ±0.5 % at every
+        # stride, a stride being an unbiased sample of the pixel values. Measured as
+        # mean |difference| from the whole render's own pixels over a window's
+        # interior, as a share of full scale, today → with the span carried
+        # (1800x2400 canvas, 512 px window, worst of three windows):
+        #
+        #     bilateral  0.196 % → 0.002 %     wavelet  0.103 % → 0.041 %
+        #     tv         0.637 % → 0.468 %
+        #
+        # **It does not close, and that is why the op still declares
+        # ``window_unfaithful``.** Two second-order whole-array dependences are left
+        # and neither is reachable through skimage's public API: ``tv`` stops on a
+        # whole-array energy (``denoise_tv_chambolle`` breaks when
+        # ``|ΔE| < eps·E_init``), so a window converges a different number of
+        # iterations — forcing ``eps=0`` measures **0.0000 %** on every window and is
+        # deliberately not done, because it would also change what every export
+        # renders; and ``wavelet`` keeps BayesShrink's per-subband coefficient
+        # variance *and* decomposes a smaller array to fewer levels. The colour LUT
+        # skimage's bilateral builds from the array's own min/max, which the LEAD
+        # named as the third, is **measured not to matter**: pinning it as well took
+        # 2.2e-05 of full scale to 1e-06, two orders under the smallest defect still
+        # declared here, so it is not built.
+        #
+        # Nothing on a whole-image render moves: with no ``frozen_fits``, ``fit``
+        # measures exactly as it always did and merely records the number.
+        def measure_span() -> tuple[float, float]:
+            lo = float(np.nanpercentile(img, 0.5))
+            hi = float(np.nanpercentile(img, 99.5))
+            if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+                lo, hi = float(img.min()), float(img.max())
+            return lo, hi
+
+        lo, hi = ctx.fit("span", measure_span)
         if hi <= lo:
             return img
         norm = (img - lo) / (hi - lo)  # joint scale → colour preserved; stars may exceed 1
@@ -542,14 +566,26 @@ def _deconvolve(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
         psf /= psf.sum()
         # Joint robust scale (shared across channels → no colour shift); keep
         # highlights (don't clip stars away) — RL only needs non-negativity.
-        # Whole-image, and re-measured on a windowed render exactly as the denoise
-        # above is — same LEAD, and here freezing it measured *worse* on two of
-        # three windows, because ten Richardson-Lucy passes from a flat guess
-        # amplify even the proxy span's 0.02 % difference from the canvas's.
-        lo = float(np.nanpercentile(img, 1.0))
-        hi = float(np.nanpercentile(img, 99.5))
-        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
-            lo, hi = float(img.min()), float(img.max())
+        # Whole-image, so it goes through ``ctx.fit`` for the same reason the
+        # denoise above does, and here it is the **whole** story: ``richardson_lucy``
+        # starts from a flat 0.5 guess and iterates with local convolutions, so it
+        # takes no other measurement of the array it is handed. Carrying the span
+        # therefore makes the loupe's window *be* the picture — measured
+        # 8.5e-05 → 9.8e-08 of full scale on the worst of three windows, the
+        # remainder being float32 FFT round-off over two different transform sizes
+        # (scipy picks ``fft`` for the window and the canvas alike, and the two
+        # accumulate in different orders). The LEAD that filed this measured it
+        # getting *worse*, which was two errors partly cancelling: its harness
+        # compared the frozen render against a re-measured one whose span error
+        # happened to offset the crop's own boundary term.
+        def measure_span() -> tuple[float, float]:
+            lo = float(np.nanpercentile(img, 1.0))
+            hi = float(np.nanpercentile(img, 99.5))
+            if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+                lo, hi = float(img.min()), float(img.max())
+            return lo, hi
+
+        lo, hi = ctx.fit("span", measure_span)
         if hi <= lo:
             return img
         out = np.empty_like(img)
@@ -572,7 +608,8 @@ register(OpSpec(
         "the window — and this op is skipped on the decimated preview, which "
         "makes the loupe the only place its threshold is ever seen. Not costed: "
         "the obvious fix reshapes a stack hot-path module for the editor's sake. "
-        "Worst measured 2.9e-04 of full scale (tests/test_edit_window_fidelity.py)."),
+        "The measured worst case is asserted in tests/test_edit_window_fidelity.py "
+        "(_NOT_WINDOW_FAITHFUL), not repeated here."),
     help="Remove stray single bright or dark pixels (stuck sensor pixels) that "
          "calibration missed, without softening real stars.",
     params=[EditParam("sigma", "Threshold (σ)", "float", default=5.0, min=2.0, max=10.0,
@@ -585,12 +622,16 @@ register(OpSpec(
     id="detail.denoise", label="Noise reduction", group="detail", stage="linear", glossary="noise",
     apply=_denoise, proxy_safe=True, heavy=True,  # skimage restoration — slow on the proxy
     window_unfaithful=(
-        "the 0.5-99.5th percentile span every method normalises by is a "
-        "whole-image measurement, and freezing it is a partial fix whose sign is "
-        "method-dependent: BayesShrink derives its own per-subband sigma and "
-        "skimage's bilateral builds its colour LUT from the array's own min/max "
-        "(open LEAD, docs/IMPROVEMENTS.md). Worst measured 9.3e-03 of full scale, "
-        "on a star-poor window (tests/test_edit_window_fidelity.py)."),
+        "the 0.5-99.5th percentile span every method normalises by *is* carried "
+        "now (v0.493.9) and that was most of it, but two whole-array dependences "
+        "inside skimage are not reachable through its public API: "
+        "`denoise_tv_chambolle` stops on a whole-array energy, so a window "
+        "converges a different number of iterations, and BayesShrink keeps its "
+        "per-subband coefficient variance and decomposes a smaller array to fewer "
+        "levels. The figures live in tests/test_edit_window_fidelity.py, in "
+        "_NOT_WINDOW_FAITHFUL and _DENOISE_SPAN_GAIN, where they are asserted — "
+        "one home per number, because the two this field used to repeat had both "
+        "gone wrong within four days of being written."),
     help="Smooth away background grain while keeping stars and detail. Tip: use the "
          "'From your image' button to set a strength from your own noise level.",
     params=[
@@ -611,10 +652,11 @@ register(OpSpec(
     stage="any", apply=_chroma_denoise, proxy_safe=True, heavy=True,  # wide filter
     window_unfaithful=(
         "`_robust_sky` takes the whole array's luminance median and MAD to decide "
-        "how much smoothing a bright pixel keeps, so a window takes them from the "
+        "how much smoothing a bright pixel keeps, so a window decides it from the "
         "window. Not costed: its own docstring argues the number shapes a taper "
-        "rather than gating anything. Worst measured 2.3e-03 of full scale, on a "
-        "bright core (tests/test_edit_window_fidelity.py)."),
+        "rather than gating anything. The measured worst case is asserted in "
+        "tests/test_edit_window_fidelity.py (_NOT_WINDOW_FAITHFUL), not repeated "
+        "here."),
     help="Even out the patchy green/magenta colour drift across the sky that "
          "ordinary noise reduction leaves behind. It only touches colour, so "
          "stars, detail and sharpness are untouched.",
@@ -652,12 +694,12 @@ register(OpSpec(
     id="detail.deconvolve", label="Deconvolution", group="detail", stage="linear",
     glossary="deconvolution",
     apply=_deconvolve, proxy_safe=True, heavy=True,  # iterative Richardson-Lucy — slow on the proxy
-    window_unfaithful=(
-        "the same whole-image percentile span as `detail.denoise`, and freezing it "
-        "measured *worse* on two windows of three — ten Richardson-Lucy passes from "
-        "a flat 0.5 guess with clip=False amplify even a 0.02 % difference in it "
-        "(open LEAD, docs/IMPROVEMENTS.md). Worst measured 1.4e-04 of full scale "
-        "(tests/test_edit_window_fidelity.py)."),
+    # No ``window_unfaithful``: the percentile span was this op's only whole-array
+    # measurement and ``_deconvolve`` now carries it through ``ctx.fit``, so a
+    # window of the loupe renders the picture's own pixels (v0.493.9, measured in
+    # tests/test_edit_window_fidelity.py). That matters here more than anywhere:
+    # "deconvolution understates on the proxy" is one of the four preview
+    # advisories, and it sends the reader to this control *to judge it*.
     help="Recover sharpness lost to seeing by reversing the star blur. It's a heavy "
          "effect, so the live preview may take a moment to update while it's on.",
     params=[

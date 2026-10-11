@@ -155,7 +155,11 @@ class EditContext:
     # skimage, or in a stack hot-path module the editor has no business
     # reshaping — the op says so instead, in :attr:`OpSpec.window_unfaithful`,
     # and the loupe names it to the reader rather than quietly showing a
-    # strength the export will not apply. Four ops do today.
+    # strength the export will not apply. **Three** ops do today: the fourth,
+    # ``detail.deconvolve``, was declared only because the percentile span it
+    # normalises by was not carried, and v0.493.9 carried it (the span is now
+    # ``fit``'s, in both restoration ops). "It cannot be carried" is a claim with
+    # a short shelf life — check it before repeating it.
     #
     # ``fit`` is the channel that fixes it: an op asks for its fitted value by
     # name and gets either the value a previous whole-image render measured (when
@@ -374,14 +378,20 @@ class OpSpec:
     #: The loupe ("check it at full size") re-runs the recipe on one 512 px crop
     #: and hands every op the whole-image render's own measurements through
     #: :meth:`EditContext.fit`; that channel is the whole reason a window of the
-    #: picture can be trusted to *be* the picture. Four ops take a whole-array
-    #: measurement by a route ``fit`` cannot reach — a percentile span whose
-    #: freeze is a partial fix with a method-dependent sign, and a sky level and
-    #: noise floor read inside a **stack hot-path** module — so handed a window
-    #: they measure the window, and the strength they show there is not the
-    #: strength the export applies. Declaring it makes the loupe say so, which is
-    #: the honest thing available until the measurement is carried (the open LEAD
-    #: in ``docs/IMPROVEMENTS.md``). It changes no render and no export.
+    #: picture can be trusted to *be* the picture. Three ops take a whole-array
+    #: measurement by a route ``fit`` cannot reach — two sky-and-noise estimates
+    #: read inside a **stack hot-path** module and inside ``skimage``, and a
+    #: wavelet/TV convergence that depends on the whole array through skimage's
+    #: own internals — so handed a window they measure the window, and the
+    #: strength they show there is not the strength the export applies. Declaring
+    #: it makes the loupe say so, which is the honest thing available while the
+    #: measurement cannot be carried. It changes no render and no export.
+    #:
+    #: **Check "cannot" before repeating it.** The percentile span both
+    #: restoration ops normalise by was on this list from v0.493.7 as a
+    #: measurement ``fit`` could not reach; v0.493.9 simply routed it through
+    #: ``fit``, which made ``detail.deconvolve`` window-faithful outright and took
+    #: most of ``detail.denoise``'s divergence with it.
     #:
     #: **A declaration rather than a list, because the list kept being wrong.**
     #: Which ops measure the whole image was written out in prose in four places

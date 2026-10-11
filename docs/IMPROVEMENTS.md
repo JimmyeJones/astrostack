@@ -82,58 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **LEAD (Builder 2026-10-11, filed with v0.493.5 — the two whole-array measurements that fix found and could
-  not safely carry) — `detail.denoise` and `detail.deconvolve` normalise by a percentile span of the array
-  they are handed, so the "check it at full size" loupe re-measures it on its own 512 px window; freezing it
-  is a *partial* fix whose SIGN is method-dependent.** *(Pillar: editor — PRIORITY 1; size **S to write, M to
-  decide**; severity low — the loupe is a diagnostic window and no saved picture is affected. Confidence: the
-  span divergence is **measured** end to end, and so is the fix's failure to close it.)*
-  **What is measured, and it is not in doubt.** Both ops open with `lo, hi = nanpercentile(img, 0.5|1.0),
-  nanpercentile(img, 99.5)` and normalise by that span before doing anything — deliberately robust, because on
-  linear data one hot star sets `max()` and crushes the sky noise the ops work on into nothing. It is a
-  whole-picture property. On an 1800×2400 canvas (bright core + stars + a ragged mosaic edge), the span a
-  512 px window measures for itself against the whole canvas's: **−99.0 %** on a star-poor patch (its own
-  grain fills the entire range), **−13.7 %** over a bright core, **+3.3 %** at the ragged edge. The whole
-  **proxy**'s is **−0.02 %** — a strided decimation is an unbiased sample of the pixel values — so the
-  whole-image render's number is the one a window wants, exactly as for the star mask v0.493.5 fixed.
-  **Why it was NOT built, with the table that stopped it.** Mean |difference| from the whole render's own
-  pixels in the window, as a share of its 99th-percentile level, today → with the span frozen from the proxy:
-
-  | op / method | star-poor window | bright core | ragged edge |
-  |---|---|---|---|
-  | `denoise` wavelet (the default) | 3.91 % → **1.74 %** | 0.01 % → 0.01 % | 0.01 % → 0.01 % |
-  | `denoise` tv | 1.82 % → **0.12 %** | 0.14 % → 0.11 % | 0.09 % → 0.11 % |
-  | `denoise` bilateral | 5.90 % → **0.53 %** | 0.12 % → 0.09 % | 0.08 % → 0.08 % |
-  | `deconvolve` | 0.83 % → **0.29 %** | 0.23 % → **0.51 %** | 0.43 % → **0.50 %** |
-
-  On a *second*, smaller fixture (560×760 canvas, 256 px window, span −95.5 % / +25.6 %) the same freeze gave
-  tv 0.0024 → **0.0007**, wavelet 0.0081 → 0.0077, and **bilateral 0.0025 → 0.0063 — worse.** So: a clear win
-  for tv, a partial win for the wavelet default, and **unpredictable for bilateral and for deconvolve.**
-  **The reason, and it is the thing to settle first.** Each method carries a *second* whole-array dependence
-  that `EditContext.fit` cannot reach, so freezing the span fixes the input and leaves the rest: wavelet
-  BayesShrink derives its per-subband threshold from the array it is handed; skimage's `denoise_bilateral`
-  builds its colour-distance lookup table from that array's own `min()/max()`; and `richardson_lucy` iterates
-  from a flat 0.5 guess with `clip=False`, which over ten passes amplifies even the proxy span's 0.02 %
-  difference from the canvas's around sharp stars — which is why the deconvolve column moves the wrong way on
-  two windows out of three. **Do not flip the freeze on the strength of the span measurement alone**; the
-  honest shapes, cheapest first: **(a)** freeze the span *and* seed RL from the picture's own scale, measured
-  on the same two fixtures; **(b)** hand skimage an explicitly bounded range for the bilateral LUT so the
-  window and the picture quantise alike; **(c)** accept that these two ops cannot be made window-faithful and
-  say so on the loupe instead, the way `star_reduce_differs_on_proxy` says it for the preview — which is
-  **cheap, honest and reaches the user**, and is probably the right first slice. The measurement harness is
-  two synthetic canvases and about thirty lines; the tables above are its output, so (a) and (b) are each an
-  afternoon with a decision at the end rather than a guess.
-  **(c) shipped v0.493.7** — each of the four ops now declares `OpSpec.window_unfaithful`, `loupe-info` ships
-  the labels as `unvouched_ops`, and the loupe says so in one line. That was the cheap, render-neutral half;
-  **still open is (a) and (b)**, which are the two that need the two-fixture measurement above before anything
-  is flipped. Do not flip the freeze on the span measurement alone — bilateral measured *worse* on one fixture.
-  **All four unfaithful ops are now pinned with their numbers** in
-  `tests/test_edit_window_fidelity.py::_NOT_WINDOW_FAITHFUL` (v0.493.6), which also found the other two —
-  `detail.chroma_denoise`'s `_robust_sky` (2.3e-03 on a bright core) and `detail.hot_pixels`' per-channel
-  sky and noise floor (2.9e-04), the latter in a **stack hot-path** module and therefore not a fix to make
-  from the editor's side. Fixing any of the four fails that file until its entry goes, so this entry cannot
-  rot silently.
-
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
   (0.25°) loses its per-panel identity entirely, and every per-panel surface in the engine then silently
@@ -3538,6 +3486,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.493.9 **the "check it at full size" loupe re-measured both restoration ops' percentile span on its own 512 px crop, and the span was carryable after all** (`_denoise` and `_deconvolve` take `lo, hi` from `ctx.fit("span", …)`; `detail.deconvolve`'s `OpSpec.window_unfaithful` declaration is gone) — the **(a)** and **(b)** halves of the v0.493.5 LEAD, answered with the two-fixture measurement it asked for rather than with a flip. The LEAD's own table said freezing the span measured *worse* for deconvolve on two windows of three and for bilateral on one fixture; re-measured with the boundary term held constant it is **better on 11 of 12 cells**, and the sign it saw was two errors cancelling. For `detail.deconvolve` the span was its **only** whole-array measurement — `richardson_lucy` starts from a flat 0.5 guess and iterates with local convolutions — so carrying it makes the window the picture outright: **8.5e-05 → 9.8e-08** of full scale, ~700×, the remainder being float32 FFT round-off over two different transform sizes. That retires one of the three advisories the loupe was being cited for and could not answer ("deconvolution previews weaker … check it at full size **to judge it**"). `detail.denoise` keeps its declaration, narrowed to what is left and why: **bilateral 2.9e-03 → 3.2e-05** (~90×, and it is the method the advisory names), **wavelet** 1.3–1.5× on every window, **tv** 2.7× where the span error dominates and 2 % *worse* on the bright core — because tv's residual is `denoise_tv_chambolle`'s whole-array stopping energy, not its span, and BayesShrink's is its per-subband coefficient variance plus a shallower decomposition on a smaller array. Neither is reachable through skimage's public API; `eps=0` would make tv exact and **change every export**, so it is written down, not flipped. The colour LUT skimage's bilateral builds from the array's min/max — the LEAD's third suspect — is **measured not to matter** (2.2e-05 → 1e-06 when pinned as well) and was not built. No whole-image render moves: with no `frozen_fits`, `fit` measures exactly as before. **And the figures are assertions now**: two of the three in `_NOT_WINDOW_FAITHFUL` were wrong within four days of being written (`chroma_denoise` 2.3e-03 → 3.2e-03, `hot_pixels` 2.9e-04 → 7.2e-04, each understated *and* on the wrong window), which is this file's own bug class one level down — the worst case and the window it occurs on are checked, the registry declarations stopped repeating them, and a test refuses a declaration that re-quotes one
 - ✅ v0.493.8 **the editor dogfood can finally *read* the full-size check's caveat** (`scripts/dogfood_editor.mjs` opens that modal twice — the second time after adding **Noise reduction** — and `driveFullSizeCheck()` now takes its navigator corner and its screenshot tag as parameters) — v0.493.7's own carry-forward: the first open runs on Auto's recipe, which carries none of the four window-unfaithful ops, and the Add-menu loop removes each op right after adding it, so no pass could ever reach that modal with one of them in the recipe. **The first version of this filed three false findings** because `FullSizeCheck` keeps `spot` and `split` in component state and closing the modal does not unmount it — the probe clicked the same corner and toggled the split *off*, then reported its halves missing (the v0.492.59 failure mode). It now reads the toggle's label before pressing it; `--big --editor` comes back **clean, 0 findings**, printing the caveat off a real page
 - ✅ v0.493.7 **"check it at full size" now names the ops whose strength it cannot vouch for** (`OpSpec.window_unfaithful` on the four, `loupe-info.unvouched_ops`, `frontend/src/components/editor/windowFidelity.ts`) — option **(c)** of the v0.493.5 LEAD, and the only one of its three shapes that changes no render. **Every one of the decimated preview's four advisories sends the reader to this control, and three of them are about ops the window re-measures** (hot-pixel removal "at the threshold you've set", deconvolution "to judge it", bilateral denoise "instead" of raising the strength) — so the editor's authority on those three sliders was its least faithful surface for them, silently. Now one conditional line inside the already-open modal names them and says the rest matches exactly, which is bit-identical and asserted: the v0.493.6 sweep parametrizes off the **registry** declaration rather than its own table, pinned both ways, so a new unfaithful op is named to the reader the moment it declares itself and a fixed one fails the suite until the declaration goes. Empty on any recipe without one of the four, Auto's own included; `unvouched_ops` is an added field with an empty default, so an older frontend stays as silent as it was
 - ✅ v0.493.6 **the guard that should have caught v0.493.5: the loupe's "which ops measure the whole image?" list is asserted op by op** (new `tests/test_edit_window_fidelity.py`, 52 items, 4.1 s) — that list lived in prose in four places and nothing checked it, which is the same lesson v0.493.3/.4 carried forward about a constant whose justification is prose. For every op the loupe re-runs on its window: whole-canvas render vs a 224 px window of it with the whole render's `fitted` frozen on, compared over the window's interior (inset 56 px, wider than any parameter's spatial reach), on an uneven canvas × three windows (star-poor / bright core / ragged edge). **Eleven ops come back bit-identical (exactly 0.0)** and the four that do not are listed with their reason and their number — `detail.denoise` 9.3e-03 and `detail.deconvolve` 1.4e-04 (the open LEAD), plus the two the guard *found*: `detail.chroma_denoise`'s `_robust_sky` 2.3e-03 and `detail.hot_pixels`' per-channel sky/noise floor 2.9e-04, the latter in a **stack hot-path** module. Nothing tuned: the 1e-9 tolerance sits ~8,600× under the smallest real divergence with no case between. **6 failed, 46 passed** against the commit before v0.493.5. The swept set is derived from the registry minus exactly what the loupe handles itself (geometry disabled, the three background fields replayed), so a new op fails the sweep until someone looks at it, and a stale exception fails it too

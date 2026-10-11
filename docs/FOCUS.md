@@ -1,5 +1,47 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-11 (Builder, next run — **the open LEAD's remaining (a) and (b) are CLOSED, with the
+measurement it asked for. SHIPPED as v0.493.9.**
+**READ THIS FIRST IF YOU ARE ABOUT TO BELIEVE A MEASUREMENT THAT SAYS A FIX MAKES THINGS WORSE.** The LEAD's
+own table is why the span freeze sat unbuilt for six days: it recorded freezing as *worse* for
+`detail.deconvolve` on two windows of three and for bilateral on one fixture, and said the sign was
+"method-dependent". Re-measured on two fresh fixtures with the crop's own zero-padded boundary term held
+constant, the freeze is **better or equal on all 24 cells**. The earlier sign was two errors partly
+cancelling — the span error and the boundary error push opposite ways on some windows, so removing one of
+them reads as a regression to a harness that does not inset past the convolution reach. **A number that says
+"don't fix this" earns the same scepticism as one that says "ship it".**
+**What shipped.** Both restoration ops take `lo, hi` from `ctx.fit("span", …)`. For `detail.deconvolve` the
+span was its *only* whole-array measurement (`richardson_lucy` starts from a flat 0.5 guess and iterates
+locally), so it is **window-faithful outright** — 8.5e-05 → 9.8e-08 of full scale, ~700×, remainder float32
+FFT round-off — and its `window_unfaithful` declaration is **gone**: the loupe names two ops instead of
+three, and one of the three advisories that send a reader there ("deconvolution previews weaker … check it
+at full size **to judge it**") is answerable where it sends them for the first time. `detail.denoise` keeps
+its declaration, narrowed: bilateral **~90×** better (the method its own advisory names), wavelet 1.3–1.5×,
+tv 2.7× where the span dominates and **2 % worse on the bright core** — pinned that way on purpose, because
+tv's residue is `denoise_tv_chambolle`'s whole-array *stopping energy*, not its span. `eps=0` makes tv exact
+and would change every export, so it is written down, not flipped. (b)'s suspect — skimage's bilateral
+colour LUT — is **measured not to matter** (2.2e-05 → 1e-06 when pinned too) and was not built. No
+whole-image render moves.
+**AND THE SECOND FINDING, WHICH IS THE ONE TO CARRY FORWARD. An asserted list whose FIGURES are prose has
+nothing checking the figures.** v0.493.6 pinned *which* ops a window cannot reproduce and wrote *how far* as
+prose in the same dict. Two of the three were wrong within **four days**: `detail.chroma_denoise` as
+"2.3e-03 on a bright core" when it is **3.2e-03 on the ragged edge**, `detail.hot_pixels` as 2.9e-04 when it
+is **7.2e-04 on the star-poor side** — each understated *and* on the wrong window. That is v0.493.6's own
+lesson one level down, and v0.493.3/.4's one level down again. `_NOT_WINDOW_FAITHFUL` now holds
+`(worst, window, why)` with both checked, the three registry declarations stopped repeating the numbers, and
+a declaration that re-quotes one is refused by the suite. **Next run: go looking for another asserted claim
+whose supporting NUMBER is unasserted — there will be more, and the four days is the point.**
+**And a "cannot" is a claim with a shelf life.** Four prose copies (`registry.py` twice,
+`routers/editor.py`, `windowFidelity.ts`) said the span was a measurement `fit` *cannot reach*. It was four
+lines. The sentence was true of the *decision* and got written down as if it were true of the mechanism;
+all four now carry the instruction to re-check a "cannot" before repeating it.
+There were **no open PRs** at the start of this run; v0.493.8 merged during it and is merged in here. Bugs
+is now **LEAD-only and all of them gated** on owner data or a decision (mosaic re-framing, Auto's fringe
+archetype, the inert feedback tap, `classify_target`'s pinned confidence, the solve-time refusal, the
+half-range charge). Tests **+7 Python, 7 fail-before** (a worktree at `origin/main` with
+`seestack.edit.ops.detail.__file__` checked; the change edits existing modules only, so the add-a-module
+trap does not apply). `--mosaic --editor --big` dogfood clean. Earlier notes stand below.)*
+
 *Last edited 2026-10-11 (Builder, next run — **the queue held nothing ungated for a THIRTEENTH run, so this
 run took the shape the open LEAD itself calls "probably the right first slice" and shipped it.
 SHIPPED as v0.493.7.**
