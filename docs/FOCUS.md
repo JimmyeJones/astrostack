@@ -34,6 +34,30 @@ own constants answers nothing. Go through the editor's other self-referential as
 question; `tests/test_edit_suggestion_grid.py` is the shape of the answer — it declares the population and
 then **runs the real measurement** for each member, so a suggestion that stops being settable fails on its
 own output rather than on a table.
+**And the survey that question deserves was run, so do not redo it blind.** The whole `tests/` tree carries
+**226** assertions mentioning an `_UPPER_CASE` name, which is too coarse a net to be a population; narrowed
+to an assertion against a **private constant of an editor or Auto module** it is **55 in 12 files**, and all
+55 were read (the record, with the one near-instance named, is in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md)). Almost none is this shape — they use the constant as a yardstick for a measured property, which is exactly right
+(`test_color_cal`'s clamp bounds, `test_auto_level_sigma_margin`'s two populations either side of
+`_LEVEL_MAX_SIGMA_RATIO`, `test_auto_recipe_proxy_parity`'s `_PARITY_BUDGET`), and the two "mirror" files
+that look most like it are the counter-example worth copying: `test_auto_summary_mirror` and
+`test_auto_feedback_cues_mirror` compare the module's table to an **independent** source (a shared JSON
+fixture, a hand-written case table, and `test_edit_op_effect`'s `_EFFECT` against the **registry's**
+registered set), which is what made the circular one stand out. **And the lesson is sharper than "look for a
+tautology": the one tautological line the sweep did find (`scnr_noise_sigma(1.0) == _SCNR_NOISE_SIGMA`) is
+harmless, because nothing re-derives that number. What made the highlights test dangerous was the
+DUPLICATED NUMBER behind it — hunt the second home of a value, not the vacuous assertion.** **So the remaining
+exposure is not in `tests/` — it is wherever a value is produced by one file and consumed by a surface that
+re-derives it.** The next place to look with that question is the frontend's own copies: the editor's
+descriptor-driven forms get `min`/`max`/`step` from the server, but `StackOptionControl` carries its own
+numbers for what the schema does not say — and **it carries two different ones for the same question**:
+the slider branch falls back to `field.step ?? (isInt ? 1 : 0.01)` (line 86) and the plain-number branch to
+`field.step ?? (type === "int" ? 1 : 0.1)` (line 147), a 10× difference in one file with nothing comparing
+them. Harmless for the editor *today* — all 36 numeric `EditParam`s declare a step, which the new sweep
+incidentally establishes — so this is a question to ask of the **stacking** `StackOptionField`s that share
+the control, not a bug to fix here. Ask it with the same question: what could change without anything
+noticing?
 **AND THE HALF DELIBERATELY NOT BUILT, FILED WITH ITS NUMBERS — item 0 in "Bugs".** The identical defect is
 on the **on-by-default** path: a real `auto_recipe` writes `tone.stretch.target_bg =
 0.23710031710565088` into the recipe (0.01-step control) and `tone.saturation.amount = 1.242` (0.05-step,

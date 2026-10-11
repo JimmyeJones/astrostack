@@ -1,5 +1,80 @@
 # Process notes & QA sweep records
 
+## 2026-10-11 (Builder, branch `claude/jolly-bardeen-4dlv4a`) — an assertion that reads the file it is checking is not a check; the sweep for a second instance, and where the exposure actually is
+
+**The question that found v0.493.11 in about a minute was not "is this number right?" but "what could change
+without this test noticing?"** The carried-forward note said to go looking for another asserted claim whose
+supporting figures are unasserted. The first one checked was worse than unasserted — it was **circular**.
+`tests/test_highlight_suggestion.py::test_strength_grid_is_the_ops_own_slider_steps` asserted
+`seestack/edit/highlights.py`'s suggestion grid against **that same module's** `_STRENGTH_MIN` / `_MAX` /
+`_STEP`, which were a hand-kept copy of `tone.stretch`'s `highlights` `EditParam`. Its docstring states the
+consequence exactly — *"A suggestion the slider can't represent would show as 'not at the suggestion'
+forever"* — so the claim was right, the test was real, and it could not fail for the reason it existed. Six
+of the editor's ten suggestions were off their control's step grid underneath it; the measurement table is in
+[`SHIPPED.md`](SHIPPED.md) under v0.493.11.
+
+**THE SWEEP FOR A SECOND INSTANCE — one near-instance, otherwise CLEAN, and the population is stated so it
+is not re-swept blind.** The whole `tests/` tree carries **226** assertions mentioning some `_UPPER_CASE`
+name, which is too coarse a net to be a population. Narrowed to the one this bug lives in — an assertion
+referencing a **private constant of an editor or Auto module**, across
+`test_edit_*`, `test_auto_*`, `test_highlight_suggestion` and `test_color_cal` — it is **55 assertions in 12
+files**, and all 55 were read. What they mostly are is the *right* use of a module constant: a yardstick a
+measured property is checked against, where the constant moving is supposed to move the expectation.
+
+
+* `tests/test_color_cal.py` — a solved scale is asserted to land inside `_MIN_CAL_SCALE` / `_MAX_CAL_SCALE`,
+  and separately to hit the ceiling on an input chosen to exceed it. The measurement is independent of the
+  bound.
+* `tests/test_auto_level_sigma_margin.py` (v0.493.10, the run before this one) — two populations measured
+  either side of `_LEVEL_MAX_SIGMA_RATIO`, with the margins on each side asserted. The constant is the thing
+  under test, not the source of the expectation.
+* `tests/test_auto_recipe_proxy_parity.py` — a measured gap against `_PARITY_BUDGET`, and a second case
+  asserted to exceed it by 2×, so the budget cannot be quietly loosened into vacuity.
+* `tests/test_auto_inert_cues.py`, `tests/test_auto_noise_measure.py` — `_AUTO_DENOISE_MAX` /
+  `_AUTO_CHROMA_MAX` as clamps that a measured knob is asserted to reach or respect.
+
+**The one near-instance, named so it is not mistaken for a find.**
+`tests/test_edit_proxy_parity.py:647` — `assert scnr_noise_sigma(1.0) == _SCNR_NOISE_SIGMA` — is the shape:
+the function returns that constant, so the line cannot fail. It is **not** the same bug, because the line
+after it is the real assertion (`scnr_noise_sigma(0.5) == _SCNR_NOISE_SIGMA`, i.e. the measure is never
+widened below 1×, which is a property and not an identity), and because nothing downstream re-derives the
+number. Left alone deliberately: a vacuous line beside a real one costs nothing, and this run's finding was
+not vacuity but a **copy** — the circular test's constants were a second home for a number declared
+elsewhere, which is what let the two drift apart unnoticed. **The thing to hunt is the duplicated number,
+not the tautological assertion.**
+
+**And the two files whose names suggest exactly this bug are the counter-example worth copying.**
+`test_auto_summary_mirror.py` and `test_auto_feedback_cues_mirror.py` both assert a module's table *as a
+whole mapping* against an **independent** source — a shared JSON fixture in the first, a hand-written case
+table in the second; `tests/test_edit_op_effect.py:259` does it a third way, asserting its `_EFFECT` table
+against the **registry's** registered set — and the first one's own docstring says why the whole mapping
+rather than a per-key loop: *"a phrase table drifts by gaining or losing a key as much as by re-wording one, and neither shows up
+in a per-key loop over one side's own keys."* That is the same insight one level up, already written down in
+this repo. The circular test failed it by looping over one side's own *values*.
+
+**SO THE REMAINING EXPOSURE IS NOT IN `tests/`, AND THAT IS THE USEFUL RESULT.** A test can only be circular
+when the thing it checks is produced in one file and re-derived in another; the sweep above says the test
+suite has stopped doing that. Where the repo still does it is the **frontend**, which receives the op schema
+from the server and then carries its own numbers for whatever the schema does not say — and
+`frontend/src/components/StackOptionControl.tsx` carries **two different ones for the same question**: the
+slider branch falls back to `field.step ?? (isInt ? 1 : 0.01)` (line 86) and the plain-number branch to
+`field.step ?? (field.type === "int" ? 1 : 0.1)` (line 147). A 10× difference, in one file, with nothing
+comparing them. **Not a bug for the editor today** — all 36 numeric `EditParam`s declare a step, which
+`tests/test_edit_suggestion_grid.py` now establishes incidentally — so the fallback is unreachable from
+there. The control is shared with the Stack and Settings forms, whose `StackOptionField`s are a different
+population, and *that* is where the question is worth asking next. Filed here rather than in the backlog
+because it is a question, not a finding.
+
+**One more thing the fix itself taught, and it generalises past this file.** Two of the six suggestions
+could not be put right by rounding at the end. `suggest_asinh_stretch` *solves* its strength against a black
+point, so snapping the black point afterwards would have left the strength solved against a value the
+picture never gets; the black point is snapped **first**. `suggest_levels_points` tests whether its two
+points collapse (`white - black < min_gap`), so the test now runs on the snapped pair, because the gap that
+decides whether the suggestion is worth making is the gap the op is handed. The rule both follow was already
+written, one file over, in `seestack/edit/highlights.py`'s own docstring: ***"the op it was solved against is
+the op that will render it."*** **When a measured value is constrained after it is computed, check whether
+anything downstream was computed from the unconstrained one.**
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-yelkmv`, second task) — a probe that interacts with a surface twice has to ask what the first pass left behind
 
 **v0.493.8 built the instrument the note below asked for, and its first version filed three findings that were
