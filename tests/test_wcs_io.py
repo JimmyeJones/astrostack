@@ -9,13 +9,16 @@ from astropy.wcs import WCS  # noqa: E402
 
 from seestack.io.wcs_io import (  # noqa: E402
     _extent_from_scale_matrix,
+    _fits_printable_ascii,
     canvas_extent_from_fits,
     footprint_radec_deg,
     wcs_center_deg_from_text,
     wcs_dict_rescaled_to_preview,
     wcs_from_text,
     wcs_rotation_deg_from_text,
+    wcs_text_from_raw,
     wcs_text_from_sidecar,
+    wcs_text_is_usable,
     wcs_to_text,
 )
 
@@ -714,3 +717,183 @@ def test_it_agrees_with_the_function_every_reader_uses(tmp_path):
     for with_wcs in (True, False):
         p = _write_image(tmp_path / f"m{int(with_wcs)}.fits", with_wcs=with_wcs)
         assert fits_has_celestial_wcs(p) is (celestial_wcs_from_fits(p)[0] is not None)
+
+
+# --- a non-ASCII character in a stored header (observer issue #1137) -------
+#
+# ASTAP's ``cmdline:`` commentary card records the solver's whole invocation,
+# including the input file's path — so a capture folder whose name carries a
+# non-ASCII character (a Seestar writes U+2018 where the user typed an
+# apostrophe) puts that character into the ``.wcs`` sidecar and from there into
+# the ``wcs_json`` column. The header is then illegal FITS and ``WCS(header)``
+# raises ``UnicodeEncodeError``, so every one of that target's subs reads back
+# as unsolved and it can never stack. Measured on the owner's library: 115 of
+# 115 frames solved, 0 stack runs, and the identical failure in 19 consecutive
+# scan jobs over six weeks.
+
+_ASTAP_SIDECAR_CARDS = (
+    "SIMPLE  =                    T",
+    "BITPIX  =                    8",
+    "NAXIS   =                    0",
+    "CTYPE1  = 'RA---TAN'",
+    "CTYPE2  = 'DEC--TAN'",
+    "CRPIX1  =                540.0",
+    "CRPIX2  =                540.0",
+    "CRVAL1  =              324.123",
+    "CRVAL2  =               57.456",
+    "CDELT1  =              -0.0008",
+    "CDELT2  =               0.0008",
+    "CROTA1  =                  0.0",
+    "CROTA2  =                 12.5",
+    # Not a WCS keyword, so ``_parse_fixed_format_cards`` declines and astropy
+    # does the read — which is where the encode check lives. A real ASTAP
+    # sidecar always carries this card, so the slow path is the *ordinary* path
+    # for a solved frame, not an exotic one.
+    "PLTSOLVD=                    T",
+)
+
+
+def _astap_sidecar_text(folder_name: str) -> str:
+    """A realistic ASTAP ``.wcs`` sidecar for a sub inside ``folder_name``.
+
+    Padded to the 2880-byte FITS block the way ASTAP writes it, so the fixed
+    80-column card image the readers scan by offset is the real thing.
+    """
+    cards = [
+        *_ASTAP_SIDECAR_CARDS,
+        f"COMMENT cmdline: astap -f /data/incoming/{folder_name}/Light_001.fit -r 10",
+        "END",
+    ]
+    body = "".join(card.ljust(80)[:80] for card in cards)
+    return body + " " * ((-len(body)) % 2880)
+
+
+# The owner's own target name, with U+2018 LEFT SINGLE QUOTATION MARK where an
+# apostrophe would be, and the byte-for-byte ASCII control beside it.
+_SMART = "IC 1396B - Elephant‘s Trunk Nebula B_sub"
+_ASCII = "IC 1396B - Elephant's Trunk Nebula B_sub"
+
+
+def test_a_stored_wcs_with_a_non_ascii_folder_name_in_its_cmdline_card_still_parses():
+    text = _astap_sidecar_text(_SMART)
+    # The precondition: the blob really is the illegal-FITS case, and it is the
+    # commentary card carrying it — not a WCS keyword.
+    assert not text.isascii()
+    assert "‘" in text
+
+    wcs = wcs_from_text(text)
+    assert wcs is not None, "the frame reads back as unsolved and can never stack"
+    assert wcs.celestial.has_celestial
+    # And the stored solution is *trusted*, which is the gate every consumer
+    # asks (``wcs_text_is_usable``) before persisting or reprojecting through it.
+    assert wcs_center_deg_from_text(text) is not None
+
+
+def test_repairing_the_non_ascii_character_changes_nothing_about_the_astrometry():
+    """The repaired read must agree with the legal-ASCII control *exactly*.
+
+    ``to_header(relax=True)`` byte-equality is the bar the fast path is held to
+    as well — a stronger claim than agreeing on a pixel grid, and the one that
+    matters because ``solve.bootstrap.propagate_wcs`` re-serialises what it
+    reads back.
+    """
+    control = _astap_sidecar_text(_ASCII)
+    affected = _astap_sidecar_text(_SMART)
+    assert control.isascii()
+    # One variable: same length, same cards, one character different.
+    assert len(control) == len(affected)
+    assert sum(a != b for a, b in zip(control, affected, strict=True)) == 1
+
+    w_control = wcs_from_text(control)
+    w_affected = wcs_from_text(affected)
+    assert w_control is not None and w_affected is not None
+    assert wcs_to_text(w_affected) == wcs_to_text(w_control)
+    assert wcs_center_deg_from_text(affected) == wcs_center_deg_from_text(control)
+    assert wcs_rotation_deg_from_text(affected) == wcs_rotation_deg_from_text(control)
+
+    # The whole pixel→sky map, on the corners and the centre, not just CRVAL.
+    px = [[0, 0], [1079, 0], [0, 1079], [1079, 1079], [539.5,539.5]]
+    sky_control = w_control.celestial.all_pix2world(px, 0)
+    sky_affected = w_affected.celestial.all_pix2world(px, 0)
+    assert np.max(np.abs(sky_affected - sky_control)) == 0.0
+
+
+def test_a_fresh_solve_stores_header_text_that_is_legal_fits():
+    """The write side: nothing illegal reaches ``wcs_json`` in the first place.
+
+    Without this the target re-solves on every scan forever —
+    ``apply_solve_result_to_db`` rightly refuses to persist a solve
+    ``wcs_text_is_usable`` calls unusable, and ``build_solve_arglist``
+    deliberately keeps offering a frame whose only mark is that reason.
+    """
+    stored = wcs_text_from_raw(_astap_sidecar_text(_SMART))
+    assert stored is not None
+    assert stored.isascii(), "an illegal header was normalised into storage"
+    assert wcs_text_is_usable(stored)
+
+    # It is the same solution as the control's, stored the same way.
+    control = wcs_text_from_raw(_astap_sidecar_text(_ASCII))
+    assert control is not None
+    assert wcs_to_text(wcs_from_text(stored)) == wcs_to_text(wcs_from_text(control))
+
+
+def test_an_ascii_sidecar_is_stored_byte_for_byte_as_before():
+    """The ordinary case is untouched: the repair is reached only when needed."""
+    raw = _astap_sidecar_text(_ASCII)
+    from astropy.io.fits import Header
+
+    assert wcs_text_from_raw(raw) == str(Header.fromstring(raw))
+
+
+def test_the_repair_keeps_the_80_column_card_image_intact():
+    """Character-for-character, because the readers scan the text by offset.
+
+    A multi-byte character collapsed to a shorter replacement would shift every
+    card after the repair into the wrong columns — which is a wrong *solution*,
+    not a failed parse, and so the dangerous way to get this wrong.
+    """
+    affected = _astap_sidecar_text(_SMART)
+    repaired = _fits_printable_ascii(affected)
+    assert len(repaired) == len(affected)
+    assert repaired.isascii()
+    # Every card boundary still lands where it did.
+    control = _astap_sidecar_text(_ASCII)
+    for off in range(0, len(control), 80):
+        assert repaired[off:off + 8] == control[off:off + 8]
+
+
+def test_a_non_ascii_character_in_a_value_card_still_reads_as_unsolved():
+    """The repair is scoped to commentary cards, and this is why.
+
+    ``CRVAL1  = 32?4.12`` is not a float: astropy falls back to **0.0**, so a
+    whole-text repair would turn this frame into one that reads as *solved* at
+    RA 0 — a silently wrong solution, 324 degrees from where the frame actually
+    points, which would then be trusted as a stack reference and reprojected
+    through. "Unsolved" is the honest answer, and it is the answer this blob got
+    before the repair existed. The assertion is on the recovered **centre**, not
+    just on usability, because that is the value that would be wrong.
+    """
+    broken = _astap_sidecar_text(_ASCII).replace(
+        "CRVAL1  =              324.123", "CRVAL1  =              32‘4.12")
+    assert len(broken) == len(_astap_sidecar_text(_ASCII))
+    assert wcs_text_is_usable(broken) is False
+    assert wcs_center_deg_from_text(broken) is None
+    # Pin the scoping itself: the check above would also pass if the repair
+    # merely happened not to help on this blob.
+    assert "‘" in _fits_printable_ascii(broken)
+
+
+def test_a_genuinely_corrupt_blob_is_still_reported_as_unsolved():
+    """A non-ASCII character is not a licence to accept garbage.
+
+    The repaired text still has to parse on its own merits, so a blob that is
+    wrong for any other reason keeps reading as ``None``.
+    """
+    assert wcs_text_is_usable("GARBAGE‘ NOT A HEADER AT ALL") is False
+    assert wcs_from_text("‘" * 80) is None
+
+
+def test_nothing_changes_for_a_blob_that_was_already_ascii_and_already_failed():
+    """An ASCII blob with no solution reads as unusable, exactly as before."""
+    assert wcs_from_text("END" + " " * 2877) is not None  # a bare header parses…
+    assert wcs_text_is_usable("END" + " " * 2877) is False  # …but says nothing

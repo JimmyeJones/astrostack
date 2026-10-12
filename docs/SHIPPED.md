@@ -1,5 +1,111 @@
 # Shipped — the record
 
+## 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-5xjtzi`) — one typographic apostrophe in a folder name made a target permanently unstackable
+
+### v0.494.4 — 🔴 BUG FIX (observer issue [#1137](https://github.com/JimmyeJones/astrostack/issues/1137), verified on `main` before anything was written): **a non-ASCII character in a capture folder's name travels through ASTAP's `cmdline:` card into `wcs_json`, and every one of that target's subs then reads back as unsolved — `seestack/io/wcs_io.py::_fits_printable_ascii`, repairing commentary cards on both sides of the round-trip.**
+
+*(Baseline `origin/main` at `8a6af423` (`__version__` 0.494.3): full suite green, CI green, **no open PRs**, and
+"Bugs (fix these first)" still holding no ungated, undecided entry — so this run took the one *new* thing the
+inbox had: an observer issue filed this morning and not yet in the backlog. Filed as a lead, verified as a
+bug.)*
+
+**What was wrong.** FITS restricts every character of every header card to printable ASCII (0x20-0x7E). ASTAP
+does not: its `cmdline:` commentary card records the solver's whole invocation **including the input file's
+path**, so a capture folder whose name carries a non-ASCII character — a Seestar writes **U+2018 LEFT SINGLE
+QUOTATION MARK** into a target name the moment the user types an apostrophe — puts that character into the
+`.wcs` sidecar, and from there into the `wcs_json` column. The stored header is then illegal FITS, and astropy
+enforces that on the way *in*: `Header.fromstring` accepts the text (with an *"Unprintable string … commentary
+cards may only contain printable ASCII characters"* verify warning), but `WCS(header)` **re-encodes it as ASCII
+and raises `UnicodeEncodeError`** — which `wcs_from_text` catches as "corrupt cache, treat as missing" and
+reports as `None`.
+
+**Reproduced on `main` before the fix, both directions, one variable.** A realistic ASTAP sidecar for a sub
+inside `IC 1396B - Elephant‘s Trunk Nebula B_sub`, and its byte-for-byte ASCII control — same length, same
+cards, exactly one character different:
+
+| the stored blob | `wcs_from_text` | `wcs_text_is_usable` |
+|---|---|---|
+| ASCII apostrophe | **WCS** | True |
+| U+2018 | **None** | False |
+
+The failure is on the **ordinary** path for a solved frame, not an exotic one: a real sidecar carries
+`PLTSOLVD`, which is not a WCS keyword, so `_parse_fixed_format_cards` declines and astropy does the read —
+and astropy is where the encode check lives. (The hand-rolled fast path skips `COMMENT` cards entirely, so it
+would have parsed this blob fine; that is why the bug needs a *realistic* fixture to show at all.)
+
+**Why it is total and permanent, which is what makes a one-target bug worth a run.** The observer measured one
+such target in the owner's library: **115 of 115** frames with a non-empty `wcs_json`, `pixscale_arcsec` and
+`rotation_deg` populated on all 115 (they come off ASTAP's `.ini` sidecar and are perfectly good), no frame
+carrying a `solve_failed:` reason, 107 accepted, 2,140 s of exposure — and **0 rows in `stack_runs`**. So the
+record calls the target fully solved while `run_stack`'s drizzle branch raises *"reference WCS could not be
+parsed for drizzle"* on every scan: the **same message in 19 consecutive scan jobs over six weeks**. Nothing
+the owner can do from the app clears it, and the message points at the WCS, which is fine. One target of 100,
+115 frames of 110,190 — and he is not without a picture of the object, a sibling `IC_1396B` from an
+ASCII-named folder stacks fine. What earned the fix is that the failure is total for the affected target,
+permanent under the old code, self-reproducing on every solve, and triggered by something no owner would think
+to look at.
+
+**Both sides of the round-trip are repaired, and each half answers a different failure.**
+
+- **Read side (`wcs_from_text`) — heals the 115 rows already stored.** This is the half that gets the owner a
+  picture, with **no migration, no re-solve and no DB write**: `build_solve_arglist` skips a frame with a
+  truthy `wcs_json`, so those rows are never re-offered to the solver and a write-side-only fix would have left
+  the target broken forever. One retry, inside the `except`, gated on `text.isascii()`.
+- **Write side (`wcs_text_from_raw`) — stops the retry loop for a *fresh* install.** Without it the same folder
+  name is permanently unsolvable rather than permanently unstackable: `apply_solve_result_to_db` rightly refuses
+  to persist a solve `wcs_text_is_usable` calls unusable and stores a `solve_failed:` reason, and
+  `build_solve_arglist` *deliberately* keeps offering a frame whose only mark is that reason (most solve
+  failures are transient) — so ASTAP is paid again on every scan for an answer that can never be stored. The
+  text is now normalised to legal FITS **before** it lands in `wcs_json`, so no reader needs the retry at all.
+
+**The fix is scoped to commentary cards, and that narrowing is load-bearing — a test caught the wrong version
+of this fix.** The first cut repaired the whole header, which is wrong in the one way that matters:
+`CRVAL1  = 32?4.12` is not a float, **astropy falls back to 0.0**, and the frame then reads as *solved at
+RA 0* — a silently wrong solution 324° from where it points, which would be trusted as a stack reference and
+reprojected through. "Unsolved" is the honest answer there, and it is the answer that blob already got. So a
+`COMMENT`/`HISTORY`/blank-keyword card is repaired (free text, no WCS meaning, cannot change a solution) and a
+value card is left alone to fail as before. `test_a_non_ascii_character_in_a_value_card_still_reads_as_unsolved`
+asserts the recovered **centre** is `None`, not merely that the blob is unusable, and pins the scoping itself —
+the usability check alone would pass on a fix that simply happened not to help.
+
+**And character-for-character, because the text is a fixed-format 80-column card image** that
+`_parse_fixed_format_cards` reads **by offset**: a multi-byte character collapsed to a shorter replacement
+would shift every later card into the wrong columns, which is again a wrong *solution* rather than a failed
+parse. `?` is printable ASCII and legal in every position. A text that is not a whole number of cards cannot be
+scanned safely, so nothing is repaired.
+
+**The repair costs the astrometry nothing, measured rather than argued.** Against the legal-ASCII control:
+`to_header(relax=True)` **byte-identical** (the same bar the fast path is held to, and the one that matters
+because `solve.bootstrap.propagate_wcs` re-serialises what it reads back), identical centre, identical
+rotation, identical arcsec/px, and `all_pix2world` over the four corners and the centre differing by
+**exactly 0.0**.
+
+**No hot-path cost, and the first measurement of it was a confound worth recording.** `wcs_from_text` is read
+**once per sub** by `compute_mosaic_canvas`, so the whole retry lives inside the `except` and the success path
+is byte-for-byte what it was — adding so much as a closure to it measured ~80 ms a canvas computation on the
+§1 owner's 5,477-sub target. The first A/B said 82 → 96 µs a call and looked like a 17 % regression; it was
+**the baseline pytest run competing for the same four cores**. Alternating A/B, three rounds: 82.5/82.6,
+83.6/87.3, 88.4/87.5 µs — indistinguishable, in both directions. **Never benchmark against a suite that is
+still running.**
+
+**Upgrade-safe (§9):** no config, schema, on-disk-layout, default or API change; nothing in `incoming/`
+touched; nothing persisted or rewritten. Purely a widening of what the existing readers accept, in one
+direction (a blob that parsed before parses identically), so an older and a newer build read every row the
+same way except the illegal ones, which only the newer build can read at all.
+
+**Tests (+10, five with fail-before shown).** `tests/test_wcs_io.py` (+8): the affected blob parses and is
+*usable*; the repaired read agrees with the ASCII control byte-for-byte through `to_header` **and** on the
+whole pixel→sky map; a fresh solve stores `isascii()` text; an ASCII sidecar is stored byte-for-byte as before;
+the 80-column card image survives the repair with every card boundary where it was; a non-ASCII character in a
+**value** card still reads as unsolved with a `None` centre; a genuinely corrupt blob is still `None`; and an ASCII blob that already read as unusable still does.
+`tests/test_solve_runner.py` (+2): end to end through `solve_one` → `apply_solve_result_to_db` → `get_frame`,
+a solve from a non-ASCII folder is stored **as a solve** with no `solve_failed:` reason and the stacker's own
+read of the stored row succeeds; and the stored solution is identical to the ASCII control's. Fail-before was
+shown by reverting the two call sites in a scratch copy while keeping the helper importable, so the failures
+are about behaviour: the five behaviour tests fail with the production error
+(`'ascii' codec can't encode character '\u2018'`), and the four scoping/control tests pass both ways — which
+is what they are for.
+
 ## 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-bz6foc`) — the live preview stops re-fitting the sky model it fitted a moment ago
 
 ### v0.494.3 — ⚡ PRIORITY 1 (editor), the third bite out of "Live preview … what remains here is **responsiveness**": **the render resumes from the array the last additive `background.*` op produced, instead of re-fitting the whole canvas's sky on every debounced frame — 5.18 s → 2.81 s on a mosaic the size of the owner's own, and bit-identical.**
