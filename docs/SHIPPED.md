@@ -1,5 +1,47 @@
 # Shipped — the record
 
+## 2026-10-12 (owner session) — the Sun/Moon video stacker: blue, misaligned, and keeping the wrong frames
+
+### v0.493.17 — 🔴 BUG FIX: three faults in `seestack/video`, each measured on the owner's own captures
+
+**The report.** *"The solar stacker is still working terribly — between looking blue to not lining up the
+frames, it is practically unusable."* Measured with a read-only diagnostic run inside his container over his
+four newest Sun/Moon captures (numbers only, nothing copied off the box).
+
+**1. Blue.** `detect_cfa_pattern` (v0.408.2) read the green *diagonal* off the frame, but assumed which of the
+other two sites is red — from one file, `…175558-Solar-RAW.avi`, whose bright site is `(1,0)`. His
+`…180604-Solar-RAW.avi` and `…181632-Solar-RAW.avi` put it at `(0,1)` (site means 36.4/**119.0**/9.1/36.4 and
+41.7/**136.5**/10.5/41.7): same green diagonal, so `GBRG` was picked, which makes `(0,1)` blue — the disk came
+out **9:36:119 and 10:41:136, i.e. blue**. Now red is read from the light: the brighter non-green site is red
+(white-light solar filters pass ~13:1 red over blue on his files; the Moon and planets are redder than blue; the
+sensor is weakest in blue), so `GRBG` and `BGGR` are now returned too.
+
+**2. Not lining up.** `_measure_shift` phase-correlated the *whole* frame. His Sun covers 7 % of a 1080×1920
+frame, and the camera's stationary noise pattern — identical in every frame — won the correlation: on
+`…181632-Solar-RAW.avi` it disagreed with the disk's own centre by > 4 px on **138 of 143** sampled frames
+(median disk motion 22.6 px, correlation 7.1 px). New `_find_disk` (largest bright component, so a hot pixel
+can't pose as the disk) and `_measure_disk_shift`: the disk-centre difference, refined by a Hann-windowed
+correlation of a window that *follows* the disk, the refinement bounded to `_MAX_REFINE_PX` (2 px) — measured,
+a larger "correction" is the fixed pattern lining up with itself at the integer offset between windows (it
+cancelled a real 5 px shift). The 15 %-of-frame shift cap (162 px on his frames; his Sun drifts up to ~270 px)
+now applies only to the whole-frame fallback: with a disk, a frame is dropped only when the disk touches the edge.
+
+**3. Keeping the wrong frames.** `frame_sharpness` was the whole frame's mean squared Laplacian over the
+whole frame's mean² — mostly black sky and sensor noise, normalised by a mean the sky drags down — so it ran
+*against* brightness (**r = −0.79** on his raw capture): the dimmest, noisiest frames ranked sharpest. Now it is
+taken over the disk's box after a light Gaussian (`_SHARPNESS_SMOOTH_SIGMA`), with the dark sky's Laplacian
+energy in the same box subtracted as the noise floor, and normalised by the disk's own mean. No disk → whole
+frame, as before.
+
+**Pinned by** 6 tests over an owner-shaped fixture (a 7 %-of-frame limb-darkened Sun with spots over a fixed
+sensor pattern, written **lossless** — an H.264 encode smooths away exactly the pattern that fooled the old
+code): alignment within 1 px on 30 frames drifting ±60 px; an end-to-end stack whose sunspots stay ≥ 88 % as
+deep as one frame's (new 93 %, old 78 % — judged by spot depth because an *unmoved* stack keeps the fixed
+pattern crisp, which a Laplacian reads as detail); a 150 px drift kept and only an edge-clipped disk dropped;
+crisp frames out-scoring dim, noisy, hazy ones; and all four sensor orientations decoding to a red-orange Sun.
+All six fail on the previous code. One existing test asserted the bug (an anti-diagonal case expecting `RGGB`
+with the bright site at `(1,1)`, i.e. a blue Sun) and was corrected, with the reason written beside it.
+
 ## 2026-10-12 (Builder, branch `claude/vibrant-galileo-qssusy`, same run, second task) — the instrument that was supposed to say whether the de-levelling's residual reaches the picture
 
 ### v0.493.16 — the cost claim is measured over the position inside the control's step, not over one scene: `test_how_often_the_cost_changes_the_stop_auto_writes`, `_positions`, `_downward_reach`, `_POSITION_SWEEP_GRAIN`

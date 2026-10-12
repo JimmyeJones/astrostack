@@ -231,6 +231,19 @@ def source_is_cfa_mosaic(pix_fmt: str | None) -> bool:
 CFA_PATTERN_GREEN_ANTIDIAGONAL = "RGGB"
 CFA_PATTERN_GREEN_DIAGONAL = "GBRG"
 
+#: The other two names, for the same two diagonals with red and blue swapped.
+#: ⚠️ **Red-vs-blue is NOT a fixed device fact** *(corrected 2026-10-12)*. The
+#: v0.408.2 comment below assumed it was, from one file whose bright site sat at
+#: ``(1,0)``. The owner's next two raw captures —
+#: ``2026-06-19-180604-Solar-RAW.avi`` and ``…-181632-Solar-RAW.avi`` — measure
+#: ``(0,0)`` 36.4/41.7, ``(0,1)`` **119.0/136.5**, ``(1,0)`` 9.1/10.5, ``(1,1)``
+#: 36.4/41.7: green on the same main diagonal, but the bright site on the
+#: *other* side, so the assumed ``GBRG`` made it blue and the Sun came out
+#: **9:36:119 — blue**. So :func:`detect_cfa_pattern` now reads red as the
+#: brighter of the two non-green sites as well.
+CFA_PATTERN_GREEN_ANTIDIAGONAL_RED_LAST = "BGGR"
+CFA_PATTERN_GREEN_DIAGONAL_RED_FIRST = "GRBG"
+
 #: What to debayer as when a frame carries no colour information to read — the
 #: measured phase of the owner's real capture, not the deep-sky path's name.
 CFA_PATTERN = CFA_PATTERN_GREEN_DIAGONAL
@@ -257,12 +270,16 @@ def detect_cfa_pattern(mosaic: np.ndarray) -> str:
     match to within noise while red's and blue's do not — which identifies the
     green **diagonal** objectively, from four means over one frame.
 
-    Green on the anti-diagonal is ``RGGB``; green on the main diagonal is
-    ``GBRG``. Red-vs-blue *within* the winning pair cannot be read from a mosaic
-    at all (``GBRG`` and ``GRBG`` differ only by swapping them, and both leave
-    zero residual), so that stays the device fact the owner's measurement
-    establishes: on this sensor the brighter site through a white-light solar
-    filter is red.
+    Green on the anti-diagonal is ``RGGB`` or ``BGGR``; green on the main
+    diagonal is ``GBRG`` or ``GRBG``. Which of the two remaining sites is red
+    cannot be read from the *pattern* (swapping them leaves the same zero
+    residual), so it is read from the *light*: **the brighter one is red.** A
+    white-light solar filter passes far more red than blue (the owner's files
+    measure 13:1), the Moon and the planets are redder than they are blue, and
+    the sensor is weakest in blue — so on every target this path stacks, red
+    outshines blue. It used to be assumed from one file's orientation instead,
+    and the owner's next two captures came out blue (see
+    :data:`CFA_PATTERN_GREEN_ANTIDIAGONAL_RED_LAST`).
 
     Returns :data:`CFA_PATTERN` when the frame is too flat to call, so a dark or
     an unexposed capture degrades to the measured default rather than to a coin
@@ -286,7 +303,13 @@ def detect_cfa_pattern(mosaic: np.ndarray) -> str:
     if matched > unmatched * _CFA_DETECT_MATCH_RATIO:
         return CFA_PATTERN  # both diagonals equally mismatched: not a call
     if diagonal < antidiagonal:
+        # Green on (0,0)/(1,1); red is the brighter of (1,0) (GBRG) and (0,1) (GRBG).
+        if means[(0, 1)] > means[(1, 0)]:
+            return CFA_PATTERN_GREEN_DIAGONAL_RED_FIRST
         return CFA_PATTERN_GREEN_DIAGONAL
+    # Green on (0,1)/(1,0); red is the brighter of (0,0) (RGGB) and (1,1) (BGGR).
+    if means[(1, 1)] > means[(0, 0)]:
+        return CFA_PATTERN_GREEN_ANTIDIAGONAL_RED_LAST
     return CFA_PATTERN_GREEN_ANTIDIAGONAL
 
 

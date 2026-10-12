@@ -49,8 +49,27 @@ _LUMA = (0.299, 0.587, 0.114)
 #: Alignment shifts larger than this fraction of the frame's short edge are
 #: treated as a failed correlation (a cloud, a dropped frame, the disk leaving
 #: the field) rather than real drift, and the frame is skipped instead of being
-#: smeared into the stack.
+#: smeared into the stack. **Applies only to the whole-frame fallback** — when a
+#: disk is found, its centre is measured directly, so a large drift is a real
+#: drift and the only reason to drop a frame is the disk running off the edge
+#: (the owner's solar captures drift up to ~270 px; this limit was 162 px there).
 _MAX_SHIFT_FRACTION = 0.15
+
+#: Pixel-noise smoothing (Gaussian σ, px) before the sharpness Laplacian. Without
+#: it the score is mostly sensor noise: measured on the owner's raw solar AVI the
+#: unsmoothed score ran *against* brightness (r = −0.79), so the dimmest,
+#: noisiest frames were kept as the "sharpest".
+_SHARPNESS_SMOOTH_SIGMA = 1.0
+
+#: A disk must cover at least this fraction of the frame (and no more than
+#: :data:`_DISK_MAX_FRACTION`) to be aligned and graded on; otherwise the whole
+#: frame is used, as before.
+_DISK_MIN_FRACTION = 0.0005
+_DISK_MAX_FRACTION = 0.85
+
+#: How far (px) the windowed correlation may move the disk-centre shift. The
+#: centre is good to about a pixel; anything larger is not a refinement.
+_MAX_REFINE_PX = 2.0
 
 #: Frames we refuse to work below — a 2-frame "video" has nothing to be lucky
 #: about, and the sharpness ranking would be meaningless.
@@ -166,20 +185,94 @@ def frame_luma(frame: np.ndarray) -> np.ndarray:
     return (_LUMA[0] * f[..., 0] + _LUMA[1] * f[..., 1] + _LUMA[2] * f[..., 2])
 
 
+@dataclass(frozen=True)
+class _Disk:
+    """Where the bright object (Sun, Moon, planet) sits in one frame."""
+
+    cy: float
+    cx: float
+    y0: int
+    y1: int
+    x0: int
+    x1: int
+    touches_edge: bool
+    mask: np.ndarray
+
+
+def _find_disk(luma: np.ndarray) -> _Disk | None:
+    """The bright object's centre, extent and pixels — or ``None`` if there isn't one.
+
+    Thresholded halfway between the background (the median) and the bright level
+    (the 99.5th percentile), keeping only the **largest** connected region, so a
+    hot pixel or a cosmic ray cannot pose as the disk. ``None`` for a frame with
+    no clear object, or one the object fills, so callers fall back to the whole
+    frame exactly as before.
+    """
+    from scipy import ndimage
+
+    lum = np.asarray(luma, dtype=np.float32)
+    lo = float(np.median(lum))
+    hi = float(np.percentile(lum, 99.5))
+    if not (math.isfinite(lo) and math.isfinite(hi)) or hi - lo <= 1e-6:
+        return None
+    mask = lum > lo + 0.5 * (hi - lo)
+    labels, n = ndimage.label(mask)
+    if n == 0:
+        return None
+    sizes = np.bincount(labels.ravel())[1:]
+    biggest = int(np.argmax(sizes)) + 1
+    disk = labels == biggest
+    frac = float(sizes[biggest - 1]) / disk.size
+    if frac < _DISK_MIN_FRACTION or frac > _DISK_MAX_FRACTION:
+        return None
+    cy, cx = ndimage.center_of_mass(disk)
+    sl = ndimage.find_objects(disk.astype(np.int8))[0]
+    y0, y1, x0, x1 = sl[0].start, sl[0].stop, sl[1].start, sl[1].stop
+    h, w = disk.shape
+    return _Disk(float(cy), float(cx), y0, y1, x0, x1,
+                 touches_edge=y0 == 0 or x0 == 0 or y1 == h or x1 == w, mask=disk)
+
+
 def frame_sharpness(luma: np.ndarray) -> float:
     """Exposure-invariant sharpness score for one frame (higher = sharper).
 
     Mean squared Laplacian — the standard "is this in focus?" measure — divided
-    by the frame's mean brightness squared. The normalisation matters here: a
-    thin cloud or the Seestar's auto-exposure can change a lunar capture's
-    overall level between frames, and an un-normalised Laplacian would then rank
-    the *brightest* frames as the sharpest rather than the crispest ones.
-    """
-    from scipy.ndimage import laplace
+    by the mean brightness squared. The normalisation matters: a thin cloud or
+    the Seestar's auto-exposure can change a capture's level between frames, and
+    an un-normalised Laplacian would rank the *brightest* frames sharpest.
 
-    lap = laplace(luma.astype(np.float32, copy=False))
-    energy = float(np.mean(lap.astype(np.float64) ** 2))
-    mean = float(np.mean(luma.astype(np.float64)))
+    **Measured on the disk, after smoothing out pixel noise** *(2026-10-12)*. It
+    used to be the whole frame: on the owner's Sun, which covers 7 % of the
+    frame, that is mostly black sky and sensor noise, normalised by a mean the
+    black sky drags down — so the score ran *against* brightness (r = −0.79 on
+    his raw capture) and the dimmest, noisiest frames were kept as the sharpest.
+    Now the Laplacian is taken over the disk's bounding box after a light
+    Gaussian (:data:`_SHARPNESS_SMOOTH_SIGMA`), and normalised by the disk's own
+    mean. A frame with no disk is scored on the whole frame, as before.
+    """
+    from scipy.ndimage import binary_dilation, gaussian_filter, laplace
+
+    lum = np.asarray(luma, dtype=np.float32)
+    disk = _find_disk(lum)
+    if disk is None:
+        lap = laplace(gaussian_filter(lum, _SHARPNESS_SMOOTH_SIGMA))
+        energy = float(np.mean(lap.astype(np.float64) ** 2))
+        mean = float(np.mean(lum, dtype=np.float64))
+    else:
+        # Work in a box around the disk with a margin of dark sky. The sky's
+        # Laplacian energy is the noise floor — read noise, the sensor's fixed
+        # pattern — and the same floor sits under the disk, so it is subtracted:
+        # what is left is detail. Without that, a dimmer frame's noise counts for
+        # more after normalising and the haziest frames win.
+        pad = max(8, (disk.y1 - disk.y0) // 4)
+        y0, x0 = max(0, disk.y0 - pad), max(0, disk.x0 - pad)
+        y1, x1 = min(lum.shape[0], disk.y1 + pad), min(lum.shape[1], disk.x1 + pad)
+        lap = laplace(gaussian_filter(lum[y0:y1, x0:x1], _SHARPNESS_SMOOTH_SIGMA)).astype(np.float64) ** 2
+        inside = disk.mask[y0:y1, x0:x1]
+        sky = ~binary_dilation(inside, iterations=4)
+        floor = float(np.mean(lap[sky])) if sky.sum() >= 64 else 0.0
+        energy = max(0.0, float(np.mean(lap[binary_dilation(inside, iterations=2)])) - floor)
+        mean = float(np.mean(lum[disk.mask], dtype=np.float64))
     if not math.isfinite(energy) or mean <= 0:
         return 0.0
     return energy / (mean * mean)
@@ -225,6 +318,42 @@ def _measure_shift(ref_luma: np.ndarray, luma: np.ndarray) -> tuple[float, float
         log.debug("video phase_cross_correlation failed: %s", exc)
         return None
     return float(shift[0]), float(shift[1])
+
+
+def _measure_disk_shift(
+    ref_luma: np.ndarray, ref_disk: _Disk, luma: np.ndarray, disk: _Disk,
+) -> tuple[float, float]:
+    """(dy, dx) that brings ``disk`` onto ``ref_disk``: centre first, then refined.
+
+    Coarse: the difference of the two disk centres — immune to anything that
+    does not move with the disk. Fine: phase correlation of a Hann-windowed
+    window that *follows* the disk in each frame, which locks onto the limb and
+    the surface detail. **Why not the whole frame any more** *(2026-10-12)*: on
+    the owner's raw solar capture the Sun covers 7 % of the frame, and the
+    camera's stationary noise pattern — identical in every frame — won the
+    whole-frame correlation, so it reported ~0 shift while the disk moved a
+    median 22 px: 138 of 143 sampled frames were stacked misaligned.
+    """
+    ry, rx = int(round(ref_disk.cy)), int(round(ref_disk.cx))
+    cy, cx = int(round(disk.cy)), int(round(disk.cx))
+    coarse = (float(ry - cy), float(rx - cx))
+    half_h = int(0.6 * (ref_disk.y1 - ref_disk.y0)) + 8
+    half_w = int(0.6 * (ref_disk.x1 - ref_disk.x0)) + 8
+    h, w = luma.shape
+    if (min(ry, cy) - half_h < 0 or min(rx, cx) - half_w < 0
+            or max(ry, cy) + half_h > h or max(rx, cx) + half_w > w):
+        return coarse          # no room for a common window: the centre is still right
+    a = ref_luma[ry - half_h:ry + half_h, rx - half_w:rx + half_w].astype(np.float32)
+    b = luma[cy - half_h:cy + half_h, cx - half_w:cx + half_w].astype(np.float32)
+    win = np.outer(np.hanning(a.shape[0]), np.hanning(a.shape[1])).astype(np.float32)
+    fine = _measure_shift((a - a.mean()) * win, (b - b.mean()) * win)
+    # The centre is already good to about a pixel, so the refinement may only
+    # nudge it. A bigger "correction" is the sensor's fixed pattern lining up
+    # with itself at the integer offset between the two windows — measured: it
+    # cancelled a real 5 px shift outright — so the centre wins.
+    if fine is None or abs(fine[0]) > _MAX_REFINE_PX or abs(fine[1]) > _MAX_REFINE_PX:
+        return coarse
+    return coarse[0] + fine[0], coarse[1] + fine[1]
 
 
 def _shift_frame(rgb: np.ndarray, dy: float, dx: float) -> np.ndarray:
@@ -390,6 +519,7 @@ def stack_video(
     ref_luma: np.ndarray | None = (
         frame_luma(graded.best_frame) if graded.best_frame is not None else None
     )
+    ref_disk = _find_disk(ref_luma) if ref_luma is not None else None
     # Nothing else needs the reference *frame* once its luma is measured, and it
     # is the one full frame pass 1 was holding.
     graded.best_frame = None
@@ -422,18 +552,34 @@ def stack_video(
             if opts.align and ref_luma is None:
                 ref_index = i
                 ref_luma = frame_luma(frame)
+                ref_disk = _find_disk(ref_luma)
             acc.add(rgb)
             n_stacked += 1
         else:
-            shift = _measure_shift(ref_luma, frame_luma(frame))
-            if shift is None:
-                acc.add(rgb)
-                n_stacked += 1
-            elif abs(shift[0]) > max_shift or abs(shift[1]) > max_shift:
-                n_align_failed += 1
+            luma = frame_luma(frame)
+            disk = _find_disk(luma) if ref_disk is not None else None
+            if ref_disk is not None and disk is not None:
+                # A disk in both: align on it. The only reason to drop the frame
+                # is the disk running off the edge — a cut-off disk has a moved
+                # centre, so its shift (and its picture) would be wrong.
+                if disk.touches_edge:
+                    n_align_failed += 1
+                else:
+                    dy, dx = _measure_disk_shift(ref_luma, ref_disk, luma, disk)
+                    acc.add(_shift_frame(rgb, dy, dx))
+                    n_stacked += 1
+            elif ref_disk is not None:
+                n_align_failed += 1     # the disk is gone from this frame (cloud, slew)
             else:
-                acc.add(_shift_frame(rgb, shift[0], shift[1]))
-                n_stacked += 1
+                shift = _measure_shift(ref_luma, luma)
+                if shift is None:
+                    acc.add(rgb)
+                    n_stacked += 1
+                elif abs(shift[0]) > max_shift or abs(shift[1]) > max_shift:
+                    n_align_failed += 1
+                else:
+                    acc.add(_shift_frame(rgb, shift[0], shift[1]))
+                    n_stacked += 1
         done += 1
         if progress is not None:
             progress("stack", done, n_keep)
