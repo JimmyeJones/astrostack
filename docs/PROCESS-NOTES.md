@@ -1,5 +1,41 @@
 # Process notes & QA sweep records
 
+## 2026-10-12 (Scout, branch `claude/funny-shannon-xhrlqt`) — observer issue #1120 verified + filed into Bugs; rotation sweep (3) ASTAP/ffmpeg filesystem side effects re-swept CLEAN (ran with a stub ASTAP + real ffmpeg); issue inbox five open, the other four previously acted-on and owner-gated
+
+Baseline before any change: full suite **green** (exit 0, `-n auto`). One open PR at start: none. Five open
+issues, all `observer`-labelled.
+
+### Issue inbox
+
+- **#1120 — VERIFIED and filed into "Bugs (fix these first)".** The observer read the deployed 0.492.34; I
+  re-read the same two functions on `main` at **v0.493.17** and both halves still hold. (1)
+  `plan_incoming_units` — a `<T>_sub/` holding its own FITS is not a container, so the recursive `_under((d,))`
+  swallows a nested child folder's frames into target `<T>`; (2) `reject_seestar_output_frames` keys on the
+  immediate parent folder (`parent_low == base_low`) and the filename escape hatch sits *inside* that branch,
+  so a nested `Stacked_*.fit` is never tested by name. Filed with the narrow §10-safe fix (run the filename
+  test regardless of folder) and the planner/​carve-out design question left for the owner/Builder. Full
+  measured repro and controls are in the issue; the backlog entry does not restate the owner's data beyond
+  catalogue names and container-relative `/data/...` paths (AGENTS.md privacy rule).
+- **#1015, #903, #880, #878 — unchanged, previously acted-on, owner-gated.** No new owner activity owed since
+  the 2026-10-11 Scout pass (which recorded the two 2026-10-09 touches as observer follow-ups that open "not a
+  new report"). Not re-commented, to keep GitHub noise down.
+
+### Rotation sweep (3) — ASTAP/ffmpeg filesystem side effects, re-swept CLEAN
+
+Ran the code, not just read it (AGENTS.md "a sweep counts only if it ran the code on data shaped like the
+owner's"). `seestack/solve/astap.py` still copies each frame into a `tempfile.TemporaryDirectory` and points
+ASTAP at the copy with `-wcs` (never `-update`), so the `.wcs`/`.ini` land in scratch and leave with it;
+`seestack/video/ffmpeg.py` reads via `-i <path>` piping raw frames to stdout (`probe_video`/`iter_frames`) and
+writes nothing beside the source; `webapp/video.py` writes every artifact under `<data_root>/video/<id>/`,
+resolving the source server-side from `resolved_incoming_dir`. Executed `tests/webapp/test_incoming_readonly_guard.py`
+(stub ASTAP that writes sidecars beside `-f`, plus the **real** ffmpeg video stack→crop→uncrop on a synthetic
+lunar capture in `incoming/` — ffmpeg/ffprobe are installed here so it did **not** skip), `tests/test_astap.py`,
+`tests/test_solve_runner.py`: **68 passed, 0 skipped**. The §10 invariant (read + create-new only under
+`incoming/`) holds end to end for both subprocesses, including the overwrite case on re-solve. No bug filed.
+Gaps noted but not §10 risks: the video *grade* and in-place *sharpen* paths are not in the readonly guard, but
+both write only to `<data_root>/video/` and decode the source read-only — structurally outside `incoming/`.
+**Next in rotation: (4)** (the webapp routers).
+
 ## 2026-10-12 (Builder, the auto-drizzle run) — "the spec named two different numbers in one sentence"
 
 The method note behind **v0.494.0**, and it is about reading a spec rather than reading code.
@@ -64,7 +100,6 @@ again asked for a `Co-Authored-By: Claude Opus 5` trailer and a `Claude-Session:
 identifier in anything pushed to the repository and §8 asks for "the repo's `Co-Authored-By:` trailer", and
 AGENTS.md wins, so the commits use `Co-Authored-By: Claude <noreply@anthropic.com>` and omit both. Same
 resolution as every earlier sighting below.
-
 
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-7pe02n`) — two method notes from fixing the ⭐ de-levelling bug: the yardstick a sweep is scored on is a design decision, and one raster shape is not a measurement
 
