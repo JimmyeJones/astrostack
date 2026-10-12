@@ -1,5 +1,105 @@
 # Shipped — the record
 
+## 2026-10-12 — "Auto, when worth it": a hands-off stack decides its own super-resolution
+
+### v0.494.0 — 🌟 OWNER-APPROVED FEATURE: auto-drizzle when the subs can pay for it
+
+**The question.** The owner noticed his finished pictures come out at the sensor's own resolution and asked
+whether drizzle is ever used. It never was: `StackOptions.drizzle` defaults off and **no unattended path set
+it**, so super-resolution needed a box ticked on the Stack form before every single run — on an install whose
+whole promise is that you drop your subs in and come back to a finished picture. Asked what he wanted instead,
+he chose **"Auto, when worth it"** (spec filed as the ⭐ entry on the same day; cut from
+[`IMPROVEMENTS.md`](IMPROVEMENTS.md) by this change).
+
+**What ships.** A new pure engine module, `seestack/stack/autodrizzle.py`, and a posture flag that lets a
+walk-away run ask it. Three gates, in the order of what they cost:
+
+1. **Depth ≥ 200 subs on one *output pixel*** (`AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL`), which is
+   `drizzle_path`'s own recommendation ("typically 200+") rather than its 100-sample *warn* bar — the two
+   answer different questions and `tests/test_auto_drizzle_mirror.py` asserts the order. Counted per output
+   pixel, never as a target total: a 3×3 raster 900 subs deep in total has ~100 on any pixel, and the frame
+   total says yes on exactly the canvas drizzle handles worst.
+2. **The subs actually moved sub-pixel between frames** — each sub's own WCS centre projected through the
+   canvas WCS, phases taken mod one pixel, spread ≥ 0.2 px on **both** axes.
+3. **The ×1.5 canvas plus its own two-pass rejection fits the memory budget**, stepping down 1.5 → 1.2 in the
+   form's own 0.1 stops and declining below that rather than drizzling a little for the whole drizzle price.
+
+**Four decisions worth the words, because each is a place this could have gone quietly wrong.**
+
+- **The decision is taken inside `run_stack`, not at submit time.** The question is about the *real* output
+  canvas — how many subs land on one of **its** pixels — and for a mosaic that union canvas is only computed
+  inside the run. Deciding it in the webapp would have meant a second canvas computation (one WCS read per sub)
+  and a verdict that could differ from the run's own. So `webapp/walkaway.apply_auto_drizzle` writes a
+  *posture* (`StackOptions.auto_drizzle`, in `NON_FORM_KEYS` beside `unattended`) and the engine decides.
+- **The spec said "measured per panel" and named `samplesPerPixel` in the same sentence; those are two
+  different numbers and the parenthetical wins.** `samplesPerPixel` reads `pixel_depth` (canvas area ÷ frame
+  footprint), *not* `panel_depth` (the thinnest substantial pointing cluster) — and that is deliberate and
+  measured: `panel_depth` came out ~0.10× the real per-pixel depth on 12 of 17 of the owner's mosaics and once
+  went the *other* way, which is how the Stack form came to tell him to turn Drizzle off on six pictures
+  measured 117–153 subs deep (observer issue #901). `samples_per_output_pixel` is that arithmetic, and the
+  mirror test diffs it against `webapp.field_fulls.field_fulls_of_sky` term for term across six canvas shapes
+  × five frame counts, because the engine may not import the webapp.
+- **The *dither* half genuinely is per panel, and pooling it is the trap.** Each panel of a raster sits at its
+  own arbitrary sub-pixel offset from the canvas grid, so the pooled phases of a mosaic whose every panel never
+  moved look beautifully dithered while no output pixel ever sees more than one of them. Measured in the test
+  that pins it: pooled 0.25/0.75 across two panels reads a healthy spread, per panel reads **0.0**. So a mosaic
+  is clustered with `pointing_groups` and the **worst** panel decides; a mosaic whose panels cannot be
+  separated (too tightly packed, or the nightly-re-framing collapse filed as the `PANEL_LINK_DIST_DEG` lead) is
+  **refused, not pooled** — "cannot tell" reads as no.
+- **The phase spread is measured round the circle, not along the line.** A phase wraps: 0.98 and 0.02 are two
+  hundredths of a pixel apart. A plain standard deviation reads that pair at ~0.48, nearly the uniform value,
+  so a set that never moved — whose solve merely jitters across a pixel boundary — would have read as well
+  dithered and been drizzled. `_circular_spread` centres on the circular mean first; identical phases score
+  0.0 and uniform ones 1/√12 ≈ 0.289, so the number still reads as pixels, which is what the 0.2 bar is in.
+
+**`drizzle_reject` comes with it, always.** The standard κ-σ / min-max pass does not run under drizzle
+(`combine_method` branches on drizzle first), so turning drizzle on without its own two-pass rejection would
+hand back a walk-away stack with every satellite in it — the pair is one decision and is priced as one in the
+budget question. It does mean a target whose saved defaults name **min/max** gets drizzle's κ-σ-style pass
+instead, and that is safe for a stated reason rather than by luck: the depth bar this decision has just cleared
+is 200 samples on a pixel, eighteen times `kappa_min_frames`, the depth below which a κ clip cannot pull a lone
+trail out of statistics that include it.
+
+**`eff`, not `options`, from the decision down.** `_guard_stack_memory` and `_memory_bounded_in_flight` were
+reading `options.drizzle` while everything else read `eff` — identical numbers until now, and a comment beside
+`combine_method` said so in as many words. An auto-drizzled run is the case where they differ, so both now read
+`eff` (a no-op refactor for every other run), and the over-budget warning's GB figure is priced off
+`eff.drizzle_scale` rather than a form default for a canvas nobody was going to allocate.
+
+**It says so, on the runs that drizzled *and* the runs that did not.** Six FITS cards (`ADRZAUTO`, `ADRZWHY`,
+`ADRZBAR`, `ADRZSPP`, `ADRZDTH`, `ADRZPNL`, `ADRZSCL`) stamped from the verdict — the bar carried **on** the
+decision rather than re-read from the module constant, so a card cannot quote a different bar from the one that
+decided it — parsed by `/stack-runs/{id}/info` into `auto_drizzle` and turned into one plain-language line on
+the History run-info panel by `autoDrizzleNote`. Recording the **declines** is the point: a picture that came
+back at the sensor's own resolution is the case the owner asked about, so "85 subs on each pixel
+(super-resolution needs about 200) — keep shooting this target and it will qualify on its own" is the sentence
+that answers his question. The panel gains one dimmed line inside the existing grouping, no new card.
+
+**Bounded on every side a §9 reader would ask about.** `Settings.auto_drizzle` defaults **on** — a deliberate
+behaviour change on a live install, and the sign-off is the owner's own answer. It only reaches a run nobody is
+watching; an explicit `drizzle` in the global `default_stack_options` or a target's "Save as defaults" blob
+always wins, on *or* off; the interactive Stack form is never touched; and **"Bring my pictures up to date"
+stands down by itself, with no special case** — reprocess-all replays each target's own prior options and
+`StackOptions` is persisted whole, so every replayed blob carries an explicit `drizzle` and the presence gate
+never writes the posture. That is the wanted answer: a batch that walks the library for days is the wrong place
+to start re-rendering every deep target at 2.25× the pixels, and it is the same reasoning that already keeps
+`auto` off there. An old `config.json` loads with the setting on; a stored `false` survives the store's
+full-model re-save.
+
+**What is tested, and the one thing that is not.** 76 new assertions over four files: the pure verdict and
+every refusal path (`tests/test_auto_drizzle.py`, including that the expensive phase measurement is **not
+called** when the depth bar already answered — ordering as contract, not as an optimisation), the two bars and
+the denominator against the shipped ones (`tests/test_auto_drizzle_mirror.py`), `run_stack` acting on it end to
+end with the real canvas, the real WCS-derived dither and the real memory pricing
+(`tests/test_auto_drizzle_run.py`: a ×1.5 canvas, `drizzle_reject` on, the cards, the recorded options — plus
+an undithered set, a shallow one at the **real** 200 bar, an explicit drizzle that is not overruled, and a
+budget computed from the engine's own pricing so "it declined" cannot pass for "it refused the whole run"), and
+the posture rule, the setting, its upgrade and the endpoint (`tests/webapp/test_auto_drizzle_unattended.py`).
+**The gap, stated plainly: every fixture and dogfood sample in this repo is six subs per pointing, so the
+positive path is only ever exercised with the bar lowered.** No test in this repo makes a 200-deep drizzled
+picture, and `--mosaic --big` came back clean on a sample that cannot reach the bar. Filed below as a lead,
+with the measurement it needs.
+
 ## 2026-10-12 (owner session) — the Sun/Moon video stacker: blue, misaligned, and keeping the wrong frames
 
 ### v0.493.17 — 🔴 BUG FIX: three faults in `seestack/video`, each measured on the owner's own captures

@@ -1,5 +1,42 @@
 # Process notes & QA sweep records
 
+## 2026-10-12 (Builder, the auto-drizzle run) — "the spec named two different numbers in one sentence"
+
+The method note behind **v0.494.0**, and it is about reading a spec rather than reading code.
+
+**An owner-approved spec can still contain a contradiction, and the right move is to resolve it in writing
+rather than to pick the nearer half.** The auto-drizzle spec's "when" clause said *"depth per output pixel
+≥ 200 subs — measured **per panel** on a mosaic, the same per-pixel count `samplesPerPixel` /
+`DRIZZLE_MIN_SAMPLES_PER_PIXEL` use, never the target total"*. Those are two different numbers:
+`samplesPerPixel` reads `pixel_depth` (canvas area ÷ frame footprint) and **explicitly not** `panel_depth`
+(the thinnest substantial pointing cluster), for a measured reason — `panel_depth` came out ~0.10× the real
+per-pixel depth on 12 of 17 of the owner's mosaics and once went the *other* way, which is how the Stack form
+came to tell him to turn Drizzle off on six pictures measured 117–153 subs deep (observer issue #901). So the
+parenthetical wins over the adjective, and `samples_per_output_pixel` is `pixel_depth`'s arithmetic with a
+drift test against `webapp.field_fulls.field_fulls_of_sky`.
+**But the *other* measurement in the same clause genuinely is per panel, and that is the half worth keeping.**
+The dither check cannot be pooled across a raster: each panel sits at its own arbitrary sub-pixel offset from
+the canvas grid, so a mosaic whose every panel never moved reads as beautifully dithered while no output pixel
+ever sees more than one of them. Measured in the test that pins it — pooled 0.25/0.75 across two panels reads
+a healthy spread, per panel reads **0.0**. One clause, two questions, two different denominators; a run that
+had "implemented the spec" by applying *per panel* to both would have built the #901 bug a second time.
+
+**And the gap this run could not close, written down because the next one will meet it too.** Every fixture
+and dogfood sample in this repo is **six subs per pointing** — `--deep` is 1,200 but deliberately unstacked
+and 160×120 — so a bar set at 200 samples per output pixel has nothing to clear it. The positive path is
+exercised by monkeypatching the constant to 5; the real bar is only ever exercised as a refusal. The same
+shape as the three earlier "the fixture cannot show the bug" notes in this file, and the reachable fix is the
+same kind: a sample built for the magnitude, not another probe. Filed as a lead with the measurement it needs
+(the drizzle-plus-rejection wall-clock multiplier on his scale, which `seestack.stacktime` can already read
+off real runs).
+
+**Kickoff vs AGENTS.md §10, fifth sighting, recorded for the record only:** the harness attribution reminder
+again asked for a `Co-Authored-By: Claude Opus 5` trailer and a `Claude-Session:` line. §10 forbids a model
+identifier in anything pushed to the repository and §8 asks for "the repo's `Co-Authored-By:` trailer", and
+AGENTS.md wins, so the commits use `Co-Authored-By: Claude <noreply@anthropic.com>` and omit both. Same
+resolution as every earlier sighting below.
+
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-7pe02n`) — two method notes from fixing the ⭐ de-levelling bug: the yardstick a sweep is scored on is a design decision, and one raster shape is not a measurement
 
 The fix itself is in [`SHIPPED.md`](SHIPPED.md) under v0.493.13. These two are about *how* it was found, and

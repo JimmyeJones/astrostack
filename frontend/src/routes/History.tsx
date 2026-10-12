@@ -8,7 +8,7 @@ import { notifications } from "@mantine/notifications";
 import { IconAdjustments, IconCheck, IconChevronDown, IconCopy, IconDeviceFloppy, IconGitCompare, IconInfoCircle, IconMoon, IconPencil, IconRuler2, IconSparkles, IconStar, IconStarFilled, IconTags, IconTrash, IconX } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackPanelGainSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded, type StackRejectionDegraded } from "../api/client";
+import { api, type StackRun, type ObjectInfo, type StackPhotometricSummary, type StackPanelGainSummary, type StackDarkScalingSummary, type StackRejectionSummary, type StackWeightingSummary, type StackWeightingSkipped, type StackFrameAccounting, type StackDrizzleDegraded, type StackRejectionDegraded, type StackAutoDrizzle } from "../api/client";
 import {
   formatCaptureNights, formatIntegration, formatStampDateTime,
 } from "../format";
@@ -430,6 +430,78 @@ export interface FrameAccountingNote {
 // Returns null when nothing's worth saying — no accounting recorded (older
 // master), or every attempted sub aligned (the "· N subs" integration line
 // already tells that happy story). Pure so it can be unit-tested.
+// "Did AstroStack drizzle this one, and why?" — the answer to the question the
+// owner actually asked. He noticed his finished pictures come out at the
+// sensor's own resolution, found that drizzle was never used unless a box was
+// ticked on the Stack form, and chose "Auto, when worth it". The run then takes
+// that decision at 3 a.m. with nobody watching, which makes this card the only
+// place it can be explained — so the line says what it chose and the one number
+// it chose from, and for a "no" it says what would change the answer.
+//
+// The depth is always a count **per output pixel**, never the target's frame
+// total: on a mosaic the subs are spread across the raster, so a 3x3 raster 900
+// subs deep in total has ~100 on any pixel, and a sentence quoting the total
+// would be the same substitution that had the Stack form telling the owner to
+// turn Drizzle off on pictures measured 117-153 deep (observer issue #901).
+//
+// Returns null on every attended run and every master that predates the cards,
+// and on an unrecognised `reason` — a newer engine's sixth verdict must render
+// nothing rather than a half-sentence. Pure so it can be unit-tested.
+export function autoDrizzleNote(
+  ad: StackAutoDrizzle | null | undefined,
+): string | null {
+  if (!ad) return null;
+  const spp = ad.samples_per_pixel;
+  const n = typeof spp === "number" && Number.isFinite(spp) && spp >= 0
+    ? Math.floor(spp)
+    : null;
+  const subs = n === null ? null : `${n} sub${n === 1 ? "" : "s"} on each pixel`;
+  if (ad.drizzled) {
+    const scale = ad.scale;
+    if (typeof scale !== "number" || !Number.isFinite(scale) || scale <= 1) {
+      return null;
+    }
+    return (
+      `Super-resolution ×${Number(scale.toFixed(2))}, chosen automatically`
+      + `${subs ? ` — ${subs}` : ""}. Deep, well-dithered subs can be `
+      + `re-sampled onto a finer grid, so this picture is bigger — and carries `
+      + `more real detail — than one of your frames.`
+    );
+  }
+  const bar = typeof ad.bar === "number" && Number.isFinite(ad.bar) && ad.bar > 0
+    ? Math.floor(ad.bar)
+    : null;
+  switch (ad.reason) {
+    case "too_few_samples":
+      return (
+        `Not drizzled: ${subs ?? "not enough subs on each pixel"}`
+        + `${bar ? ` (super-resolution needs about ${bar})` : ""}. Keep shooting `
+        + `this target and it will qualify on its own.`
+      );
+    case "too_little_dither":
+      return (
+        "Not drizzled: your subs barely moved between frames, so there is "
+        + "nothing extra for a finer grid to pick up — drizzling would add a "
+        + "pattern rather than detail."
+      );
+    case "dither_unknown":
+      return (
+        "Not drizzled: AstroStack couldn't measure how much the subs moved "
+        + "between frames, and super-resolution only pays off when they moved. "
+        + "Nothing is wrong with this picture."
+      );
+    case "no_room_in_budget":
+      return (
+        "Not drizzled: this target is deep and well-dithered enough for "
+        + "super-resolution, but the bigger canvas wouldn't fit the stack "
+        + "memory budget. Raising it in Settings → Stacking → Memory "
+        + "would let the next run try."
+      );
+    default:
+      return null;
+  }
+}
+
 // "Why is last night's picture a different size?" — the one thing an unattended
 // run can change about the *shape* of the result without anyone watching.
 //
@@ -851,6 +923,14 @@ function StackInfoPanel({ safe, runId }: { safe: string; runId: number }) {
       {rejectionSummaryText(data.rejection) ? (
         <Text size="xs" c="dimmed">
           {rejectionSummaryText(data.rejection)}
+        </Text>
+      ) : null}
+      {/* "Was this one drizzled, and why?" — the owner's own question about why
+          his pictures come out at the sensor's resolution, answered on the run
+          that decided it for him. */}
+      {autoDrizzleNote(data.auto_drizzle) ? (
+        <Text size="xs" c="dimmed">
+          {autoDrizzleNote(data.auto_drizzle)}
         </Text>
       ) : null}
       {/* An unattended run that made a slightly smaller picture rather than no

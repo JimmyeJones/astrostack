@@ -1832,6 +1832,33 @@ export interface PrintSizes {
   bigger?: BiggerPrint | null;
 }
 
+/** What a hands-off run decided about drizzling *itself*, and what it decided
+ *  from — the owner's "Auto, when worth it". Present on every unattended run
+ *  that was asked the question, including the ones that said no: a picture that
+ *  came back at the sensor's own resolution is the case he asked about. */
+export interface StackAutoDrizzle {
+  /** Did it drizzle? */
+  drizzled: boolean;
+  /** Stable code from `seestack.stack.autodrizzle` — `"deep_and_dithered"`,
+   *  `"too_few_samples"`, `"too_little_dither"`, `"dither_unknown"`,
+   *  `"no_room_in_budget"`. A newer engine may add one. */
+  reason: string;
+  /** Subs that landed on one *output pixel* — never the target's frame total,
+   *  which on a mosaic is the whole bug this bar exists to avoid. */
+  samples_per_pixel?: number;
+  /** The bar that number was judged against, carried by the run itself so the
+   *  sentence cannot quote a different one from the decision. */
+  bar?: number;
+  /** The subs' sub-pixel phase spread, in output pixels. Absent when the depth
+   *  already answered it (measuring it costs a WCS read per sub). */
+  dither_px?: number;
+  /** How many pointing groups that spread was measured inside (1 = a single
+   *  field; a mosaic is measured panel by panel). */
+  panels?: number;
+  /** The super-resolution scale it chose, when it chose to drizzle. */
+  scale?: number;
+}
+
 /** An unattended run that lowered its drizzle scale to fit the memory budget. */
 export interface StackDrizzleDegraded {
   reason: string;
@@ -2055,6 +2082,10 @@ export interface StackRunInfo {
   // budget and the engine stepped the super-resolution scale down to the largest
   // one that did — instead of refusing to make a picture at all with advice
   // nobody was there to read. Absent on every run that fitted.
+  // What a hands-off run decided about drizzling itself, and the numbers it
+  // decided from. Absent on an attended run (the posture only ever reaches a
+  // walk-away stack) and on masters written before the feature.
+  auto_drizzle?: StackAutoDrizzle | null;
   drizzle_degraded?: StackDrizzleDegraded | null;
   // The same story for outlier removal rather than the canvas: the guard cut the
   // pass back (fewer extremes per side) or dropped it entirely (drizzle) so the

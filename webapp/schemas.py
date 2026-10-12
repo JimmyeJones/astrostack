@@ -1390,7 +1390,7 @@ def stack_option_fields() -> list[StackOptionField]:
 #     ``pipeline._stack_target`` after every option merge.
 # Neither may ever be set from raw client input.
 NON_FORM_KEYS = {"dark_path", "flat_path", "flat_dark_path", "bias_path",
-                 "unattended"}
+                 "unattended", "auto_drizzle"}
 
 
 def describable_keys() -> set[str]:
@@ -1399,16 +1399,17 @@ def describable_keys() -> set[str]:
 
 def strip_non_form_keys(data: dict[str, Any]) -> dict[str, Any]:
     """Return *data* without any ``NON_FORM_KEYS`` (the calibration master paths
-    and the ``unattended`` posture flag).
+    and the two posture flags, ``unattended`` and ``auto_drizzle``).
 
     Those paths are resolved server-side from master *ids* and must never
     originate from raw client input (a settings PUT body, a persisted global
     ``default_stack_options``). Callers that seed a StackOptions dict from a
     source that could carry client-supplied paths strip them with this first;
     legitimate server-resolved paths (from ``trigger_stack`` / auto-bind) are
-    applied downstream, after the stripped base. ``unattended`` rides along for
-    the same reason — it says whether anybody is watching the run, which only the
-    server that started the job knows.
+    applied downstream, after the stripped base. The two posture flags ride
+    along for the same reason — ``unattended`` says whether anybody is watching
+    the run and ``auto_drizzle`` whether the app may choose the drizzle itself,
+    and only the server that started the job knows either.
     """
     return {k: v for k, v in data.items() if k not in NON_FORM_KEYS}
 
