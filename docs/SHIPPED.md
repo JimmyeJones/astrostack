@@ -1,5 +1,72 @@
 # Shipped — the record
 
+## 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-wnpajy`) — the on-device-output guard keyed its folder-independent evidence on the folder
+
+### v0.494.1 — 🔴 BUG FIX (observer issue [#1120](https://github.com/JimmyeJones/astrostack/issues/1120)): the device's own pictures are rejected by name at any depth
+
+**What was wrong.** `seestack/io/project.py::reject_seestar_output_frames` is the guard that keeps the
+Seestar's on-device *stacked output* out of the stack and reference pool. It has two tests: the frame's
+**folder** (the bare `<T>/` beside the authoritative `<T>_sub/`, or a `*_video`/`*_photo` capture folder) and,
+since the owner's real library proved the per-folder count guard insufficient, the frame's **filename** (the
+device writes `Stacked*.fit`, its raw subs `Light_*.fit`). The docstring states the filename rule plainly — a
+frame whose name is on-device output is rejected *"at any count"* — but the call implementing it sat **inside**
+the `parent_low == base_low` branch, so the one piece of evidence that does not depend on the folder was only
+ever consulted for frames whose folder had already matched.
+
+That left a reachable hole, because the *planner* puts frames in folders this guard does not recognise. For a
+`<T>_sub/` folder holding FITS of its own, `scanner.plan_incoming_units` computes `is_container = False` and
+its recursive `_under((d,))` then swallows every file in a **nested** child folder into the `<T>_sub` unit →
+target `<T>`. The observer found exactly that on the owner's box: `incoming/M 45_sub/SH2-171/` holding five
+`Stacked_*_SH2-171_*.fit` — the device's own pictures of a *different* object — registered as accepted frames
+of **M 45**, 54.8° from the centre of M 45's own frames, counted in its exposure. Run as a controlled
+experiment with both populations put into the state a fresh ingest leaves, the deployed guard rejected all
+seven in the bare `M 45/` folder and **none** of the five nested ones; the folder was the only variable.
+
+**What ships, and how narrow it is.** `_is_seestar_output_filename` is now asked of **every** accepted frame
+of the target, outside every folder branch; the bare-folder branch keeps its per-folder count accounting
+exactly as before. Four lines of behaviour, and each of the three things that did *not* change is the reason
+the fix is this shape:
+
+- **Nesting on its own still rejects nothing.** The planner absorbs *any* nested folder into the parent
+  target, so a nesting test would silently drop a user's real subs out of their own stack — the exact failure
+  the count guard exists to prevent. A nested folder of ordinary `Light_*` frames, including one named
+  `<B>_sub/`, comes through as accepted as it was; `test_reject_seestar_output_frames_leaves_nested_light_subs_alone`
+  is that control, and it asks the strict prefix test (`StackedRegion3.fit` is somebody's own file) through the
+  new folder-independent path.
+- **The per-folder count guard is untouched.** A genuine `<T>/` folder of raw subs that merely shares a
+  Seestar target's base name is spared exactly as before, and so is a folder mixing a user's `Light_*` with a
+  season of the device's `Stacked*`. Both existing regressions pass unchanged.
+- **The planner half is not made here.** The nested frames are still *registered* under the wrong target, so
+  the counting defect survives the fix — and correcting it collides with the deliberate v0.184.17 carve-out
+  (`test_scan_keeps_a_plain_nested_non_seestar_folder_as_one_target`). The observer's sharpest shape, a nested
+  `*_sub` child of a `*_sub` parent, sits outside that carve-out's stated scope, so reconciling the two is a
+  judgement and is re-filed under Bugs rather than guessed at.
+
+**Why it was worth fixing at severity low.** No published picture was affected and the stack self-heals: the
+footprint guard drops exactly those five at 54.76–54.80° from the group centre with zero collateral out of
+1,465. But it heals under the **wrong diagnosis** — the owner sees five frames of M 45 rejected for a bad
+plate solve, which invites re-solving frames that are not subs, are not M 45's and should never have become
+frames. And the mechanism is not self-limiting: these five are 3-plane and would be align-dropped anyway,
+while a **2-D** `Stacked_*.fit` arriving the same way is the already-documented family that averages into the
+picture at weight 1/N and is *preferentially* chosen as the stack reference, its centre being the dither
+median.
+
+**Guardrails.** Additive and reversible, like every other path through this function: the frames are marked
+`accept=0` with `reject_reason=auto:seestar_output` and the owner can re-accept them, a frame they graded by
+hand (`user_override`) is left alone, a frame already rejected is not re-stamped so a re-scan is idempotent,
+and **nothing on disk is touched** (AGENTS.md §10). No schema change, no setting, no API shape change, no
+default flipped — the guard was already armed on this path, and it now reaches the frames it already claimed
+to reach.
+
+**Tests** (both fail before, `tests/test_scanner.py`): the unit case seeds 30 real subs, five nested
+`Stacked_*` of another object, the seven bare-folder outputs and one nested output the user re-accepted by
+hand, and asserts the nested five and the bare seven go while the subs and the override stay (before: only the
+bare seven). The end-to-end case runs a real `scan_and_organize` over the observer's tree shape, which is what
+proves the guard is *armed* on the path the owner's install runs — `_seestar_output_bases` registers the bare
+`<T>` base off the `<T>_sub` folder — and asserts `n_frames_added == 5` (the planner absorption, unchanged and
+now pinned) against `n_output_frames_rejected == 2` (before: 0, with two accepted frames of another object).
+104 passed in `tests/test_scanner.py`; full suite 7,845 passed / 7 skipped.
+
 ## 2026-10-12 — "Auto, when worth it": a hands-off stack decides its own super-resolution
 
 ### v0.494.0 — 🌟 OWNER-APPROVED FEATURE: auto-drizzle when the subs can pay for it
