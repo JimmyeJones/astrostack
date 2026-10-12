@@ -33,6 +33,27 @@ weighted-mean path. So "worth it" is two measurements and a budget:
    satellite, so the pair is priced as one. The scale steps down towards
    :data:`AUTO_DRIZZLE_MIN_SCALE` and below that the answer is simply "no".
 
+**What saying yes costs, measured** (2026-10-12, ``scripts/measure_drizzle_cost.py``;
+four real ``run_stack`` runs over the same 1920×1080 subs at 12 / 24 / 36 frames
+on a 4-vCPU container). Per-sub slope over that span: plain reproject +
+weighted mean **0.78 s**, drizzle ×1.0 single-pass 1.97 s, drizzle ×1.5
+single-pass 2.23 s, and what this module actually asks for — ×1.5 with two-pass
+rejection — **5.68 s**. So an automatic drizzle costs about **×7 a plain sub**:
+~×2.9 for drizzle plus the bigger canvas, and a further ~×2.5 for the second
+pass, which makes ``drizzle_path``'s "two-pass rejection roughly doubles that
+again" right and a little understated. The whole-run ratio reads lower (×5.2 at
+12 subs, ×6.4 at 36) only because both paths share the same fixed start-up cost.
+
+The **ratio** is the transferable half — the seconds belong to that container,
+and ``seestack.stacktime.estimate_from_runs`` already measures the owner's own
+seconds-per-sub per ``stack_cost_class`` from his finished runs. Multiplying the
+two is uncomfortable at his scale: on a target of 5,477 subs ×7 turns about an
+hour of stacking into most of a day's, and his deepest is 35,894. Nothing here
+refuses on those grounds, deliberately — a time gate is a *new* refusal on the
+on-by-default hot path and the owner's own call, so it is filed for him rather
+than guessed at. What this note exists to prevent is the next reader assuming
+the cost is a few percent.
+
 Nothing here reads a setting or touches I/O: the decision is a pure function of
 numbers the stacker already has in hand, so the run that makes it, the header
 card that records it and the sentence History reads can never describe three

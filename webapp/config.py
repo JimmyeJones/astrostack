@@ -257,6 +257,18 @@ class Settings(BaseModel):
     # (on *or* off), the interactive Stack form is never touched, and
     # "Bring my pictures up to date" stands down by itself because the options it
     # replays carry an explicit ``drizzle`` already.
+    #
+    # **What it costs when it says yes: about ×7 the per-sub wall-clock of the
+    # plain path** — measured 2026-10-12 with ``scripts/measure_drizzle_cost.py``
+    # (per-sub slope over 12/24/36 subs at 1920×1080: plain 0.78 s against 5.68 s
+    # for ×1.5 with two-pass rejection; ~×2.9 of that is drizzle plus the canvas
+    # and a further ~×2.5 the second pass). The ratio is the half that transfers
+    # between machines, and ``seestack.stacktime.estimate_from_runs`` holds the
+    # owner's own seconds-per-sub. **Nothing refuses on time**, and that is a
+    # decision rather than an oversight: a time gate is a new refusal on this
+    # on-by-default path and is filed under "Needs owner sign-off" with these
+    # numbers. Turning this off is the owner's own answer to the same question,
+    # and it is one switch.
     auto_drizzle: bool = True
     # Should the one-click Auto edit trim the ragged, low-coverage border off a
     # mosaic/dithered result? On (the historical behaviour) Auto ends with a

@@ -1,5 +1,78 @@
 # Shipped — the record
 
+## 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-wnpajy`, second task) — what an automatic drizzle costs, and the positive path run at the bar that ships
+
+### v0.494.2 — the v0.494.0 LEAD's shape (a): measured, written down, and **no gate built**
+
+**The gap.** v0.494.0 ships auto-drizzle **on by default and unattended**, and its own filing run named the
+one thing it shipped unmeasured: nobody had a number for what it costs. `drizzle_path`'s module docstring
+claims two multipliers in prose — drizzle "is slower per frame than reproject + accumulate, especially with
+`scale > 1`", and "two-pass rejection roughly doubles that again" — and auto-drizzle turns on **both**, on his
+deepest targets (5,477 and 35,894 subs), with nobody there. The spec set no time budget. The second half of
+the same gap was in the tests: `--deep` is deliberately not stacked and its sensor is 160×120, `--mosaic` and
+`--big` are six subs deep, so every drizzling test in the repo reached the branch only by monkeypatching
+`AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL` to **5**. Nothing here had ever run it at 200.
+
+**The number.** New `scripts/measure_drizzle_cost.py` times four real `run_stack` runs over the *same*
+synthetic 1920×1080 subs — the Seestar's own size — on one pointing, so the two claims can be read off a
+difference instead of being lumped. Three frame counts, 4-vCPU container, `OMP_NUM_THREADS=1`, seconds for
+the whole run:
+
+| N | plain | ×1.0 1-pass | ×1.5 1-pass | ×1.5 2-pass | 2-pass / plain |
+|---|---|---|---|---|---|
+| 12 | 14.83 | 22.88 | 33.55 | 76.50 | ×5.16 |
+| 24 | 23.77 | 46.51 | 52.10 | 130.51 | ×5.49 |
+| 36 | 33.51 | 70.06 | 86.94 | 212.69 | ×6.35 |
+
+Per-sub slope over that span — which is the number that extrapolates, the whole-run ratio being dragged down
+by a fixed start-up cost both paths pay: **plain 0.78 s**, ×1.0 single-pass 1.97 s, ×1.5 single-pass 2.23 s,
+**×1.5 two-pass 5.68 s**. So an automatic drizzle costs about **×7 a plain sub**: ~×2.9 for drizzle plus the
+bigger canvas and a further **~×2.5** for the second pass, which makes `drizzle_path`'s "roughly doubles that
+again" right and slightly understated. The ×1.5 single-pass column is the noisy one on a shared container
+(its 12→24 and 24→36 slopes disagree by ~2×); the two columns the decision turns on are the first and the
+last, and both are linear across the span.
+
+The **ratio** is the transferable half — the seconds belong to that container — and
+`seestack.stacktime.estimate_from_runs` already measures his own seconds-per-sub per `stack_cost_class` from
+his finished runs, so the two multiply. Multiplied out at his scale it is uncomfortable: ×7 turns about an
+hour of stacking into most of a day's on a 5,477-sub target, and his deepest is 35,894. A related consequence,
+noted rather than built: `stack_cost_class` already splits drizzle from plain, so the *first* auto-drizzled
+stack of a target has no comparable basis run and the ETA is silent for it by design.
+
+**What was deliberately NOT built, and why that is the finding.** A time gate — "don't start a six-hour stack
+unattended" — is a **new refusal on the on-by-default hot path**, and the LEAD said in as many words not to
+reach for it without this number. Now that the number exists it says the honest thing is still not to guess:
+"the box has all night" is a judgement about *his* night, and ×7 on 35,894 subs is not a night. So the
+question is filed for him as **item 19 of the one-sitting list**, with the arithmetic at his scale and three
+answers to choose from — leave it; refuse above N hours (he picks N); or just show the estimate first, which
+is the cheapest and is not a refusal but is still a new sentence on the hands-off path. Turning `auto_drizzle`
+off is meanwhile a complete answer and one switch, and the note now beside that setting says so.
+
+**Where the number lives.** Both places a reader would look: `seestack/stack/autodrizzle.py`'s module
+docstring (beside the gates it prices) and `Settings.auto_drizzle`'s own comment in `webapp/config.py`
+(which is what the LEAD asked for). Each says the ratio transfers and the seconds do not, and each says the
+absence of a time gate is a decision rather than an oversight.
+
+**The other half, closed in code.** `tests/test_auto_drizzle_run.py::test_the_real_depth_bar_is_cleared_with_the_constant_unpatched`
+runs the drizzling branch at **exactly `AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL`**, with nothing patched: a
+160×120 sensor and the constant's own worth of sub-pixel-dithered subs on one pointing (a single field's
+canvas is one frame, so `samples_per_output_pixel` returns `None` and the frame count *is* the per-pixel
+depth). It reads `ADRZBAR 200` back out of the finished picture's header beside a ×1.5 canvas and
+`ADRZWHY deep_and_dithered`. The frame count is taken *from* the constant, so the day the bar moves the test
+follows it instead of quietly landing underneath it; it asserts the literal 200 as well, so a move is
+deliberate. 13.6 s, and deliberately the only one of its kind — the rest of the file still lowers the bar,
+which is the right trade for the cases that are about something else.
+
+**No wall-clock assertion anywhere.** A timing test under an eight-way `pytest -n` load is the flake
+`docs/AGENT-ENVIRONMENT.md` warns about, so the measurement stays in the instrument and the conclusion in
+prose. The instrument instead refuses to report a ratio it cannot see: a non-positive slope on the *plain*
+path means the runs are under the warm-up noise floor (at 320×240 the first timed run pays the lazy imports
+the other three reuse, and plain comes back slower at 16 subs than at 8), so it prints why and exits
+non-zero rather than handing the reader a ×3.2 that is noise. That is measured, not hypothesised — it is what
+the first smoke run of the script did.
+
+**No production behaviour changed**: a script, two comments and a test. Full suite 7,846 passed / 7 skipped.
+
 ## 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-wnpajy`) — the on-device-output guard keyed its folder-independent evidence on the folder
 
 ### v0.494.1 — 🔴 BUG FIX (observer issue [#1120](https://github.com/JimmyeJones/astrostack/issues/1120)): the device's own pictures are rejected by name at any depth
