@@ -82,52 +82,36 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **LEAD (Builder 2026-10-11, filed with v0.493.13 — the cost that fix knowingly took, with the shape that
-  gets it back) — the de-levelling's joint fit runs six whole-canvas passes where a strided plane would do,
-  and Auto's mosaic analysis got ~76 % slower.** *(Pillar: performance behind priority 1 — size **S to write,
-  M to be sure of**; severity low, it is seconds on a button the owner presses by hand. Confidence: **measured
-  both ways**, see the figures below; whether the strided estimate is as good is *not* measured, which is why
-  this is a lead.)*
-  **What is measured.** `_delevelled_luminance` now alternates `fit_sky_poly` against the per-level steps
-  (`_LEVEL_FIT_PASSES = 6`), and each pass costs one whole-canvas poly fit plus one sigma-clipped median per
-  level. On a 1500×1500 proxy carrying a gradient and real panel steps: the pass itself **476 → 1771 ms**,
-  `auto_recipe` **1433 → 2522 ms**, and the preset-suggestion endpoint's `classify_target`
-  **1121 → 2011 ms**. Three passes would be 2116 ms for `auto_recipe` and leave 0.0019 of `target_bg` error
-  instead of 0.0008 — a fifth of a slider step instead of a twelfth — so the pass count is a real knob and
-  the measurement for it is in `tests/test_auto_delevel_joint_fit.py`. A canvas whose panels are already
-  level exits after 1–5 passes, so the bill only lands on a mosaic that really has steps.
-  **The shape worth costing, and why it should be nearly free.** Everything the loop produces is tiny: the
-  steps are one scalar per coverage level and the surface is six polynomial coefficients. `fit_sky_poly`
-  already fits *per-tile medians* ("~600 samples instead of millions", its own docstring), and
-  `_robust_stats` already caps its sample at 250 000 strided pixels — so both halves of the alternation are
-  subsampling estimators being handed every pixel six times over. Running the alternation on a **strided**
-  copy of the plane (and the coverage map, and the sky mask) and only evaluating the final surface at full
-  size should cut it by ~stride², with the guard's own `level_sigma` measured on the strided residual exactly
-  as `_robust_stats` would have strided it anyway.
-  **What has to be settled first, and it is not the stride.** `fit_sky_poly` returns an *evaluated surface*,
-  not its coefficients, so a strided fit gives a strided surface and the full-size one cannot be recovered
-  without either exposing the coefficients or re-fitting once at full size on the last pass. Exposing them is
-  the clean move (`eval_poly_surface` is already public and takes them), but it is a change to a primitive
-  three other passes share, so it wants its own before/after on the per-frame flatten and the final-gradient
-  pass rather than being done in passing. **And measure the answer, not the speed:** re-run
-  `tests/test_auto_delevel_joint_fit.py`'s 75-case grid with the strided loop and show the goal errors are
-  unchanged, because a stride that moves them is not an optimisation. Do **not** reach for a smaller
-  `_LEVEL_FIT_PASSES` instead without re-running that grid — the 0.0008 bound is what makes the fix safe on
-  the on-by-default path.
-  **↳ UPDATE (Builder 2026-10-11, with v0.493.14 — the pass count is cheaper to decide than this entry
-  assumed).** `target_bg` is now landed on its control's own 0.01 stops before it reaches the recipe, and at
-  six passes the residual this fix accepts is byte-**invisible** in what Auto emits: the recipe for a quiet
-  mosaic is identical to the one the same stack gets as a single field, across all five geometries × two
-  seeds (`test_the_measured_cost_is_below_the_controls_own_resolution`). So the question for a smaller pass
-  count is no longer "how much goal error?" but **"does the emitted recipe change at all?"** — a yes/no
-  instead of a judgement about a sub-step number, and it does not need the stride work first.
-  **The arithmetic says the likely answer is no, so measure it rather than assuming either way.** A residual
-  changes the emitted stop only where it straddles a half-step boundary: over uniformly distributed
-  positions, **0.0008 (six passes) moves the stop on ~8 %, 0.0019 (three passes) on ~19 %, 0.0061 (one
-  pass) on ~60 %**. So three passes roughly doubles how often Auto's mosaic recipe differs from the
-  identical single field's, which is the thing v0.493.13 existed to close — i.e. the pass count is probably
-  *not* where the ~76 % comes back from, and the strided plane is. Run
-  `test_the_measured_cost_is_below_the_controls_own_resolution` at three passes to settle it in one command.
+- **LEAD (Builder 2026-10-12, what is left of the v0.493.13 cost entry once the stride half is in
+  v0.493.15 — and the measurement its own UPDATE proposed does not work) — is `_LEVEL_FIT_PASSES = 6`
+  more rounds than the picture needs, and what test could tell?** *(Pillar: performance behind
+  priority 1 — size **S to measure, S to change**; severity low, and lower than it was: the ~76 %
+  Auto's mosaic analysis had lost is now mostly back without touching the pass count. Confidence:
+  **measured** — the figures below are this run's, see [`SHIPPED.md`](SHIPPED.md) under v0.493.15.)*
+  The entry this replaces said the question was now a yes/no — *"does the emitted recipe change at
+  all?"* — answerable by running
+  `test_the_measured_cost_is_below_the_controls_own_resolution` at three passes, and predicted the
+  answer was probably no. **Both halves are wrong, and the second one is the finding.** Run at 6 /
+  3 / 2 / 1 passes, that test passes every time: the emitted `target_bg` is identical to the
+  identical single field's on all ten of its cases even at **one** pass, where the continuous goal
+  error is 0.0058 — six times what the entry called the deciding quantity.
+  **Why it cannot see it, measured.** The ten cases are five geometries x two seeds of the *same
+  scene*, so their single-field `target_bg` takes exactly **two** values (0.22332 and 0.22386) —
+  two positions on the 0.01 grid, 0.05 of one step apart, both in the upper half of their step. And
+  this pass's residual is one-signed (the mosaic always reads *lower*), so the error moves the value
+  **away** from the nearest boundary: nothing below **0.0089** — nine tenths of a step — can change
+  the stop on any of the ten. The test's name claims a bar it is nine times too coarse to hold,
+  which is the v0.493.9/v0.493.10 shape again (a figure inside an asserted claim is as unchecked as
+  one in a prose claim) and it is this file's own instrument.
+  **What to do, cheapest first.** (a) Make the sweep cover the *position inside the step*: a DC
+  offset on the scene moves `target_bg` across its own grid, so the claim "below the control's
+  resolution" becomes testable at the ~20 positions where it could fail, and the pass count becomes
+  the yes/no the entry wanted. Assert the sweep really reaches the boundary, or it is circular for
+  a second reason. (b) Only then re-run it at three passes and decide. **Do not lower
+  `_LEVEL_FIT_PASSES` on the strength of the existing test** — it cannot distinguish 0.0008 from
+  0.0058, and the continuous figures (0.0061 / 0.0030 / 0.0019 / 0.0008 for 1 / 2 / 3 / 6 rounds)
+  are the only yardstick with resolution today. (c) The same blind spot applies to every emitted-stop
+  comparison in that file, v0.493.15's own included, so (a) is the fix for all of them at once.
 
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
@@ -3533,6 +3517,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.493.15 **all but the last round of the de-levelling's joint fit now reads a strided plane, so most of the ~76 % v0.493.13 knowingly cost Auto's mosaic analysis is back** (`_LEVEL_FIT_SAMPLE_CAP`, new `_fit_stride`, `_delevelled_luminance`; the level masks also hoisted out of the loop) — a round's whole output is six polynomial coefficients and one scalar per level, and both halves were already subsampling estimators (`fit_sky_poly` solves over ~600 per-tile medians, `_robust_stats` strides its own sample), so handing them every pixel of a 1500×1500 proxy six times over bought nothing. The **last** round still runs at full size, because its surface is the one the guard and the steps are read off. Clock, on a 1500×1500 proxy with a gradient and real panel steps: `_delevelled_luminance` **1761 → 1088 ms**, `auto_recipe` **2276 → 1546 ms**, `classify_target` **2312 → 1573 ms**, the alternation alone **1821 → 969 ms**. The answer: at 1500×1500 over 21 scenes × three raster geometries, the goal error shifts by at most **0.00038** of `target_bg` (a twenty-sixth of its control's step), the worst case 0.00972 → 0.01008, and the same 3 of 21 cases differ from the identical single field either way. **The filed prerequisite — expose `fit_sky_poly`'s coefficients — was not needed**: the strided rounds only produce a step estimate, and the full-size round re-fits from it, so the primitive three other passes share was not touched. **The shape that reads safer is worse**: giving the full-resolution stage its own settle budget makes the alternation 1821 → **2045 ms**, because a mosaic with steps to recover never settles inside six rounds. And the cap is a floor doing work — starved to a twelfth of it the same grid moves the goal by up to 0.0060 and flips one of 150 emitted recipes. **This subsystem's own 300×600 fixture is below the cap and could not measure any of it**, so the scene builders took an `h`/`w` argument (bit-identical on all 300 scenes they build) and the sweep ran at proxy scale — the §1 rule through a third door
 - ✅ v0.493.14 **the on-by-default half of v0.493.11: every number Auto writes into the recipe is now one its own slider can hold** (`auto_op_params` routes all seven through `registry.snap_to_param`; new `_emitted` carries the two reasons an op is dropped; `_sharpen_radius_from_fwhm` drops `_SHARPEN_RADIUS_MIN/_MAX/_STEP` — the last copy of a slider's range in the repo; new `tests/test_auto_knob_grid.py`) — a real Auto run wrote `tone.stretch.target_bg = 0.2388…` on a **0.01**-step control and `tone.saturation.amount = 1.248` on a **0.05**-step one while the readout beside each showed a rounder number and the "What Auto did" sentence a third, so one knob carried three numbers and the first nudge jumped the picture. The lead was gated on what half a step *costs*, and the yardstick is the control's own resolution, not a count of display levels: rendered both ways on five realistic canvases, the snap moves the picture by **1.05–2.73 of 255** at the worst pixel (mean 0.17–0.39, **0.001–0.70 %** of pixels by a whole level) against **5.2–17.9** for *one click* of the same controls (mean 0.4–2.6, **5–96 %** of pixels) — 2–5× less at the worst pixel and 100–1000× less of the picture. A noisy stack does not move at all, because its knobs sit on clip ends that are already stops, which is why the two single-field samples hid it. Verified through the live app: both bundled samples' saved Auto recipes now read `target_bg 0.24` / `saturation 1.25`, the numbers the sentence and the readout already showed. Option **(b)** is answered rather than skipped — **no float parameter declares a step finer than two decimals**, so the existing `decimalScale={2}` readout is exact for every value a control can hold and a third decimal would show nothing; asserted, so the day a 0.001-step parameter is added the test names the readout as the fix. A taste tap still moves every knob it moved, because each `auto_prefs._PARAM_STEP` is a whole number of its control's stops and the grid is anchored at `min` — now read as code, not trusted as a comment. No stored recipe is rewritten
 - ✅ v0.493.13 **the ⭐ gradient/de-levelling bug is fixed — the smooth sky surface and the per-level steps are now fitted against each other instead of a flatness proxy being asked of one plane** (`_delevelled_luminance`, `_LEVEL_FIT_PASSES`, `_LEVEL_FIT_SETTLED`; new `tests/test_auto_delevel_joint_fit.py`, `tests/test_auto_delevel_yardstick_candidate.py` retired into it) — a level's own median is its patch of the canvas's smooth shape **plus** its step, and neither is identifiable a level at a time, which is why asking the raw plane "does this look like sky?" refused every level under a 49 % ramp (**2.08× the truth**, the mosaic 7.1 % dark) and why v0.493.12's detrended yardstick made an along-strip ramp 2.6× worse than the bug. Now `fit_sky_poly` is fitted to the plane with the current steps removed, each step is re-measured as its residual from that surface, and the guard is asked of **that** residual. Measured as the error in the `target_bg` Auto emits, five raster geometries × fifteen scenes × four seeds: worst **0.0229 → 0.0137**, cases over half a slider step **48 of 75 → 7 of 75** (all seven a canvas an object fills, where the pass still does nothing), no case worse than before by more than 0.0008, and the filed geometry **0.0195 → under 0.0003** at every ramp strength. **The defect was on every geometry, not just the 1×4 it was filed on** — 1.47× on a 2×2, 1.67–1.70× on a 2×3, 2.07–2.12× on a 3×3, for a ramp of any orientation, a vignette-like radial residual and a faint filled canvas — and the owner's own rasters were the unmeasured ones. Costs named and asserted: six fit passes (one recovers 28 % of a quiet 2×2's staircase, six recover 82 %), the pass no longer flattens the panels *alone* (the composition does, and better: 0.00052 vs 0.00075 quiet, 0.00052 vs 0.02279 under a ramp), the object end of the 3.0 separation down ~2.3× with every newly-levelled amplitude measuring a **lower** goal error than refusing it did, +4–14 % on a proxy-sized canvas. Collateral: `classify_target`'s ragged-fringe canvases read as a star cluster on 1 of 6 rather than 5 of 6. A single-field stack's Auto is byte-for-byte unchanged
 - ✅ v0.493.12 **the fix filed for the ⭐ gradient/de-levelling bug, measured before it shipped — it fixes that bug and makes two other cases worse, one of them worse than the bug** (new `tests/test_auto_delevel_yardstick_candidate.py`; **no production code changed**) — the ⭐ entry proposed judging `_delevelled_luminance`'s guard on a detrended plane. Reported sky level as a ratio of the identical no-step scene, four seeds: the across-strip ramp it was filed for goes **2.08–2.12× → 1.00–1.02×**, but an **along**-strip ramp goes 2.08–2.11× → **2.69–2.79×** at 20 % and 2.09–2.11× → **5.37–5.42×** at 50 %, and a faint object-filled canvas 1.44× → **1.71×** / 1.31× → **1.82×**. The reason is that detrending the whole canvas removes the smooth shape *common to every panel* (which the guard should ignore) **and** the shape that *differs between* panels (which it must see, and which today it refuses on correctly) — plus a smooth object spanning a strip. So the quantity is under-determined and **moving the constant cannot rescue it**: the two populations close from ~9–17× apart to 3.7× because both ends move together. The entry's own named prerequisite turned out not to be the risk — the degree-2 surface does absorb **35–49 %** of a panel step, but the candidate keeps every step on the raw plane and the mask swap moves it **under 1 %**; a prerequisite that checks out is not evidence the fix is safe. Candidate and costs are **asserted**, as a one-change replica proven to be one change, so neither the idea nor its price can be lost
