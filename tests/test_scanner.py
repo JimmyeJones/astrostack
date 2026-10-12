@@ -939,6 +939,135 @@ def test_reject_seestar_output_frames_rejects_a_multi_frame_photo_folder(tmp_pat
         proj.close()
 
 
+def test_reject_seestar_output_frames_rejects_output_nested_under_the_subs_folder(tmp_path):
+    """Observer issue #1120: a capture folder nested *inside* the authoritative
+    ``<T>_sub/`` is absorbed into ``<T>``'s own frames by the planner, and the
+    device pictures it holds then escaped this guard entirely — their immediate
+    parent is neither the bare ``<T>/`` nor a ``*_video``/``*_photo`` folder, so
+    the branch that consults the *filename* was never entered. The guard's own
+    contract is that a frame whose name is the device's output is rejected "at any
+    count", and the folder was never part of that sentence. The owner's library
+    carried five of another object's ``Stacked_*`` that way, accepted frames of a
+    single field 54.8° from their own pointing. Fails before: the five nested
+    outputs stayed accepted (only the bare folder's seven were rejected)."""
+    proj = Project.create(tmp_path / "proj", name="M 45")
+    try:
+        root = tmp_path / "incoming"
+        subs = [
+            proj.add_frame(FrameRow(
+                source_path=str(root / "M 45_sub" / f"Light_M 45_10.0s_IRCUT_{i:04d}.fit")))
+            for i in range(30)
+        ]
+        # The real shape: the device's own pictures of a *different* object, in a
+        # folder nested one level inside this target's raw-subs folder.
+        nested = [
+            proj.add_frame(FrameRow(source_path=str(
+                root / "M 45_sub" / "SH2-171" / f"Stacked_10.0s_SH2-171_{i:03d}.fit")))
+            for i in range(5)
+        ]
+        # ...and the bare-folder population the guard already handled, so this
+        # test would also catch a fix that traded one for the other.
+        bare = [
+            proj.add_frame(FrameRow(
+                source_path=str(root / "M 45" / f"Stacked_10.0s_M 45_{i:03d}.fit")))
+            for i in range(7)
+        ]
+        # A nested output the user re-accepted by hand is still their decision.
+        kept = proj.add_frame(FrameRow(
+            source_path=str(root / "M 45_sub" / "SH2-171" / "Stacked_keep.fit"),
+            user_override=True))
+
+        rejected = proj.reject_seestar_output_frames("M 45")
+        assert set(rejected) == set(nested) | set(bare)
+        for fid in nested:
+            assert proj.get_frame(fid).accept is False
+            assert proj.get_frame(fid).reject_reason == REJECT_REASON_SEESTAR_OUTPUT
+        for fid in subs:
+            assert proj.get_frame(fid).accept is True
+        assert proj.get_frame(kept).accept is True
+
+        # Still idempotent — a re-scan rejects nothing more.
+        assert proj.reject_seestar_output_frames("M 45") == []
+    finally:
+        proj.close()
+
+
+def test_reject_seestar_output_frames_leaves_nested_light_subs_alone(tmp_path):
+    """The control for the test above, and the reason the fix is a *filename*
+    test rather than a nesting test: the planner absorbs any nested folder into
+    the parent target, so rejecting on nesting would silently drop a user's real
+    subs out of their own stack. A nested folder of ordinary ``Light_*`` frames —
+    including one named ``<B>_sub/``, the app's own marker for raw subs — must
+    come through untouched, however wrong its *attribution* still is (that half
+    is the planner's, and is deliberately not changed here)."""
+    proj = Project.create(tmp_path / "proj", name="M 45")
+    try:
+        root = tmp_path / "incoming"
+        ids = [
+            proj.add_frame(FrameRow(
+                source_path=str(root / "M 45_sub" / "SH2-171" / f"Light_{i:03d}.fit")))
+            for i in range(4)
+        ] + [
+            proj.add_frame(FrameRow(
+                source_path=str(root / "M 45_sub" / "SH2-171_sub" / f"Light_{i:03d}.fit")))
+            for i in range(4)
+        ] + [
+            # Not the device's name, however much it looks like it (the strict
+            # prefix test, asked here through the new folder-independent path).
+            proj.add_frame(FrameRow(
+                source_path=str(root / "M 45_sub" / "SH2-171" / f"StackedRegion{i}.fit")))
+            for i in range(3)
+        ]
+        assert proj.reject_seestar_output_frames("M 45") == []
+        for fid in ids:
+            assert proj.get_frame(fid).accept is True
+    finally:
+        proj.close()
+
+
+def test_scan_rejects_nested_on_device_output_absorbed_into_the_parent_target(tmp_path):
+    """The same bug through the whole scan, which is what proves the fix is armed
+    on the path the owner's install actually runs: ``_seestar_output_bases``
+    registers the bare ``<T>`` base off the ``<T>_sub`` folder, ingest absorbs the
+    nested folder's frames into ``<T>`` (the planner half, unchanged), and the
+    reject pass now takes the device pictures back out of the stack pool.
+    Fails before with ``n_output_frames_rejected == 0`` and two accepted frames of
+    another object."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 45_sub").mkdir(parents=True)
+    for i in range(3):
+        write_seestar_fits(
+            scan_root / "M 45_sub" / f"Light_{i:03d}.fit", n_stars=5, seed=i + 1)
+    nested = scan_root / "M 45_sub" / "SH2-171"
+    nested.mkdir()
+    strays = [
+        write_seestar_fits(
+            nested / f"Stacked_10.0s_SH2-171_{i:03d}.fit", n_stars=5, seed=20 + i)
+        for i in range(2)
+    ]
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        m45 = next(t for t in result.targets if t.safe_name == "M_45")
+        assert m45.n_frames_added == 5               # 3 subs + the 2 absorbed strays
+        assert m45.n_output_frames_rejected == 2     # ...which leave the pool again
+
+        proj = lib.open_target("M_45")
+        try:
+            accepted = list(proj.iter_frames(accepted_only=True))
+            assert len(accepted) == 3                # only the real subs stack
+            by_path = {f.source_path: f for f in proj.iter_frames()}
+            for stray in strays:
+                frame = by_path[str(stray)]
+                assert frame.accept is False
+                assert frame.reject_reason == REJECT_REASON_SEESTAR_OUTPUT
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
 def test_rescan_rejects_pre_v0_184_9_output_pollution_end_to_end(tmp_path):
     """Upgrade path: a library first scanned before the Seestar convention
     shipped merged the on-device output into the ``<T>`` target. Re-scanning with

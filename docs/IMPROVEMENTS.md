@@ -116,42 +116,29 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   longer, which is the only shape that does not pay per round. Do **not** lower it, and do not raise it
   without putting the 60 ms-a-round price beside the 3.6 % in the same sentence.
 
-- **BUG (Scout 2026-10-12, from observer issue #1120 — verified against `main` at v0.493.17, not just the
-  deployed 0.492.34 the observer read) — a capture folder nested under a `*_sub` parent that holds FITS of
-  its own is absorbed into the parent's target, and the on-device-output guard cannot reject the stray
-  frames because it keys on the folder, not the filename.** *(Pillar: autonomy + trust — PRIORITY 2–3; size
-  **S for the narrow fix, M to reconcile with the v0.184.17 carve-out**; severity **low** — the observer
-  measured 5 stray frames of one object attributed to another out of ~110k across one of 100 targets, no
-  published picture affected, and the footprint guard drops all 5 at the next stack — but the mechanism is
-  **not self-limiting**: any nested folder under a `*_sub` parent is absorbed, and a 2-D on-device output
-  arriving that way would average into the picture. Confidence: **reproduced** end to end in the current
-  tree.)*
-  **What is reproduced in `main`.** Two independent halves, both confirmed by reading the running functions:
-  (1) `seestack/io/scanner.py::plan_incoming_units` — for a `<T>_sub/` folder that holds its own FITS,
-  `is_container` is False (line ~407, `not by_rel.get((d,))`), so `_under((d,))` — which is *recursive*
-  (lines ~381-387) — swallows every file in a nested child folder into the `<T>_sub` unit → target `<T>`.
-  A nested `SH2-171/` under `M 45_sub/` therefore becomes frames of **M 45**. (2)
-  `seestack/io/project.py::reject_seestar_output_frames` decides on-device output by the frame's *immediate
-  parent folder* name (`parent_low == base_low`, line ~1535), and the documented "filename escape hatch"
-  (`_is_seestar_output_filename`, line ~1538) sits **inside** that branch — so for a frame whose parent is
-  `SH2-171` (not the bare `<T>`), the one test that does not depend on the folder is never consulted, and
-  `Stacked_*.fit` on-device output nested that way is accepted at `accept=1`.
-  **The narrow, §10-safe fix (observer's point 3, and the guard's own docstring already argues for it):**
-  let `_is_seestar_output_filename` run on every accepted frame regardless of its parent folder — a frame
-  whose name is on-device output is "rejected at any count" by the guard's stated contract, and rejection
-  is additive/reversible (`accept=0`, re-acceptable), touching nothing in `incoming/`. This fixes the
-  *attribution of the stray frames to the stack pool* without touching the planner. **A regression test
-  must fail-before:** seed an `<T>_sub/` with a nested `*/Stacked_*.fit`, run `reject_seestar_output_frames`,
-  assert the nested outputs are rejected (today they are not).
-  **What is NOT in the narrow fix, and needs a design call before anyone widens it:** the planner half (1)
-  still *registers* the nested frames under `<T>` (wrong target), merely now rejected. Fixing the planner
-  collides with the deliberate v0.184.17 carve-out
+- **BUG, REMAINDER (the guard half shipped as v0.494.1; this is what observer issue
+  [#1120](https://github.com/JimmyeJones/astrostack/issues/1120) left) — the *planner* still attributes a
+  capture folder nested under a `*_sub` parent to the parent's target, so the frames are registered as that
+  target's and v0.494.1 only takes the device pictures among them back out of the stack pool.** *(Pillar:
+  autonomy + trust — PRIORITY 2–3; size **M**, because it is a design call rather than a mechanical change;
+  severity **low** — on-device output nested that way is now rejected by name at any depth, so a wrong
+  *count* is what is left, and the observer measured 5 frames of one object attributed to another out of
+  ~110k across one of 100 targets. Confidence: **reproduced** end to end, and asserted as part of the shipped
+  fix — `tests/test_scanner.py::test_scan_rejects_nested_on_device_output_absorbed_into_the_parent_target`
+  pins `n_frames_added == 5` on a target whose own folder holds three.)*
+  `seestack/io/scanner.py::plan_incoming_units` — for a `<T>_sub/` folder that holds its own FITS,
+  `is_container` is False (`not by_rel.get((d,))`), so the *recursive* `_under((d,))` swallows every file in a
+  nested child folder into the `<T>_sub` unit → target `<T>`. A nested `SH2-171/` under `M 45_sub/` therefore
+  becomes frames of **M 45**: its frame count and `total_exposure_s` carry another object's sky, and a nested
+  folder of ordinary `Light_*` subs — the observer's shapes A and B, which the v0.494.1 guard deliberately
+  leaves accepted, because rejecting on *nesting* would drop a user's real subs from their own stack — is
+  still mis-attributed with nothing to catch it.
+  **Why it is not a mechanical change.** Fixing the planner collides with the deliberate v0.184.17 carve-out
   (`test_scan_keeps_a_plain_nested_non_seestar_folder_as_one_target`), which keeps a plainly-nested
-  non-Seestar folder as one target. The observer's sharpest shape — a nested **`*_sub`** child of a
-  `*_sub` parent — sits outside that carve-out's stated scope (its child shares the `_sub` marker), so
-  reconciling the two is a judgement, not a mechanical change. Do **not** make `is_container` descend
-  whenever a `*_sub` child is present without that reconciliation. Full measured repro, controls and
-  rule-outs in the issue.
+  non-Seestar folder as one target. The observer's sharpest shape — a nested **`*_sub`** child of a `*_sub`
+  parent — sits outside that carve-out's stated scope (its child shares the `_sub` marker), so reconciling the
+  two is a judgement. Do **not** make `is_container` descend whenever a `*_sub` child is present without that
+  reconciliation. Full measured repro, controls and rule-outs in the issue.
 
 - **LEAD (Builder 2026-10-12, filed with the v0.494.0 auto-drizzle it is about — the one thing that feature
   ships unmeasured) — nothing in this repo can make a 200-subs-per-pixel drizzled picture, so auto-drizzle's
@@ -3580,6 +3567,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.494.1 **the on-device-output guard stopped keying the one piece of evidence that does not depend on the folder *on the folder*** (`seestack/io/project.py::reject_seestar_output_frames` — `is_seestar_output_filename` now runs on every accepted frame, outside the `parent_low == base_low` branch) — observer issue #1120: a capture folder nested inside the authoritative `<T>_sub/` is absorbed into `<T>`'s frames by the planner, and the device's own pictures it holds escaped the guard entirely, because their immediate parent is neither the bare `<T>/` nor a `*_video`/`*_photo` folder. The owner's library carried five `Stacked_*` of another object that way, accepted frames of a single field **54.8°** from their own pointing — counted in its exposure, and due to be rejected at the next stack under the wrong diagnosis ("bad plate-solve"), which invites re-solving frames that should never have been frames. The guard's own docstring already said a frame whose *name* is on-device output is rejected "at any count"; the folder was never part of that sentence. **Nesting on its own still rejects nothing** — a nested folder of ordinary `Light_*` subs is as accepted as before, because rejecting on nesting would drop a user's real subs out of their own stack — and the per-folder count guard is untouched, so a genuine `<T>/` folder of raw subs is as safe as it was. Additive and reversible (`accept=0`, `auto:seestar_output`, re-acceptable), nothing in `incoming/` touched. The planner half — the wrong *attribution* — is a design call against the v0.184.17 carve-out and is re-filed under Bugs, not made here. Full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.494.0 **🌟 the owner-approved "Auto, when worth it": a hands-off stack now decides its own super-resolution** (new `seestack/stack/autodrizzle.py`; `StackOptions.auto_drizzle` posture + `webapp.walkaway.apply_auto_drizzle`; `Settings.auto_drizzle` on by default; `ADRZ*` cards → `/stack-runs/{id}/info` → `History.autoDrizzleNote`) — drizzle was never used unless a box was ticked, so his pictures came out at the sensor's resolution. It now drizzles ×1.5 when ≥ 200 subs land on one **output pixel** (canvas area ÷ frame footprint, never a mosaic's frame total — observer #901's bug class), the subs moved ≥ 0.2 px sub-pixel (phases measured **round the circle**, so a solve jittering across a pixel boundary cannot read as dither, and **per panel** on a mosaic, where pooling reads a raster of undithered panels as 0.25-vs-0.75 "well dithered"), and the canvas plus its own two-pass rejection fits the budget (stepping 1.5 → 1.2, declining below). An explicit `drizzle` always wins on or off, the Stack form is untouched, and reprocess-all stands down by itself because the options it replays carry one. Every run that was asked says what it chose **and** why not, which is the half that answers his question. Full entry in [`SHIPPED.md`](SHIPPED.md)
 - **v0.493.17** — 🔴 BUG FIX (owner report "the solar stacker is practically unusable", measured on his own captures): blue Sun (`detect_cfa_pattern` now reads red as the brighter non-green site — two of his raw AVIs had it on the other side, 9:36:119), misalignment (`_measure_disk_shift`: disk centre + windowed refine; whole-frame correlation had locked onto the fixed sensor pattern on 138/143 frames), big drifts kept unless the disk leaves the frame, and `frame_sharpness` scored on the disk with the sky's noise floor subtracted (it ran against brightness, r = −0.79).
 - ✅ v0.493.16 **the test that was supposed to say whether the de-levelling's residual reaches the owner's picture could not have seen it, and the answer it was hiding is 3.6 % of positions, not none** (`tests/test_auto_delevel_joint_fit.py`: `test_the_ten_quiet_cases_cannot_see_the_cost_they_were_asserting`, `test_how_often_the_cost_changes_the_stop_auto_writes`, `test_the_pass_count_is_what_moves_how_often_auto_disagrees_with_itself`; **no production code**) — `test_the_measured_cost_is_below_the_controls_own_resolution` claimed the fix's 0.0002–0.0008 residual was invisible in what Auto emits, and passed at 6 / 3 / 2 / **1** fit passes, where the error is 0.0058. Its ten cases are five geometries × two seeds of **one scene**, so their single-field `target_bg` takes exactly two values, both in the lower half of their 0.01 step, and this pass's residual is one-signed (the mosaic always reads *lower*, on all 126 cases measured) — so the error walks the value **away** from the near boundary and nothing under **0.0083** could change the stop on any of them, ten times the cost the name bounded. The lever the entry proposed does not work either: the luminance is whole-image-normalised, so a DC offset on the sky returns the identical `target_bg` to five decimals. The grain does work — `sky_level` is the sky's position inside the image's own robust range — so the sweep now walks `target_bg` across a step and a half, and on that instrument the shipped de-levelling differs from the identical single field on **3 of 84** positions, every one of them just above a rounding boundary on the side the one-signed error walks it off. **And the v0.493.13 cost entry's open question is answered rather than re-asked**: 3 passes 9.5 %, 6 passes 3.6 %, 10 passes 1.2 %, 16 passes 0 % — fewer passes are not free, and raising them is priced at ~60 ms a round and filed as a decision, not flipped

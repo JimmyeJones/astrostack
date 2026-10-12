@@ -1478,7 +1478,10 @@ class Project:
 
         ``output_folder`` is the bare target-folder basename (``"<T>"``); a frame
         is treated as output when its source's immediate parent folder matches it
-        (case-insensitively) or is a ``*_video``/``*_photo`` folder. A frame the
+        (case-insensitively), or is a ``*_video``/``*_photo`` folder, or when its
+        own *filename* is the device's output name — that last test is asked of
+        every frame whatever its folder (see "...and at any depth" below). A
+        frame the
         user manually
         accepted (``user_override``) is left untouched, and a frame already
         rejected is not re-touched — so a re-scan is idempotent.
@@ -1507,6 +1510,27 @@ class Project:
         ``<T>/`` folder of ``Light_*`` subs untouched however many ``Stacked``
         images sit next to it.
 
+        **...and at any depth** (observer issue #1120). That filename test used
+        to sit *inside* the ``parent_low == base_low`` branch, so the one piece
+        of evidence that does not depend on the folder was consulted only for
+        frames whose folder had already matched. A capture folder nested inside
+        the authoritative ``<T>_sub/`` is absorbed into ``<T>``'s own frames by
+        the planner (``scanner.plan_incoming_units``' recursive ``_under``), and
+        the device pictures it holds then escaped this guard altogether: their
+        immediate parent is neither the bare ``<T>/`` nor a
+        ``*_video``/``*_photo`` folder. The owner's library carried five
+        ``Stacked_*`` of another object that way, accepted as frames of a
+        single-field target 54.8° from their own pointing — counted in its
+        exposure, and later rejected by the footprint guard under the wrong
+        diagnosis ("bad plate-solve"), which invites re-solving frames that
+        should never have been frames. So the filename test now runs on **every**
+        accepted frame of the target, whatever its folder — which is what "at any
+        count" already meant, the folder never having been part of that sentence.
+        **Nesting on its own still rejects nothing:** a nested folder of ordinary
+        ``Light_*`` subs is as untouched as it was before, and the planner still
+        attributes it to the parent target (that half is a design call against the
+        v0.184.17 carve-out and is deliberately not made here).
+
         Returns the ids of the frames newly rejected by this call.
         """
         assert self._conn is not None
@@ -1532,15 +1556,24 @@ class Project:
                 continue
             parent = Path(frame.source_path).parent
             parent_low = parent.name.lower()
+            # Asked of every frame, outside every folder branch: only the
+            # *count* half of this guard is per folder (#1120).
+            named_output = _is_seestar_output_filename(frame.source_path)
             if parent_low == base_low:
                 key = str(parent)
                 folder_ids.setdefault(key, []).append(frame.id)
-                if _is_seestar_output_filename(frame.source_path):
+                if named_output:
                     named_output_ids.append(frame.id)
                 else:
                     folder_unnamed.setdefault(key, []).append(frame.id)
             elif parent_low.endswith(_CAPTURE_FOLDER_SUFFIXES):
                 capture_ids.append(frame.id)
+            elif named_output:
+                # A device picture somewhere else under this target — a folder
+                # nested in ``<T>_sub/``, or the subs folder itself. No count
+                # guard applies: the folder is not a population this guard has
+                # to protect, and the name is the whole evidence.
+                named_output_ids.append(frame.id)
         to_reject: list[int] = capture_ids + named_output_ids
         for key, ids in folder_ids.items():
             if len(ids) <= _MAX_SEESTAR_OUTPUT_FRAMES:
