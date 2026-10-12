@@ -1,5 +1,114 @@
 # Shipped — the record
 
+## 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-bz6foc`) — the live preview stops re-fitting the sky model it fitted a moment ago
+
+### v0.494.3 — ⚡ PRIORITY 1 (editor), the third bite out of "Live preview … what remains here is **responsiveness**": **the render resumes from the array the last additive `background.*` op produced, instead of re-fitting the whole canvas's sky on every debounced frame — 5.18 s → 2.81 s on a mosaic the size of the owner's own, and bit-identical.**
+
+*(Baseline `origin/main` at `e3da9c19` (`__version__` 0.494.2): **7846 passed, 7 skipped**, 16m26s with
+`OMP/OPENBLAS/MKL/NUMEXPR_NUM_THREADS=1`, `-n 4 --dist worksteal`, `/tmp/pytest-of-root` cleared first. CI on
+`main` green, no open PRs, and "Bugs (fix these first)" holding no ungated, undecided entry — so this run took
+§2's big-picture review first (`--mosaic --editor --big`, **CLEAN**, record in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md)) and then the one measured, filed editor slice that was waiting.)*
+
+**Where it was filed.** Under "⭐ Editor — make it excellent", the "Live preview" entry has listed
+*responsiveness* as its last open half since v0.57.0. v0.382.2 took the first bite (carry each op's
+**measurement** forward, 1.78×) and v0.382.3 the second (stop reading the full-resolution coverage canvases
+whole). v0.382.2's own write-up then named its successor and deliberately left it: *"`EditContext` has the
+same trick for a spatial model — `frozen_deltas` / `replay_field` … A future run wanting it should ship it as
+its own change, with the 4.2e-7 re-measured on a mosaic proxy and its own much tighter slot budget."*
+
+**What was still being repeated.** `edit_fit_cache` can carry a *number*: a stretch's median and σ, a white
+balance, a sky mode. The three `background.*` ops do not fit a number — they fit a **spatial model**, a mesh
+over the whole canvas and a per-coverage-level offset — so nothing was ever carried for them. Dragging the
+saturation slider at the bottom of Auto's recipe therefore re-fitted the sky at the top of it, on every
+debounced frame, and **twice**: the preview PNG and the histogram are two requests running the same recipe
+over the same proxy.
+
+**The fix, and the one design decision in it.** After the last enabled additive op, the array is a pure
+function of the proxy and of the ops above it — the ops are deterministic, the proxy is the same file — so
+when the next recipe agrees *op for op up to that boundary*, resuming from the stored array renders the same
+picture and skips every fit above it. New `webapp/edit_resume_cache.py` holds the store; one new
+`webapp/routers/editor.py::_render_preview_array` is the single place both live-preview endpoints go through,
+so what either of them reuses is one decision rather than two.
+
+**`apply_recipe` needed no new parameter**, which is what kept this out of the engine entirely. The split is
+made where no stretch has run (`edit_resume_cache.boundary` declines otherwise, because `stretched` and
+`ctx.stage` are per-call state), so the prefix call and the tail call compose into exactly what the single
+call does — asserted bit-for-bit rather than argued.
+
+**Measured** (the bundled samples through `build_auto_recipe_for_run`: `background.level_coverage` →
+`background.final_gradient` → colour calibration → stretch → SCNR → saturation → curves → sharpen → border
+trim; `OMP/OPENBLAS/MKL_NUM_THREADS=1`, best of three):
+
+| canvas | today | resumed | | array | identical? |
+|---|---|---|---|---|---|
+| 1693×1150 mosaic — **the owner's own proxy size** | 5.18 s | **2.81 s** | 1.85× | 23.4 MB | **True**, max diff 0 |
+| 907×615 mosaic (`--mosaic`) | 1.49 s | 0.73 s | 2.06× | 6.7 MB | **True**, max diff 0 |
+| 847×575 mosaic at proxy stride 2 (`--big`) | 1.50 s | 0.68 s | 2.21× | 5.8 MB | **True**, max diff 0 |
+| 480×320 single field | 0.31 s | 0.19 s | 1.64× | 1.8 MB | **True**, max diff 0 |
+
+Three of those four canvases are mosaics with **3.6–4.8 % of their pixels uncovered**, which is where any
+spatial shortcut is most likely to diverge. And the two caches compose: through the endpoint, with
+`edit_fit_cache` warm as well, the `--mosaic` render goes **2.08 s → 0.40 s** with the sky fit counted and
+found to have run exactly once.
+
+**Why the array and not the field, which is the half v0.382.2 left open.** Replaying a recorded field
+(`EditContext.record_field` / `replay_field`, built for the loupe) reconstructs the picture as
+`before + float32(after − before)` — which is **not** `after`. One float32 rounding, the ~4e-7 v0.382.2
+measured, on the one surface whose entire job is to show what the export will do; that is the reason it stood
+the slice down, and it is a real reason. It would also cost **more** memory, not less: a mosaic's Auto recipe
+carries two additive ops, so two fields, against the one array a boundary needs. Caching the boundary answers
+both at once — hence `max diff 0` above rather than "below a 16-bit LSB".
+
+**The budget is in bytes, because bytes are what the box has** (AGENTS.md §3, "never trade correctness or
+memory safety for speed"). `MAX_BYTES = 64 MB` across the whole store with oldest-first eviction, and
+`MAX_ENTRIES = 2`: one slot is the editor's own shape (a person edits one picture at a time), two covers
+stepping back to the previous one. One slot of the largest proxy `PROXY_MAX_PX` allows is 27 MB, so two of
+them is the ceiling rather than an estimate; an array that would not fit the budget alone is simply not
+cached, and the store's own total is asserted after a sweep that overfills it.
+
+**Three things are load-bearing and each is pinned by a test:**
+
+- **The master's identity is in the key**, not only the render geometry — `(mtime_ns, size)` of the run's
+  FITS beside `edit_fit_cache.render_key`'s project / run / scale / shape / `already_display`. The fit cache
+  can live without it (a stale *measurement* read off slightly different pixels is slightly wrong); an array
+  is a **picture**, and a stale one would be the wrong one. One `stat` per render.
+- **A disabled op is not a step.** `apply_recipe` filters them before it runs anything, so the boundary is a
+  position in the *enabled* list — counting a switched-off op would put it one op below where the array
+  actually reaches.
+- **A render whose op failed is not cached.** A failed op is *skipped*, so the array is not the picture that
+  recipe makes, and the next render has to run it again for the editor to say so again.
+
+Carried notes travel by **position** and are re-keyed onto the new render's uids on arrival, because
+`record_note` keys by `uid` and `recipe_from_dict` mints a fresh uid for every recipe posted without one.
+Only `tone.color_calibrate` records a note today and it sits below the boundary in Auto's recipe — but a
+hand-built recipe can put it above, and the histogram's `color_cal` read-out must not blink out when a render
+resumes.
+
+**Upgrade-safe (§9), and cheaply so:** an in-process `OrderedDict`, nothing persisted, no config key, no
+schema, no on-disk path, no API shape, no default flipped. A miss — a restarted container, an evicted entry,
+a changed op above the boundary — is precisely today's render, so the worst case of the whole module is what
+the app already does.
+
+**Tests (+14, `tests/webapp/test_edit_resume_cache.py`).** Eight pure (the boundary sits after the last
+additive op; no additive op means no boundary; a *disabled* additive op does not move it; a stretch above it
+declines the whole idea; only a recipe that agrees up to the boundary resumes, and a fresh uid is not a
+change while a changed param is; a rewritten master invalidates it at the same shape and scale; the store is
+bounded by bytes *and* entries with oldest-first eviction; an array over the whole budget is not cached; and
+notes are re-keyed onto this render's uids). Six through the endpoints, **three failing before** (verified in
+a `git worktree` at `origin/main`, with `webapp.routers.editor.__file__` printed to prove the old module was
+the one under test — the documented trap for a change that *adds* a module): a repeat preview skips the fit
+and returns byte-identical bytes; the histogram beside it resumes from the same array; and an edit **below**
+the boundary reuses while still rendering, byte for byte, what that same recipe renders from cold. The other
+three are guards against staleness rather than against today's behaviour, so they pass before — both were
+checked to have teeth by breaking the code on purpose (comparing op ids without their params, and caching a
+failed render) and watching each one fail.
+
+**Dogfood.** `--mosaic --editor --big` before the change, **zero findings** — nothing overflowing, no console
+errors, page heights at the standing baseline, the scale pair 0 of 16 answers moved, Auto's trim 7.9 % on the
+`--mosaic` control, all three editor drives and all three Auto taste rows clean. The record is in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md).
+
 ## 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-wnpajy`, second task) — what an automatic drizzle costs, and the positive path run at the bar that ships
 
 ### v0.494.2 — the v0.494.0 LEAD's shape (a): measured, written down, and **no gate built**

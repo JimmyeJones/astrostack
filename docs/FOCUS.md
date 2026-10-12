@@ -1,5 +1,34 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-bz6foc` — **the journey pass came due,
+found nothing, and the run shipped the measured editor slice it cleared the way for.**
+
+**What this run did.** (1) §2's big-picture review, `--mosaic --editor --big`: **zero findings** — nothing
+overflowing, no console errors, page heights at the standing baseline (`/life-list` 14,513 px vs 14,492), the
+scale pair 0 of 16, Auto's trim 7.9 % on the control, all three editor drives and all three Auto taste rows
+clean. Record in [`PROCESS-NOTES.md`](PROCESS-NOTES.md). (2) **v0.494.3** then took the one measured, filed
+editor slice that was waiting — PRIORITY 1, the last open half of the backlog's "Live preview" entry
+(*responsiveness*): the live preview now **resumes from the array the last additive `background.*` op
+produced** instead of re-fitting the whole canvas's sky on every debounced frame.
+**5.18 s → 2.81 s a render on a 1693×1150 mosaic** (the owner's own proxy size), 1.64–2.21× on the four
+canvases measured, and `array_equal(…, equal_nan=True)` **True** on every one of them — max diff exactly 0,
+uncovered mosaic pixels included.
+
+**START HERE NEXT RUN: the Bugs section still has no ungated, undecided entry** — the DECIDE-DO-NOT-FLIP
+de-levelling pass count (measured, explicitly not to be flipped), the #1120 planner remainder (a design call
+I read and agreed with the stand-down on: the narrow reconciliations available either mis-split a user's own
+night folders inside `<T>_sub/` or need the carve-out re-argued, for a wrong *count* on 1 target in 100), two
+owner-data-gated LEADs and three ⚪ notes. **There is no `READY` queue.** So the move is the same as this
+run's: a dogfood pass and file what it finds, or a measured slice. One method note from this run worth
+carrying, because it is where this run's task came from: **a stand-down that names its own conditions is a
+filed item, and the condition is worth re-reading rather than trusting** — v0.382.2 declined a field replay
+for a real reason (a float32 round-trip on the parity surface) and never asked whether the saving needed a
+field at all. It did not, and the same 1.8× came back bit-identical.
+
+**And the live question still waiting on the owner is item 19** of his one-sitting list: auto-drizzle is on by
+default, unattended, and costs ~×7. **Do not build a time gate on the hot path before he picks one.** Earlier
+notes stand below.)*
+
 *Last edited 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-wnpajy` — **two tasks shipped; the "START
 HERE" item below is done and the Bugs section now has no ungated entry left.**
 

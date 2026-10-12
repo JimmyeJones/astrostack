@@ -1,5 +1,75 @@
 # Process notes & QA sweep records
 
+## 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-bz6foc`) — the big-picture dogfood came due and found nothing, and the slice it cleared the way for was one a previous run had already measured and declined
+
+*(Baseline `origin/main` at `e3da9c19` (0.494.2): **7846 passed, 7 skipped**, 16m26s, `-n 4 --dist worksteal`,
+`/tmp/pytest-of-root` cleared first. CI on `main` green. No open PRs. `list_issues`: nothing new owed — the
+Scout acted on the inbox the same day. "Bugs (fix these first)" holds no ungated, undecided entry for an
+eleventh run, which is what `FOCUS.md` said to expect and why it pointed at a journey pass.)*
+
+### The pass — `--mosaic --editor --big`, **CLEAN, zero findings**
+
+Four reading positions, all three samples, both widths, three editor drives:
+
+- **Nothing overflowed, no console error**, on any page at 1440 px or 420 px, on all three targets.
+- **Page heights at the standing DOGFOOD BASELINE**: `/life-list [Still to shoot]` **14,513 px** on a phone
+  against the recorded 14,492; every other row unchanged.
+- **The scale pair read 0 of 16** canvas-independent answers moved, as it has since v0.492.38. Auto's trim is
+  **7.9 %** on the `--mosaic` control (unchanged for seven runs) and **7 %** on `--big`.
+- **Read as one paragraph, the three Target pages agree.** The mosaic's four cards share one arithmetic — 4 min
+  over "about 3 fields of sky", a typical part at 1 min, the thin panel at 30 s against 1 min, 75 % of the
+  object captured — and the full-size twin differs only where it should (`🎯 Nicely framed`, because its bigger
+  sensor really does hold the object). The single field's readiness card says *"of ~2 h **for this single
+  field**"* beside a coaching card telling him to go wide, which is v0.444.2 working.
+- **All three Auto taste rows read honestly**: 10 chips live, the right 2 marked, the "why Auto shifted" note
+  neutral before a tap, narrowed after the live one, and the marked chip answered with its own sentence plus
+  the note's "already at its limit there on this picture" clause. The `--big` loupe opened twice, read its
+  caveat with "Noise reduction" in the recipe, and the split and navigator behaved.
+
+One thing worth naming so it is not re-filed as a finding: on the `--big` target **every** op in the Add-menu
+loop reprints the sharpen advisory, because Auto's seeded recipe keeps a 1 px sharpen and `1.0 / 2.0` is under
+the advisory floor at proxy stride 2. That is the advisory being true on every recipe it is true of, not a leak.
+
+### Why the task after it was *not* a new idea
+
+With the backlog's front gated, the honest options were a dogfood finding (there was none) or a measured,
+filed slice. The one waiting was in [`SHIPPED.md`](SHIPPED.md) rather than in the backlog's own list: v0.382.2
+closed the live preview's first two responsiveness bites and ended with *"the next slice, measured and
+deliberately not taken"*, naming its own conditions for a future run. **A stand-down that names its conditions
+is a filed item, and `SHIPPED.md` is one of the three files `grep -r <noun> docs/` is supposed to reach** — the
+backlog's "Live preview" entry still lists responsiveness as open, and the spec for the next bite lives next to
+the measurement that chose the last one.
+
+### The method note: the stand-down was right, and it was right about the *instrument*, not the idea
+
+v0.382.2 declined to replay a recorded **field** because the reconstruction is
+`before + float32(after − before)`, which is not `after` — ~4e-7 of float32 rounding, on the one surface whose
+job is to show what the export will do. Three runs of this repo's own history say a near-miss on a priority-1
+parity surface is not worth taking, so the refusal stands. What it did not ask is whether the *saving* needs
+the field at all. It does not: the thing worth keeping is the **picture at the boundary**, and an array handed
+back to a deterministic pipeline is exactly what the pipeline would have produced. So the same 1.8× came back
+**bit-identical** (max diff exactly 0 on four canvases, three of them mosaics with 3.6–4.8 % uncovered), with
+*one* array instead of two fields, and with no engine change at all — because the split is made where no
+stretch has run, so two ordinary `apply_recipe` calls compose into what one call does.
+
+**Transferable:** when a measured stand-down turns on a *property of the mechanism* (here, that reconstructing
+a value from a float32 delta loses a rounding), check whether the goal needs that mechanism before accepting
+the price or the refusal. The entry had already priced the only instrument it considered.
+
+And the second half, which cost the first version of the budget: **the question "how much memory is this?" has
+a different answer per canvas, so the bound has to be in bytes.** An entry count bounds a store of scalars
+(v0.382.2's eight slots are kilobytes); it bounds nothing when a slot is an image — two slots is 12 MB on the
+`--mosaic` sample and 54 MB on the largest proxy the editor can build.
+
+### The recurring kickoff-vs-§10 disagreement, unchanged
+
+The session's harness attribution asks for a `Claude-Session:` trailer and a model identifier in commit
+messages; AGENTS.md §10 forbids a model identifier in anything pushed to the repository, and §8 asks for the
+repo's own `Co-Authored-By:` trailer. AGENTS.md wins (its own §0 and the kickoff prompt both say so), so the
+commit carries `Co-Authored-By: Claude <noreply@anthropic.com>` and nothing else. Recorded for the Nth time so
+the next run does not re-decide it.
+
+
 ## 2026-10-12 (Scout, branch `claude/funny-shannon-xhrlqt`) — observer issue #1120 verified + filed into Bugs; rotation sweep (3) ASTAP/ffmpeg filesystem side effects re-swept CLEAN (ran with a stub ASTAP + real ffmpeg); issue inbox five open, the other four previously acted-on and owner-gated
 
 Baseline before any change: full suite **green** (exit 0, `-n auto`). One open PR at start: none. Five open
