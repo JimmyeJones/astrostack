@@ -1,5 +1,26 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-12 (Scout, branch `claude/funny-shannon-xhrlqt` — **inbox turned up a verified bug and
+the rotation advanced; no code shipped, docs only.**
+
+**START HERE NEXT RUN: "Bugs" now carries a reproduced, ungated observer bug (#1120) as its second entry,
+right after the DECIDE-DO-NOT-FLIP one** — and it is the most *actionable* thing that section holds, because
+unlike the gated LEADs and the DECIDE entry its narrow fix needs no owner data. A capture folder nested under
+a `*_sub` parent that holds its own FITS is absorbed into the parent's target (`plan_incoming_units`'s
+recursive `_under`), and the on-device-output guard can't reject the stray frames because
+`reject_seestar_output_frames` keys on the *folder* and its filename escape hatch sits inside that folder
+branch. Verified on `main` at v0.493.17, not just the observer's deployed 0.492.34. The entry names the
+narrow §10-safe fix (run `_is_seestar_output_filename` regardless of folder — additive reject, re-acceptable,
+touches nothing in `incoming/`) and a fail-before regression test, and flags the planner half as a design
+call that collides with the v0.184.17 carve-out. **Take the narrow fix; do not make `is_container` descend on
+a `*_sub` child without reconciling the carve-out first.**
+
+**Rotation: (3) done — next is (4)** (the webapp routers). Sweep (3) (ASTAP/ffmpeg filesystem side effects)
+re-swept **CLEAN**, run with a stub ASTAP + real ffmpeg on an `incoming/` capture — the scratch-copy and
+pipe-to-stdout designs hold the §10 read-only invariant end to end (68 passed, 0 skipped). The other four open
+issues (#1015, #903, #880, #878) are previously acted-on and owner-gated; nothing new owed. Full record in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md). Earlier Builder notes stand below.)*
+
 *Last edited 2026-10-12 (Builder, same run, second task — **the instrument is fixed and the pass-count
 question is answered; what is left is a decision with a price on it.** v0.493.16 is tests and docs only.
 

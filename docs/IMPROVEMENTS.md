@@ -116,6 +116,43 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   longer, which is the only shape that does not pay per round. Do **not** lower it, and do not raise it
   without putting the 60 ms-a-round price beside the 3.6 % in the same sentence.
 
+- **BUG (Scout 2026-10-12, from observer issue #1120 — verified against `main` at v0.493.17, not just the
+  deployed 0.492.34 the observer read) — a capture folder nested under a `*_sub` parent that holds FITS of
+  its own is absorbed into the parent's target, and the on-device-output guard cannot reject the stray
+  frames because it keys on the folder, not the filename.** *(Pillar: autonomy + trust — PRIORITY 2–3; size
+  **S for the narrow fix, M to reconcile with the v0.184.17 carve-out**; severity **low** — the observer
+  measured 5 stray frames of one object attributed to another out of ~110k across one of 100 targets, no
+  published picture affected, and the footprint guard drops all 5 at the next stack — but the mechanism is
+  **not self-limiting**: any nested folder under a `*_sub` parent is absorbed, and a 2-D on-device output
+  arriving that way would average into the picture. Confidence: **reproduced** end to end in the current
+  tree.)*
+  **What is reproduced in `main`.** Two independent halves, both confirmed by reading the running functions:
+  (1) `seestack/io/scanner.py::plan_incoming_units` — for a `<T>_sub/` folder that holds its own FITS,
+  `is_container` is False (line ~407, `not by_rel.get((d,))`), so `_under((d,))` — which is *recursive*
+  (lines ~381-387) — swallows every file in a nested child folder into the `<T>_sub` unit → target `<T>`.
+  A nested `SH2-171/` under `M 45_sub/` therefore becomes frames of **M 45**. (2)
+  `seestack/io/project.py::reject_seestar_output_frames` decides on-device output by the frame's *immediate
+  parent folder* name (`parent_low == base_low`, line ~1535), and the documented "filename escape hatch"
+  (`_is_seestar_output_filename`, line ~1538) sits **inside** that branch — so for a frame whose parent is
+  `SH2-171` (not the bare `<T>`), the one test that does not depend on the folder is never consulted, and
+  `Stacked_*.fit` on-device output nested that way is accepted at `accept=1`.
+  **The narrow, §10-safe fix (observer's point 3, and the guard's own docstring already argues for it):**
+  let `_is_seestar_output_filename` run on every accepted frame regardless of its parent folder — a frame
+  whose name is on-device output is "rejected at any count" by the guard's stated contract, and rejection
+  is additive/reversible (`accept=0`, re-acceptable), touching nothing in `incoming/`. This fixes the
+  *attribution of the stray frames to the stack pool* without touching the planner. **A regression test
+  must fail-before:** seed an `<T>_sub/` with a nested `*/Stacked_*.fit`, run `reject_seestar_output_frames`,
+  assert the nested outputs are rejected (today they are not).
+  **What is NOT in the narrow fix, and needs a design call before anyone widens it:** the planner half (1)
+  still *registers* the nested frames under `<T>` (wrong target), merely now rejected. Fixing the planner
+  collides with the deliberate v0.184.17 carve-out
+  (`test_scan_keeps_a_plain_nested_non_seestar_folder_as_one_target`), which keeps a plainly-nested
+  non-Seestar folder as one target. The observer's sharpest shape — a nested **`*_sub`** child of a
+  `*_sub` parent — sits outside that carve-out's stated scope (its child shares the `_sub` marker), so
+  reconciling the two is a judgement, not a mechanical change. Do **not** make `is_container` descend
+  whenever a `*_sub` child is present without that reconciliation. Full measured repro, controls and
+  rule-outs in the issue.
+
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
   (0.25°) loses its per-panel identity entirely, and every per-panel surface in the engine then silently
