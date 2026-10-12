@@ -23,9 +23,9 @@ from seestack.video.lucky import (
     MIN_FRAMES,
     VideoStackCancelled,
     _sampling_stride,
-    ordinal,
     frame_luma,
     frame_sharpness,
+    ordinal,
 )
 from tests.videosynth import lunar_frame, lunar_video, write_video
 
@@ -488,3 +488,133 @@ def test_grade_locates_the_sharpest_frame_without_holding_one(tmp_path):
     graded = grade_video(path)
     assert graded.best_index == 3
     assert graded.best_frame is None
+
+
+# --- the owner's Sun: small, drifting, and over a fixed sensor pattern ------
+#
+# 2026-10-12, measured on the owner's own captures with a diagnostic run inside
+# his container: on ``2026-06-19-181632-Solar-RAW.avi`` the Sun covers 7 % of a
+# 1080×1920 frame; the whole-frame phase correlation disagreed with the disk's
+# own centre by > 4 px on **138 of 143** sampled frames (median disk motion
+# 22.6 px, correlation 7.1 px) — the camera's stationary noise pattern, the same
+# in every frame, won the correlation; a few frames drifted 170–270 px, past the
+# 162 px limit; and the sharpness score ran *against* brightness (r = −0.79), so
+# the dimmest, noisiest frames were kept as the sharpest. The fixture below is
+# that shape at 480×270.
+
+_SUN_H, _SUN_W, _SUN_R = 270, 480, 53          # 53 px radius → ~7 % of the frame
+
+
+def _fixed_pattern(seed: int = 1) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    return (rng.normal(0, 6, (_SUN_H, _SUN_W))
+            + np.tile(rng.normal(0, 4, _SUN_W), (_SUN_H, 1))).astype(np.float32)
+
+
+def _sun(cy, cx, *, fpn, sharp=1.0, bright=1.0, noise=1.0, seed=0) -> np.ndarray:
+    """A small limb-darkened Sun with three spots, over the sensor's fixed pattern."""
+    yy, xx = np.mgrid[:_SUN_H, :_SUN_W].astype(np.float32)
+    r = np.hypot(xx - cx, yy - cy)
+    disk = np.clip((_SUN_R - r) / 2 + 0.5, 0, 1)
+    limb = 1 - 0.4 * np.clip(r / _SUN_R, 0, 1) ** 2
+    spots = np.zeros_like(disk)
+    for oy, ox, s in ((-15, 10, 4), (20, -18, 3), (5, 25, 2.5)):
+        spots += np.exp(-(((yy - cy - oy) ** 2 + (xx - cx - ox) ** 2) / (2 * (s * (2 - sharp)) ** 2)))
+    img = 120 * bright * disk * limb * (1 - 0.6 * spots) + 20
+    return img + fpn + np.random.default_rng(seed).normal(0, noise, img.shape).astype(np.float32)
+
+
+def _u8(img: np.ndarray) -> np.ndarray:
+    return np.repeat(np.clip(img, 0, 255).astype(np.uint8)[..., None], 3, axis=2)
+
+
+def _spot_depth(lum: np.ndarray) -> float:
+    """How far the darkest spot dips below the disk's typical level (0..1)."""
+    from scipy.ndimage import binary_erosion, gaussian_filter
+
+    sm = gaussian_filter(lum, 1.5)
+    inside = sm > 0.5 * (np.percentile(sm, 99.5) + np.median(sm))
+    core = binary_erosion(inside, iterations=12)   # away from the limb's own darkening
+    return float(1.0 - sm[core].min() / np.median(sm[core]))
+
+
+def _write_lossless(path, frames, fps=10):
+    """Uncompressed RGB AVI — the owner's raw captures are lossless, and an H.264
+    encode smooths away exactly the fixed pattern that fooled the old alignment."""
+    import subprocess
+
+    from seestack.video.ffmpeg import ffmpeg_path
+
+    h, w = frames[0].shape[:2]
+    proc = subprocess.Popen(
+        [ffmpeg_path(), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24",
+         "-s", f"{w}x{h}", "-r", str(fps), "-i", "-", "-c:v", "rawvideo", "-pix_fmt", "bgr24",
+         str(path)], stdin=subprocess.PIPE)
+    for f in frames:
+        proc.stdin.write(np.ascontiguousarray(f).tobytes())
+    proc.stdin.close()
+    assert proc.wait() == 0
+    return path
+
+
+def test_alignment_follows_a_small_sun_not_the_sensors_fixed_pattern():
+    """Fails before: the whole-frame correlation locked onto the stationary
+    pattern on every frame (median error ~47 px here; 138/143 on his file)."""
+    from seestack.video.lucky import _find_disk, _measure_disk_shift
+
+    fpn = _fixed_pattern()
+    rng = np.random.default_rng(2)
+    ref = _sun(135, 240, fpn=fpn)
+    ref_disk = _find_disk(ref)
+    errors = []
+    for k in range(30):
+        dy, dx = rng.uniform(-60, 60), rng.uniform(-60, 60)
+        frame = _sun(135 + dy, 240 + dx, fpn=fpn, seed=k + 1)
+        sy, sx = _measure_disk_shift(ref, ref_disk, frame, _find_disk(frame))
+        errors.append(float(np.hypot(sy + dy, sx + dx)))
+    assert max(errors) < 1.0, f"alignment errors (px): {sorted(errors)[-5:]}"
+
+
+def test_a_small_drifting_sun_stacks_sharp(tmp_path):
+    """End to end through the decoder: the stack keeps the spots crisp.
+
+    Fails before: the frames were 'aligned' onto the fixed pattern — i.e. not
+    moved — so the drifting disk averaged into a blur."""
+    fpn = _fixed_pattern()
+    rng = np.random.default_rng(3)
+    centres = [(135 + rng.uniform(-35, 35), 240 + rng.uniform(-35, 35)) for _ in range(12)]
+    frames = [_u8(_sun(cy, cx, fpn=fpn, seed=i)) for i, (cy, cx) in enumerate(centres)]
+    path = _write_lossless(tmp_path / "Solar_video.avi", frames)
+    result = stack_video(path, LuckyOptions(keep_percent=100, align=True))
+    assert result.n_stacked == 12 and result.n_align_failed == 0
+    # Judged by how dark the sunspots stay, not by a sharpness score: an unmoved
+    # stack keeps the sensor's fixed pattern crisp (it is the same in every
+    # frame), which a Laplacian reads as detail — the very thing that hid this.
+    single = _spot_depth(frames[0][..., 0].astype(np.float32))
+    stacked = _spot_depth(np.nan_to_num(result.image[..., 0]) * 255.0)
+    assert stacked > 0.88 * single, f"spot depth {stacked:.2f} vs one frame {single:.2f}"
+
+
+def test_a_big_drift_is_kept_and_only_a_disk_off_the_edge_is_dropped(tmp_path):
+    """The owner's Sun drifts up to ~270 px. A disk that is still whole is a
+    good frame however far it moved; one running off the edge is not.
+
+    Fails before: anything past 15 % of the short edge (40 px here) was dropped."""
+    fpn = _fixed_pattern()
+    centres = [(135, 240)] * 3 + [(135 + 70, 240 - 150), (135 - 70, 240 + 150)] + [(135, 470)]
+    frames = [_u8(_sun(cy, cx, fpn=fpn, seed=i)) for i, (cy, cx) in enumerate(centres)]
+    path = _write_lossless(tmp_path / "Solar_video.avi", frames)
+    result = stack_video(path, LuckyOptions(keep_percent=100, align=True))
+    assert result.n_stacked == 5            # the two far-drifted frames are kept
+    assert result.n_align_failed == 1       # the one cut off at the right edge is not
+
+
+def test_sharpness_keeps_the_crisp_frames_over_hazy_noisy_ones():
+    """Fails before: the whole-frame score ran against brightness, so a dimmer,
+    noisier, softer frame out-scored a crisp one (r = −0.79 on his capture)."""
+    fpn = _fixed_pattern()
+    crisp = [frame_sharpness(_sun(135, 240, fpn=fpn, sharp=1.0, bright=1.0, noise=2, seed=i))
+             for i in range(5)]
+    hazy = [frame_sharpness(_sun(135, 240, fpn=fpn, sharp=0.3, bright=0.55, noise=6, seed=50 + i))
+            for i in range(5)]
+    assert min(crisp) > max(hazy), (crisp, hazy)

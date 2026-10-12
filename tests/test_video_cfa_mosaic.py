@@ -276,9 +276,12 @@ def test_the_two_patterns_are_one_row_flip_apart():
     # And the detector agrees about which name goes with which diagonal.
     sites = _OWNERS_MEASURED_SITES
     assert detect_cfa_pattern(_mosaic_from_sites(sites)) == CFA_PATTERN_GREEN_DIAGONAL
-    antidiagonal = {(0, 0): 10.2, (0, 1): 40.7, (1, 0): 40.7, (1, 1): 131.7}
+    antidiagonal = {(0, 0): 131.7, (0, 1): 40.7, (1, 0): 40.7, (1, 1): 10.2}
     assert (detect_cfa_pattern(_mosaic_from_sites(antidiagonal))
             == CFA_PATTERN_GREEN_ANTIDIAGONAL)
+    # (Corrected 2026-10-12: this case used to put the bright site at (1,1) and
+    # expect RGGB — i.e. it asserted a *blue* Sun. Which site is red is read from
+    # the light now; the swapped layouts are pinned in the test below.)
 
 
 def test_a_frame_with_nothing_to_read_falls_back_instead_of_guessing():
@@ -416,3 +419,34 @@ def test_a_kept_frame_is_debayered_even_when_the_first_frame_is_discarded(tmp_pa
     assert picked[0] is None
     assert np.array_equal(picked[3], every[3])
     assert _mesh_strength(picked[3][..., 1]) < 0.05
+
+
+# --- ...and with red read from the light, not assumed -----------------------
+#
+# 2026-10-12: the owner's next two raw captures put the bright site on the
+# *other* side of the same green diagonal, so the assumed GBRG made the Sun blue
+# (measured 9:36:119). Measured site means of
+# ``incoming/Solar_video/2026-06-19-180604-Solar-RAW.avi``:
+_OWNERS_SECOND_CAPTURE_SITES = {(0, 0): 36.4, (0, 1): 119.0, (1, 0): 9.1, (1, 1): 36.4}
+
+
+@pytest.mark.parametrize("sites, expected", [
+    (_OWNERS_MEASURED_SITES, "GBRG"),                    # bright at (1,0)
+    (_OWNERS_SECOND_CAPTURE_SITES, "GRBG"),              # bright at (0,1) — was blue
+    ({(0, 0): 131.7, (0, 1): 40.7, (1, 0): 40.7, (1, 1): 10.2}, "RGGB"),
+    ({(0, 0): 10.2, (0, 1): 40.7, (1, 0): 40.7, (1, 1): 131.7}, "BGGR"),
+])
+def test_red_is_the_brighter_non_green_site_whichever_way_the_capture_lies(sites, expected):
+    """Every orientation of the owner's sensor debayers to a red-orange Sun.
+
+    Fails before on the two swapped layouts: ``GRBG`` and ``BGGR`` were never
+    returned, so those captures decoded with red and blue exchanged."""
+    from seestack.io.fits_loader import bilinear_debayer
+    from seestack.video.ffmpeg import detect_cfa_pattern
+
+    mosaic = _mosaic_from_sites(sites)
+    pattern = detect_cfa_pattern(mosaic)
+    assert pattern == expected
+    rgb = bilinear_debayer(mosaic, pattern=pattern)[4:-4, 4:-4]
+    r, g, b = (float(rgb[..., c].mean()) for c in range(3))
+    assert r > g > b, f"{sites} → {pattern} decoded {r:.0f}:{g:.0f}:{b:.0f}, not a red-orange Sun"
