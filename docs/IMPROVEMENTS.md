@@ -2377,6 +2377,31 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-APPROVED (2026-10-12) — auto-drizzle when it pays off.** The owner noticed his stacks come out at the
+  sensor's own resolution and asked whether drizzle is used. It never is unless ticked: `StackOptions.drizzle`
+  defaults off and no unattended path sets it. Asked, he chose **"Auto, when worth it"** (the S30 samples ~4″/px,
+  coarser than his seeing, and his deep targets have thousands of subs). **Spec:**
+  - **Where:** beside `webapp.walkaway.apply_unattended_rejection`, applied to unattended/auto runs only (watcher
+    auto-stack, Process target, reprocess / "Bring my pictures up to date"). A manual Stack-form run keeps what is
+    ticked. **An explicit `drizzle` in the global or per-target saved defaults always wins** (on *or* off).
+  - **When:** depth per output pixel ≥ 200 subs — measured **per panel** on a mosaic, the same per-pixel count
+    `samplesPerPixel` / `DRIZZLE_MIN_SAMPLES_PER_PIXEL` use, never the target total — **and** the subs are
+    actually dithered: the fractional parts of their solved positions must spread across the pixel (e.g. std ≥
+    0.2 px on both axes); without sub-pixel variety drizzle adds a grid, not detail.
+  - **How much:** ×1.5. If `estimate_stack` says it won't fit the memory budget *with* `drizzle_reject` (which
+    the unattended path already turns on), step down with `_largest_drizzle_scale_within_budget` to no lower than
+    ×1.2; below that, don't drizzle. Never drizzle without rejection on an unattended run.
+  - **Say so:** stamp the decision and its reason in the run's provenance and show it on the stack card:
+    "Drizzled ×1.5 automatically — 640 subs on each pixel" / "Not drizzled: 85 subs on each pixel (needs 200)" /
+    "…subs barely moved between frames".
+  - **Setting:** new `auto_drizzle: bool = True` (owner-approved default — the §9 sign-off is this entry), with
+    a Settings toggle beside auto-stack. Upgrade test: an old `config.json` loads with it on.
+  - **Tests (fail-before):** a deep single field drizzles ×1.5; a mosaic deep in total but shallow per panel does
+    not; undithered subs do not; a saved `drizzle: false` is respected; an over-budget canvas steps down or
+    declines. Dogfood `--mosaic --deep` and look at the result.
+  - **Caution:** "Bring my pictures up to date" will then re-render deep targets at 2.25× the pixels — check the
+    editor proxy, previews and disk use on a mosaic-size canvas (`--big`).
+
 - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-30) — "Bring my pictures up to date": re-stack only the
   targets that have new light, in one click.**~~ — **✅ SHIPPED v0.492.0** (Builder 2026-09-30). Entry cut to
   [`SHIPPED.md`](SHIPPED.md); one-liner under "Shipped" below. **The entry's one open question is answered, so
