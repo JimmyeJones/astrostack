@@ -1,5 +1,75 @@
 # Shipped — the record
 
+## 2026-10-12 (Builder, branch `claude/vibrant-galileo-qssusy`, same run, second task) — the instrument that was supposed to say whether the de-levelling's residual reaches the picture
+
+### v0.493.16 — the cost claim is measured over the position inside the control's step, not over one scene: `test_how_often_the_cost_changes_the_stop_auto_writes`, `_positions`, `_downward_reach`, `_POSITION_SWEEP_GRAIN`
+
+*(Python: one test replaced by **three** (six items with parametrisation) in
+`tests/test_auto_delevel_joint_fit.py`, plus two helpers. **No production code at all** — the
+behaviour this describes is v0.493.13's and v0.493.15's, unchanged. Full suite re-run green.)*
+
+**What was wrong, and it was a test.** `test_the_measured_cost_is_below_the_controls_own_resolution`
+asserted that v0.493.13's residual (0.0002–0.0008 of `target_bg`) is invisible in what Auto emits:
+*"on a quiet mosaic the recipe Auto writes is byte-identical to the one it writes for the same stack
+laid out as a single field, on every one of these ten cases"*. The ten cases are true. The name is
+false, and v0.493.13's own cost entry had been built on it — its UPDATE said the fit-pass count was
+now *"a yes/no instead of a judgement, answerable by running that test at three passes"*.
+
+**Run at 6 / 3 / 2 / 1 passes, it passes every time** — including at **one** pass, where the
+continuous goal error is 0.0058, six times the quantity the entry called deciding.
+
+**Why it cannot see it, measured.** The ten cases are five geometries × two seeds of **one scene**,
+so their single-field `target_bg` takes exactly two values, 0.22332 and 0.22386 — two positions 0.05
+of one 0.01 step apart. Both sit in the *lower* half of their step, so both round **down** and the
+nearest rounding boundary is the one *above* them; and this pass's residual is **one-signed** — the
+mosaic always reads lower, on all 126 cases measured — so the error walks the value **away** from
+that boundary. To change the stop it would have to cross the boundary below, **0.0083–0.0089** away.
+Ten times the cost the name bounded.
+
+This is the third run in a row to find the same class of defect, and that is the transferable part:
+**a measurement whose instrument cannot resolve the thing it is named after.** v0.493.10 — the
+figures inside an asserted claim were prose and did not reproduce. v0.493.11 — a grid test asserted a
+module against its own copy of the numbers. This one — a test named *"below the control's own
+resolution"* could not see an error nine times larger than the one it bounded. **The shared tell is a
+claim about a quantity whose population is never stated**, and the question to ask is not *"is the
+number right?"* but *"what is the smallest effect this could have detected?"*.
+
+**The two levers that do not work, written down so they are not re-tried.** The filed entry proposed
+a DC offset on the scene's sky. It moves nothing: the luminance is whole-image-normalised, so
+`sky_level` is the sky's *position inside the image's own robust range* and a constant cancels
+exactly — sixteen offsets from −0.02 to +0.04 return the identical `target_bg` to five decimals.
+Scaling the whole scene about its sky cancels for the same reason. The lever that does work is the
+**grain**: `sky_level ≈ 2.6σ / span`, so 0.0020–0.0070 of grain walks `target_bg` across a step and a
+half, with the staircase, the object and the geometry held fixed.
+
+**What the answer turns out to be.** On that sweep (21 grain values × two seeds × two rasters, 84
+cases), the shipped six-pass de-levelling leaves a worst goal error of **0.00136** and the stop Auto
+writes for a mosaic differs from the identical single field's on **3 of 84 — 3.6 %**, all on the 2×3
+raster, which is the owner's own geometry. v0.493.14's arithmetic had predicted ~8 % for 0.0008 and
+was right in kind; the test written beside it could not see it. So *"the measured cost is below the
+control's own resolution"* is false as a general claim and true of ~96 % of canvases, and **the number
+that matters is the rate**. Both structural facts behind the rate are asserted, because any future fix
+has to keep them: the residual is one-signed, and a flip happens exactly where the single field's
+position sits in `(0.5, 0.5 + error/step)`.
+
+**And the open question from the v0.493.13 cost entry is answered rather than re-asked:**
+
+| passes | worst goal error | emitted stop differs | `_delevelled_luminance` | `auto_recipe` |
+|---|---|---|---|---|
+| 3 | 0.0033 | 8 of 84 (9.5 %) | — | — |
+| **6** (shipped) | 0.0014 | **3 of 84 (3.6 %)** | 1126 ms | 1534 ms |
+| 10 | 0.0006 | 1 of 84 (1.2 %) | 1372 ms | 1819 ms |
+| 16 | 0.0001 | 0 of 84 (0 %) | 1641 ms | 2184 ms |
+
+**Fewer passes are not free** — three nearly triples how often Auto's mosaic recipe differs from the
+identical single field's, which is the one thing v0.493.13 existed to close. **Raising them is not
+flipped**, and the reason is not the clock: a round now costs ~60 ms rather than ~230 (v0.493.15), so
+16 rounds would take the divergence to zero for +515 ms — the entire v0.493.15 saving, spent inside
+one run — but the question underneath is whether the single field is a reference worth paying per
+round for, and nothing in this repo establishes that it is. It is the yardstick v0.493.13 *chose*, the
+owner never sees both, and one stop of this control moves the picture 5.2–17.9 of 255 at the worst
+pixel either way. Filed in `docs/IMPROVEMENTS.md` as a decision with the price beside the rate.
+
 ## 2026-10-12 (Builder, branch `claude/vibrant-galileo-qssusy`) — the de-levelling's six whole-canvas fit passes, got back
 
 ### v0.493.15 — all but the last round of the de-levelling's joint fit reads a strided plane: `_LEVEL_FIT_SAMPLE_CAP`, `_fit_stride`, `_delevelled_luminance`

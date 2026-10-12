@@ -1,5 +1,43 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-12 (Builder, same run, second task — **the instrument is fixed and the pass-count
+question is answered; what is left is a decision with a price on it.** v0.493.16 is tests and docs only.
+
+**START HERE NEXT RUN: "Bugs" now starts with a DECIDE-DO-NOT-FLIP entry carrying the whole ladder.** It
+is the only item at the front of that section that is not gated on the owner's data, and it is gated on a
+judgement instead: the de-levelling's fit-pass count buys agreement with the identical single field at
+~60 ms a round (3 passes 9.5 % of positions differ, 6 → 3.6 %, 10 → 1.2 %, 16 → 0 %, and 16 would spend
+the *entire* v0.493.15 saving). Read the entry's last paragraph before touching it — the open question is
+not the clock, it is whether the single field is a reference worth paying per round for.
+
+**And a correction to this file's own note from earlier today, because it got a detail backwards.** The
+ten cases' two positions (0.22332 and 0.22386) sit in the **lower** half of their 0.01 step, not the
+upper — they round *down*, the nearest boundary is the one above them, and the one-signed error walks them
+away from it. The conclusion is unchanged and the binding figure is **0.0083** (the smaller of 0.0083 and
+0.0089), not 0.0089. `_downward_reach` in the test file now does that arithmetic in one place, with the
+two cases written out, because getting it backwards is exactly how the original claim was mis-stated.
+
+**THE METHOD NOTE, and it is the same one three runs running, which is why it is worth saying sharply.**
+Three runs have now found the same class of defect: **a measurement whose instrument cannot resolve the
+thing it is named after.** v0.493.10: the figures inside an asserted claim were prose and did not
+reproduce. v0.493.11: a grid test asserted a module against its own copy of the numbers. v0.493.14-16:
+a test named "below the control's own resolution" could not see an error nine times larger than the one
+it bounded, because its ten cases were one scene. **The shared tell is a claim about a quantity whose
+population is never stated.** The question to ask of any assertion in this subsystem is not "is the
+number right?" but **"what is the smallest effect this could have detected, and is it smaller than the
+effect claimed?"** — and the answer is a measurement, not a reading of the code.
+
+**What the fix looked like, since the shape transfers.** The claim was about *where inside its own step*
+a number lands, so the fixture had to sweep that position. Two levers do not work and are written down so
+nobody re-tries them: a DC offset on the sky (the luminance is whole-image-normalised, so it cancels
+exactly — sixteen offsets, identical `target_bg` to five decimals) and scaling the scene about its sky
+(same reason). The one that works is the **grain**, because `sky_level` is the sky's position inside the
+image's own robust range: 0.0020-0.0070 of it walks `target_bg` across a step and a half. **When a claim
+is about quantisation, the fixture has to move the phase, and the lever is whichever input the quantised
+quantity is actually a function of.**
+
+Earlier notes stand below.)*
+
 *Last edited 2026-10-12 (Builder, next run — **the v0.493.13 LEAD that FOCUS pointed at is half settled:
 the stride half is in v0.493.15 and is cut; what is left of the entry is the pass count, re-filed with a
 correction.** Take the next item; do not go looking for the stride.

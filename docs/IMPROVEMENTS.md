@@ -82,36 +82,39 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **LEAD (Builder 2026-10-12, what is left of the v0.493.13 cost entry once the stride half is in
-  v0.493.15 — and the measurement its own UPDATE proposed does not work) — is `_LEVEL_FIT_PASSES = 6`
-  more rounds than the picture needs, and what test could tell?** *(Pillar: performance behind
-  priority 1 — size **S to measure, S to change**; severity low, and lower than it was: the ~76 %
-  Auto's mosaic analysis had lost is now mostly back without touching the pass count. Confidence:
-  **measured** — the figures below are this run's, see [`SHIPPED.md`](SHIPPED.md) under v0.493.15.)*
-  The entry this replaces said the question was now a yes/no — *"does the emitted recipe change at
-  all?"* — answerable by running
-  `test_the_measured_cost_is_below_the_controls_own_resolution` at three passes, and predicted the
-  answer was probably no. **Both halves are wrong, and the second one is the finding.** Run at 6 /
-  3 / 2 / 1 passes, that test passes every time: the emitted `target_bg` is identical to the
-  identical single field's on all ten of its cases even at **one** pass, where the continuous goal
-  error is 0.0058 — six times what the entry called the deciding quantity.
-  **Why it cannot see it, measured.** The ten cases are five geometries x two seeds of the *same
-  scene*, so their single-field `target_bg` takes exactly **two** values (0.22332 and 0.22386) —
-  two positions on the 0.01 grid, 0.05 of one step apart, both in the upper half of their step. And
-  this pass's residual is one-signed (the mosaic always reads *lower*), so the error moves the value
-  **away** from the nearest boundary: nothing below **0.0089** — nine tenths of a step — can change
-  the stop on any of the ten. The test's name claims a bar it is nine times too coarse to hold,
-  which is the v0.493.9/v0.493.10 shape again (a figure inside an asserted claim is as unchecked as
-  one in a prose claim) and it is this file's own instrument.
-  **What to do, cheapest first.** (a) Make the sweep cover the *position inside the step*: a DC
-  offset on the scene moves `target_bg` across its own grid, so the claim "below the control's
-  resolution" becomes testable at the ~20 positions where it could fail, and the pass count becomes
-  the yes/no the entry wanted. Assert the sweep really reaches the boundary, or it is circular for
-  a second reason. (b) Only then re-run it at three passes and decide. **Do not lower
-  `_LEVEL_FIT_PASSES` on the strength of the existing test** — it cannot distinguish 0.0008 from
-  0.0058, and the continuous figures (0.0061 / 0.0030 / 0.0019 / 0.0008 for 1 / 2 / 3 / 6 rounds)
-  are the only yardstick with resolution today. (c) The same blind spot applies to every emitted-stop
-  comparison in that file, v0.493.15's own included, so (a) is the fix for all of them at once.
+- **DECIDE, DO NOT FLIP (Builder 2026-10-12, measured with the instrument v0.493.16 built, which is
+  what made it answerable) — the de-levelling's fit-pass count buys agreement with the single field
+  at ~60 ms a round, and 6 is where it sits for no measured reason.** *(Pillar: editor — PRIORITY 1;
+  size **S to change, M to decide**; severity low — it is a one-stop difference in a derived goal, not
+  a wrong picture. Confidence: **measured**, the whole ladder; what is *not* settled is whether the
+  single field is the right reference to pay for.)*
+  **What is measured.** Over a sweep of the position `target_bg` lands at inside its own 0.01 step (21
+  grain values x two seeds x two rasters, 84 cases — `test_how_often_the_cost_changes_the_stop_auto_writes`):
+  | passes | worst goal error | emitted stop differs from the single field | `_delevelled_luminance` | `auto_recipe` |
+  |---|---|---|---|---|
+  | 3 | 0.0033 | 8 of 84 (9.5 %) | — | — |
+  | **6** (shipped) | 0.0014 | **3 of 84 (3.6 %)** | 1126 ms | 1534 ms |
+  | 10 | 0.0006 | 1 of 84 (1.2 %) | 1372 ms | 1819 ms |
+  | 16 | 0.0001 | 0 of 84 (0 %) | 1641 ms | 2184 ms |
+  **Three passes is ruled out with numbers** — it nearly triples how often Auto's mosaic recipe differs
+  from the identical single field's, which is the one thing v0.493.13 existed to close — so the ~76 %
+  that fix cost was never coming back from the pass count, and v0.493.15 took it off the stride instead.
+  **Going up is the open question, and the arithmetic is uncomfortable**: now that all but the last round
+  is strided a round costs ~60 ms rather than ~230, so 16 rounds would take the divergence to zero for
+  +515 ms — which is the *entire* v0.493.15 saving, spent inside one run. Ten rounds is half the saving
+  for a third of the divergence.
+  **Why it is filed and not flipped, and it is not the clock.** A flip means the owner's mosaic gets a
+  stretch goal one 0.01 stop from what the identical stack laid out as a single field would get, and one
+  stop of that control moves the picture **5.2-17.9 of 255** at the worst pixel (v0.493.14 measured it).
+  So it is visible — but *which of the two is right* is not established anywhere: the single field is
+  v0.493.13's chosen **yardstick**, not a ground truth, and the owner never sees both. Nothing in this
+  repo says a mosaic's own sky measurement should be worse than the reference's by less than a stop. **So
+  the decision is "is agreement with the single-field reference worth 60 ms a round?", which is the
+  owner's taste, not a measurement** — and the honest shapes are: (a) leave it at 6 and say so in the
+  constant's note with this table (cheapest, and it is what v0.493.16 did); (b) raise to 10 and accept
+  half the saving; (c) find out whether a *mosaic's* sky can be measured better rather than iterated
+  longer, which is the only shape that does not pay per round. Do **not** lower it, and do not raise it
+  without putting the 60 ms-a-round price beside the 3.6 % in the same sentence.
 
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
@@ -3517,6 +3520,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.493.16 **the test that was supposed to say whether the de-levelling's residual reaches the owner's picture could not have seen it, and the answer it was hiding is 3.6 % of positions, not none** (`tests/test_auto_delevel_joint_fit.py`: `test_the_ten_quiet_cases_cannot_see_the_cost_they_were_asserting`, `test_how_often_the_cost_changes_the_stop_auto_writes`, `test_the_pass_count_is_what_moves_how_often_auto_disagrees_with_itself`; **no production code**) — `test_the_measured_cost_is_below_the_controls_own_resolution` claimed the fix's 0.0002–0.0008 residual was invisible in what Auto emits, and passed at 6 / 3 / 2 / **1** fit passes, where the error is 0.0058. Its ten cases are five geometries × two seeds of **one scene**, so their single-field `target_bg` takes exactly two values, both in the lower half of their 0.01 step, and this pass's residual is one-signed (the mosaic always reads *lower*, on all 126 cases measured) — so the error walks the value **away** from the near boundary and nothing under **0.0083** could change the stop on any of them, ten times the cost the name bounded. The lever the entry proposed does not work either: the luminance is whole-image-normalised, so a DC offset on the sky returns the identical `target_bg` to five decimals. The grain does work — `sky_level` is the sky's position inside the image's own robust range — so the sweep now walks `target_bg` across a step and a half, and on that instrument the shipped de-levelling differs from the identical single field on **3 of 84** positions, every one of them just above a rounding boundary on the side the one-signed error walks it off. **And the v0.493.13 cost entry's open question is answered rather than re-asked**: 3 passes 9.5 %, 6 passes 3.6 %, 10 passes 1.2 %, 16 passes 0 % — fewer passes are not free, and raising them is priced at ~60 ms a round and filed as a decision, not flipped
 - ✅ v0.493.15 **all but the last round of the de-levelling's joint fit now reads a strided plane, so most of the ~76 % v0.493.13 knowingly cost Auto's mosaic analysis is back** (`_LEVEL_FIT_SAMPLE_CAP`, new `_fit_stride`, `_delevelled_luminance`; the level masks also hoisted out of the loop) — a round's whole output is six polynomial coefficients and one scalar per level, and both halves were already subsampling estimators (`fit_sky_poly` solves over ~600 per-tile medians, `_robust_stats` strides its own sample), so handing them every pixel of a 1500×1500 proxy six times over bought nothing. The **last** round still runs at full size, because its surface is the one the guard and the steps are read off. Clock, on a 1500×1500 proxy with a gradient and real panel steps: `_delevelled_luminance` **1761 → 1088 ms**, `auto_recipe` **2276 → 1546 ms**, `classify_target` **2312 → 1573 ms**, the alternation alone **1821 → 969 ms**. The answer: at 1500×1500 over 21 scenes × three raster geometries, the goal error shifts by at most **0.00038** of `target_bg` (a twenty-sixth of its control's step), the worst case 0.00972 → 0.01008, and the same 3 of 21 cases differ from the identical single field either way. **The filed prerequisite — expose `fit_sky_poly`'s coefficients — was not needed**: the strided rounds only produce a step estimate, and the full-size round re-fits from it, so the primitive three other passes share was not touched. **The shape that reads safer is worse**: giving the full-resolution stage its own settle budget makes the alternation 1821 → **2045 ms**, because a mosaic with steps to recover never settles inside six rounds. And the cap is a floor doing work — starved to a twelfth of it the same grid moves the goal by up to 0.0060 and flips one of 150 emitted recipes. **This subsystem's own 300×600 fixture is below the cap and could not measure any of it**, so the scene builders took an `h`/`w` argument (bit-identical on all 300 scenes they build) and the sweep ran at proxy scale — the §1 rule through a third door
 - ✅ v0.493.14 **the on-by-default half of v0.493.11: every number Auto writes into the recipe is now one its own slider can hold** (`auto_op_params` routes all seven through `registry.snap_to_param`; new `_emitted` carries the two reasons an op is dropped; `_sharpen_radius_from_fwhm` drops `_SHARPEN_RADIUS_MIN/_MAX/_STEP` — the last copy of a slider's range in the repo; new `tests/test_auto_knob_grid.py`) — a real Auto run wrote `tone.stretch.target_bg = 0.2388…` on a **0.01**-step control and `tone.saturation.amount = 1.248` on a **0.05**-step one while the readout beside each showed a rounder number and the "What Auto did" sentence a third, so one knob carried three numbers and the first nudge jumped the picture. The lead was gated on what half a step *costs*, and the yardstick is the control's own resolution, not a count of display levels: rendered both ways on five realistic canvases, the snap moves the picture by **1.05–2.73 of 255** at the worst pixel (mean 0.17–0.39, **0.001–0.70 %** of pixels by a whole level) against **5.2–17.9** for *one click* of the same controls (mean 0.4–2.6, **5–96 %** of pixels) — 2–5× less at the worst pixel and 100–1000× less of the picture. A noisy stack does not move at all, because its knobs sit on clip ends that are already stops, which is why the two single-field samples hid it. Verified through the live app: both bundled samples' saved Auto recipes now read `target_bg 0.24` / `saturation 1.25`, the numbers the sentence and the readout already showed. Option **(b)** is answered rather than skipped — **no float parameter declares a step finer than two decimals**, so the existing `decimalScale={2}` readout is exact for every value a control can hold and a third decimal would show nothing; asserted, so the day a 0.001-step parameter is added the test names the readout as the fix. A taste tap still moves every knob it moved, because each `auto_prefs._PARAM_STEP` is a whole number of its control's stops and the grid is anchored at `min` — now read as code, not trusted as a comment. No stored recipe is rewritten
 - ✅ v0.493.13 **the ⭐ gradient/de-levelling bug is fixed — the smooth sky surface and the per-level steps are now fitted against each other instead of a flatness proxy being asked of one plane** (`_delevelled_luminance`, `_LEVEL_FIT_PASSES`, `_LEVEL_FIT_SETTLED`; new `tests/test_auto_delevel_joint_fit.py`, `tests/test_auto_delevel_yardstick_candidate.py` retired into it) — a level's own median is its patch of the canvas's smooth shape **plus** its step, and neither is identifiable a level at a time, which is why asking the raw plane "does this look like sky?" refused every level under a 49 % ramp (**2.08× the truth**, the mosaic 7.1 % dark) and why v0.493.12's detrended yardstick made an along-strip ramp 2.6× worse than the bug. Now `fit_sky_poly` is fitted to the plane with the current steps removed, each step is re-measured as its residual from that surface, and the guard is asked of **that** residual. Measured as the error in the `target_bg` Auto emits, five raster geometries × fifteen scenes × four seeds: worst **0.0229 → 0.0137**, cases over half a slider step **48 of 75 → 7 of 75** (all seven a canvas an object fills, where the pass still does nothing), no case worse than before by more than 0.0008, and the filed geometry **0.0195 → under 0.0003** at every ramp strength. **The defect was on every geometry, not just the 1×4 it was filed on** — 1.47× on a 2×2, 1.67–1.70× on a 2×3, 2.07–2.12× on a 3×3, for a ramp of any orientation, a vignette-like radial residual and a faint filled canvas — and the owner's own rasters were the unmeasured ones. Costs named and asserted: six fit passes (one recovers 28 % of a quiet 2×2's staircase, six recover 82 %), the pass no longer flattens the panels *alone* (the composition does, and better: 0.00052 vs 0.00075 quiet, 0.00052 vs 0.02279 under a ramp), the object end of the 3.0 separation down ~2.3× with every newly-levelled amplitude measuring a **lower** goal error than refusing it did, +4–14 % on a proxy-sized canvas. Collateral: `classify_target`'s ragged-fringe canvases read as a star cluster on 1 of 6 rather than 5 of 6. A single-field stack's Auto is byte-for-byte unchanged

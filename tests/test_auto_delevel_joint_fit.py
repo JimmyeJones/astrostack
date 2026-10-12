@@ -322,9 +322,10 @@ def _target_bg(lum: np.ndarray, cov: np.ndarray) -> float:
     residual cost (0.0002-0.0008), the pass-count convergence (0.0061 -> 0.0008)
     — is *smaller than one of those stops*, so reading the recipe would return a
     column of exact zeros and measure nothing. The measurement is continuous and
-    stays so; only what reaches the slider is quantised. (That the costs this
-    file bounds are now literally invisible in what Auto emits is asserted in
-    :func:`test_the_measured_cost_is_below_the_controls_own_resolution`.)
+    stays so; only what reaches the slider is quantised. (What those costs do to
+    the stop Auto actually writes is measured in
+    :func:`test_how_often_the_cost_changes_the_stop_auto_writes` — **3.6 % of
+    positions**, not none, which is what v0.493.16 corrected.)
     """
     m_rgb, m_cov = P.measured_region(_rgb(lum), cov, None)
     return float(P.measured_auto_knobs(m_rgb, m_cov)["target_bg"])
@@ -396,39 +397,192 @@ def test_a_quiet_mosaic_is_what_it_was_to_well_inside_a_slider_step():
     assert worst > 0.0
 
 
-def test_the_measured_cost_is_below_the_controls_own_resolution():
-    """And the same cost as the owner can actually see it: not at all.
+#: The grain values the position sweep walks ``target_bg`` across its control's
+#: step with. ``sky_level`` is the sky's position *inside the image's own robust
+#: range*, so it moves with the grain and nothing else here does:
+#: ``target_bg = 0.24 - 0.4 * sky_level``, so 0.0020-0.0070 of grain walks the
+#: emitted value across about a step and a half. **It is a lever on the position,
+#: not a model of a population** — the claim being tested is about where inside
+#: its own step the number lands, and every other way of moving that was tried
+#: does not move it at all: the luminance is whole-image-normalised, so a DC
+#: offset on the sky cancels *exactly* (measured: sixteen offsets from -0.02 to
+#: +0.04 return the identical ``target_bg`` to five decimals), and scaling the
+#: whole scene about its sky cancels for the same reason.
+_POSITION_SWEEP_GRAIN = tuple(round(0.0020 + 0.00025 * i, 5) for i in range(21))
 
-    The residual above is a cost to the *measurement*. What reaches his picture
-    is the measurement landed on ``tone.stretch.target_bg``'s own 0.01 stops
-    (v0.493.14), and 0.0002-0.0008 is a twelfth of one of those — so on a quiet
-    mosaic the recipe Auto writes is **byte-identical** to the one it writes for
-    the same stack laid out as a single field, on every one of these ten cases.
-    Asserted here rather than in the snapping test because this is the number
-    that makes v0.493.13's trade free in the output, and it is this file's
-    figures that bound it.
+#: One ``tone.stretch.target_bg`` stop. Not read from the registry on purpose:
+#: these tests are about what *this* control's resolution does to a claim, and a
+#: silent change to it should fail them rather than be followed.
+_BG_STEP = 0.01
 
-    **And it is these ten cases, not a theorem** — which is the useful half. A
-    residual only changes the emitted stop when it straddles a half-step
-    boundary, so an error of 0.0008 moves the stop on ~8 % of uniformly
-    distributed positions and one of 0.0019 (what three fit passes leave, see
-    :func:`test_the_pass_count_is_a_measured_choice_not_a_round_number`) on
-    ~19 %. That arithmetic is why "would fewer passes be free?" is now a
-    yes/no question with a likely answer of **no**, where before it was a
-    judgement about a sub-step number — and why this assertion failing is a
-    reason to look at the de-levelling rather than to relax it.
+
+def _downward_reach(pos: float) -> float:
+    """How far *down* a value at ``pos`` inside its step has to move before it
+    lands on a different stop.
+
+    A value rounds to the nearest stop, so the boundary below it is half a step
+    under the stop it rounds to: ``pos + 0.5`` steps away when it rounds down
+    (``pos < 0.5``) and ``pos - 0.5`` when it rounds up. Written out because the
+    two cases are the whole difference between a blind sweep and a sharp one, and
+    getting it backwards is how the claim above was mis-stated once already.
     """
-    for name, geom in _GEOMS.items():
+    return (pos + 0.5 if pos < 0.5 else pos - 0.5) * _BG_STEP
+
+
+def _positions(sigmas=_POSITION_SWEEP_GRAIN, seeds=(13, 5)):
+    """``{(sigma, seed): (target_bg, emitted, position inside its step)}`` for the
+    single field — the reference every claim below is a difference from.
+
+    Measured once and shared, because a single field cannot reach
+    ``_delevelled_luminance`` at all (a uniform coverage map has one level, so the
+    pass declines), which also makes it independent of ``_LEVEL_FIT_PASSES``.
+    """
+    out = {}
+    for sigma in sigmas:
+        for seed in seeds:
+            scene = _scene(seed=seed, rows=1, cols=1, offsets=(), sigma=sigma)
+            flat = np.full(scene.shape, float(_GEOMS["2x3 raster"]["frames"][0]),
+                           dtype=np.float32)
+            value = _target_bg(scene, flat)
+            out[(sigma, seed)] = (value, _emitted_target_bg(scene, flat),
+                                  (value % _BG_STEP) / _BG_STEP)
+    return out
+
+
+def test_the_ten_quiet_cases_cannot_see_the_cost_they_were_asserting():
+    """The instrument bug, pinned so it cannot come back.
+
+    Until v0.493.16 the claim above this was
+    ``test_the_measured_cost_is_below_the_controls_own_resolution``: *"on a quiet
+    mosaic the recipe Auto writes is byte-identical to the one it writes for the
+    same stack laid out as a single field, on every one of these ten cases"*. The
+    ten cases are true and the name is not, and this is why: the ten are five
+    geometries x two seeds of **one scene**, so their single-field ``target_bg``
+    takes exactly **two** values, 0.05 of one step apart, and both sit in the
+    *lower* half of their step — so the nearest rounding boundary is the one
+    **above** them, and this pass's residual is one-signed (the mosaic always
+    reads *lower*), walking the value away from it. To change the stop the error
+    would have to cross the boundary **below**, 0.83-0.89 of a step away, against
+    a cost of 0.0008: the ten cases are ten times too coarse for their own name.
+
+    It passed at six fit passes, and at three, and at two, and at **one**, where
+    the error is 0.0058. So it could not answer the question the v0.493.13 cost
+    entry built on it — *"would fewer passes be free?"* — and
+    :func:`test_the_pass_count_is_what_moves_how_often_auto_disagrees_with_itself`
+    is the instrument that can. Same shape as v0.493.9 and v0.493.10 one level
+    down: a figure inside an asserted claim is as unchecked as one in a prose
+    claim, and here the unchecked figure was the test's own resolution.
+    """
+    quiet = {}
+    for geometry, geom in _GEOMS.items():
         rows, cols = geom["rows"], geom["cols"]
-        cov = _coverage(rows, cols, geom["frames"])
-        flat = np.full(cov.shape, float(geom["frames"][0]), dtype=np.float32)
+        flat = np.full((H, W), float(geom["frames"][0]), dtype=np.float32)
         for seed in (13, 5):
-            mosaic = _scene(seed=seed, rows=rows, cols=cols,
-                            offsets=geom["offsets"])
             single = _scene(seed=seed, rows=rows, cols=cols,
                             offsets=tuple(0.0 for _ in geom["offsets"]))
-            assert (_emitted_target_bg(mosaic, cov)
-                    == _emitted_target_bg(single, flat)), (name, seed)
+            quiet[(geometry, seed)] = _target_bg(single, flat)
+
+    assert len(quiet) == 10
+    distinct = sorted({round(v, 5) for v in quiet.values()})
+    assert distinct == [0.22332, 0.22386], distinct
+
+    pos = [(v % _BG_STEP) / _BG_STEP for v in quiet.values()]
+    # Both in the lower half of their step, so both round *down* and the boundary
+    # a downward error has to cross is the far one.
+    assert max(pos) < 0.5, pos
+    reach = min(_downward_reach(p) for p in pos)
+    assert reach > 0.008, reach            # measured: 0.0083 and 0.0089
+    # ...which is more than ten times the cost the name claimed to bound.
+    assert reach > 10.0 * 0.0008, reach
+
+
+@pytest.mark.parametrize("geometry", ["1x4 strips", "2x3 raster"])
+def test_how_often_the_cost_changes_the_stop_auto_writes(geometry):
+    """The honest form of the claim, on an instrument with resolution: **how
+    often**, over the position inside the control's own step.
+
+    v0.493.14's arithmetic said a residual of 0.0008 moves the emitted stop on
+    ~8 % of uniformly distributed positions. That was right, and the test it was
+    written beside could not see it (above). Swept across a step and a half of
+    positions (:data:`_POSITION_SWEEP_GRAIN`), the shipped six-pass de-levelling
+    leaves a goal error of at most **0.00136** and the stop Auto writes for a
+    mosaic differs from the identical single field's on **3 of 84** cases — 3.6 %,
+    all on the 2x3 raster, which is the owner's own geometry.
+
+    So *"the measured cost is below the control's own resolution"* is false as a
+    general claim and true of almost every canvas, and the number that matters is
+    the rate. Two structural facts make the rate what it is, and both are asserted
+    here because any fix to this pass has to keep them: the residual is
+    **one-signed** (the mosaic reads lower, on all 126 cases measured), and a flip
+    therefore happens exactly where the single field's position sits in
+    ``(0.5, 0.5 + error/step)`` — just above a rounding boundary, on the side the
+    error walks it off.
+    """
+    geom = _GEOMS[geometry]
+    rows, cols = geom["rows"], geom["cols"]
+    cov = _coverage(rows, cols, geom["frames"])
+    singles = _positions()
+
+    # The sweep is only worth anything if it reaches the positions where the
+    # claim could fail; a sweep that never crosses 0.5 is the blind instrument
+    # above wearing a sweep's clothes.
+    seen = sorted(p for _v, _e, p in singles.values())
+    assert min(seen) < 0.1 and max(seen) > 0.9, (min(seen), max(seen))
+    assert sum(1 for p in seen if p > 0.5) >= 8, seen
+
+    flips, worst = [], 0.0
+    for (sigma, seed), (s_val, s_emitted, pos) in singles.items():
+        mosaic = _scene(seed=seed, rows=rows, cols=cols,
+                        offsets=geom["offsets"], sigma=sigma)
+        m_val = _target_bg(mosaic, cov)
+        # One-signed, and that is the property, not an accident of the fixture.
+        assert m_val < s_val, (sigma, seed, m_val, s_val)
+        worst = max(worst, s_val - m_val)
+        if _emitted_target_bg(mosaic, cov) != s_emitted:
+            flips.append((sigma, seed, pos))
+
+    assert worst < 0.0016, worst
+    assert len(flips) <= 3, flips
+    for sigma, seed, pos in flips:
+        assert _downward_reach(pos) < worst, (sigma, seed, pos, worst)
+        assert pos > 0.5, (sigma, seed, pos)
+
+
+@pytest.mark.parametrize("passes,want_flips", [(3, 7), (6, 3), (10, 1)])
+def test_the_pass_count_is_what_moves_how_often_auto_disagrees_with_itself(
+        passes, want_flips, monkeypatch):
+    """And the question the v0.493.13 cost entry left open, answered on the
+    instrument that can see it: **fewer fit passes are not free.**
+
+    Over the same position sweep on the geometry every flip occurs on, with the
+    single field's stop as the reference:
+
+    | passes | worst goal error | stop differs |
+    |---|---|---|
+    | 3 | 0.0033 | 8 of 84 (9.5 %) |
+    | **6** (shipped) | 0.0014 | 3 of 84 (3.6 %) |
+    | 10 | 0.0006 | 1 of 84 (1.2 %) |
+    | 16 | 0.0001 | 0 of 84 (0 %) |
+
+    (The counts asserted here are the 42-case half of that sweep — the 2x3
+    raster, both seeds — which is where all but one of them land: **7**, 3 and 1
+    of 42.) Three passes nearly **triples**
+    how often Auto's mosaic recipe differs from the identical single field's,
+    which is the one thing v0.493.13 existed to close, so the ~76 % that fix cost
+    was never going to come back from the pass count — and it did not have to
+    (v0.493.15 took it off the stride instead). It also keeps paying *upward*,
+    which is a live question now that all but the last round is cheap.
+    """
+    monkeypatch.setattr(P, "_LEVEL_FIT_PASSES", passes)
+    geom = _GEOMS["2x3 raster"]
+    cov = _coverage(2, 3, geom["frames"])
+    flips = 0
+    for (sigma, seed), (_s_val, s_emitted, _pos) in _positions().items():
+        mosaic = _scene(seed=seed, rows=2, cols=3,
+                        offsets=geom["offsets"], sigma=sigma)
+        if _emitted_target_bg(mosaic, cov) != s_emitted:
+            flips += 1
+    assert flips == want_flips, (passes, flips)
 
 
 # --------------------------------------------------------------------------- #
