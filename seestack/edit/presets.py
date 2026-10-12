@@ -231,10 +231,11 @@ _LEVEL_MAX_SIGMA_RATIO = 3.0
 #: ``auto_recipe`` measures **1433 ms -> 2522 ms** (three passes would be 2116 ms)
 #: and the preset-suggestion endpoint's ``classify_target`` 1121 -> 2011 ms. That
 #: is once per Auto analysis, not per render, and it buys removing an error of up
-#: to two whole slider steps from 48 of 75 measured cases — but the cheap way to
-#: get it back is filed in ``docs/IMPROVEMENTS.md`` (run the alternation on a
-#: strided plane: the steps are scalars and the surface is six coefficients, so
-#: neither needs every pixel).
+#: to two whole slider steps from 48 of 75 measured cases. **Most of that bill is
+#: now back** (v0.493.15): all but the last round reads a strided plane, because
+#: the steps are scalars and the surface is six coefficients and neither needs
+#: every pixel — see :data:`_LEVEL_FIT_SAMPLE_CAP` for the stride, what it costs
+#: the answer, and the shape of it that was measured and ruled out.
 #:
 #: The loop also stops early once nothing moves
 #: (:data:`_LEVEL_FIT_SETTLED`): measured over five raster geometries, a canvas
@@ -246,6 +247,61 @@ _LEVEL_FIT_PASSES = 6
 #: image's own grain — at which point another pass cannot change which levels the
 #: guard keeps, nor move a step by anything the picture could show.
 _LEVEL_FIT_SETTLED = 0.05
+
+#: How many pixels the alternation above reads at a time, before the one round
+#: whose surface is actually kept.
+#:
+#: **Everything a round produces is tiny** — the surface is six polynomial
+#: coefficients and each step is one scalar — **and both halves are already
+#: subsampling estimators**: :func:`~seestack.bg.sky_poly.fit_sky_poly` solves
+#: over *per-tile medians* ("~600 samples instead of millions", its own
+#: docstring) and :func:`~seestack.bg.coverage_leveling._robust_stats` strides
+#: its own sample down to ``_STATS_SAMPLE_CAP``. Handing either of them every
+#: pixel of a 1500x1500 proxy six times over buys nothing, so the rounds that
+#: exist only to produce the *next* step estimate run on a strided copy of the
+#: plane (:func:`_fit_stride`) and the last one runs at full size.
+#:
+#: The cap is the plane's total, so the smallest level this pass will measure
+#: (:data:`_LEVEL_MIN_SHARE` of the canvas) still keeps thousands of samples, at
+#: which point a sigma-clipped median's own error is a hundredth of the grain
+#: against a settle threshold (:data:`_LEVEL_FIT_SETTLED`) of a twentieth of it.
+#: A real mosaic proxy strides by 2-3 (``proxy.PROXY_MAX_PX`` is 1500).
+#:
+#: **Measured on the answer before the clock, and measured at the owner's own
+#: proxy scale, because 180k pixels is below this cap and so cannot show what the
+#: stride does at all** (the §1 rule arriving through the same door as in
+#: v0.493.13-14: a fixture has to be big enough for the quantity being measured
+#: to exist in it). On 21 scenes x three raster geometries at 1500x1500, where
+#: production strides by 3, against the identical run with the cap raised out of
+#: reach: the goal error moves by at most **0.00038** of ``target_bg`` — a
+#: twenty-sixth of the control's own 0.01 step — against goal errors spanning
+#: 0.00004-0.0097, the worst case is 0.00972 -> 0.01008, and the number of cases
+#: whose emitted recipe differs from the identical single field's is **3 of 21
+#: either way**, i.e. the stride moves no case across the line that matters.
+#:
+#: **And the cap is a floor doing work, not a round number.** Starved to a
+#: *twelfth* of it (~20k samples, the stride forced onto this module's 300x600
+#: test fixture), the same sweep moves the goal by up to **0.0060** and flips one
+#: of 150 emitted recipes — the movement is concentrated where a level sits on
+#: :data:`_LEVEL_MAX_SIGMA_RATIO`'s boundary, since a noisier surface moves the
+#: residual the guard reads. Both figures are asserted in
+#: ``tests/test_auto_delevel_joint_fit.py``.
+#:
+#: The clock, on a 1500x1500 proxy carrying a gradient and real panel steps:
+#: ``_delevelled_luminance`` **1761 -> 1088 ms**, ``auto_recipe`` **2276 ->
+#: 1546 ms** and ``classify_target`` **2312 -> 1573 ms**; the alternation itself,
+#: timed against its alternatives in one process, **1821 -> 969 ms**.
+_LEVEL_FIT_SAMPLE_CAP = 250_000
+
+
+def _fit_stride(n_pixels: int) -> int:
+    """Stride that brings ``n_pixels`` down to :data:`_LEVEL_FIT_SAMPLE_CAP`.
+
+    Integer arithmetic rather than the square root of a ratio, so the strided
+    plane is never *smaller* than the cap on a size where a float would land a
+    hair low: 1 below the cap, 2 from 1 MP, 3 from 2.25 MP.
+    """
+    return max(1, math.isqrt(max(int(n_pixels), 1) // _LEVEL_FIT_SAMPLE_CAP))
 
 
 def _delevelled_luminance(lum: np.ndarray,
@@ -304,6 +360,14 @@ def _delevelled_luminance(lum: np.ndarray,
     before. No case is worse than it was by more than **0.0008** of the goal, and
     only ever on a mosaic with no smooth shape, where the old arithmetic was exact.
     The whole sweep is in ``tests/test_auto_delevel_joint_fit.py``.
+
+    All but the last of those rounds reads a **strided** copy of the plane
+    (:data:`_LEVEL_FIT_SAMPLE_CAP`), which is where most of the alternation's
+    cost went: a round's whole output is six coefficients and one scalar per
+    level, and the last round — the one whose surface the guard and the steps are
+    actually read off — runs at full size as before. Measured at the owner's own
+    proxy scale it moves the goal by at most 0.0004 against goal errors of
+    0.00004-0.0097, and the recipe Auto emits not at all.
 
     Only the *shape* is subtracted — the canvas's own robust median is put back —
     so, like the detrend beside it, this changes how flat the plane is and never
@@ -403,27 +467,84 @@ def _delevelled_luminance(lum: np.ndarray,
     from seestack.bg.sky_poly import fit_sky_poly
 
     steps: dict[int, float] = {level: 0.0 for level in big}
-    surface: np.ndarray | None = None
-    for _ in range(_LEVEL_FIT_PASSES):
-        step_map = np.zeros(lum.shape, dtype=np.float32)
-        for level, region in regions.items():
-            step_map[region] = np.float32(steps[level])
-        fitted = fit_sky_poly(lum - step_map, sky)
-        if fitted is None or not np.all(np.isfinite(fitted)):
-            break
-        surface = fitted
-        residual = lum - surface
-        moved = 0.0
-        for level, region in regions.items():
-            region_sky = region & sky
-            if lum[region_sky].size < _LEVEL_MIN_PIXELS:
-                continue
-            med, _sigma = _robust_stats(residual[region_sky])
-            if np.isfinite(med):
-                moved = max(moved, abs(float(med) - steps[level]))
-                steps[level] = float(med)
-        if moved <= _LEVEL_FIT_SETTLED * grain:
-            break
+    # The level masks the rounds below read their samples through. Hoisted out of
+    # the loop because they do not change between rounds: they used to be rebuilt
+    # once per level per round, which is a whole-canvas boolean AND each time.
+    regions_sky = {level: region & sky for level, region in regions.items()}
+
+    def alternate(plane: np.ndarray,
+                  plane_sky: np.ndarray,
+                  plane_regions: dict[int, np.ndarray],
+                  plane_regions_sky: dict[int, np.ndarray],
+                  passes: int) -> np.ndarray | None:
+        """``passes`` rounds of *(fit the surface | re-measure every step as its
+        residual from it)* on ``plane``, updating ``steps`` in place. Returns the
+        last surface fitted, or ``None`` if none could be.
+
+        ``plane`` is the whole luminance or a strided view of it, with every mask
+        strided to match (:data:`_LEVEL_FIT_SAMPLE_CAP`) — a round's whole output
+        is six coefficients and one scalar per level, so it does not need every
+        pixel to produce them. The pixel floor stays absolute rather than scaled
+        by the stride: it asks "are these enough samples for a median?", which is
+        a question about the plane being read.
+        """
+        out: np.ndarray | None = None
+        for _ in range(passes):
+            step_map = np.zeros(plane.shape, dtype=np.float32)
+            for level, region in plane_regions.items():
+                step_map[region] = np.float32(steps[level])
+            fitted = fit_sky_poly(plane - step_map, plane_sky)
+            if fitted is None or not np.all(np.isfinite(fitted)):
+                break
+            out = fitted
+            resid = plane - fitted
+            moved = 0.0
+            for level, region_sky in plane_regions_sky.items():
+                pixels = resid[region_sky]
+                if pixels.size < _LEVEL_MIN_PIXELS:
+                    continue
+                med, _sigma = _robust_stats(pixels)
+                if np.isfinite(med):
+                    moved = max(moved, abs(float(med) - steps[level]))
+                    steps[level] = float(med)
+            if moved <= _LEVEL_FIT_SETTLED * grain:
+                break
+        return out
+
+    # All but the last round on a strided view of everything, purely to hand the
+    # last one a step estimate that is already close; the last one at full size,
+    # because its surface is the one the guard and the steps below are read off.
+    #
+    # **The last round is one round, and not "however many the settle test
+    # wants", and that is measured rather than tidy.** Handing the
+    # full-resolution stage its own ``_LEVEL_FIT_PASSES`` budget reads as the
+    # safer shape — the answer would then be converged at full size whatever the
+    # strided rounds did — but this loop's settle test does not stop it on the
+    # canvas that matters: a mosaic with steps to recover runs all six rounds
+    # (that is what :data:`_LEVEL_FIT_PASSES`'s own note records), so the stage
+    # runs its whole budget and the strided rounds become pure overhead —
+    # measured on the 1500x1500 proxy below, **1926 ms before this change and
+    # 2066 ms with that shape**, i.e. worse than the cost it exists to recover.
+    # One full round it is, and what that is worth is measured on the answer at
+    # the owner's own scale (:data:`_LEVEL_FIT_SAMPLE_CAP`).
+    stride = _fit_stride(lum.size)
+    if stride > 1:
+        sub = (slice(None, None, stride), slice(None, None, stride))
+        coarse = alternate(lum[sub], sky[sub],
+                           {lv: r[sub] for lv, r in regions.items()},
+                           {lv: m[sub] for lv, m in regions_sky.items()},
+                           _LEVEL_FIT_PASSES - 1)
+        # A strided plane with too little sky left in it to fit a surface through
+        # at all is handed the whole budget at full size instead, so a canvas the
+        # strided rounds cannot measure is measured exactly as it was before they
+        # existed. (``None`` only ever comes back from the *first* round, so no
+        # converged step estimate is thrown away here.)
+        budget = 1 if coarse is not None else _LEVEL_FIT_PASSES
+    else:
+        # Below the cap there is nothing to stride, and this is the
+        # full-resolution loop it has always been, round for round.
+        budget = _LEVEL_FIT_PASSES
+    surface = alternate(lum, sky, regions, regions_sky, budget)
     if surface is None:
         # No sky surface could be fitted at all (too little sky, a non-finite
         # fit) — measure the image exactly as it is today, which is what this
@@ -432,9 +553,8 @@ def _delevelled_luminance(lum: np.ndarray,
 
     residual = lum - surface
     per_level: dict[int, float] = {}
-    for level, region in regions.items():
-        region_sky = region & sky
-        pixels = lum[region_sky]
+    for level, region_sky in regions_sky.items():
+        pixels = residual[region_sky]
         if pixels.size < _LEVEL_MIN_PIXELS:
             # Too little sky left in this level to say where its sky is: leave the
             # level exactly as it came in, which is what this whole function does
@@ -443,7 +563,7 @@ def _delevelled_luminance(lum: np.ndarray,
         # The residual's own spread, which a constant step cannot move (the
         # estimator is sigma-clipped), so this is "what is left in this level once
         # both the smooth shape and this level's own step are accounted for".
-        _, level_sigma = _robust_stats(residual[region_sky])
+        _, level_sigma = _robust_stats(pixels)
         if not np.isfinite(level_sigma) or level_sigma > _LEVEL_MAX_SIGMA_RATIO * grain:
             # What is left of this level does not look like sky — it is a level a
             # nebula or a galaxy fills, and reading the object's level as a sky
