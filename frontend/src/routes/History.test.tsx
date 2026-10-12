@@ -5,7 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import roughCases from "../roughlyAligned.cases.json";
-import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, panelGainSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, contributingSubs, calibrationSummaryText, drizzleDegradedNote, rejectionDegradedNote, removedOverlayCaption, derivedFromNote, overwrittenPictureNote } from "./History";
+import { HistoryView, sortRuns, noiseDeltas, previousRunId, historyCompareHref, noiseTrendSeries, combineMethodLabel, formatEngineVersion, photometricSummaryText, panelGainSummaryText, darkScalingSummaryText, sensorDefectsSummaryText, rejectionSummaryText, weightingSummaryText, weightingSkippedText, frameAccountingNote, readErrorNote, roughlyAlignedNote, contributingSubs, calibrationSummaryText, autoDrizzleNote, drizzleDegradedNote, rejectionDegradedNote, removedOverlayCaption, derivedFromNote, overwrittenPictureNote } from "./History";
 import { formatIntegration, formatStampDateTime } from "../format";
 import * as client from "../api/client";
 import { FULL_RES_PNG_MAX_LONG_EDGE } from "../fullres";
@@ -1717,6 +1717,82 @@ describe("sensorDefectsSummaryText", () => {
   });
   it("groups a big count so it can be read at a glance", () => {
     expect(sensorDefectsSummaryText(12345)).toContain("12,345");
+  });
+});
+
+// The owner's own question — "is drizzle ever used?" — answered on the run that
+// decided it for him. The one thing these must never get wrong is the
+// denominator: a mosaic's *frame total* in place of its per-pixel depth is the
+// substitution that had the Stack form telling him to turn Drizzle off on
+// pictures measured 117-153 subs deep (observer issue #901), so the sentence
+// always says "on each pixel" and the number always comes from the engine.
+describe("autoDrizzleNote", () => {
+  it("says nothing on an attended run or a master older than the cards", () => {
+    expect(autoDrizzleNote(null)).toBeNull();
+    expect(autoDrizzleNote(undefined)).toBeNull();
+  });
+  it("names the scale and the per-pixel depth when it drizzled", () => {
+    const s = autoDrizzleNote({
+      drizzled: true, reason: "deep_and_dithered", scale: 1.5,
+      samples_per_pixel: 640, bar: 200, dither_px: 0.27, panels: 4,
+    });
+    expect(s).toContain("×1.5");
+    expect(s).toContain("640 subs on each pixel");
+    expect(s).toContain("automatically");
+  });
+  it("says how short a thin target fell, and that it will qualify by itself", () => {
+    const s = autoDrizzleNote({
+      drizzled: false, reason: "too_few_samples", samples_per_pixel: 85, bar: 200,
+    });
+    expect(s).toContain("85 subs on each pixel");
+    expect(s).toContain("200");
+    expect(s).toContain("Keep shooting");
+  });
+  it("blames the dither, not the owner, when the subs never moved", () => {
+    const s = autoDrizzleNote({
+      drizzled: false, reason: "too_little_dither", samples_per_pixel: 400,
+      bar: 200, dither_px: 0.01, panels: 1,
+    });
+    expect(s).toContain("barely moved between frames");
+    expect(s).not.toContain("200");
+  });
+  it("reassures when the dither could not be measured at all", () => {
+    const s = autoDrizzleNote({
+      drizzled: false, reason: "dither_unknown", samples_per_pixel: 400, bar: 200,
+    });
+    expect(s).toContain("Nothing is wrong");
+  });
+  it("names the one lever when it was only the memory budget", () => {
+    const s = autoDrizzleNote({
+      drizzled: false, reason: "no_room_in_budget", samples_per_pixel: 900,
+      bar: 200, dither_px: 0.28, panels: 9,
+    });
+    expect(s).toContain("memory budget");
+    expect(s).toContain("Settings");
+  });
+  it("renders nothing for a verdict a newer engine invented", () => {
+    expect(autoDrizzleNote({ drizzled: false, reason: "something_new" })).toBeNull();
+  });
+  it("declines to claim a scale it was not given", () => {
+    // A "drizzled" card with no usable scale would read as "Super-resolution ×",
+    // so it says nothing instead.
+    expect(autoDrizzleNote({ drizzled: true, reason: "deep_and_dithered" }))
+      .toBeNull();
+    expect(autoDrizzleNote({
+      drizzled: true, reason: "deep_and_dithered", scale: 1,
+    })).toBeNull();
+  });
+  it("still reads sensibly with no depth recorded", () => {
+    const s = autoDrizzleNote({
+      drizzled: false, reason: "too_few_samples", bar: 200,
+    });
+    expect(s).toContain("not enough subs on each pixel");
+  });
+  it("says one sub, not 1 subs", () => {
+    const s = autoDrizzleNote({
+      drizzled: false, reason: "too_few_samples", samples_per_pixel: 1, bar: 200,
+    });
+    expect(s).toContain("1 sub on each pixel");
   });
 });
 

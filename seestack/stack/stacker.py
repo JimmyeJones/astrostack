@@ -78,6 +78,7 @@ from seestack.stack.weighting import (
 if TYPE_CHECKING:
     from seestack.bg.coverage_leveling import CoverageGrain
     from seestack.calibrate.apply import CalibrationMasters
+    from seestack.stack.autodrizzle import AutoDrizzleDecision, DitherSpread
 
 # Peak count of full-canvas float32 RGB arrays alive at once across the stack
 # passes (Welford mean/M2/count, or drizzle output/weight, plus working
@@ -680,6 +681,26 @@ class StackOptions:
     # Off by default → every existing run record, config and desktop run is
     # byte-for-byte unchanged.
     unattended: bool = False
+    # **Posture, not a knob** (the same kind of flag as ``unattended`` above, and
+    # it lives in ``NON_FORM_KEYS`` for the same reason): may this run decide
+    # *for itself* whether to drizzle? The owner noticed his pictures come out at
+    # the sensor's own resolution, asked whether drizzle is ever used — it never
+    # was, ``drizzle`` defaults off and no unattended path set it — and chose
+    # "Auto, when worth it" (2026-10-12).
+    #
+    # It is a posture rather than a setting because it says only *who decides*.
+    # The decision itself is :mod:`seestack.stack.autodrizzle`'s, taken inside
+    # ``run_stack`` from the real output canvas: how many subs land on one of its
+    # pixels, whether they actually moved sub-pixel between frames, and whether
+    # the super-resolved canvas fits the memory budget. ``webapp.walkaway``
+    # writes it, only on a run nobody is watching and only when the merged
+    # options expressed **no** ``drizzle`` choice — so an explicit ``drizzle`` in
+    # the owner's global or per-target saved defaults always wins, on *or* off.
+    #
+    # Off by default → every existing run record, config and desktop run is
+    # byte-for-byte unchanged, and the only thing that turns it on is the
+    # owner-approved ``Settings.auto_drizzle``.
+    auto_drizzle: bool = False
 
     def background_options(self) -> BackgroundOptions:
         return BackgroundOptions(
@@ -1053,6 +1074,72 @@ def auto_reject_depth(
     if len(substantial) < 2:
         return None                             # no sound split; use the frame count
     return min(substantial)
+
+
+def _decide_auto_drizzle(
+    frames: list, n: int, *,
+    ref_shape: tuple[int, int],
+    dst_shape: tuple[int, int],
+    dst_wcs_text: str | None,
+    is_mosaic: bool,
+    memory_budget_gb: float | None,
+) -> AutoDrizzleDecision:
+    """:func:`~seestack.stack.autodrizzle.decide_auto_drizzle`, wired to this
+    run's frames, canvas and memory budget.
+
+    Three things the pure module deliberately cannot know, and must not import to
+    find out: where a sub's sub-pixel phase comes from (its own WCS, projected
+    through the canvas this stack is about to reproject onto), which mosaic panel
+    each sub belongs to (:func:`~seestack.stack.pointings.pointing_groups`, the
+    same gate every other per-panel decision in here uses), and what a drizzled
+    canvas costs (:func:`_estimate_peak_bytes`).
+
+    The phase measurement is handed over as a **callable**, not a value, because
+    it is the expensive half — a WCS read per sub, plus the clustering — and the
+    depth bar answers most runs on canvas arithmetic alone. A shallow walk-away
+    stack therefore pays nothing for being asked the question.
+
+    **A mosaic whose panels cannot be separated is refused, not pooled.** Each
+    panel sits at its own arbitrary sub-pixel offset from the canvas grid, so
+    pooling a raster's phases reads a set of perfectly undithered panels as
+    beautifully dithered, while no output pixel ever sees more than one of them.
+    ``pointing_groups`` returns ``None`` for a mosaic too tightly packed to split
+    — and for one whose nightly re-framing chained its panels into a single
+    cluster (the ``PANEL_LINK_DIST_DEG`` lead in ``docs/IMPROVEMENTS.md``) — and
+    there the honest answer is "cannot tell", which the decision reads as no.
+    """
+    from seestack.stack.autodrizzle import (
+        AUTO_DRIZZLE_PANEL_MIN_FRAMES,
+        canvas_pixel_positions,
+        decide_auto_drizzle,
+        dither_spread_px,
+    )
+
+    def _measure() -> DitherSpread | None:
+        labels: list[int] | None = None
+        if is_mosaic:
+            labels = pointing_groups(_frame_radecs(frames),
+                                     min_members=AUTO_DRIZZLE_PANEL_MIN_FRAMES)
+            if labels is None:
+                return None
+        return dither_spread_px(
+            canvas_pixel_positions(frames, canvas_wcs_text=dst_wcs_text),
+            labels=labels, min_members=AUTO_DRIZZLE_PANEL_MIN_FRAMES)
+
+    budget = int(_stack_memory_budget_bytes(memory_budget_gb))
+
+    def _fits(scale: float) -> bool:
+        # Priced *with* the two-pass rejection, because an automatic drizzle
+        # always asks for it — a walk-away drizzle with no outlier rejection at
+        # all would keep every satellite that slipped past frame QC, so the two
+        # are one decision and have to be one price.
+        peak, _ = _estimate_peak_bytes(dst_shape, drizzle=True,
+                                       drizzle_scale=scale, drizzle_reject=True)
+        return int(peak) <= budget
+
+    return decide_auto_drizzle(
+        n_frames=n, ref_shape=ref_shape, dst_shape=dst_shape,
+        measure_dither=_measure, fits_budget=_fits)
 
 
 def panel_frame_counts(
@@ -2002,6 +2089,7 @@ def _build_output_header_meta(
     n_read_errors: int = 0,
     n_read_recovered: int = 0,
     drizzle_reject_declined: bool = False,
+    auto_drizzle: AutoDrizzleDecision | None = None,
     drizzle_scale_requested: float | None = None,
     min_max_reject_count_requested: int | None = None,
     rejection_map_written: bool | None = None,
@@ -2256,6 +2344,35 @@ def _build_output_header_meta(
     # server log has rolled.
     if drizzle_reject_declined:
         meta["DRZREJSK"] = ("memory", "drizzle rejection skipped (over budget)")
+    # …and the decision nobody was there to watch: whether this hands-off run
+    # drizzled *itself*, and the numbers it decided from
+    # (:mod:`seestack.stack.autodrizzle`). Stamped on every run that was asked
+    # the question, **including the ones that said no** — a picture that came
+    # back at the sensor's own resolution is the case the owner asked about in
+    # the first place, so "why not" is the half most worth recording. Absent on
+    # an attended run, which never carries the posture, and on every master
+    # written before the feature.
+    if auto_drizzle is not None:
+        meta["ADRZAUTO"] = (bool(auto_drizzle.drizzle),
+                            "drizzle decided automatically for this run")
+        meta["ADRZWHY"] = (str(auto_drizzle.reason),
+                           "why auto-drizzle decided that")
+        # The bar that judged *this* run, carried on the decision rather than
+        # re-read from the module constant, so the card cannot quote a different
+        # number from the one that decided it.
+        meta["ADRZBAR"] = (int(auto_drizzle.bar),
+                           "subs/output px auto-drizzle needs")
+        meta["ADRZSPP"] = (int(auto_drizzle.samples_per_pixel),
+                           "subs on one output pixel")
+        if auto_drizzle.dither_px is not None:
+            meta["ADRZDTH"] = (round(float(auto_drizzle.dither_px), 4),
+                               "sub-pixel dither spread, output px")
+        if auto_drizzle.panels is not None:
+            meta["ADRZPNL"] = (int(auto_drizzle.panels),
+                               "pointing groups the dither was measured in")
+        if auto_drizzle.scale is not None:
+            meta["ADRZSCL"] = (round(float(auto_drizzle.scale), 4),
+                               "drizzle scale auto-drizzle chose")
     # …and the same story one level up: an unattended run whose *canvas* didn't fit,
     # stepped down to the largest super-resolution scale the budget could hold
     # rather than refusing to make a picture at all. ``options.drizzle_scale`` here
@@ -3495,6 +3612,57 @@ def run_stack(
     # persisted") and sent a 2026-09-13 run off to fix a bug that does not exist.
     eff = _resolve_auto_reject(
         options, n, depth=auto_reject_depth(_frame_radecs(frames)))
+    # ---- "Auto, when worth it": should this run drizzle itself? ------------
+    # Asked only on a run carrying the ``auto_drizzle`` posture — which
+    # ``webapp.walkaway`` writes for an unattended stack whose merged options
+    # expressed no ``drizzle`` choice, so an explicit ``drizzle`` in the owner's
+    # own saved defaults has already won by the time this runs, on *or* off. The
+    # engine cannot tell an explicit ``drizzle: false`` from the dataclass
+    # default, which is exactly why that gate lives up there and this one is only
+    # ``not eff.drizzle`` (never re-scale a drizzle the owner asked for).
+    #
+    # Decided *here* rather than at submit time for the same reason
+    # :func:`_afford_drizzle_reject` is: the question is about the real output
+    # canvas — how many subs land on one of *its* pixels — and for a mosaic that
+    # union canvas was only just computed a few hundred lines up. Answering it
+    # from an estimate would mean a second canvas computation (one WCS read per
+    # sub) and a verdict that could differ from the run's own.
+    auto_drizzle: AutoDrizzleDecision | None = None
+    if eff.auto_drizzle and not eff.drizzle:
+        auto_drizzle = _decide_auto_drizzle(
+            frames, n, ref_shape=ref_shape, dst_shape=dst_shape,
+            dst_wcs_text=dst_wcs_text, is_mosaic=is_mosaic_canvas,
+            memory_budget_gb=memory_budget_gb)
+        if auto_drizzle.drizzle:
+            # ``drizzle_reject`` comes with it, always. The standard κ-σ/min-max
+            # pass does not run under drizzle (see :func:`combine_method`), so
+            # turning drizzle on without its own two-pass rejection would hand a
+            # walk-away stack back with every satellite and plane trail in it.
+            # The pair is priced as one in ``_decide_auto_drizzle``'s budget
+            # question for the same reason; whether the second pass is
+            # *affordable* in the end is still ``_afford_drizzle_reject``'s
+            # answer, immediately below.
+            #
+            # It also means a target whose saved defaults name **min/max**
+            # rejection gets drizzle's κ-σ-style pass instead, which is worth
+            # saying plainly: nothing is lost, because the depth bar this
+            # decision just cleared is 200 samples on a pixel — eighteen times
+            # ``kappa_min_frames``, the depth below which a κ clip cannot pull a
+            # lone trail out of statistics that include it. The method swap only
+            # ever happens where the swapped-in method provably reaches.
+            eff = replace(eff, drizzle=True, drizzle_reject=True,
+                          drizzle_scale=float(auto_drizzle.scale))
+            log.info(
+                "Auto-drizzle: x%g — %d subs on each output pixel (bar %d), "
+                "sub-pixel spread %.2f px measured over %d pointing group(s).",
+                eff.drizzle_scale, auto_drizzle.samples_per_pixel,
+                auto_drizzle.bar, auto_drizzle.dither_px or 0.0,
+                auto_drizzle.panels or 1)
+        else:
+            log.info(
+                "Auto-drizzle: not drizzling (%s) — %d subs on each output "
+                "pixel against a bar of %d.", auto_drizzle.reason,
+                auto_drizzle.samples_per_pixel, auto_drizzle.bar)
     # …and the drizzle half of the same question, which can only be answered here:
     # pricing the two-pass rejection needs the real output canvas, and for a
     # mosaic that union canvas was only just computed. ``eff.drizzle_reject`` then
@@ -3509,8 +3677,13 @@ def run_stack(
     eff = replace(eff, drizzle_reject=_afford_drizzle_reject(
         eff, n, dst_shape, memory_budget_gb))
     if _drizzle_reject_wanted and not eff.drizzle_reject:
+        # ``eff``, not ``options``: the scale this run is actually building at.
+        # They used to be the same number here, and an auto-drizzled run is the
+        # case where they are not — ``options.drizzle_scale`` is then whatever
+        # the form's default happened to be, which would put a GB figure in this
+        # sentence for a canvas nobody was going to allocate.
         _reject_need, _ = _estimate_peak_bytes(
-            dst_shape, drizzle=True, drizzle_scale=options.drizzle_scale,
+            dst_shape, drizzle=True, drizzle_scale=eff.drizzle_scale,
             drizzle_reject=True)
         _resolved = resolve_stack_memory_budget(memory_budget_gb)
         log.warning(
@@ -3607,10 +3780,11 @@ def run_stack(
     # drizzled near-cap mosaic canvas can otherwise reach tens of GB and get the
     # whole container OOM-killed (there's no cgroup limit to catch it).
     # (Rejection is skipped below 4 frames, so don't charge its extra arrays.)
-    # ``eff.drizzle_scale`` (not ``options``) from here down: an unattended
-    # over-budget run may have just stepped it down, and the guard, the in-flight
-    # cap and the drizzler must all price the canvas that is actually allocated.
-    _guard_stack_memory(dst_shape, drizzle=options.drizzle,
+    # ``eff`` (not ``options``) from here down: an unattended over-budget run may
+    # have just stepped the scale down, and an auto-drizzled one turned drizzle
+    # *on* a few hundred lines up — so the guard, the in-flight cap and the
+    # drizzler must all price the canvas that is actually allocated.
+    _guard_stack_memory(dst_shape, drizzle=eff.drizzle,
                         drizzle_scale=eff.drizzle_scale,
                         drizzle_reject=eff.drizzle_reject,
                         reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
@@ -3630,7 +3804,7 @@ def run_stack(
     max_in_flight = _memory_bounded_in_flight(
         ref_shape, dst_shape,
         max_in_flight=_max_workers * 2,
-        drizzle=options.drizzle, drizzle_scale=eff.drizzle_scale,
+        drizzle=eff.drizzle, drizzle_scale=eff.drizzle_scale,
         drizzle_reject=eff.drizzle_reject,
         reject_arrays=(_min_max_reject_arrays(eff.min_max_reject_count)
                        if _min_max_reject_runs(eff, n) else 0),
@@ -3693,9 +3867,12 @@ def run_stack(
     # header card and the form already read, so routing the dispatcher through
     # it makes "what the app says it did" and "what it did" the same expression
     # rather than two that happen to agree. The predicate is identical
-    # term-for-term to what each ``elif`` carried, and ``eff.drizzle`` is never
-    # anything but ``options.drizzle`` (nothing between here and
-    # ``_resolve_auto_reject`` touches it), so no run changes branch.
+    # term-for-term to what each ``elif`` carried.
+    #
+    # ``eff.drizzle`` used to be nothing but ``options.drizzle``, and this
+    # comment used to say so; the auto-drizzle decision beside
+    # ``_resolve_auto_reject`` is the one thing that moves it, which is exactly
+    # why the dispatch, the memory guard and the in-flight cap all read ``eff``.
     combine = combine_method(eff, n)
 
     # ---- 3a. Drizzle path (alternate accumulator) --------------------------
@@ -4200,6 +4377,7 @@ def run_stack(
                                             drizzle_reject_declined=(
                                                 _drizzle_reject_wanted
                                                 and not eff.drizzle_reject),
+                                            auto_drizzle=auto_drizzle,
                                             drizzle_scale_requested=(
                                                 drizzle_scale_requested),
                                             min_max_reject_count_requested=(

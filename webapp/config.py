@@ -230,6 +230,34 @@ class Settings(BaseModel):
     # interactive Stack form is never affected either way (it is not unattended),
     # and neither is reprocess-all, which replays a prior run's own options.
     auto_reject_on_unattended: bool = False
+    # Let a *hands-off* stack decide for itself whether to drizzle — the owner's
+    # "Auto, when worth it" (2026-10-12).
+    #
+    # Why it exists. He noticed his finished pictures come out at the sensor's
+    # own resolution and asked whether drizzle is ever used. It never was:
+    # ``StackOptions.drizzle`` defaults off and no unattended path set it, so
+    # super-resolution needed a box ticked on the Stack form before every single
+    # run — on an install whose whole promise is that you drop your subs in and
+    # come back to a finished picture. Asked what he wanted instead, he chose
+    # "Auto, when worth it".
+    #
+    # *When* it is worth it is :mod:`seestack.stack.autodrizzle`'s judgement,
+    # taken inside the run from the real output canvas: at least 200 subs on one
+    # of **its** pixels (counted per output pixel, never as a mosaic's frame
+    # total), the subs actually moved sub-pixel between frames, and the
+    # super-resolved canvas plus its own two-pass outlier rejection fits the
+    # memory budget. Below any of those the run makes exactly the picture it
+    # makes today, and says in its own header why.
+    #
+    # **On by default, and that is a deliberate behaviour change on a live
+    # install** — the §9 sign-off is the owner's own answer, recorded in
+    # ``docs/SHIPPED.md`` under this version. It is bounded on every side a §9
+    # reader would ask about: it only reaches a run nobody is watching, an
+    # explicit ``drizzle`` in the global or per-target saved defaults always wins
+    # (on *or* off), the interactive Stack form is never touched, and
+    # "Bring my pictures up to date" stands down by itself because the options it
+    # replays carry an explicit ``drizzle`` already.
+    auto_drizzle: bool = True
     # Should the one-click Auto edit trim the ragged, low-coverage border off a
     # mosaic/dithered result? On (the historical behaviour) Auto ends with a
     # ``geometry.crop`` to the largest well-covered rectangle, so the picture is
