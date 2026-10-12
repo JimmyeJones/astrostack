@@ -51,6 +51,7 @@ from seestack.edit import auto_prefs as auto_prefs_mod
 from seestack.edit import presets as presets_mod
 from webapp import deps
 from webapp import edit_fit_cache
+from webapp import edit_resume_cache
 from webapp import stale_crop
 from webapp.schemas import EditOpOut, editor_ops_schema
 
@@ -502,12 +503,70 @@ def render_run_display_array(
     colour-calibration path ran); the default returns just the array so existing
     callers are unchanged."""
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
-    ctx = _preview_context(project_dir, run, recipe, rgb, scale)
-    out = apply_recipe(rgb, recipe, ctx, for_preview=True)
-    _remember_preview_fits(project_dir, run, recipe, rgb, scale, ctx)
+    out, ctx = _render_preview_array(project_dir, run, recipe, rgb, scale)
     if return_ctx:
         return out, ctx
     return out
+
+
+def _render_preview_array(project_dir: Path, run, recipe: Recipe, rgb, scale: float,
+                          errors: list[str] | None = None):
+    """``(display RGB, ctx)`` for the whole-proxy live preview.
+
+    The one place both live-preview endpoints — the PNG and the histogram beside
+    it — go through, so what either of them reuses from the render before is one
+    decision rather than two. Two caches sit here, and they carry different
+    things:
+
+    * :mod:`webapp.edit_fit_cache` hands every op the *number* an earlier render
+      measured, for the longest prefix the two recipes agree on; and
+    * :mod:`webapp.edit_resume_cache` hands this render the *picture* at the last
+      additive ``background.*`` op, so the sky fit above it is skipped entirely
+      rather than re-measured. That is the half a number cannot express — a mesh
+      is not a scalar — and it is measured at 1.85× a render on a mosaic the size
+      of the owner's own.
+
+    Splitting the pipeline at that boundary is safe because no stretch has run
+    there (``edit_resume_cache.boundary`` declines otherwise), so the prefix call
+    and the tail call compose into exactly what one call over the whole recipe
+    does — asserted bit-for-bit rather than argued.
+    """
+    ctx = _preview_context(project_dir, run, recipe, rgb, scale)
+    key = edit_resume_cache.render_key(
+        project_dir, run.id, run.fits_path, proxy_scale=scale,
+        proxy_shape=rgb.shape, already_display=ctx.already_display)
+    fingerprints = edit_fit_cache.op_fingerprints(recipe)
+    ops = edit_resume_cache.enabled_ops(recipe)
+    errs: list[str] = []
+
+    point = edit_resume_cache.resume_for(key, fingerprints)
+    if point is not None:
+        ctx.op_notes.update(edit_resume_cache.notes_onto(point, ops))
+        out = apply_recipe(point.array, Recipe(ops=ops[point.n_ops:]), ctx,
+                           for_preview=True, errors=errs)
+    else:
+        n = edit_resume_cache.boundary(ops)
+        if n <= 0:
+            out = apply_recipe(rgb, recipe, ctx, for_preview=True, errors=errs)
+        else:
+            # `auto_stretch=False` on the prefix: the fallback stretch belongs to
+            # the end of the *recipe*, and the prefix is not the end of it.
+            mid = apply_recipe(rgb, Recipe(ops=ops[:n]), ctx, for_preview=True,
+                               auto_stretch=False, errors=errs)
+            notes = edit_resume_cache.notes_from(ctx.op_notes, ops[:n])
+            out = apply_recipe(mid, Recipe(ops=ops[n:]), ctx, for_preview=True,
+                               errors=errs)
+            # Only a clean render is worth keeping: an op that failed was skipped
+            # rather than applied, so its array is not the picture this recipe
+            # makes — and the next render must re-run it so the editor says so
+            # again.
+            if not errs:
+                edit_resume_cache.remember(key, fingerprints, array=mid,
+                                           n_ops=n, notes=notes)
+    if errors is not None:
+        errors.extend(errs)
+    _remember_preview_fits(project_dir, run, recipe, rgb, scale, ctx)
+    return out, ctx
 
 
 def _preview_context(project_dir: Path, run, recipe: Recipe,
@@ -2216,10 +2275,9 @@ async def edit_histogram(safe: str, run_id: int, request: Request,
         # preview beside it: the two endpoints fire together on every change and
         # run the identical recipe over the identical proxy, so whichever lands
         # second re-uses what the first measured instead of re-solving it.
-        ctx = _preview_context(project_dir, run, rec, rgb, scale)
         errors: list[str] = []
-        out = apply_recipe(rgb, rec, ctx, for_preview=True, errors=errors)
-        _remember_preview_fits(project_dir, run, rec, rgb, scale, ctx)
+        out, ctx = _render_preview_array(project_dir, run, rec, rgb, scale,
+                                         errors=errors)
         hist = compute_histogram(out)
         hist["empty"] = empty
         hist["errors"] = errors  # ops that failed (surfaced near the preview)
