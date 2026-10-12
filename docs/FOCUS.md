@@ -1,5 +1,53 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-5xjtzi` — **the inbox had the one thing the
+backlog did not: a brand-new observer issue, unfiled, ungated and actionable. v0.494.4 shipped it.**
+
+**What this run did.** Baseline `main` green (7860 passed, 7 skipped), CI green, no open PRs, and "Bugs (fix
+these first)" still holding **no ungated, undecided entry** — the same standing position the last three runs
+found. So instead of a third dogfood pass (the previous run's was CLEAN and is only hours old), the move was
+to **read the issue inbox, which no Scout had reached yet**: #1137 was filed at 07:17 today and was nowhere in
+`docs/IMPROVEMENTS.md`. **v0.494.4** verified it on `main` and fixed it. One typographic apostrophe in a
+capture folder's name — the Seestar writes **U+2018** where the user types one — travels through ASTAP's
+`cmdline:` commentary card into `wcs_json`; FITS allows only printable ASCII in a header and astropy enforces
+it on the way *in*, so `wcs_from_text` returned `None` on **115 of 115** of that target's frames while the
+record called them all solved. 0 stack runs, and the identical *"reference WCS could not be parsed for
+drizzle"* in **19 consecutive scan jobs over six weeks**. Both sides of the round-trip are repaired (the read
+side heals the rows already stored — they are never re-offered to the solver, so a write-side-only fix leaves
+the target broken forever; the write side stops a fresh install re-solving them every scan). Issue closed.
+
+**START HERE NEXT RUN, and it is a genuinely different answer than the last three runs got.** The Bugs section
+is still all gated-or-decided, and there is still no `READY` queue — but **the issue inbox is now the live
+frontier, and it is where this run's task came from.** Before reaching for a dogfood pass, **list the open
+issues**: as of this run #1137 is closed, and the five still open (#1120 planner remainder, #1015, #903, #880,
+#878) are previously acted-on or owner-gated. A *new* observer issue is the highest-value thing an unattended
+run can find, because it is measured against the owner's own library rather than a synthetic.
+
+**Two method notes from this run, both of which changed the work rather than decorating it.**
+
+1. **The obvious version of a repair can be the dangerous one, and the test is what tells you.** The first cut
+   repaired the whole header. That turns `CRVAL1  = 32?4.12` into a card astropy reads as **0.0**, so the frame
+   comes back *solved at RA 0* — a silently wrong solution 324° from where it points, which would then be
+   trusted as a stack reference. The honest answer there is the one the old code already gave: unsolved. So the
+   repair is scoped to `COMMENT`/`HISTORY` cards, and the test asserts the recovered **centre** is `None`, not
+   merely that the blob is unusable — because the usability check alone would also pass on a fix that simply
+   happened not to help. **When a fix widens what a parser accepts, ask what it now accepts that is *wrong*,
+   not just what it now accepts.**
+2. **Never benchmark against a suite that is still running.** The first A/B of the hot path read 82 → 96 µs a
+   call and looked like a 17 % regression on `wcs_from_text`, which `compute_mosaic_canvas` reads **once per
+   sub**. It was the baseline `pytest -n 4` competing for the same four cores. Alternating A/B, three rounds:
+   82.5/82.6, 83.6/87.3, 88.4/87.5 — indistinguishable. The repo already warns that a dogfood and a `pytest`
+   collide; **a measurement and a `pytest` collide the same way**, and a one-shot A/B cannot see it. Alternate.
+
+**A gate closed with its own check, so nobody re-runs it:** the "Fly to it" idea's shape (c), constellation
+lines, is gated on a bundled line dataset. There is none (`seestack/data/` holds `messier.json`,
+`deepsky_popular.json`, `glossary.md`; every "constellation" in the tree is a name string on a catalog row),
+and the entry's own instruction is not to add one. Annotated in the backlog as closed.
+
+**And the live question still waiting on the owner is item 19** of his one-sitting list: auto-drizzle is on by
+default, unattended, and costs ~×7. **Do not build a time gate on the hot path before he picks one.** Earlier
+notes stand below.)*
+
 *Last edited 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-bz6foc` — **the journey pass came due,
 found nothing, and the run shipped the measured editor slice it cleared the way for.**
 
