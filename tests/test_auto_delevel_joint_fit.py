@@ -60,9 +60,19 @@ _SEEDS = (13, 5, 21, 3)
 
 def _scene(*, rows: int = 1, cols: int = 4, offsets=(), gradient: float = 0.0,
            axis: str = "y", sigma: float = 0.004, blob: float = 0.0,
-           radial: float = 0.0, seed: int = 13) -> np.ndarray:
+           radial: float = 0.0, seed: int = 13,
+           h: int = H, w: int = W) -> np.ndarray:
     """A linear mosaic proxy: flat sky, a faint extended object, stars, grain,
     an optional smooth shape, and per-panel steps on a ``rows`` x ``cols`` raster.
+
+    ``h`` / ``w`` build the *same* scene on a bigger canvas rather than a bigger
+    crop of it: the object is already a fraction of the frame, the two absolute
+    widths scale with it and the stars scale by density, so the shapes the guard
+    reasons about are unchanged. ``h, w = H, W`` is the arithmetic this file has
+    always run, term for term. Needed because
+    :data:`~seestack.edit.presets._LEVEL_FIT_SAMPLE_CAP` is above this fixture's
+    whole pixel count, so nothing about the strided rounds can be measured on it
+    (see :func:`test_the_strided_rounds_do_not_move_the_answer_at_proxy_scale`).
 
     The three smooth shapes are deliberately different *relative to the raster*:
     ``axis="y"`` puts a ramp perpendicular to the panel strips (every panel sees
@@ -73,12 +83,14 @@ def _scene(*, rows: int = 1, cols: int = 4, offsets=(), gradient: float = 0.0,
     canvas-filling object. ``blob`` is that object.
     """
     rng = np.random.default_rng(seed)
-    img = np.full((H, W), _SKY, dtype=np.float32)
-    yy, xx = np.mgrid[0:H, 0:W]
-    img += (np.exp(-(((xx - W / 2) / 50.0) ** 2 + ((yy - H / 2) / 35.0) ** 2))
+    scale = ((h / H) + (w / W)) / 2.0
+    img = np.full((h, w), _SKY, dtype=np.float32)
+    yy, xx = np.mgrid[0:h, 0:w]
+    img += (np.exp(-(((xx - w / 2) / (50.0 * scale)) ** 2
+                     + ((yy - h / 2) / (35.0 * scale)) ** 2))
             * 0.033).astype(np.float32)
-    for _ in range(150):
-        cy, cx = int(rng.integers(8, H - 8)), int(rng.integers(8, W - 8))
+    for _ in range(int(round(150 * (h * w) / (H * W)))):
+        cy, cx = int(rng.integers(8, h - 8)), int(rng.integers(8, w - 8))
         amp = float(rng.uniform(0.2, 0.9))
         gy, gx = np.mgrid[cy - 6:cy + 7, cx - 6:cx + 7]
         img[cy - 6:cy + 7, cx - 6:cx + 7] += (
@@ -86,18 +98,18 @@ def _scene(*, rows: int = 1, cols: int = 4, offsets=(), gradient: float = 0.0,
         ).astype(np.float32)
     img += rng.normal(0.0, sigma, img.shape).astype(np.float32)
     if gradient:
-        ramp = ((yy / H) if axis == "y"
-                else (xx / W) if axis == "x"
-                else 0.5 * (yy / H) + 0.5 * (xx / W))
+        ramp = ((yy / h) if axis == "y"
+                else (xx / w) if axis == "x"
+                else 0.5 * (yy / h) + 0.5 * (xx / w))
         img += (gradient * ramp).astype(np.float32)
     if radial:
-        r2 = ((xx - W / 2) / (W / 2)) ** 2 + ((yy - H / 2) / (H / 2)) ** 2
+        r2 = ((xx - w / 2) / (w / 2)) ** 2 + ((yy - h / 2) / (h / 2)) ** 2
         img += (radial * (1.0 - 0.9 * r2)).astype(np.float32)
     if blob:
-        img += (blob * np.exp(-(((xx - W / 2) / (W / 3)) ** 2
-                                + ((yy - H / 2) / (H / 2)) ** 2))).astype(np.float32)
+        img += (blob * np.exp(-(((xx - w / 2) / (w / 3)) ** 2
+                                + ((yy - h / 2) / (h / 2)) ** 2))).astype(np.float32)
     if offsets:
-        ph, pw = H // rows, W // cols
+        ph, pw = h // rows, w // cols
         for r in range(rows):
             for c in range(cols):
                 img[r * ph:(r + 1) * ph, c * pw:(c + 1) * pw] += np.float32(
@@ -105,9 +117,10 @@ def _scene(*, rows: int = 1, cols: int = 4, offsets=(), gradient: float = 0.0,
     return img
 
 
-def _coverage(rows: int, cols: int, frames) -> np.ndarray:
-    cov = np.zeros((H, W), dtype=np.float32)
-    ph, pw = H // rows, W // cols
+def _coverage(rows: int, cols: int, frames,
+              h: int = H, w: int = W) -> np.ndarray:
+    cov = np.zeros((h, w), dtype=np.float32)
+    ph, pw = h // rows, w // cols
     for r in range(rows):
         for c in range(cols):
             cov[r * ph:(r + 1) * ph, c * pw:(c + 1) * pw] = float(
@@ -618,3 +631,184 @@ def test_the_steps_come_out_of_the_plane_the_sky_level_is_read_off():
                 # With a smooth shape present the old arithmetic left the whole
                 # staircase in the plane; this is the defect, on the pixels.
                 assert before > 4.0 * after, (name, kw, before, after)
+
+
+# --------------------------------------------------------------------------- #
+# The strided rounds (v0.493.15) — the clock came down; did the answer move?
+# --------------------------------------------------------------------------- #
+
+#: A canvas the shipped stride fires on. 1000x1000 is the *smallest* one it does
+#: (``_LEVEL_FIT_SAMPLE_CAP`` x 4), so its strided plane carries exactly the cap
+#: — the fewest samples production ever hands the rounds, at any proxy size.
+_BIG = 1000
+
+#: ...and a cap starved to a twelfth of the real one, which is the only way this
+#: file's own 300x600 fixture (180k pixels, below the cap) can be made to stride
+#: at all. It forces the same stride of 3 on ~20k samples where production has
+#: 250k, so it is the shipped constant made twelve times harder, not a model of
+#: it.
+_STARVED_CAP = 20_000
+
+
+def _measured_bg(lum: np.ndarray, cov: np.ndarray) -> float:
+    """``_target_bg``'s mosaic half on its own.
+
+    The single-field half of :func:`_goal_error` never reaches
+    ``_delevelled_luminance`` — a uniform coverage map has one level, so the pass
+    declines — so it is identical under every cap and cancels out of any
+    comparison between two of them. Measuring only the mosaic is therefore the
+    same comparison for half the work, which is what makes a sweep at the owner's
+    proxy scale affordable here at all.
+    """
+    return _target_bg(lum, cov)
+
+
+def test_the_strided_plane_never_carries_fewer_samples_than_the_cap():
+    """:func:`~seestack.edit.presets._fit_stride`'s whole contract.
+
+    Every figure in :data:`~seestack.edit.presets._LEVEL_FIT_SAMPLE_CAP`'s note
+    about how precise a level's median is rests on the strided plane carrying *at
+    least* the cap, so that is the property, asserted across the sizes a proxy
+    can actually be rather than at one of them.
+    """
+    assert P._fit_stride(H * W) == 1, "this file's fixture must not stride"
+    assert P._fit_stride(_BIG * _BIG) == 2
+    assert P._fit_stride(1500 * 1500) == 3      # a square proxy at PROXY_MAX_PX
+    assert P._fit_stride(1500 * 1000) == 2
+    for n in (0, 1, 10, 50_000, 249_999, 250_000, 999_999, 1_000_000,
+              1_500_000, 2_250_000, 4_000_000, 9_000_000, 25_000_000):
+        stride = P._fit_stride(n)
+        assert stride >= 1, n
+        if stride > 1:
+            assert n // (stride * stride) >= P._LEVEL_FIT_SAMPLE_CAP, (n, stride)
+        # ...and never one stride coarser than that bound allows.
+        assert n // ((stride + 1) ** 2) < P._LEVEL_FIT_SAMPLE_CAP, (n, stride)
+
+
+@pytest.mark.parametrize("scene_name", ["quiet", "ramp across (y) 0.20",
+                                        "radial 0.20", "blob 0.15"])
+def test_the_strided_rounds_do_not_move_the_answer_at_proxy_scale(
+        scene_name, monkeypatch):
+    """The measurement that decides the stride, at the owner's own proxy scale.
+
+    **It cannot be made on this file's 300x600 fixture, and that is the point
+    worth carrying forward**: 180k pixels is *below* the sample cap, so the
+    shipped code does not stride it at all and a sweep over it would compare the
+    full-resolution loop with itself. Same lesson as v0.493.13's five geometries
+    and v0.493.14's canvas area, through a third door — a fixture has to be big
+    enough for the quantity being measured to *exist* in it.
+
+    So: a 1000x1000 canvas, where the shipped stride is 2 and the strided plane
+    carries exactly the cap (the fewest samples production ever reads), measured
+    against the identical run with the cap raised out of reach. Four scenes
+    including the two the stride moves most — a centre-bright radial residual and
+    a faint canvas-filling object, both of which put a level near
+    ``_LEVEL_MAX_SIGMA_RATIO``'s boundary, where a slightly noisier surface can
+    flip whether the level is levelled at all.
+
+    **The bound is a bound, and the quantity it is a function of is the sample
+    count rather than the stride** — which is why the contract asserted next door
+    is "never fewer samples than the cap" and not "never coarser than stride N".
+    On the radial case, the one that moves: keeping the cap and taking the stride
+    to 3 and then 5 (i.e. a third and a twenty-fifth of the samples) walks the
+    shift from **0.00031 to 0.00070 to 0.00176**, so the 0.0005 asserted here is
+    inside a measured ladder and not a ceiling nothing could reach. The same
+    budget at the stride production reaches on a full 1500x1500 proxy measures
+    the same: 21 scenes x three raster geometries, worst shift **0.00038**, worst
+    goal error 0.00972 -> 0.01008, and the same 3 of 21 cases over the line
+    either way (the table is in ``docs/SHIPPED.md``).
+    """
+    geom = _GEOMS["2x2 raster"]          # the owner's own raster (AGENTS.md §1)
+    kw = next(kw for name, kw, _s in _SCENES if name == scene_name)
+    cov = _coverage(2, 2, geom["frames"], _BIG, _BIG)
+    lum = _scene(seed=13, rows=2, cols=2, offsets=geom["offsets"],
+                 h=_BIG, w=_BIG, **kw)
+
+    assert P._fit_stride(lum.size) == 2, lum.size
+    strided = _measured_bg(lum, cov)
+    strided_emitted = _emitted_target_bg(lum, cov)
+    monkeypatch.setattr(P, "_LEVEL_FIT_SAMPLE_CAP", 10 ** 12)
+    assert P._fit_stride(lum.size) == 1
+    full = _measured_bg(lum, cov)
+    full_emitted = _emitted_target_bg(lum, cov)
+
+    # A twentieth of the control's own 0.01 step, where the error this whole
+    # subsystem is about is bounded at a tenth of one.
+    assert abs(strided - full) < 0.0005, (scene_name, full, strided)
+    # And on the number that reaches his picture, no difference at all.
+    assert strided_emitted == full_emitted, (scene_name, strided_emitted,
+                                             full_emitted)
+
+
+def test_the_sample_cap_is_a_floor_doing_work_not_a_round_number(monkeypatch):
+    """Starve the rounds and the answer *does* move — which is what makes the
+    cap a measured constant rather than a tidy one.
+
+    At a twelfth of the shipped cap (the stride forced onto this file's own
+    fixture: stride 3 on ~20k samples) the faint-object case the guard sits
+    closest to on a 1x4 raster moves by more than half a slider step and lands on
+    a different stop. Nothing is wrong with the *shape* of the strided rounds
+    there — the step estimates are simply read off a tenth as many pixels, so the
+    surface they fit is noisier and the residual
+    :data:`~seestack.edit.presets._LEVEL_MAX_SIGMA_RATIO` is asked about moves
+    with it. Lowering :data:`~seestack.edit.presets._LEVEL_FIT_SAMPLE_CAP` to buy
+    more speed therefore costs the answer, and this is the assertion that says so.
+    """
+    geom = _GEOMS["1x4 strips"]
+    cov = _coverage(1, 4, geom["frames"])
+    lum = _scene(seed=13, rows=1, cols=4, offsets=geom["offsets"], blob=0.15)
+
+    assert P._fit_stride(lum.size) == 1, "the shipped cap must not stride this"
+    shipped = _measured_bg(lum, cov)
+    shipped_emitted = _emitted_target_bg(lum, cov)
+    monkeypatch.setattr(P, "_LEVEL_FIT_SAMPLE_CAP", _STARVED_CAP)
+    assert P._fit_stride(lum.size) == 3
+    starved = _measured_bg(lum, cov)
+
+    assert abs(starved - shipped) > 0.004, (shipped, starved)
+    assert _emitted_target_bg(lum, cov) != shipped_emitted
+
+
+def test_a_canvas_the_strided_rounds_cannot_fit_keeps_the_whole_budget():
+    """The fallback, asserted on the pixels rather than read off the branch.
+
+    A strided plane with too little sky in it to fit a surface through must not
+    cost the pass its rounds: the full-resolution stage is handed the whole
+    ``_LEVEL_FIT_PASSES`` budget instead, so the canvas is measured exactly as it
+    was before the strided rounds existed — **bit for bit**, which is the only
+    bar worth asserting for a fallback.
+    """
+    import seestack.bg.sky_poly as sp
+
+    geom = _GEOMS["2x2 raster"]
+    cov = _coverage(2, 2, geom["frames"], _BIG, _BIG)
+    lum = _scene(seed=13, rows=2, cols=2, offsets=geom["offsets"],
+                 h=_BIG, w=_BIG, gradient=0.20, axis="y")
+    assert P._fit_stride(lum.size) > 1
+
+    real = sp.fit_sky_poly
+    full_shape = lum.shape
+
+    def declines_on_a_strided_plane(plane, include=None, **kw):
+        if plane.shape != full_shape:
+            return None
+        return real(plane, include, **kw)
+
+    try:
+        sp.fit_sky_poly = declines_on_a_strided_plane
+        fallback = P._delevelled_luminance(lum, cov)
+    finally:
+        sp.fit_sky_poly = real
+
+    # The same canvas with nothing strided at all: the loop this fell back to.
+    cap = P._LEVEL_FIT_SAMPLE_CAP
+    try:
+        P._LEVEL_FIT_SAMPLE_CAP = 10 ** 12
+        unstrided = P._delevelled_luminance(lum, cov)
+    finally:
+        P._LEVEL_FIT_SAMPLE_CAP = cap
+
+    assert np.array_equal(fallback, unstrided)
+    # ...and it is a canvas the pass really does act on, so this is not two
+    # declines agreeing with each other.
+    assert not np.array_equal(fallback, lum)

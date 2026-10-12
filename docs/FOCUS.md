@@ -1,5 +1,44 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-12 (Builder, next run — **the v0.493.13 LEAD that FOCUS pointed at is half settled:
+the stride half is in v0.493.15 and is cut; what is left of the entry is the pass count, re-filed with a
+correction.** Take the next item; do not go looking for the stride.
+
+**START HERE NEXT RUN: "Bugs" now starts with the v0.493.15 LEAD — and it is not the perf question it looks
+like, it is an instrument question with a cheap fix.** The entry the last three runs have been quoting said
+the pass count was "a yes/no, answerable by running `test_the_measured_cost_is_below_the_controls_own_resolution`
+at three passes". **It is not, and the reason is this file's own instrument.** Run at 6 / 3 / 2 / 1 passes that
+test passes every time — even at one pass, where the continuous goal error is 0.0058, six times the quantity
+the entry called deciding. Measured: its ten cases are five geometries × two seeds of the *same scene*, so
+their single-field `target_bg` takes exactly **two** values (0.22332 and 0.22386), two positions 0.05 of one
+0.01 step apart, both in the upper half of their step — and this pass's residual is one-signed (the mosaic
+always reads *lower*), so the error moves the value **away** from the nearest boundary. Nothing below
+**0.0089** — nine tenths of a step — can change the stop on any of the ten. The test's name claims a bar it
+is nine times too coarse to hold. The fix is (a) in the entry: sweep the **position inside the step** with a
+DC offset on the scene, assert the sweep reaches the boundary, and the pass count becomes the yes/no that was
+wanted. **Do that before deciding anything about `_LEVEL_FIT_PASSES`.**
+
+**The method note worth more than v0.493.15's own fix, and it is the third door onto the §1 rule in three
+runs.** The stride could not be measured on this subsystem's fixture *at all*: 300×600 is 180k pixels, below
+`_LEVEL_FIT_SAMPLE_CAP`, so the shipped code does not stride it and a sweep over it compares the
+full-resolution loop with itself. v0.493.13 learned "more than one raster shape", v0.493.14 learned "big
+enough for the quantity to be *stable*" — this one is **big enough for the quantity to exist**. The scene
+builders now take an `h`/`w` argument (verified bit-identical on all 300 scenes they build), so the next
+claim about anything that scales with canvas size can be measured where it lives.
+
+**And two shapes that read safer than what shipped, both measured, both worse — the transferable half.**
+(1) The filed entry's named prerequisite (expose `fit_sky_poly`'s coefficients, because a strided fit returns
+a strided surface) **was not needed at all**: the strided rounds only produce a *step estimate*, and the
+full-size round re-fits from it, so a primitive three other passes share stayed untouched. **When a
+prerequisite is about carrying an intermediate result across resolutions, check first whether the result has
+to cross at all.** (2) Handing the full-resolution stage its own settle budget is the shape that obviously
+cannot move the answer — and it makes the alternation **1821 → 2045 ms**, worse than the bug, because this
+loop's settle test does not stop it on the canvas that matters (a mosaic with steps to recover runs all six
+rounds, which the constant's own note already said). **A safety argument that leans on an early exit has to
+check that the exit fires on the case being protected.**
+
+Earlier notes stand below.)*
+
 *Last edited 2026-10-11 (Builder, next run — **the v0.493.11 LEAD that FOCUS pointed at is settled and the
 entry is cut. SHIPPED as v0.493.14.** Take the next item; do not go looking for this one.
 

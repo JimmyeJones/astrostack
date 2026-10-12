@@ -1,5 +1,94 @@
 # Shipped — the record
 
+## 2026-10-12 (Builder, branch `claude/vibrant-galileo-qssusy`) — the de-levelling's six whole-canvas fit passes, got back
+
+### v0.493.15 — all but the last round of the de-levelling's joint fit reads a strided plane: `_LEVEL_FIT_SAMPLE_CAP`, `_fit_stride`, `_delevelled_luminance`
+
+*(Python **+7 items** in `tests/test_auto_delevel_joint_fit.py`, all of which error on `origin/main`
+— they name `_fit_stride` / `_LEVEL_FIT_SAMPLE_CAP`, which do not exist there. ~35 lines of
+production code in one function plus one four-line helper; no new dependency, no config, schema,
+on-disk or API change, and no frontend change. The two scene builders in that test file grew an
+`h` / `w` argument, **verified bit-identical on all 300 scenes the file builds** against
+`git show HEAD:` of the same file.)*
+
+**What was filed, and what it cost.** v0.493.13 fixed the ⭐ gradient/de-levelling bug by fitting
+the sky surface and the per-level steps *against each other* — six rounds of (fit the surface |
+re-measure each step as its residual from it) — and filed the bill it knowingly took as the first
+Bugs entry: Auto's mosaic analysis **~76 % slower**, because each round cost one whole-canvas
+`fit_sky_poly` plus one sigma-clipped median per coverage level. The entry also named the shape to
+get it back: *everything a round produces is tiny* — six polynomial coefficients and one scalar per
+level — *and both halves are already subsampling estimators*, so run the rounds on a strided plane.
+
+**What shipped.** `_delevelled_luminance` runs all but the last round on a strided view of the
+luminance, the sky mask and every level mask (`_fit_stride`, which brings the plane down to
+`_LEVEL_FIT_SAMPLE_CAP = 250_000` samples: stride 1 below the cap, 2 from 1 MP, 3 from 2.25 MP, so
+2–3 on a real mosaic proxy — `proxy.PROXY_MAX_PX` is 1500). The **last** round runs at full size, as
+before, because its surface is the one the guard's flatness question and the final steps are read
+off. The level masks are also hoisted out of the loop, where they used to be rebuilt per level per
+round.
+
+**The entry's "what has to be settled first" turned out not to need settling.** It expected the
+stride to require exposing `fit_sky_poly`'s coefficients, since the function returns an *evaluated*
+surface and a strided fit gives a strided one. That is only true if the strided surface has to be
+used at full size — and it does not: the strided rounds exist to produce a *step estimate*, and the
+full-size round re-fits from it. So the primitive three other passes share was not touched at all,
+which is the cheaper and much safer half of the trade the entry was weighing.
+
+**The shape that reads safer and is worse, measured.** Handing the full-resolution stage its own
+`_LEVEL_FIT_PASSES` budget with its own settle test looks like the shape that cannot move the
+answer — it would be converged at full size whatever the strided rounds did. It does not work,
+because this loop's settle test does not stop it on the canvas that matters: *a mosaic with steps to
+recover runs all six rounds*, which `_LEVEL_FIT_PASSES`' own note already records. So that stage
+spends its whole budget, the strided rounds become pure overhead, and the alternation measures
+**1821 → 2045 ms** — worse than the cost it exists to recover. One full round it is, and the price
+of that choice is what the measurement below bounds.
+
+**The clock** (one box, a 1500×1500 proxy carrying a gradient and real panel steps, BLAS pinned to
+one thread):
+
+| | before | after |
+|---|---|---|
+| `_delevelled_luminance` | 1761 ms | **1088 ms** |
+| `auto_recipe` | 2276 ms | **1546 ms** |
+| `classify_target` (the preset-suggestion endpoint) | 2312 ms | **1573 ms** |
+| the alternation alone, timed against its alternatives in one process | 1821 ms | **969 ms** |
+
+**The answer, which is the half that decides it — and it could not be measured on this subsystem's
+own fixture.** `tests/test_auto_delevel_joint_fit.py` builds 300×600 scenes: 180 k pixels, *below*
+the sample cap, so the shipped code does not stride them and a sweep over that fixture would have
+compared the full-resolution loop with itself. **Same lesson as v0.493.13's five geometries and
+v0.493.14's canvas area, arriving through a third door: a fixture has to be big enough for the
+quantity being measured to exist in it.** So the scene builders took an `h`/`w` argument (the object
+is already a fraction of the frame; the two absolute widths scale with it and the stars scale by
+density) and the measurement ran at proxy scale.
+
+At **1500×1500**, where production strides by 3, over 21 scenes × three raster geometries, against
+the identical run with the cap raised out of reach:
+
+| | full resolution | strided |
+|---|---|---|
+| worst `target_bg` error vs the identical single field | 0.00972 | 0.01008 |
+| worst shift from striding | — | **0.00038** (a twenty-sixth of the control's 0.01 step) |
+| cases whose emitted recipe differs from the single field's | 3 of 21 | 3 of 21 |
+
+So the stride moves no case across the line that matters. The shift is concentrated on a
+centre-bright radial residual and a faint canvas-filling object — the scenes that put a level near
+`_LEVEL_MAX_SIGMA_RATIO`'s boundary, where a slightly noisier surface can flip whether the level is
+levelled at all — and it is **a function of the sample count, not of the stride**, which is why the
+asserted contract is *"the strided plane never carries fewer samples than the cap"* rather than
+*"never coarser than stride N"*. On the radial case at 1000×1000, holding the cap and forcing the
+stride to 2 / 3 / 5 (the cap, a third of it, a twenty-fifth) walks the shift
+**0.00031 → 0.00070 → 0.00176**: a measured ladder, so the 0.0005 the test asserts is a bound and
+not a ceiling nothing could reach.
+
+**And the cap is a floor doing work.** Starved to a twelfth of it (stride 3 on ~20 k samples, forced
+onto the 300×600 fixture), the same 75-case grid × two seeds moves the goal by up to **0.0060** and
+flips **one of 150** emitted recipes. Lowering the cap for more speed therefore costs the answer,
+and `test_the_sample_cap_is_a_floor_doing_work_not_a_round_number` is the assertion that says so.
+The fallback is asserted on the pixels too: a strided plane with too little sky to fit a surface
+through hands the whole budget back to the full-resolution stage, and the result is **bit-identical**
+to the un-strided loop on the same canvas.
+
 ## 2026-10-11 (Builder, branch `claude/jolly-bardeen-kmpmon`) — the on-by-default half of v0.493.11: Auto's own knobs land on their controls' stops
 
 ### v0.493.14 — every number Auto writes into the recipe is one its slider can hold: `auto_op_params`, `_emitted`, `snap_to_param`, `_sharpen_radius_from_fwhm`
