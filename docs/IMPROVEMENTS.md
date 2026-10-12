@@ -153,6 +153,29 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   whenever a `*_sub` child is present without that reconciliation. Full measured repro, controls and
   rule-outs in the issue.
 
+- **LEAD (Builder 2026-10-12, filed with the v0.494.0 auto-drizzle it is about — the one thing that feature
+  ships unmeasured) — nothing in this repo can make a 200-subs-per-pixel drizzled picture, so auto-drizzle's
+  *positive* path is tested only with its bar lowered, and its wall-clock cost on the owner's scale is
+  unknown.** *(Pillar: autonomy — PRIORITY 2; size **S to measure, M to act on**; severity unknown-but-bounded
+  — the feature is correct on every path a fixture can reach, and what is unmeasured is what it **costs**.
+  Confidence: the gap is **proven** — every sample and fixture here is six subs per pointing; the cost is not
+  measured at all.)*
+  **What is missing.** `drizzle_path`'s own module docstring says drizzle "is slower per frame than reproject +
+  accumulate, especially with `scale > 1`" and that "two-pass rejection roughly doubles that again" — and
+  auto-drizzle turns on **both**, unattended, on his deepest targets (5,477 and 35,894 subs). Nobody has put a
+  number on that multiplier, and the spec set no time budget. `seestack.stacktime.estimate_from_runs` already
+  measures seconds-per-sub per `stack_cost_class` from a target's own finished runs, so the instrument exists;
+  what does not exist is a run to measure. The second half of the same gap: `--deep` is deliberately **not
+  stacked** and its sensor is 160×120, `--mosaic`/`--big` are six subs deep, so `tests/test_auto_drizzle_run.py`
+  reaches the drizzling branch only by monkeypatching `AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL` to 5.
+  **Why it is a lead and not a fix.** The honest shapes, cheapest first: **(a)** time one real
+  drizzle-with-rejection stack against the same frames undrizzled on a deep fixture built for it, and put the
+  multiplier in the setting's own note; **(b)** if it is large, gate on `estimate_from_runs` ("don't start a
+  six-hour stack unattended") — which is a *new* refusal on the hot path and must not be blind-flipped;
+  **(c)** leave it, on the grounds that a walk-away box has all night. Do not reach for (b) without (a)'s
+  number. **Do not lower the 200 bar to make it testable** — it is `drizzle_path`'s own recommendation and
+  `tests/test_auto_drizzle_mirror.py` pins it to that sentence; build the fixture instead.
+
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
   (0.25°) loses its per-panel identity entirely, and every per-panel surface in the engine then silently
@@ -2414,31 +2437,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-APPROVED (2026-10-12) — auto-drizzle when it pays off.** The owner noticed his stacks come out at the
-  sensor's own resolution and asked whether drizzle is used. It never is unless ticked: `StackOptions.drizzle`
-  defaults off and no unattended path sets it. Asked, he chose **"Auto, when worth it"** (the S30 samples ~4″/px,
-  coarser than his seeing, and his deep targets have thousands of subs). **Spec:**
-  - **Where:** beside `webapp.walkaway.apply_unattended_rejection`, applied to unattended/auto runs only (watcher
-    auto-stack, Process target, reprocess / "Bring my pictures up to date"). A manual Stack-form run keeps what is
-    ticked. **An explicit `drizzle` in the global or per-target saved defaults always wins** (on *or* off).
-  - **When:** depth per output pixel ≥ 200 subs — measured **per panel** on a mosaic, the same per-pixel count
-    `samplesPerPixel` / `DRIZZLE_MIN_SAMPLES_PER_PIXEL` use, never the target total — **and** the subs are
-    actually dithered: the fractional parts of their solved positions must spread across the pixel (e.g. std ≥
-    0.2 px on both axes); without sub-pixel variety drizzle adds a grid, not detail.
-  - **How much:** ×1.5. If `estimate_stack` says it won't fit the memory budget *with* `drizzle_reject` (which
-    the unattended path already turns on), step down with `_largest_drizzle_scale_within_budget` to no lower than
-    ×1.2; below that, don't drizzle. Never drizzle without rejection on an unattended run.
-  - **Say so:** stamp the decision and its reason in the run's provenance and show it on the stack card:
-    "Drizzled ×1.5 automatically — 640 subs on each pixel" / "Not drizzled: 85 subs on each pixel (needs 200)" /
-    "…subs barely moved between frames".
-  - **Setting:** new `auto_drizzle: bool = True` (owner-approved default — the §9 sign-off is this entry), with
-    a Settings toggle beside auto-stack. Upgrade test: an old `config.json` loads with it on.
-  - **Tests (fail-before):** a deep single field drizzles ×1.5; a mosaic deep in total but shallow per panel does
-    not; undithered subs do not; a saved `drizzle: false` is respected; an over-budget canvas steps down or
-    declines. Dogfood `--mosaic --deep` and look at the result.
-  - **Caution:** "Bring my pictures up to date" will then re-render deep targets at 2.25× the pixels — check the
-    editor proxy, previews and disk use on a mosaic-size canvas (`--big`).
-
 - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-30) — "Bring my pictures up to date": re-stack only the
   targets that have new light, in one click.**~~ — **✅ SHIPPED v0.492.0** (Builder 2026-09-30). Entry cut to
   [`SHIPPED.md`](SHIPPED.md); one-liner under "Shipped" below. **The entry's one open question is answered, so
@@ -3582,6 +3580,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.494.0 **🌟 the owner-approved "Auto, when worth it": a hands-off stack now decides its own super-resolution** (new `seestack/stack/autodrizzle.py`; `StackOptions.auto_drizzle` posture + `webapp.walkaway.apply_auto_drizzle`; `Settings.auto_drizzle` on by default; `ADRZ*` cards → `/stack-runs/{id}/info` → `History.autoDrizzleNote`) — drizzle was never used unless a box was ticked, so his pictures came out at the sensor's resolution. It now drizzles ×1.5 when ≥ 200 subs land on one **output pixel** (canvas area ÷ frame footprint, never a mosaic's frame total — observer #901's bug class), the subs moved ≥ 0.2 px sub-pixel (phases measured **round the circle**, so a solve jittering across a pixel boundary cannot read as dither, and **per panel** on a mosaic, where pooling reads a raster of undithered panels as 0.25-vs-0.75 "well dithered"), and the canvas plus its own two-pass rejection fits the budget (stepping 1.5 → 1.2, declining below). An explicit `drizzle` always wins on or off, the Stack form is untouched, and reprocess-all stands down by itself because the options it replays carry one. Every run that was asked says what it chose **and** why not, which is the half that answers his question. Full entry in [`SHIPPED.md`](SHIPPED.md)
 - **v0.493.17** — 🔴 BUG FIX (owner report "the solar stacker is practically unusable", measured on his own captures): blue Sun (`detect_cfa_pattern` now reads red as the brighter non-green site — two of his raw AVIs had it on the other side, 9:36:119), misalignment (`_measure_disk_shift`: disk centre + windowed refine; whole-frame correlation had locked onto the fixed sensor pattern on 138/143 frames), big drifts kept unless the disk leaves the frame, and `frame_sharpness` scored on the disk with the sky's noise floor subtracted (it ran against brightness, r = −0.79).
 - ✅ v0.493.16 **the test that was supposed to say whether the de-levelling's residual reaches the owner's picture could not have seen it, and the answer it was hiding is 3.6 % of positions, not none** (`tests/test_auto_delevel_joint_fit.py`: `test_the_ten_quiet_cases_cannot_see_the_cost_they_were_asserting`, `test_how_often_the_cost_changes_the_stop_auto_writes`, `test_the_pass_count_is_what_moves_how_often_auto_disagrees_with_itself`; **no production code**) — `test_the_measured_cost_is_below_the_controls_own_resolution` claimed the fix's 0.0002–0.0008 residual was invisible in what Auto emits, and passed at 6 / 3 / 2 / **1** fit passes, where the error is 0.0058. Its ten cases are five geometries × two seeds of **one scene**, so their single-field `target_bg` takes exactly two values, both in the lower half of their 0.01 step, and this pass's residual is one-signed (the mosaic always reads *lower*, on all 126 cases measured) — so the error walks the value **away** from the near boundary and nothing under **0.0083** could change the stop on any of them, ten times the cost the name bounded. The lever the entry proposed does not work either: the luminance is whole-image-normalised, so a DC offset on the sky returns the identical `target_bg` to five decimals. The grain does work — `sky_level` is the sky's position inside the image's own robust range — so the sweep now walks `target_bg` across a step and a half, and on that instrument the shipped de-levelling differs from the identical single field on **3 of 84** positions, every one of them just above a rounding boundary on the side the one-signed error walks it off. **And the v0.493.13 cost entry's open question is answered rather than re-asked**: 3 passes 9.5 %, 6 passes 3.6 %, 10 passes 1.2 %, 16 passes 0 % — fewer passes are not free, and raising them is priced at ~60 ms a round and filed as a decision, not flipped
 - ✅ v0.493.15 **all but the last round of the de-levelling's joint fit now reads a strided plane, so most of the ~76 % v0.493.13 knowingly cost Auto's mosaic analysis is back** (`_LEVEL_FIT_SAMPLE_CAP`, new `_fit_stride`, `_delevelled_luminance`; the level masks also hoisted out of the loop) — a round's whole output is six polynomial coefficients and one scalar per level, and both halves were already subsampling estimators (`fit_sky_poly` solves over ~600 per-tile medians, `_robust_stats` strides its own sample), so handing them every pixel of a 1500×1500 proxy six times over bought nothing. The **last** round still runs at full size, because its surface is the one the guard and the steps are read off. Clock, on a 1500×1500 proxy with a gradient and real panel steps: `_delevelled_luminance` **1761 → 1088 ms**, `auto_recipe` **2276 → 1546 ms**, `classify_target` **2312 → 1573 ms**, the alternation alone **1821 → 969 ms**. The answer: at 1500×1500 over 21 scenes × three raster geometries, the goal error shifts by at most **0.00038** of `target_bg` (a twenty-sixth of its control's step), the worst case 0.00972 → 0.01008, and the same 3 of 21 cases differ from the identical single field either way. **The filed prerequisite — expose `fit_sky_poly`'s coefficients — was not needed**: the strided rounds only produce a step estimate, and the full-size round re-fits from it, so the primitive three other passes share was not touched. **The shape that reads safer is worse**: giving the full-resolution stage its own settle budget makes the alternation 1821 → **2045 ms**, because a mosaic with steps to recover never settles inside six rounds. And the cap is a floor doing work — starved to a twelfth of it the same grid moves the goal by up to 0.0060 and flips one of 150 emitted recipes. **This subsystem's own 300×600 fixture is below the cap and could not measure any of it**, so the scene builders took an `h`/`w` argument (bit-identical on all 300 scenes they build) and the sweep ran at proxy scale — the §1 rule through a third door

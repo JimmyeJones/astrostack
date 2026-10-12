@@ -4312,6 +4312,26 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     # last night's image is a different size from the one before. Absent — and the
     # line omitted — on every run that fitted, which is all of them on a healthy
     # box.
+    # "Did AstroStack drizzle this one, and why?" — the owner asked whether
+    # drizzle is ever used and chose "Auto, when worth it", so a hands-off run
+    # that took the decision on his behalf has to be able to say what it chose
+    # and the one number it chose from (``stacker`` stamps the ADRZ* cards from
+    # ``seestack.stack.autodrizzle``'s verdict). Carried for the runs that said
+    # **no** as well as the ones that drizzled: a picture that came back at the
+    # sensor's own resolution is the case he asked about. Absent on an attended
+    # run, which never carries the posture, and on masters that predate it.
+    auto_drizzle: dict[str, Any] | None = None
+    if "ADRZWHY" in header:
+        auto_drizzle = {"drizzled": bool(header.get("ADRZAUTO", False)),
+                        "reason": str(header["ADRZWHY"])}
+        for hk, k in (("ADRZSPP", "samples_per_pixel"), ("ADRZBAR", "bar"),
+                      ("ADRZPNL", "panels")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                auto_drizzle[k] = int(header[hk])
+        for hk, k in (("ADRZDTH", "dither_px"), ("ADRZSCL", "scale")):
+            with contextlib.suppress(KeyError, TypeError, ValueError):
+                auto_drizzle[k] = float(header[hk])
+
     drizzle_degraded: dict[str, Any] | None = None
     if "DRZSCLAD" in header:
         drizzle_degraded = {"reason": "memory"}
@@ -4427,6 +4447,7 @@ def stack_run_info(safe: str, run_id: int, request: Request) -> dict[str, Any]:
             "rejection": rejection,
             "rejection_degraded": rejection_degraded,
             "frame_accounting": frame_accounting,
+            "auto_drizzle": auto_drizzle,
             "drizzle_degraded": drizzle_degraded,
             "auto_edit": auto_edit, "sky_cast": sky_cast,
             "color_cal": color_cal,

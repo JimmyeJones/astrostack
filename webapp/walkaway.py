@@ -236,3 +236,57 @@ def apply_unattended_rejection(opts: dict[str, Any], *,
     if opts.get("drizzle") and "drizzle_reject" not in opts:
         opts["drizzle_reject"] = True
     return opts
+
+
+def drizzle_choice_expressed(opts: Mapping[str, Any]) -> bool:
+    """Did the user say whether to drizzle this stack?
+
+    ``True`` when ``drizzle`` is *present* — presence, not truthiness, for the
+    same reason :func:`rejection_choice_expressed` reads it that way: an
+    explicitly saved ``drizzle: false`` is as much a choice as a ``true`` one,
+    and the automatic drizzle must not overrule either.
+    """
+    return "drizzle" in opts
+
+
+def apply_auto_drizzle(opts: dict[str, Any], *,
+                       enabled: bool, unattended: bool) -> dict[str, Any]:
+    """Decide whether this run may choose its own drizzle — the owner's
+    "Auto, when worth it".
+
+    Mutates and returns ``opts``. What it writes is the ``auto_drizzle``
+    **posture**, never ``drizzle`` itself: whether drizzle is *worth it* can only
+    be answered on the real output canvas — how many subs land on one of its
+    pixels, whether they moved sub-pixel between frames, whether the
+    super-resolved canvas fits the memory budget — and for a mosaic that canvas
+    is only computed inside ``run_stack``. So the engine decides and this says
+    who is allowed to (:mod:`seestack.stack.autodrizzle`).
+
+    Three gates, and the key is written **either way** so the answer is a
+    property of *this* run rather than of whatever was merged into it — the same
+    treatment ``unattended`` gets, and for the same reason: a stale saved
+    default, a crafted POST body or a replayed prior-run blob may all carry
+    ``auto_drizzle``, and none of them is entitled to.
+
+    * ``unattended`` — the posture only ever reaches a run nobody is watching.
+      A stack a human set up on the Stack form uses exactly what they ticked.
+    * ``enabled`` — ``Settings.auto_drizzle`` (on by default, owner-approved).
+      Off and this writes ``False``, which is ``StackOptions``' own default, so
+      every built blob is byte-for-byte what it is today.
+    * no ``drizzle`` key in the merged options. A ``drizzle`` in the global
+      ``default_stack_options`` or in the target's "Save as defaults" blob always
+      wins, on *or* off — the same honour-the-user's-choice rule
+      :func:`apply_unattended_rejection` applies to the rejection method.
+
+    That last gate is also what keeps **"Bring my pictures up to date"** out of
+    this by construction, with no special case. Reprocess-all replays each
+    target's own prior run options, and ``StackOptions`` is persisted whole, so
+    every replayed blob carries an explicit ``drizzle`` and the posture is never
+    written. That is the wanted answer: a batch that walks the whole library over
+    days is the wrong place to start re-rendering every deep target at 2.25× the
+    pixels, and it is the same reasoning that already keeps ``auto`` off there —
+    "the reused options are the owner's own and must not be re-defaulted".
+    """
+    opts["auto_drizzle"] = bool(
+        enabled and unattended and not drizzle_choice_expressed(opts))
+    return opts

@@ -43,7 +43,11 @@ from webapp.schemas import (
     coerce_stack_options,
     strip_non_form_keys,
 )
-from webapp.walkaway import apply_unattended_rejection, parse_saved_stack_defaults
+from webapp.walkaway import (
+    apply_auto_drizzle,
+    apply_unattended_rejection,
+    parse_saved_stack_defaults,
+)
 
 if TYPE_CHECKING:
     from seestack.io.project import StackRunRow
@@ -4408,6 +4412,19 @@ def _stack_target(
         # target's own prior options — so ``auto`` must stay off there — while
         # running for days with nobody watching. It passes ``unattended=True``.
         opts_dict["unattended"] = bool(auto if unattended is None else unattended)
+        # …and the second posture, written right after it and for the same
+        # reason: may this run choose its own drizzle? The owner asked whether
+        # drizzle is ever used (his pictures come out at the sensor's own
+        # resolution) and chose "Auto, when worth it", so a hands-off run that
+        # expressed no ``drizzle`` choice is allowed to decide — on the real
+        # output canvas, inside the engine, where the question can actually be
+        # answered (``seestack.stack.autodrizzle``). The rule, including why a
+        # saved ``drizzle`` always wins and why reprocess-all stands down by
+        # itself, lives in ``webapp/walkaway.py`` beside the rejection one.
+        # Written unconditionally, so a crafted body or a replayed blob cannot
+        # hand an attended run a posture it is not entitled to.
+        apply_auto_drizzle(opts_dict, enabled=settings.auto_drizzle,
+                           unattended=opts_dict["unattended"])
         calibration_skipped: list[str] = []
         if saved_master_ids:
             # The user's own "Save as defaults" calibration picks win over the
