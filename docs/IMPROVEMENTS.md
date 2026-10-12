@@ -140,29 +140,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   two is a judgement. Do **not** make `is_container` descend whenever a `*_sub` child is present without that
   reconciliation. Full measured repro, controls and rule-outs in the issue.
 
-- **LEAD (Builder 2026-10-12, filed with the v0.494.0 auto-drizzle it is about — the one thing that feature
-  ships unmeasured) — nothing in this repo can make a 200-subs-per-pixel drizzled picture, so auto-drizzle's
-  *positive* path is tested only with its bar lowered, and its wall-clock cost on the owner's scale is
-  unknown.** *(Pillar: autonomy — PRIORITY 2; size **S to measure, M to act on**; severity unknown-but-bounded
-  — the feature is correct on every path a fixture can reach, and what is unmeasured is what it **costs**.
-  Confidence: the gap is **proven** — every sample and fixture here is six subs per pointing; the cost is not
-  measured at all.)*
-  **What is missing.** `drizzle_path`'s own module docstring says drizzle "is slower per frame than reproject +
-  accumulate, especially with `scale > 1`" and that "two-pass rejection roughly doubles that again" — and
-  auto-drizzle turns on **both**, unattended, on his deepest targets (5,477 and 35,894 subs). Nobody has put a
-  number on that multiplier, and the spec set no time budget. `seestack.stacktime.estimate_from_runs` already
-  measures seconds-per-sub per `stack_cost_class` from a target's own finished runs, so the instrument exists;
-  what does not exist is a run to measure. The second half of the same gap: `--deep` is deliberately **not
-  stacked** and its sensor is 160×120, `--mosaic`/`--big` are six subs deep, so `tests/test_auto_drizzle_run.py`
-  reaches the drizzling branch only by monkeypatching `AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL` to 5.
-  **Why it is a lead and not a fix.** The honest shapes, cheapest first: **(a)** time one real
-  drizzle-with-rejection stack against the same frames undrizzled on a deep fixture built for it, and put the
-  multiplier in the setting's own note; **(b)** if it is large, gate on `estimate_from_runs` ("don't start a
-  six-hour stack unattended") — which is a *new* refusal on the hot path and must not be blind-flipped;
-  **(c)** leave it, on the grounds that a walk-away box has all night. Do not reach for (b) without (a)'s
-  number. **Do not lower the 200 bar to make it testable** — it is `drizzle_path`'s own recommendation and
-  `tests/test_auto_drizzle_mirror.py` pins it to that sentence; build the fixture instead.
-
 - **LEAD (Builder 2026-10-10, filed with v0.493.0 — turned up by the new dithered sample on its first pass,
   which is what that instrument exists for) — a mosaic whose nightly RE-FRAMING exceeds `PANEL_LINK_DIST_DEG`
   (0.25°) loses its per-panel identity entirely, and every per-panel surface in the engine then silently
@@ -3558,6 +3535,22 @@ outright bug in existing behaviour, never to add capability.
   object card and its blurb, and `seestack/bg_advice.py` supplies the flatten nudge. If anything is still
   missing there, it is a copy or wiring task on bundled data, not a network one.
 
+19. **An automatic drizzle costs about ×7 the per-sub time of a plain stack. Should an unattended run ever
+    decline one because of how long it would take?** *(Filed 2026-10-12 with the measurement that makes it
+    answerable — v0.494.2, `scripts/measure_drizzle_cost.py`. It would rank near the top of this list: it is
+    about a feature that is **on by default right now**.)* You approved "Auto, when worth it" and v0.494.0
+    ships it; what it does *not* have is a clock. Measured over 12/24/36 subs at 1920×1080, the per-sub cost
+    goes from **0.78 s** plain to **5.68 s** for the ×1.5 canvas with drizzle's two-pass rejection — the ratio
+    is the half that transfers to your box, and your own seconds-per-sub is already measured per target
+    (`seestack.stacktime.estimate_from_runs`). Multiplied out at your scale, a target of 5,477 subs goes from
+    roughly an hour of stacking to most of a day's, and your deepest is 35,894. **Answer:** one of
+    (a) *leave it — the box has all night, and I'd rather have the resolution*; (b) *don't start one it
+    estimates at more than N hours — tell me which N*; or (c) *just tell me the estimate before it starts and
+    let it run*. (c) is the cheapest and is not a refusal, but it is still a new sentence on the hands-off
+    path, so none of the three is built until you pick. Turning `auto_drizzle` off in Settings is meanwhile a
+    complete answer and one switch. Worth: whether a hands-off night on your deepest targets finishes by
+    morning.
+
 _(Normal, tested changes merge to the default branch automatically — see
 AGENTS.md §8. Only the items above need a human's OK first.)_
 
@@ -3567,6 +3560,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.494.2 **what an automatic drizzle costs, measured — and the positive path finally run at the bar that ships** (new `scripts/measure_drizzle_cost.py`; the number written into `seestack/stack/autodrizzle.py`'s docstring and `Settings.auto_drizzle`'s own note; new `tests/test_auto_drizzle_run.py::test_the_real_depth_bar_is_cleared_with_the_constant_unpatched`) — the v0.494.0 LEAD's shape (a). `drizzle_path` claimed two multipliers and gave no numbers for either, on the one path that runs unattended on his deepest targets. Four real `run_stack` runs over the same 1920×1080 subs at 12/24/36 frames: per-sub slope **0.78 s** plain, 1.97 s drizzle ×1.0, 2.23 s ×1.5, **5.68 s** ×1.5 with two-pass rejection — so an automatic drizzle is about **×7 a plain sub** (~×2.9 drizzle plus canvas, a further ~×2.5 the second pass, which makes *"roughly doubles that again"* right and slightly understated); the whole-run ratio reads lower (×5.2 at 12 subs, ×6.4 at 36) only because both paths share one fixed start-up cost. **No gate was built**: a time refusal on the on-by-default hot path is the owner's call and is now item 19 of his one-sitting list, with the arithmetic at his scale and three answers to choose from. The other half of the proven gap is closed in code — every drizzling test in the repo lowered `AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL` to 5, so nothing had ever run the branch at **200**; a 160×120 sensor and exactly the constant's own worth of subs now does, in 13.6 s, with `ADRZBAR 200` read back out of the finished picture's header. The instrument refuses to report a ratio it cannot see (a non-positive plain-path slope means the runs are under the warm-up noise floor). No production behaviour changed. Full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.494.1 **the on-device-output guard stopped keying the one piece of evidence that does not depend on the folder *on the folder*** (`seestack/io/project.py::reject_seestar_output_frames` — `is_seestar_output_filename` now runs on every accepted frame, outside the `parent_low == base_low` branch) — observer issue #1120: a capture folder nested inside the authoritative `<T>_sub/` is absorbed into `<T>`'s frames by the planner, and the device's own pictures it holds escaped the guard entirely, because their immediate parent is neither the bare `<T>/` nor a `*_video`/`*_photo` folder. The owner's library carried five `Stacked_*` of another object that way, accepted frames of a single field **54.8°** from their own pointing — counted in its exposure, and due to be rejected at the next stack under the wrong diagnosis ("bad plate-solve"), which invites re-solving frames that should never have been frames. The guard's own docstring already said a frame whose *name* is on-device output is rejected "at any count"; the folder was never part of that sentence. **Nesting on its own still rejects nothing** — a nested folder of ordinary `Light_*` subs is as accepted as before, because rejecting on nesting would drop a user's real subs out of their own stack — and the per-folder count guard is untouched, so a genuine `<T>/` folder of raw subs is as safe as it was. Additive and reversible (`accept=0`, `auto:seestar_output`, re-acceptable), nothing in `incoming/` touched. The planner half — the wrong *attribution* — is a design call against the v0.184.17 carve-out and is re-filed under Bugs, not made here. Full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.494.0 **🌟 the owner-approved "Auto, when worth it": a hands-off stack now decides its own super-resolution** (new `seestack/stack/autodrizzle.py`; `StackOptions.auto_drizzle` posture + `webapp.walkaway.apply_auto_drizzle`; `Settings.auto_drizzle` on by default; `ADRZ*` cards → `/stack-runs/{id}/info` → `History.autoDrizzleNote`) — drizzle was never used unless a box was ticked, so his pictures came out at the sensor's resolution. It now drizzles ×1.5 when ≥ 200 subs land on one **output pixel** (canvas area ÷ frame footprint, never a mosaic's frame total — observer #901's bug class), the subs moved ≥ 0.2 px sub-pixel (phases measured **round the circle**, so a solve jittering across a pixel boundary cannot read as dither, and **per panel** on a mosaic, where pooling reads a raster of undithered panels as 0.25-vs-0.75 "well dithered"), and the canvas plus its own two-pass rejection fits the budget (stepping 1.5 → 1.2, declining below). An explicit `drizzle` always wins on or off, the Stack form is untouched, and reprocess-all stands down by itself because the options it replays carry one. Every run that was asked says what it chose **and** why not, which is the half that answers his question. Full entry in [`SHIPPED.md`](SHIPPED.md)
 - **v0.493.17** — 🔴 BUG FIX (owner report "the solar stacker is practically unusable", measured on his own captures): blue Sun (`detect_cfa_pattern` now reads red as the brighter non-green site — two of his raw AVIs had it on the other side, 9:36:119), misalignment (`_measure_disk_shift`: disk centre + windowed refine; whole-frame correlation had locked onto the fixed sensor pattern on 138/143 frames), big drifts kept unless the disk leaves the frame, and `frame_sharpness` scored on the disk with the sky's noise floor subtracted (it ran against brightness, r = −0.79).

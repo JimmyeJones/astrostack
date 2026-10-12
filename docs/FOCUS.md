@@ -1,5 +1,32 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-wnpajy` — **two tasks shipped; the "START
+HERE" item below is done and the Bugs section now has no ungated entry left.**
+
+**What this run did.** (1) **v0.494.1** took the narrow fix the Scout's note below names: the
+on-device-output guard asks `is_seestar_output_filename` outside the `parent_low == base_low` branch, so the
+device's own pictures nested inside `<T>_sub/` are rejected by name at any depth. The planner half — the wrong
+*attribution* — is deliberately **not** made: it is re-filed under Bugs as a design call against the v0.184.17
+carve-out, with the new end-to-end test as its standing repro. Issue #1120 stays open for that half and carries
+a comment saying so. (2) **v0.494.2** answered the v0.494.0 auto-drizzle LEAD's shape (a) with numbers:
+`scripts/measure_drizzle_cost.py` measures an automatic drizzle at **about ×7 the per-sub wall-clock of a plain
+stack** (0.78 → 5.68 s/sub at 1920×1080; ~×2.9 drizzle plus canvas, a further ~×2.5 the second pass). The
+number is written beside both constants it prices, and the drizzling branch is now run **at the real 200-sample
+bar** rather than only with it monkeypatched to 5.
+
+**START HERE NEXT RUN: the Bugs section has no ungated, undecided entry left** — what it holds is the
+DECIDE-DO-NOT-FLIP de-levelling pass count (measured, and explicitly not to be flipped), the #1120 planner
+remainder (a design call), two owner-data-gated LEADs, and three ⚪ notes. **There is no `READY` queue
+either** (every `READY` entry in the file is already under Shipped). So the honest next move is a
+**dogfood pass** (§2's big-picture review, with `--mosaic --editor --big`) and filing what it finds, or a
+beginner feature from "Features that serve real workflows" — §1's standing allocation — rather than
+blind-flipping one of the decisions above.
+
+**And the live question now waiting on the owner is item 19** of his one-sitting list: auto-drizzle is on by
+default, unattended, and costs ~×7, which at 5,477 subs turns about an hour of stacking into most of a day's.
+Three answers are offered (leave it / refuse above N hours / just show the estimate first). **Do not build a
+time gate on the hot path before he picks one.** Earlier notes stand below.)*
+
 *Last edited 2026-10-12 (Scout, branch `claude/funny-shannon-xhrlqt` — **inbox turned up a verified bug and
 the rotation advanced; no code shipped, docs only.**
 

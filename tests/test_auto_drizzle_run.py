@@ -7,9 +7,19 @@ stamped into the finished picture's header so it can explain its own size long
 after the job log has rolled.
 
 The decision's depth bar is 200 subs on one output pixel, which is the right
-number and a terrible test fixture, so these runs lower it through the module
-constant the decision reads at call time. Everything else — the canvas, the
-dither measured off each sub's own WCS, the memory pricing — is the real thing.
+number and a terrible test fixture, so most of these runs lower it through the
+module constant the decision reads at call time. Everything else — the canvas,
+the dither measured off each sub's own WCS, the memory pricing — is the real
+thing.
+
+**One of them does not lower it**: ``test_the_real_depth_bar_is_cleared_with_the
+_constant_unpatched`` runs the drizzling branch at exactly
+``AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL``, on a small sensor rather than a lowered
+bar, because "the positive path is tested only with its bar lowered" was a
+proven gap in a feature that is **on by default and unattended** — and a
+monkeypatched constant cannot show that 200 is a number the code can actually
+reach. The price of the real bar is one ~15 s test; the price of not having it
+was that nothing in this repo had ever run the branch the owner's install runs.
 """
 
 from __future__ import annotations
@@ -150,6 +160,61 @@ def test_a_shallow_run_is_not_drizzled_and_says_how_short_it_fell(tmp_path):
     # Nothing was measured about the dither: the depth already answered it, and
     # measuring it is a WCS read per sub.
     assert "ADRZDTH" not in header
+    proj.close()
+
+
+def test_the_real_depth_bar_is_cleared_with_the_constant_unpatched(tmp_path):
+    """The positive path at the number that ships, with nothing patched.
+
+    Every other drizzling run in this file lowers
+    ``AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL`` to 5, and that was filed as a proven
+    gap: a feature that is on by default and decides for itself on a walk-away
+    night had **no** test that the branch it takes is reachable at 200, which is
+    a different claim from "the branch works when the bar is 5". A lowered
+    constant cannot make it, and neither can the bundled samples — ``--mosaic``
+    and ``--big`` are six subs per pointing and ``--deep`` is not stacked.
+
+    So the fixture pays the bar instead of moving it: a small sensor and exactly
+    ``AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL`` subs on one pointing, which is the
+    depth a single field reports (the canvas is one frame, so
+    ``samples_per_output_pixel`` returns ``None`` and the frame count *is* the
+    per-pixel depth). The frame count is read from the constant, so the day the
+    bar moves this test follows it rather than quietly landing under it.
+
+    ~15 s, and deliberately the only one of its kind here."""
+    n = autodrizzle.AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL
+    w, h = 160, 120
+    proj = Project.create(tmp_path / "deep", name="M_42")
+    raws = tmp_path / "deep_raws"
+    raws.mkdir()
+    for i in range(n):
+        shift = ((i * 0.37) % 2.0, (i * 0.53) % 2.0)
+        path = write_seestar_fits(raws / f"d{i}.fit", width=w, height=h, add_wcs=True,
+                                  seed=11, noise_seed=400 + i, n_stars=10,
+                                  star_shift=shift)
+        proj.add_frame(FrameRow(
+            source_path=str(path), cached_path=str(path),
+            width_px=w, height_px=h, bayer_pattern="RGGB",
+            wcs_json=make_synth_wcs_text(width=w, height=h, crpix_shift=shift),
+            ra_center_deg=83.6, dec_center_deg=-5.4, exposure_s=10.0,
+        ))
+    res = run_stack(proj, StackOptions(
+        background_flatten=False, suppress_hot_pixels=False, max_workers=2,
+        output_name="deep", unattended=True, auto_drizzle=True))
+    with fits.open(res.fits_path) as hdul:
+        data = np.asarray(hdul[0].data)
+        header = dict(hdul[0].header)
+    assert data.shape[1:] == (int(round(h * 1.5)), int(round(w * 1.5)))
+    assert header["ADRZAUTO"] is True
+    assert header["ADRZWHY"] == autodrizzle.REASON_DEEP_AND_DITHERED
+    # The bar in the header is the shipped constant, not a patched one — which
+    # is the whole point of this test existing beside the others.
+    assert int(header["ADRZBAR"]) == autodrizzle.AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL
+    assert int(header["ADRZBAR"]) == 200
+    assert int(header["ADRZSPP"]) >= int(header["ADRZBAR"])
+    assert float(header["ADRZSCL"]) == pytest.approx(1.5)
+    assert float(header["ADRZDTH"]) >= autodrizzle.AUTO_DRIZZLE_MIN_DITHER_PX
+    assert header["STACKER"].startswith("drizzle")
     proj.close()
 
 
