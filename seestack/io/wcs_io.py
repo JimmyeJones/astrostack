@@ -175,6 +175,72 @@ def _wcs_from_plain_tan_text(text: str):
     return wcs
 
 
+# --- illegal non-ASCII in a stored header (see `_fits_printable_ascii`) ----
+#
+# FITS restricts every character of every header card to printable ASCII
+# (0x20-0x7E). ASTAP does not: its ``cmdline:`` commentary card records the
+# solver's whole invocation, **including the input file's path**, so a capture
+# folder whose name carries a non-ASCII character — a Seestar writes the
+# typographic apostrophe U+2018 into a target name the moment the user types
+# one — puts that character into the ``.wcs`` sidecar, and from there into the
+# ``wcs_json`` column. The header is then illegal FITS, and astropy enforces
+# that on the way *in*: ``Header.fromstring`` accepts the text (with an
+# "Unprintable string … commentary cards may only contain printable ASCII"
+# verify warning), but ``WCS(header)`` re-encodes it as ASCII and raises
+# ``UnicodeEncodeError`` — which :func:`wcs_from_text` catches as "corrupt
+# cache, treat as missing" and reports as ``None``.
+#
+# The consequence is total for the affected target and permanent, which is why
+# both sides of the round-trip repair it: every one of its subs reads back as
+# unsolved, so ``run_stack``'s drizzle branch raises "reference WCS could not be
+# parsed for drizzle" on every scan, while the record still calls the frames
+# solved — ``pixscale_arcsec`` and ``rotation_deg`` come off ASTAP's ``.ini``
+# sidecar and are perfectly good. Observer issue
+# https://github.com/JimmyeJones/astrostack/issues/1137 measured one such
+# target: 115 of 115 frames solved, 0 rows in ``stack_runs``, and the identical
+# failure in 19 consecutive scan jobs over six weeks.
+_FITS_MIN_PRINTABLE = 0x20
+_FITS_MAX_PRINTABLE = 0x7E
+#: Keywords whose card holds free text rather than a value. These are the only
+#: cards the repair touches — see :func:`_fits_printable_ascii`.
+_COMMENTARY_KEYWORDS = frozenset({"COMMENT", "HISTORY", ""})
+
+
+def _fits_printable_ascii(text: str) -> str:
+    """``text`` with characters FITS forbids replaced by ``?`` **in commentary
+    cards only** — or ``text`` unchanged when the repair cannot be scoped.
+
+    Two deliberate narrowings, and the second one is load-bearing:
+
+    *Commentary cards only.* A ``COMMENT``/``HISTORY`` card is free text with no
+    WCS meaning, so replacing a character in it cannot change a solution. A
+    *value* card is different: ``CRVAL1  = 32?4.12`` is not a float, astropy
+    falls back to **0.0**, and the frame then reads as solved at RA 0 — a
+    silently wrong solution where the honest answer is "unsolved". So a
+    non-ASCII character anywhere but a commentary card is left in place, the
+    parse fails as it did before, and the frame stays unsolved.
+
+    *Character-for-character.* The surrounding text is a fixed-format 80-column
+    card image that :func:`_parse_fixed_format_cards` reads by offset, so a
+    shorter replacement would shift every later card into the wrong columns.
+    ``?`` is printable ASCII and legal in every position. If the text is not a
+    whole number of cards it cannot be scanned safely, so nothing is repaired.
+    """
+    if len(text) % 80:
+        return text
+    out = []
+    for i in range(0, len(text), 80):
+        card = text[i:i + 80]
+        if card.isascii() or card[:8].rstrip() not in _COMMENTARY_KEYWORDS:
+            out.append(card)
+            continue
+        out.append("".join(
+            c if _FITS_MIN_PRINTABLE <= ord(c) <= _FITS_MAX_PRINTABLE else "?"
+            for c in card
+        ))
+    return "".join(out)
+
+
 def wcs_from_text(text: str | None):
     """Reconstruct a WCS from a stored text blob. Returns None on failure.
 
@@ -202,6 +268,40 @@ def wcs_from_text(text: str | None):
             warnings.simplefilter("ignore", FITSFixedWarning)
             return WCS(Header.fromstring(text))
     except Exception as exc:  # noqa: BLE001 — corrupt cache, treat as missing
+        # One retry, and only for the one cause that is a *repairable* header
+        # rather than a corrupt one: a character FITS does not allow in a card
+        # (see :func:`_fits_printable_ascii` for how one gets stored). The whole
+        # retry lives inside the ``except``, and the success path above is
+        # byte-for-byte what it was, because this function is read **once per
+        # sub** by :func:`seestack.stack.mosaic.compute_mosaic_canvas` — adding
+        # so much as a closure to it costs the §1 owner's 5,477-sub target
+        # ~80 ms a canvas computation, measured.
+        if not text.isascii():
+            try:
+                repaired = _fits_printable_ascii(text)
+                wcs = _wcs_from_plain_tan_text(repaired)
+                if wcs is None:
+                    from astropy.io.fits.verify import VerifyWarning
+
+                    with warnings.catch_warnings():
+                        # The same DATE-OBS normalisation noise as above, plus
+                        # the "Unprintable string" verify warning the illegal
+                        # card raises on its way through ``Header.fromstring``
+                        # — this retry is the answer to it, so it is noise here.
+                        warnings.simplefilter("ignore", FITSFixedWarning)
+                        warnings.simplefilter("ignore", VerifyWarning)
+                        wcs = WCS(Header.fromstring(repaired))
+            except Exception as retry_exc:  # noqa: BLE001
+                log.warning(
+                    "WCS parse failed even with the characters FITS forbids in "
+                    "a header repaired (treating frame as unsolved): %s",
+                    retry_exc)
+                return None
+            log.info(
+                "WCS text carried characters FITS forbids in a header "
+                "(usually a non-ASCII folder name in ASTAP's cmdline card); "
+                "parsed it with them replaced")
+            return wcs
         log.warning("WCS parse failed (treating frame as unsolved): %s", exc)
         return None
 
@@ -302,6 +402,20 @@ def wcs_text_from_raw(raw: str | None) -> str | None:
     if not raw:
         return None
     from astropy.io.fits import Header
+
+    # Repair the characters FITS does not allow in a header *before* the text is
+    # normalised for storage, so what lands in ``wcs_json`` is legal FITS and
+    # reads back without :func:`wcs_from_text`'s retry. Without this a target
+    # whose capture folder carries a non-ASCII character re-solves on every
+    # scan, forever: ``apply_solve_result_to_db`` rightly refuses to persist a
+    # solve ``wcs_text_is_usable`` calls unusable, stores a ``solve_failed:``
+    # reason, and ``build_solve_arglist`` deliberately keeps offering a frame
+    # whose only mark is that reason — so the solver is paid again every scan
+    # for an answer that cannot be stored. Character-for-character, so the
+    # padded card image keeps its 80-column layout (see
+    # :func:`_fits_printable_ascii`).
+    if not raw.isascii():
+        raw = _fits_printable_ascii(raw)
 
     try:
         # The header is padded to multiples of 2880 bytes by FITS convention,

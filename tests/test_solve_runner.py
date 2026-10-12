@@ -912,3 +912,119 @@ def test_a_setup_failure_still_wins_over_the_timeout_classification(tmp_path):
         assert f.reject_reason == f"solve_failed:{SOLVE_SETUP_NO_DATABASE}"
     finally:
         proj.close()
+
+
+# --- a non-ASCII capture-folder name (observer issue #1137) ----------------
+
+
+def _astap_sidecar_raw(folder_name: str) -> str:
+    """A realistic ASTAP ``.wcs`` sidecar for a sub inside ``folder_name``.
+
+    ASTAP's ``cmdline:`` commentary card records the solver's whole invocation,
+    **including the input file's path** — so a capture folder whose name carries
+    a non-ASCII character puts that character into the sidecar, and from there
+    into ``wcs_json``. ``PLTSOLVD`` is in here because a real sidecar carries it
+    and it takes the readers off their fast path onto astropy, which is where
+    the FITS printable-ASCII rule is enforced.
+    """
+    cards = [
+        "SIMPLE  =                    T",
+        "BITPIX  =                    8",
+        "NAXIS   =                    0",
+        "CTYPE1  = 'RA---TAN'",
+        "CTYPE2  = 'DEC--TAN'",
+        "CRPIX1  =                960.5",
+        "CRPIX2  =                540.5",
+        "CRVAL1  =               324.12",
+        "CRVAL2  =                57.45",
+        "CDELT1  =  -0.0006944444444444",
+        "CDELT2  =   0.0006944444444444",
+        "PLTSOLVD=                    T",
+        f"COMMENT cmdline: astap -f /data/incoming/{folder_name}/Light_001.fit -r 10",
+        "END",
+    ]
+    body = "".join(card.ljust(80)[:80] for card in cards)
+    return body + " " * ((-len(body)) % 2880)
+
+
+# The owner's own target name, with U+2018 LEFT SINGLE QUOTATION MARK where an
+# apostrophe would be — as the camera wrote it — and its ASCII control.
+_SMART_FOLDER = "IC 1396B - Elephant‘s Trunk Nebula B_sub"
+_ASCII_FOLDER = "IC 1396B - Elephant's Trunk Nebula B_sub"
+
+
+def _solve_with_sidecar(raw: str, fits_path):
+    fake_result = ASTAPResult(
+        fits_path=fits_path, wcs_sidecar_path=None,
+        ra_center_deg=324.12, dec_center_deg=57.45,
+        pixscale_arcsec=2.5, rotation_deg=0.0, solved=True, log_tail="",
+        wcs_sidecar_raw=raw,
+    )
+
+    class FakeSolver:
+        def __init__(self, *a, **kw):
+            pass
+
+        def solve(self, _path, **_kw):
+            return fake_result
+
+    with patch("seestack.solve.runner.ASTAPSolver", FakeSolver):
+        return solve_one(1, str(fits_path))
+
+
+def test_a_solve_from_a_non_ascii_folder_is_stored_and_reads_back_as_solved(tmp_path):
+    """End to end: the one target that could never stack, now stacks.
+
+    Before this, every sub of such a target read back as **unsolved** —
+    ``wcs_from_text`` returned ``None`` on an illegal-FITS header — so
+    ``run_stack``'s drizzle branch raised "reference WCS could not be parsed for
+    drizzle" on every scan while the record still called the frames solved. The
+    owner's library had one such target: 115 of 115 frames solved, 0 stack runs,
+    the identical failure in 19 consecutive scan jobs over six weeks.
+    """
+    from seestack.io.wcs_io import wcs_from_text, wcs_text_is_usable
+
+    fits = tmp_path / "Light_001.fit"
+    fits.write_bytes(b"")
+    result = _solve_with_sidecar(_astap_sidecar_raw(_SMART_FOLDER), fits)
+
+    assert result.solved is True
+    assert result.wcs_text is not None
+    # What is stored is legal FITS, so no reader needs the repair path at all.
+    assert result.wcs_text.isascii()
+    assert wcs_text_is_usable(result.wcs_text)
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        fid = proj.add_frame(FrameRow(source_path=str(fits)))
+        apply_solve_result_to_db(proj, SolveResult(
+            frame_id=fid, fits_path=str(fits), solved=True,
+            wcs_text=result.wcs_text,
+            ra_center_deg=result.ra_center_deg, dec_center_deg=result.dec_center_deg,
+            pixscale_arcsec=result.pixscale_arcsec, rotation_deg=result.rotation_deg,
+            error=None,
+        ))
+        f = proj.get_frame(fid)
+        assert f is not None
+        # The guard did *not* fire: the solve is stored as a solve, with no
+        # ``solve_failed:`` reason to make the solver re-earn it every scan.
+        assert f.wcs_json
+        assert not (f.reject_reason or "").startswith("solve_failed")
+        # And the stacker's own read — the call that used to raise — succeeds.
+        assert wcs_from_text(f.wcs_json) is not None
+    finally:
+        proj.close()
+
+
+def test_the_non_ascii_folder_name_costs_the_solution_nothing(tmp_path):
+    """The stored solution is identical to the ASCII control's, byte for byte."""
+    fits = tmp_path / "Light_001.fit"
+    fits.write_bytes(b"")
+    affected = _solve_with_sidecar(_astap_sidecar_raw(_SMART_FOLDER), fits)
+    control = _solve_with_sidecar(_astap_sidecar_raw(_ASCII_FOLDER), fits)
+
+    assert control.wcs_text is not None and affected.wcs_text is not None
+    # Only the commentary card differs, and only where the character was.
+    assert affected.wcs_text.replace("?", "'") == control.wcs_text
+    assert affected.ra_center_deg == control.ra_center_deg
+    assert affected.dec_center_deg == control.dec_center_deg
