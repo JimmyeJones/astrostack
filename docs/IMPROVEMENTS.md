@@ -2594,6 +2594,12 @@ off by default. Don't re-file it.)*
   (c) **Constellation lines at the backdrop radius.** The star backdrop is a bare point cloud at r=420; the
   offline Sky viewer's recognisable-star labelling is the precedent. Only worth it if a constellation-line
   dataset is already bundled — check before scoping, and do **not** add one as a dependency for this.
+  **⚪ GATE CHECKED AND CLOSED — nothing to build (Builder 2026-10-12).** The answer is no: `seestack/data/`
+  holds `messier.json`, `deepsky_popular.json` and `glossary.md` and nothing else, and the only
+  "constellation" in the tree is a **name string** carried on a catalog row (`lifelist.py`,
+  `nightplan.py`) — there is no line/segment dataset anywhere, bundled or vendored. So this entry's own
+  condition fails, and its own instruction is not to add one. **Do not re-run this check**; reopen only if a
+  constellation-line dataset arrives for some other reason.
 
 - **NEW IDEA (Builder 2026-08-06, same run) — a beginner can crop the Moon, but there is no way to crop anything
   else.** *(Friendliness — PRIORITY 3; size M; **think before building**.)* The framing crop is disk-shaped by
