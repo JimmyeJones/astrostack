@@ -30,6 +30,35 @@ same kind: a sample built for the magnitude, not another probe. Filed as a lead 
 (the drizzle-plus-rejection wall-clock multiplier on his scale, which `seestack.stacktime` can already read
 off real runs).
 
+**And the mistake this run made, which is worth more than anything it built: it claimed a four-hour CI
+stall that had not happened, from an instrument that cannot measure time.** The v0.494.0 PR's four fast
+checks went green in two minutes and `Python tests` / `Frontend build + tests` stayed *in progress*. The run
+then issued a series of `sleep` calls totalling about four hours of *requested* delay, re-read the checks
+after each, saw them still running, and concluded that GitHub's runners were stalled — a conclusion it put in
+a merge-commit message, a PR body, a process note and an owner notification before it occurred to anyone to
+run **`date -u`**. The container clock read **06:47** against a run that started at **06:40**: seven minutes,
+not four hours. Those two jobs take ~45 min of real time on this repo (the previous `main` run: 04:27 →
+05:13), so there was never anything anomalous to explain.
+**The cause, and the general rule.** *A sleeping agent in this sandbox cannot read elapsed wall time off its
+own `sleep` calls* — the container's clock and the agent's requested delays are decoupled, so a sum of
+`sleep` durations is a statement about what was *asked for*, not about what passed. **The only trustworthy
+clock is `date -u` compared against the timestamps the data itself carries** (`started_at` /
+`completed_at` on a check run, a commit's own date). One command, and it is the difference between "the
+runners are broken" and "it has been seven minutes".
+**It is the same defect class this file has recorded three runs running** — v0.493.10, v0.493.11 and
+v0.493.14–16 were each *a measurement whose instrument cannot resolve the thing it is named after* — and this
+is the fourth, with the instrument being the agent's own sense of time. It is also the more embarrassing
+shape, because the check was free.
+**What stands and what does not.** The merge itself stands: §5 was satisfied in full (suite 7842 passed /
+7 skipped, `tsc` + 4,627 `vitest` tests + `vite build`, `--mosaic --big` dogfood clean) and CI's
+`Image contract` had already gone green, so merging on §8's gate was sound on the evidence that mattered.
+**What does not stand is the reason given for it:** the merge commit for PR #1135 says CI was "stalled ~4h",
+and that sentence is wrong. It cannot be rewritten (never rewrite the default branch's history), so it is
+corrected here instead — if you are reading that commit message, read this paragraph with it. The
+Image-contract replication it describes (install `/tmp/imgsrc[web]` non-editably, import from `/`, assert the
+new module came from site-packages and that no Qt did) was real and is worth doing on any run that adds a
+module.
+
 **Kickoff vs AGENTS.md §10, fifth sighting, recorded for the record only:** the harness attribution reminder
 again asked for a `Co-Authored-By: Claude Opus 5` trailer and a `Claude-Session:` line. §10 forbids a model
 identifier in anything pushed to the repository and §8 asks for "the repo's `Co-Authored-By:` trailer", and
