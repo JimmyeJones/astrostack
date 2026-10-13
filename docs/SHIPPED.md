@@ -53,7 +53,12 @@ so this is the trim-off picture either way): the interior lands on its own targe
 (v0.493.14), so this is a visible, border-driven drift in a picture whose sky never changed. **And the fringe is
 not what the discarded measurement bought**: it renders at **0.13–0.17** grey under *both* cue sets, nowhere
 near either target, because it is a thin strip of under-covered sky and no stretch target puts it at the sky's
-grey. So measuring it only ever moved the 85–94 % of the picture that is interior.
+grey. So measuring it only ever moved the 85–94 % of the picture that is interior. **The one thing that does
+move the fringe is recorded for completeness and it is tiny and in the right direction**: under the kept
+rectangle's cues the fringe renders marginally *brighter* (0.1347 against 0.1306 at a 5.9 % band, 0.1734
+against 0.1557 at a 39.7 % one), i.e. a ragged border now gets the same stretch as the picture it borders
+rather than a darker one — which is what someone who turned the trim off in order to keep the whole frame is
+asking for.
 
 **So the answer is the archetype's answer**, and the gate's own argument is what the measurement refutes: the
 preference was conflating *which pixels are in the picture* (all of them, with the trim off) with *which pixels
