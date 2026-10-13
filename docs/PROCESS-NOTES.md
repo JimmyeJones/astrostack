@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-10-13 (Builder, branch `claude/brave-albattani-totnig`, after the merge) — §11 miss: v0.495.3 was built for two hours with no published claim
+
+Recording my own deviation, because this is the collision class §11 exists for. §2 says *"mark it **In progress**
+in the backlog with your branch in the commit that starts it"*; I went straight from choosing the
+`auto_crop`-OFF remainder to measuring it, and the entry only ever appeared in the record as Shipped. No
+collision happened — `origin/main` did not move for the whole run — so nothing was lost, but for roughly two
+hours a second run reading "Bugs" top-down would have seen that entry unclaimed and could have spent its whole
+run on the same measurement.
+
+**What made it easy to skip, and the cheap fix.** The claim is owed *"in the commit that starts the work"*, and
+this task's first two hours produced **no commit at all** — it was two scratch scripts and a sweep, with the
+first repo edit coming only once the decision was made. A measurement-first task therefore has no natural hook
+for the claim, which is exactly when the claim is most useful: a run that is *measuring* an entry is the one
+whose work is invisible to everybody else. **So: on a task whose first phase is a measurement, push the claim
+line as its own `docs:` commit before the first scratch script**, not with the first code change. It costs one
+commit and it is the only thing that makes a two-hour measurement visible.
+
 ## 2026-10-13 (Builder, branch `claude/brave-albattani-totnig`) — the gate that was "waiting on a number" had the number inside the repo, and the measurement answered a question nobody had asked
 
 **The run.** Baseline `origin/main` at `cc8265f2` green (**7904 passed, 7 skipped** in 20:19), CI green, no open
