@@ -30,6 +30,20 @@ measurement is worth an invariance sweep as well as a magnitude**: if one candid
 should not matter and the other is not, that is a stronger finding than any effect size, and it is cheap
 (three canvases).
 
+**The validating dogfood pass (`scripts/agent-dogfood.sh --mosaic --editor`, after the fix): CLEAN — and it
+is a control, not evidence.** Both page sweeps "nothing overflowing, no console errors", mosaic trim 7.9 %, the
+panel map agreeing with the health sentences, 21/21 editor ops previewed with undo/redo on both samples, both
+chip classes behaving, and the mosaic's own "What Auto-process did" naming nine steps ending in the trim.
+**That last clause is why it is a control**: the bundled samples run with `auto_crop_border` **on**, which is
+the path this change leaves byte-identical, so a clean pass confirms nothing regressed and says nothing about
+the path that moved. Worth knowing before a future run reads "dogfood clean" as validation of a trim-off
+change: no bundled sample exercises the preference off, and `measured_region`'s own note explains why one that
+did would still be blind (the `--mosaic` sample's fringe is 3.1 % of its finite population and its `target_bg`
+sits on a clamp). The trim-off path's evidence is the 160-canvas sweep and the endpoint test, not the browser.
+`/life-list [Still to shoot]` is **14,513 px** on phone, unchanged from the previous two passes' baseline — a
+known number, still nobody's reported friction, and still the one measured-long page if a run ever wants §1's
+layout slice.
+
 **One mechanical thing, for a run that touches this family again.** `test_auto_crop_off_changes_nothing_else_about_the_recipe`
 (`tests/test_edit_engine.py`) has asserted the **new** behaviour all along — `off_ops == on_ops[:-1]` — and
 passed under the old gate only because its fixture is a 48×64 uniform-noise patch whose narrowing cannot move a
