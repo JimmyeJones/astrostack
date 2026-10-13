@@ -401,8 +401,9 @@ def plan_incoming_units(
             if parts[: len(prefix)] != prefix:
                 continue
             # ``without`` names the immediate children that are units of their
-            # own (see ``nested_child_verdict``); their files are not this
-            # unit's, and a recursive sweep is exactly how they became its.
+            # own (see ``nested_child_verdict``). Their files are not this
+            # unit's — and sweeping recursively is exactly how they came to be
+            # counted as them (observer issue #1120).
             if len(parts) > len(prefix) and parts[len(prefix)] in without:
                 continue
             out.extend(entries)
@@ -541,8 +542,9 @@ def nested_child_verdict(
     **The fix cannot be "descend whenever a nested folder is present."** A user
     who sorted one target's own subs into ``M 45_sub/night1/``, ``night2/``
     would get two junk targets named after their nights — the same mistake the
-    v0.184.17 carve-out (``test_scan_keeps_a_plain_nested_non_seestar_folder_as_
-    one_target``) exists to prevent one level up. Nesting is not evidence.
+    v0.184.17 carve-out exists to prevent one level up (pinned by
+    ``tests/test_scanner.py::test_scan_keeps_a_plain_nested_non_seestar_folder_as_one_target``).
+    Nesting is not evidence.
 
     So a nested folder leaves its parent only on evidence the app already
     trusts, each piece of which says the frames are not this parent's subs:
