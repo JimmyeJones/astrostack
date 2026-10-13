@@ -129,3 +129,72 @@ describe("thinStackWarning's mosaic sentence", () => {
     expect(w?.message).not.toContain("each part");
   });
 });
+
+describe("the next step when a restack would already deepen this picture", () => {
+  // Found by `scripts/agent-dogfood.sh --combine`: the page said "check that
+  // your subs plate-solved and weren't over-rejected … then add more subs"
+  // while a sibling note had measured 3 subs accepted, located and absent from
+  // this stack. Both halves of that advice are wrong in that one state.
+
+  it("names the restack and the subs already waiting", () => {
+    const w = thinStackWarning(3, null, "this-page", 3);
+    expect(w?.message).toContain("This stack combined only 3 frames");
+    expect(w?.message).toContain(
+      "You already have 3 more subs accepted and located that this stack didn't use");
+    expect(w?.message).toContain("restack to fold them in");
+    expect(w?.message).toContain("No new shooting needed");
+  });
+
+  it("stops telling the reader to check solves and go shooting", () => {
+    // The fail-before, as the two claims that cannot be true of subs the app
+    // has already accepted and located.
+    const w = thinStackWarning(3, null, "this-page", 3);
+    expect(w?.message).not.toMatch(/plate-solved/);
+    expect(w?.message).not.toMatch(/over-rejected/);
+    expect(w?.message).not.toMatch(/add more subs/);
+  });
+
+  it("still says the picture is thin — the depth claim is unchanged", () => {
+    const plain = thinStackWarning(3);
+    const ready = thinStackWarning(3, null, "this-page", 7);
+    expect(ready?.level).toBe(plain?.level);
+    expect(ready?.frames).toBe(plain?.frames);
+    expect(ready?.message).toMatch(/still look noisy/);
+  });
+
+  it("keeps the single-sub headline and swaps only the next step", () => {
+    const w = thinStackWarning(1, null, "this-page", 1);
+    expect(w?.level).toBe("single");
+    expect(w?.message).toContain("single sub, not a stack");
+    expect(w?.message).toContain(
+      "You already have 1 more sub accepted and located");
+    expect(w?.message).toContain("restack to fold it in");
+  });
+
+  it("carries the mosaic's own two figures, then the restack", () => {
+    const w = thinStackWarning(12, 4, "this-page", 5);
+    expect(w?.message).toContain(
+      "Your 12 subs are spread across about 4 fields of sky");
+    expect(w?.message).toContain("only about 3 subs on it");
+    expect(w?.message).toContain("restack to fold them in");
+  });
+
+  it("is byte-for-byte the old warning when nothing is waiting", () => {
+    // Every surface that does not have the figure, an older backend, and a
+    // target that really is just thin: all read exactly as before. A nonsense
+    // figure degrades the same way rather than into "0 more subs".
+    const plain = thinStackWarning(3);
+    for (const ready of [null, undefined, 0, -2, 0.4, NaN]) {
+      expect(thinStackWarning(3, null, "this-page", ready)).toEqual(plain);
+    }
+    expect(plain?.message).toContain('see the "rejected" count above');
+    expect(plain?.message).toContain("then add more subs");
+  });
+
+  it("leaves the wall card's pointer alone when nothing is waiting", () => {
+    // The third argument still decides where the reader is sent, and the fourth
+    // only ever replaces the sentence that pointer lives in.
+    expect(thinStackWarning(1, null, "open-it", 0))
+      .toEqual(thinStackWarning(1, null, "open-it"));
+  });
+});

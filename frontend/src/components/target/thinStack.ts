@@ -20,6 +20,23 @@
  * `perPixel.ts`); a single field is unchanged in every respect, wording
  * included.
  *
+ * **`readyToStack` is what stops it guessing at the remedy** (added 2026-10-13,
+ * found by `scripts/agent-dogfood.sh --combine`). The depth claim is a fact
+ * about the picture and is right either way, but the *next step* was always
+ * "check that your subs plate-solved and weren't over-rejected … then add more
+ * subs" — and on the Target page a sibling note had already measured that N
+ * subs were accepted, located and simply absent from this stack, which is the
+ * one state where both halves of that advice are wrong: those subs did solve
+ * and were not rejected, and he need not shoot anything. That mattered more
+ * than "two notes disagree", because `NoticeBoard` keeps two notes inline by
+ * priority: this warning is a `warning` and the corrective
+ * "N subs missing from your current picture · Restack" is an `advisory`, so the
+ * guess won the inline slot and the measured remedy sat behind "more notes".
+ * The page passes the figure only when the picture on show *is* the run this
+ * warning describes — see `Target.tsx` — because the two are otherwise measured
+ * against different stacks. It is the same reconciliation the coaching line
+ * already gets from `grainLevel` and `framing`.
+ *
  * Returns `null` for a healthy depth (no nag), otherwise a level + message.
  * `level` lets the UI pick colour/urgency: "single" (one sub deep — not really a
  * stack) vs "thin" (2–4 — very few).
@@ -72,6 +89,12 @@ export function thinStackWarning(
    * `ThinStackRejectedCountIs`. Defaults to the surfaces this warning was
    * written for, so every existing caller is unchanged word for word. */
   rejectedCountIs: ThinStackRejectedCountIs = "this-page",
+  /** How many subs are accepted, located and **absent from this very stack** —
+   * i.e. how many a restack would fold in without another night's shooting.
+   * Omit / null / 0 on every surface that does not have the figure, and the
+   * advice is exactly what it has always been. See `readyToStack` in the
+   * module docstring for why it changes the sentence. */
+  readyToStack?: number | null,
 ): ThinStackWarning | null {
   // Unknown / not-yet-stacked → nothing to warn about.
   if (nFramesUsed == null || !Number.isFinite(nFramesUsed) || nFramesUsed < 0) {
@@ -89,9 +112,20 @@ export function thinStackWarning(
     rejectedCountIs === "open-it"
       ? 'open it and check the "rejected" count'
       : 'see the "rejected" count above';
-  const next =
-    `Check that your subs plate-solved and weren't over-rejected (${where}), ` +
-    "then add more subs — a stack only gets cleaner as it combines more frames.";
+  // Subs already on disk that this stack does not contain. Floored and bounded
+  // below, so a nonsense figure from a caller degrades to the old sentence
+  // rather than into "0 more subs".
+  const ready =
+    readyToStack != null && Number.isFinite(readyToStack) && readyToStack >= 1
+      ? Math.floor(readyToStack)
+      : 0;
+  const next = ready
+    ? `You already have ${ready} more ${ready === 1 ? "sub" : "subs"} accepted and ` +
+      `located that this stack didn't use — restack to fold ${ready === 1 ? "it" : "them"} ` +
+      "in, and a stack only gets cleaner as it combines more frames. No new " +
+      "shooting needed."
+    : `Check that your subs plate-solved and weren't over-rejected (${where}), ` +
+      "then add more subs — a stack only gets cleaner as it combines more frames.";
 
   if (mosaic) {
     // Name both figures. A mosaic owner reading "only 3 subs" under a picture

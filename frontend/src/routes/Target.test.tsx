@@ -3106,3 +3106,77 @@ describe("TargetView grading a single frame", () => {
     expect(screen.getAllByLabelText("Reject frame")).toHaveLength(2);
   });
 });
+
+describe("TargetView thin-stack warning's next step", () => {
+  // Found by `scripts/agent-dogfood.sh --combine` (2026-10-13). Both notes are
+  // on this page at once, and `NoticeBoard` keeps two inline by priority — the
+  // thin-stack warning is a `warning`, the corrective "N subs missing · Restack"
+  // is an `advisory` — so the guess got the inline slot and the measured remedy
+  // sat behind "more notes".
+  it("names the restack when the server has measured subs waiting", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ reusable: true, n_frames_used: 3 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1), mkFrame(2), mkFrame(3),
+    ]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(
+      mkNewLight({ n_new_subs: 3 }));
+
+    renderTarget();
+
+    const warn = await screen.findByTestId("thin-stack-warning");
+    expect(warn.textContent).toContain("This stack combined only 3 frames");
+    expect(warn.textContent).toContain(
+      "You already have 3 more subs accepted and located that this stack didn't use");
+    expect(warn.textContent).toContain("restack to fold them in");
+    // The two claims that cannot be true of subs the app itself has accepted
+    // and located — this is the fail-before.
+    expect(warn.textContent).not.toMatch(/plate-solved/);
+    expect(warn.textContent).not.toMatch(/add more subs/);
+  });
+
+  it("keeps the old advice when the picture has everything its target holds", async () => {
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ reusable: true, n_frames_used: 3 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1), mkFrame(2), mkFrame(3),
+    ]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(null);
+
+    renderTarget();
+
+    const warn = await screen.findByTestId("thin-stack-warning");
+    expect(warn.textContent).toContain("then add more subs");
+    expect(warn.textContent).toContain('see the "rejected" count above');
+    expect(warn.textContent).not.toMatch(/restack to fold/);
+  });
+
+  it("keeps the old advice while an older cover is the picture on show", async () => {
+    // `newSubsSinceStack` is measured against the DISPLAYED picture and the
+    // warning describes the LATEST run. With a cover pinned to an older run the
+    // two are about different stacks, so the count is not this warning's to
+    // quote — and the comment on `pictureRun` refuses to make these notes
+    // follow the cover instead.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ cover_stack_run_id: 2 }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 5, reusable: true, n_frames_used: 3 }),
+      mkRun({ id: 2, reusable: true, n_frames_used: 3 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1), mkFrame(2), mkFrame(3),
+    ]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(
+      mkNewLight({ run_id: 2, n_new_subs: 3 }));
+
+    renderTarget();
+
+    const warn = await screen.findByTestId("thin-stack-warning");
+    expect(warn.textContent).toContain("then add more subs");
+    expect(warn.textContent).not.toMatch(/restack to fold/);
+  });
+});
