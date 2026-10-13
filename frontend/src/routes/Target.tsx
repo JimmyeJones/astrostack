@@ -502,15 +502,9 @@ export function TargetView() {
     staleTime: Infinity,
   });
   const wallpaperCanNorthUp = typeof renderSuggestion.data?.north_up_deg === "number";
-  // Honest heads-up when the newest stack combined very few frames — it will
-  // look noisy (a stack only smooths noise as it combines more subs), so say so
-  // rather than presenting a single-sub result as a finished picture.
-  const thinStack = useMemo(
-    // …judged on how deep the picture is where you look, not on the target's
-    // frame count: a mosaic spreads its subs across the raster (`field_fulls`).
-    () => thinStackWarning(latestRun?.n_frames_used, latestRun?.field_fulls),
-    [latestRun],
-  );
+  // (The thin-stack heads-up is built further down, where `newSubsSinceStack`
+  // exists: its *next step* depends on whether a restack would already deepen
+  // this picture. Nothing between here and the notice board reads it.)
   // "Is more time worth it?" — the same question again, but answered from the
   // *measured* grain of this target's own deepest genuine stack instead of a
   // per-object-type time goal. It supersedes the goal-independent √N line below
@@ -793,6 +787,36 @@ export function TargetView() {
   const restoredIsWholeStory =
     restoredSubs.data != null
     && restoredSubs.data.n_restored >= newSubsSinceStack;
+
+  // Honest heads-up when the newest stack combined very few frames — it will
+  // look noisy (a stack only smooths noise as it combines more subs), so say so
+  // rather than presenting a single-sub result as a finished picture.
+  const thinStack = useMemo(
+    // …judged on how deep the picture is where you look, not on the target's
+    // frame count: a mosaic spreads its subs across the raster (`field_fulls`).
+    // The fourth argument is how many subs a restack would fold in, so the
+    // advice stops saying "check your solves, then shoot more" over a note that
+    // has measured those subs accepted and located — and it is handed over
+    // ONLY when the picture on show is the very run this warning describes.
+    // `newSubsSinceStack` is measured against the displayed picture
+    // (`new_light_since_picture`); with an older cover pinned that is a
+    // different stack from `latestRun`, and the two counts would be about
+    // different pictures. The comment on `pictureRun` above refuses to make
+    // these notes follow a pinned cover, and this keeps that refusal: in that
+    // case the wording is exactly what it has always been. (The server resolves
+    // that picture to the *genuine* stack behind it — an editor export becomes
+    // the run it was rendered from, which an export shares its membership with
+    // — so when the two ids do agree, the count really is about this stack.)
+    () => thinStackWarning(
+      latestRun?.n_frames_used,
+      latestRun?.field_fulls,
+      "this-page",
+      latestRun && pictureRun && pictureRun.id === latestRun.id
+        ? newSubsSinceStack
+        : null,
+    ),
+    [latestRun, pictureRun, newSubsSinceStack],
+  );
 
   // "Is it enough yet?" — judge this target's accumulated integration against a
   // sane per-object-type goal so a beginner gets a plain-language answer to "do

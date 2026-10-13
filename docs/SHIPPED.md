@@ -1,5 +1,86 @@
 # Shipped — the record
 
+## 2026-10-13 (Builder, branch `claude/brave-albattani-32mwni`) — the `--combine` dogfood's one finding: the thin-stack warning stops guessing at a remedy the page has measured
+
+### v0.495.4 — 🟡 BUG FIX (PRIORITY 1/3, the Target page's "what do I do next"; found by `scripts/agent-dogfood.sh --combine`, the §2 big-picture pass): **the thin-stack warning told the owner to check his plate solves and shoot another night, over a note that had already measured N subs accepted, located and simply absent from this stack.** `frontend/src/components/target/thinStack.ts::thinStackWarning` gains a fourth argument, `readyToStack`; `frontend/src/routes/Target.tsx` passes it, gated on the picture on show being the run the warning describes.
+
+*(Baseline: CI run 2274 green on `main` at `c800574c` (`__version__` 0.495.3), no open PRs, and the issue inbox
+holding the same four open issues, every one already acted on and owner-gated. The local suite was started
+first and then **deliberately abandoned** — see the process note; the pass below cannot run beside it.)*
+
+**Why this pass.** `docs/FOCUS.md` recorded that §2's one-run-in-three whole-journey dogfood was owed, and
+`--combine` was the stalest flag there is: last run **2026-09-30** at v0.491.x, ~45 versions back. It is also
+the only configuration that starts where the owner's data starts (`incoming/` → scan → stack both → merge →
+rescan) and the only one that fingerprints `incoming/` for §10.
+
+**The pass itself was mechanically clean, including the rule AGENTS.md §10 calls the most important in the
+file.** EXIT 0. After the whole journey the fingerprint reports *"all 7 original file(s) still there,
+unchanged"*, with the one sub the pass drops in itself listed as create-new. The merge carried 3 frames and
+kept 1 picture, the notes it carried arrived attributed (*`From "M 31_night_2": …`* — v0.491.1's class, still
+right), two rescans held the combine at one 7-frame target, and a further night dropped into the folder that
+was combined away landed in the **deep** target rather than minting the old one again. The probe: *"nothing
+overflowing, no console errors"* on 53 desktop and 54 phone page shots. The only `ERROR`/`Traceback` in the
+server log is step 3's deliberate stack refusal, whose owner-facing sentence is the plain one.
+
+**So the finding is where the 2026-09-30 `--combine` record said to look: in what the app says once the
+operation is over.** Read as one paragraph, the Target page and the Dashboard say:
+
+* Target page, inline: *"Very few frames were combined · This stack combined only 3 frames — very few, so it
+  will still look noisy. **Check that your subs plate-solved and weren't over-rejected** (see the "rejected"
+  count above), **then add more subs** …"*
+* Dashboard: *"**3 subs you've shot aren't in the picture yet** … Stacking again folds them in."*
+
+Both halves of that advice are wrong in exactly this state, and wrong about the same subs: they **did** solve,
+they were **not** rejected — that is why the other surface can count them — and he need not shoot anything,
+because one click folds them in. The Target page carries the per-target version of that note too
+(*"3 subs missing from your current picture … it's thinner than your own data. **Restack**"*), so the page
+holds both the guess and the measurement.
+
+**And the page ranks the guess above the measurement, which is what lifts this out of "two notes disagree".**
+`NoticeBoard` keeps `inlineCount = 2` of the *speaking* notes inline by priority and folds the rest behind
+"N more notes". The thin-stack warning is `NOTICE_PRIORITY.warning` (20); the corrective
+"N subs missing · Restack" is `NOTICE_PRIORITY.advisory` (30). So on a page with any other warning speaking,
+the reader who never expands the fold sees the advice that is wrong and not the remedy that is right — and
+the pass's own output says this is the normal case (*"2 of 4 are visible without a click — the folded ones are
+what the page does NOT say to a reader who never expands it"*). The warning also **suppresses**
+`NextBestMoveBadge` (`!thinStack`), by a comment that says the two must not both nudge "add more subs", so in
+this state it is the page's single "what next" voice.
+
+**The fix is the reconciliation the coaching line already gets twice.** `NextBestMoveBadge` is handed
+`grainLevel` *"so the 'add more time' rung cannot promise a cleaner background over a card that has just
+measured the background clean"* and `framing` *"so the coaching line stops telling a beginner to add time to a
+picture that is missing most of its object"*. `thinStackWarning` never got the same treatment. It now takes
+`readyToStack` and, when that is ≥ 1, keeps its depth claim verbatim — the picture really is thin and really
+will look noisy — and replaces only the **next step**: *"You already have 3 more subs accepted and located
+that this stack didn't use — restack to fold them in, and a stack only gets cleaner as it combines more
+frames. No new shooting needed."* Same `level`, same `frames`, same headline, same mosaic two-figure sentence.
+
+**The run the two numbers are about is the whole care in the wiring, and it is where this could have become a
+second substitution bug.** `thinStack` describes `latestRun`; `newSubsSinceStack` is the server's
+`new_light_since_picture`, measured against **the run behind the displayed picture**, which may be a pinned
+cover. So the figure is handed over **only** when `pictureRun.id === latestRun.id`. With an older cover
+pinned the two are about different stacks — the latest run may already contain those subs — and the wording
+stays exactly what it has always been. That also keeps the stand-down recorded under v0.491.1 intact: making
+these analysis notes *follow* a pinned cover is the change `Target.tsx`'s own comment exists to refuse, and
+this does not do it. The two cases where `newSubsSinceStack` is zeroed on purpose (`needsProcessing`,
+`solveSetup`) fall out right for free: when plate-solving is not set up, *"check that your subs plate-solved"*
+is precisely the correct advice, and it is what the reader gets.
+
+**Nothing else moves.** `FrameCountBadge` (Gallery/Dashboard grids), `Jobs.tsx` and the Library wall chip do
+not have the figure, do not pass it, and are byte-for-byte unchanged — pinned by a test that walks `null`,
+`undefined`, `0`, `-2`, `0.4` and `NaN` and asserts deep equality with the old warning, so a nonsense figure
+from a future caller degrades to the old sentence rather than into *"0 more subs"*. The `rejectedCountIs`
+pointer still decides where a reader is sent whenever nothing is waiting.
+
+**Upgrade-safe (§9):** frontend copy and one new optional argument. No endpoint, response shape, config,
+schema, on-disk layout or stored default change; nothing removed and no layout slice taken (§1's UI rule) —
+the warning that was there is the warning that is there, with a truer second sentence.
+
+**Tests: +7 unit, +3 rendered; 5 of the 10 fail before**, verified by reverting both source files in place and
+re-running (the page-level *"names the restack"* among them). The 5 that pass before are the ones that exist
+to pin what must **not** change: the byte-for-byte degrade, the wall card's pointer, the depth claim itself,
+and the two stand-downs (no count waiting, and an older cover on show). `tsc` clean.
+
 ## 2026-10-13 (Builder, branch `claude/brave-albattani-totnig`) — the rest of the `auto_crop`-OFF lead: the border-trim preference stops moving the stretch
 
 ### v0.495.3 — 🔴 BUG FIX (PRIORITY 1, editor; the *remainder* of the `auto_crop`-OFF LEAD filed with v0.492.49, whose archetype half shipped as v0.494.5): **with the border-trim preference off, Auto's four pixel-setting cues were read off the ragged fringe, so the owner's picture got darker the raggedier its border was.** `seestack/edit/presets.py::auto_recipe` and `analyze_auto_inputs` narrow through `measured_region` unconditionally; `webapp/routers/editor.py::_measured_region_for_run` drops its preference argument and `_run_taste_context` its second region.
