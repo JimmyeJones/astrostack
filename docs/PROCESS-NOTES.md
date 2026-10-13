@@ -1,5 +1,84 @@
 # Process notes & QA sweep records
 
+## 2026-10-13 (Scout, branch `claude/funny-shannon-smo3bd`) — QA rotation sweep (4) the webapp routers: CLEAN; inbox all acted-on, nothing new owed; dogfood `--mosaic --editor` clean
+
+*(Baseline `origin/main` at `f4a153b3` (0.494.5), and the designated branch sat exactly on it — 0 ahead,
+0 behind. Full suite **7872 passed, 7 skipped** (13m25s), `-n 4 --dist worksteal`; CI green on `main`; **no open PRs**. No code shipped
+this run — docs only.)*
+
+**Issue inbox — five open, every one already acted on and owner-gated; nothing new owed.** Listed and
+re-read all five:
+- **#1120** (nested capture folder absorbed into the parent target) — the guard half shipped v0.494.1; the
+  planner remainder is already filed under "Bugs" as a design call against the v0.184.17 carve-out. Acted on.
+- **#1015** (Observer's code clone is stale vs the deployed app) — its one app-side suggested fix, *put the
+  version in `/api/health`*, is **shipped** (v0.479.3); the remaining fixes (pin the clone to the deployed
+  version, mint the read-only token) are Observer-charter / owner actions, not changes to this repo. The Scout
+  already answered on the issue and left it open for the owner; the Observer keeps posting follow-ups confirming
+  the gap. Nothing new owed here.
+- **#903** (reprocess-all with auto-edit off replaced displayed pictures) — owner-gated (its fixes are a
+  default flip / cover-pin that need sign-off).
+- **#880** (mosaic on-device output accepted with a traceback reject reason) — the user-facing halves shipped;
+  the storage-hygiene remainder is filed under "Bugs" as "fix only if touching these files".
+- **#878** (76 % of frames double-registered) — owner answered YES to de-duping (sign-off item 16) and the app
+  offers it since v0.482.1/.2; closes on the owner's click, not more code.
+
+A *new* observer issue is the highest-value thing an unattended run can find, so the inbox is checked first —
+but there was none this run (newest is #1120, 2026-10-11, already filed).
+
+**Dogfood `--mosaic --editor`: CLEAN.** Both the single-field sample and the 2×2 mosaic sample stacked;
+every page sweep printed *"nothing overflowing, no console errors"*; `/life-list [Still to shoot]` 14,513 px
+(the standing baseline — 14,513 last run too); mosaic trim **7.9 %** on the control; panel map 4 panels on a
+2×2 grid, `thin=False`; the server-side mosaic health sentences read coherently together. The editor drive
+added **all 21 ops**, rendered a preview for each, applied Undo/Redo, and re-opened the full-size check.
+*(The probe was cut off at the very last step — the recipe teardown after the full-size re-open — by my own
+`timeout 600` wrapper, so the log ends in a Playwright "Target page … has been closed" and `DOGFOOD EXIT=124`.
+That is the wrapper killing the parent mid-settle, **not an app failure**: every substantive probe finished
+before it. Next run, drop the `timeout` or give it ≥900 s for a `--mosaic --editor` pass.)*
+
+**QA sweep (4) — the webapp routers.** Read the surfaces that carry the router invariants §6 names
+(server-side calibration-path resolution, §10 incoming read-only, NaN-aware coverage) and the two
+observer-facing endpoints:
+- `upload.py` — the only router that writes into `incoming/`. Per-segment sanitiser (`safe_component` /
+  `safe_relname` / `safe_relpath`) rejects `..`/NUL/separators; every write re-confirmed under the destination
+  by `confined_dest` (which `.resolve()`s, so an in-`incoming/` symlink redirect is caught); zip members go
+  through the same pair (never `extractall`), the **uncompressed** total is checked against free space before
+  the first byte, each member is truncated at its declared size, and an absolute member name is refused rather
+  than stripped. `/api/upload-destinations` never walks/opens/`stat`s under `incoming/` — all counts come off
+  `frames` rows. Held.
+- `incominglag.py` — the #1063 cross-target over-count (summing `source_folders_under` across the two targets
+  that both claim a #878-doubled folder) is fixed by counting a shared folder's **distinct** `source_path`s,
+  and a folder whose de-dup could not complete keeps the quieter summed tally (under-count is the only safe
+  failure direction). The #1088 calibration-skip-nesting fix is in (asks what the scan *recorded* as skipped,
+  not a second directory walk). Held.
+- `settings.py` — auth keys stripped from GET and PUT both ways; `default_stack_options` validated as a whole
+  (422, not a poisoned 200) and NON_FORM_KEYS (`dark_path` etc.) stripped on the way in *and* out; host paths
+  excluded from export/import. Held.
+- `stack.py` — the submit path `body.pop`s client `dark_path`/`flat_path`/`flat_dark_path`/`bias_path` and
+  re-resolves them server-side from master ids; `put_stack_defaults` filters the body to form keys (so a raw
+  path can't be persisted) and stores only master *ids*. Held.
+- `overtrim.py` / spot-checks in `targets.py` — "one definition, two surfaces" and NaN guards
+  (`goal == goal`) as documented; one-broken-project-must-not-500 everywhere. Held.
+- Crosscutting: there is no custom default `JSONResponse` in `main.py`, so NaN→JSON (invalid per the strict
+  spec, rejected by `JSON.parse`) relies on per-router guarding of coverage-derived floats. The mosaic dogfood
+  probe exercises exactly those responses and reports **no console errors**, so there is no live
+  NaN-in-JSON bug on owner-shaped data — not filed, because a sweep counts only when it runs on data shaped
+  like the owner's, and the one that did came back clean.
+
+**No verified bug found. Rotation: (4) done → next run is (1)** (scale-dependent preview↔export parity on a
+mosaic-size canvas). Backlog left no longer than found (this record and the FOCUS.md note are the only edits);
+"Needs owner sign-off" is current (item 19 was answered on PR #1143 and is now a ⭐ Builder entry under
+"Features that serve real workflows"); no stale gate to strike.
+
+**One flake observed, recorded so a future CI red on it isn't mistaken for a regression (not filed — not
+root-caused, seen once in three full runs).** On the merged state (`origin/main` + these docs),
+`tests/webapp/test_current_picture_fallback.py::test_a_healthy_library_never_opens_a_project_for_the_fallback`
+failed once under `-n 4 --dist worksteal` (its `assert opens == []` — the gallery-zip fallback opened a project
+it should not have), then **passed in isolation and passed on a clean full re-run (7896 passed, 7 skipped)**.
+All its fixtures are function-scoped off `tmp_path` and xdist workers are separate processes, so it is not
+shared-state pollution; it reads as load/timing-dependent nondeterminism in that endpoint's fallback path. The
+test is green on `main` (its CI and the v0.495.0 Builder run both passed it), so this is an existing suite
+flake, not something this run introduced — worth a Builder look only if it recurs.
+
 ## 2026-10-13 (Builder, branch `claude/brave-albattani-0rmc6t`) — the owner-answered item built; the prerequisite bug found by *reading the spec against the code*; and one optional keyword that broke 41 tests
 
 *(Baseline `origin/main` at `f4a153b3` (0.494.5): CI green on `main`'s head, **no open PRs**, issue inbox
