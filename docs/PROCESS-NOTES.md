@@ -1,5 +1,49 @@
 # Process notes & QA sweep records
 
+## 2026-10-13 (Builder, branch `claude/brave-albattani-5kmn39`) — dogfood `--mosaic --editor` CLEAN; the inbox reckoning; and a method note on a gate that named the wrong instrument
+
+*(Baseline `origin/main` at `02444893` (0.495.1): full suite **7904 passed, 7 skipped** (17m51s), `-n 4 --dist
+worksteal`; CI green on `main`'s head; **no open PRs**. Shipped **v0.495.2**.)*
+
+**Dogfood `--mosaic --editor`: CLEAN**, recorded because a clean sweep is a record too (AGENTS.md §2). Every
+page sweep "nothing overflowing, no console errors"; `/life-list [Still to shoot]` 14,513 px at phone width,
+unchanged; the mosaic's panel map (4 panels, 2×2, `thin=False`) and its five health sentences agree with each
+other and with the 7.9 % trim; 21/21 editor ops previewed with no console error, undo and redo applied, the
+full-size check correctly not offered at 1:1; Auto's note, the ten live chips, the two marked chips and the
+taste-profile reset all behaved on both the single field and the mosaic. The run took **~55 min** wall clock,
+which is worth knowing before budgeting one: do not wrap it in `timeout` (see the 2026-10-13 Scout note below).
+
+**Issue inbox — four open now, every one already acted on.** Not the Scout's job this run, but read before
+choosing work, because FOCUS said the inbox was the frontier:
+- **#1015** (observer's code clone never matched the deployed app) — observer-side, nothing in this repo to fix.
+- **#903** (reprocess-all flattened 44 displayed pictures) — forward mechanism fixed (v0.448.1
+  `_picture_is_auto_finished`), the dialog made loud (v0.447.2), the "not stretched yet" chip (v0.448.0), and
+  the *repair* exists as `webapp/refinish.py` + `submit_refinish_pictures`. Its last observer comment asked
+  whether the 44 already-flattened targets get a repair pass; they do. **Worth closing on the next Scout run** —
+  a Builder reading it spent real time re-deriving that, which is exactly the cost an unclosed done issue has.
+- **#880** / **#878** — remainders filed in "Bugs" as ⚪ notes; both owner-data-gated.
+
+**#1120 is closed and the inbox is down from five to four**, so the previous two notes' "five open" is stale.
+
+**The method note, and it is the transferable part.** The item this run shipped had been gated for weeks on
+*"that is a measurement on a real browser rather than a reading of the code"*. The measurement that settled it
+was neither in a browser nor about the number the gate named. The gate assumed the question was *"is 600 ms
+right?"*; the answer turned out to be *"what does one render of the recipe Auto actually emits cost, per canvas
+size?"* — **286 ms** on a single field, **5.08 s** on an owner-shaped 1693×1150 mosaic proxy, with **no `heavy`
+op in either**. Once that is on the page the constant is unanswerable on purpose: the same canvas is a different
+number of seconds on a different box, so the honest fix measures at runtime. Two artefacts already held most of
+it — `webapp/edit_resume_cache.py`'s own table, and the running app's own "What Auto-process did" sentence naming
+which ops Auto chose on the bundled mosaic. **So when a backlog entry names an instrument it is waiting for,
+check first whether the quantity it is reaching for is already measured somewhere in the repo, and whether the
+honest answer is "no constant can know this" rather than a better constant.** That is the same shape as the
+2026-10-13 note below about a design call being a Builder's to make: the gate was about judgement, not data.
+
+**One mechanical trap worth the line.** `@mantine/hooks`' `useDebouncedValue` lists `wait` in its effect's
+dependency array, so **changing the delay re-arms a pending timer**. Any future "adaptive" delay in this
+codebase has to be quantised for that reason alone — a value that tracked a measurement's jitter would keep
+restarting the settle the user is already waiting on. It is why v0.495.2 is a three-rung ladder and not an
+arithmetic expression, and the ladder's own promise ("2.4 s and 3.1 s agree") is pinned by a test.
+
 ## 2026-10-13 (Scout, branch `claude/funny-shannon-smo3bd`) — QA rotation sweep (4) the webapp routers: CLEAN; inbox all acted-on, nothing new owed; dogfood `--mosaic --editor` clean
 
 *(Baseline `origin/main` at `f4a153b3` (0.494.5), and the designated branch sat exactly on it — 0 ahead,

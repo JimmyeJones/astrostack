@@ -371,7 +371,22 @@ export function EditorView() {
   // pipeline (deconvolution, wavelet denoise), so dragging a slider re-renders
   // only the value you land on instead of every intermediate frame through a
   // slow op; light-only recipes keep the snappy short debounce.
-  const debounceMs = useMemo(() => previewDebounceMs(ops, specs), [ops, specs]);
+  //
+  // ...and longer again when the picture itself is slow, which the op hint alone
+  // cannot see: the one-click Auto recipe emits no `heavy` op at all and still
+  // takes 2.8 s a render on a proxy the size of the owner's mosaic against 0.2 s
+  // on a single field (`webapp/edit_resume_cache.py` measures both), so a
+  // mosaic used to fire a fresh render — two, with the histogram beside it — on
+  // every quarter-second pause of a drag, each one running to completion on the
+  // server whether or not the browser still wants it. `lastRenderMs` is how long
+  // the previous render of *this* picture actually took, measured rather than
+  // guessed from the canvas size because the same mosaic is a different number
+  // of seconds on a different box. Per run: a different picture is a different
+  // measurement, and until one arrives this is exactly the old behaviour.
+  const [lastRenderMs, setLastRenderMs] = useState<number | null>(null);
+  useEffect(() => { setLastRenderMs(null); }, [rid]);
+  const debounceMs = useMemo(() => previewDebounceMs(ops, specs, lastRenderMs),
+                             [ops, specs, lastRenderMs]);
   const [dKey] = useDebouncedValue(recipeKey, debounceMs);
   const [bust, setBust] = useState(0);
   const dRecipe: Recipe = useMemo(() => {
@@ -399,13 +414,21 @@ export function EditorView() {
     // signals the shown image is momentarily stale.
     placeholderData: keepPreviousData,
     queryFn: async ({ signal }) => {
+      const started = performance.now();
       const res = await fetch(api.editPreviewUrl(safe, rid, dRecipe, bust), { signal });
       if (!res.ok) {
         let detail = `HTTP ${res.status}`;
         try { detail = (await res.json()).detail ?? detail; } catch { /* ignore */ }
         throw new Error(detail);
       }
-      return URL.createObjectURL(await res.blob());
+      const url = URL.createObjectURL(await res.blob());
+      // What this render cost, for the debounce above. Only a render that
+      // *finished* counts: a superseded one throws on its abort signal and a
+      // failed one throws before here, and neither is a measurement of the
+      // picture. `settleForRenderMs` quantises it, so the ordinary jitter
+      // between two renders of one picture leaves the debounce alone.
+      setLastRenderMs(performance.now() - started);
+      return url;
     },
   });
   useEffect(() => {
