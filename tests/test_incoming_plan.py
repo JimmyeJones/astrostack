@@ -231,3 +231,65 @@ def test_every_skipped_calibration_unit_is_a_folder_the_plan_names(
                        os.path.join("MyWorks", "Darks 30s")}
     assert skipped <= planned
     assert [t.target_name for t in result.targets] == ["M 42"]
+
+
+def _nested_tree(root: Path) -> None:
+    """Observer issue #1120's shapes, in one drop: a ``<T>_sub/`` holding its own
+    subs plus a nested raw-subs folder, a nested folder of only device pictures,
+    and a nested folder of ordinary subs under no marker at all."""
+    _fits(root / "M 45_sub" / "Light_001.fit", 1)
+    _fits(root / "M 45_sub" / "Light_002.fit", 2)
+    # The marker says these are another object's raw subs -> its own unit.
+    _fits(root / "M 45_sub" / "SH2-171_sub" / "Light_SH_001.fit", 3)
+    # Only the device's own pictures -> passed over, as anywhere else.
+    _fits(root / "M 45_sub" / "NGC 7000" / "Stacked_10.0s.fit", 4)
+    # No marker and ordinary subs -> stays with its parent, deliberately.
+    _fits(root / "M 45_sub" / "night2" / "Light_003.fit", 5)
+
+
+def test_a_nested_capture_folder_is_not_planned_as_its_parents_frames(
+        tmp_path: Path) -> None:
+    """Observer issue #1120: ``_under`` is recursive, so every nested folder's
+    files were swallowed into the ``<T>_sub`` unit and planned as ``<T>``'s.
+
+    A ``<T>_sub/`` holds ``<T>``'s subs *directly*, so what is nested inside one
+    is judged on its own evidence (``scanner.nested_child_verdict``): the
+    ``*_sub`` marker makes a unit, pure device output is passed over, and an
+    unmarked folder of ordinary subs stays put because it cannot be told from a
+    user's own nightly sorting.
+
+    Fails before as one unit of five files named ``M 45``."""
+    incoming = tmp_path / "incoming"
+    _nested_tree(incoming)
+
+    folders = _by_folder(incoming)
+
+    assert folders["M 45_sub"] == ("M 45", 3)        # its own two + night2's one
+    assert folders["M 45_sub/SH2-171_sub"] == ("SH2-171", 1)
+    assert "M 45_sub/NGC 7000" not in folders        # the device's own pictures
+    assert "M 45_sub/night2" not in folders          # folded in, as before
+
+
+def test_the_plan_and_the_scan_agree_about_a_nested_capture_folder(
+        tmp_path: Path) -> None:
+    """The load-bearing claim again, over the shapes of issue #1120: plan and
+    scan cannot disagree about *whose* frames a nested folder is.
+
+    They are two different walks — one over a path listing, one over the real
+    directories — so the split has to come from one function or it will drift.
+    Fails before on both sides at once, which is exactly why it is worth
+    asserting here rather than only in ``tests/test_scanner.py``."""
+    incoming = tmp_path / "incoming"
+    _nested_tree(incoming)
+
+    planned = plan_incoming_units(incoming, _listing(incoming))
+
+    lib = Library.open_or_create(tmp_path / "library")
+    try:
+        result = scan_and_organize(lib, incoming, copy_to_cache=False)
+    finally:
+        lib.close()
+
+    assert (sorted((u.target_name, u.n_files) for u in planned)
+            == sorted((t.target_name, t.n_frames_found) for t in result.targets)
+            == [("M 45", 3), ("SH2-171", 1)])

@@ -23,6 +23,13 @@ leans on that, and on the Seestar's **folder-naming convention** (see
   * Loose FITS files sitting directly in the root (exports, one-offs, files
     that escaped a folder) are collected into a single ``Unsorted`` target
     you can sort out by hand later.
+  * A ``<T>_sub/`` holds ``<T>``'s subs **directly**, so a capture folder
+    nested *inside* one is not part of it: a child carrying its own convention
+    marker becomes its own unit, and a child holding only the device's own
+    pictures is passed over, exactly as it would be at any other level. A
+    nested folder with no marker at all stays with its parent — it cannot be
+    told from a user's own ``<T>_sub/night1/`` sorting. See
+    ``nested_child_verdict``.
 
 Two phases, kept separate so they're independently testable:
 
@@ -363,6 +370,15 @@ def plan_incoming_units(
     this answers: an unexpanded container's folder is the prefix of its
     children's, and the caller rolls registered counts up by prefix, so the
     totals agree either way — only the name attached to them is coarser.
+
+    **A nested capture folder is split out here too**, on the same
+    :func:`nested_child_verdict` the scan asks (observer issue #1120). The
+    prefix roll-up above covers the one consequence: a split child's folder is
+    still the parent's prefix, so the parent's registered count can now include
+    frames that are no longer in its unit, and
+    :func:`webapp.incominglag.lagging_folders` floors the difference at zero —
+    which is the direction that under-reports rather than invents a lag, and is
+    already that function's documented stance.
     """
     root = Path(root)
     # Group by the file's directory, as a tuple of path components relative to
@@ -378,11 +394,19 @@ def plan_incoming_units(
             continue
         by_rel.setdefault(tuple(rel.parts[:-1]), []).append((p, float(mtime)))
 
-    def _under(prefix: tuple[str, ...]) -> list[tuple[Path, float]]:
+    def _under(prefix: tuple[str, ...],
+               without: frozenset[str] = frozenset()) -> list[tuple[Path, float]]:
         out: list[tuple[Path, float]] = []
         for parts, entries in by_rel.items():
-            if parts[: len(prefix)] == prefix:
-                out.extend(entries)
+            if parts[: len(prefix)] != prefix:
+                continue
+            # ``without`` names the immediate children that are units of their
+            # own (see ``nested_child_verdict``). Their files are not this
+            # unit's — and sweeping recursively is exactly how they came to be
+            # counted as them (observer issue #1120).
+            if len(parts) > len(prefix) and parts[len(prefix)] in without:
+                continue
+            out.extend(entries)
         out.sort(key=lambda e: str(e[0]))
         return out
 
@@ -401,6 +425,39 @@ def plan_incoming_units(
         folder_of[str(entries[0][0])] = folder
         newest_of[folder] = max(m for _, m in entries)
 
+    def _unit_for(prefix: tuple[str, ...], parent: str) -> None:
+        """Add the unit for the directory ``prefix``, with any nested folder
+        that is a unit of its own split out beside it.
+
+        The verdict comes from :func:`nested_child_verdict` — the same function
+        the real scan asks — so a nested capture folder cannot be one target's
+        frames here and another's in the library.
+        """
+        name = prefix[-1]
+        split: set[str] = set()
+        own_units: list[str] = []
+        if _holds_raw_subs(name):
+            kids = sorted({parts[len(prefix)] for parts in by_rel
+                           if len(parts) > len(prefix)
+                           and parts[: len(prefix)] == prefix})
+            for child in kids:
+                entries = _under(prefix + (child,))
+                if not entries:
+                    continue
+                verdict = nested_child_verdict(
+                    name, child, [p for p, _ in entries])
+                if verdict == NESTED_KEEP:
+                    continue
+                split.add(child)
+                if verdict == NESTED_UNIT:
+                    own_units.append(child)
+        entries = _under(prefix, without=frozenset(split))
+        if entries:
+            _add(name, parent, os.path.join(*prefix), entries)
+        for child in own_units:
+            _add(child, str(root.joinpath(*prefix)),
+                 os.path.join(*prefix, child), _under(prefix + (child,)))
+
     for d in sorted({parts[0] for parts in by_rel if parts}):
         children = sorted({parts[1] for parts in by_rel
                            if len(parts) >= 2 and parts[0] == d})
@@ -410,13 +467,10 @@ def plan_incoming_units(
         )
         if is_container:
             for child in children:
-                entries = _under((d, child))
-                if entries:
-                    _add(child, str(root / d), os.path.join(d, child), entries)
+                if _under((d, child)):
+                    _unit_for((d, child), str(root / d))
             continue
-        entries = _under((d,))
-        if entries:
-            _add(d, str(root), d, entries)
+        _unit_for((d,), str(root))
 
     planned: list[PlannedUnit] = []
     for target_name, unit_files in _apply_seestar_convention(
@@ -452,6 +506,81 @@ def _looks_like_seestar_container(d: Path) -> bool:
     except OSError:
         return False
     return any(c.name.lower().endswith(_SUB_SUFFIX) for c in children)
+
+
+def _holds_raw_subs(name: str) -> bool:
+    """True when a folder's name is the device's raw-subs marker — ``<T>_sub``,
+    and so ``<T>_mosaic_sub``, which ends with the same suffix."""
+    return name.lower().endswith(_SUB_SUFFIX)
+
+
+#: :func:`nested_child_verdict` — the nested folder is part of its parent's unit
+#: after all, which is the deliberate default.
+NESTED_KEEP = "keep"
+#: …it is a unit of its own, and ``_apply_seestar_convention`` names or skips it
+#: exactly as it would at any other level.
+NESTED_UNIT = "unit"
+#: …it holds only the device's own finished pictures, which the convention never
+#: ingests anywhere, so it is passed over and recorded.
+NESTED_OUTPUT = "output"
+
+
+def nested_child_verdict(
+    parent_name: str, child_name: str, child_files: Sequence[str | Path],
+) -> str:
+    """What a folder nested *inside* a capture folder is: ``NESTED_KEEP``,
+    ``NESTED_UNIT`` or ``NESTED_OUTPUT``.
+
+    A ``<T>_sub/`` folder holds ``<T>``'s raw subs **directly** — that is the
+    device's convention and the whole basis for mapping the folder onto the
+    target — so a folder nested inside one is, by construction, something the
+    convention has no rule for. Both unit builders are recursive, which is how
+    observer issue #1120 found five of another object's on-device pictures
+    registered as accepted frames of ``M 45`` (``M 45_sub/SH2-171/``), landing
+    54.8° from the rest of that target's sky.
+
+    **The fix cannot be "descend whenever a nested folder is present."** A user
+    who sorted one target's own subs into ``M 45_sub/night1/``, ``night2/``
+    would get two junk targets named after their nights — the same mistake the
+    v0.184.17 carve-out exists to prevent one level up (pinned by
+    ``tests/test_scanner.py::test_scan_keeps_a_plain_nested_non_seestar_folder_as_one_target``).
+    Nesting is not evidence.
+
+    So a nested folder leaves its parent only on evidence the app already
+    trusts, each piece of which says the frames are not this parent's subs:
+
+    * its name carries the raw-subs marker (``*_sub``, and so ``*_mosaic_sub``)
+      — the authoritative "these are *B*'s subs" claim, and issue #1120's
+      sharpest shape — or it is a ``*_video`` / ``*_photo`` capture folder,
+      which the convention skips everywhere else it appears. Either way it is a
+      unit in its own right and the convention is left to say which
+      (``NESTED_UNIT``);
+    * every FITS in it is named like the device's own stacked output
+      (:func:`seestack.io.project.is_seestar_output_filename`) — the one piece
+      of evidence that does not depend on the folder at all, which is exactly
+      what that guard documents the folder test as unable to supply. The
+      convention never ingests the device's finished pictures, so neither does
+      this (``NESTED_OUTPUT``).
+
+    Anything else — a nested folder of ordinary subs under no marker, issue
+    #1120's shape A — **stays with its parent on purpose**: it cannot be told
+    from the nightly sub-organisation above, and splitting a real target's own
+    subs into junk targets is worse than a frame count that is five too high.
+    That is a recorded stand-down, not an oversight.
+
+    ``NESTED_KEEP`` for any parent that is not a capture folder, so the
+    whole-device container expansion and the plainly-nested carve-out are both
+    untouched.
+    """
+    if not _holds_raw_subs(parent_name):
+        return NESTED_KEEP
+    low = child_name.lower()
+    if low.endswith(_SUB_SUFFIX) or low.endswith(_CAPTURE_SUFFIXES):
+        return NESTED_UNIT
+    files = [str(f) for f in child_files]
+    if files and all(is_seestar_output_filename(f) for f in files):
+        return NESTED_OUTPUT
+    return NESTED_KEEP
 
 
 def container_target_children(
@@ -1177,6 +1306,56 @@ def scan_and_organize(
     # convention exactly as ``plan_incoming_units`` carries it, so a skip can be
     # recorded against the folder the plan names. See ``_calibration_units``.
     folder_of: dict[str, str] = {}
+
+    def _add_unit(directory: Path, parent: str, folder: str) -> None:
+        """Append the unit for ``directory``, with any nested folder that is a
+        unit of its own split out beside it.
+
+        The verdict is :func:`nested_child_verdict` — the same function
+        ``plan_incoming_units`` asks of a path listing, so the plan and the
+        library cannot disagree about whose frames a nested capture folder is.
+        """
+        split: list[tuple[Path, list[Path], str]] = []
+        if _holds_raw_subs(directory.name):
+            try:
+                kids = sorted(c for c in directory.iterdir() if c.is_dir())
+            except OSError:
+                kids = []
+            for child in kids:
+                child_fits = find_fits_files(child, recursive=True)
+                if not child_fits:
+                    continue
+                verdict = nested_child_verdict(
+                    directory.name, child.name, child_fits)
+                if verdict == NESTED_KEEP:
+                    continue
+                split.append((child, child_fits, verdict))
+                if verdict == NESTED_OUTPUT:
+                    # Only the device's own finished pictures, of something
+                    # else. The convention never ingests those, so they are
+                    # passed over here rather than registered as this target's
+                    # and rejected afterwards — and recorded, like every other
+                    # skip, so the scan can say what it did. A folder of pure
+                    # ``Stacked*.fit`` is ``n_unvouched == 0``, i.e. the
+                    # convention working as designed, so it stays quiet.
+                    result.skipped_output_folders.append(SkippedOutputFolder(
+                        name=child.name, parent=str(directory),
+                        n_files=len(child_fits),
+                        n_device_output=len(child_fits),
+                    ))
+        own = [f for f in find_fits_files(directory, recursive=True)
+               if not any(f.is_relative_to(c) for c, _, _ in split)]
+        if own:
+            subdirs_with_fits.append((directory.name, own))
+            parents.append(parent)
+            folder_of[str(own[0])] = folder
+        for child, child_fits, verdict in split:
+            if verdict != NESTED_UNIT:
+                continue
+            subdirs_with_fits.append((child.name, child_fits))
+            parents.append(str(directory))
+            folder_of[str(child_fits[0])] = os.path.join(folder, child.name)
+
     for d in subdirs:
         # Whole-device drop: the Seestar share/SD card copied wholesale keeps a
         # container level (e.g. "MyWorks/") intact, so a subdir may hold no FITS
@@ -1186,12 +1365,9 @@ def scan_and_organize(
         # giant target named after the container.
         if not find_fits_files(d, recursive=False) and _looks_like_seestar_container(d):
             for child in sorted(c for c in d.iterdir() if c.is_dir()):
-                child_fits = find_fits_files(child, recursive=True)
-                if child_fits:
-                    subdirs_with_fits.append((child.name, child_fits))
-                    parents.append(str(d))
-                    folder_of[str(child_fits[0])] = os.path.join(
-                        d.name, child.name)
+                if find_fits_files(child, recursive=True):
+                    _add_unit(child, str(d),
+                              os.path.join(d.name, child.name))
             # Heal the OLD shape: before this expansion existed, a scan lumped the
             # whole container into ONE giant target named after it, mixing several
             # objects' subs with on-device outputs/videos — it keeps auto-stacking
@@ -1201,11 +1377,7 @@ def scan_and_organize(
             # opening every big project on every poll.
             _flag_legacy_container_drop(library, d)
             continue
-        fits = find_fits_files(d, recursive=True)
-        if fits:
-            subdirs_with_fits.append((d.name, fits))
-            parents.append(str(root))
-            folder_of[str(fits[0])] = d.name
+        _add_unit(d, str(root), d.name)
     # Fold the Seestar folder convention in (raw "_sub" folders → targets;
     # skip on-device outputs and videos) before turning folders into targets.
     # The skipped bare "<T>/" folders come back with it so the scan can say what

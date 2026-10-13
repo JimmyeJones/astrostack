@@ -1,5 +1,132 @@
 # Shipped — the record
 
+## 2026-10-13 (Builder, branch `claude/brave-albattani-oqu5tc`) — the planner half of observer issue #1120: a capture folder nested inside a `<T>_sub/` is no longer the parent target's frames
+
+### v0.495.1 — 🔴 BUG FIX: **a `<T>_sub/` holds `<T>`'s subs *directly*, but both unit builders swept it recursively — so anything nested inside one became that target's frames.**
+New `seestack/io/scanner.py::nested_child_verdict` (+ `NESTED_KEEP` / `NESTED_UNIT` / `NESTED_OUTPUT` and the private `_holds_raw_subs`), asked by `plan_incoming_units`'s new `_unit_for` and by `scan_and_organize`'s new `_add_unit` — one function, so the plan and the library cannot disagree about whose frames a nested folder is.
+
+*(Baseline `origin/main` at `d3c47e95` (`__version__` 0.495.0): full suite green — **7896 passed, 7 skipped** —
+CI green on `main`'s previous head, no open PRs, and the issue inbox holding the same five open, already
+acted-on entries. This was the one **reproduced** open entry in "Bugs (fix these first)": the remainder observer
+issue #1120 left when v0.494.1 shipped only its guard half.)*
+
+**What was wrong.** `plan_incoming_units` builds a unit's file list with the recursive `_under(prefix)`, and the
+real scan with `find_fits_files(d, recursive=True)`; the only thing that stops either descending is the
+*container* test, which requires the parent level to hold **no** FITS. A `<T>_sub/` holds thousands of its own,
+so it is never a container, and everything nested inside it was swallowed into its unit. On the owner's disk
+that is `incoming/M 45_sub/SH2-171/` — five `Stacked_*_SH2-171_*.fit`, the device's own pictures of a different
+object, registered as accepted frames of **M 45** and solving **54.8°** from the rest of that target's sky. The
+issue's own matrix measured four absorbing shapes (its D, A, B, E) against three controls that all worked.
+
+**Why it was filed as a design call, and what the reconciliation is.** The obvious fix — descend whenever a
+nested folder is present — collides with the deliberate v0.184.17 carve-out, which keeps a plainly-nested
+non-Seestar folder (`MyProject/{night1,night2}`) as **one** target. One level down, the same shape is a user
+who sorted a single target's subs into `M 45_sub/night1/`, and splitting those out mints junk targets named
+after somebody's nights. So the rule that shipped is: **nesting is not evidence.** A child leaves its parent
+only on a marker the app already trusts, and each marker already has a meaning everywhere else:
+
+* its name carries the raw-subs marker (`*_sub`, and so `*_mosaic_sub`) — the authoritative *"these are B's
+  subs"* claim, and the issue's sharpest shape — or it is a `*_video` / `*_photo` capture folder. Either way it
+  is a unit in its own right and `_apply_seestar_convention` is left to name or skip it exactly as it would at
+  any other level (`NESTED_UNIT`);
+* every FITS in it is named like the device's own stacked output (`project.is_seestar_output_filename`, the one
+  piece of evidence that does not depend on the folder — which is precisely what that guard's docstring says
+  the folder test cannot supply). The convention never ingests the device's finished pictures anywhere, so this
+  **passes the folder over** rather than registering it and rejecting it afterwards (`NESTED_OUTPUT`). The skip
+  is recorded as an ordinary `SkippedOutputFolder` with `n_device_output == n_files`, i.e. `n_unvouched == 0`,
+  so it stays out of `unvouched_skips` — the convention working as designed is not worth a word;
+* anything else stays with its parent (`NESTED_KEEP`), **and that is now pinned by a test** rather than left to
+  be "fixed" blind by a later run. The parent keeps the frames; the count is five too high; that is the cheaper
+  error.
+
+Because the carve-out's parent holds no FITS of its own and its children carry no marker, the two rules cannot
+meet: `nested_child_verdict` returns `KEEP` for any parent that is not a capture folder at all.
+
+**Measured against the issue's own matrix** (re-run through the deployed `plan_incoming_units`, shapes and
+controls both — `A_sub/` holding three of its own subs):
+
+| shape | before | after |
+|---|---|---|
+| **D** `A_sub/` + nested bare `B/` of `Stacked_B` (*the real shape*) | one unit `A`, 6 files | **`A` 3; B's pictures passed over** |
+| **B** `A_sub/` + nested `B_sub/` of `Light_B` (*the sharpest*) | one unit `A`, 6 files | **`A` 3 + `B` 3** |
+| **E** `A_sub/` + nested `B/` **and** `B_sub/` | one unit `A`, 9 files | **`A` 3 + `B` 3; the pictures passed over** |
+| **A** `A_sub/` + nested bare `B/` of ordinary `Light_B` | one unit `A`, 6 files | one unit `A`, 6 — *the stand-down* |
+| nested `A_sub/Moon_video/` | absorbed into `A` | **passed over**, as at every other level |
+| *control C* container + `A_sub`, `B_sub` | two units | two units |
+| *control C2* both at top level | two units | two units |
+| *control C3* bare `B/` beside `B_sub/` | one unit `B` | one unit `B` |
+| *control* the v0.184.17 carve-out | one target | one target |
+
+**Two things the build had to get right that the entry had not named.**
+
+1. **A split-out child must not be *ingested* as a bare target.** Letting the pure-device-output child become a
+   unit named `SH2-171` was the first shape tried, and `_seestar_output_bases` quietly breaks under it: its
+   `ingested_bare` set is keyed on the **lowercased name alone**, with no parent, so a nested bare `SH2-171`
+   being ingested anywhere suppresses the output base for the *real* top-level `SH2-171_sub` target and stops
+   the upgrade-path healing that set exists for. Passing the folder over instead — which is what the convention
+   does with the device's pictures everywhere else — never enters that set.
+2. **The container expansion and the root-level walk had to build units through the same function.** They were
+   two spellings of the same three lines, and fixing only the root-level one would have left
+   `MyWorks/A_sub/B_sub/` absorbed — the identical bug one level deeper, in the shape the owner's whole-device
+   drop takes. `_add_unit` is now both, which is also what keeps `folder_of`'s spelling (`M 45_sub/SH2-171_sub`)
+   identical to the planner's.
+
+**The one consequence worth writing down.** `webapp.incominglag._rollup` sums registered counts **by folder
+prefix**, and a split child's folder is still its parent's prefix — so a parent's roll-up can now include
+frames that are no longer in its unit, and `lagging_folders` floors the difference at zero. That is the
+direction that under-reports a lag rather than inventing one, bounded by the nested folder's own file count,
+and it is already that function's documented stance; `plan_incoming_units`' docstring now says so out loud.
+
+**Upgrade safety (§9).** No config field, no DB schema change, no on-disk move, no API shape change, no default
+flipped, and nothing in `incoming/` is read any way but read (§10 — the change only ever *narrows* what a unit
+claims). Frames already registered under the wrong target are untouched: a scan only ever adds, and v0.494.1
+already takes the device pictures among them back out of the stack pool, so the healing path is unchanged and
+the fix is about every scan from here. The **scoped** scan (`single_target`) is deliberately not touched — its
+documented contract is to take the folder it is pointed at as the unit "without consulting its name at all".
+
+**Tests (+7 fail-before, proven in a `git worktree` at `origin/main` carrying the new test files).**
+`tests/test_scanner.py`: the nested raw-subs folder splits out, the pure-device-output folder is passed over
+(and the skip recorded, and silent), both shapes at once, a nested `*_video`, and the same inside a container —
+all five failing before with the parent holding the other object's frames (`{'M 45': 5} == {'M 45': 3,
+'SH2-171': 2}` and so on). `tests/test_incoming_plan.py`: the plan names them the same way, and the
+load-bearing plan↔scan agreement asserted over the nested shapes specifically, since they are two different
+walks. The stand-down shape gets its own test (passes before *and* after, which is the point), and
+`test_scan_rejects_nested_on_device_output_absorbed_into_the_parent_target` — v0.494.1's regression — is kept
+armed by moving its fixture to a **mixed** nested folder, the one shape still absorbed, which is exactly where
+a frame's *name* has to be the only evidence.
+
+**What is deliberately left, and is not an open bug.** The issue's shape A — a nested folder of ordinary subs
+under no marker — is a decided stand-down, recorded in `nested_child_verdict`'s docstring and pinned by
+`test_scan_keeps_a_nested_folder_of_ordinary_subs_with_its_parent`. Reopen it only with evidence that tells a
+foreign object's subs from a user's own nightly sorting; the folder name and the frame names are the only
+evidence a path-only planner has, and neither does.
+
+**The entry as it stood in "Bugs (fix these first)" when this run took it:**
+
+- **BUG, REMAINDER (the guard half shipped as v0.494.1; this is what observer issue
+  [#1120](https://github.com/JimmyeJones/astrostack/issues/1120) left) — the *planner* still attributes a
+  capture folder nested under a `*_sub` parent to the parent's target, so the frames are registered as that
+  target's and v0.494.1 only takes the device pictures among them back out of the stack pool.** *(Pillar:
+  autonomy + trust — PRIORITY 2–3; size **M**, because it is a design call rather than a mechanical change;
+  severity **low** — on-device output nested that way is now rejected by name at any depth, so a wrong
+  *count* is what is left, and the observer measured 5 frames of one object attributed to another out of
+  ~110k across one of 100 targets. Confidence: **reproduced** end to end, and asserted as part of the shipped
+  fix — `tests/test_scanner.py::test_scan_rejects_nested_on_device_output_absorbed_into_the_parent_target`
+  pins `n_frames_added == 5` on a target whose own folder holds three.)*
+  `seestack/io/scanner.py::plan_incoming_units` — for a `<T>_sub/` folder that holds its own FITS,
+  `is_container` is False (`not by_rel.get((d,))`), so the *recursive* `_under((d,))` swallows every file in a
+  nested child folder into the `<T>_sub` unit → target `<T>`. A nested `SH2-171/` under `M 45_sub/` therefore
+  becomes frames of **M 45**: its frame count and `total_exposure_s` carry another object's sky, and a nested
+  folder of ordinary `Light_*` subs — the observer's shapes A and B, which the v0.494.1 guard deliberately
+  leaves accepted, because rejecting on *nesting* would drop a user's real subs from their own stack — is
+  still mis-attributed with nothing to catch it.
+  **Why it is not a mechanical change.** Fixing the planner collides with the deliberate v0.184.17 carve-out
+  (`test_scan_keeps_a_plain_nested_non_seestar_folder_as_one_target`), which keeps a plainly-nested
+  non-Seestar folder as one target. The observer's sharpest shape — a nested **`*_sub`** child of a `*_sub`
+  parent — sits outside that carve-out's stated scope (its child shares the `_sub` marker), so reconciling the
+  two is a judgement. Do **not** make `is_container` descend whenever a `*_sub` child is present without that
+  reconciliation. Full measured repro, controls and rule-outs in the issue.
+
 ## 2026-10-13 (Builder, branch `claude/brave-albattani-0rmc6t`) — the owner's answer to sign-off item 19, built: an automatic drizzle says how long it will take, then runs
 
 ### v0.495.0 — 🌟 OWNER-ANSWERED FEATURE (sign-off item 19, answered 2026-10-13): **"Drizzling ×1.5 — about 14 h (a plain stack would take about 2 h)", on the running job, with cancel and "don't auto-drizzle this target" beside it.**
