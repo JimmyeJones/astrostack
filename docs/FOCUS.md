@@ -1,5 +1,35 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-13 (Scout, branch `claude/funny-shannon-smo3bd` — **inbox clear, QA rotation sweep (4)
+the webapp routers CLEAN, dogfood clean. No code shipped — docs only, and that is the honest outcome.**
+
+**What this run did.** Baseline `main` green (**7872 passed, 7 skipped**), CI green, no open PRs. (1) **Issue
+inbox first:** five open, every one already acted-on and owner-gated, and **no new observer issue** (newest is
+#1120, filed 2026-10-11 and already in "Bugs"). So nothing new owed — see the full per-issue reckoning in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md). (2) **Dogfood `--mosaic --editor`: CLEAN** — every page sweep "nothing
+overflowing, no console errors", `/life-list` 14,513 px at baseline, mosaic trim 7.9 %, all 21 editor ops +
+undo/redo + full-size check. (3) **QA sweep (4) the webapp routers: CLEAN** — read the invariant-bearing and
+observer-facing surfaces (`upload.py` §10 path confinement + zip-bomb guard; `incominglag.py` #1063/#1088
+dedup; `settings.py` auth + calibration-path stripping both ways; `stack.py` submit + `put_stack_defaults`
+calibration-path server-resolution; `overtrim.py`; NaN guards in `targets.py`), all held, and confirmed the
+mosaic dogfood probe shows no NaN-in-JSON on owner-shaped data. **No verified bug found.**
+
+**START HERE NEXT RUN.** (a) **The issue inbox is still the live frontier** — list the open issues *first*,
+because a new observer issue (measured against the owner's real library) is the highest-value thing an
+unattended run can find, and it is where the last two task-bearing runs' work came from. (b) **"Bugs" is still
+all gated-or-decided** (the DECIDE-DO-NOT-FLIP pass count, the #1120 planner remainder, the two owner-data-gated
+LEADs, the ⚪ notes) — re-read the *bodies*, not the headlines, for one whose own text names the cheap evidence
+that settles it (that is how v0.494.5 and v0.494.3 were found). (c) **The obvious next Builder build is item
+19** — the owner answered it on merged PR #1143 and it is now a ⭐ entry under "Features that serve real
+workflows" (state the auto-drizzle time estimate, then run; do **not** build a time gate). (d) **Rotation: (4)
+done → next sweep is (1)**, scale-dependent preview↔export parity on a mosaic-size canvas.
+
+**One method note for the next Scout, because it cost this run time.** `scripts/agent-dogfood.sh --mosaic
+--editor` runs well past a 600 s wrapper (two stacks + a playwright install + a 21-op editor drive). Wrapping
+it in `timeout 600` killed it at the final recipe-teardown step and left a Playwright "Target page … has been
+closed" / `EXIT=124` in the log that *looks* like an app crash but is the wrapper. Drop the `timeout`, or give
+it ≥900 s; every substantive probe had already finished and come back clean. Earlier notes stand below.)*
+
 *Last edited 2026-10-13 (Builder, branch `claude/hopeful-dijkstra-06a17n` — **the gated entries' *bodies* had
 the work the headlines said was absent. v0.494.5 shipped it.**
 
