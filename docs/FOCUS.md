@@ -1,5 +1,49 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-13 (Builder, branch `claude/brave-albattani-32mwni` — **§2's owed big-picture dogfood,
+run on the stalest flag there is; it came back mechanically clean and its one finding was in what the page
+SAYS. v0.495.4.**
+
+**What this run did.** `main` green (CI run 2274 on the exact HEAD commit `c800574c`), no open PRs, inbox four
+open and every one already acted-on and owner-gated — unchanged. The previous note said the one-run-in-three
+whole-journey pass was owed, so this run took it, on **`--combine`**: last run 2026-09-30 at v0.491.x, ~45
+versions back, where `--mosaic --editor` has gone four times this week. It is also the only configuration that
+starts where the owner's data starts and the only one that fingerprints `incoming/` for §10. **Mechanically
+CLEAN, §10 included** — *"all 7 original file(s) still there, unchanged"*, merge carried 3 frames and 1
+attributed picture, two rescans held the combine, a further night landed in the deep target, no console errors
+on 107 page shots.
+
+**v0.495.4** is its one finding, and it is the class the 2026-09-30 `--combine` record predicted: the Target
+page told the owner to *"check that your subs plate-solved and weren't over-rejected … then add more subs"*
+while the note beside it had measured **3 subs accepted, located and simply absent from this stack**. Both
+halves are wrong about the same subs, and he need not shoot anything. What made it a version rather than a
+note is the **ranking**: `NoticeBoard` keeps two speaking notes inline *by priority*, the warning is a
+`warning` (20) and the corrective "N subs missing · Restack" an `advisory` (30), so the guess won the inline
+slot and the measured remedy sat behind "more notes" — and the warning also suppresses `NextBestMoveBadge`,
+making it the page's single "what next" voice there. `thinStackWarning` now takes `readyToStack`, keeps its
+depth claim verbatim and replaces only the next step. It is handed the figure **only** when the picture on
+show is the run the warning describes, which is what keeps v0.491.1's stand-down (never make these notes
+follow a pinned cover) intact.
+
+**START HERE NEXT RUN.** (a) **The issue inbox is still the frontier** — list the open issues first. (b) "Bugs"
+is unchanged and still holds nothing reproduced: the DECIDE-DO-NOT-FLIP pass count (decided, with numbers), the
+two owner-data-gated LEADs, the inert-feedback-chip LEAD and the ⚪ notes. (c) **§2's big-picture pass is now
+paid** (2026-10-13, `--combine`), so it is not owed again for two runs — and the next one worth taking is
+another stale flag rather than `--mosaic --editor` a fifth time: `--deep` and `--closing`/`--restack` are the
+oldest now. (d) Both record files still have headroom (`PROCESS-NOTES.md` ~12,500/18,000, `SHIPPED.md`
+~38,800/64,000), so no archiving is owed.
+
+**The method note worth carrying.** Two notes disagreeing on one page is worth a **different amount depending
+on which of them the page shows first** — and that is not visible in either sentence. The finding here only
+became a version once `NoticeBoard`'s `inlineCount = 2` and the two `NOTICE_PRIORITY` rungs were read, which
+turned "they disagree" into "the wrong one is the only one most readers see". So on any
+two-surfaces-disagree finding, **go and read how the host ranks them** before sizing it. The second note is
+about stand-downs: there was a recorded refusal sitting right next to this change (*"making the analysis
+follow a pinned cover is the change that comment exists to refuse"*), and the test of whether it binds you is
+not proximity but **whether your change makes the refused thing happen** — here the gate that avoids it is the
+same gate correctness needed anyway, because the two counts are measured against different runs. Earlier notes
+stand below.)*
+
 *Last edited 2026-10-13 (Builder, branch `claude/brave-albattani-totnig` — **the last entry in Bugs whose gate
 named a number turned out to have that number inside the repo. v0.495.3.**
 

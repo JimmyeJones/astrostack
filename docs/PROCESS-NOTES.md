@@ -1,5 +1,106 @@
 # Process notes & QA sweep records
 
+## 2026-10-13 (Builder, branch `claude/brave-albattani-32mwni`) — the §2 big-picture dogfood on its stalest flag, and a §7 ordering mistake that cost 20 minutes
+
+*(→ **v0.495.4**. Baseline: **CI run 2274 green on `main` at `c800574c`**, no open PRs, inbox four open and
+every one already acted-on and owner-gated — unchanged from the previous run's reckoning.)*
+
+### The §7 ordering mistake, which is the part worth writing down
+
+`docs/FOCUS.md` said the one-run-in-three whole-journey dogfood was owed, so the plan was always a dogfood
+pass. I started the **baseline `pytest` first anyway**, out of §2's start-of-run habit, and then had to throw
+it away 20 minutes in: `docs/AGENT-ENVIRONMENT.md` §7 says *"dogfood first, `pytest` after"*, and on a fresh
+checkout the collision is not a risk but a certainty — **`webapp/static/` does not exist at all**, so
+`agent-dogfood.sh` is guaranteed to run `npx vite build`, and `emptyOutDir: true` empties the directory every
+`create_app()` fixture reads. The two cannot overlap, and the suite was going to take ~2 h on this box (4
+cores, ~16 % in 20 min) and then be invalidated anyway by the fix that followed.
+
+**The rule to carry: when the run's plan contains a dogfood pass at all, the dogfood goes first, before the
+baseline suite — not just "not at the same time".** §2 and §7 read as if the baseline comes first and a
+dogfood is slotted in later; on a run whose *task* is the dogfood, that ordering costs a whole suite. What
+stood in for the baseline is the signal §7 itself recommends as the independent one: **`main`'s own CI run on
+the exact HEAD commit**. That is a real green suite on this code, not an assumption, and it is the only thing
+that made abandoning the local one honest rather than convenient. Worth saying plainly so the next run does
+not read this as licence to skip a baseline: it is licence to *substitute CI's green on the same commit*, and
+only when the local suite physically cannot run yet.
+
+### The pass: `--combine`, chosen because it was the stalest flag there is
+
+Last run **2026-09-30** at v0.491.x — ~45 versions and 13 days back, where `--mosaic --editor` has been run
+four times in the last week. It is also the only configuration that starts where the owner's data starts and
+the only one that fingerprints `incoming/` for §10.
+
+**CLEAN, mechanically, including §10.** EXIT 0. After the whole journey: *"all 7 original file(s) still
+there, unchanged"*, the one sub the pass drops in itself listed as create-new. The merge carried 3 frames and
+kept 1 picture, its notes arrived **attributed** (`From "M 31_night_2": …` — v0.491.1's own fix, still
+holding), `merge-suggestions` offered the group at 0.0 arcmin once both targets had a centre, two rescans held
+the combine at one 7-frame target, and a further night dropped into the folder that was combined away landed
+in the **deep** target. 53 desktop + 54 phone page shots, *"nothing overflowing, no console errors"*. The one
+`ERROR`/`Traceback` in the server log is step 3's deliberate pre-solve stack refusal.
+
+### The finding, and why reading the paragraph is what found it
+
+It is the fifth-or-so finding in a row of the class the probe's own instructions name, and the **2026-09-30
+`--combine` record predicted exactly where it would be**: *"a `--combine`/`--merge` pass has to be read for
+what the app says once the operation is over, not only for whether the operation worked."* Nothing mechanical
+was wrong this time either.
+
+Target page, inline: *"This stack combined only 3 frames — very few, so it will still look noisy. **Check that
+your subs plate-solved and weren't over-rejected** (see the "rejected" count above), **then add more subs**."*
+Beside it: *"**3 subs missing from your current picture** … it's thinner than your own data. **Restack**."*
+Both halves of the first are wrong about the same subs — they *did* solve and were *not* rejected, which is
+why the second can count them — and he need not shoot anything.
+
+**What made it worth a version rather than a note is the ranking, and that took reading `NoticeBoard` rather
+than the two sentences.** The board keeps `inlineCount = 2` of the *speaking* notes inline **by priority**: the
+thin-stack warning is `NOTICE_PRIORITY.warning` (20), the corrective note is `advisory` (30). So the guess wins
+an inline slot and the measured remedy sits behind *"N more notes"* — and the pass's own output says that fold
+is the normal case (*"2 of 4 are visible without a click — the folded ones are what the page does NOT say to a
+reader who never expands it"*). The warning also **suppresses** `NextBestMoveBadge` (`!thinStack`), under a
+comment saying the two must not both nudge "add more subs", so in that state it is the page's single "what
+next" voice. **A disagreement between two notes is worth a different amount depending on which of them the
+page shows first** — that is the generalisable half, and no reading of either sentence reaches it.
+
+### Two things that were checked rather than assumed, and both constrained the fix
+
+1. **Which run each number is about.** `thinStack` describes `latestRun`; `newSubsSinceStack` is
+   `new_light_since_picture`, measured against the run behind the **displayed** picture, which may be a pinned
+   cover. Pairing them naively would have been the same substitution bug this repo has fixed four times. The
+   figure is therefore passed **only** when `pictureRun.id === latestRun.id`.
+2. **The stand-down recorded under v0.491.1** — *"making the analysis follow a pinned cover is the change that
+   comment exists to refuse"* — and `Target.tsx`'s own comment saying `latestRun` deliberately stays the newest
+   run. Neither is touched: the warning still describes the latest run, and the gate above is what keeps that
+   true rather than quietly re-opening the question. **A stand-down nearby is not the same as a stand-down on
+   your item**; the way to tell is whether your change makes the refused thing happen, and here it does the
+   opposite.
+
+Two cases fall out right for free, which is usually the sign the gate is in the right place:
+`newSubsSinceStack` is zeroed on purpose while `needsProcessing` or `solveSetup` hold — and when plate-solving
+genuinely is not set up, *"check that your subs plate-solved"* is precisely the correct advice, so the reader
+keeps it.
+
+### Fail-before, and what the tests that passed before are for
+
+10 new tests, **5 fail before** (both source files reverted in place and re-run, including the page-level
+*"names the restack"*). The other 5 pass before **by design** and are the more interesting half: they pin the
+byte-for-byte degrade across `null`/`undefined`/`0`/`-2`/`0.4`/`NaN`, the wall card's pointer, the depth claim
+itself, and the two stand-downs (no count waiting; an older cover on show). On a change whose whole risk is
+"did you move a sentence three other surfaces share", the tests that must pass **both** before and after are
+what bound the blast radius, and a fail-before count alone would have understated the work.
+
+### Numbers for the next run
+
+* Full Python suite on this box at `-n 4 --dist worksteal` with the BLAS cap: **7908 passed, 7 skipped in
+  25:09** — in line with the 2026-09-30 record, so nothing to worry about. **And a correction worth having,
+  because I nearly filed the wrong number:** the run I abandoned was crawling (~16 % in 20 min, which
+  extrapolated to ~2 h) and the cause was not the box — it was `scripts/agent-setup.sh`'s `npm install` and
+  toolchain work still competing for the same 4 cores. **Do not benchmark the suite against a run started in
+  the same minute as setup**, and do not record a timing from one; the clean run was 5x faster.
+* `npx vitest run`: **300 files / 4664 tests**, ~50 min on the same box. `vite build` 20.6 s.
+* `--combine` baseline, for comparison with the 2026-09-30 one: 53 desktop / 54 phone shots, tallest page
+  `[phone] /life-list [Still to shoot]` **14,513 px** (unchanged from the 2026-10-13 `--mosaic` pass's own
+  14,513), `[phone] /tonight` 3,368 px, `[phone] /targets/<T>/edit/<run>` 3,299 px.
+
 ## 2026-10-13 (Builder, branch `claude/brave-albattani-totnig`, after the merge) — §11 miss: v0.495.3 was built for two hours with no published claim
 
 Recording my own deviation, because this is the collision class §11 exists for. §2 says *"mark it **In progress**
