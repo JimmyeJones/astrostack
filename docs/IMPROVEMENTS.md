@@ -2411,6 +2411,19 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-ANSWERED (2026-10-13, sign-off item 19) — say how long an automatic drizzle will take, then run it.**
+  v0.494.2 measured an auto-drizzle at ~×7 the per-sub time of a plain stack (0.78 s → 5.68 s per sub at
+  1920×1080, ×1.5 with two-pass rejection); on his 5,477-sub target that is an hour → most of a day. Asked
+  whether a hands-off run should decline a long one, he chose **(c) "tell me the estimate before it starts and
+  let it run"** — not (a) silence, not (b) a cut-off. **Spec:** when `webapp.walkaway.apply_auto_drizzle`
+  decides to drizzle, estimate the run from his own measured seconds-per-sub
+  (`seestack.stacktime.estimate_from_runs`) × the measured drizzle ratio, and put it where he sees a running
+  job: the Jobs row and the target's stack card — *"Drizzling ×1.5 — about 14 h (a plain stack would take
+  about 2 h)"* — with **one-click actions beside it: cancel, and "don't auto-drizzle this target"** (a
+  per-target saved `drizzle: false`, which already wins). No refusal, no threshold, no new global setting. When
+  no timing history exists, say "this will take several times longer than a normal stack" rather than invent a
+  number. Tests: the estimate's arithmetic, the copy, the per-target opt-out round-trip.
+
 - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-30) — "Bring my pictures up to date": re-stack only the
   targets that have new light, in one click.**~~ — **✅ SHIPPED v0.492.0** (Builder 2026-09-30). Entry cut to
   [`SHIPPED.md`](SHIPPED.md); one-liner under "Shipped" below. **The entry's one open question is answered, so
@@ -3550,22 +3563,6 @@ outright bug in existing behaviour, never to add capability.
   **offline** by the bundled catalogues: `seestack/objectinfo.py::identify_object` feeds the Target page's
   object card and its blurb, and `seestack/bg_advice.py` supplies the flatten nudge. If anything is still
   missing there, it is a copy or wiring task on bundled data, not a network one.
-
-19. **An automatic drizzle costs about ×7 the per-sub time of a plain stack. Should an unattended run ever
-    decline one because of how long it would take?** *(Filed 2026-10-12 with the measurement that makes it
-    answerable — v0.494.2, `scripts/measure_drizzle_cost.py`. It would rank near the top of this list: it is
-    about a feature that is **on by default right now**.)* You approved "Auto, when worth it" and v0.494.0
-    ships it; what it does *not* have is a clock. Measured over 12/24/36 subs at 1920×1080, the per-sub cost
-    goes from **0.78 s** plain to **5.68 s** for the ×1.5 canvas with drizzle's two-pass rejection — the ratio
-    is the half that transfers to your box, and your own seconds-per-sub is already measured per target
-    (`seestack.stacktime.estimate_from_runs`). Multiplied out at your scale, a target of 5,477 subs goes from
-    roughly an hour of stacking to most of a day's, and your deepest is 35,894. **Answer:** one of
-    (a) *leave it — the box has all night, and I'd rather have the resolution*; (b) *don't start one it
-    estimates at more than N hours — tell me which N*; or (c) *just tell me the estimate before it starts and
-    let it run*. (c) is the cheapest and is not a refusal, but it is still a new sentence on the hands-off
-    path, so none of the three is built until you pick. Turning `auto_drizzle` off in Settings is meanwhile a
-    complete answer and one switch. Worth: whether a hands-off night on your deepest targets finishes by
-    morning.
 
 _(Normal, tested changes merge to the default branch automatically — see
 AGENTS.md §8. Only the items above need a human's OK first.)_
