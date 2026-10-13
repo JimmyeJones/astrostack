@@ -1,5 +1,68 @@
 # Process notes & QA sweep records
 
+## 2026-10-13 (Builder, branch `claude/brave-albattani-0rmc6t`) — the owner-answered item built; the prerequisite bug found by *reading the spec against the code*; and one optional keyword that broke 41 tests
+
+*(Baseline `origin/main` at `f4a153b3` (0.494.5): CI green on `main`'s head, **no open PRs**, issue inbox
+holding the same five previously-acted-on, owner-gated issues (#1120, #1015, #903, #880, #878) — nothing new.
+"Bugs (fix these first)" ungated-and-undecided: still nothing. So the task was the one the previous run's
+FOCUS note had already named: the ⭐ owner-answered entry at the top of "Features that serve real workflows",
+whose answering PR #1143 had merged a few hours earlier. **Final: 7896 passed, 7 skipped, 16m44s**; `tsc`,
+4,642 vitest tests and `vite build` green; dogfood CLEAN.)*
+
+**The transferable finding: read the spec's own mechanism against the code before building the surface.** The
+owner's answer names the opt-out mechanism in a parenthesis — *"a per-target saved `drizzle: false`, **which
+already wins**"* — and in the engine it does: `walkaway.drizzle_choice_expressed` reads the key's *presence*,
+so an explicit `false` stands the target down. In the **endpoint that writes it**, it did not. `Save as
+defaults` has stored only what the form *changed* since v0.374.0, `drizzle`'s engine default is also `false`,
+and v0.494.0 added the presence rule without adding the key to `put_stack_defaults`' `always_persist` tuple —
+so the delta dropped exactly the value that carries the decision. The button the spec describes would have
+been a no-op shipped with tests that each passed, because the natural tests (does the endpoint write it? does
+the engine honour it?) both pass; what fails is the third one nobody writes — *does it survive the next press
+of the form that owns the blob?* **When a spec says "X already wins", check the writer as well as the reader.**
+
+**And the shape that made it invisible: a list spelled out at the call site.** The rule lives in
+`walkaway.py`; the list of keys it needs lived as a literal in `routers/stack.py`
+(`always_persist=(*AUTO_REJECT_OPT_KEYS, "drizzle_reject")`). v0.494.0 edited the rule and never saw the list.
+It is now one constant, `PRESENCE_IS_THE_CHOICE`, beside the rule, and the endpoint reads it — which is the
+same move as v0.494.4's "a docstring that names a second owner of the rule you are changing is naming your
+second edit", one level down: **a literal list at a call site is a second owner of a rule, and a silent one.**
+
+**One optional keyword, 41 failing tests, and a failure message that named none of it.** `run_stack` gained
+`on_auto_drizzle=None` — optional, defaulted, and passed unconditionally from `_stack_target`. Every
+`tests/webapp` test that stubs `run_stack` writes the signature out in full, so **17 files** needed `**_kw`.
+Grepping `def fake_run_stack(proj, opts, *, progress=None, cancel=None,` found 17 of them and **missed
+`test_reprocess_all.py`, whose stub is called `fake` and spells the signature on one line** — so the full
+suite came back with 40 failures reading `reprocess-all: target M_42 failed` and nothing else: the
+`TypeError: fake() got an unexpected keyword argument` is swallowed by the batch's own per-target isolation.
+**The fix for next time is the sweep, not the grep**: parse every
+`monkeypatch.setattr("seestack.stack.stacker.run_stack", <name>)`, find `<name>`'s `def`, and assert `**` is in
+its signature. That script is five lines, found all of them, and is the check to run *before* the full suite
+whenever a hot-path engine entry point gains a parameter. Grepping one spelling of a signature is not it.
+
+**A mid-run edit's phantom failures, confirmed again — and the cheap way to tell.** The first baseline came
+back `2 failed` in `tests/webapp/test_derived_light.py`, a file this run never touched; both passed in
+isolation moments later, and neither appeared in either later full run. The cause is the documented one (source
+files edited while the suite was running — AGENTS.md §7), and the useful detail is the **tell**: a phantom
+failure is in a file your diff does not name, and it does not reproduce. A *real* one from the same run was in
+a file the diff does not name either (`test_reprocess_all.py`), and **did** reproduce. So "re-run the file
+alone" is the whole discriminator, and it costs 30 seconds.
+
+**A measurement published once, read in one place.** `DRIZZLE_COST_RATIO` in
+`seestack/stack/autodrizzle.py` is the ×7.3 / ×2.9 from `scripts/measure_drizzle_cost.py`, and
+`tests/test_auto_drizzle_cost_note.py` asserts it still equals `5.68 / 0.78` and `2.23 / 0.78` to 2 %. That
+test exists so the next person to re-run the instrument changes one constant and sees the assertion that tells
+them where the number is consumed, rather than finding a second copy of ×7 in a docstring somewhere.
+
+**Dogfood CLEAN** (default pass, run before `pytest` as §7 requires): nothing overflowing, no console errors,
+page heights at the standing baseline (`/life-list` 14,513 px, matching the last two records exactly). The
+`--mosaic`/`--editor` flags were deliberately **not** added: this run makes no Auto or editor claim — the
+change is a note on a job row and one additive endpoint — and the previous run's `--deep --mosaic --editor`
+pass is hours old and clean.
+
+**Still open, carried from the previous run:** `docs/PROCESS-NOTES.md` is within ~800 lines of its 18,000-line
+ceiling (this entry included). Archiving the oldest entries whole to `docs/archive/` — never deleting — remains
+a small, safe task for whichever run wants it.
+
 ## 2026-10-13 (Builder, branch `claude/hopeful-dijkstra-06a17n`) — the lead that named its own missing evidence, and the half of its fix that lived in the engine
 
 *(Baseline `origin/main` at `00ca05d6` (0.494.4): **7870 passed, 7 skipped**, 18m43s, `-n 4 --dist worksteal`;
