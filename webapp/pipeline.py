@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import time
+from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -28,6 +29,7 @@ from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
 from seestack.stackhealth import readable_transparency_ratio
 from webapp import __version__ as APP_VERSION
 from webapp import jobqueue
+from webapp.drizzletime import price_auto_drizzle
 from webapp.config import Settings
 # "Is the picture this target is *showing* a finished one?" — one definition,
 # shared with the Library wall's "Not stretched yet" chip and the endpoint
@@ -4221,6 +4223,14 @@ def _auto_bind_calibration(settings: Settings, proj: Any, opts_dict: dict[str, A
         opts_dict.pop("scale_dark_to_light", None)
 
 
+#: How many of a target's newest stack runs the automatic drizzle's cost note
+#: reads when timing the run it has just chosen. The same window
+#: ``/stack-estimate`` uses for the Stack form's own estimate, and for the same
+#: reason: only the newest ``stacktime.MAX_BASIS_RUNS`` *comparable* runs are
+#: ever used, so this is how far back a match is looked for.
+_DRIZZLE_TIME_SCAN_RUNS = 50
+
+
 def _stack_target(
     settings: Settings,
     jm: JobManager,
@@ -4437,6 +4447,44 @@ def _stack_target(
             opts_dict["max_workers"] = settings.cpu_workers
         opts = coerce_stack_options(opts_dict)
 
+        # "Auto, when worth it" **says what it will cost, and then runs** — the
+        # owner's own answer to sign-off item 19 (2026-10-13), after v0.494.2
+        # measured an automatic drizzle at about ×7 a plain sub: not a refusal
+        # and not a threshold, just the estimate where he sees a running job.
+        # Only a run carrying the posture can ever choose to drizzle, so only
+        # that run pays for the history read — and it is read *here* rather than
+        # inside the callback, so nothing queries the project while the stacker
+        # is mid-run. The rows cannot change underneath it either: this run's own
+        # row is written when it finishes.
+        drizzle_basis: list[Any] = []
+        if opts.auto_drizzle:
+            drizzle_basis = list(islice(proj.iter_stack_runs(),
+                                        _DRIZZLE_TIME_SCAN_RUNS))
+
+        def _note_auto_drizzle(chosen: Any) -> None:
+            """Price the drizzle the engine has just committed to, onto the job."""
+            cost = price_auto_drizzle(
+                drizzle_basis,
+                scale=float(chosen.decision.scale or 0.0),
+                n_frames=chosen.n_frames,
+                canvas_px=chosen.canvas_px,
+                cost_class=chosen.cost_class,
+                plain_cost_class=chosen.plain_cost_class,
+                engine_version=APP_VERSION,
+            )
+            # The in-memory job is what ``GET /api/jobs`` serves for an active
+            # job, so this is visible on the next poll with nothing to flush.
+            job.auto_drizzle = cost.as_dict()
+            log.info(
+                "Auto-drizzle x%.2g on %s: about %s vs about %s plain "
+                "(%d past run(s) of this target).",
+                cost.scale, safe,
+                "unknown" if cost.drizzle_seconds is None
+                else f"{cost.drizzle_seconds / 3600.0:.1f} h",
+                "unknown" if cost.plain_seconds is None
+                else f"{cost.plain_seconds / 3600.0:.1f} h",
+                cost.basis_runs)
+
         result = run_stack(
             proj, opts,
             progress=lambda phase, done, total: (
@@ -4445,6 +4493,7 @@ def _stack_target(
             cancel=job.cancel_requested,
             memory_budget_gb=settings.max_stack_memory_gb,
             app_version=APP_VERSION,
+            on_auto_drizzle=_note_auto_drizzle,
         )
         if not result.cancelled:
             # Record how many solved+accepted subs this stack covered, so the

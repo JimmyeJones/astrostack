@@ -354,7 +354,7 @@ def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dic
     looking at, minus the ones they never chose.
     """
     from webapp.walkaway import (
-        AUTO_REJECT_OPT_KEYS,
+        PRESENCE_IS_THE_CHOICE,
         stack_defaults_delta,
     )
 
@@ -373,11 +373,14 @@ def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dic
     # Validated as a whole above; stored as the difference from what this target
     # would stack with anyway, so an option the user never touched keeps
     # following the global default instead of being frozen at today's value.
-    # The rejection keys are kept whatever they hold: the unattended chain reads
-    # their *presence*, not their value (see ``stack_defaults_delta``).
+    # The rejection keys *and* ``drizzle`` are kept whatever they hold: the
+    # unattended chain reads their **presence**, not their value, so a value
+    # equal to the default is still a decision (``PRESENCE_IS_THE_CHOICE``,
+    # which is the single owner of that list — spelling it out here is how
+    # ``drizzle`` came to be missing from it).
     clean = stack_defaults_delta(
         clean, _unsaved_stack_options(settings),
-        always_persist=(*AUTO_REJECT_OPT_KEYS, "drizzle_reject"))
+        always_persist=PRESENCE_IS_THE_CHOICE)
     # Also remember the calibration-master picks so the form pre-fills them next
     # time (they used to be silently dropped, leaving the selects empty). Only
     # persist a key the user actually posted, coerced to a clean int id (or
@@ -439,6 +442,44 @@ def get_pinned_stack_defaults(safe: str, request: Request) -> dict[str, Any]:
             for p in pinned
         ],
     }
+
+
+@router.post("/api/targets/{safe}/auto-drizzle-off")
+def auto_drizzle_off(safe: str, request: Request) -> dict[str, Any]:
+    """"Don't auto-drizzle this target" — the one-click stand-down beside the
+    running job's cost note.
+
+    An automatic drizzle costs about ×7 a plain sub (v0.494.2), and the owner's
+    answer to that was *tell me the estimate and let it run* — so the note on a
+    running job says how long it will take and offers two actions: cancel this
+    run, and never again on this target. This is the second one.
+
+    It writes ``drizzle: false`` into the target's own "Save as defaults" blob,
+    which is the existing mechanism and already wins:
+    ``walkaway.drizzle_choice_expressed`` reads the key's **presence**, so an
+    explicit ``false`` means "this target has chosen" and the posture is never
+    written again (``apply_auto_drizzle``). Nothing else about the blob is
+    touched — it is **merged**, not replaced, so a target's saved κ, canvas mode
+    and calibration-master picks all survive, which a partial PUT to
+    ``/stack-defaults`` would not.
+
+    Idempotent, additive and reversible: untick nothing, just tick Drizzle back
+    on (or clear the saved defaults) on the Stack form. It does not stop the run
+    that is going — that is Cancel's job, right beside it — and it is not a
+    global setting, because the owner declined a threshold and this is a
+    per-target preference rather than a policy.
+    """
+    from webapp.walkaway import parse_saved_stack_defaults
+
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        saved = parse_saved_stack_defaults(proj.get_meta(STACK_DEFAULTS_META_KEY))
+        saved["drizzle"] = False
+        proj.set_meta(STACK_DEFAULTS_META_KEY, json.dumps(saved))
+    finally:
+        proj.close()
+        lib.close()
+    return {"drizzle": False, "saved": saved}
 
 
 @router.get("/api/targets/{safe}/rejection-outlook")

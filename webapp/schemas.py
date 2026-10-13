@@ -982,6 +982,14 @@ class JobOut(BaseModel):
     # raw `error` text (webapp/jobs.py, Jobs.tsx). None when unclassified.
     error_kind: str | None = None
     result: dict[str, Any] | None = None
+    # What the automatic drizzle this job chose will cost — scale, the estimated
+    # seconds for the drizzled run and for the plain stack it replaces, how many
+    # past runs the rate was measured over, and whether this build measured them
+    # (webapp/drizzletime.py). The owner asked to be told the estimate before an
+    # automatic drizzle runs and then left alone (sign-off item 19), and a
+    # running job's row is where he sees it. None on every other job, which is
+    # every job that did not choose to drizzle itself.
+    auto_drizzle: dict[str, Any] | None = None
 
 
 class ImportWaitingOut(BaseModel):

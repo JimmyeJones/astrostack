@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { type ReactNode, useRef, useState } from "react";
 import { api, type Job } from "../api/client";
+import { AutoDrizzleNote } from "../components/AutoDrizzleNote";
 import { BringFolderInButton } from "../components/BringFolderInButton";
 import {
   type SkipReason, skipReasonOf, skippedFolderLine, skippedFoldersExplainer,
@@ -1714,6 +1715,15 @@ export function JobRow(
       {active ? <Progress value={job.state === "queued" ? 0 : pct} animated mt="xs" /> : null}
       {job.error ? <JobError raw={job.error} kind={job.error_kind} /> : null}
       {job.detail ? <Text c="dimmed" size="xs" mt={4}>{job.detail}</Text> : null}
+      {/* What an automatic drizzle this run chose will cost, and the two things
+          to do about it. The row already has a cancel, so the note doesn't
+          repeat it. Gated *here* rather than inside the note: the note needs a
+          query client for its stand-down mutation, and a JobRow renders in
+          plenty of places (and tests) that have no provider — so the component
+          is mounted only on the rare job that actually chose to drizzle. */}
+      {active && job.auto_drizzle ? (
+        <AutoDrizzleNote cost={job.auto_drizzle} target={job.target} />
+      ) : null}
       <JobResultActions job={job} />
     </Paper>
   );

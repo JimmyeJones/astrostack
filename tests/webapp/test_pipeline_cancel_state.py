@@ -69,7 +69,7 @@ def test_pipeline_mid_stack_cancel_is_classified_cancelled(solved_library, monke
     )
 
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                       memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         return SimpleNamespace(
             output_dir="/tmp/x", run_id=None, n_frames_used=0,
             canvas_shape=(1, 1, 3), cancelled=True, errors=[], excluded_frames=[],
