@@ -1,5 +1,109 @@
 # Shipped — the record
 
+## 2026-10-13 (Builder, branch `claude/brave-albattani-totnig`) — the rest of the `auto_crop`-OFF lead: the border-trim preference stops moving the stretch
+
+### v0.495.3 — 🔴 BUG FIX (PRIORITY 1, editor; the *remainder* of the `auto_crop`-OFF LEAD filed with v0.492.49, whose archetype half shipped as v0.494.5): **with the border-trim preference off, Auto's four pixel-setting cues were read off the ragged fringe, so the owner's picture got darker the raggedier its border was.** `seestack/edit/presets.py::auto_recipe` and `analyze_auto_inputs` narrow through `measured_region` unconditionally; `webapp/routers/editor.py::_measured_region_for_run` drops its preference argument and `_run_taste_context` its second region.
+
+*(Baseline `origin/main` at `cc8265f2` (`__version__` 0.495.2): full suite green — **7904 passed, 7 skipped** in
+20:19 — CI green on `main`, no open PRs, and the issue inbox holding four open issues, every one already acted
+on and owner-gated. "Bugs (fix these first)" held nothing reproduced, and this is the one entry in it whose own
+text names a number that is gettable **inside this repo** rather than out of the owner's library.)*
+
+**What the entry asked for.** v0.494.5 took the archetype off the border-trim preference and deliberately left
+these four — the sky level and σ, the denoise strength, the denoise↔sharpen crossfade and the saturation term —
+on it, because unlike the archetype they *set pixels*: with the trim off the fringe really is in the rendered
+picture, so "a sky level measured only on the interior aims the stretch at a picture the owner is not getting"
+is a real argument. The entry's own gate was one number: **how far the target grey moves when the fringe is
+excluded from the measurement but kept in the render.**
+
+**The measurement, on the engine's own ragged four-panel canvases** (`tests/test_auto_noise_measure.py::_ragged`,
+whose coverage map and trim rectangle come from the real `largest_covered_rect`), **8 fringe bands × 5 σ × 4
+seeds = 160**, comparing the whole canvas against the kept rectangle:
+
+| trim the canvas asks for | target grey, whole canvas vs kept | denoise strength | crossfade (sharpen) | saturation | chroma |
+|---|---|---|---|---|---|
+| 5.9 % | **−2.3 %** (worst 8.3 %) | 0.05 | 0.10 | **0.00** | 0.05 |
+| 9.8 % | −2.3 % (worst 5.0 %) | 0.05 | 0.10 | 0.00 | 0.05 |
+| 13.6 % | −3.6 % (worst 8.3 %) | 0.10 | 0.10 | 0.00 | 0.05 |
+| 17.3 % | −5.5 % (worst 10.0 %) | 0.10 | 0.10 | 0.00 | 0.05 |
+| 22.7 % | −6.8 % (worst 10.0 %) | 0.15 | 0.10 | 0.00 | 0.10 |
+| 28.0 % | −8.1 % (worst 15.0 %) | 0.20 | 0.10 | 0.00 | 0.10 |
+| 33.1 % | −9.4 % (worst 15.0 %) | 0.15 | 0.10 | 0.00 | 0.15 |
+| 39.7 % | −10.6 % (worst 20.0 %) | 0.15 | 0.10 | 0.00 | 0.15 |
+
+**And the decisive half is not the size of the move, it is that one of the two numbers is not about the sky.**
+`target_bg` is `clip(0.24 − sky·0.4, …)`, so this is the **sky level** moving, and the two regions disagree
+about it in a way that tells you which one is wrong: the **kept rectangle's** sky level is flat in the fringe
+width — 0.0123 / 0.0125 / 0.0124 at a 6 %, 14 % and 30 % fringe (σ 0.002), same scene, same sky — while the
+**whole canvas's** climbs with the band: 0.043 / 0.043 / 0.049 there, and 0.071 → 0.110 across the bands
+averaged over σ. A measurement that tracks *how ragged the canvas is* is not a measurement of the sky. Half of
+it is the fringe's grain (one to three subs deep against the panels' six to fifteen) and half is its ragged
+geometry: with the fringe covered as deeply as the panels and no extra noise, the whole-canvas number is still
+3.3× the kept rectangle's at a 14 % band, because a ragged perimeter is structure the de-trend has to fit
+through.
+
+**σ barely moves at all (1.02–1.08×)**, which is the other thing worth knowing: the saturation term is a pure
+function of it on a 0.05-step control and **never crossed a stop in 160 canvases**. What the σ change does reach
+is the denoise strength and the crossfade, which is where the 0.05–0.20 above comes from.
+
+**What the owner would see, rendered.** Applying both recipes to the whole canvas (crop op stripped from both,
+so this is the trim-off picture either way): the interior lands on its own target grey either way (aim error
+0.001–0.007), at **0.209 → 0.204** under the whole-canvas cues as the fringe widens against a steady **0.217 →
+0.226** under the kept rectangle's. One 0.01 stop of that control moves the worst pixel 5.2–17.9 of 255
+(v0.493.14), so this is a visible, border-driven drift in a picture whose sky never changed. **And the fringe is
+not what the discarded measurement bought**: it renders at **0.13–0.17** grey under *both* cue sets, nowhere
+near either target, because it is a thin strip of under-covered sky and no stretch target puts it at the sky's
+grey. So measuring it only ever moved the 85–94 % of the picture that is interior.
+
+**So the answer is the archetype's answer**, and the gate's own argument is what the measurement refutes: the
+preference was conflating *which pixels are in the picture* (all of them, with the trim off) with *which pixels
+can say what this sky is doing* (the well-covered ones, always). The border trim is a **framing** preference and
+is now exactly that — with it off the recipe is the trim-on recipe minus its `geometry.crop` op, op for op and
+param for param.
+
+**Upgrade-safe (§9), and the owner's own install does not move one byte.** His `auto_crop_border` is **on**,
+and with it on `measured_region` already narrowed — so every number in his Auto recipe, his "What Auto did"
+sentence and his taste bucket is what it was. A single-field stack and any mosaic with nothing worth trimming
+pass `trim_crop=None` and are untouched by construction. No config key, no schema, no on-disk layout, no default
+flipped, and **no API shape change**: the optional `auto_crop` request field and `?auto_crop=` query param stay
+accepted on all four editor endpoints (an older frontend still sends them; dropping a request field would be
+the break) and simply no longer change what is measured. `analyze_auto_inputs`' `auto_crop`, `trim_fraction`
+and `trim_fraction_available` fields are unchanged and still report what the recipe *did*. The frontend is
+untouched. On the trim-off path the webapp now does **one** `measured_region` narrowing instead of two.
+
+**Tests (+5 new, 2 re-reasoned rather than weakened; 5 of the 7 fail before, proven in a worktree at
+`origin/main`).** `tests/test_auto_noise_measure.py`:
+`test_with_auto_crop_off_the_only_difference_is_the_crop_op` and
+`test_the_border_trim_preference_moves_no_cue_that_sets_pixels` are the two that asserted the old gate, each now
+asserting the stronger invariant (and the second checks first that the fixture can tell the two regions apart,
+so the equality is a property of the rule rather than of a canvas with nothing to narrow);
+`test_the_kept_rectangles_sky_level_is_flat_in_the_fringe_width` pins the evidence the decision turns on and
+**passes before and after on purpose**, so the next run cannot re-flip the gate without facing it;
+`test_with_the_trim_off_the_stretch_target_stops_drifting_with_the_fringe` states the symptom; and
+`test_the_reported_cues_describe_the_same_region_whatever_the_trim_says` holds the "What Auto did" note to the
+recipe it describes. `tests/webapp/test_editor.py::test_the_per_run_trim_override_does_not_move_the_region_the_knobs_are_read_off`
+is the webapp half, spying the shape handed to `measured_auto_knobs` across the override in all three spellings.
+
+**The entry as it stood, for the record:**
+
+- **LEAD, REMAINDER (the *archetype* half shipped as v0.494.5, which decided the gate; this is what it
+  deliberately left) — with the border-trim preference OFF, Auto's own **cues** — sky level and sigma, the
+  denoise strength, the denoise-sharpen crossfade, the saturation term — are still read off the ragged fringe's
+  grain.** *(Pillar: editor — PRIORITY 1; size **S to write, M to decide**; severity low — it only bites a
+  library that has turned `auto_crop_border` off, and the owner's is on. Confidence: the mechanism is measured —
+  see the table in [`SHIPPED.md`](SHIPPED.md) under v0.492.49 — the *right answer* for these four is not.)*
+  v0.494.5 answered this lead's own question for the one measurement that is a claim about the **object**: the
+  archetype no longer asks the preference, because `classify_target`'s signal threshold is global and fringe
+  grain therefore hides faint structure in the interior too, so the whole-canvas verdict was never the better
+  description of the fringe-inclusive picture (5 of 360 ragged canvases differ, every one a confident invented
+  `cluster`). **That argument does not carry to these four**, and the reason is the one v0.492.49 gated on: they
+  set *pixels*. With the trim off the fringe really is in the rendered picture, so a sky level or a denoise
+  strength measured only on the interior aims the stretch and the smoothing at a picture the owner is not
+  getting. The honest shape is still "measure on the well-covered population, render the whole canvas", and it
+  still needs the number nobody has: how far the target grey moves when the fringe is excluded from the
+  measurement but kept in the render. **Do not blind-flip this one** — unlike the archetype it changes what Auto
+  emits for an existing setting, and §1's caution about the on-by-default hot path applies.
+
 ## 2026-10-13 (Builder, branch `claude/brave-albattani-5kmn39`) — the fourth bite out of the live preview's responsiveness: the settle follows the picture, not the op list
 
 ### v0.495.2 — the editor's live preview settled in **250 ms** in front of a **5-second** render, because the debounce was chosen from a property of the *ops* and the cost belongs to the *picture*.

@@ -1085,6 +1085,39 @@ def measured_region(
     map that does not match the image is passed through untouched, exactly as
     :func:`_delevelled_luminance` already ignores it.
 
+    **Neither region follows the border-trim preference, and that took a third
+    measurement.** The first instalment gated this narrowing on ``auto_crop`` by
+    the rule *"measure the picture the recipe makes"*: with the trim off no crop
+    runs, so the fringe is in the rendered picture and the whole canvas looked
+    like the honest thing to measure. That conflates two questions — *which pixels
+    are in the picture* (all of them, with the trim off) and *which pixels can
+    answer "what is this sky doing?"* (the well-covered ones, always). Measured on
+    the same ragged canvases, 8 fringe bands × 5 σ × 4 seeds = 160 of them, the
+    second question has one answer and the whole canvas is not it:
+
+    * the **kept rectangle's** sky level is flat in the fringe width — 0.0123,
+      0.0125, 0.0124 at a 6 %, 14 % and 30 % fringe (σ 0.002) — while the **whole
+      canvas's** climbs with it: 0.043, 0.043, 0.049 there, and 0.071 → 0.110
+      across the bands when averaged over σ. One of the two numbers is a function
+      of something that is not the sky.
+    * through ``0.24 − sky·0.4`` that lands as a stretch target **2.3 % low at a
+      5.9 % trim and 10.6 % low at 39.7 %** — more than one 0.01 stop of a control
+      whose single stop moves the worst pixel 5.2–17.9 of 255 (v0.493.14) — so the
+      owner's picture got *darker the raggedier its border was*. Rendering the
+      whole canvas under each cue set: the interior lands at its own target either
+      way (aim error 0.001–0.007), at **0.209 → 0.204** on the whole-canvas cues
+      against a steady **0.217 → 0.226** on the kept rectangle's.
+    * and the fringe is **not** what the discarded measurement bought: it renders
+      at 0.13–0.17 grey under *both* cue sets, nowhere near either target, because
+      it is a thin strip of under-covered sky and no stretch target puts it at the
+      sky's grey. So measuring it only moved the 85–94 % of the picture that is
+      interior.
+
+    σ, by contrast, barely moves (1.02–1.08×), which is why the saturation term —
+    a pure function of it on a 0.05-step control — never crossed a stop in 160
+    canvases; the denoise strength and the denoise↔sharpen crossfade did, by up to
+    0.05 at a 5.9 % fringe and 0.20 at 28 %.
+
     **And the archetype moves too, which the first instalment did not measure.**
     The editor's "try this preset?" chip classifies through the *same*
     :func:`classify_target`, from the webapp rather than from ``auto_recipe``, so
@@ -1502,12 +1535,14 @@ def auto_recipe(rgb: np.ndarray | None = None,
     ``auto_crop`` (default ``True`` — today's behaviour) is the owner's preference
     for that last step: some would rather keep the *whole* frame, ragged edges and
     all, than have Auto quietly reframe their picture. With it off the
-    ``geometry.crop`` op is simply not emitted and nothing else about the recipe
-    changes ("Trim border" is still there to crop by hand). The caller still
-    *measures* the trim rectangle either way, so ``analyze_auto_inputs`` can report
-    what Auto would have trimmed. It gates every measurement that sets **pixels**
-    — and nothing else: the archetype the taste profile is keyed on is read off the
-    kept rectangle whatever it says, for the reason beside that call below.
+    ``geometry.crop`` op is simply not emitted and **nothing else about the recipe
+    changes** ("Trim border" is still there to crop by hand) — it is a framing
+    preference and that is all it is. The caller still *measures* the trim
+    rectangle either way, so ``analyze_auto_inputs`` can report what Auto would
+    have trimmed, and every measurement below is read off the rectangle the trim
+    keeps whichever way the preference points: the fringe is a worse description
+    of this picture's sky than the picture is, with the trim off as much as with
+    it on (:func:`measured_region` carries the measurement).
 
     ``proxy_scale`` is the stride ``build_proxy`` decimated this image by. It is
     a **measurement** input too, and reaches exactly one place: the archetype
@@ -1527,10 +1562,13 @@ def auto_recipe(rgb: np.ndarray | None = None,
     # out — ``background.level_coverage`` is emitted on a mosaic and nowhere
     # else — so ``is_mosaic`` decides both, in one place. A single-field stack's
     # Auto is byte-for-byte what it was, whatever map the caller supplies.
-    # Measure the picture this recipe actually produces: when the border trim at
-    # the bottom of this function is going to run, the fringe it deletes is not
-    # part of it (see :func:`measured_region`).
-    m_rgb, m_cov = measured_region(rgb, coverage, trim_crop if auto_crop else None)
+    # Measure the well-covered picture, whatever the border-trim preference says
+    # (see :func:`measured_region`). When the trim runs, the fringe it deletes is
+    # not part of the picture at all; when it does not, the fringe is still a
+    # thin, one-to-three-subs-deep strip whose levels and grain describe how
+    # ragged the canvas is rather than what the sky is doing, and every number
+    # below is a claim about the sky.
+    m_rgb, m_cov = measured_region(rgb, coverage, trim_crop)
     knobs = measured_auto_knobs(m_rgb, m_cov if is_mosaic else None,
                                 grain_ratio=grain_ratio)
     object_type = None
@@ -1539,25 +1577,20 @@ def auto_recipe(rgb: np.ndarray | None = None,
         # bias learned on one archetype only shifts that archetype. An unclassified
         # image (cls None) falls back to the global taste — see auto_prefs.
         #
-        # **The archetype is read off the kept rectangle whatever ``auto_crop``
-        # says**, which is the one measurement here that does not follow the
-        # preference — because it is the one that is not about this picture's
-        # pixels. ``classify_target``'s signal threshold is a *global*
-        # ``6·sky_sigma``, so the fringe's grain lifts it and hides faint diffuse
-        # structure in the **interior** too: the whole-canvas verdict is not a
-        # better description of the fringe-inclusive picture, it is a worse one.
-        # Measured over the engine's own 360 ragged four-panel canvases, the two
-        # regions disagree on 5, every one of them a confident whole-canvas
-        # ``cluster`` against a kept-rectangle *nothing*
-        # (``webapp.routers.editor.classify_run_measured`` carries the table and
-        # the consequence). The bucket is also library-wide while the preference is
-        # per-picture, so letting it decide stranded a tap in a bucket Auto stops
-        # reading the moment the fringe shrinks. This is the **read** side of that
-        # profile and ``editor._classify_run`` is the write side; they have to
-        # answer by one rule, so they now both ignore the preference.
-        a_rgb, a_cov = ((m_rgb, m_cov) if auto_crop
-                        else measured_region(rgb, coverage, trim_crop))
-        object_type = classify_target(a_rgb, a_cov if is_mosaic else None,
+        # The archetype is read off the same well-covered region every other
+        # measurement here is, and for the same reason: ``classify_target``'s
+        # signal threshold is a *global* ``6·sky_sigma``, so fringe grain lifts it
+        # and hides faint diffuse structure in the **interior** too. Measured over
+        # the engine's own 360 ragged four-panel canvases, the two regions
+        # disagree on 5, every one of them a confident whole-canvas ``cluster``
+        # against a kept-rectangle *nothing*
+        # (``webapp.routers.editor.classify_run_measured`` carries that table).
+        # The bucket is also library-wide while the preference is per-picture, so
+        # letting it decide stranded a tap in a bucket Auto stops reading the
+        # moment the fringe shrinks. This is the **read** side of that profile and
+        # ``editor._classify_run`` is the write side; they have to answer by one
+        # rule, so neither asks the preference.
+        object_type = classify_target(m_rgb, m_cov if is_mosaic else None,
                                       proxy_scale=proxy_scale).get("cls")
     values = auto_knob_values(knobs, prefs, object_type)
 
@@ -1670,8 +1703,11 @@ def analyze_auto_inputs(
     # else — so ``is_mosaic`` decides both, in one place. A single-field stack's
     # Auto is byte-for-byte what it was, whatever map the caller supplies.
     # Mirrors ``auto_recipe``: the cues explain the recipe, so they are read off
-    # the same pixels it measured (see :func:`measured_region`).
-    m_rgb, m_cov = measured_region(rgb, coverage, trim_crop if auto_crop else None)
+    # the same pixels it measured — the kept rectangle whichever way the
+    # border-trim preference points (see :func:`measured_region`). ``auto_crop``
+    # still decides the two ``trim_fraction`` fields below, which report what the
+    # recipe did rather than what it measured.
+    m_rgb, m_cov = measured_region(rgb, coverage, trim_crop)
     if rgb is not None:
         a = analyze_proxy(m_rgb, m_cov if is_mosaic else None, grain_ratio)
         sky_sigma = float(a["sky_sigma"])

@@ -1480,6 +1480,52 @@ def _classify_shape_spy(monkeypatch) -> list:
     return shapes
 
 
+def _knob_shape_spy(monkeypatch) -> list:
+    """Record the ``(h, w)`` of every array the webapp measures its Auto knobs on."""
+    from webapp.routers import editor as editor_mod
+
+    shapes: list[tuple[int, int] | None] = []
+    real = editor_mod.presets_mod.measured_auto_knobs
+
+    def spy(m_rgb, m_cov=None, **kw):
+        shapes.append(None if m_rgb is None else tuple(m_rgb.shape[:2]))
+        return real(m_rgb, m_cov, **kw)
+
+    monkeypatch.setattr(editor_mod.presets_mod, "measured_auto_knobs", spy)
+    return shapes
+
+
+def test_the_per_run_trim_override_does_not_move_the_region_the_knobs_are_read_off(
+        client, solved_library, monkeypatch):
+    """The remainder of the lead v0.494.5 decided the archetype half of, and the
+    reverse of what this sibling asserted for the **knobs** until v0.495.3.
+
+    Those four cues set pixels, which is why they were left following the
+    preference: with the trim off the fringe is in the rendered picture. The
+    measurement (``presets.measured_region``) says that does not make the fringe
+    able to answer what the sky is doing — the kept rectangle's sky level is flat
+    in the fringe width while the whole canvas's climbs with it, so the trim-off
+    stretch target drifted 2.3-10.6 % low with how ragged the border was, and the
+    fringe renders nowhere near either target anyway. So both halves now read one
+    region, and the override is accepted and changes neither answer.
+
+    The library-wide setting stays **on**, so the override is the only thing that
+    could move the measurement."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_fringe_mosaic_run(solved_library, safe, basename="override_knobs")
+    assert client.get("/api/settings").json()["auto_crop_border"] is True
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences"
+
+    shapes = _knob_shape_spy(monkeypatch)
+
+    assert client.get(f"{url}?auto_crop=false").status_code == 200
+    assert client.get(f"{url}?auto_crop=true").status_code == 200
+    assert client.get(url).status_code == 200          # omitted ⇒ the setting (on)
+    # The 76x96 rectangle the trim keeps, every time — and not the whole canvas,
+    # which this fixture's fringe makes a different shape.
+    assert shapes == [(76, 96), (76, 96), (76, 96)]
+
+
 def test_the_per_run_trim_override_does_not_move_the_bucket_a_cue_is_filed_in(
         client, solved_library, monkeypatch):
     """The editor's **per-run** border-trim switch must *not* reach the

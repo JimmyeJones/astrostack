@@ -1,5 +1,42 @@
 # Process notes & QA sweep records
 
+## 2026-10-13 (Builder, branch `claude/brave-albattani-totnig`) — the gate that was "waiting on a number" had the number inside the repo, and the measurement answered a question nobody had asked
+
+**The run.** Baseline `origin/main` at `cc8265f2` green (**7904 passed, 7 skipped** in 20:19), CI green, no open
+PRs, inbox four open and all previously acted-on and owner-gated (#1015, #903, #880, #878 — no new observer
+issue since #1120, which is closed). "Bugs (fix these first)" held nothing reproduced, exactly as the previous
+two notes said. One task shipped: **v0.495.3**, the remainder of the `auto_crop`-OFF lead.
+
+**The method note worth carrying, because it is the second run in a row to find this.** The previous note said:
+*"when a gate names an instrument, check first whether the quantity it is reaching for is already measured
+somewhere."* This entry named a **quantity** rather than an instrument — *"how far the target grey moves when
+the fringe is excluded from the measurement but kept in the render"* — and it had been read for two weeks as
+owner-data-gated company to the two LEADs beside it. It is not: the engine's own `_ragged` fixture builds that
+exact canvas, `auto_recipe(auto_crop=…)` is the only difference between the two candidate behaviours, and
+stripping the crop op from the trim-**on** recipe gives the proposed behaviour exactly, with no new code at
+all. Two scratch scripts and about twenty minutes. **The tell for "this gate is cheaper than it reads" is that
+the two behaviours differ by one argument of one pure function** — then the measurement is a loop, not a
+build.
+
+**And the measurement did not answer the question the entry asked.** The entry framed it as a size — how far
+does the grey move, is it enough to be worth churn — and the size (2.3 % at a 5.9 % fringe, 10.6 % at 39.7 %)
+is not what settles it. What settles it is that the **kept rectangle's sky level is flat in the fringe width
+while the whole canvas's climbs with it**: same scene, same sky, three fringe bands, and one of the two numbers
+moves by a factor of two. That makes it a question about *which number is about the sky* rather than about
+whether a difference is big enough to care, and the "but the fringe is in the rendered picture" argument the
+gate rested on does not survive it — the fringe renders at 0.13–0.17 grey under **both** cue sets, nowhere near
+either stretch target, so the measurement it was buying never aimed at it. **A difference-of-two-answers
+measurement is worth an invariance sweep as well as a magnitude**: if one candidate is invariant to a knob that
+should not matter and the other is not, that is a stronger finding than any effect size, and it is cheap
+(three canvases).
+
+**One mechanical thing, for a run that touches this family again.** `test_auto_crop_off_changes_nothing_else_about_the_recipe`
+(`tests/test_edit_engine.py`) has asserted the **new** behaviour all along — `off_ops == on_ops[:-1]` — and
+passed under the old gate only because its fixture is a 48×64 uniform-noise patch whose narrowing cannot move a
+snapped param. A test whose fixture cannot express the behaviour it names is green for the wrong reason in both
+directions; the same shape is why this file's own `_scene(mosaic=True)` could not see the border bug that
+started this chain (v0.492.49), and why `_ragged` exists.
+
 ## 2026-10-13 (Builder, branch `claude/brave-albattani-5kmn39`) — dogfood `--mosaic --editor` CLEAN; the inbox reckoning; and a method note on a gate that named the wrong instrument
 
 *(Baseline `origin/main` at `02444893` (0.495.1): full suite **7904 passed, 7 skipped** (17m51s), `-n 4 --dist

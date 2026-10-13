@@ -691,17 +691,24 @@ def test_auto_builds_the_recipe_the_kept_picture_itself_would_get():
     assert [o.id for o in ragged.ops][-1] == "geometry.crop"
 
 
-def test_with_auto_crop_off_the_whole_canvas_is_measured_again():
-    """The rule is "measure what the recipe keeps", not "measure the middle": with
-    the owner's border-trim preference off, the fringe stays in his picture, so it
-    is part of what Auto has to answer for."""
+def test_with_auto_crop_off_the_only_difference_is_the_crop_op():
+    """The border-trim preference is a **framing** preference and nothing else.
+
+    This asserted the reverse until v0.495.3 — "with the trim off the fringe
+    stays in his picture, so it is part of what Auto has to answer for" — which
+    conflated *which pixels are in the picture* (all of them, with the trim off)
+    with *which pixels can say what this sky is doing* (the well-covered ones,
+    always). The three tests below are the measurement that settled it; this is
+    the consequence, on the fixture that can tell the two regions apart.
+    """
     img, cov, trim = _ragged(seed=13)
+    on = auto_recipe(img, median_fwhm=2.5, is_mosaic=True, trim_crop=trim,
+                     coverage=cov, auto_crop=True)
     off = auto_recipe(img, median_fwhm=2.5, is_mosaic=True, trim_crop=trim,
                       coverage=cov, auto_crop=False)
-    whole = auto_recipe(img, median_fwhm=2.5, is_mosaic=True, trim_crop=None,
-                        coverage=cov)
+    assert [o.id for o in on.ops][-1] == "geometry.crop"
     assert [(o.id, o.params) for o in off.ops] == [
-        (o.id, o.params) for o in whole.ops]
+        (o.id, o.params) for o in on.ops[:-1]]
 
 
 def test_a_single_field_stacks_auto_is_untouched_by_the_narrowing():
@@ -882,12 +889,73 @@ def test_auto_recipe_keys_its_taste_on_the_kept_picture_with_the_trim_off_too(
     assert _archetype_shapes(monkeypatch, img, cov, trim, auto_crop=False) == [kept]
 
 
-def test_the_border_trim_preference_still_gates_every_cue_that_sets_pixels():
-    """...and the control, which is the whole reason the archetype moved alone:
-    the four measurements that decide *pixels* must still follow the preference,
-    because with the trim off the fringe really is in the rendered picture. Asked
-    of the one number the whole recipe funnels into."""
+def test_the_border_trim_preference_moves_no_cue_that_sets_pixels():
+    """...and the same claim about the four measurements that decide *pixels*,
+    asked of the one number the whole recipe funnels into.
+
+    Until v0.495.3 this asserted the opposite (``on != off``) and passed, which is
+    the bug: the preference is about framing, and it was moving the stretch.
+    """
     img, cov, trim = _ragged(seed=89, sigma=0.02, band=20)
+    # The fixture can tell the two regions apart, so the equality below is a
+    # property of the rule rather than of a canvas with nothing to narrow.
+    assert measured_region(img, cov, trim)[0].shape != img.shape
     on = _ragged_target_bg(img, cov, trim, auto_crop=True)
     off = _ragged_target_bg(img, cov, trim, auto_crop=False)
-    assert on != pytest.approx(off, abs=1e-9), (on, off)
+    assert on == pytest.approx(off, abs=1e-9), (on, off)
+
+
+def test_the_kept_rectangles_sky_level_is_flat_in_the_fringe_width():
+    """The measurement the trim-off decision turns on, pinned so the next run
+    cannot re-flip the gate without facing it.
+
+    One of the two candidate regions reports a sky level that is a function of
+    *how ragged the canvas is* rather than of the sky, and it is not the kept
+    rectangle. Same scene, same sky, same σ, three fringe widths: the kept
+    rectangle answers the same number every time; the whole canvas climbs with the
+    band. (Measured over 8 bands × 5 σ × 4 seeds when this shipped — the whole
+    canvas runs 0.071 → 0.110 across the bands against a flat ~0.052.)
+    """
+    kept, whole = [], []
+    for band in (6, 14, 30):
+        img, cov, trim = _ragged(seed=3, sigma=0.002, band=band)
+        assert trim is not None
+        m_rgb, m_cov = measured_region(img, cov, trim)
+        kept.append(float(analyze_proxy(m_rgb, m_cov)["sky"]))
+        whole.append(float(analyze_proxy(img, cov)["sky"]))
+    assert max(kept) - min(kept) < 0.002, kept
+    assert whole[0] < whole[-1], whole
+    assert min(whole) > max(kept) * 2.0, (whole, kept)
+
+
+def test_with_the_trim_off_the_stretch_target_stops_drifting_with_the_fringe():
+    """What that buys the owner, stated as the symptom: with the border trim off,
+    his picture used to get **darker the raggedier its border was** — the stretch
+    target walked 2.3 % low at a 5.9 % fringe and 10.6 % low at 39.7 %, on a
+    control whose single 0.01 stop moves the worst pixel 5.2-17.9 of 255
+    (v0.493.14). It is the same sky in every one of these canvases, so it is the
+    same target grey.
+    """
+    targets = {band: _ragged_target_bg(*_ragged(seed=3, sigma=0.008, band=band),
+                                       auto_crop=False)
+               for band in (6, 14, 30)}
+    assert max(targets.values()) - min(targets.values()) == pytest.approx(0.0,
+                                                                         abs=1e-9), \
+        targets
+
+
+def test_the_reported_cues_describe_the_same_region_whatever_the_trim_says():
+    """``analyze_auto_inputs`` is the "what Auto did" note's own source, so it has
+    to report the numbers the recipe was built from — which are now one region's
+    whichever way the preference points. What still follows the preference is the
+    pair of trim fields, because those report what the recipe *did*."""
+    img, cov, trim = _ragged(seed=89, sigma=0.02, band=20)
+    on = analyze_auto_inputs(img, median_fwhm=2.5, is_mosaic=True,
+                             trim_crop=trim, coverage=cov, auto_crop=True)
+    off = analyze_auto_inputs(img, median_fwhm=2.5, is_mosaic=True,
+                              trim_crop=trim, coverage=cov, auto_crop=False)
+    for cue in ("sky", "sky_sigma", "noisy", "noise_fraction"):
+        assert on[cue] == off[cue], (cue, on[cue], off[cue])
+    assert on["trim_fraction"] is not None
+    assert off["trim_fraction"] is None
+    assert off["trim_fraction_available"] == on["trim_fraction_available"]
