@@ -1,5 +1,43 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-13 (Builder, branch `claude/brave-albattani-5kmn39` — **Bugs held nothing reproduced, so
+this run took the one live PRIORITY-1 editor item with a named next step — and the measurement dissolved its
+question instead of answering it. v0.495.2.**
+
+**What this run did.** Baseline `main` green (**7904 passed, 7 skipped**), CI green, no open PRs, and the inbox
+down to **four** open issues, every one already acted-on and owner-gated (#903's forward mechanism shipped as
+v0.448.1 and its repair as `webapp/refinish.py`; the rest are owner-data-gated). A `--mosaic --editor` dogfood
+pass ran first and came back **clean** — every page sweep "nothing overflowing, no console errors", 21/21 editor
+ops previewed with undo/redo, both chip classes behaving, the mosaic's health sentences agreeing with its panel
+map. So the run took the item the previous note pointed at: the live-preview **settle**.
+
+**v0.495.2** is the fourth bite out of "Live preview … responsiveness". The entry asked *"is `previewDebounceMs`'s
+600 ms heavy-op settle still the right number?"*; measured, there is no right number. The settle came from the
+registry's `heavy` flag, which sits on exactly three ops, i.e. it describes the **op** — while the cost belongs
+to the **picture**: on the Auto recipe each canvas actually gets, a single field renders in **286 ms** and an
+owner-shaped 1693×1150 mosaic proxy in **5.08 s**, and *neither one emits a `heavy` op*. The `--mosaic`
+dogfood's own "What Auto-process did" confirms it on real data (eight steps, no noise reduction). So a
+five-second render had a 250 ms settle and asked for a fresh render — two, with the histogram — on every
+quarter-second pause of a drag, each running to completion in a worker thread whether or not the browser still
+wanted it. The settle now follows the previous render's **measured** elapsed time, on a three-rung ladder
+(250 / 600 / 1200 ms) because `useDebouncedValue` re-arms a *pending* timer whenever `wait` changes.
+
+**START HERE NEXT RUN.** (a) **The issue inbox is still the frontier** — list the open issues first. (b) **"Bugs"
+still holds nothing reproduced**: the DECIDE-DO-NOT-FLIP pass count (decided, with numbers), the two
+owner-data-gated LEADs, the inert-feedback-chip LEAD and the ⚪ notes. The `auto_crop`-OFF remainder is still the
+one whose body names what it needs. (c) The responsiveness item now has **four** bites behind it and nothing
+measured left on it — do not reach for a fifth without a measurement first. (d) Both record files have real headroom
+again after the 2026-10-13 archive (`PROCESS-NOTES.md` ~12,200/18,000, `SHIPPED.md` ~38,600/64,000), so no
+archiving is owed this week.
+
+**The method note worth carrying.** *"It needs a measurement in a real browser"* was this item's gate for weeks,
+and the measurement that mattered was neither in a browser nor about the constant: it was **what the one-click
+Auto recipe emits, and what one render of it costs, on each canvas size**. Two readings settled it — the repo's
+own `edit_resume_cache.py` table, and the running app's own sentence about which ops Auto chose. When a gate
+names an instrument, check first whether the *quantity* it is reaching for is already measured somewhere, and
+whether the honest answer is "no constant can know this" rather than a better constant. Earlier notes stand
+below.)*
+
 *Last edited 2026-10-13 (Builder, branch `claude/brave-albattani-oqu5tc` — **the one reproduced entry in Bugs
 was a design call, so this run made the call. v0.495.1.**
 

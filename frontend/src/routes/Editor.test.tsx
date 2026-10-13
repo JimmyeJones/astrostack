@@ -8,6 +8,7 @@ import * as client from "../api/client";
 import type { EditOp } from "../api/client";
 import { allPlacementMismatches, placementMismatches } from "../test/editorOpPlacement";
 import { PREVIEW_TOOLS } from "../components/editor/previewTools";
+import { LIGHT_DEBOUNCE_MS, SLOW_RENDER_MS } from "../components/editor/previewDebounce";
 
 const STRETCH: EditOp = {
   id: "tone.stretch", label: "Stretch", group: "tone", stage: "any",
@@ -3904,5 +3905,47 @@ describe("Editor framing verdict", () => {
     expect(await screen.findByText(new RegExp(CATALOGUE_LINE.slice(0, 40))))
       .toBeInTheDocument();
     expect(screen.queryByTestId("framing-verdict")).not.toBeInTheDocument();
+  });
+});
+
+describe("EditorView — the live preview's settle follows this picture's own cost", () => {
+  it("settles longer once it has measured that a render here takes seconds", async () => {
+    // The debounce used to be chosen from the ops' `heavy` hint alone, which is a
+    // property of the *op*: the one-click Auto recipe emits no heavy op at all and
+    // still takes 2.8 s a render on a proxy the size of the owner's mosaic against
+    // 0.2 s on a single field (`webapp/edit_resume_cache.py` measures both). So a
+    // mosaic settled in 250 ms and fired a fresh render on every quarter-second
+    // pause of a drag — each one running to completion on the server whether or
+    // not the browser still wanted it. The settle now follows what the previous
+    // render of *this* picture actually cost.
+    mockEditorQueries();
+    let previews = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("editor/preview")) {
+        previews += 1;
+        await new Promise((r) => setTimeout(r, SLOW_RENDER_MS + 150));
+      }
+      return {
+        ok: true,
+        blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+      };
+    }));
+
+    renderEditor();
+    expect(await screen.findByText("Stretch")).toBeInTheDocument();
+    // The first render has to *finish* before it is a measurement: that is the
+    // frame the shown picture comes from.
+    await waitFor(() => expect(screen.getByAltText("preview")).toBeInTheDocument(),
+                  { timeout: 6000 });
+    const before = previews;
+
+    fireEvent.click(screen.getByLabelText("Enable/bypass"));
+    // Past the light settle and well short of the measured one: the old
+    // behaviour has already re-rendered here, the new one has not.
+    await new Promise((r) => setTimeout(r, LIGHT_DEBOUNCE_MS + 350));
+    expect(previews).toBe(before);
+
+    // And it does render — a longer settle, not a lost one.
+    await waitFor(() => expect(previews).toBe(before + 1), { timeout: 6000 });
   });
 });

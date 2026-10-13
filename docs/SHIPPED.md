@@ -1,5 +1,76 @@
 # Shipped — the record
 
+## 2026-10-13 (Builder, branch `claude/brave-albattani-5kmn39`) — the fourth bite out of the live preview's responsiveness: the settle follows the picture, not the op list
+
+### v0.495.2 — the editor's live preview settled in **250 ms** in front of a **5-second** render, because the debounce was chosen from a property of the *ops* and the cost belongs to the *picture*.
+`frontend/src/components/editor/previewDebounce.ts` gains `settleForRenderMs` and a third rung
+(`SLOW_DEBOUNCE_MS` 1200, `HEAVY_RENDER_MS` 500, `SLOW_RENDER_MS` 1200); `previewDebounceMs` takes an optional
+`lastRenderMs`; `routes/Editor.tsx` measures the elapsed time of each *finished* live-preview render and feeds
+it back. Frontend only.
+
+*(Baseline `origin/main` at `02444893` (`__version__` 0.495.1): full suite green — **7904 passed, 7 skipped** —
+CI green on `main`'s head, no open PRs, and "Bugs (fix these first)" holding nothing reproduced. A
+`--mosaic --editor` dogfood pass ran first and came back **clean**: every page sweep "nothing overflowing, no
+console errors", all 21 editor ops previewed with undo/redo, the taste row and both chip classes behaving, and
+the mosaic's health sentences agreeing with its panel map. So this is the live PRIORITY-1 editor item that
+`docs/FOCUS.md` named as the one with a next step.)*
+
+**What the item asked, and why the answer is not a number.** The "Live preview … responsiveness" entry had
+three bites behind it (v0.382.2 the fit cache, v0.382.3 the coverage reads, v0.494.3 the resume cache) and ended
+*"the next honest question is whether `previewDebounceMs`'s 600 ms heavy-op settle is still the right number"*.
+It is the wrong question. `previewDebounceMs` returned 600 ms when any **enabled** op carried the registry's
+`heavy` flag and 250 ms otherwise — and `heavy` is set on exactly three ops (`detail.denoise`,
+`detail.chroma_denoise`, `detail.deconvolve`), i.e. it describes the **op**. What a render costs is dominated by
+the **picture**, measured here on the Auto recipe each canvas actually gets:
+
+| canvas | Auto's ops | a `heavy` op? | one render | old settle |
+|---|---|---|---|---|
+| single field, 480×320 proxy | 7 | **no** | **286 ms** | 250 ms |
+| owner-shaped mosaic, 1693×1150 proxy, clean sky | 8 | **no** | **5.08 s** | **250 ms** |
+| the same mosaic with a noisy sky | 10 | yes | 7.00 s | 600 ms |
+
+So the case that matters most is the one the hint cannot see at all: **a five-second render with a
+quarter-second settle**, 20× short. And it is not a guess about the owner's data — the `--mosaic` dogfood's own
+*"What Auto-process did"* lists eight steps on the bundled 2×2 and names **no** noise reduction, and
+`webapp/edit_resume_cache.py` independently measured 5.18 s cold / 2.81 s resumed on the same 1693×1150 proxy.
+The owner is a heavy mosaic user with deep, clean stacks, which is precisely the column with no `heavy` op in it.
+
+**What that cost him.** Every settle asks for a fresh render — **two**, because the histogram beside the picture
+runs the same recipe on the same proxy — and each one runs to completion in a worker thread whether or not the
+browser still wants it (`edit_preview` is `async def` + `run_in_threadpool`; an aborted `fetch` closes the
+connection, it does not stop the numpy). A nudge-pause-nudge drag across three seconds therefore queued around
+ten renders of a 23 MB proxy where it needed one, on a RAM-capped NAS.
+
+**What shipped: the settle follows the previous render of this picture, measured.** `Editor.tsx` times each
+preview fetch that *finishes* (a superseded one throws on its abort signal, a failed one throws earlier —
+neither is a measurement of the picture) and hands it to `previewDebounceMs`. Measured rather than derived from
+the canvas size on purpose: the same mosaic is a different number of seconds on a different box, and **no
+constant in this repo can know the owner's NAS** — which is the same reason the item's own "measure it in a real
+browser" gate could never have produced a number worth shipping.
+
+**Three rungs, not a formula, and that is the load-bearing detail.** `@mantine/hooks`' `useDebouncedValue` lists
+`wait` in its effect's dependencies, so changing the delay **re-arms a pending timer**. A settle that tracked
+every render's jitter would keep restarting the one the user is already waiting on. The ladder promises that two
+renders of the same picture land on the same number: ≥1.2 s → 1200 ms, ≥0.5 s → 600 ms, else 250 ms.
+
+**The two guard rails.** The `heavy` hint stays a **floor** — a fast render never talks the editor out of
+settling for deconvolution — and 1200 ms is a **ceiling**, because a 30 s render must not buy a 15 s settle;
+the editor still has to answer a click. With no measurement yet (first open, a failed render, a stubbed clock,
+a non-finite elapsed time) the function is byte-for-byte its old self, which is also why the bundled single
+field at 286 ms does not move at all.
+
+**Upgrade-safe (§9):** frontend-only. No config key, no schema, no on-disk layout, no endpoint, no response
+shape, no default anybody has stored. There is nothing here an older install can be out of step with.
+
+**Tests (+12).** 11 pure cases in `previewDebounce.test.ts` — no opinion without a measurement; none from a 0 /
+negative / NaN / Infinity elapsed time (any of which would otherwise become a `setTimeout` delay); the three
+rungs and both boundaries; the ceiling at 30 s; the ladder's own promise that 2.4 s and 3.1 s agree; the owner's
+case (a slow picture with no heavy op lengthens, 250 → 1200); a fast picture unchanged; and the `heavy` floor in
+both directions. Plus one end-to-end `Editor.test.tsx` case that drives the real component with a deliberately
+slow preview fetch, waits for the picture to arrive, toggles an op, and asserts no new render has been asked for
+600 ms later — **fails before** (`expected 3 to be 2`) with the third argument removed, and then asserts the
+render does arrive, so it cannot pass by losing one.
+
 ## 2026-10-13 (Builder, branch `claude/brave-albattani-oqu5tc`) — the planner half of observer issue #1120: a capture folder nested inside a `<T>_sub/` is no longer the parent target's frames
 
 ### v0.495.1 — 🔴 BUG FIX: **a `<T>_sub/` holds `<T>`'s subs *directly*, but both unit builders swept it recursively — so anything nested inside one became that target's frames.**
