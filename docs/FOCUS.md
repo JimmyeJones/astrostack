@@ -1,5 +1,38 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-13 (Builder, branch `claude/brave-albattani-oqu5tc` — **the one reproduced entry in Bugs
+was a design call, so this run made the call. v0.495.1.**
+
+**What this run did.** Baseline `main` green (**7896 passed, 7 skipped**), CI green, no open PRs, and the inbox
+holding the same five open, already-acted-on, owner-gated issues — no new observer issue, so nothing new owed
+there. The previous note said "Bugs is all gated-or-decided"; one of those entries was gated on a **judgement**
+rather than on the owner's data, which is a gate a Builder is allowed to open. **v0.495.1** is the planner half
+of observer #1120: a `<T>_sub/` holds its subs *directly*, so both unit builders' recursive sweep was making
+whatever sat nested inside one into that target's frames (his `M 45_sub/SH2-171/` → 5 of another object's
+device pictures as accepted frames of M 45, 54.8° away). The reconciliation with the v0.184.17 carve-out is
+**"nesting is not evidence"**: a child splits out only on a marker the app already trusts (`*_sub`,
+`*_video`/`*_photo`, or a folder of *only* `Stacked_*` pictures), and an unmarked folder of ordinary subs stays
+with its parent — pinned by its own test, because it cannot be told from a user's own `<T>_sub/night1/`
+sorting. All three of the issue's controls and the carve-out are unmoved.
+
+**START HERE NEXT RUN.** (a) **The issue inbox is still the frontier** — list the open issues first; it is where
+the last three task-bearing runs' work came from. (b) **"Bugs" now holds nothing reproduced at all** — what is
+left is the DECIDE-DO-NOT-FLIP pass count (decided, with numbers), the two owner-data-gated LEADs, the
+inert-feedback-chip LEAD (stuck on telemetry the app does not have) and the ⚪ notes. The `auto_crop`-OFF
+remainder is the one whose body still names what it needs. (c) If Bugs and the inbox are both dry, the **live
+PRIORITY-1 editor item with a named next step** is responsiveness: `previewDebounceMs`'s 600 ms heavy-op settle
+has not been re-asked since two caches (v0.382.2, v0.494.3) took a mosaic render from 5.18 s to 2.81 s, and
+that one is a measurement in a real browser rather than a reading of the code.
+
+**The method note worth carrying.** *"Size M, because it is a design call"* is not the same gate as *"waiting on
+the owner's data"*, and three runs read it as one. A design call whose options are all inside the repo — here,
+which of two deliberate rules wins where they meet — is a Builder's to make, as long as the losing side is
+**pinned by a test** rather than left to the next reader's judgement. The stand-down test that passes before
+*and* after is the cheap part of that, and it is what stops the next run "fixing" the half this one chose to
+leave. And the mechanical one: a rule spelled out twice (the container expansion and the root-level walk were
+two spellings of three lines) means a fix lands in one of them — the second owner again, this time inside one
+function. Earlier notes stand below.)*
+
 *Last edited 2026-10-13 (Scout, branch `claude/funny-shannon-smo3bd` — **inbox clear, QA rotation sweep (4)
 the webapp routers CLEAN, dogfood clean. No code shipped — docs only, and that is the honest outcome.**
 

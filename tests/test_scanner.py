@@ -1029,10 +1029,18 @@ def test_scan_rejects_nested_on_device_output_absorbed_into_the_parent_target(tm
     """The same bug through the whole scan, which is what proves the fix is armed
     on the path the owner's install actually runs: ``_seestar_output_bases``
     registers the bare ``<T>`` base off the ``<T>_sub`` folder, ingest absorbs the
-    nested folder's frames into ``<T>`` (the planner half, unchanged), and the
-    reject pass now takes the device pictures back out of the stack pool.
-    Fails before with ``n_output_frames_rejected == 0`` and two accepted frames of
-    another object."""
+    nested folder's frames into ``<T>``, and the reject pass takes the device
+    pictures back out of the stack pool. Fails before with
+    ``n_output_frames_rejected == 0`` and two accepted frames of another object.
+
+    The nested folder here holds a **mix** — a real-looking sub beside two device
+    pictures — which is deliberately the one shape ``nested_child_verdict`` still
+    leaves absorbed (it is not pure device output and carries no folder marker, so
+    it cannot be told from a user's own ``<T>_sub/night1/`` sorting). That is what
+    keeps this guard armed where it matters: a nested folder the planner cannot
+    split out is exactly where a frame's *name* has to be the evidence. The pure
+    and marked shapes are split out one level earlier now — see
+    ``test_scan_passes_over_a_nested_folder_of_only_device_output``."""
     scan_root = tmp_path / "incoming"
     (scan_root / "M 45_sub").mkdir(parents=True)
     for i in range(3):
@@ -1045,18 +1053,19 @@ def test_scan_rejects_nested_on_device_output_absorbed_into_the_parent_target(tm
             nested / f"Stacked_10.0s_SH2-171_{i:03d}.fit", n_stars=5, seed=20 + i)
         for i in range(2)
     ]
+    write_seestar_fits(nested / "Light_SH2-171_001.fit", n_stars=5, seed=30)
 
     lib = Library.create(tmp_path / "lib")
     try:
         result = scan_and_organize(lib, scan_root)
         m45 = next(t for t in result.targets if t.safe_name == "M_45")
-        assert m45.n_frames_added == 5               # 3 subs + the 2 absorbed strays
-        assert m45.n_output_frames_rejected == 2     # ...which leave the pool again
+        assert m45.n_frames_added == 6               # 3 subs + the 3 absorbed strays
+        assert m45.n_output_frames_rejected == 2     # ...two of which leave the pool
 
         proj = lib.open_target("M_45")
         try:
             accepted = list(proj.iter_frames(accepted_only=True))
-            assert len(accepted) == 3                # only the real subs stack
+            assert len(accepted) == 4   # the 3 real subs + the unmarked stray
             by_path = {f.source_path: f for f in proj.iter_frames()}
             for stray in strays:
                 frame = by_path[str(stray)]
@@ -1064,6 +1073,193 @@ def test_scan_rejects_nested_on_device_output_absorbed_into_the_parent_target(tm
                 assert frame.reject_reason == REJECT_REASON_SEESTAR_OUTPUT
         finally:
             proj.close()
+    finally:
+        lib.close()
+
+
+# --- observer issue #1120: a capture folder nested inside a <T>_sub/ ----------
+# A "<T>_sub/" holds <T>'s subs *directly*, so a folder nested inside one is not
+# part of it. Which of these shapes splits out is decided by
+# ``scanner.nested_child_verdict``, whose docstring carries the reconciliation
+# with the v0.184.17 carve-out (pinned just below by
+# ``test_scan_keeps_a_plain_nested_non_seestar_folder_as_one_target``).
+
+
+def test_scan_splits_a_nested_raw_subs_folder_out_of_its_parent_target(tmp_path):
+    """Issue #1120's sharpest shape (B): a nested ``B_sub/`` — the app's own
+    authoritative "these are B's raw subs" marker — became frames of **A**.
+
+    Fails before with one target ``A`` of six frames and no ``B`` at all."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 45_sub").mkdir(parents=True)
+    for i in range(3):
+        write_seestar_fits(
+            scan_root / "M 45_sub" / f"Light_{i:03d}.fit", n_stars=5, seed=i + 1)
+    nested = scan_root / "M 45_sub" / "SH2-171_sub"
+    nested.mkdir()
+    for i in range(2):
+        write_seestar_fits(
+            nested / f"Light_SH2-171_{i:03d}.fit", n_stars=5, seed=20 + i)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        added = {t.target_name: t.n_frames_added for t in result.targets}
+        assert added == {"M 45": 3, "SH2-171": 2}
+        # And both targets' frames really are their own, accepted and stackable.
+        for safe, n in (("M_45", 3), ("SH2-171", 2)):
+            proj = lib.open_target(safe)
+            try:
+                assert len(list(proj.iter_frames(accepted_only=True))) == n
+            finally:
+                proj.close()
+    finally:
+        lib.close()
+
+
+def test_scan_passes_over_a_nested_folder_of_only_device_output(tmp_path):
+    """Issue #1120's own shape (D) — the one actually on the owner's disk: a
+    nested folder holding *only* ``Stacked_*`` device pictures of another object.
+
+    The convention never ingests the device's own pictures, so these are passed
+    over rather than registered as the parent's and rejected afterwards: the
+    parent's frame count is its own again. The skip is recorded, and stays quiet
+    because every file in it is accounted for (``n_unvouched == 0``).
+
+    Fails before with ``n_frames_added == 5`` on a target whose folder holds
+    three."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 45_sub").mkdir(parents=True)
+    for i in range(3):
+        write_seestar_fits(
+            scan_root / "M 45_sub" / f"Light_{i:03d}.fit", n_stars=5, seed=i + 1)
+    nested = scan_root / "M 45_sub" / "SH2-171"
+    nested.mkdir()
+    for i in range(2):
+        write_seestar_fits(
+            nested / f"Stacked_10.0s_SH2-171_{i:03d}.fit", n_stars=5, seed=20 + i)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        added = {t.target_name: t.n_frames_added for t in result.targets}
+        assert added == {"M 45": 3}
+        proj = lib.open_target("M_45")
+        try:
+            assert len(list(proj.iter_frames())) == 3     # not even registered
+        finally:
+            proj.close()
+        skip = next(s for s in result.skipped_output_folders
+                    if s.name == "SH2-171")
+        assert (skip.n_files, skip.n_device_output) == (2, 2)
+        assert skip.n_unvouched == 0
+        assert result.unvouched_skips == []              # nothing to explain
+    finally:
+        lib.close()
+
+
+def test_scan_keeps_a_nested_folder_of_ordinary_subs_with_its_parent(tmp_path):
+    """The deliberate stand-down (issue #1120's shape A), pinned so it is not
+    "fixed" blind later: a nested folder of ordinary subs under **no** marker
+    stays with its parent.
+
+    It cannot be told from a user who sorted one target's own subs into
+    ``M 45_sub/night1/`` — and minting junk targets named after someone's nights
+    is worse than a frame count that is two too high. Splitting on nesting alone
+    is what ``nested_child_verdict`` refuses to do."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 45_sub").mkdir(parents=True)
+    for i in range(2):
+        write_seestar_fits(
+            scan_root / "M 45_sub" / f"Light_{i:03d}.fit", n_stars=5, seed=i + 1)
+    nested = scan_root / "M 45_sub" / "night1"
+    nested.mkdir()
+    for i in range(2):
+        write_seestar_fits(
+            nested / f"Light_n1_{i:03d}.fit", n_stars=5, seed=20 + i)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        added = {t.target_name: t.n_frames_added for t in result.targets}
+        assert added == {"M 45": 4}
+    finally:
+        lib.close()
+
+
+def test_scan_splits_both_nested_shapes_out_of_one_capture_folder(tmp_path):
+    """Issue #1120's shape E, where the two rules meet: a ``<T>_sub/`` holding
+    both a nested ``B_sub/`` of real subs and a nested bare ``B/`` of B's device
+    pictures. The subs become target B; the pictures are passed over; A keeps
+    only its own."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 45_sub").mkdir(parents=True)
+    for i in range(2):
+        write_seestar_fits(
+            scan_root / "M 45_sub" / f"Light_{i:03d}.fit", n_stars=5, seed=i + 1)
+    subs = scan_root / "M 45_sub" / "SH2-171_sub"
+    subs.mkdir()
+    write_seestar_fits(subs / "Light_SH2-171_000.fit", n_stars=5, seed=20)
+    out = scan_root / "M 45_sub" / "SH2-171"
+    out.mkdir()
+    write_seestar_fits(out / "Stacked_10.0s_SH2-171.fit", n_stars=5, seed=21)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        added = {t.target_name: t.n_frames_added for t in result.targets}
+        assert added == {"M 45": 2, "SH2-171": 1}
+        proj = lib.open_target("SH2-171")
+        try:
+            paths = [f.source_path for f in proj.iter_frames()]
+            assert len(paths) == 1
+            assert "SH2-171_sub" in paths[0]   # the subs, never the picture
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_scan_passes_over_a_video_folder_nested_in_a_capture_folder(tmp_path):
+    """The same family: a ``*_video`` nested inside a ``<T>_sub/`` was absorbed,
+    so a video capture's frames became deep-sky subs of the parent — the one
+    thing the convention's video skip exists to prevent at every other level."""
+    scan_root = tmp_path / "incoming"
+    (scan_root / "M 45_sub").mkdir(parents=True)
+    for i in range(2):
+        write_seestar_fits(
+            scan_root / "M 45_sub" / f"Light_{i:03d}.fit", n_stars=5, seed=i + 1)
+    nested = scan_root / "M 45_sub" / "Moon_video"
+    nested.mkdir()
+    write_seestar_fits(nested / "Video_000.fit", n_stars=5, seed=20)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        added = {t.target_name: t.n_frames_added for t in result.targets}
+        assert added == {"M 45": 2}
+    finally:
+        lib.close()
+
+
+def test_scan_splits_a_nested_capture_folder_inside_a_container(tmp_path):
+    """The rule reaches the whole-device drop too, because the container
+    expansion and the root-level walk now build their units through the same
+    function. Without that, a nested ``B_sub/`` one level deeper in
+    ``MyWorks/A_sub/`` would still be A's frames."""
+    scan_root = tmp_path / "incoming"
+    box = scan_root / "MyWorks"
+    (box / "M 45_sub").mkdir(parents=True)
+    write_seestar_fits(box / "M 45_sub" / "Light_000.fit", n_stars=5, seed=1)
+    nested = box / "M 45_sub" / "SH2-171_sub"
+    nested.mkdir()
+    write_seestar_fits(nested / "Light_SH2-171_000.fit", n_stars=5, seed=2)
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, scan_root)
+        added = {t.target_name: t.n_frames_added for t in result.targets}
+        assert added == {"M 45": 1, "SH2-171": 1}
     finally:
         lib.close()
 
