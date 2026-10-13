@@ -826,11 +826,68 @@ def test_classifying_a_ragged_canvas_answers_what_the_kept_picture_answers():
             == classify_target(img[rows, cols], cov[rows, cols]))
 
 
-def test_with_auto_crop_off_the_whole_canvas_is_classified_again():
-    """Same rule as the recipe's: with the owner's border-trim preference off no
-    crop runs, the fringe stays in the picture the editor shows, and the whole
-    canvas is the honest thing to classify. ``measured_region`` is handed ``None``
-    for the rectangle in that case, which is what makes this one line."""
+def test_measured_region_handed_no_rectangle_narrows_nothing():
+    """``measured_region``'s own identity, which is what every caller that has a
+    reason to keep the whole canvas depends on: handed ``None`` for the rectangle
+    it returns its inputs, so classifying its output is classifying the canvas.
+
+    It used to be asserted as "the *recipe's* rule with the border trim off", and
+    that is no longer what it is: v0.494.5 took the archetype off that preference
+    (see the two tests below, and ``editor.classify_run_measured``). What stays on
+    it — the sky level, σ, the denoise strength and the saturation term — is what
+    this identity is still the mechanism for."""
     img, cov, _trim = _ragged(seed=89, sigma=0.02, band=20)
     assert (classify_target(*measured_region(img, cov, None))
             == classify_target(img, cov))
+
+
+def _archetype_shapes(monkeypatch, img, cov, trim, *, auto_crop: bool):
+    """``(h, w)`` of what ``auto_recipe`` hands ``classify_target``, once."""
+    import seestack.edit.presets as presets_mod
+
+    seen: list[tuple[int, int]] = []
+    real = presets_mod.classify_target
+
+    def spy(rgb, coverage=None, **kw):
+        seen.append(tuple(rgb.shape[:2]))
+        return real(rgb, coverage, **kw)
+
+    monkeypatch.setattr(presets_mod, "classify_target", spy)
+    # A non-``None`` ``prefs`` is what makes `auto_recipe` classify at all; a
+    # neutral one keeps every emitted value exactly what it would be anyway.
+    auto_recipe(img, median_fwhm=2.5, is_mosaic=True, trim_crop=trim,
+                coverage=cov, prefs={}, auto_crop=auto_crop)
+    return seen
+
+
+def test_auto_recipe_keys_its_taste_on_the_kept_picture_with_the_trim_off_too(
+        monkeypatch):
+    """The **read** side of the taste profile, and the half a webapp-only fix
+    would have missed: ``auto_recipe`` classifies for itself (it is what resolves
+    ``object_type`` for ``auto_knob_values``), so if it kept gating that on
+    ``auto_crop`` while ``editor._classify_run`` stopped, the write side and the
+    read side would disagree again — the exact failure v0.492.54 exists to stop,
+    arriving from the other direction.
+
+    Both regions, one spy: the kept rectangle whichever way the preference points.
+    """
+    img, cov, trim = _ragged(seed=89, sigma=0.02, band=20)
+    assert trim is not None
+    x0, y0, x1, y1 = trim
+    kept = (int(round(y1 * H)) - int(round(y0 * H)),
+            int(round(x1 * W)) - int(round(x0 * W)))
+    assert kept != (H, W)      # the fixture can tell the two regions apart
+
+    assert _archetype_shapes(monkeypatch, img, cov, trim, auto_crop=True) == [kept]
+    assert _archetype_shapes(monkeypatch, img, cov, trim, auto_crop=False) == [kept]
+
+
+def test_the_border_trim_preference_still_gates_every_cue_that_sets_pixels():
+    """...and the control, which is the whole reason the archetype moved alone:
+    the four measurements that decide *pixels* must still follow the preference,
+    because with the trim off the fringe really is in the rendered picture. Asked
+    of the one number the whole recipe funnels into."""
+    img, cov, trim = _ragged(seed=89, sigma=0.02, band=20)
+    on = _ragged_target_bg(img, cov, trim, auto_crop=True)
+    off = _ragged_target_bg(img, cov, trim, auto_crop=False)
+    assert on != pytest.approx(off, abs=1e-9), (on, off)

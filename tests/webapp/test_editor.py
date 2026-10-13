@@ -843,13 +843,28 @@ def test_preset_suggestion_does_not_call_a_mosaic_a_star_cluster_off_its_fringe(
     assert body["preset_id"] is None, body
 
 
-def test_preset_suggestion_classifies_the_whole_canvas_with_the_trim_off(
+def test_preset_suggestion_classifies_the_kept_picture_with_the_trim_off_too(
         client, solved_library, monkeypatch):
-    """The control, and the same rule the recipe follows: with the owner's
-    border-trim preference off, no crop runs, the fringe is part of the picture the
-    editor shows, and classifying the whole canvas is the honest answer. The
-    override arrives the way the two Auto endpoints already accept it, so a
-    body-less POST (every frontend) still reads as "use the setting"."""
+    """The chip's claim is about the **object**, so the border-trim preference must
+    not move it — which is the opposite of what this test asserted until now, and
+    the measurement is why.
+
+    The gate was there by the rule Auto's own cues follow: with the trim off no
+    crop runs, so the fringe *is* in the picture and the whole canvas looked like
+    the honest thing to classify. But ``classify_target``'s signal threshold is
+    **global** (``sky + max(0.06, 6·sky_sigma)``), so the fringe's grain hides
+    faint diffuse structure in the *interior* too: the whole-canvas verdict is not
+    a better description of the fringe-inclusive picture, it is a worse one.
+    Measured over the engine's own 360 ragged four-panel canvases (9 bands × 8
+    seeds × 5 σ, ``tests/test_auto_noise_measure.py``'s ``_ragged``): the two
+    regions disagree on **5**, every one a confident whole-canvas ``cluster``
+    (0.82–0.84) against a kept-rectangle *nothing*, none below a 15.4 % trim. So
+    what the gate bought was an invented "Star cluster" chip on a canvas whose own
+    content supports no verdict at all.
+
+    The ``auto_crop`` field stays **accepted** — an older frontend sends one and
+    dropping a request field would be an API break (§9) — it simply no longer
+    changes the answer."""
     from webapp.routers import editor as editor_mod
 
     shapes: list[tuple[int, int]] = []
@@ -864,11 +879,17 @@ def test_preset_suggestion_classifies_the_whole_canvas_with_the_trim_off(
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_run(solved_library, safe, h=80, w=100, is_mosaic=True)
     _write_frame_coverage(solved_library, safe, _ragged_border_coverage())
+    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion"
 
-    assert client.post(
-        f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion",
-        json={"auto_crop": False}).status_code == 200
-    assert shapes == [(80, 100)]
+    # The per-run override off, the override on, and the library-wide setting off
+    # — three ways of saying "leave the fringe in", and the kept rectangle all
+    # three times.
+    assert client.post(url, json={"auto_crop": False}).status_code == 200
+    assert client.post(url, json={"auto_crop": True}).status_code == 200
+    assert client.put("/api/settings",
+                      json={"auto_crop_border": False}).status_code == 200
+    assert client.post(url).status_code == 200
+    assert shapes == [(76, 96), (76, 96), (76, 96)]
 
 
 def test_preset_suggestion_on_a_single_field_run_is_untouched(client,
@@ -1397,20 +1418,27 @@ def test_a_feedback_tap_with_no_run_context_never_claims_a_limit(client):
     assert client.get("/api/editor/auto-preferences").json()["limit_note"] is None
 
 
-def test_auto_feedback_is_filed_on_the_whole_canvas_with_the_trim_off(
+def test_auto_feedback_with_the_trim_off_is_filed_on_the_kept_picture_too(
         client, solved_library, monkeypatch):
-    """The control, and the same rule the recipe and the chip follow: with the
-    owner's border-trim preference off no crop runs, the fringe is part of the
-    picture the editor shows, and the whole canvas is what Auto keys on too — so
-    it is what the tap must be filed under.
+    """The border-trim preference must not decide which bucket a tap lands in —
+    the opposite of what this test asserted until now (v0.492.54), and the reason
+    is the *consequence* rather than the region.
 
-    Here the preference comes from the **setting**, which is what a request that
-    carries no override resolves to — the per-run override has its own tests
-    below."""
+    ``auto_prefs.effective_biases`` reads a per-type override **only** for that
+    type. This fixture's canvas classifies as a star **cluster** and its kept
+    rectangle as nothing at all, so with the trim off a tap used to be filed under
+    ``by_type["cluster"]`` — a verdict the ragged fringe invented — and the
+    library-wide taste stayed *neutral*. The owner's "too dark" then did nothing
+    at all for this target the moment the fringe shrank or the preference flipped,
+    which is the whole 0.06 of stretch target one tap is worth. The archetype is a
+    claim about the object, so it no longer asks a display preference; the
+    assertion below is the user-visible half of that (the taste is in force), and
+    the shape is the wiring."""
     from webapp.routers import editor as editor_mod
 
     assert client.put("/api/settings",
                       json={"auto_crop_border": False}).status_code == 200
+    assert client.get("/api/editor/auto-preferences").json()["neutral"] is True
 
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_fringe_mosaic_run(solved_library, safe, basename="bucket_nocrop")
@@ -1427,7 +1455,14 @@ def test_auto_feedback_is_filed_on_the_whole_canvas_with_the_trim_off(
     assert client.post("/api/editor/auto-preferences/feedback",
                        json={"cue": "too_dark", "safe": safe,
                              "run_id": rid}).status_code == 200
-    assert shapes == [(80, 100)]
+    assert shapes == [(76, 96)]
+
+    # ...and the tap is somewhere Auto reads: the library-wide profile, which is
+    # what a picture this classifier has no opinion about is shifted by. Filed in
+    # the fringe's `cluster` bucket this read answers `neutral: True`.
+    lib_wide = client.get("/api/editor/auto-preferences").json()
+    assert lib_wide["neutral"] is False, lib_wide
+    assert lib_wide["biases"], lib_wide
 
 
 def _classify_shape_spy(monkeypatch) -> list:
@@ -1445,42 +1480,45 @@ def _classify_shape_spy(monkeypatch) -> list:
     return shapes
 
 
-def test_the_per_run_trim_override_reaches_the_bucket_a_cue_is_filed_in(
+def test_the_per_run_trim_override_does_not_move_the_bucket_a_cue_is_filed_in(
         client, solved_library, monkeypatch):
-    """The editor's **per-run** border-trim switch has to reach the classification,
-    not just the setting.
+    """The editor's **per-run** border-trim switch must *not* reach the
+    classification — which is the reverse of what this test asserted under
+    v0.492.54, and the argument is in ``editor.classify_run_measured``.
 
-    `Editor.tsx` keeps an `autoCropOverride` and sends it to ``…/editor/auto``, so
-    with the switch flipped Auto classifies the **whole** canvas — and the bucket a
-    tap is filed under must follow, or the write side and the read side of the taste
-    profile disagree again at exactly the moment the owner has told the app to leave
-    the fringe in. The library-wide setting stays **on** here, so the only thing
-    that can narrow or widen the measurement is the override itself."""
+    What v0.492.54 was protecting is still protected, and that is the point of
+    there being one function: the write side (this POST) and the read side
+    (``auto_recipe``'s taste bucket) cannot disagree, because neither of them asks
+    the preference any more. Where the override still has to reach is Auto's own
+    cues, which decide pixels — pinned by
+    :func:`test_auto_crop_body_overrides_the_setting_for_one_run` and
+    :func:`test_auto_analysis_trim_matches_the_auto_crop`, not here.
+
+    The library-wide setting stays **on**, so the override is the only thing that
+    could move the measurement."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_fringe_mosaic_run(solved_library, safe, basename="override_feedback")
     assert client.get("/api/settings").json()["auto_crop_border"] is True
 
     shapes = _classify_shape_spy(monkeypatch)
 
-    # Trim off for this one picture → the whole 80x100 canvas.
-    assert client.post("/api/editor/auto-preferences/feedback",
-                       json={"cue": "too_dark", "safe": safe, "run_id": rid,
-                             "auto_crop": False}).status_code == 200
-    # Trim on → the 76x96 rectangle the trim keeps, as the setting already gives.
-    assert client.post("/api/editor/auto-preferences/feedback",
-                       json={"cue": "too_dark", "safe": safe, "run_id": rid,
-                             "auto_crop": True}).status_code == 200
-    assert shapes == [(80, 100), (76, 96)]
+    for crop in (False, True):
+        assert client.post("/api/editor/auto-preferences/feedback",
+                           json={"cue": "too_dark", "safe": safe, "run_id": rid,
+                                 "auto_crop": crop}).status_code == 200
+    # The 76x96 rectangle the trim keeps, both times — the fringe cannot name the
+    # bucket by being left in the picture.
+    assert shapes == [(76, 96), (76, 96)]
 
 
-def test_the_per_run_trim_override_reaches_the_run_scoped_profile_too(
+def test_the_run_scoped_profile_reads_the_same_archetype_whatever_the_override(
         client, solved_library, monkeypatch):
     """And the other half of the pair: the run-scoped "why Auto shifted" note.
 
     It is a GET, so the override arrives as a query param rather than in a body —
     the one shape difference between these two requests. It must answer about the
-    same picture the feedback POST beside it files into, or the note describes a
-    taste the tap is not going to land in."""
+    same archetype the feedback POST beside it files into, and now that neither
+    asks the border-trim preference that holds across every spelling of it."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_fringe_mosaic_run(solved_library, safe, basename="override_get")
     url = f"/api/targets/{safe}/stack-runs/{rid}/editor/auto-preferences"
@@ -1490,15 +1528,15 @@ def test_the_per_run_trim_override_reaches_the_run_scoped_profile_too(
     assert client.get(f"{url}?auto_crop=false").status_code == 200
     assert client.get(f"{url}?auto_crop=true").status_code == 200
     assert client.get(url).status_code == 200          # omitted ⇒ the setting (on)
-    assert shapes == [(80, 100), (76, 96), (76, 96)]
+    assert shapes == [(76, 96), (76, 96), (76, 96)]
 
 
-def test_the_per_run_trim_override_also_overrides_a_setting_that_is_off(
+def test_the_archetype_is_the_same_with_the_setting_off_and_the_override_on(
         client, solved_library, monkeypatch):
-    """The override has to work in **both** directions, or it is just a second way
-    of spelling the setting: someone who normally keeps the full frame can still let
-    Auto crop this one picture, and the bucket follows that too. This is the case a
-    test that only ever turns the override off cannot see."""
+    """Both directions, which is the case a test that only ever turns the override
+    off cannot see: someone who normally keeps the full frame, letting Auto crop
+    this one picture, gets the same archetype as everybody else. The preference is
+    simply not an input to this question any more, however it is spelled."""
     assert client.put("/api/settings",
                       json={"auto_crop_border": False}).status_code == 200
 
@@ -1507,32 +1545,43 @@ def test_the_per_run_trim_override_also_overrides_a_setting_that_is_off(
 
     shapes = _classify_shape_spy(monkeypatch)
 
-    # Setting off, override on → narrowed, against the setting.
+    # Setting off, override on.
     assert client.post("/api/editor/auto-preferences/feedback",
                        json={"cue": "too_dark", "safe": safe, "run_id": rid,
                              "auto_crop": True}).status_code == 200
-    # ...and omitted still means the setting, which is off → the whole canvas.
+    # ...and omitted, which still means the setting, which is off.
     assert client.post("/api/editor/auto-preferences/feedback",
                        json={"cue": "too_dark", "safe": safe,
                              "run_id": rid}).status_code == 200
-    assert shapes == [(76, 96), (80, 100)]
+    assert shapes == [(76, 96), (76, 96)]
 
 
-def test_the_preset_chip_honours_the_per_run_trim_override(
+def test_the_chip_and_the_bucket_answer_one_question_by_one_rule(
         client, solved_library, monkeypatch):
-    """The chip is the other classification surface, and it is why this was one task
-    rather than two: it already *accepted* the override (v0.492.49) but no frontend
-    sent one, so fixing only the feedback path would have left the two surfaces
-    answering one question by two rules. ``api.presetSuggestion`` now sends it."""
+    """The property that made this one task rather than two, and the one worth
+    keeping whichever way the rule goes: the "try this preset?" chip and the taste
+    bucket are the same classification read for two purposes, so they must never
+    answer by two rules. Asserted across the override rather than for one value of
+    it — the shape *and* the chip's own verdict, so a divergence in either is a
+    failure."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     rid = _make_fringe_mosaic_run(solved_library, safe, basename="override_chip")
-    url = f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion"
+    chip = f"/api/targets/{safe}/stack-runs/{rid}/editor/preset-suggestion"
 
     shapes = _classify_shape_spy(monkeypatch)
 
-    assert client.post(url, json={"auto_crop": False}).status_code == 200
-    assert client.post(url, json={"auto_crop": True}).status_code == 200
-    assert shapes == [(80, 100), (76, 96)]
+    verdicts = []
+    for crop in (False, True):
+        r = client.post(chip, json={"auto_crop": crop})
+        assert r.status_code == 200
+        verdicts.append(r.json()["preset_id"])
+        assert client.post("/api/editor/auto-preferences/feedback",
+                           json={"cue": "too_dark", "safe": safe, "run_id": rid,
+                                 "auto_crop": crop}).status_code == 200
+    assert shapes == [(76, 96)] * 4
+    # The kept picture is not confidently any one archetype, so the honest chip is
+    # no chip — and it says the same thing either way.
+    assert verdicts == [None, None], verdicts
 
 
 def test_auto_feedback_on_a_single_field_classifies_the_whole_frame(

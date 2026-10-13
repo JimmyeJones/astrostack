@@ -1505,7 +1505,9 @@ def auto_recipe(rgb: np.ndarray | None = None,
     ``geometry.crop`` op is simply not emitted and nothing else about the recipe
     changes ("Trim border" is still there to crop by hand). The caller still
     *measures* the trim rectangle either way, so ``analyze_auto_inputs`` can report
-    what Auto would have trimmed.
+    what Auto would have trimmed. It gates every measurement that sets **pixels**
+    — and nothing else: the archetype the taste profile is keyed on is read off the
+    kept rectangle whatever it says, for the reason beside that call below.
 
     ``proxy_scale`` is the stride ``build_proxy`` decimated this image by. It is
     a **measurement** input too, and reaches exactly one place: the archetype
@@ -1536,7 +1538,26 @@ def auto_recipe(rgb: np.ndarray | None = None,
         # Per-object-type taste: classify this image (galaxy/nebula/cluster) so a
         # bias learned on one archetype only shifts that archetype. An unclassified
         # image (cls None) falls back to the global taste — see auto_prefs.
-        object_type = classify_target(m_rgb, m_cov if is_mosaic else None,
+        #
+        # **The archetype is read off the kept rectangle whatever ``auto_crop``
+        # says**, which is the one measurement here that does not follow the
+        # preference — because it is the one that is not about this picture's
+        # pixels. ``classify_target``'s signal threshold is a *global*
+        # ``6·sky_sigma``, so the fringe's grain lifts it and hides faint diffuse
+        # structure in the **interior** too: the whole-canvas verdict is not a
+        # better description of the fringe-inclusive picture, it is a worse one.
+        # Measured over the engine's own 360 ragged four-panel canvases, the two
+        # regions disagree on 5, every one of them a confident whole-canvas
+        # ``cluster`` against a kept-rectangle *nothing*
+        # (``webapp.routers.editor.classify_run_measured`` carries the table and
+        # the consequence). The bucket is also library-wide while the preference is
+        # per-picture, so letting it decide stranded a tap in a bucket Auto stops
+        # reading the moment the fringe shrinks. This is the **read** side of that
+        # profile and ``editor._classify_run`` is the write side; they have to
+        # answer by one rule, so they now both ignore the preference.
+        a_rgb, a_cov = ((m_rgb, m_cov) if auto_crop
+                        else measured_region(rgb, coverage, trim_crop))
+        object_type = classify_target(a_rgb, a_cov if is_mosaic else None,
                                       proxy_scale=proxy_scale).get("cls")
     values = auto_knob_values(knobs, prefs, object_type)
 
