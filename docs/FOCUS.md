@@ -1,5 +1,39 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-13 (Builder, branch `claude/brave-albattani-totnig` — **the last entry in Bugs whose gate
+named a number turned out to have that number inside the repo. v0.495.3.**
+
+**What this run did.** Baseline `main` green (**7904 passed, 7 skipped**), CI green, no open PRs, inbox four
+open and every one already acted-on and owner-gated. "Bugs" held nothing reproduced, so the run re-read the
+*bodies* of what is left — and the `auto_crop`-OFF **remainder** (the four cues v0.494.5 deliberately left on
+the border-trim gate) was not owner-data-gated at all: its gate was a quantity the engine's own `_ragged`
+fixture can produce, and the two candidate behaviours differ by one argument of one pure function.
+**v0.495.3**: with the trim off, Auto's sky level, σ, denoise strength and crossfade were read off the ragged
+fringe, so the owner's picture got **darker the raggedier its border was** — the trim-off stretch target ran
+2.3 % low at a 5.9 % trim and 10.6 % low at 39.7 %. The decisive number is not that size: the kept rectangle's
+sky level is *flat* in the fringe width while the whole canvas's climbs with it, so one of the two was measuring
+the raggedness rather than the sky — and the fringe the discarded measurement was for renders at 0.13–0.17 grey
+under *both* cue sets, nowhere near either target. The border trim is now a **framing** preference and nothing
+else. His own install does not move one byte (his `auto_crop_border` is on, where this already narrowed).
+
+**START HERE NEXT RUN.** (a) **The issue inbox is still the frontier** — list the open issues first. (b) **Bugs
+now holds no entry whose gate is a number this repo can get**: what is left is the DECIDE-DO-NOT-FLIP pass count
+(decided, with numbers), the two owner-data-gated LEADs (`PANEL_LINK_DIST_DEG`, the solve-retry rate), the
+inert-feedback-chip LEAD (stuck on telemetry the app does not have) and the ⚪ notes — re-read them for a gate
+that is a *judgement* or a *repo-gettable quantity* rather than his data, because that is where the last three
+task-bearing runs' work came from. (c) The live-preview responsiveness item has four bites and nothing measured
+left; do not reach for a fifth without a measurement first. (d) **No dogfood pass was run this run** — the task
+came out of reading a Bugs body, and the run before this one took a `--mosaic --editor` pass that came back
+clean. §2's one-run-in-three big-picture pass is therefore owed soon; the last whole-journey one was
+2026-10-12.
+
+**The method note worth carrying.** Two runs in a row have found that a gate's *wording* overstated what it was
+waiting for. The tell this time: **the two candidate behaviours differed by one argument of one pure function**,
+so the "measurement" was a loop over the existing fixture rather than a build. And when a decision is between
+two answers, sweep for **invariance** as well as for effect size — "one candidate does not move when a knob that
+should not matter moves, and the other does" settled this in three canvases, where the magnitude alone had been
+arguable for two weeks. Earlier notes stand below.)*
+
 *Last edited 2026-10-13 (Builder, branch `claude/brave-albattani-5kmn39` — **Bugs held nothing reproduced, so
 this run took the one live PRIORITY-1 editor item with a named next step — and the measurement dissolved its
 question instead of answering it. v0.495.2.**

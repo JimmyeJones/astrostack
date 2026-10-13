@@ -417,14 +417,18 @@ def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | Non
         grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
 
 
-def _measured_region_for_run(project_dir: Path, run, auto_crop: bool):
+def _measured_region_for_run(project_dir: Path, run):
     """``(m_rgb, m_cov, proxy_scale)`` — the pixels Auto measures for a run.
 
     The shared prologue of :func:`build_auto_recipe_for_run` and its mirrors: the
     run's own proxy, the coverage map Auto measures against (``None`` off a
     mosaic, see :func:`_auto_measure_coverage`), both narrowed to the rectangle
-    the recipe's border trim keeps (``presets.measured_region``) when the trim is
-    going to run at all.
+    the recipe's border trim keeps (``presets.measured_region``).
+
+    It takes **no** border-trim preference, matching ``presets.auto_recipe``: the
+    well-covered rectangle is the region every Auto measurement is read off,
+    whichever way that preference points, and that module's
+    ``measured_region`` carries the measurement behind it.
 
     A *function*, so a caller that needs two answers about the same picture —
     the archetype and the measured knobs, which the editor's run-scoped
@@ -433,8 +437,7 @@ def _measured_region_for_run(project_dir: Path, run, auto_crop: bool):
     is_mosaic = _run_is_mosaic(run, load=True)
     trim = _trim_rect_for_run(run) if is_mosaic else None
     m_rgb, m_cov = presets_mod.measured_region(
-        rgb, _auto_measure_coverage(run, scale, is_mosaic),
-        trim if auto_crop else None)
+        rgb, _auto_measure_coverage(run, scale, is_mosaic), trim)
     return m_rgb, m_cov, scale
 
 
@@ -458,13 +461,13 @@ def classify_run_measured(project_dir: Path, run) -> dict:
     is filed in (:func:`_classify_run`) — and the second one went on reading the
     whole canvas after v0.492.49 narrowed the first.
 
-    **It takes no border-trim preference, which is a change from v0.492.54, and
-    the measurement is why.** The preference gated this narrowing until now, by
-    the rule the Auto siblings follow: with the trim off no crop runs, so the
-    fringe *is* in the picture and the whole canvas was taken as the honest thing
-    to classify. That conflates two questions this one region was answering at
-    once — *which pixels are in the picture* (all of them, with the trim off) and
-    *which pixels should set a global noise threshold* (the well-covered ones,
+    **It takes no border-trim preference, which was a change from v0.492.54, and
+    the measurement is why.** The preference gated this narrowing until v0.494.5,
+    by the rule the Auto siblings then followed: with the trim off no crop runs,
+    so the fringe *is* in the picture and the whole canvas was taken as the honest
+    thing to classify. That conflates two questions this one region was answering
+    at once — *which pixels are in the picture* (all of them, with the trim off)
+    and *which pixels should set a global noise threshold* (the well-covered ones,
     always). The second is what ``classify_target`` does with them, and its
     threshold is global: fringe grain hides faint structure **in the interior
     too**, so the whole-canvas verdict is not a better description of the
@@ -484,13 +487,16 @@ def classify_run_measured(project_dir: Path, run) -> dict:
     stretch target one tap is worth (v0.492.54 measured it). The archetype is a
     claim about the *object*, so it must not depend on a display preference at all.
 
-    What still follows the preference is everything that describes the picture
-    being rendered — ``auto_recipe``'s sky level and σ, the denoise strength, the
-    denoise↔sharpen crossfade and the saturation term, all of which set pixels
-    (``presets.measured_region`` via :func:`_measured_region_for_run`). Moving
-    those is a larger decision and is filed as the remainder of that lead.
+    **And since v0.495.3 nothing else follows it either**, which is the rest of
+    that lead, measured: the four cues that set *pixels* — ``auto_recipe``'s sky
+    level and σ, the denoise strength, the denoise↔sharpen crossfade and the
+    saturation term — are read off this same rectangle. The kept rectangle's sky
+    level is flat in the fringe width while the whole canvas's climbs with it, so
+    the trim-off stretch target drifted 2.3–10.6 % low purely with how ragged the
+    border was, and the fringe it was chasing renders nowhere near either target
+    anyway. The table is in ``presets.measured_region``.
     """
-    m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run, True)
+    m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run)
     return presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
 
 
@@ -1021,26 +1027,19 @@ def _run_taste_context(request: Request, safe: str, run_id: int,
     (the v0.492.50 symptom). ``(None, None)`` only when the proxy itself is
     unreadable, which is exactly today's behaviour.
 
-    ``auto_crop`` is the editor's per-run border-trim override and gates the
-    region the **knobs** are measured on, exactly as it gates it inside
-    ``auto_recipe``: those numbers describe the picture that is about to be
-    rendered, so with the trim off they have to describe the whole canvas. The
-    **archetype** does not ask the preference at all — it is a claim about the
-    object, and the argument and the measurement are in
-    :func:`classify_run_measured`. With the trim on (the default, and the owner's
-    setting) the two regions are the same object and this costs one extra
-    ``measured_region`` narrowing on no request at all."""
+    ``auto_crop`` is the editor's per-run border-trim override. It is still
+    **accepted** — an older frontend sends one — and it no longer changes either
+    answer: both the archetype and the knobs are read off the rectangle the trim
+    keeps, exactly as ``presets.auto_recipe`` reads them, because the fringe
+    describes how ragged the canvas is rather than what the sky is doing whether
+    or not it survives into the render. The argument is in
+    :func:`classify_run_measured` and the measurement in
+    ``presets.measured_region``. One region now, so the second narrowing this
+    function used to pay on a trim-off request is gone."""
     try:
         project_dir, run = _run_info(request, safe, run_id)
-        crop = (bool(deps.get_settings(request).auto_crop_border)
-                if auto_crop is None else bool(auto_crop))
-        m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run, crop)
-        # The archetype's own region: the kept rectangle, whatever `crop` says.
-        # Recomputed only when the two differ — the proxy read behind it is
-        # cached, so the cost is the narrowing itself.
-        a_rgb, a_cov = ((m_rgb, m_cov) if crop
-                        else _measured_region_for_run(project_dir, run, True)[:2])
-        cls = presets_mod.classify_target(a_rgb, a_cov, proxy_scale=scale).get("cls")
+        m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run)
+        cls = presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale).get("cls")
     except Exception:  # noqa: BLE001 — advisory; never 500 the editor's load
         return None, None
     try:
