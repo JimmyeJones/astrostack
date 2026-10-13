@@ -69,6 +69,16 @@ mosaic-size canvas). Backlog left no longer than found (this record and the FOCU
 "Needs owner sign-off" is current (item 19 was answered on PR #1143 and is now a ⭐ Builder entry under
 "Features that serve real workflows"); no stale gate to strike.
 
+**One flake observed, recorded so a future CI red on it isn't mistaken for a regression (not filed — not
+root-caused, seen once in three full runs).** On the merged state (`origin/main` + these docs),
+`tests/webapp/test_current_picture_fallback.py::test_a_healthy_library_never_opens_a_project_for_the_fallback`
+failed once under `-n 4 --dist worksteal` (its `assert opens == []` — the gallery-zip fallback opened a project
+it should not have), then **passed in isolation and passed on a clean full re-run (7896 passed, 7 skipped)**.
+All its fixtures are function-scoped off `tmp_path` and xdist workers are separate processes, so it is not
+shared-state pollution; it reads as load/timing-dependent nondeterminism in that endpoint's fallback path. The
+test is green on `main` (its CI and the v0.495.0 Builder run both passed it), so this is an existing suite
+flake, not something this run introduced — worth a Builder look only if it recurs.
+
 ## 2026-10-13 (Builder, branch `claude/brave-albattani-0rmc6t`) — the owner-answered item built; the prerequisite bug found by *reading the spec against the code*; and one optional keyword that broke 41 tests
 
 *(Baseline `origin/main` at `f4a153b3` (0.494.5): CI green on `main`'s head, **no open PRs**, issue inbox
