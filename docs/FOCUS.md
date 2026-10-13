@@ -41,9 +41,13 @@ observation deliberately *not* filed (the mosaic's "What Auto-process did" alert
 non-finding recorded so it is not re-derived (the bundled samples really are star fields, so "Star cluster" is
 right), in [`PROCESS-NOTES.md`](PROCESS-NOTES.md).
 
-**And the live question still waiting on the owner is item 19** of his one-sitting list: auto-drizzle is on by
-default, unattended, and costs ~×7. **Do not build a time gate on the hot path before he picks one.** Earlier
-notes stand below.)*
+**Item 19 is no longer the live question — it was answered while this run was building.** Another run's open
+PR [#1143](https://github.com/JimmyeJones/astrostack/pull/1143) (docs only, branch
+`claude/drizzle-time-answer`, pushed during this run, which is why the backlog read as owner-gated when this
+one started) records the owner choosing **(c)**: *state the estimate before an automatic drizzle starts and let
+it run* — no refusal, no threshold, no new global setting. It lands as a ⭐ entry in "Features that serve real
+workflows" with a spec, and **it is the obvious next build** once that PR is merged; read the entry rather than
+this sentence. **Still do not build a time gate** — (b) was explicitly not chosen. Earlier notes stand below.)*
 
 *Last edited 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-5xjtzi` — **the inbox had the one thing the
 backlog did not: a brand-new observer issue, unfiled, ungated and actionable. v0.494.4 shipped it.**
