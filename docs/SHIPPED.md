@@ -1,5 +1,41 @@
 # Shipped — the record
 
+## 2026-10-13 (Builder, branch `claude/brave-albattani-0rmc6t`) — the per-target stand-down from the automatic drizzle could not be saved
+
+### v0.494.6 — 🔴 BUG FIX: **a saved `drizzle: false` — the only way a target opts out of "Auto, when worth it" — was diffed away by *Save as defaults*, so the stand-down the engine honours was unreachable through the only UI that writes one.**
+`webapp/walkaway.py::PRESENCE_IS_THE_CHOICE` is now the single owner of "option keys whose presence is the decision"; `routers/stack.py::put_stack_defaults` reads it instead of spelling the tuple out at the call site.
+
+*(Found while building the owner's answer to sign-off item 19, which names a per-target saved `drizzle: false`
+as the mechanism for its "don't auto-drizzle this target" button — and it does not stick.)*
+
+**The bug.** v0.494.0 gave a saved `drizzle: false` a job: `walkaway.drizzle_choice_expressed` reads the key's
+**presence**, not its value, so an explicit `false` means "this target has chosen" and
+`apply_auto_drizzle` never writes the posture again. Its own docstring says so — *"a `drizzle` in the global
+`default_stack_options` or in the target's 'Save as defaults' blob always wins, on **or** off"*. But
+`put_stack_defaults` stores only what the form **changed** (v0.374.0), and the engine's own `drizzle` default
+is `false`, so `stack_defaults_delta` diffed the key straight out of the blob unless it was listed in
+`always_persist` — and v0.494.0 added the presence rule without adding the key to that tuple. Two real
+consequences: the per-target stand-down could not be saved at all, and a *Save as defaults* press after one
+(for a κ, a canvas mode, a calibration master — anything) silently re-enabled hours of drizzling on the next
+unattended run.
+
+**The fix, and why it is a constant rather than one more string.** `drizzle` joins `AUTO_REJECT_OPT_KEYS` and
+`drizzle_reject` on a named list in `webapp/walkaway.py`, beside the function whose rule it serves, and the
+endpoint reads that list. The tuple spelled out at the call site is precisely how the key came to be missing:
+the rule moved in `walkaway.py` and the list it needs lived in `routers/stack.py`.
+
+**Not a migration, and not a behaviour flip on existing data (§9).** No stored blob is touched: a target that
+already saved defaults keeps every key it has. What changes is what a *future* Save press stores — the same
+treatment `sigma_clip` has had since v0.337.0, and for the same reason (`sigma_clip`'s engine default is also a
+value a user may deliberately choose). `pinned_stack_options` still reports nothing when a saved value agrees
+with the global one, so the pinned note gains no new noise.
+
+**Tests.** Three in `tests/webapp/test_stack_defaults_delta.py`: a posted `drizzle: false` survives a form save
+and the unattended chain then reads it as a choice, the `true` direction likewise, and the pure half — every
+key on `PRESENCE_IS_THE_CHOICE` survives a post whose values match the baseline exactly. The "saving the form
+unchanged pins only …" test now reads the constant rather than re-spelling the set. Fail-before verified by
+dropping `drizzle` back out of the list.
+
 ## 2026-10-13 (Builder, branch `claude/hopeful-dijkstra-06a17n`) — the archetype Auto keys the owner's taste on stopped depending on a display preference
 
 ### v0.494.5 — 🔴 BUG FIX (PRIORITY 1, editor; the *archetype* half of the open `auto_crop`-OFF LEAD filed with v0.492.49, decided with the measurement that lead asked for): **with the border-trim preference off, the ragged fringe's grain invented a confident "star cluster" verdict — and a feedback tap taken in that state was filed in the bucket the fringe named, where Auto stops reading it the moment the fringe shrinks.** `webapp/routers/editor.py::classify_run_measured` no longer asks the preference; `_classify_run`, `build_preset_suggestion_for_run` and `_run_taste_context`'s archetype follow it.

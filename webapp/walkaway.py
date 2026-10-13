@@ -27,6 +27,18 @@ from typing import Any
 #: per-target default or an explicit form post is always honoured verbatim.
 AUTO_REJECT_OPT_KEYS = ("auto_reject", "sigma_clip", "min_max_reject")
 
+#: Every option key whose mere **presence** in a target's saved blob is the
+#: decision, so *Save as defaults* must store it even when its value matches
+#: what the target would stack with anyway (:func:`stack_defaults_delta`'s
+#: ``always_persist``). One list rather than a tuple spelled out at the call
+#: site, because that is how ``drizzle`` came to be missing: v0.494.0 made
+#: :func:`drizzle_choice_expressed` read presence — giving a saved
+#: ``drizzle: false`` the job of standing a target down from the automatic
+#: drizzle — while the endpoint's own ``always_persist`` list was left as it
+#: was, so the delta dropped exactly that ``false`` (it matches the engine
+#: default) and the stand-down could not be saved at all.
+PRESENCE_IS_THE_CHOICE = (*AUTO_REJECT_OPT_KEYS, "drizzle_reject", "drizzle")
+
 
 def parse_saved_stack_defaults(raw: str | None) -> dict[str, Any]:
     """The target's persisted "Save as defaults" blob, as a dict.
@@ -151,13 +163,17 @@ def stack_defaults_delta(
     what the target stacks with, which is the one thing this must never do.
 
     ``always_persist`` names keys whose mere **presence** is the decision, so
-    matching the default is not the same as saying nothing:
-    :data:`AUTO_REJECT_OPT_KEYS` and ``drizzle_reject`` gate
-    :func:`apply_unattended_rejection`, and ``sigma_clip``'s own engine default
-    is ``True`` — so dropping a saved ``sigma_clip: true`` would hand the
-    unattended chain a target that "never chose", letting it pick the method
-    instead. That is exactly the behaviour ``auto_reject_on_unattended``
-    (v0.337.0) exists to make **opt-in**, and it must not arrive by the side door.
+    matching the default is not the same as saying nothing —
+    :data:`PRESENCE_IS_THE_CHOICE` is that list. :data:`AUTO_REJECT_OPT_KEYS`
+    and ``drizzle_reject`` gate :func:`apply_unattended_rejection`, and
+    ``sigma_clip``'s own engine default is ``True`` — so dropping a saved
+    ``sigma_clip: true`` would hand the unattended chain a target that "never
+    chose", letting it pick the method instead. That is exactly the behaviour
+    ``auto_reject_on_unattended`` (v0.337.0) exists to make **opt-in**, and it
+    must not arrive by the side door. ``drizzle`` is there for the same reason
+    one version later: :func:`drizzle_choice_expressed` reads *its* presence, so
+    a dropped ``drizzle: false`` is a target that never said "don't drizzle me"
+    and the automatic drizzle starts again on the next unattended run.
 
     Keys absent from ``unsaved`` (a calibration-master pick, an option from a
     newer version) are always kept: with nothing to compare against, the only

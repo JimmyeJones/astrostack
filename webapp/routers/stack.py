@@ -354,7 +354,7 @@ def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dic
     looking at, minus the ones they never chose.
     """
     from webapp.walkaway import (
-        AUTO_REJECT_OPT_KEYS,
+        PRESENCE_IS_THE_CHOICE,
         stack_defaults_delta,
     )
 
@@ -373,11 +373,14 @@ def put_stack_defaults(safe: str, body: dict[str, Any], request: Request) -> dic
     # Validated as a whole above; stored as the difference from what this target
     # would stack with anyway, so an option the user never touched keeps
     # following the global default instead of being frozen at today's value.
-    # The rejection keys are kept whatever they hold: the unattended chain reads
-    # their *presence*, not their value (see ``stack_defaults_delta``).
+    # The rejection keys *and* ``drizzle`` are kept whatever they hold: the
+    # unattended chain reads their **presence**, not their value, so a value
+    # equal to the default is still a decision (``PRESENCE_IS_THE_CHOICE``,
+    # which is the single owner of that list — spelling it out here is how
+    # ``drizzle`` came to be missing from it).
     clean = stack_defaults_delta(
         clean, _unsaved_stack_options(settings),
-        always_persist=(*AUTO_REJECT_OPT_KEYS, "drizzle_reject"))
+        always_persist=PRESENCE_IS_THE_CHOICE)
     # Also remember the calibration-master picks so the form pre-fills them next
     # time (they used to be silently dropped, leaving the selects empty). Only
     # persist a key the user actually posted, coerced to a clean int id (or
