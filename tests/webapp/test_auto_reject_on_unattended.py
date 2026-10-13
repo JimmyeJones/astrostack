@@ -182,7 +182,7 @@ def _capture_opts(monkeypatch):
     captured = {}
 
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                       memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         captured["opts"] = opts
         return SimpleNamespace(
             output_dir="/tmp/x", run_id=1, n_frames_used=0, canvas_shape=(1, 1, 3),

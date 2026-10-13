@@ -120,6 +120,25 @@ AUTO_DRIZZLE_REASONS = (
     REASON_NO_ROOM_IN_BUDGET,
 )
 
+#: Per-sub cost of each drizzle cost class, as a multiple of a plain reproject +
+#: weighted mean — the transferable half of the 2026-10-12 measurement in the
+#: module docstring (``scripts/measure_drizzle_cost.py``: 0.78 s plain, 2.23 s
+#: drizzle ×1.5 single-pass, 5.68 s drizzle ×1.5 with two-pass rejection, over
+#: the same 1920×1080 subs at 12/24/36 frames).
+#:
+#: Keyed on ``seestack.stacktime.stack_cost_class``, which is what separates
+#: runs the owner's own seconds-per-sub may be read across — so the ratio and
+#: the measured rate it multiplies are talking about the same two jobs. The
+#: numbers are for ×1.5; the automatic path may step down to ×1.2, where the
+#: canvas is ~36 % smaller than ×1.5's, so a stepped-down run comes in *under*
+#: its estimate. That direction is the safe one for a sentence beginning
+#: "about", and splitting the ratio by scale would be inventing two more numbers
+#: from one measurement.
+DRIZZLE_COST_RATIO = {
+    "drizzle": 2.9,
+    "drizzle+reject": 7.3,
+}
+
 
 @dataclass(frozen=True)
 class DitherSpread:
@@ -177,6 +196,46 @@ class AutoDrizzleDecision:
     #: How many pointing groups the dither was measured within (see
     #: :class:`DitherSpread`); ``None`` when no dither measurement was taken.
     panels: int | None
+
+
+@dataclass(frozen=True)
+class AutoDrizzleRun:
+    """A yes from :func:`decide_auto_drizzle`, plus what it costs to price it.
+
+    The owner asked to be **told how long an automatic drizzle will take** and
+    then left alone — not refused, and not gated on a threshold (sign-off item
+    19, answered 2026-10-13). Nothing in the engine can say that sentence: the
+    seconds come from his own finished runs, which live in the project DB the
+    webapp reads, and the surface is a running job's row. So the engine hands
+    the decision *out* — ``run_stack(on_auto_drizzle=…)`` is called once, with
+    this, at the moment the run commits to drizzling — and the webapp prices it
+    (:mod:`webapp.drizzletime`).
+
+    It carries the two cost classes rather than the options blobs because the
+    engine is the only place that knows them without re-deriving the rule:
+    ``cost_class`` is what this run will be recorded as and what its rate should
+    be read from, and ``plain_cost_class`` is what the very same run would have
+    been had the automatic drizzle said no — which is the comparison the owner's
+    sentence makes ("a plain stack would take about 2 h"). Deriving either from
+    a mapping afterwards would be a second, quietly different resolution of
+    ``auto_reject`` and the ``drizzle_reject`` affordability check, which is the
+    shape of mistake this project keeps finding.
+    """
+
+    #: The decision itself — always one with ``drizzle`` True.
+    decision: AutoDrizzleDecision
+    #: Subs this run will actually combine.
+    n_frames: int
+    #: The **pre-drizzle** stacking canvas in pixels, for comparing against the
+    #: canvases the owner's past runs were measured on.
+    canvas_px: int
+    #: ``stack_cost_class`` of the options that will run (``"drizzle"`` or
+    #: ``"drizzle+reject"``, the latter only once the second pass is known to be
+    #: affordable).
+    cost_class: str
+    #: ``stack_cost_class`` of what this run would have been without the
+    #: automatic drizzle.
+    plain_cost_class: str
 
 
 def samples_per_output_pixel(

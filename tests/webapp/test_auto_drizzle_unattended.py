@@ -140,7 +140,7 @@ def _capture_opts(monkeypatch):
     captured = {}
 
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                       memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         captured["opts"] = opts
         return SimpleNamespace(
             output_dir="/tmp/x", run_id=1, n_frames_used=0, canvas_shape=(1, 1, 3),
@@ -299,3 +299,127 @@ def test_a_run_with_no_cards_reports_nothing(client, solved_library):
     run_id = _run_with_cards(solved_library, safe, {})
     body = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/info").json()
     assert body["auto_drizzle"] is None
+
+
+# --- what it costs, said on the running job ------------------------------
+#
+# Sign-off item 19, answered 2026-10-13: an automatic drizzle costs about ×7 a
+# plain sub (v0.494.2), and the owner's answer to that was **(c) tell me the
+# estimate before it starts and let it run** — not silence, and not a cut-off.
+# So the Jobs row and the target's stack card say how long, and offer the two
+# answers: cancel this run, and never again on this target.
+
+
+def test_the_job_row_carries_the_cost_note_shape(client):
+    """The field exists on the API, defaults to ``null``, and is additive — an
+    older frontend reading ``/api/jobs`` sees exactly what it sees today."""
+    from webapp.jobs import Job
+
+    job = Job(kind="stack", target="M_42")
+    assert job.auto_drizzle is None
+    assert job.to_dict()["auto_drizzle"] is None
+    job.auto_drizzle = {"scale": 1.5, "drizzle_seconds": 50400.0,
+                        "plain_seconds": 7200.0, "basis_runs": 3,
+                        "same_engine": True}
+    assert job.to_dict()["auto_drizzle"]["drizzle_seconds"] == 50400.0
+
+
+def test_the_note_is_not_persisted_so_no_migration_is_needed(tmp_path):
+    """Deliberately in-memory only: the note is about a run that is still going,
+    and a process that restarts mid-stack marks the job ``interrupted``, so a
+    durable copy could only ever outlive the thing it describes. Pinned because
+    "add a column" is the reflex and it would be a schema change on a live
+    install for nothing."""
+    from webapp.jobs import JobManager
+
+    jm = JobManager(tmp_path / "jobs.db")
+    job = jm.submit("stack", lambda *_: None, target="M_42")
+    job.auto_drizzle = {"scale": 1.5}
+    jm._persist(job)
+    reloaded = jm._load_from_db(job.id)
+    assert reloaded is not None
+    assert reloaded.auto_drizzle is None
+
+
+def test_dont_auto_drizzle_this_target_round_trips(client, built_library):
+    """The one-click stand-down beside the note. It writes ``drizzle: false``
+    into the target's own saved defaults, which the unattended chain reads as a
+    choice and never overrules."""
+    r = client.post("/api/targets/M_42/auto-drizzle-off")
+    assert r.status_code == 200, r.text
+    assert r.json()["drizzle"] is False
+    # Read back through the shared reader the unattended chain itself uses...
+    saved = _saved_blob(built_library, "M_42")
+    assert saved["drizzle"] is False
+    # ...and the posture is then never written again for this target.
+    assert apply_auto_drizzle(dict(saved), enabled=True,
+                              unattended=True)["auto_drizzle"] is False
+
+
+def test_the_stand_down_merges_and_never_drops_what_was_saved(client, built_library):
+    """It must not be a partial PUT to ``/stack-defaults``, which *replaces* the
+    blob — a target's saved κ, canvas mode and calibration-master picks all have
+    to survive a click on a drizzle button."""
+    seed = client.get("/api/targets/M_42/stack-defaults").json()
+    seed.update({"sigma_kappa": 2.5, "mosaic_canvas": "reference",
+                 "dark_master_id": 7})
+    assert client.put("/api/targets/M_42/stack-defaults", json=seed).status_code == 200
+    client.post("/api/targets/M_42/auto-drizzle-off")
+    saved = _saved_blob(built_library, "M_42")
+    assert saved["drizzle"] is False
+    assert saved["sigma_kappa"] == 2.5
+    assert saved["mosaic_canvas"] == "reference"
+    assert saved["dark_master_id"] == 7
+
+
+def test_the_stand_down_is_idempotent(client, built_library):
+    client.post("/api/targets/M_42/auto-drizzle-off")
+    first = _saved_blob(built_library, "M_42")
+    client.post("/api/targets/M_42/auto-drizzle-off")
+    assert _saved_blob(built_library, "M_42") == first
+
+
+def test_the_stand_down_is_reversible_from_the_stack_form(client, built_library):
+    """Nothing here is one-way: ticking Drizzle back on and saving the form puts
+    the target back to drizzling, and the posture is then written again."""
+    client.post("/api/targets/M_42/auto-drizzle-off")
+    seed = client.get("/api/targets/M_42/stack-defaults").json()
+    seed["drizzle"] = True
+    assert client.put("/api/targets/M_42/stack-defaults", json=seed).status_code == 200
+    assert _saved_blob(built_library, "M_42")["drizzle"] is True
+
+
+def test_the_stand_down_survives_a_later_save_of_the_stack_form(
+        client, built_library):
+    """The regression that would have made this whole button a lie.
+
+    Pressing *Save as defaults* stores only what the form **changed**, and the
+    engine's own ``drizzle`` default is ``false`` — so a target that had just
+    stood down, then had its Stack form saved for some unrelated reason (a κ, a
+    calibration master), silently lost the stand-down and auto-drizzled again on
+    the next unattended run. ``drizzle`` is on ``PRESENCE_IS_THE_CHOICE`` for
+    exactly this: its presence *is* the decision, so it is kept whatever it
+    holds."""
+    client.post("/api/targets/M_42/auto-drizzle-off")
+    seed = client.get("/api/targets/M_42/stack-defaults").json()
+    seed["sigma_kappa"] = 2.5
+    assert client.put("/api/targets/M_42/stack-defaults", json=seed).status_code == 200
+    saved = _saved_blob(built_library, "M_42")
+    assert saved["drizzle"] is False
+    assert apply_auto_drizzle(dict(saved), enabled=True,
+                              unattended=True)["auto_drizzle"] is False
+
+
+def _saved_blob(library_root, safe):
+    from webapp.schemas import STACK_DEFAULTS_META_KEY
+    from webapp.walkaway import parse_saved_stack_defaults
+
+    lib = Library.open_or_create(library_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return parse_saved_stack_defaults(proj.get_meta(STACK_DEFAULTS_META_KEY))
+        finally:
+            proj.close()
+    finally:
+        lib.close()

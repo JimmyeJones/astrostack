@@ -61,11 +61,12 @@ def _project(tmp_path, shifts) -> Project:
     return proj
 
 
-def _run(proj, **overrides):
+def _run(proj, *, _on_auto_drizzle=None, **overrides):
     opts = dict(background_flatten=False, suppress_hot_pixels=False,
                 max_workers=2, output_name="out", unattended=True)
     opts.update(overrides)
-    return run_stack(proj, StackOptions(**opts))
+    return run_stack(proj, StackOptions(**opts),
+                     on_auto_drizzle=_on_auto_drizzle)
 
 
 DITHERED = [(i * 0.37, i * 0.53) for i in range(6)]
@@ -101,6 +102,73 @@ def test_a_deep_dithered_unattended_run_drizzles_itself(tmp_path, monkeypatch):
     assert stored["drizzle"] is True
     assert stored["drizzle_reject"] is True
     assert float(stored["drizzle_scale"]) == pytest.approx(1.5)
+    proj.close()
+
+
+def test_the_caller_is_told_what_the_drizzle_it_chose_will_cost(
+        tmp_path, monkeypatch):
+    """``on_auto_drizzle`` fires once, with what it takes to price the run.
+
+    The owner asked to be told how long an automatic drizzle will take and then
+    left alone (sign-off item 19, 2026-10-13), and the engine cannot say that
+    sentence — the seconds come from his own past runs, which only the webapp
+    reads. So it hands the decision out. The two cost classes are the load
+    bearing part: they are what separates the runs a rate may be read across,
+    and the engine is the only place that knows both without re-resolving
+    ``auto_reject`` and the ``drizzle_reject`` affordability check.
+    """
+    monkeypatch.setattr(autodrizzle, "AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL", 5)
+    proj = _project(tmp_path, DITHERED)
+    seen = []
+    _run(proj, auto_drizzle=True, _on_auto_drizzle=seen.append)
+    assert len(seen) == 1
+    chosen = seen[0]
+    assert chosen.decision.drizzle is True
+    assert chosen.decision.reason == autodrizzle.REASON_DEEP_AND_DITHERED
+    assert float(chosen.decision.scale) == pytest.approx(1.5)
+    assert chosen.n_frames == len(DITHERED)
+    # The **pre-drizzle** canvas, which is what the owner's past runs were
+    # measured on — not the ×1.5 grid this one will allocate.
+    assert chosen.canvas_px == W * H
+    assert chosen.cost_class == "drizzle+reject"
+    # …and what this very run would have been without the automatic drizzle,
+    # which is the "a plain stack would take about …" half of the sentence.
+    assert chosen.plain_cost_class not in ("drizzle", "drizzle+reject")
+    proj.close()
+
+
+def test_a_run_that_does_not_drizzle_tells_the_caller_nothing(
+        tmp_path, monkeypatch):
+    """No note on a run that stayed plain — the sentence is about a drizzle, and
+    the Jobs row must stay as quiet as it is today on every other job."""
+    monkeypatch.setattr(autodrizzle, "AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL", 5)
+    seen = []
+    proj = _project(tmp_path, PARKED)
+    _run(proj, auto_drizzle=True, _on_auto_drizzle=seen.append)
+    assert seen == []
+    proj.close()
+    # …and likewise with the posture never written at all.
+    seen.clear()
+    proj = _project(tmp_path / "b", DITHERED)
+    _run(proj, auto_drizzle=False, _on_auto_drizzle=seen.append)
+    assert seen == []
+    proj.close()
+
+
+def test_a_note_that_raises_does_not_cost_the_stack(tmp_path, monkeypatch):
+    """A sentence on a job row must never be able to fail a stack that is
+    otherwise fine — the rule every side note in this app follows."""
+    monkeypatch.setattr(autodrizzle, "AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL", 5)
+    proj = _project(tmp_path, DITHERED)
+
+    def _boom(_chosen):
+        raise RuntimeError("no")
+
+    res = _run(proj, auto_drizzle=True, _on_auto_drizzle=_boom)
+    with fits.open(res.fits_path) as hdul:
+        # Still drizzled, still finished.
+        assert np.asarray(hdul[0].data).shape[1:] == (int(round(H * 1.5)),
+                                                      int(round(W * 1.5)))
     proj.close()
 
 

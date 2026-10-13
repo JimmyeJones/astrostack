@@ -191,7 +191,7 @@ def test_the_jobs_summary_quotes_the_same_figure_as_the_listing(
                       canvas_h=canvas_h, uncovered_frac=0.56)
 
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                       memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         # The row above is the one this "run" wrote: same canvas, same id.
         return SimpleNamespace(
             output_dir="/tmp/x", run_id=run_id, n_frames_used=119,

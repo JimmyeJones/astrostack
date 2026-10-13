@@ -2690,6 +2690,26 @@ export interface Job {
    * over string-matching the raw `error`. Absent on an older backend. */
   error_kind?: string | null;
   result: Record<string, unknown> | null;
+  /** What the automatic drizzle this job chose will cost, once it has chosen —
+   * absent on every other job, and on an older backend. The owner asked to be
+   * told the estimate before an automatic drizzle runs and then left alone
+   * (sign-off item 19); `autoDrizzleCostLine` turns this into that sentence. */
+  auto_drizzle?: AutoDrizzleCost | null;
+}
+
+/** The numbers behind "Drizzling ×1.5 — about 14 h (a plain stack would take
+ * about 2 h)", measured from this target's own past runs (`webapp/drizzletime.py`). */
+export interface AutoDrizzleCost {
+  /** Super-resolution scale the run chose (1.2–1.5). */
+  scale: number;
+  /** Estimated seconds for the drizzled run — `null` with no timed history. */
+  drizzle_seconds: number | null;
+  /** …and for the plain stack it replaces. `null` together with the above. */
+  plain_seconds: number | null;
+  /** How many of the target's past runs the rate was taken over. */
+  basis_runs: number;
+  /** `false` when every basis run was timed by a different build. */
+  same_engine: boolean;
 }
 
 /** An import job that has been sitting in the queue too long, and the job holding
@@ -3844,6 +3864,12 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  /** "Don't auto-drizzle this target" — merges `drizzle: false` into the
+   * target's saved defaults, which the unattended chain reads as a choice and
+   * never overrules. Reversible from the Stack form; nothing else is touched. */
+  autoDrizzleOff: (safe: string) =>
+    req<{ drizzle: boolean; saved: Record<string, unknown> }>(
+      `/api/targets/${safe}/auto-drizzle-off`, { method: "POST" }),
   triggerStack: (safe: string, options: Record<string, unknown>) =>
     req<{ job_id: string }>(`/api/targets/${safe}/stack`, {
       method: "POST",

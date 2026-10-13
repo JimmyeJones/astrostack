@@ -33,7 +33,7 @@ class _FakeJM:
 
 def _stack_returning(monkeypatch, **fields):
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                       memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         return SimpleNamespace(
             output_dir="/tmp/x", run_id=1, n_frames_used=9, canvas_shape=(1, 1, 3),
             cancelled=False, errors=[], excluded_frames=[],

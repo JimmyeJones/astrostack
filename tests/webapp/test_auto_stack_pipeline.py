@@ -35,7 +35,7 @@ def _patch_run_stack(monkeypatch):
     calls: list[str] = []
 
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                       memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         calls.append(getattr(proj, "name", "?"))
         return SimpleNamespace(
             output_dir="/tmp/x", run_id=1, n_frames_used=3, canvas_shape=(1, 1, 3),
@@ -330,7 +330,7 @@ def _capture_opts(monkeypatch):
     captured: dict = {}
 
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                       memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         captured["opts"] = opts
         return SimpleNamespace(
             output_dir="/tmp/x", run_id=1, n_frames_used=3, canvas_shape=(1, 1, 3),
@@ -683,7 +683,7 @@ def test_stack_marks_solved_count_so_watcher_skips_align_dropped_target(
             # A manual stack that dropped one sub at alignment: it records a run
             # whose n_frames_used is n-1, and writes no crash-loop marker of its own.
             def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                               memory_budget_gb=None, app_version=None, _n=n):  # noqa: ANN001
+                               memory_budget_gb=None, app_version=None, _n=n, **_kw):  # noqa: ANN001
                 proj.add_stack_run(StackRunRow(
                     id=None, timestamp_utc="2026-05-01T00:00:00Z",
                     output_basename="master", fits_path=None, tiff_path=None,
@@ -757,7 +757,7 @@ def test_auto_stack_fallback_ignores_a_small_channel_combine_run(solved_library)
 
 def test_auto_stack_failure_is_non_fatal(solved_library, monkeypatch):
     def boom(proj, opts, *, progress=None, cancel=None,
-             memory_budget_gb=None, app_version=None):  # noqa: ANN001
+             memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         raise ValueError("No accepted frames are plate-solved yet")
 
     monkeypatch.setattr("seestack.stack.stacker.run_stack", boom)
@@ -816,7 +816,7 @@ def test_auto_stack_clears_marker_when_cancelled(solved_library, monkeypatch):
             job = Job(kind="pipeline")
 
             def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                               memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                               memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
                 calls.append(getattr(proj, "name", "?"))
                 job._cancel.set()  # the user cancels while this target is stacking
                 return SimpleNamespace(
@@ -861,7 +861,7 @@ def test_auto_stack_retries_after_a_recoverable_failure(solved_library, monkeypa
     calls: list[str] = []
 
     def boom(proj, opts, *, progress=None, cancel=None,
-             memory_budget_gb=None, app_version=None):  # noqa: ANN001
+             memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         calls.append(getattr(proj, "name", "?"))
         raise ValueError("simulated transient read error")
 
