@@ -1,5 +1,84 @@
 # Shipped — the record
 
+## 2026-10-13 (Builder, branch `claude/hopeful-dijkstra-06a17n`) — the archetype Auto keys the owner's taste on stopped depending on a display preference
+
+### v0.494.5 — 🔴 BUG FIX (PRIORITY 1, editor; the *archetype* half of the open `auto_crop`-OFF LEAD filed with v0.492.49, decided with the measurement that lead asked for): **with the border-trim preference off, the ragged fringe's grain invented a confident "star cluster" verdict — and a feedback tap taken in that state was filed in the bucket the fringe named, where Auto stops reading it the moment the fringe shrinks.** `webapp/routers/editor.py::classify_run_measured` no longer asks the preference; `_classify_run`, `build_preset_suggestion_for_run` and `_run_taste_context`'s archetype follow it.
+
+*(Baseline `origin/main` at `00ca05d6` (`__version__` 0.494.4): full suite green — **7870 passed, 7 skipped** in
+18:43 — CI green on `main`, no open PRs, and the issue inbox holding five open issues, every one of them already
+acted on and owner-gated (#1120's planner remainder, #1015 — whose `/api/health` version suggestion **is
+shipped**, checked before anything else — #903, #880, #878). So "Bugs (fix these first)" was the frontier again,
+and the one entry in it whose own text names the cheap evidence nobody had gathered is this lead.)*
+
+**The open question, in the lead's own words.** v0.492.49 narrowed every Auto measurement to the rectangle the
+border trim keeps, and **gated the narrowing on `auto_crop`** in all three places, by the rule *"measure the
+picture the recipe makes"*: with the trim off no crop runs, so the fringe *is* in the picture. The lead said
+the measured mechanism is about **grain**, not about what survives, and that the honest fix is "probably neither
+'narrow anyway' nor 'leave it': it is to measure the cues on the **well-covered** population while still
+*rendering* the whole canvas — two different questions the code currently answers with one region. Decide that
+first; do not blind-flip the gate."
+
+**What the measurement says.** Over the engine's own ragged four-panel canvases (`tests/test_auto_noise_measure.py`'s
+`_ragged`, which builds the coverage map and takes its rectangle from the real `largest_covered_rect`), **9
+fringe bands × 8 seeds × 5 σ = 360 canvases**, comparing the whole canvas against the kept rectangle:
+
+| trim the canvas asks for | canvases | archetype differs |
+|---|---|---|
+| 5.9 % | 40 | 0 |
+| 7.9 % | 40 | 0 |
+| 9.8 % | 40 | 0 |
+| 11.7 % | 40 | 0 |
+| 13.6 % | 40 | 0 |
+| **15.4 %** | 40 | **1** |
+| 19.1 % | 40 | 0 |
+| **22.7 %** | 40 | **1** |
+| **28.0 %** | 40 | **3** |
+
+Five of 360, and **every one of them the same way round**: a confident whole-canvas `cluster` (0.82–0.84)
+against a kept-rectangle *nothing at all*. The cues move together and in the documented direction —
+`star_share` 0.756–0.775 → 0.834–0.839, `ext_frac` 0.0125–0.0140 → 0.0109–0.0111 — i.e. the fringe **hides**
+the faint extended structure that is in both pictures.
+
+**The decision, and why it is not a blind flip.** The gate conflated two questions: *which pixels are in the
+picture* (all of them, with the trim off) and *which pixels should set a global noise threshold* (the
+well-covered ones, always). `classify_target`'s signal threshold is `sky + max(0.06, 6·sky_sigma)` on a
+**global** σ, so fringe grain lifts it and hides faint diffuse structure **in the interior too** — the
+whole-canvas verdict is therefore not a better description of the fringe-inclusive picture, it is a worse one,
+and the table shows it is never the other way round. So for the **archetype** the answer to the lead's "narrow
+anyway or leave it" is: narrow, always. **The four cues that set pixels are explicitly left alone** and re-filed
+as the lead's remainder, because for them the gate's argument still holds: a sky level or a denoise strength
+measured only on the interior aims the stretch and the smoothing at a picture the owner is not getting.
+
+**The consequence that made it worth code rather than a note, which is the taste profile.**
+`auto_prefs.effective_biases` reads a per-type override **only** for that type, and the bucket is library-wide
+while the preference is per-picture. So a "too dark" tap taken with the trim off was filed under the `cluster`
+the fringe invented and the **global set stayed neutral** — and Auto then did nothing at all for that target the
+moment the fringe shrank or the preference flipped, which is the whole **0.06** of stretch target one tap is
+worth (v0.492.54 measured it). An archetype that is a claim about the *object* must not depend on a display
+preference, and now it does not.
+
+**v0.492.54's invariant is kept, not undone.** That fix threaded the editor's per-run override into the bucket
+so the *write* side (the feedback POST) and the *read* side (`auto_recipe`'s profile) could not disagree. They
+still cannot: both go through the one `classify_run_measured`, which now asks the preference nowhere. What the
+override still reaches is Auto's own cues, pinned where it belongs
+(`test_auto_crop_body_overrides_the_setting_for_one_run`, `test_auto_analysis_trim_matches_the_auto_crop`).
+
+**Upgrade-safe (§9), and the owner's own install does not move at all.** His `auto_crop_border` is **on**, and
+with it on `classify_run_measured` already narrowed — so every byte of his Auto output, his chip and his taste
+bucket is what it was. No config key, no schema, no on-disk layout, no default flipped, and **no API shape
+change**: the optional `auto_crop` request field on `…/editor/preset-suggestion` and on the feedback POST stays
+accepted (an older frontend still sends one; dropping a request field would be the break) and simply no longer
+changes the answer. The frontend is untouched. On the trim-on path the extra work is **nothing** — the
+archetype's region *is* the knobs' region and the object is reused; only a trim-off request pays one more
+`measured_region` narrowing, behind the same cached proxy read.
+
+**Tests.** +1 new (`test_the_chip_and_the_bucket_answer_one_question_by_one_rule` — the chip's verdict *and* the
+classified shape, across the override, so a divergence in either fails), and **five re-reasoned rather than
+weakened**: each one asserted the old gate, and each now asserts the stronger invariant that the archetype does
+not move. `test_auto_feedback_with_the_trim_off_is_filed_on_the_kept_picture_too` adds the user-visible half
+nothing had ever checked — after the tap the **library-wide** profile is no longer `neutral`, which is exactly
+what the `cluster`-bucket filing made it. Fail-before verified by restoring the gate in a scratch copy.
+
 ## 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-5xjtzi`) — one typographic apostrophe in a folder name made a target permanently unstackable
 
 ### v0.494.4 — 🔴 BUG FIX (observer issue [#1137](https://github.com/JimmyeJones/astrostack/issues/1137), verified on `main` before anything was written): **a non-ASCII character in a capture folder's name travels through ASTAP's `cmdline:` card into `wcs_json`, and every one of that target's subs then reads back as unsolved — `seestack/io/wcs_io.py::_fits_printable_ascii`, repairing commentary cards on both sides of the round-trip.**

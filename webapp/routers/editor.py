@@ -438,22 +438,19 @@ def _measured_region_for_run(project_dir: Path, run, auto_crop: bool):
     return m_rgb, m_cov, scale
 
 
-def classify_run_measured(project_dir: Path, run, auto_crop: bool = True) -> dict:
-    """``presets.classify_target`` on the picture Auto is about to make — the one
-    place in the webapp that asks a run's coarse archetype.
+def classify_run_measured(project_dir: Path, run) -> dict:
+    """``presets.classify_target`` on the **well-covered** picture — the one place
+    in the webapp that asks a run's coarse archetype.
 
-    **Mirrors ``build_auto_recipe_for_run``** — same proxy, same
-    :func:`_run_is_mosaic` verdict, same :func:`_trim_rect_for_run` rectangle,
-    same measured region — the way :func:`build_auto_analysis_for_run` already
-    promises to, and for the same reason: ``auto_recipe`` keys the Adaptive-Auto
-    taste profile on this very verdict, read off the rectangle its own border trim
-    keeps (``presets.measured_region``), so an archetype measured on the whole
-    canvas is a second opinion about one picture. It is also the *worse* opinion:
-    the ragged fringe is one to three subs deep where the panels are a dozen, and
-    that grain lifts ``classify_target``'s signal threshold until the faint
-    diffuse structure vanishes under it — the verdict then walks toward "star
-    cluster", which is a statement about the canvas rather than about what was
-    photographed.
+    Reads the same proxy, the same :func:`_run_is_mosaic` verdict and the same
+    :func:`_trim_rect_for_run` rectangle ``build_auto_recipe_for_run`` does, for
+    the reason :func:`build_auto_analysis_for_run` already gives: ``auto_recipe``
+    keys the Adaptive-Auto taste profile on this very verdict, so a second region
+    here would be a second opinion about one picture. The ragged fringe is one to
+    three subs deep where the panels are a dozen, and that grain lifts
+    ``classify_target``'s ``6·sky_sigma`` signal threshold until faint diffuse
+    structure vanishes under it — the verdict then walks toward "star cluster",
+    which is a statement about the canvas rather than about what was photographed.
 
     It is a *function*, not two call sites, because both of its callers are the
     same question with different consequences — the editor's "try this preset?"
@@ -461,32 +458,60 @@ def classify_run_measured(project_dir: Path, run, auto_crop: bool = True) -> dic
     is filed in (:func:`_classify_run`) — and the second one went on reading the
     whole canvas after v0.492.49 narrowed the first.
 
-    ``auto_crop`` is the owner's "let Auto trim the ragged border" preference, and
-    it gates the narrowing exactly as it gates it in the Auto siblings: with the
-    trim switched off no crop runs, the fringe *is* part of the picture the editor
-    shows, and the whole canvas is the honest thing to classify.
+    **It takes no border-trim preference, which is a change from v0.492.54, and
+    the measurement is why.** The preference gated this narrowing until now, by
+    the rule the Auto siblings follow: with the trim off no crop runs, so the
+    fringe *is* in the picture and the whole canvas was taken as the honest thing
+    to classify. That conflates two questions this one region was answering at
+    once — *which pixels are in the picture* (all of them, with the trim off) and
+    *which pixels should set a global noise threshold* (the well-covered ones,
+    always). The second is what ``classify_target`` does with them, and its
+    threshold is global: fringe grain hides faint structure **in the interior
+    too**, so the whole-canvas verdict is not a better description of the
+    fringe-inclusive picture, it is a worse one. Measured over the engine's own
+    360 ragged four-panel canvases (``_ragged``, 9 fringe bands × 8 seeds × 5 σ):
+    the two regions disagree on **5**, every one of them a confident whole-canvas
+    ``cluster`` (0.82–0.84) against a kept-rectangle *nothing*, and none below a
+    **15.4 %** trim — so nothing moves on a healthy ragged edge, and what moves
+    is always an invented verdict rather than a lost one.
+
+    The consequence that makes it worth fixing rather than noting is the taste
+    profile, because the bucket is library-wide and the preference is per-picture.
+    ``auto_prefs.effective_biases`` reads a per-type override **only** for that
+    type, so a tap taken while the trim was off used to be filed under the
+    ``cluster`` the fringe invented — and then silently stopped applying the
+    moment the fringe shrank or the preference flipped, which is the whole 0.06 of
+    stretch target one tap is worth (v0.492.54 measured it). The archetype is a
+    claim about the *object*, so it must not depend on a display preference at all.
+
+    What still follows the preference is everything that describes the picture
+    being rendered — ``auto_recipe``'s sky level and σ, the denoise strength, the
+    denoise↔sharpen crossfade and the saturation term, all of which set pixels
+    (``presets.measured_region`` via :func:`_measured_region_for_run`). Moving
+    those is a larger decision and is filed as the remainder of that lead.
     """
-    m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run, auto_crop)
+    m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run, True)
     return presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale)
 
 
-def build_preset_suggestion_for_run(project_dir: Path, run,
-                                    auto_crop: bool = True) -> dict:
+def build_preset_suggestion_for_run(project_dir: Path, run) -> dict:
     """Coarsely classify a run's own proxy and, when one archetype is clear, suggest
     the matching built-in preset (galaxy / nebula / star cluster) — a hint the editor
     shows as a one-click "try this preset?" chip. Read-only: it never changes the Auto
     recipe or persists anything, so a mis-suggestion costs a click, not an image.
     Declines (``preset_id=None``) on an ambiguous or blank field.
 
-    Classifies through :func:`classify_run_measured`, which mirrors
-    ``build_auto_recipe_for_run`` — same proxy, same mosaic verdict, same trim
-    rect, same measured region. The reason is in that function's docstring; the
-    measurement is in ``presets.measured_region`` (the verdict flips on 21 of 210
-    ragged canvases, from the 9.8 % trim upward).
+    Classifies through :func:`classify_run_measured`, which reads the same proxy,
+    the same mosaic verdict and the same trim rect ``build_auto_recipe_for_run``
+    does. The reason is in that function's docstring; the measurement is in
+    ``presets.measured_region`` (the verdict flips on 21 of 210 ragged canvases,
+    from the 9.8 % trim upward).
 
-    ``auto_crop`` is the owner's "let Auto trim the ragged border" preference; see
-    :func:`classify_run_measured` for how it gates the narrowing."""
-    out = classify_run_measured(project_dir, run, auto_crop)
+    It takes **no** border-trim preference, and that is deliberate — see
+    :func:`classify_run_measured`: the archetype is a claim about the object, so it
+    is read off the well-covered picture whatever the owner has told the trim to
+    do."""
+    out = classify_run_measured(project_dir, run)
     # Only the user-facing fields; the raw cues stay server-side (debug/tests only).
     return {"preset_id": out["preset_id"], "label": out["label"],
             "reason": out["reason"], "confidence": out["confidence"]}
@@ -943,8 +968,7 @@ def _auto_preferences_out(profile: dict,
     )
 
 
-def _classify_run(request: Request, safe: str, run_id: int,
-                  auto_crop: bool | None = None) -> str | None:
+def _classify_run(request: Request, safe: str, run_id: int) -> str | None:
     """Best-effort coarse archetype (galaxy/nebula/cluster) of a run's own proxy,
     so type-scoped feedback lands in the right bucket. Returns ``None`` — i.e. fall
     back to the global taste — on any failure (missing run, unreadable proxy).
@@ -961,20 +985,19 @@ def _classify_run(request: Request, safe: str, run_id: int,
     under the archetype Auto reads moves it by 0.06. The editor says "Thanks —
     Auto will lean that way for you" and re-runs Auto on a byte-identical recipe.
 
-    ``auto_crop`` is the editor's **per-run** border-trim override, which Auto
-    itself honours (`Editor.tsx`'s ``autoCropArg`` reaches ``…/editor/auto``), so
-    the bucket has to honour it too or the write side and the read side disagree
-    again at exactly the moment the owner has told the app to leave the fringe in.
-    ``None`` — every older frontend, and any caller that does not know — falls back
-    to the library-wide ``auto_crop_border`` setting, which is what a body-less
-    POST to ``…/editor/preset-suggestion`` already resolves to, so the default
-    answer is byte-for-byte what it was.
+    **It takes no border-trim override, and that is the point of the one function.**
+    v0.492.54 threaded the editor's per-run override through here so the write side
+    and the read side could not disagree; the agreement is now kept where it
+    belongs — in :func:`classify_run_measured`, which no longer asks the
+    preference at all, so both sides answer about the object rather than about
+    whether the owner wanted a trim. A tap can therefore no longer be stranded in
+    a bucket the fringe invented (the measurement is in that function's
+    docstring). The override still reaches everything it set out to reach: Auto's
+    own cues, which decide pixels.
     """
     try:
         project_dir, run = _run_info(request, safe, run_id)
-        crop = (bool(deps.get_settings(request).auto_crop_border)
-                if auto_crop is None else bool(auto_crop))
-        return classify_run_measured(project_dir, run, crop).get("cls")
+        return classify_run_measured(project_dir, run).get("cls")
     except Exception:  # noqa: BLE001 — classification is advisory; never sink feedback
         return None
 
@@ -999,13 +1022,25 @@ def _run_taste_context(request: Request, safe: str, run_id: int,
     unreadable, which is exactly today's behaviour.
 
     ``auto_crop`` is the editor's per-run border-trim override and gates the
-    narrowing as it does everywhere else (:func:`classify_run_measured`)."""
+    region the **knobs** are measured on, exactly as it gates it inside
+    ``auto_recipe``: those numbers describe the picture that is about to be
+    rendered, so with the trim off they have to describe the whole canvas. The
+    **archetype** does not ask the preference at all — it is a claim about the
+    object, and the argument and the measurement are in
+    :func:`classify_run_measured`. With the trim on (the default, and the owner's
+    setting) the two regions are the same object and this costs one extra
+    ``measured_region`` narrowing on no request at all."""
     try:
         project_dir, run = _run_info(request, safe, run_id)
         crop = (bool(deps.get_settings(request).auto_crop_border)
                 if auto_crop is None else bool(auto_crop))
         m_rgb, m_cov, scale = _measured_region_for_run(project_dir, run, crop)
-        cls = presets_mod.classify_target(m_rgb, m_cov, proxy_scale=scale).get("cls")
+        # The archetype's own region: the kept rectangle, whatever `crop` says.
+        # Recomputed only when the two differ — the proxy read behind it is
+        # cached, so the cost is the narrowing itself.
+        a_rgb, a_cov = ((m_rgb, m_cov) if crop
+                        else _measured_region_for_run(project_dir, run, True)[:2])
+        cls = presets_mod.classify_target(a_rgb, a_cov, proxy_scale=scale).get("cls")
     except Exception:  # noqa: BLE001 — advisory; never 500 the editor's load
         return None, None
     try:
@@ -1169,16 +1204,17 @@ def post_auto_feedback(body: AutoFeedbackIn, request: Request) -> AutoPreference
 
     When the request carries the run's ``safe``/``run_id``, the cue is recorded into
     that run's object-type bucket (best-effort classification; unclassifiable ⇒ the
-    global set), and the returned note is scoped to that archetype. An optional
-    ``auto_crop`` carries the editor's per-run border-trim override into that
-    classification, so the bucket is the one Auto keys on even when the owner has
-    told Auto to leave the fringe in (see :func:`_classify_run`)."""
+    global set), and the returned note is scoped to that archetype. The optional
+    ``auto_crop`` field stays accepted (an older frontend sends it, and removing a
+    request field would be an API break — §9) but no longer reaches the bucket:
+    the archetype is a claim about the object rather than about the trim the owner
+    asked for, so a tap can no longer be stranded in a bucket the ragged fringe
+    invented (see :func:`classify_run_measured` for the measurement)."""
     if body.cue not in auto_prefs_mod.known_cues():
         raise HTTPException(status_code=422, detail=f"unknown feedback cue: {body.cue!r}")
     object_type = None
     if body.safe and body.run_id is not None:
-        object_type = _classify_run(request, body.safe, body.run_id,
-                                    body.auto_crop)
+        object_type = _classify_run(request, body.safe, body.run_id)
     lib = deps.open_library(request)
     try:
         stored = _read_auto_preferences(lib)
@@ -2547,14 +2583,17 @@ async def preset_suggestion(safe: str, run_id: int, request: Request) -> dict:
     stays the safe fallback). Additive sibling of ``…/editor/auto``; it never persists
     anything and doesn't change what Auto emits."""
     project_dir, run = _run_info(request, safe, run_id)
-    # The same question the two Auto endpoints ask, through the same helper: the
-    # chip classifies the picture Auto is about to make, so on a mosaic it reads
-    # the rectangle the border trim keeps rather than the ragged fringe beside
-    # it. A body-less POST (every frontend) reads as "use the setting".
-    auto_crop = await _auto_crop_pref(request)
+    # The same question the taste bucket asks, through the same helper: on a
+    # mosaic the chip classifies the rectangle the border trim keeps rather than
+    # the ragged fringe beside it, and — unlike Auto's own cues — it does that
+    # whatever the border-trim preference says, because "this looks like a star
+    # cluster" is a claim about the object (see `classify_run_measured`). The
+    # request's optional `auto_crop` field therefore no longer changes the answer;
+    # it stays accepted, because an older frontend still sends one and dropping a
+    # request field would be an API break (§9).
 
     def work() -> dict:
-        return build_preset_suggestion_for_run(project_dir, run, auto_crop=auto_crop)
+        return build_preset_suggestion_for_run(project_dir, run)
 
     return await run_in_threadpool(work)
 
