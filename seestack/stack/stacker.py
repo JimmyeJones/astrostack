@@ -78,7 +78,11 @@ from seestack.stack.weighting import (
 if TYPE_CHECKING:
     from seestack.bg.coverage_leveling import CoverageGrain
     from seestack.calibrate.apply import CalibrationMasters
-    from seestack.stack.autodrizzle import AutoDrizzleDecision, DitherSpread
+    from seestack.stack.autodrizzle import (
+        AutoDrizzleDecision,
+        AutoDrizzleRun,
+        DitherSpread,
+    )
 
 # Peak count of full-canvas float32 RGB arrays alive at once across the stack
 # passes (Welford mean/M2/count, or drizzle output/weight, plus working
@@ -1657,6 +1661,9 @@ def estimate_stack(project: Project, options: StackOptions,
 
 CancelFn = Callable[[], bool]
 ProgressFn = Callable[[str, int, int], None]
+#: Called once when an unattended run decides to drizzle itself, so the caller
+#: can say what that will cost (see ``run_stack(on_auto_drizzle=…)``).
+AutoDrizzleFn = Callable[["AutoDrizzleRun"], None]
 
 
 class StackCancelled(RuntimeError):
@@ -3170,6 +3177,7 @@ def run_stack(
     cancel: CancelFn | None = None,
     memory_budget_gb: float | None = None,
     app_version: str | None = None,
+    on_auto_drizzle: AutoDrizzleFn | None = None,
 ) -> StackResult:
     """
     Execute a stacking run end-to-end. Synchronous — call this from a worker
@@ -3179,6 +3187,15 @@ def run_stack(
     provenance — the webapp passes its ``__version__`` so History can show which
     build produced each image. The engine never imports the webapp, so it's passed
     in rather than looked up; ``None`` leaves the run's version unrecorded.
+
+    ``on_auto_drizzle`` (optional) is called **once**, with an
+    :class:`~seestack.stack.autodrizzle.AutoDrizzleRun`, at the moment an
+    unattended run commits to drizzling itself — and never otherwise. It exists
+    because the owner asked to be told how long an automatic drizzle will take
+    and then left alone, and the decision is only answerable here (it needs the
+    real output canvas) while the sentence is only sayable by the caller (it
+    needs his own past runs' seconds-per-sub). Raising from it costs the run
+    nothing: a side note must never fail a stack.
     """
     progress = progress or (lambda *a: None)
     cancel = cancel or (lambda: False)
@@ -3628,6 +3645,10 @@ def run_stack(
     # from an estimate would mean a second canvas computation (one WCS read per
     # sub) and a verdict that could differ from the run's own.
     auto_drizzle: AutoDrizzleDecision | None = None
+    # What this run would have been had the automatic drizzle said no — kept for
+    # the "a plain stack would take about …" half of the sentence below, and
+    # taken *here* so it is the same resolved options object, not a re-derivation.
+    plain_eff = eff
     if eff.auto_drizzle and not eff.drizzle:
         auto_drizzle = _decide_auto_drizzle(
             frames, n, ref_shape=ref_shape, dst_shape=dst_shape,
@@ -3695,6 +3716,29 @@ def run_stack(
             _resolved.bytes / 1e9,
             raise_the_budget_sentence(_resolved.source),
         )
+    # ---- …and tell the caller what the drizzle it just chose will cost ------
+    # Fired *after* the affordability check above, not beside the decision, so
+    # ``cost_class`` is the class this run will really be recorded as: a second
+    # pass declined for memory makes it ``drizzle`` rather than
+    # ``drizzle+reject``, and the two differ by about 2.5× a sub. Guarded
+    # because a sentence on a job row must never be able to fail a stack that is
+    # otherwise fine (the same rule every side note in the webapp follows).
+    if auto_drizzle is not None and auto_drizzle.drizzle and on_auto_drizzle:
+        from dataclasses import asdict
+
+        from seestack.stack.autodrizzle import AutoDrizzleRun as _AutoDrizzleRun
+        from seestack.stacktime import stack_cost_class
+
+        try:
+            on_auto_drizzle(_AutoDrizzleRun(
+                decision=auto_drizzle,
+                n_frames=int(n),
+                canvas_px=int(dst_shape[0]) * int(dst_shape[1]),
+                cost_class=stack_cost_class(asdict(eff), n),
+                plain_cost_class=stack_cost_class(asdict(plain_eff), n),
+            ))
+        except Exception:  # noqa: BLE001 — a side note never fails a stack
+            log.warning("auto-drizzle cost note failed", exc_info=True)
     # …and the second half of the same asymmetry, one level up: the *canvas*
     # itself over budget. Dropping the rejection above only frees the extra
     # rejection planes; when even the single pass doesn't fit, the guard below

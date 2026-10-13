@@ -14,6 +14,7 @@ import { api, type StackOptionField } from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { autoRejectMethodNote as autoRejectMethodNoteText } from "../autoRejectNote";
 import { backgroundModeLabel, backgroundModeNudge } from "../backgroundModeNudge";
+import { AutoDrizzleNote } from "../components/AutoDrizzleNote";
 import { HintIcon } from "../components/HintIcon";
 import { SampleTourNote } from "../components/SampleTourNote";
 import { StackOptionControl as FieldControl } from "../components/StackOptionControl";
@@ -103,6 +104,27 @@ export function StackView() {
   const pinned = useQuery({
     queryKey: ["stack-defaults-pinned", safe],
     queryFn: () => api.pinnedStackDefaults(safe),
+  });
+  // Is a stack of *this* target running right now, and did it turn drizzle on by
+  // itself? The job card below follows the run this page started, which is never
+  // an automatic drizzle — the posture only ever reaches a run nobody set up —
+  // so the note has to read the job list rather than `job`. Shares the app-wide
+  // ["jobs"] cache (the header badge already polls it), so this costs nothing.
+  const jobs = useQuery({
+    queryKey: ["jobs"],
+    queryFn: () => api.listJobs(),
+    refetchInterval: 5_000,
+  });
+  const autoDrizzleJob = useMemo(() => (
+    (jobs.data ?? []).find((j) => (
+      j.target === safe && (j.state === "running" || j.state === "queued")
+      && j.auto_drizzle
+    )) ?? null
+  ), [jobs.data, safe]);
+  const cancelJob = useMutation({
+    mutationFn: (id: string) => api.cancelJob(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+    onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
   const pinnedNote = useMemo(() => {
     const rows = pinned.data?.pinned ?? [];
@@ -1637,6 +1659,18 @@ export function StackView() {
                 </Button>
               ) : null}
             </Stack>
+          ) : null}
+
+          {/* An automatic drizzle running on this target right now: how long it
+              will take, what a plain stack would have taken, and the two things
+              to do about it. Shown above this page's own job card because it is
+              about a *different* run — one nobody set up — and it self-hides on
+              every target that is not being auto-drizzled. */}
+          {autoDrizzleJob ? (
+            <AutoDrizzleNote
+              cost={autoDrizzleJob.auto_drizzle}
+              target={safe}
+              onCancel={() => cancelJob.mutate(autoDrizzleJob.id)} />
           ) : null}
 
           {job ? (

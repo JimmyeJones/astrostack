@@ -110,6 +110,19 @@ class Job:
     error: str | None = None
     error_kind: str | None = None
     result: dict[str, Any] | None = None
+    #: What an automatic drizzle this job chose will cost, once it has chosen —
+    #: ``{"scale", "drizzle_seconds", "plain_seconds", "basis_runs",
+    #: "same_engine"}`` (see :mod:`webapp.drizzletime`). The owner asked to be
+    #: told the estimate and then left alone, and a running job's row is where
+    #: he sees it.
+    #:
+    #: Deliberately **not** persisted to the jobs DB, so no migration and no new
+    #: column: the note is only ever about a run that is still going, and a
+    #: process that restarts mid-stack marks the job ``interrupted`` anyway, so a
+    #: durable copy could only ever outlive the thing it describes. Active jobs
+    #: are served from this in-memory map (see :meth:`JobManager.list`), which is
+    #: exactly the note's lifetime.
+    auto_drizzle: dict[str, Any] | None = None
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
     _last_flush: float = field(default=0.0, repr=False)
 
@@ -133,6 +146,7 @@ class Job:
             "finished_utc": self.finished_utc, "error": self.error,
             "error_kind": self.error_kind,
             "result": self.result,
+            "auto_drizzle": self.auto_drizzle,
         }
 
 

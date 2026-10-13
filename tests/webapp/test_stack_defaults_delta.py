@@ -21,7 +21,12 @@ import json
 
 from seestack.io.library import Library
 from webapp.schemas import STACK_DEFAULTS_META_KEY
-from webapp.walkaway import stack_defaults_delta
+from webapp.walkaway import (
+    PRESENCE_IS_THE_CHOICE,
+    apply_auto_drizzle,
+    parse_saved_stack_defaults,
+    stack_defaults_delta,
+)
 
 # What a target with no saved blob would be stacked with: the global blob filled
 # out with each descriptor's own default.
@@ -108,14 +113,14 @@ def _stored_blob(library_root, safe):
     return json.loads(raw) if raw else None
 
 
-def test_saving_the_form_unchanged_pins_only_the_rejection_choice(
+def test_saving_the_form_unchanged_pins_only_the_presence_keys(
         client, built_library):
     _put_form(client, "M_42")
     stored = _stored_blob(built_library, "M_42")
     # Not a snapshot of ~30 options: only the keys whose presence is itself the
-    # decision survive an otherwise untouched save.
-    assert set(stored) <= {"auto_reject", "sigma_clip", "min_max_reject",
-                           "drizzle_reject"}
+    # decision survive an otherwise untouched save — and that list has exactly
+    # one owner, so this reads it rather than re-spelling it.
+    assert set(stored) <= set(PRESENCE_IS_THE_CHOICE)
 
 
 def test_a_later_global_change_reaches_a_target_that_saved_defaults(
@@ -186,3 +191,40 @@ def test_the_calibration_master_picks_still_round_trip(client, built_library):
     saved = client.get("/api/targets/M_42/stack-defaults").json()
     assert saved["dark_master_id"] == 7
     assert saved["flat_master_id"] == 3
+
+
+def test_a_saved_drizzle_off_survives_a_form_save(client, built_library):
+    """The per-target stand-down from the automatic drizzle is a *presence*.
+
+    v0.494.0 gave a saved ``drizzle: false`` a job — it is how a target opts out
+    of "Auto, when worth it" (``walkaway.drizzle_choice_expressed`` reads the
+    key's presence, not its value) — but left it out of the endpoint's
+    ``always_persist`` list. ``false`` is also the engine default, so the delta
+    dropped it and the stand-down could not be saved at all: the next unattended
+    stack of that target drizzled again, for hours, with nothing having changed
+    on any screen.
+    """
+    _put_form(client, "M_42", drizzle=False)
+    stored = _stored_blob(built_library, "M_42")
+    assert stored["drizzle"] is False
+    # …and the engine chain reads it as a choice, so the posture is never written.
+    opts = dict(parse_saved_stack_defaults(json.dumps(stored)))
+    assert apply_auto_drizzle(opts, enabled=True, unattended=True)["auto_drizzle"] is False
+
+
+def test_a_saved_drizzle_on_survives_too(client, built_library):
+    # The other direction of the same presence rule: a target the owner wants
+    # drizzled every time keeps saying so, and is likewise not re-decided.
+    _put_form(client, "M_42", drizzle=True)
+    assert _stored_blob(built_library, "M_42")["drizzle"] is True
+    opts = {"drizzle": True}
+    assert apply_auto_drizzle(opts, enabled=True, unattended=True)["auto_drizzle"] is False
+
+
+def test_the_presence_list_is_what_the_delta_is_asked_for():
+    # The pure half, so the regression is pinned without a client: every key on
+    # the list survives a post whose values match the unsaved baseline exactly.
+    posted = {k: UNSAVED.get(k, False) for k in PRESENCE_IS_THE_CHOICE}
+    kept = stack_defaults_delta(posted, {**UNSAVED, **posted},
+                                always_persist=PRESENCE_IS_THE_CHOICE)
+    assert set(kept) == set(PRESENCE_IS_THE_CHOICE)

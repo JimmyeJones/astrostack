@@ -137,7 +137,7 @@ def test_reprocess_all_preserves_the_existing_master_output(solved_client, solve
 
 def _patch_run_stack(monkeypatch, *, capture: list | None = None):
     """Fake run_stack that records the opts it was called with."""
-    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None):  # noqa: ANN001
+    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         if capture is not None:
             capture.append(opts)
         # emit a little progress so the phase/detail interplay is exercised
@@ -328,7 +328,7 @@ def test_interactive_stack_never_auto_binds_calibration(solved_library, monkeypa
 def test_reprocess_all_isolates_a_failing_target(solved_library, monkeypatch):
     seen: list[str] = []
 
-    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None):  # noqa: ANN001
+    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         seen.append(getattr(proj, "safe_name", "?"))
         if len(seen) == 1:
             raise ValueError("boom on first target")
@@ -1188,7 +1188,7 @@ def test_reprocess_all_switch_on_does_not_double_count_as_kept(
 def test_reprocess_all_cancels_between_targets(solved_library, monkeypatch):
     calls: list = []
 
-    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None):  # noqa: ANN001
+    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         calls.append(1)
         return SimpleNamespace(output_dir="/tmp/x", run_id=1, n_frames_used=3,
                                canvas_shape=(1, 1, 3), cancelled=False,
@@ -2423,7 +2423,7 @@ NEW_RUN_ID = 999
 def _patch_run_stack_new_run(monkeypatch):
     """Like ``_patch_run_stack`` but the fresh run has an id of its own, so a
     cover decision cannot accidentally match the seeded run's id."""
-    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None):  # noqa: ANN001
+    def fake(proj, opts, *, progress=None, cancel=None, memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         return SimpleNamespace(output_dir="/tmp/x", run_id=NEW_RUN_ID, n_frames_used=3,
                                canvas_shape=(1, 1, 3), cancelled=False,
                                errors=[], excluded_frames=[])

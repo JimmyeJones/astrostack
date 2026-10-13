@@ -1,5 +1,112 @@
 # Shipped — the record
 
+## 2026-10-13 (Builder, branch `claude/brave-albattani-0rmc6t`) — the owner's answer to sign-off item 19, built: an automatic drizzle says how long it will take, then runs
+
+### v0.495.0 — 🌟 OWNER-ANSWERED FEATURE (sign-off item 19, answered 2026-10-13): **"Drizzling ×1.5 — about 14 h (a plain stack would take about 2 h)", on the running job, with cancel and "don't auto-drizzle this target" beside it.**
+New `webapp/drizzletime.py` (`price_auto_drizzle`, `AutoDrizzleCost`); `run_stack(on_auto_drizzle=…)` handing out a new `seestack.stack.autodrizzle.AutoDrizzleRun`, priced against a new measured `DRIZZLE_COST_RATIO`; `Job.auto_drizzle` → `JobOut.auto_drizzle`; one copy helper `frontend/src/autoDrizzleNote.ts` read by `components/AutoDrizzleNote.tsx` on both the Jobs row and the Stack page; `POST /api/targets/{safe}/auto-drizzle-off`.
+
+*(Baseline `origin/main` at `f4a153b3` (`__version__` 0.494.5): full suite green — 7870 passed, 7 skipped — CI
+green on `main`'s head, no open PRs, and "Bugs (fix these first)" holding nothing ungated. So the task was the
+one the previous run's FOCUS note named as "the obvious next build": the ⭐ owner-answered entry at the top of
+"Features that serve real workflows", whose answering PR #1143 had merged a few hours earlier. Its prerequisite
+bug is v0.494.6, immediately below.)*
+
+**The question the owner answered.** v0.494.0 let an unattended run drizzle itself when the subs can pay for it
+("Auto, when worth it"); v0.494.2 then measured the price — **0.78 s a plain sub against 5.68 s for ×1.5 with
+two-pass rejection, about ×7** — and filed the consequence rather than guessing at it: on his 5,477-sub target
+that turns about an hour of stacking into most of a day's, and his deepest target holds 35,894 subs. Offered
+(a) silence, (b) a refusal or threshold, (c) the estimate up front, he chose **(c)**. So **nothing here
+refuses, thresholds or gates** — what it adds is a sentence, and two one-click answers to it.
+
+**What was built, and the three judgement calls inside it.**
+
+1. **The estimate is measured, never modelled — and it prefers the measurement of the job in hand.** When the
+   target has comparable *drizzled* runs the number is read straight off them and the ratio is **not used at
+   all**; the ratio only ever fills in a side with no runs of its own (the ordinary case being a target stacked
+   only plain, where the plain rate × 7.3 gives the drizzled figure, and the reverse recovers "a plain stack
+   would take about …"). With nothing timed at all there is **no number**: the wording drops to *"this will
+   take several times longer than a normal stack"*, which the measurement supports on its own. Silence was the
+   one wrong answer available — the whole point of his choice is that an automatic drizzle never starts a long
+   run without saying so — so the no-history case is different *wording*, not an absent note. Both second
+   counts are always `None` together or present together, because half a comparison reads as a promise about
+   the other half.
+2. **The hook fires after the affordability check, not beside the decision.** `_afford_drizzle_reject` can
+   decline the second pass on an over-budget run, and that is the difference between **×7.3 and ×2.9 a sub**.
+   Fired at the decision, the note would have quoted the two-pass number for a single-pass run. So the engine
+   hands out the cost class the run will **actually be recorded as** — and *both* classes, the drizzled one and
+   what this very run would have been without the automatic drizzle, because `run_stack` is the only place that
+   knows them without re-resolving `auto_reject` and the affordability check a second, quietly different way.
+   The canvas it hands over is the **pre-drizzle** one, which is what the owner's past runs were measured on.
+3. **Nothing is persisted, and nothing is a new column.** The note is only ever about a run that is still
+   going, and a process that restarts mid-stack marks the job `interrupted` — so a durable copy could only
+   outlive the thing it describes. `Job.auto_drizzle` is in-memory only (active jobs are served from that map,
+   which is exactly the note's lifetime), so this ships with **no jobs-DB migration at all**. `JobOut` gains
+   the field rather than changing any other, and a note that raises is swallowed: a sentence on a job row must
+   never be able to fail a stack.
+
+**The two surfaces, one owner of the copy.** `frontend/src/autoDrizzleNote.ts` holds the sentence; the Jobs row
+and the Stack page both read it, so the two can never say different things about one run. The Jobs row leaves
+out the note's own cancel because it already has one beside the progress bar. The Stack page shows it for
+**this target's currently running stack, whichever chain started it** — its own job card follows the run the
+page submitted, and that is never an automatic drizzle, since the posture only ever reaches a run nobody set
+up; so the note reads the shared `["jobs"]` cache the header badge already polls rather than that card's job.
+
+**The stand-down endpoint merges rather than replaces.** `POST /api/targets/{safe}/auto-drizzle-off` reads the
+target's saved blob, sets one key and writes it back. A partial `PUT /stack-defaults` would have been the
+obvious reuse and is the wrong one: that endpoint stores what it is posted, so a one-click button posting
+`{"drizzle": false}` would have **deleted** the target's saved κ, canvas mode and calibration-master picks.
+Idempotent, additive and reversible from the Stack form. Its durability is v0.494.6's subject.
+
+**Upgrade safety (§9).** No config field, no DB schema change, no on-disk move, no default flipped: an install
+that never auto-drizzles sees nothing new. `run_stack`'s new parameter is optional and defaults to `None`, so
+every existing caller is byte-for-byte unchanged, and `/api/jobs` gains a field and loses none. Every
+`run_stack` stub in `tests/webapp/` took `**_kw`, so the next optional keyword does not break seventeen files.
+
+**Tests.** `tests/test_auto_drizzle_cost_note.py` (11) pins the arithmetic, the preference order, every refusal
+(nothing timed, a run too small to generalise from, a wildly different canvas) and that the ratio still matches
+the measurement it came from. Three new cases in `tests/test_auto_drizzle_run.py` pin the hook firing exactly
+once on a real drizzling `run_stack`, firing never otherwise, and not costing the stack when it raises. Eight
+in `tests/webapp/test_auto_drizzle_unattended.py` cover the payload shape, that it is *not* persisted, and the
+opt-out's round-trip, merge, idempotence, reversibility and survival of a later form save.
+`frontend/src/autoDrizzleNote.test.ts` (10) and `frontend/src/components/AutoDrizzleNote.test.tsx` (5) cover the
+copy and the button.
+
+## 2026-10-13 (Builder, branch `claude/brave-albattani-0rmc6t`) — the per-target stand-down from the automatic drizzle could not be saved
+
+### v0.494.6 — 🔴 BUG FIX: **a saved `drizzle: false` — the only way a target opts out of "Auto, when worth it" — was diffed away by *Save as defaults*, so the stand-down the engine honours was unreachable through the only UI that writes one.**
+`webapp/walkaway.py::PRESENCE_IS_THE_CHOICE` is now the single owner of "option keys whose presence is the decision"; `routers/stack.py::put_stack_defaults` reads it instead of spelling the tuple out at the call site.
+
+*(Found while building the owner's answer to sign-off item 19, which names a per-target saved `drizzle: false`
+as the mechanism for its "don't auto-drizzle this target" button — and it does not stick.)*
+
+**The bug.** v0.494.0 gave a saved `drizzle: false` a job: `walkaway.drizzle_choice_expressed` reads the key's
+**presence**, not its value, so an explicit `false` means "this target has chosen" and
+`apply_auto_drizzle` never writes the posture again. Its own docstring says so — *"a `drizzle` in the global
+`default_stack_options` or in the target's 'Save as defaults' blob always wins, on **or** off"*. But
+`put_stack_defaults` stores only what the form **changed** (v0.374.0), and the engine's own `drizzle` default
+is `false`, so `stack_defaults_delta` diffed the key straight out of the blob unless it was listed in
+`always_persist` — and v0.494.0 added the presence rule without adding the key to that tuple. Two real
+consequences: the per-target stand-down could not be saved at all, and a *Save as defaults* press after one
+(for a κ, a canvas mode, a calibration master — anything) silently re-enabled hours of drizzling on the next
+unattended run.
+
+**The fix, and why it is a constant rather than one more string.** `drizzle` joins `AUTO_REJECT_OPT_KEYS` and
+`drizzle_reject` on a named list in `webapp/walkaway.py`, beside the function whose rule it serves, and the
+endpoint reads that list. The tuple spelled out at the call site is precisely how the key came to be missing:
+the rule moved in `walkaway.py` and the list it needs lived in `routers/stack.py`.
+
+**Not a migration, and not a behaviour flip on existing data (§9).** No stored blob is touched: a target that
+already saved defaults keeps every key it has. What changes is what a *future* Save press stores — the same
+treatment `sigma_clip` has had since v0.337.0, and for the same reason (`sigma_clip`'s engine default is also a
+value a user may deliberately choose). `pinned_stack_options` still reports nothing when a saved value agrees
+with the global one, so the pinned note gains no new noise.
+
+**Tests.** Three in `tests/webapp/test_stack_defaults_delta.py`: a posted `drizzle: false` survives a form save
+and the unattended chain then reads it as a choice, the `true` direction likewise, and the pure half — every
+key on `PRESENCE_IS_THE_CHOICE` survives a post whose values match the baseline exactly. The "saving the form
+unchanged pins only …" test now reads the constant rather than re-spelling the set. Fail-before verified by
+dropping `drizzle` back out of the list.
+
 ## 2026-10-13 (Builder, branch `claude/hopeful-dijkstra-06a17n`) — the archetype Auto keys the owner's taste on stopped depending on a display preference
 
 ### v0.494.5 — 🔴 BUG FIX (PRIORITY 1, editor; the *archetype* half of the open `auto_crop`-OFF LEAD filed with v0.492.49, decided with the measurement that lead asked for): **with the border-trim preference off, the ragged fringe's grain invented a confident "star cluster" verdict — and a feedback tap taken in that state was filed in the bucket the fringe named, where Auto stops reading it the moment the fringe shrinks.** `webapp/routers/editor.py::classify_run_measured` no longer asks the preference; `_classify_run`, `build_preset_suggestion_for_run` and `_run_taste_context`'s archetype follow it.

@@ -19,16 +19,48 @@ because a new observer issue (measured against the owner's real library) is the 
 unattended run can find, and it is where the last two task-bearing runs' work came from. (b) **"Bugs" is still
 all gated-or-decided** (the DECIDE-DO-NOT-FLIP pass count, the #1120 planner remainder, the two owner-data-gated
 LEADs, the ⚪ notes) — re-read the *bodies*, not the headlines, for one whose own text names the cheap evidence
-that settles it (that is how v0.494.5 and v0.494.3 were found). (c) **The obvious next Builder build is item
-19** — the owner answered it on merged PR #1143 and it is now a ⭐ entry under "Features that serve real
-workflows" (state the auto-drizzle time estimate, then run; do **not** build a time gate). (d) **Rotation: (4)
-done → next sweep is (1)**, scale-dependent preview↔export parity on a mosaic-size canvas.
+that settles it (that is how v0.494.5 and v0.494.3 were found). (c) **Item 19 shipped as v0.495.0 while this
+run was sweeping** — another run built the auto-drizzle time estimate (the Builder note directly below is its
+record), so the one-sitting sign-off list has no live question again; do not re-reach for it. (d) **Rotation:
+(4) done → next sweep is (1)**, scale-dependent preview↔export parity on a mosaic-size canvas.
 
 **One method note for the next Scout, because it cost this run time.** `scripts/agent-dogfood.sh --mosaic
 --editor` runs well past a 600 s wrapper (two stacks + a playwright install + a 21-op editor drive). Wrapping
 it in `timeout 600` killed it at the final recipe-teardown step and left a Playwright "Target page … has been
 closed" / `EXIT=124` in the log that *looks* like an app crash but is the wrapper. Drop the `timeout`, or give
 it ≥900 s; every substantive probe had already finished and come back clean. Earlier notes stand below.)*
+
+*Last edited 2026-10-13 (Builder, branch `claude/brave-albattani-0rmc6t` — **the owner-answered item is
+built, and its own spec named a bug that would have made it a no-op.**
+
+**What this run did.** The previous note called the ⭐ owner-answered entry "the obvious next build" once PR
+#1143 merged; it had, so this run built it. **v0.495.0**: a running job that turned drizzle on by itself now
+says *"Drizzling ×1.5 — about 14 h (a plain stack would take about 2 h)"* on the Jobs row and on the target's
+Stack page, with **cancel** and **"don't auto-drizzle this target"** beside it. No threshold, no new global
+setting — that is answer (c), verbatim. The estimate is measured from his own comparable runs and prefers a
+*drizzled* run of the target over the plain rate × the measured ratio; with nothing timed it says "several
+times longer than a normal stack" rather than inventing hours. **v0.494.6**, the prerequisite, is the bug the
+spec's own parenthesis exposed: *"a per-target saved `drizzle: false`, which already wins"* — it does in the
+engine, and could not be **saved**, because `Save as defaults` diffs away a value equal to the default and
+v0.494.0 never added `drizzle` to `always_persist`.
+
+**START HERE NEXT RUN.** The one-sitting sign-off list has **no live question** on it again: item 19 is now
+shipped, so the Bugs section and the issue inbox are the frontier, with the same standing position the last
+four runs found (nothing ungated in Bugs; five open issues, all previously acted on and owner-gated). Two
+concrete things if nothing new has arrived:
+1. **`docs/PROCESS-NOTES.md` is ~800 lines from its 18,000-line ceiling.** Archiving the oldest entries whole
+   to `docs/archive/` (never deleting) is small and safe, and two runs have now flagged it without doing it.
+2. **The `auto_crop`-OFF lead's remainder** — the four cues that set *pixels* rather than naming the object —
+   is still on its gate, deliberately, and is the one open entry whose body names what it needs.
+
+**The method note worth carrying.** Two of this run's three findings came from *reading one artefact against
+another*, not from a dogfood or a measurement: the spec's parenthesis against the endpoint that writes the key
+(v0.494.6), and `walkaway.py`'s rule against the literal list in `routers/stack.py` that serves it. The
+generalisation of v0.494.4's "a docstring naming a second owner is naming your second edit" is: **a list
+spelled out at a call site is a second owner of a rule, and a silent one.** And the mechanical one: when a hot
+path's entry point gains a parameter, *parse* every `monkeypatch.setattr(…run_stack…)` and check each stub's
+signature for `**` — grepping one spelling of the signature missed one file and cost a 17-minute suite run
+(details, and the five-line sweep, in [`PROCESS-NOTES.md`](PROCESS-NOTES.md)). Earlier notes stand below.)*
 
 *Last edited 2026-10-13 (Builder, branch `claude/hopeful-dijkstra-06a17n` — **the gated entries' *bodies* had
 the work the headlines said was absent. v0.494.5 shipped it.**

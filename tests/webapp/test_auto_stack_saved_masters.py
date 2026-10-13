@@ -38,7 +38,7 @@ def _capture_opts(monkeypatch):
     captured = {}
 
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                       memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         captured["opts"] = opts
         return SimpleNamespace(
             output_dir="/tmp/x", run_id=1, n_frames_used=0, canvas_shape=(1, 1, 3),
@@ -339,7 +339,7 @@ def _recorded_warnings(data_root, run_id: int = 1) -> list[str]:
 def _stack_returning_warnings(monkeypatch, warnings: list[str]):
     """Patch run_stack to return a result carrying ``warnings``."""
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                       memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         return SimpleNamespace(
             output_dir="/tmp/x", run_id=1, n_frames_used=3, canvas_shape=(1, 1, 3),
             cancelled=False, errors=[], excluded_frames=[],
@@ -389,7 +389,7 @@ def test_an_older_result_without_the_field_degrades_to_no_warnings(
     """Upgrade-safety: a result object from before this existed (no attribute)
     must read as "nothing to say" rather than raise mid-job."""
     def fake_run_stack(proj, opts, *, progress=None, cancel=None,
-                       memory_budget_gb=None, app_version=None):  # noqa: ANN001
+                       memory_budget_gb=None, app_version=None, **_kw):  # noqa: ANN001
         return SimpleNamespace(
             output_dir="/tmp/x", run_id=1, n_frames_used=3, canvas_shape=(1, 1, 3),
             cancelled=False, errors=[], excluded_frames=[],
