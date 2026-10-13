@@ -76,7 +76,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **Builder, branch `claude/brave-albattani-32mwni`** — the `--combine` dogfood finding: the
+  thin-stack warning's next step (`thinStackWarning`) tells the owner to check his solves and
+  shoot more, while the note the page folds away has measured that accepted, located subs are
+  already waiting for a restack.
 
 ---
 
