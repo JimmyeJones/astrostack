@@ -38,6 +38,19 @@ check first whether the quantity it is reaching for is already measured somewher
 honest answer is "no constant can know this" rather than a better constant.** That is the same shape as the
 2026-10-13 note below about a design call being a Builder's to make: the gate was about judgement, not data.
 
+**A CI trap this run hit, and how to tell it apart from a red `main`.** PR #1149's first CI run **wedged**:
+four jobs went green in 90 s, and the other two — Python tests (stuck in `pip install`, which takes 31 s on
+`main`) and Frontend build + tests (stuck in `vitest run`, 8m24s on `main`) — stopped reporting at 13:50 UTC
+and sat "in progress" for over two hours. **The tell is the run's own `updated_at`**: it froze at 13:50 too, so
+GitHub had stopped recording anything about that run at all, and a `POST .../cancel` was accepted (202) and then
+never took effect. That is the Actions control plane losing the runners, not a slow suite and not the diff —
+`vite.config.ts` caps every frontend test at `testTimeout: 30000`, so that suite *cannot* hang, only fail, and
+nothing in a frontend-only diff can reach a `pip install`. **Do not read a stalled job as a red `main` and do
+not start "fixing" it.** A re-run is the right move (AGENTS.md's "died before any test body ran / runner loss"
+carve-out, once); when the cancel is also ignored, `rerun_workflow_run` answers *403 This workflow is already
+running*, and the only way to get a fresh run is a **real** push to the branch — never an empty commit. This
+note is that push.
+
 **One mechanical trap worth the line.** `@mantine/hooks`' `useDebouncedValue` lists `wait` in its effect's
 dependency array, so **changing the delay re-arms a pending timer**. Any future "adaptive" delay in this
 codebase has to be quantised for that reason alone — a value that tracked a measurement's jitter would keep
