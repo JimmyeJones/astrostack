@@ -1,5 +1,50 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-13 (Builder, branch `claude/hopeful-dijkstra-06a17n` — **the gated entries' *bodies* had
+the work the headlines said was absent. v0.494.5 shipped it.**
+
+**What this run did.** Baseline `main` green (7870 passed, 7 skipped), CI green, no open PRs, and the inbox
+holding nothing new — the five open issues are all previously acted on and owner-gated, and #1015's own
+suggested fix (*put the version in `/api/health`*) was checked and **is shipped**, so there was no inbox task
+this time. So the move was neither a fourth dogfood nor a shrug: **re-read the bodies of the "gated-or-decided"
+Bugs entries for one that names the evidence that would settle it.** The `auto_crop`-OFF archetype LEAD ends
+with exactly that, and nobody had taken it. **v0.494.5** measured it (360 ragged canvases: the whole canvas and
+the kept rectangle disagree on 5, *every one* a confident invented `cluster` against a kept-rectangle nothing,
+none below a 15.4 % trim) and decided the gate: the archetype Auto keys the owner's **taste profile** on no
+longer asks the border-trim preference, because it is a claim about the object rather than about the picture's
+pixels — and because the bucket is library-wide while the preference is per-picture, so a tap taken with the
+trim off was stranded in a bucket Auto stops reading the moment the fringe shrinks. The four cues that set
+*pixels* are deliberately left on the gate and re-filed as the lead's remainder.
+
+**START HERE NEXT RUN — two concrete things, in order.**
+1. **"Bugs" entries marked "M to decide" are not the same as entries waiting on the owner.** Three runs read
+   that section as dry; this one found a task by reading past the headlines. The remaining ones to re-read that
+   way are the DECIDE-DO-NOT-FLIP de-levelling pass count (which carries numbers and a stand-down — that one
+   really is decided), the #1120 planner remainder (a design call against the v0.184.17 carve-out), and the
+   inert-feedback-chip LEAD (whose own missing evidence is *how often a marked chip is tapped anyway*, which
+   needs telemetry the app does not have — so that one is genuinely stuck).
+2. **`docs/PROCESS-NOTES.md` is ~870 lines from its 18,000-line ceiling** and the budget test fails inside 500.
+   Archiving the oldest entries to `docs/archive/` (never deleting) is a small, safe task; whichever run trips
+   it should just do it.
+
+**One method note worth carrying, because it is where this run's second edit came from.** The archetype had
+**two** owners — three call sites in `webapp/routers/editor.py` and one inside `seestack/edit/presets.py`'s
+`auto_recipe`, which classifies for itself. A webapp-only fix would have been green on every webapp test and
+would have re-created the write/read disagreement v0.492.54 exists to stop. **The tell was in v0.492.54's own
+docstring**: it says the bucket must agree with *"the archetype `auto_recipe` itself keys on"* — a docstring
+that names a second owner of the rule you are changing is naming your second edit.
+
+**Dogfood `--deep --mosaic --editor` CLEAN** (the first `--deep` pass in two weeks): trim 7.9 %, nothing
+overflowing, no console errors, page heights at the standing baseline, both 21-op editor drives and both Auto
+taste rows clean, and the 1,200-sub frames table at 301 rows / 7,553 nodes / 1,327 ms. Record, including one
+observation deliberately *not* filed (the mosaic's "What Auto-process did" alert is now very long) and one
+non-finding recorded so it is not re-derived (the bundled samples really are star fields, so "Star cluster" is
+right), in [`PROCESS-NOTES.md`](PROCESS-NOTES.md).
+
+**And the live question still waiting on the owner is item 19** of his one-sitting list: auto-drizzle is on by
+default, unattended, and costs ~×7. **Do not build a time gate on the hot path before he picks one.** Earlier
+notes stand below.)*
+
 *Last edited 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-5xjtzi` — **the inbox had the one thing the
 backlog did not: a brand-new observer issue, unfiled, ungated and actionable. v0.494.4 shipped it.**
 

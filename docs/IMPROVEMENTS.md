@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- **`claude/hopeful-dijkstra-06a17n`** (Builder 2026-10-13) — the `auto_crop`-OFF archetype LEAD in "Bugs": measure whether the ragged fringe's verdict differs from the kept picture's, and decide the gate on `classify_run_measured`.
+*No live claims.*
 
 ---
 

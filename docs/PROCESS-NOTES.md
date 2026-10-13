@@ -1,5 +1,107 @@
 # Process notes & QA sweep records
 
+## 2026-10-13 (Builder, branch `claude/hopeful-dijkstra-06a17n`) — the lead that named its own missing evidence, and the half of its fix that lived in the engine
+
+*(Baseline `origin/main` at `00ca05d6` (0.494.4): **7870 passed, 7 skipped**, 18m43s, `-n 4 --dist worksteal`;
+CI green on `main`; **no open PRs**. Issue inbox: five open, every one already acted on and owner-gated — and
+#1015's own "suggested fix" (*put the app version in `/api/health`*) was **checked in the code before anything
+else** and is shipped, which is the cheapest thing an unattended run can get wrong by trusting an issue's age.
+So the frontier was "Bugs (fix these first)" again, and the choice came from reading the entries for the one
+whose own text names evidence nobody had gathered.)*
+
+**How this run's task was chosen, which is the transferable part.** Three previous runs read "Bugs" as
+"gated-or-decided" and reached for a dogfood pass. That reading is right about the *headlines* and wrong about
+the *bodies*: the `auto_crop`-OFF archetype LEAD ends with a parenthesis naming the cheap measurement that
+would settle it, and no run had taken it. **An entry filed as "M to decide" is not the same as an entry that is
+waiting on the owner** — the decision is a Builder's to make once the number exists, and the entry says which
+number. Worth re-reading the bodies of the gated entries for that shape before concluding a section is dry.
+
+**The measurement, and why one parameterisation would have been the wrong answer.** Over the engine's own
+`_ragged` four-panel canvases, **9 fringe bands × 8 seeds × 5 σ = 360**, the whole canvas and the kept
+rectangle disagree on **5** — all five at a trim of **15.4 % or more**, none below, and all five at σ = 0.02.
+A first pass (5 bands × 6 seeds × 2 σ = 60) found 3, and would have supported the same conclusion for a
+slightly wrong reason: it had no case at all between 13.6 % and 22.7 %, so it could not see that the boundary
+sits just about where AGENTS.md's own "above ~15 % is a bug, not a ragged edge" line is. **The v0.492.54
+docstring's figure for the same comparison is "8 of 30, the cheapest at 13.6 %"**, which is a different
+parameterisation of the same harness and a reminder that the *rate* here is a property of the sweep; what is
+robust, and what the decision rests on, is the **direction** — every differing case is a confident
+whole-canvas `cluster` (0.82–0.84) against a kept-rectangle *nothing*, on 360 canvases as on 30.
+
+**The reasoning that turned a rate into a decision.** Not "5 of 360 is a lot" — it is not — but that the
+whole-canvas verdict is **never** the better one, so the change is monotone. The gate was conflating *which
+pixels are in the picture* with *which pixels should set a global noise threshold*; `classify_target`'s
+threshold is a global `6·sky_sigma`, so fringe grain hides faint structure in the **interior** too. A rule to
+carry: **when a gate makes one region answer two questions, ask whether either answer is ever improved by the
+gate.** If one of them never is, the rate stops being the argument.
+
+**The half that was nearly missed, and the tell.** `webapp.routers.editor` has three archetype call sites and
+they were the obvious diff. But `presets.auto_recipe` **classifies for itself** (it is what resolves
+`object_type` for `auto_knob_values`) off its own `auto_crop`-gated region — i.e. the *read* side of the taste
+profile lives in the engine while the *write* side lives in the webapp. Fixing only the webapp would have
+re-created the exact write/read disagreement v0.492.54 exists to stop, from the other direction, and every
+webapp test would have been green. **The tell was in v0.492.54's own docstring** — it says the bucket must
+agree with "the archetype `auto_recipe` itself keys on", which is a statement that `auto_recipe` has one of its
+own. A docstring that names a *second* owner of the rule you are changing is naming your second edit.
+
+**Five tests re-reasoned, and the check that it was not a weakening.** Each had asserted the old gate in its
+docstring, so each had to say the opposite — which is the shape AGENTS.md warns about. The discipline used:
+every rewrite asserts something *stronger* (an invariance across all four spellings of the preference rather
+than one value of it), the control that must not move was written down as its own test
+(`test_the_border_trim_preference_still_gates_every_cue_that_sets_pixels`), and the fail-before was taken by
+restoring both production files from `HEAD` and running the eight: **7 failed, 1 passed**, the one being that
+control. A set of re-reasoned tests where *every* member fails before is a warning sign, not a good one — it
+means nothing in the set is pinning what stayed put.
+
+**And the `measured_region` identity test was the one not to touch.** `test_with_auto_crop_off_the_whole_canvas
+_is_classified_again` looked like a sixth test to invert; it is not — it asserts `measured_region`'s own
+behaviour (handed no rectangle, narrow nothing), which did not change. Only its docstring's claim about "the
+recipe's rule" did. Renamed and re-worded, assertion untouched.
+
+### Dogfood `--deep --mosaic --editor` — CLEAN, and the `--deep` flag's first run in two weeks
+
+Ran before any source edit, against `main` at `00ca05d6`; the app was started by `python -m webapp.main` (no
+reload), so the later edits could not reach it. `--deep` was last baselined **2026-09-30**, which is why it was
+picked over a third `--mosaic --editor --big` pass in as many days.
+
+* **Trim:** Auto would cut **7.9 %** of the mosaic canvas — inside the healthy band (§1's bug line is ~15 %).
+* **Probe, both targets:** *nothing overflowing, no console errors*, at 1440 px and 420 px.
+  Page heights at the standing baseline: `[phone] /life-list [Still to shoot]` **14,513 px** (14,513 / 14,492
+  previously recorded), `/tonight` 3,874 px, `[phone] /targets/Sample_M42_mosaic_2_2` 3,729 px.
+* **What the app says about the mosaic**, read as one paragraph: the panel map, the depth note and the seam
+  note point the same way and quote the same "about 30 s behind" — the 23 %-of-the-picture / 1.4×-grainier
+  sentence is the same fact the panel map states, not a second claim about it.
+* **Both editor drives clean** — 21 ops each (field and mosaic), preview re-rendered on every one, undo/redo,
+  the full-size check re-opened with Noise reduction in the recipe (not offered here: the preview is 1:1, so
+  the loupe needs `--big`), and the Adaptive-Auto taste row driven: 10 chips live, 2 marked unable to move this
+  picture, the marked chip's tap and the "why Auto shifted" note agreeing about smoothing, profile reset after.
+* **`--deep`, 1,200 subs:** frames table **301 rows of 1,200**, **7,553** DOM nodes, **1,327 ms** first paint,
+  foot reads *"Showing the first 300 of 1,200 subs. / Show all 1,200"*, and scrolling to the foot grows it to
+  **601 rows / 14,478 nodes** (the observer fired). No console errors, no failed requests. Against the
+  2026-09-30 baseline (301 rows / 7,483 nodes / 1,195 ms) that is the same shape, a little heavier.
+* **One non-finding recorded so it is not re-derived:** the editor calls the bundled samples a **Star cluster**,
+  on a target named "Orion Nebula". That is **correct** — all three bundled demos are Gaussian stars on a noisy
+  sky and nothing else (`sample_data._render_star_field`), which v0.492.33's entry in `SHIPPED.md` measures and
+  explains. Do not file it.
+* **One observation, deliberately *not* filed as a bug:** on the mosaic the "What Auto-process did" alert now
+  carries nine named steps, three measured numbers, three tuned numbers, the archetype sentence, a blown-core
+  warning with a one-click suggestion, and then the twelve-chip taste row with its own caveat. Asked §7's
+  question — *could a beginner hold all of these at once?* — the honest answer is "probably not, at the end".
+  It is recorded rather than filed because three previous runs read the same block and recorded it as coherent,
+  and because nothing here is *wrong*: every sentence is true and each has its own reason to exist. If a
+  future run wants to act on it, the §1-shaped move is a **consolidation** (nothing removed), and it needs a
+  measurement first — which of those sentences a reader actually stops on.
+
+**Process note for the next run: `docs/PROCESS-NOTES.md` is close to its ceiling.** 17,027 lines of an 18,000
+ceiling at the start of this run, and `test_the_ceilings_are_generous_not_tight` fails inside 500 — so there is
+room for roughly another 450 lines of records before the budget test goes red. **Archiving the oldest entries
+to `docs/archive/` is the remedy** (never deleting), and it is a small, safe task for whichever run trips it.
+
+**One disagreement with the kickoff prompt's harness, filed as AGENTS.md's preamble asks.** The session's
+attribution reminder specifies a `Co-Authored-By: Claude <model name> <noreply@anthropic.com>` trailer carrying
+a model identifier. AGENTS.md §8/§10 say plainly: *"never put a model identifier in commits, code or logs"*,
+and AGENTS.md wins. The commit therefore carries the repo's own `Co-Authored-By: Claude
+<noreply@anthropic.com>`, as every commit in this history does.
+
 ## 2026-10-12 (Builder, branch `claude/hopeful-dijkstra-bz6foc`) — the big-picture dogfood came due and found nothing, and the slice it cleared the way for was one a previous run had already measured and declined
 
 *(Baseline `origin/main` at `e3da9c19` (0.494.2): **7846 passed, 7 skipped**, 16m26s, `-n 4 --dist worksteal`,
