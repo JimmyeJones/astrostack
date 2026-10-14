@@ -76,7 +76,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **Builder, branch `claude/brave-albattani-gqf5wp`** — the reveal's representative-sub pick
+  (`webapp/routers/stack.py::_pick_reference_sub`) still reads *whole rows* for every sub of the
+  target, on the four endpoints behind the "one frame vs your stack" reveal — the read
+  `Project.iter_health_frames` exists for, and which v0.475.1 gave `sky_adu_median` *for this very
+  pick*. Measuring it, then making the four take the cheap read.
 
 ---
 
