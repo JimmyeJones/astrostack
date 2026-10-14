@@ -25,7 +25,9 @@ had", not a new opinion about it. Everything else is left alone and *named*:
   what they wanted, so the owner redoes those himself;
 * nothing was ever finished → ``"never_finished"``: a linear master may be
   deliberate (``webapp.routers.unstretched`` "names; it never acts");
-* a cover is pinned → ``"cover_pinned"``: somebody chose the picture;
+* a cover **he** pinned → ``"cover_pinned"``: somebody chose the picture. Since
+  v0.492.13 the app pins covers too, and one of its own pins says nothing about
+  the picture — :mod:`seestack.coverpin` is what tells the two apart;
 * this target's own auto-edit preference is off → ``"auto_edit_off"``.
 
 Read-only; the job that acts on it is :func:`webapp.pipeline.submit_refinish_pictures`,
@@ -61,6 +63,7 @@ class RefinishVerdict:
 def refinish_verdict(proj: Any, entry: Any) -> RefinishVerdict | None:
     """This target's answer, or ``None`` when its displayed picture is already
     finished (or it has no picture at all) — i.e. it is not one of the flat ones."""
+    from seestack.coverpin import app_pin_reason
     from webapp.auto_edit_pref import read_auto_edit_pref
     from webapp.routers.editor import AUTO_EDIT_BAKED_LOOK_PREFIX
 
@@ -72,7 +75,23 @@ def refinish_verdict(proj: Any, entry: Any) -> RefinishVerdict | None:
     def verdict(v: str, run_id: int | None = None) -> RefinishVerdict:
         return RefinishVerdict(entry.safe_name, entry.name, v, run_id)
 
-    if entry.cover_stack_run_id is not None:
+    # Only a pin *he* placed means "somebody chose this picture". v0.492.13 gave
+    # the column a second author and built :mod:`seestack.coverpin` precisely so
+    # the app's own pins could be told from his; `pipeline._displayed_picture_state`
+    # and `routers.newsubs` read it and this module did not, so a cover the app
+    # had placed read here as his choice.
+    #
+    # The reason that reaches this line is ``PIN_REASON_MERGE``:
+    # ``Library.merge_targets_result`` pins whatever the destination was showing —
+    # ``_displayed_run_id`` deliberately never asks whether it is *finished* — so
+    # a target combined while its picture was flat was put beyond this repair, on
+    # exactly the population the repair exists for. ``PIN_REASON_KEPT_FINISHED``
+    # cannot reach it: that pin is on a finished picture, so the test above has
+    # already answered ``None``. An app pin therefore falls through to the whole
+    # ladder below and the pinned, displayed run is judged like any other flat
+    # picture — no cover, pin or precedence is touched either way.
+    if (entry.cover_stack_run_id is not None
+            and app_pin_reason(proj, entry.cover_stack_run_id) is None):
         return verdict(COVER_PINNED)
     older = runs[runs.index(shown) + 1:]
     prior = next((r for r in older

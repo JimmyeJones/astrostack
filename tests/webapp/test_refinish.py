@@ -279,3 +279,150 @@ def test_preview_endpoint_names_both_groups_and_writes_nothing(built_library, cl
 def test_start_endpoint_queues_one_job(client):
     r1 = client.post("/api/unstretched-pictures/refinish")
     assert r1.status_code == 200 and r1.json()["job_id"]
+
+
+# --------------------------------------------------------------------------- #
+# Who pinned the cover (v0.492.13's ``seestack.coverpin``)
+# --------------------------------------------------------------------------- #
+
+def _app_pin(lib, safe: str, run_id: int, reason: str) -> None:
+    """Pin a cover the way the app's own code does — the registry column plus the
+    record saying it was us. ``Library.merge_targets_result`` does exactly this
+    pair after a Combine."""
+    from seestack.coverpin import mark_app_pin
+
+    lib.set_target_cover(safe, run_id)
+    proj = lib.open_target(safe)
+    try:
+        mark_app_pin(proj, run_id, reason)
+    finally:
+        proj.close()
+
+
+def test_a_cover_the_app_pinned_during_a_combine_is_still_repairable(built_library):
+    """A Combine pins whatever the destination was *showing*, finished or flat
+    (``_displayed_run_id`` deliberately never asks), so a target combined while
+    its picture was flat was beyond this repair — and the summary told the owner
+    he had chosen that picture. Only a pin *he* placed means that."""
+    from seestack.coverpin import PIN_REASON_MERGE
+
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        safe = _first_target(lib)
+        proj = lib.open_target(safe)
+        try:
+            old = _run(proj, "2026-05-01T00:00:00Z")
+            _auto_finish(proj, old)
+            flat = _run(proj, "2026-09-10T00:00:00Z")
+            _run(proj, "2026-09-20T00:00:00Z")      # the night a Combine carried in
+        finally:
+            proj.close()
+        _app_pin(lib, safe, flat, PIN_REASON_MERGE)
+        v = _verdict(lib, safe)
+        # The pinned run is the displayed one, so it is the run a repair bakes.
+        assert v.verdict == REFINISH and v.run_id == flat
+    finally:
+        lib.close()
+
+
+def test_an_app_pin_falls_through_to_the_rest_of_the_ladder(built_library):
+    """Lifting the cover stand-down for an app pin must not jump straight to a
+    repair: the pinned picture is judged on the same evidence as any other flat
+    one, so an older picture somebody finished by hand is still left alone."""
+    from seestack.coverpin import PIN_REASON_MERGE
+
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        safe = _first_target(lib)
+        proj = lib.open_target(safe)
+        try:
+            _run(proj, "2026-05-01T00:00:00Z",
+                 options={"editor_recipe": {"ops": _OPS}, "display_space": "stretched"})
+            flat = _run(proj, "2026-09-10T00:00:00Z")
+        finally:
+            proj.close()
+        _app_pin(lib, safe, flat, PIN_REASON_MERGE)
+        assert _verdict(lib, safe).verdict == BY_HAND
+    finally:
+        lib.close()
+
+
+def test_his_own_pin_is_left_alone_even_when_a_stale_app_record_exists(built_library):
+    """``app_pin_reason``'s retirement rule, asserted at this seam: a record that
+    names a run other than the one pinned is not about this pin, so the pin is
+    his and the target is still left alone — no code had to notice he re-pinned."""
+    from seestack.coverpin import PIN_REASON_MERGE, mark_app_pin
+
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        safe = _first_target(lib)
+        proj = lib.open_target(safe)
+        try:
+            old = _run(proj, "2026-05-01T00:00:00Z")
+            _auto_finish(proj, old)
+            flat = _run(proj, "2026-09-10T00:00:00Z")
+            other = _run(proj, "2026-09-20T00:00:00Z")
+            mark_app_pin(proj, other, PIN_REASON_MERGE)   # about a pin that is gone
+        finally:
+            proj.close()
+        lib.set_target_cover(safe, flat)                  # he chose the flat one
+        assert _verdict(lib, safe).verdict == COVER_PINNED
+    finally:
+        lib.close()
+
+
+def test_a_kept_finished_pin_never_reaches_the_cover_test(built_library):
+    """Why only the Combine reason needed fixing: ``kept_finished`` is placed on a
+    *finished* picture, so the target is not one of the flat ones at all and the
+    function has answered ``None`` before the cover is ever looked at."""
+    from seestack.coverpin import PIN_REASON_KEPT_FINISHED
+
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        safe = _first_target(lib)
+        proj = lib.open_target(safe)
+        try:
+            kept = _run(proj, "2026-05-01T00:00:00Z")
+            _auto_finish(proj, kept)
+            _run(proj, "2026-09-10T00:00:00Z")
+        finally:
+            proj.close()
+        _app_pin(lib, safe, kept, PIN_REASON_KEPT_FINISHED)
+        assert _verdict(lib, safe) is None
+        assert scan_refinish(lib) == []
+    finally:
+        lib.close()
+
+
+def test_the_job_repairs_a_target_the_app_pinned(built_library, monkeypatch):
+    """End to end: the repair writes to a Combine-pinned flat target, and bakes
+    the pinned run rather than the newest one."""
+    from seestack.coverpin import PIN_REASON_MERGE
+
+    calls: list[tuple] = []
+
+    def _fake(lib, safe, run_id, auto_crop=True):  # noqa: ANN001
+        calls.append((safe, run_id, auto_crop))
+        return 3
+
+    monkeypatch.setattr("webapp.pipeline._auto_edit_process_run", _fake)
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        safe = _first_target(lib)
+        proj = lib.open_target(safe)
+        try:
+            old = _run(proj, "2026-05-01T00:00:00Z")
+            _auto_finish(proj, old)
+            flat = _run(proj, "2026-09-10T00:00:00Z")
+            _run(proj, "2026-09-20T00:00:00Z")
+        finally:
+            proj.close()
+        _app_pin(lib, safe, flat, PIN_REASON_MERGE)
+    finally:
+        lib.close()
+
+    summary = _run_body(pipeline.submit_refinish_pictures, _settings(built_library),
+                        Job(kind="refinish_pictures"))
+    assert calls == [(safe, flat, True)]
+    assert len(summary["refinished"]) == 1
+    assert summary["failed"] == [] and summary["left_alone"] == {}

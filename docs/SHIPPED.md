@@ -1,5 +1,61 @@
 # Shipped — the record
 
+## 2026-10-14 (Builder, branch `claude/relaxed-cray-4uwet8`) — the repair for #903 asked "is a cover pinned?" where it meant "did *he* pin it?"
+
+### v0.495.11 — 🟠 BUG FIX (trust — PRIORITY 1-adjacent (the displayed picture) / 2; Builder-found and reproduced, observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903)'s repair) — `webapp/refinish.py::refinish_verdict` asks `seestack.coverpin.app_pin_reason`
+
+**The symptom.** "Give back pictures a restack flattened" (Settings → Maintenance, v0.479.3 — the repair the
+owner asked for on 2026-09-26) refused a target whose cover **the app itself** had pinned, and told him in the
+summary that he was the one who had chosen the picture.
+
+**The mechanism, and it is a stale consumer rather than a wrong rule.** `refinish_verdict` was written at
+v0.479.3 against a world where a cover had one author, and tested `entry.cover_stack_run_id is not None` →
+`cover_pinned` ("somebody chose the picture"). **v0.492.13 gave covers two authors** and built
+`seestack/coverpin.py` precisely so the app's own pins could be told from his — `app_pin_reason` answers
+`None` for his pin and a reason for the app's, and retires its own record the moment he pins something else.
+Three sites were brought into line with it (`io/library.py` writes, `pipeline._displayed_picture_state` and
+`routers/newsubs.py` read). **`refinish.py` was not**, so it has been reading "a cover exists" as "he chose
+it" ever since.
+
+**Which pin actually reaches it — one of the two, and that is checked, not assumed.**
+`PIN_REASON_KEPT_FINISHED` **cannot**: that pin is placed on a *finished* picture, so
+`run_is_a_finished_picture(shown)` is already true and the function has returned `None` two lines earlier.
+`PIN_REASON_MERGE` **can**: `Library.merge_targets_result` pins whatever the destination was displaying
+(`_displayed_run_id`, which deliberately never asks whether it is finished) so the carried one-night stack
+does not take its place. So **a Combine performed while the target's picture was flat** put that picture
+beyond the repair.
+
+**Why that is the owner's own path and not a corner.** 69 of his 83 stacked targets display a flat run (the
+observer's 2026-09-25 census on #903), and the standing remedy for observer issue
+[#878](https://github.com/JimmyeJones/astrostack/issues/878) — 11 duplicate `-<hex>` targets plus the
+`<T>`/`<T>_sub` pairs — is for him to **Combine** them. The two features therefore meet on exactly the
+population the repair exists for. The pin is not permanent (a later bulk restack advances an app pin,
+`_settle_cover_after_restack`), which bounds the damage honestly: the window lasts until he runs the very
+library-wide batch this one-click repair exists to save him.
+
+**The fix.** One condition: the `cover_pinned` stand-down now requires the pin to be *his*
+(`app_pin_reason(...) is None`). An app pin falls through to the **whole** existing ladder —
+`never_finished` / `by_hand` / `auto_edit_off` / `refinish` — so the pinned-and-displayed run is judged on the
+same evidence as any other flat picture, and a repair bakes `shown.id`, i.e. the pinned run itself. **Cover
+semantics are untouched**: no column, no pin and no precedence changes, the same run stays pinned, and his own
+pin is still respected forever. This is the identical call `routers/newsubs.py` already makes, with the
+identical reasoning ("the owner has not chosen that picture over the deeper one — the app kept it for him").
+
+**Upgrade-safe (§9).** No config, schema, migration, on-disk or default change. The endpoint's response
+*shape* is unchanged — `left_alone` is still keyed by the same four reasons; a merge-pinned flat target simply
+moves from `left_alone["cover_pinned"]` into `refinish`. Nothing in `frontend/` reads `cover_pinned` (only
+`by_hand` has copy), so no frontend change and no frontend build was needed.
+
+**Tests (+5 in `tests/webapp/test_refinish.py`; 3 fail before).** Fail-before: a Combine-pinned flat cover
+with an app-finished older picture is `refinish` on the **pinned** run (was `cover_pinned`); the fall-through
+reaches the rest of the ladder rather than jumping to a repair (a hand-finished older picture is still
+`by_hand`); and the job end-to-end writes to the merge-pinned target. Guards that pass before and must keep
+passing: his own pin is still left alone **even when a stale app record names a different run**
+(`app_pin_reason`'s retirement rule, asserted at this seam), and a `kept_finished` pin never reaches the cover
+test at all (verdict `None`), which is how the narrowness above is recorded rather than believed. The existing
+`test_a_pinned_cover_is_left_alone` is his own pin and is unchanged — nothing was loosened.
+
+
 ## 2026-10-14 (Builder, branch `claude/relaxed-cray-fzxacq`) — `main`'s CI was red, and the test was what was wrong
 
 ### v0.495.10 — 🔴 CI RED ON `main`, task #1 (AGENTS.md §8): **the ten "reads columns, not whole rows" guards counted the whole process, and a leaked `job-worker` failed one of them on an innocent read**
