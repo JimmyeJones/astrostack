@@ -1,5 +1,110 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, branch `claude/relaxed-cray-4uwet8`) — the backlog was dry, so the run asked "who else reads this?" and the dogfood pass was clean
+
+*(→ **v0.495.11** + **v0.495.12**. Baseline: `main`'s own CI run **2300** green on the exact HEAD
+`9e19088d` (v0.495.10) — read first, per the previous run's note, and the local suite then agreed at
+**7941 passed, 7 skipped** in 21m28s. Inbox **four open**, confirmed with `list_issues`: #878, #880, #903,
+#1015, every one previously acted-on and owner-gated, nothing new owed. PR **#1161** was live (its branch
+pushed 33 minutes before this run began) and had filed the top two "Bugs" entries within the previous ~1.5 h,
+so §11 made both claimed-in-spirit and this run took neither; #1161 merged mid-run and this branch took the
+union.)*
+
+### Two gates closed by reading, which is what turned a dry backlog into two fixes
+
+"Bugs" really did hold nothing ungated, and that was established rather than inherited from
+[`FOCUS.md`](FOCUS.md). Two entries were read down to their source before being left alone: the **"full data"
+TIFF white point**, whose archived 2026-09-03 trace gates it on his own pixels (`(p99.99 − p1) / (max − min)`
+on a real deep OSC stack), and **observer #903's residual**, where the useful discovery is that the repair
+*shipped* — v0.479.3's "Give back pictures a restack flattened" — so what is left really is his click.
+"Features that serve real workflows" was read end to end: every entry shipped, closed, or deliberately
+declined.
+
+**Reading v0.479.3 adversarially is what found the work**, and the reason to read it was arithmetic rather
+than suspicion: 44 of his pictures depend on that one function, and it had never been looked at since the
+module underneath it changed. Both bugs this run shipped are in code that was *correct when written*.
+
+### The method: when a module gives an old fact a new author, grep the readers
+
+v0.492.13 added provenance to a target's cover — `seestack/coverpin.py`, `app_pin_reason`, a careful module
+docstring — and converted the three call sites it was about (`io/library.py` writes,
+`pipeline._displayed_picture_state` and `routers/newsubs.py` read). It did the hard part right. Both of this
+run's bugs are sites it was **not** about, and both came out of one mechanical pass: `grep -rn
+'cover_stack_run_id'` over `seestack/` and `webapp/`, then of each hit ask only *"does this ask **which**
+picture, or does it ask **who chose** it?"*
+
+That question does the whole separation. A dozen hits are pass-throughs to `displayed_picture_run` /
+`_representative_run` / `current_picture_path` — "which run is displayed" is correct **whoever** pinned it, so
+none of them is a bug and none needed touching. Exactly four carry an authorship *claim*, and two of them had
+never been converted:
+
+- **`refinish.py` (v0.495.11)** stood down on "a cover is set" and reported `cover_pinned` — *"somebody chose
+  the picture"* — for a pin the app had placed. Only `PIN_REASON_MERGE` can reach it, and that is **asserted
+  in both directions** rather than reasoned about: `merge_targets_result` pins whatever the destination was
+  *showing* (`_displayed_run_id` deliberately never asks whether it is finished), while
+  `PIN_REASON_KEPT_FINISHED` sits on a finished picture and so has already returned `None` two lines earlier.
+- **`gallery.py::get_best_pictures` (v0.495.12)** fed the same "a cover is set" bool to `rank_portfolio`,
+  which sorts on `not entry.pinned` **first** — so a Combine's own pin outranked *every* unpinned picture on
+  "My best pictures" and could push his genuinely best ones off `limit`.
+
+Both are one condition. Neither moves a cover, a pin or a precedence, and in both the pinned run stays the
+target's **representative**, because that part was never wrong.
+
+### The sharper half: the app had already written the correct sentence somewhere else
+
+`frontend/src/components/mergeSuggestions.ts::mergeCoverClause` exists to tell the user about this very pin,
+and its comment calls it *"a cover the user never pinned"* — in the confirmation he reads. Two Python modules
+away, the same pin was his favourite and his choice. **A contradiction between something the app *says* and
+something the app *does* is cheap to grep for and is where this class lives**; it is a better starting point
+than re-reading the module that looks suspicious, because the correct wording is already in the tree and
+somebody has already thought it through.
+
+### Dogfood: `--calibration --incoming-lag` — CLEAN, and the one thing that looked like a finding was a fix working
+
+Run in the CI wait, on the two stalest flags (§7 forbids it beside `pytest`, so it went between the suites).
+**0 findings, nothing overflowing, no console errors**, every page height on the standing baseline. The
+calibration branch was genuinely exercised rather than merely reached: two masters built and in the registry,
+the defect scan reporting 31 hot/dead pixels (0.020 %), `auto_bind_calibration` on, the stack **actually
+calibrated** (`masters actually applied: {'dark_master_id': 1, 'flat_master_id': 2}`), both binds `confident`,
+the stack-health card saying *"calibrated (dark+flat)"* — and the `health/calibration` note correctly
+**silent**, which the log makes you disambiguate by reading the `[run]` line: silent because the masters were
+applied (the right reason), not because nothing was.
+
+**The near-finding is worth recording so the next run does not file it.** Reading the Target page's paragraph
+as one block, two *inline* cards say nearly the same thing: `next-best-move` (*"only about 20% of it made it
+in … Shooting it in mosaic mode next session is the biggest win"*) and `framing-verdict` (*"It's bigger than
+one frame … only about 20% … Shoot it in mosaic mode"*). That reads as duplication on the page the owner
+called "extremely busy" — but it is **v0.443.0 working as designed**: `nextBestMove` claims to name *the
+single* highest-leverage move and had never heard of framing, so that fix added a `framing` rung precisely so
+the two would stop prescribing **different** next sessions. Agreement between a card that *ranks* and a card
+that *explains* is the intended outcome; it looks like repetition and is not a bug. The probe's own preamble
+says four of the last five findings were two of these cards disagreeing — the inverse case needs the same
+check before it is filed.
+
+### One environment trap, paid for in this run
+
+Narrowing a fix with an ad-hoc file list, `tests/webapp/test_gallery_best.py tests/test_portfolio.py
+tests/webapp/test_refinish.py` came back **`E fixture 'built_library' not found`** on the whole last file —
+which reads exactly like a broken checkout or a bad conftest. It is neither: **naming test files from two
+directories in one invocation can make a later `tests/webapp/` file lose `tests/webapp/conftest.py`'s
+fixtures.** Measured with order as the only variable: `tests/test_portfolio.py tests/webapp/test_refinish.py`
+→ 38 passed; `tests/webapp/test_unstretched.py tests/test_portfolio.py tests/webapp/test_refinish.py` → 47
+passed **and 16 errors**, all in the last file while the first webapp file was fine. The same files pass alone
+and in the full suite. Confirmed pre-existing by re-running the identical list on a clean tree. Written up in
+[`AGENT-ENVIRONMENT.md`](AGENT-ENVIRONMENT.md); the habit is **one directory per invocation**, and the tell is
+an *error at setup* naming a fixture that plainly exists.
+
+### §11, and the cost of the "one version per PR" rule
+
+Two fixes meant two PRs, because the previous collision note is explicit that a PR carrying two versions gets
+only its head one tagged. With the harness pinning this run to a single branch name, that meant shipping them
+strictly in series: sync, full suite, merge, then re-sync the second onto the new `main` and run the full
+suite again — **four 21-minute suites for two one-line fixes**. The CI wait is where the dogfood pass and
+these notes were written, which is the only reason the cost was tolerable. Worth knowing before choosing to
+batch: a second fix found mid-run is cheap to *write* and expensive to *ship*, and the deciding question is
+whether it would otherwise be lost rather than whether it is small.
+
+
 ## 2026-10-14 (Builder, branch `claude/relaxed-cray-fzxacq`) — `main` was red on a *test*, and the authority that said so was free
 
 *(→ **v0.495.10**. Baseline: `main` at `89f01088` (v0.495.9), and its own CI run **2294** a **FAILURE** — one
