@@ -5,6 +5,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AUTO_FEEDBACK_CHIPS,
+  AUTO_TASTE_PLAIN_NOTE,
   AutoFeedback,
   autoFeedbackGroups,
   mergeMeasuredPreferences,
@@ -369,6 +370,48 @@ describe("AutoFeedback — the note after a tap", () => {
     await screen.findByText(/would run with less smoothing/);
     expect(screen.queryByText(/is running with less smoothing/)).toBeNull();
     expect(screen.getByText("Reset")).toBeTruthy();
+  });
+
+  it("still offers Reset after the FIRST tap, while the measured note is in flight", async () => {
+    // Found by `scripts/agent-dogfood.sh --dithered --editor` (2026-10-14), which
+    // tapped "Too dark" on the owner's own canvas shape and reported *"the taste
+    // just taught has no note — and the Reset link lives inside it, so there is
+    // now no way to undo it"*.
+    //
+    // A neutral profile has no measured note, so `mergeMeasuredPreferences`'
+    // "keep the last measured note" keeps `null` — and the tap that *creates* the
+    // taste is the one tap with nothing to keep. The render used to gate Reset on
+    // the sentence, so the control went with it. `auto_prefs.describe_profile`'s
+    // docstring names this exact cost ("a note that vanished would take a control
+    // with it") and the engine never serves that state: `describe_profile` is
+    // `None` on precisely the condition `is_neutral` is true. The client was
+    // manufacturing it.
+    //
+    // The refetch is left pending on purpose — on a mosaic it sits behind the Auto
+    // re-run the tap itself started, which is the window the owner is in.
+    const UNNARROWED_BRIGHT =
+      "Auto is running a bit brighter for you, based on your recent feedback.";
+    vi.spyOn(client.api, "getRunAutoPreferences")
+      .mockResolvedValueOnce({ biases: {}, note: null, neutral: true, inert_cues: {} })
+      .mockReturnValue(new Promise<client.AutoPreferences>(() => {}));
+    vi.spyOn(client.api, "sendAutoFeedback").mockResolvedValue({
+      biases: { brightness: 1 }, note: UNNARROWED_BRIGHT, neutral: false,
+      limit_note: null,
+    });
+    const shown = vi.spyOn(notifications, "show");
+
+    wrap(() => {}, { safe: "M31", runId: 7 });
+    fireEvent.click(await screen.findByRole("button", { name: "Too dark" }));
+    await waitFor(() => expect(shown).toHaveBeenCalled());
+
+    // The taste is real (`neutral: false`), so the way back has to be on screen
+    // with it rather than one network round-trip later.
+    await screen.findByText("Reset");
+    // …and it must not have borrowed the un-narrowed sentence to get there: that
+    // one claims what Auto *is* doing to this picture, which is the claim the
+    // run-scoped narrowing exists to withhold until it has been measured.
+    expect(screen.queryByText(/running a bit brighter/)).toBeNull();
+    await screen.findByText(AUTO_TASTE_PLAIN_NOTE);
   });
 
   it("drops the note when a tap walks the last bias back to neutral", async () => {
