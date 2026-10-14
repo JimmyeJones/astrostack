@@ -1,5 +1,117 @@
 # Shipped — the record
 
+## 2026-10-14 (Builder, branch `claude/relaxed-cray-fzxacq`) — `main`'s CI was red, and the test was what was wrong
+
+### v0.495.10 — 🔴 CI RED ON `main`, task #1 (AGENTS.md §8): **the ten "reads columns, not whole rows" guards counted the whole process, and a leaked `job-worker` failed one of them on an innocent read**
+
+**The symptom.** `main`'s own CI run **2294** (`89f01088`, v0.495.9) failed one test out of 7,929:
+
+```
+FAILED tests/webapp/test_last_night.py::test_the_card_builds_no_frame_row_for_the_whole_library
+  - AssertionError: built 1 FrameRow objects for the Last-night card
+    assert 1 == 0
+```
+
+The read it accuses is `_collect_last_night`'s, and that read builds no `FrameRow` at all — v0.495.6 moved
+it onto `Project.iter_night_frames` and nothing has touched it since. The test passed alone, passed under
+`-n 4` on three separate local runs of the suite before the merge, and passed on every PR check. So the
+failure was not about the card.
+
+**Why the counter can be wrong.** `seestack.io.project._row_to_frame` is the single seam every whole-row
+read goes through, which is what makes *"this surface reads columns, not whole rows"* checkable at all: the
+answers are identical either way, so nothing else in the suite would notice a `SELECT *` coming back. Ten
+`tests/webapp` tests from v0.495.5 – v0.495.7 therefore do
+
+```python
+monkeypatch.setattr(project_module, "_row_to_frame", counting)
+```
+
+— and that is a **module global**, so the patch sees every thread in the process. A webapp test does not have
+the process to itself:
+
+* `webapp/main.py`'s lifespan shutdown calls `jm.stop()`, which sets `_stop` and pushes a sentinel on the
+  queue but **never joins the worker**, so a job already in flight keeps running on its daemon thread after
+  the `client` fixture's app has gone;
+* **reproduced**, two tests in one file: submit a scan in the first, and the second one's
+  `threading.enumerate()` is `['MainThread', 'job-worker']` — the previous test's worker, still working on
+  the previous test's (still-present) `tmp_path` data root;
+* and a scan's QC phase builds **exactly one** `FrameRow` per frame —
+  `qc.runner.apply_qc_result_to_db` opens with `project.get_frame(result.frame_id)`, the one single-row
+  reader in `Project`. Hence `built 1`, not `built 35894`.
+
+**And why CI and not here.** CI runs `python -m pytest tests/ -q` **sequentially, in one process**
+(29m30s); the documented local command is `-n 4 --dist worksteal`. Same collection order, four different
+processes — so which neighbours precede this test, and by how much they overlap it, is a different question
+on each. A race that needs one `get_frame` to land inside one request's window is exactly the kind that
+answers differently.
+
+**The fix: attribute the row to the call that asked for it.** New `tests/framerows.py`:
+
+```python
+with frame_rows_built_by(stats.get_last_night) as built:
+    body = client.get("/api/last-night").json()
+assert built() == 0
+```
+
+A row counts only when one of the named calls is somewhere in **its own** caller chain, so a stray row — built
+on a stack holding no frame of ours — cannot reach the count. The assertion, the number and the fail-before
+are unchanged; what changes is that it now measures the surface instead of the process.
+
+Two deliberate details:
+
+* **The calls are passed as objects, not names, and matched on `__code__`.** A string would let a typo or a
+  rename turn one of these guards into a tautology that passes for the wrong reason — the one failure mode
+  this fix could introduce. An empty call list raises rather than defaulting to "count everything", which is
+  the bug being removed.
+* **`tests/` own project-level counters are left alone** (`test_project.py`,
+  `test_project_night_frames.py`, `test_project_health_frames.py`,
+  `test_project_acquisition_values.py`, `test_project_frames_page.py`, `test_session_recap.py`). They build
+  no app, so there is no worker to leak into them, and converting them would be churn.
+
+**All ten webapp sites converted**, each anchored on the function its own claim is about:
+
+| test | anchor |
+|---|---|
+| `test_last_night.py` | `stats.get_last_night` |
+| `test_activity_calendar.py` | `stats.get_activity_calendar` |
+| `test_imaging_log.py` | `stats.get_imaging_log` |
+| `test_api.py` (sky brightness) | `frames.sky_brightness_read` |
+| `test_frames_paging.py` | `frames.list_frames` |
+| `test_target_stack_health.py` | `targets.target_stack_health` |
+| `test_target_restack_gain.py` | `targets.target_restack_gain` |
+| `test_auto_stack_pipeline.py` | the six auto-stack decisions it drives |
+| `test_auto_stack_saved_masters.py` | `pipeline._apply_saved_calibration_masters` |
+| `test_calibration.py` (×2) | `pipeline._confident_master_binding`, `stack._uncalibrated_advice` |
+
+**The anchoring is measured, not assumed** — a stack-based counter that silently never matches would be
+worse than the flake it replaces. Two independent positive controls, both through FastAPI's real
+`run_in_threadpool` hop:
+
+1. **Scratch revert.** Put `_collect_last_night` back on `proj.iter_frames()` and the converted test goes
+   **red** (as it must), then green again on restore.
+2. **A non-zero expectation that still holds.** `test_a_page_request_builds_only_that_pages_rows` asserts
+   `built() == 1` — a page's worth of rows — and still does, so the endpoint's own row *is* being attributed
+   rather than everything being quietly ignored.
+
+**Tests +5** (`tests/test_framerows_counter.py`): a row built under the named call is counted; a column read
+under the same call counts nothing; **a whole-row read on a `job-worker`-named thread against another
+library, while the call under test reads only columns, counts nothing** — the regression, and it is **red
+before** against a plain global counter (`assert 2 == 0`, the interloper's own two rows); naming no call is a
+`ValueError`; and the seam is restored even when the block raises. The interloper opens its own connection
+*on its own thread* on purpose: `sqlite3` refuses one made elsewhere, and a stray row that never got built
+would have made that test prove nothing.
+
+**Nothing in `seestack/` or `webapp/` changed but the version** — no endpoint, response field, config key,
+schema version, on-disk path or default moves, and no production read was altered in either direction. Net
+`ruff` findings on the touched files go **down** by one.
+
+**What is deliberately not built.** `JobManager.stop()` is left as it is. Joining the worker would mean a
+container stop (or a test teardown) waiting out a running stack, and the leak costs nothing on its own — a
+daemon thread writing to a scratch directory nobody reads again. What it cost was a *process-global patch*,
+and the only other one in `tests/webapp` is `test_skipped_folders.py`'s two `scanner` stand-ins, which raise:
+a leftover worker that hit one would fail its own job, not the test's assertion. So the class is closed where
+the damage was.
+
 ## 2026-10-14 (Builder, branch `claude/relaxed-cray-4vizeh`) — the dogfood guard that cried wolf the first time its stalest flag met it
 
 ### v0.495.9 — 🟡 TOOLING / QA honesty (the instrument behind every recent finding): **the view-switch guard reported "a Mantine class rename?" about a control the pass's own data cannot render**

@@ -2849,28 +2849,22 @@ def test_the_form_and_the_coverage_page_describe_one_target_identically(
 # ---- and the walk-away path reads those settings as columns, not as frames ---
 
 
-def _count_frame_objects(monkeypatch):
-    """Arm a counter on the one function that turns a DB row into a `FrameRow`.
+def _count_frame_objects(*under):
+    """Count the `FrameRow` objects built underneath ``under`` while the block
+    is open.
 
     The same trap `tests/test_project_acquisition_values.py` uses, pointed at
     the callers rather than at the primitive: the memory claim is about what
     *they* ask for, and nothing else in the suite would notice a whole-table
-    read coming back.
+    read coming back. The calls are *named* because `_row_to_frame` is a module
+    global and this process is shared — `tests/framerows.py` has the incident.
     """
-    import seestack.io.project as project_module
+    from framerows import frame_rows_built_by
 
-    built = [0]
-    real = project_module._row_to_frame
-
-    def counting(row):
-        built[0] += 1
-        return real(row)
-
-    monkeypatch.setattr(project_module, "_row_to_frame", counting)
-    return built
+    return frame_rows_built_by(*under)
 
 
-def test_the_unattended_binder_builds_no_frame_objects(tmp_path, monkeypatch):
+def test_the_unattended_binder_builds_no_frame_objects(tmp_path):
     """Fail-before: `_confident_master_binding` listed a `FrameRow` for every
     accepted sub to read six small columns off it — 35,894 of them on the
     owner's deepest target, each carrying its own plate-solve header. Measured
@@ -2891,11 +2885,11 @@ def test_the_unattended_binder_builds_no_frame_objects(tmp_path, monkeypatch):
     settings = SimpleNamespace(resolved_library_root=root)
     proj = _proj_with_frames(tmp_path, exposure_s=30.0, gains=[80.0] * 6)
 
-    built = _count_frame_objects(monkeypatch)
-    bound = _confident_master_binding(settings, proj)
+    with _count_frame_objects(_confident_master_binding) as built:
+        bound = _confident_master_binding(settings, proj)
 
     assert Path(bound["dark_path"]).name == dark["filename"]
-    assert built[0] == 0, f"built {built[0]} FrameRow objects to read six columns"
+    assert built() == 0, f"built {built()} FrameRow objects to read six columns"
 
 
 def test_the_uncalibrated_advice_builds_no_frame_objects(client, solved_library,
@@ -2921,8 +2915,8 @@ def test_the_uncalibrated_advice_builds_no_frame_objects(client, solved_library,
     monkeypatch.setattr(calibration_module, "list_masters",
                         lambda root: (reached.append(root), real_list(root))[1])
 
-    built = _count_frame_objects(monkeypatch)
-    stack_module._uncalibrated_advice(SimpleNamespace(app=client.app), safe)
+    with _count_frame_objects(stack_module._uncalibrated_advice) as built:
+        stack_module._uncalibrated_advice(SimpleNamespace(app=client.app), safe)
 
     assert reached, "the advice never got past the acquisition read"
-    assert built[0] == 0, f"built {built[0]} FrameRow objects to read five columns"
+    assert built() == 0, f"built {built()} FrameRow objects to read five columns"

@@ -1646,7 +1646,7 @@ def test_a_healthy_scan_sets_nothing_aside_and_reports_nothing(
 
 
 def test_the_scan_loops_stack_decision_builds_no_frame_objects(
-    solved_library, monkeypatch,
+    solved_library,
 ):
     """Every question the auto-stack trigger asks of a target is a column, and
     it is asked of every target on every poll.
@@ -1666,7 +1666,7 @@ def test_the_scan_loops_stack_decision_builds_no_frame_objects(
     up-to-date target "pays nothing but a couple of DB reads" — a claim about the
     decision as a whole, not about any one of its steps.
     """
-    import seestack.io.project as project_module
+    from framerows import frame_rows_built_by
 
     lib = Library.open_or_create(solved_library / "library")
     try:
@@ -1675,27 +1675,29 @@ def test_the_scan_loops_stack_decision_builds_no_frame_objects(
         settings = _settings(solved_library).model_copy(
             update={"auto_bind_calibration": True})
 
-        built = [0]
-        real = project_module._row_to_frame
-
-        def counting(row):
-            built[0] += 1
-            return real(row)
-
-        monkeypatch.setattr(project_module, "_row_to_frame", counting)
-
-        offered = pipeline._auto_stack_frame_count(lib, safe)
-        # The two rechecks behind it, which the scan reaches on every target
-        # that has *no* new subs — i.e. on most targets, most polls.
-        recheck = pipeline._auto_stack_calibration_recheck(settings, lib, safe)
-        heal = pipeline._auto_stack_degraded_recheck(lib, safe)
-        proj = lib.open_target(safe)
-        try:
-            mixed = pipeline._detect_mixed_pointings(proj)
-        finally:
-            proj.close()
-        depth = pipeline._auto_stack_panel_depth(lib, safe, 3)
-        hold = pipeline._auto_stack_readability_hold(lib, safe, offered or 0, 3)
+        # Each of the six decisions is named, so a row is counted only if the
+        # decision that asked for it is on its own stack — see
+        # `tests/framerows.py` for the leaked `job-worker` this used to count.
+        with frame_rows_built_by(
+            pipeline._auto_stack_frame_count,
+            pipeline._auto_stack_calibration_recheck,
+            pipeline._auto_stack_degraded_recheck,
+            pipeline._detect_mixed_pointings,
+            pipeline._auto_stack_panel_depth,
+            pipeline._auto_stack_readability_hold,
+        ) as built:
+            offered = pipeline._auto_stack_frame_count(lib, safe)
+            # The two rechecks behind it, which the scan reaches on every target
+            # that has *no* new subs — i.e. on most targets, most polls.
+            recheck = pipeline._auto_stack_calibration_recheck(settings, lib, safe)
+            heal = pipeline._auto_stack_degraded_recheck(lib, safe)
+            proj = lib.open_target(safe)
+            try:
+                mixed = pipeline._detect_mixed_pointings(proj)
+            finally:
+                proj.close()
+            depth = pipeline._auto_stack_panel_depth(lib, safe, 3)
+            hold = pipeline._auto_stack_readability_hold(lib, safe, offered or 0, 3)
     finally:
         lib.close()
 
@@ -1703,5 +1705,5 @@ def test_the_scan_loops_stack_decision_builds_no_frame_objects(
     assert offered and offered > 0
     assert recheck is None and heal is None  # nothing stacked yet on this target
     assert mixed is None and depth is None and hold is None
-    assert built[0] == 0, (
-        f"built {built[0]} FrameRow objects deciding whether to auto-stack")
+    assert built() == 0, (
+        f"built {built()} FrameRow objects deciding whether to auto-stack")

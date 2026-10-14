@@ -298,8 +298,7 @@ def test_a_reprocessed_library_still_comes_out_newest_night_first(
     assert [r[-1] for r in rows[1:]] == ["2026-07-24", "2026-07-24"]
 
 
-def test_the_log_reads_one_column_per_sub_not_a_whole_row(client, solved_library,
-                                                          monkeypatch):
+def test_the_log_reads_one_column_per_sub_not_a_whole_row(client, solved_library):
     """The log's per-target "typical star size" is the median of one stored
     column over every accepted sub, and it used to build a whole `FrameRow` per
     sub to read it.
@@ -309,7 +308,9 @@ def test_the_log_reads_one_column_per_sub_not_a_whole_row(client, solved_library
     on a project the size of the owner's deepest target. The run rows the log is
     actually made of are unaffected: `iter_stack_runs` is a different read.
     """
-    import seestack.io.project as project_module
+    from framerows import frame_rows_built_by
+
+    from webapp.routers import stats
 
     targets = client.get("/api/targets").json()
     _register_run(solved_library, targets[0]["safe_name"], basename="only",
@@ -320,17 +321,11 @@ def test_the_log_reads_one_column_per_sub_not_a_whole_row(client, solved_library
     # bundled samples deliberately carry none (see `webapp.site_location`).
     client.put("/api/settings", json={"site_lon": 150.0})
 
-    built = 0
-    real = project_module._row_to_frame
-
-    def counting(row):
-        nonlocal built
-        built += 1
-        return real(row)
-
-    monkeypatch.setattr(project_module, "_row_to_frame", counting)
-    r = client.get("/api/imaging-log.csv")
+    # Attributed to the endpoint's own stack, not to the process — see
+    # `tests/framerows.py` for the leaked `job-worker` this used to count.
+    with frame_rows_built_by(stats.get_imaging_log) as built:
+        r = client.get("/api/imaging-log.csv")
     assert r.status_code == 200
     rows = _parse(r.text)
     assert len(rows) == 2 and rows[1][2] == "30"   # header + the one run
-    assert built == 0, f"built {built} FrameRow objects for the imaging log"
+    assert built() == 0, f"built {built()} FrameRow objects for the imaging log"

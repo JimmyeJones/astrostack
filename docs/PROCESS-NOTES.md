@@ -1,5 +1,94 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, branch `claude/relaxed-cray-fzxacq`) — `main` was red on a *test*, and the authority that said so was free
+
+*(→ **v0.495.10**. Baseline: `main` at `89f01088` (v0.495.9), and its own CI run **2294** a **FAILURE** — one
+test of 7,929, five of six jobs green. Inbox **four open**, confirmed with `list_issues`: #878, #880, #903,
+#1015, every one previously acted-on and owner-gated, unchanged again. One open PR, **#1159**, docs-only from
+the previous run's branch; the `--no-site` LEAD it files was ~30 minutes old when this run read it, i.e.
+claimed-in-spirit under §11, and owner-data-gated besides. "Bugs" held nothing this repo can close and
+"Features that serve real workflows" no open ready entry, so without the red CI this would have been a
+dogfood run.)*
+
+### Read `main`'s own CI conclusion before paying for a local baseline
+
+The run opened by §2's habit — `git fetch`, read the two docs, `source scripts/agent-setup.sh`, start the full
+suite — and on this box that suite is **~70 minutes, not the documented ~11** (4 cores, load pinned at 4.4
+under `-n 4`, which is the right worker count here; the ~11 is someone else's box). At 15 % one
+`mcp__github__actions_list` call on `ci.yml` filtered to `main` answered the same question in seconds and
+answered it **differently**: run 2294 failed, with the failing test named in the job log. The local run was
+killed.
+
+**The rule worth keeping: `main`'s CI conclusion is the authority §8 names, it costs one call, and a local
+baseline is the expensive way to re-derive it.** The two prior runs' notes argue about *ordering* a local
+suite against a dogfood pass (2026-10-13, 2026-10-14); this is the cheaper question upstream of both — on a
+run that starts with `origin/main` unchanged since the last CI push, the baseline is already computed.
+
+### The failure, and why it was not about the code it accused
+
+```
+FAILED tests/webapp/test_last_night.py::test_the_card_builds_no_frame_row_for_the_whole_library
+  - AssertionError: built 1 FrameRow objects for the Last-night card
+```
+
+`_collect_last_night` has read `Project.iter_night_frames` since v0.495.6 and builds **no** `FrameRow`. The
+test passed alone here, passed under `-n 4` on the three local runs quoted in v0.495.6 – .9's own commit
+messages, and passed on every PR check.
+
+Established in this order:
+
+1. `seestack.io.project._row_to_frame` is a **module global**, so `monkeypatch.setattr` of it sees every
+   thread in the process.
+2. **A `job-worker` outlives the `client` fixture** — two tests in one scratch file proved it:
+   `client.post("/api/scan")` in the first, `threading.enumerate()` in the second →
+   `['MainThread', 'job-worker']`. `webapp/main.py`'s lifespan calls `jm.stop()`, which sets `_stop` and
+   pushes a queue sentinel but **never joins**, so a job already running finishes on its daemon thread,
+   against the previous test's `tmp_path` (which still exists).
+3. A scan builds exactly **one** `FrameRow` per frame through the only single-row reader in `Project`:
+   `qc.runner.apply_qc_result_to_db` opens with `project.get_frame(result.frame_id)`. That is the `1`, and
+   it is why the number was not 35,894.
+4. **CI runs `pytest tests/ -q` sequentially in one process; the documented local command is
+   `-n 4 --dist worksteal`.** Same collection order, four processes — so which neighbours precede a test, and
+   how far they overlap it, is a different question in each place.
+
+### Two false leads, recorded so nobody re-walks them
+
+**Fixture contamination: ruled out.** `data_root`, `built_library` and `client` are all function-scoped on
+`tmp_path`, so nothing accumulates across the tests of a file, and the xdist-distributes-a-file theory dies
+with it. **Random ordering: ruled out** — `pytest-randomly` is not installed (`pytest`, `pytest-qt`,
+`pytest-timeout`, `pytest-xdist`), so collection order is deterministic in both places.
+
+**A direct repro did not fire, and that is consistent rather than disconfirming.** Submitting a 120-frame
+scan in the test immediately before a copy of the counting test counted zero: the race needs one `get_frame`
+to land inside one request's window, and a scan either finishes first or spends that window elsewhere. The
+mechanism was established from its three independently-checkable parts instead, and the **fix** was then
+tested against the part that matters — a row built on another thread.
+
+### The generalisation, and the failure mode the fix had to avoid
+
+A test that patches a shared seam is measuring the **process**, and a webapp test does not own its process.
+So name the call: `tests/framerows.py::frame_rows_built_by` counts a row only when one of the named calls is
+on its own caller chain.
+
+The calls are passed **as objects** and matched on `__code__`, not by name, because the obvious stack-walk
+has one bad failure mode of its own: an anchor that never matches makes the count zero for ever and the guard
+passes **for the wrong reason** — silently, which is worse than the flake. An empty call list raises rather
+than defaulting to "count everything", which is the bug being removed. And the anchoring is *measured*, two
+ways, both through FastAPI's real `run_in_threadpool` hop: a scratch revert of `_collect_last_night` to
+`iter_frames()` turns the converted test red, and `test_a_page_request_builds_only_that_pages_rows` still
+asserts `built() == 1` — a non-zero expectation, which no silently-ignoring counter could satisfy.
+
+### What was left alone, with the reason
+
+`JobManager.stop()` still does not join. Joining would make a container stop — and every webapp test teardown
+— wait out a running stack, and the leak is otherwise harmless: a daemon thread writing into a scratch
+directory nobody reads again. Its only cost was to **process-global patches**, and the sweep for the rest of
+that class in `tests/webapp` found exactly one other: `test_skipped_folders.py`'s two `scanner` stand-ins,
+which *raise* — a leftover worker that hit one would fail its own job, not the test's assertion. The six
+engine-side `_row_to_frame` counters in `tests/` (`test_project.py`, `test_project_night_frames.py`,
+`test_project_health_frames.py`, `test_project_acquisition_values.py`, `test_project_frames_page.py`,
+`test_session_recap.py`) build no app, so there is no worker to leak into them; they keep the plain counter.
+
 ## 2026-10-14 (Builder, same run as v0.495.9) — the `--no-site` pass: CLEAN, the fix verified in its second state, and one lead that the pass itself cannot evidence
 
 ### Why a second pass, and the gap it closed in my own work

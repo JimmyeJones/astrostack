@@ -462,7 +462,7 @@ def test_wrong_bayer_phase_saved_dark_still_binds(solved_library, monkeypatch):
 
 
 def test_the_saved_pick_checks_are_read_as_columns_not_as_frames(
-        solved_library, monkeypatch):
+        solved_library):
     """The subs' size and colour-filter phase are two columns, and reading them
     as `FrameRow`s carried every sub's plate solution along for the ride.
 
@@ -475,7 +475,7 @@ def test_the_saved_pick_checks_are_read_as_columns_not_as_frames(
     Both lazy reads are forced here: a wrong-sized dark reaches `_sub_dims`, and
     a wrong-phase flat reaches `_sub_bayer`.
     """
-    import seestack.io.project as project_module
+    from framerows import frame_rows_built_by
 
     root = solved_library / "library"
     wrong_size = _register(root, "dark", name="Other Camera",
@@ -483,24 +483,20 @@ def test_the_saved_pick_checks_are_read_as_columns_not_as_frames(
     wrong_phase = _register(root, "flat", name="Other Phase", exposure_s=None,
                             bayer_pattern="GRBG")
 
-    built = [0]
-    real = project_module._row_to_frame
-
-    def counting(row):
-        built[0] += 1
-        return real(row)
-
-    monkeypatch.setattr(project_module, "_row_to_frame", counting)
-
     lib = Library.open_or_create(solved_library / "library")
     try:
         safe = lib.list_targets()[0].safe_name
         proj = lib.open_target(safe)
         try:
-            skipped = pipeline._apply_saved_calibration_masters(
-                Settings(data_root=str(solved_library)), proj, {},
-                {"dark_master_id": wrong_size["id"],
-                 "flat_master_id": wrong_phase["id"]})
+            # Attributed to the call under test, not to the process — see
+            # `tests/framerows.py` for the leaked `job-worker` this used to
+            # count, which runs this very function for real.
+            with frame_rows_built_by(
+                    pipeline._apply_saved_calibration_masters) as built:
+                skipped = pipeline._apply_saved_calibration_masters(
+                    Settings(data_root=str(solved_library)), proj, {},
+                    {"dark_master_id": wrong_size["id"],
+                     "flat_master_id": wrong_phase["id"]})
         finally:
             proj.close()
     finally:
@@ -509,4 +505,4 @@ def test_the_saved_pick_checks_are_read_as_columns_not_as_frames(
     # Both lazy reads really did run — otherwise the zero below means nothing.
     assert len(skipped) == 2, skipped
     assert any("wasn't used" in s and "pixels" in s for s in skipped), skipped
-    assert built[0] == 0, f"built {built[0]} FrameRow objects to read three columns"
+    assert built() == 0, f"built {built()} FrameRow objects to read three columns"

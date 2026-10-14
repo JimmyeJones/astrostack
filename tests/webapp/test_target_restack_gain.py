@@ -107,8 +107,7 @@ def test_restack_gain_unknown_target_404(client):
     assert client.get("/api/targets/does_not_exist/restack-gain").status_code == 404
 
 
-def test_the_offer_counts_one_column_not_whole_frames(client, built_library,
-                                                      monkeypatch):
+def test_the_offer_counts_one_column_not_whole_frames(client, built_library):
     """The offer needs two counts — how many subs are accepted, and how many of
     them carry a readable capture time — and it was building a `FrameRow` per
     sub to take them, plate solution and all.
@@ -117,19 +116,16 @@ def test_the_offer_counts_one_column_not_whole_frames(client, built_library,
     deepest target, measured at 1,132 ms against 370 ms for identical counts.
     The answer is unchanged either way, so only a test like this can see it.
     """
-    import seestack.io.project as project_module
+    from framerows import frame_rows_built_by
+
+    from webapp.routers import targets as targets_router
 
     safe = client.get("/api/targets").json()[0]["safe_name"]
     _register_run(built_library, safe, ts="2026-08-30T14:32:05Z")
 
-    built = 0
-    real = project_module._row_to_frame
-
-    def counting(row):
-        nonlocal built
-        built += 1
-        return real(row)
-
-    monkeypatch.setattr(project_module, "_row_to_frame", counting)
-    assert client.get(f"/api/targets/{safe}/restack-gain").status_code == 200
-    assert built == 0, f"built {built} FrameRow objects to take two counts"
+    # Attributed to the endpoint's own stack, not to the process — see
+    # `tests/framerows.py` for the leaked `job-worker` this used to count.
+    with frame_rows_built_by(targets_router.target_restack_gain) as built:
+        r = client.get(f"/api/targets/{safe}/restack-gain")
+    assert r.status_code == 200
+    assert built() == 0, f"built {built()} FrameRow objects to take two counts"
