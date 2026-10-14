@@ -1,5 +1,55 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, branch `claude/relaxed-cray-8ak3vj`, same run as v0.495.6) — the caller sweep is now a *method*, and two notes it produced
+
+**The method, stated so it can be reused.** The previous run's note said that when a repo has measured a read
+and built a cheap replacement, the next bug is in **the callers the migration stopped short of**. This run
+applied it mechanically rather than by inspiration: `grep -rn 'iter_frames('` over `webapp/` and `seestack/`,
+then for each hit ask only *"which fields does this caller actually read?"*. Thirteen hits; most are honest
+(the stacker and QC want whole rows, `site_location` and `system.py` break out early, three in `stats.py`
+and two in `frames.py` stream), and the cluster worth a version was the four night summaries. The sweep took
+about twenty minutes and is repeatable on any `Project` read — `iter_stack_runs` is the obvious next one, and
+it is *not* obviously wasteful (a `StackRunRow` has no `wcs_json`-sized column), which is why it was not
+picked up here.
+
+**Note 1 — a record earns its name from the set of consumers, not from the first one.** The task started as
+"the Dashboard's last-night recap reads whole rows" (four fields), and the four-field record would have been
+shipped had the sweep stopped there. Reading `session_recap.py`'s *other* whole-row readers turned up three
+more surfaces wanting the same five fields, and three of those are on the Target page rather than the
+Dashboard — a bigger win, found by widening the record by one field. The tell that the fifth field belonged
+was that `_session_median_fwhm` is shared by two of the four already. So: before naming a reduced record,
+grep its module for the other reads of the same table and see whether one record covers them; a record named
+after one caller tends to need a sibling within a run or two.
+
+**Note 2 — "three cards" is a different finding from "three endpoints".** The milliseconds here were never
+going to carry a version on their own (1.7 s → 0.7 s on a cached-ish read). What did was reading the
+*frontend*: `InsightTabs` renders every group and keeps the panels **mounted** on purpose — it measures which
+cards produced DOM so an empty group gets no tab — so the three Target-page night cards are not alternatives,
+they all fire on one view, and their peaks coincide (~437 MB → ~36 MB on the owner's deepest target). Same
+shape as v0.495.4's lesson one level out: when a finding is about several surfaces, **go and read how the
+page hosts them** before sizing it. A per-endpoint cost multiplies by however many of them one view mounts.
+
+**Two smaller things, recorded rather than argued.**
+
+* **The fail-before for a new *method* needs a path that does not name it.** `tests/test_project_night_frames.py`
+  cannot even import against `origin/main` (no `_NIGHT_COLUMNS`), which is the trap `docs/AGENT-ENVIRONMENT.md`
+  records for a new *module* showing up one level down. The honest fail-before is the no-row count taken
+  **through the three public functions** and **through the endpoint** — `session_recap built 34 FrameRow
+  objects`, `built 13 FrameRow objects for the Last-night card` — both verified in a `git worktree` at
+  `origin/main` with `seestack.io.project.__file__` checked to be inside the worktree.
+* **The endpoint-level "builds no row" assertion has a second reader in the request, and it is a feature.**
+  The Last-night test first failed at `built 12`: with no configured site, `resolve_site_lon` sniffs
+  `SITELONG` out of the subs' own headers and walks every accepted frame to do it (the bundled samples
+  deliberately carry none). The test now sets `site_lon` first and says why. That read is a genuine third
+  caller of the same shape, bounded by `max_probes` and breaking on the first readable path, so it was left
+  alone — but it is the reason a whole-request row count is not the same claim as a function's.
+* **Lint:** the two generic annotations added to `session_recap.py` (`_last_session_frames`,
+  `recent_session_window_frames`) take that file's `UP047 non-pep695-generic-function` count from 2 to 4.
+  Deliberate: the module already states its generics with `TypeVar` (`_TimedT`, right above the first of
+  them), PEP 695 syntax appears nowhere in this repo, and the alternative was an annotation that names a
+  record the function is no longer only called with. Every other rule's count on all three touched files is
+  byte-identical to `main`'s.
+
 ## 2026-10-14 (Builder, same run as v0.495.5) — `scripts/agent-dogfood.sh --deep` CLEAN, and the gate it could not answer
 
 *(Run after the branch was pushed and while CI was running, so no `pytest` was in flight — §7's ordering.

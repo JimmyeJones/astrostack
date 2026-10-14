@@ -2,6 +2,41 @@
 
 ## 2026-10-14 (Builder, branch `claude/relaxed-cray-8ak3vj`) — the four night summaries stop building a whole row for every sub, and three of them are one page
 
+*(Two versions, one sweep: v0.495.6 is the four night summaries, v0.495.7 the two streaming reads the same sweep turned up.)*
+
+### v0.495.7 — 🟠 POLISH (the same caller sweep, the two reads where it is time rather than peak): **the Dashboard's night fold and the imaging-log CSV built a whole `FrameRow` per sub to read three fields and one.** `webapp/routers/stats.py::_collect_night_acc` and `_collect_imaging_log` read `Project.iter_frame_columns`.
+
+Both of these **stream** — the fold is handed a generator and the log builds a list of floats — so unlike
+v0.495.6 there is no retained set to shrink and the whole cost is building the rows. Measured on the same
+synthetic project (35,894 subs over 300 nights, ~2 kB of `wcs_json` each, best of 3), with an identical fold
+and an identical median:
+
+| read | whole rows | columns |
+|---|---|---|
+| the night fold (`timestamp_utc`, `exposure_s`, `fwhm_px`) | 1,552 ms | 920 ms |
+| the imaging log's per-target median FWHM (`fwhm_px`) | 937 ms | **192 ms** |
+
+The fold's remaining 920 ms is `night_date_of` parsing every stamp, which both arms pay; the log's read is
+the one where the row *was* the cost. The fold is the walk behind **three** surfaces (the Dashboard's imaging
+calendar, the recap poster and the year recap — one cached accumulator between them, keyed on each target's
+activity stamp, so a night of shooting rebuilds it every scan); the log is a one-tap download that is
+deliberately not cached.
+
+Filed and shipped together with v0.495.6 because they are the same sweep: `grep -rn 'iter_frames('` and then
+"which fields does this caller read?". What is left after these two is honest — the stacker, QC, grading,
+`livesession` and the sky-transparency trend want whole rows; `site_location` and `system.py` break out early;
+`frames.py`'s auto-grade and bulk-reject paths read most of the row.
+
+**Upgrade-safe (§9):** read-path only — no endpoint, response field, config key, schema version, on-disk path
+or default changes, and nothing removed.
+
+**Tests (+2, both fail before).** `tests/webapp/test_activity_calendar.py`: the calendar request builds **no**
+`FrameRow` for the whole library while still naming the night's median star size (fail-before: *"built 6
+FrameRow objects for the night fold"*). `tests/webapp/test_imaging_log.py`: the same for the CSV, with the run
+row it is made of asserted unchanged (fail-before: *"built 6 FrameRow objects for the imaging log"*). Both set
+`site_lon` first, for the reason the v0.495.6 entry records: `resolve_site_lon` otherwise walks the frames
+itself.
+
 ### v0.495.6 — 🟠 BUG FIX (memory on the pages the owner opens most, AGENTS.md §10's OOM history): **the Target page's three night cards and the Dashboard's "Last night" each built a `FrameRow` for every sub of the target to read five small fields — and the three Target-page cards all mount on one view, so ~437 MB of plate-solve header text was asked for at once on his deepest target.** New `seestack/io/project.py::FrameNight` + `Project.iter_night_frames` (over `_NIGHT_COLUMNS`); `seestack/session_recap.py::session_recap`, `focus_trend` and `nights_breakdown` read it, and so does `webapp/routers/stats.py::_collect_last_night`.
 
 *(Baseline: local suite **7916 passed, 7 skipped** in 20m26s on `main` at `f437029e` (`__version__` 0.495.5),
