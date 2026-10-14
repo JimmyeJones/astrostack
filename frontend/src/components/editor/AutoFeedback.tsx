@@ -45,6 +45,18 @@ export const AUTO_FEEDBACK_CHIPS: AutoFeedbackChip[] = [
   { cue: "core_flat", label: "Core looks flat", group: "Bright core" },
 ];
 
+/** The stand-in for the "why Auto shifted" line while the *measured* one is still
+ * in flight — the first tap on a neutral profile, where
+ * :func:`mergeMeasuredPreferences` has no measured note to keep.
+ *
+ * It claims only what `neutral: false` establishes — a taste exists — and nothing
+ * whatever about *this* picture, which is the line the narrowing draws. The
+ * server's un-narrowed note would say what Auto "is running", which on the
+ * owner's own shape is the untruth `editor._run_inert_bias_params` exists to
+ * stop; this says less instead of saying something unmeasured.
+ */
+export const AUTO_TASTE_PLAIN_NOTE = "Auto has learned a taste from your taps.";
+
 /** Cluster the chips by what they're about, in first-appearance order. Pure.
  *
  * Every cue keeps its own button and every walk-back chip stays one tap away,
@@ -208,6 +220,24 @@ export function AutoFeedback(
   });
   const busy = feedback.isPending || reset.isPending;
   const note = prefs.data?.note ?? null;
+  // Is there a taste to undo? `neutral` is the server's own answer to exactly
+  // that, and the feedback POST carries it for free, so it is known even while
+  // the measured, narrowed note is still in flight.
+  //
+  // This is asked separately from `note` because the Reset link lives inside the
+  // note's line, and `auto_prefs.describe_profile`'s own docstring is explicit
+  // that it must never vanish — *"the note is the only place the Reset link
+  // lives, so a note that vanished would take a control with it"*. The engine
+  // keeps that invariant: `describe_profile` returns `None` on exactly the
+  // condition `is_neutral` is true. `mergeMeasuredPreferences` then *breaks* it
+  // on the client, in one narrow state the server never serves — the **first**
+  // tap, where keeping "the last measured note" means keeping nothing — so the
+  // tap that created the taste took away the one control that undoes it, until
+  // the background re-read landed behind the Auto re-run that same tap started
+  // (seconds on a mosaic the owner's size; a blink on a single field, which is
+  // why five editor drives on the 6-frame sample never saw it and the first
+  // `--dithered --editor` pass did).
+  const resettable = prefs.data ? !prefs.data.neutral : false;
   // Recency decay eases an unreinforced taste back toward Auto's measured
   // default. Say so when it has actually moved something — including when it has
   // moved *everything*, which is the case that would otherwise look like the
@@ -257,9 +287,9 @@ export function AutoFeedback(
           </Stack>
         ))}
       </Group>
-      {note ? (
+      {note || resettable ? (
         <Text size="10px" c="dimmed" mt={2}>
-          {note}{" "}
+          {note ?? AUTO_TASTE_PLAIN_NOTE}{" "}
           <Anchor component="button" type="button" inherit
             onClick={() => reset.mutate()} disabled={busy}>
             Reset
