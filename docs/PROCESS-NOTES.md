@@ -16,6 +16,24 @@ same figure the 2026-10-13 `--mosaic` pass recorded; `[phone] /glossary` 3,364).
 mechanical — grep the constant you added for the pass-states that reach it — and it is exactly the step whose
 absence created the bug being fixed.
 
+### And the docs PR's own CI went red, which is the third record of this run
+
+`Frontend build + tests` **failed on a docs-only PR** (#1159) — `Editor.test.tsx > EditorView > offers the
+user's saved default recipe`, *"Unable to find an element with the text: Stretch"*. The diff touches four
+`.md` files, and the identical frontend code had passed on #1158 **49 minutes earlier**, so it is not this
+PR's. The temptation is to press re-run; what the rules ask for first is a root cause, and reading got one:
+the file is 142 tests and **62.6 s locally** (green), three of its tests gate on
+`await screen.findByText("Stretch")` at testing-library's 1 s default, and the comment directly above the
+failing line records that a previous run *already* moved this wait once because gating elsewhere *"raced and
+flaked in slower CI"*. **Second flake, same line, same shape** — filed with its evidence under "Bugs", not
+fixed, because a timeout that only fires under contention cannot be given the §5 fail-before and raising the
+constant on a hunch is a blind flip.
+
+**The method note worth keeping: a red check on a diff that cannot have caused it is a finding about the
+suite, not a reason to re-run.** Pressing re-run would have been correct by the letter of the flake rule (it
+passed earlier on this exact code) and would have thrown away the one observation that makes it actionable —
+that it is the *second* occurrence at that line. The cost of reading was five minutes.
+
 ### The finding, and the discipline of not filing it as a bug
 
 Reading the Target-page paragraph as the probe asks produced a real pair: the readiness/grain card saying *"the
