@@ -1,5 +1,45 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-14 (Builder, branch `claude/brave-albattani-gqf5wp` — **both usual doors were shut
+(Bugs dry, the big-picture dogfood paid), and the task came from reading the CALLERS of a read this repo had
+already measured. v0.495.5.**
+
+**What this run did.** `main` green (local **7908 passed, 7 skipped** in 18m39s; CI run 2276 on the exact HEAD
+`7a862c55`), no open PRs, inbox four open and every one already acted-on and owner-gated — unchanged again.
+"Bugs" held nothing reproduced and §2's whole-journey pass was paid on 2026-10-13, so this run grepped the
+*consumers* of `Project.iter_health_frames` — the read whose own docstring carries a measurement — and found
+the four endpoints the v0.471.x/v0.475.1 migration stopped short of.
+
+**v0.495.5.** The "one frame vs your stack" pick built a whole `FrameRow` — `SELECT *`, plate-solution header
+text and all — for **every sub of the target** in order to choose one of them: measured at **1,477 ms /
+153.3 MB peak → 719 ms / 11.7 MB** on a project the size of his deepest target (35,894 subs), identical sub
+chosen. Three things made it a version rather than a cleanup: `FrameHealth` has carried `sky_adu_median`
+*"for the reference-sub pick"* since v0.475.1 and the pick never took it; `StackNoiseBadge` fires the endpoint
+on **every Target-page view**, again per run on Jobs, and `OneFrameVsStackCard` twice per run card on History,
+so one page can ask for that peak several times; and **the badge's cache did not cover it** — the stamp is
+fingerprinted on the sub's *id*, which only the whole-row sweep could supply, so every cached repeat view paid
+in full for an integer it already had. His own install does not change one byte of output: same pick, same
+ratios, same 404s.
+
+**START HERE NEXT RUN.** (a) **The issue inbox is still the frontier** — list the open issues first. (b) "Bugs"
+is unchanged except for **one new ⚪** filed by this run: both reveal handlers do their project read on the
+**event loop** (719 ms at his depth even after the fix) and the honest next step is a `--deep` pass in a real
+browser, not moving one `await`. The rest is as before: the DECIDE-DO-NOT-FLIP pass count (decided, with
+numbers), the two owner-data-gated LEADs, the inert-feedback-chip LEAD and the ⚪ notes. (c) **`--deep` was run this run and came back
+CLEAN** (301 of 1,200 rows, 7,578 nodes, 1,685 ms first paint, the scroll-grow firing, every figure the
+standing baseline), so the stalest flags are now `--closing` (2026-09-26) and `--restack` (2026-10-05); §2's
+whole-journey pass is paid to 2026-10-13. Its one carried lesson: `--deep` **cannot** answer the new ⚪'s gate,
+because it deliberately leaves the deep target unstacked, so the reveal's handlers never mount there — a
+flag's documented omission is as load-bearing as what it loads. (d) Both record files still have headroom
+(`PROCESS-NOTES.md` ~12,500/18,000, `SHIPPED.md` ~38,800/64,000).
+
+**The method note worth carrying.** When a repo has *measured* a read and built a cheap replacement, the next
+bug is usually not in either one — it is in **the callers the migration stopped short of**. Grep for the
+helper the measurement names rather than for the symptom; the tell here was a docstring advertising a
+capability ("a caller may hand it `FrameHealth` records as readily as whole rows") that no caller used. And
+read a cache twice: once for what it saves, and once for **what it still has to compute in order to use it** —
+this one saved the pixels and not the rows. Earlier notes stand below.)*
+
 *Last edited 2026-10-13 (Builder, branch `claude/brave-albattani-32mwni` — **§2's owed big-picture dogfood,
 run on the stalest flag there is; it came back mechanically clean and its one finding was in what the page
 SAYS. v0.495.4.**
