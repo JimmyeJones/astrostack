@@ -24,6 +24,7 @@ import { AmbientSettings } from "../components/AmbientSettings";
 import { NightSkySettings } from "../components/NightSkySettings";
 import { SkylineEditor } from "../components/SkylineEditor";
 import { SectionTabs, type PageSection } from "../components/SectionTabs";
+import { MoreSettingsSection } from "../components/settings/MoreSettings";
 import type { SettingsSection } from "../settingsSections";
 import { minMaxIgnoresWeightingHint } from "../weightingHint";
 import { folderConflict, settingsErrorMessage } from "../settingsFolders";
@@ -107,19 +108,38 @@ export function withWalkAway(
   return next;
 }
 
+/**
+ * Settings whose stored value is *meaningfully* blank.
+ *
+ * `dropEmptyFields` below drops an emptied box so a cleared numeric can't 422
+ * the whole save — but these three are strings whose blank is a real answer
+ * ("the standard folder under the data root"; "work the subnet out for me"),
+ * and dropping their `""` took away the only way back from a custom value:
+ * clearing **Incoming dir** and pressing Save kept the old path, silently, for
+ * ever. `data_root` is deliberately *not* here — it has no blank meaning, so an
+ * emptied one must keep the installed path rather than repoint the app at
+ * nothing. `astap_path` isn't either: its own control already sends `null`.
+ */
+export const BLANKABLE_FIELDS = new Set([
+  "incoming_dir",
+  "library_root",
+  "seestar_scan_subnet",
+]);
+
 // Drop keys the user emptied out (value === "") before PUTting the settings
 // patch. A cleared *non-nullable* numeric field (quiet period, ASTAP FOV, …)
 // would otherwise be sent as 0 or "" and fail the backend's ge= bounds with a
 // raw 422 — losing every *other* edit in the form behind a pydantic toast.
 // Omitting the emptied field instead keeps its stored value and lets the rest
 // save. Nullable fields the user explicitly clears send `null` (not ""), so
-// they are preserved here and still cleared server-side.
+// they are preserved here and still cleared server-side — as are the fields
+// above, for which blank is the value rather than the absence of one.
 export function dropEmptyFields(
   patch: Record<string, unknown>,
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(patch)) {
-    if (v === "") continue;
+    if (v === "" && !BLANKABLE_FIELDS.has(k)) continue;
     out[k] = v;
   }
   return out;
@@ -141,6 +161,7 @@ export const SETTINGS_PAGE_SECTIONS: { key: SettingsSection; label: string }[] =
   { key: "stacking", label: "Stacking" },
   { key: "telescope", label: "This device" },
   { key: "maintenance", label: "Maintenance" },
+  { key: "more", label: "More settings" },
 ];
 
 type HorizonPoint = [number, number];
@@ -893,7 +914,13 @@ export function SettingsView() {
   const walkAway = walkAwayEnabled(form);
   const setWalkAway = (on: boolean) => setForm((p) => withWalkAway(p, on));
   const num = (k: string) => (form[k] === null || form[k] === undefined ? "" : (form[k] as number));
-  const lbl = (k: string, label: string) => <HintLabel label={label} hint={HINTS[k]} />;
+  // `data-setting` is how "nothing was removed" stays checkable: `HINTS` is the
+  // page's own register of every labelled setting, and this stamps the key of
+  // each one onto the DOM, so a redesign slice that rehomes a control is fine
+  // and one that drops it fails a test (see "Settings — nothing was removed").
+  const lbl = (k: string, label: string) => (
+    <span data-setting={k}><HintLabel label={label} hint={HINTS[k]} /></span>
+  );
 
   // Auto-stack defaults (global). Per-target "Save as defaults" overrides these.
   const stackOpts = (form.default_stack_options as Record<string, unknown>) ?? {};
@@ -1104,7 +1131,7 @@ export function SettingsView() {
             allowDecimal={false} w={{ base: "100%", xs: 260 }}
             onChange={(v) => set("min_target_altitude_deg", v === "" ? 30 : Number(v))} />
 
-          <div>
+          <div data-setting="horizon_profile">
             <HintLabel label="Your skyline" hint={HINTS.horizon_profile} />
             <Text size="xs" c="dimmed" mb="xs">
               Draw where trees or buildings block your low sky, and the planner
@@ -1301,6 +1328,21 @@ export function SettingsView() {
         <BackupRestore />
         <AccessControl />
       </Stack>
+    ),
+    // Slice 1 of the approved Settings redesign. Additive on purpose: every
+    // control it holds also still sits on the section above that has always
+    // held it, and both edit this one `form`, so the two can never disagree
+    // and nothing has been taken away while the later slices rebuild the rest.
+    more: (
+      <MoreSettingsSection
+        form={form}
+        onPatch={(p) => setForm((prev) => ({ ...prev, ...p }))}
+        ctx={{ cpuCount: system.data?.cpu_count ?? null }}
+        conflict={conflict}
+        resolvedIncoming={settings.data.resolved_incoming_dir}
+        resolvedLibrary={settings.data.resolved_library_root}
+        saveRow={saveRow()}
+      />
     ),
   };
 

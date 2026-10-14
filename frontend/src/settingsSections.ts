@@ -22,6 +22,9 @@ export const SETTINGS_SECTIONS = [
   "stacking",
   "telescope",
   "maintenance",
+  // The plain-words home for the settings the owner called "scary to mess
+  // with" — slice 1 of the approved redesign (`docs/design/settings-redesign.md`).
+  "more",
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
