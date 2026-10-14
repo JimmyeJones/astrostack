@@ -21,6 +21,17 @@ sweep's library never renders — Gallery's and History's are behind a modal and
 on data the sample does not have — so "every file with a SegmentedControl is on
 the list" would be false for honest reasons, and asserting it would push the
 probe into warning about pages whose landing state legitimately has no switch.
+
+And one route on the list renders its switch only on data a pass may not have,
+which this file now covers too. `/tonight`'s switch is the object-type filter
+inside "Start something new", and `Tonight.tsx` returns an alert in place of
+that whole planning body without an observing site or a dark window — so on
+`--empty` and `--no-site` the guard reported a Mantine rename about a control
+that could not exist. `VIEW_SWITCH_PRECONDITIONS` in the probe exempts such a
+route by asking the **running app** the same two questions the page's own early
+returns ask; the tests below pin that it only ever exempts a route the guard
+actually watches, and that the questions it asks are still the ones the page
+is gated on.
 """
 
 from __future__ import annotations
@@ -45,12 +56,31 @@ _ROUTE_COMPONENT = {
 
 _KNOWN_RE = re.compile(r"const KNOWN_VIEW_SWITCHES\s*=\s*\[(.*?)\]\s*;", re.DOTALL)
 _QUOTED_RE = re.compile(r'"(/[^"\n]*)"')
+_PRECOND_RE = re.compile(
+    r"const VIEW_SWITCH_PRECONDITIONS\s*=\s*\{(.*?)\n\};", re.DOTALL)
+
+#: The two fields `Tonight.tsx`'s early returns gate its planning body on — and
+#: so the two the probe's `/tonight` precondition has to ask about. Named here
+#: rather than inferred so a page that stops gating on one of them goes red
+#: where somebody will read it.
+_TONIGHT_GATE_FIELDS = ("location_source", "dark_window")
 
 
 def _known_view_switches() -> list[str]:
     body = _KNOWN_RE.search(_PROBE.read_text(encoding="utf-8"))
     assert body, "dogfood_probe.mjs no longer declares KNOWN_VIEW_SWITCHES"
     return _QUOTED_RE.findall(body.group(1))
+
+
+def _precondition_block() -> str:
+    body = _PRECOND_RE.search(_PROBE.read_text(encoding="utf-8"))
+    assert body, (
+        "dogfood_probe.mjs no longer declares VIEW_SWITCH_PRECONDITIONS. "
+        "Without it the view-switch guard reports a Mantine rename on every "
+        "--empty / --no-site pass, because /tonight's switch is inside a "
+        "planning body the page does not render without a site."
+    )
+    return body.group(1)
 
 
 def test_every_named_route_really_has_a_view_switch() -> None:
@@ -95,4 +125,68 @@ def test_the_probe_discovers_switches_rather_than_listing_them() -> None:
         "COMPARE_MODES is declared again. It listed two labels on one route; "
         "viewSwitches finds every switch on every route with no list to keep in "
         "step. (The name may still appear in a comment explaining the history.)"
+    )
+
+
+def test_a_data_gated_switch_only_ever_exempts_a_route_the_guard_watches() -> None:
+    """A precondition is an exemption from a finding, so it must not invent one.
+
+    A route named here but not in ``KNOWN_VIEW_SWITCHES`` exempts nothing and
+    reads as cover for a page nobody checks; one not in ``_ROUTE_COMPONENT``
+    cannot be checked by the test above either.
+    """
+    gated = _QUOTED_RE.findall(_precondition_block())
+    assert gated, (
+        "VIEW_SWITCH_PRECONDITIONS names no route. /tonight needs one: its "
+        "switch lives inside a planning body Tonight.tsx replaces with an "
+        "alert when there is no observing site."
+    )
+    known = set(_known_view_switches())
+    stray = sorted(r for r in gated if r not in known)
+    assert not stray, (
+        f"these routes carry a view-switch precondition but are not in "
+        f"KNOWN_VIEW_SWITCHES, so they exempt nothing: {stray}"
+    )
+    unmapped = sorted(r for r in gated if r not in _ROUTE_COMPONENT)
+    assert not unmapped, (
+        f"these gated routes have no entry in _ROUTE_COMPONENT: {unmapped}"
+    )
+
+
+def test_tonights_precondition_asks_what_its_page_is_actually_gated_on() -> None:
+    """The exemption must track the page, not a snapshot of it.
+
+    The precondition asks the running app rather than re-deriving the rule, and
+    the fields it asks about are the ones ``Tonight.tsx``'s own early returns
+    read. If the page stops gating on one of them, the probe is exempting
+    `/tonight` for a reason that no longer holds — which is the same silent
+    shrink in coverage the guard exists to prevent, arrived at from the other
+    side.
+    """
+    block = _precondition_block()
+    src = (_ROUTES_DIR / _ROUTE_COMPONENT["/tonight"]).read_text(encoding="utf-8")
+    for field in _TONIGHT_GATE_FIELDS:
+        assert field in block, (
+            f"/tonight's precondition no longer asks about {field!r}, which "
+            "Tonight.tsx returns an alert on."
+        )
+        assert field in src, (
+            f"Tonight.tsx no longer reads {field!r}, so the probe's /tonight "
+            "precondition is asking the wrong question. Re-read the page's "
+            "early returns and update VIEW_SWITCH_PRECONDITIONS."
+        )
+
+
+def test_the_guard_consults_the_preconditions_before_reporting() -> None:
+    """Declaring the map is not using it.
+
+    Source-level like the rest of this file (the probe needs a browser and a
+    running app to execute), and it pins the one line that turns the map into
+    behaviour: the guard has to read it before it counts a finding.
+    """
+    text = _PROBE.read_text(encoding="utf-8")
+    assert "VIEW_SWITCH_SKIPPED[switchPath]" in text, (
+        "the view-switch guard no longer consults VIEW_SWITCH_SKIPPED, so a "
+        "route whose switch this pass cannot render is reported as a finding "
+        "again."
     )

@@ -569,6 +569,20 @@ the repo.
 > them unequal, because the deep folder being the one with more frames and the
 > shallow one the more recent is the shape v0.480.4 turns on.
 >
+> **A switch the pass's own data cannot render is a `[note]`, not a finding** *(added
+> 2026-10-14 with v0.495.9)*. The probe names the routes where a view switch is
+> known to exist (`KNOWN_VIEW_SWITCHES`) so a Mantine class rename — which would
+> find nothing *everywhere* — becomes a printed finding rather than a sweep that
+> silently covers less. One of those five is gated on data: `/tonight`'s switch
+> is the object-type filter inside "Start something new", and `Tonight.tsx`
+> replaces that whole planning body with an alert when there is no observing site
+> or no dark window — i.e. on exactly `--empty` and `--no-site`. So a route may
+> now carry a `VIEW_SWITCH_PRECONDITIONS` entry asking the **running app** (for
+> `/tonight`, the two fields the page's own early returns read), and a route that
+> fails it prints what it did not get to sweep instead of a finding. **Read a
+> `[note] /tonight: no view switch expected on this pass` as coverage you do not
+> have, not as a clean bill** — use a sited pass for it.
+>
 > **Follow it with `scripts/agent-dogfood.sh --empty`** (≈1 min once playwright is
 > installed): the same probe against an app with **no data at all**. Every
 > measurement this script took before 2026-09-07 was of the *sample-loaded* app, so
