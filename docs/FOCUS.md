@@ -66,6 +66,82 @@ request. A feature slice is a path through code nobody has walked in that direct
 hands you a button, implement the button rather than the surface around it, and follow its value to the wire.
 Earlier notes stand below.)*
 
+*Last edited 2026-10-14 (Builder, branch `claude/nifty-lamport-2zshr5` — **the backlog's one ready item was
+claimed twice over, so the run took §2's two other doors — the stalest dogfood flag, and a question a
+just-merged spec had written down for a Builder — and each one found a bug. v0.495.14 + v0.495.15.**
+
+**What this run did.** Baseline in one call: `main`'s CI run **2309** green on the exact HEAD `228970d8`
+(v0.495.13). Inbox listed with `list_issues`: **four open (#878, #880, #903, #1015), every one previously
+acted-on and owner-gated, nothing new owed.** The local suite was started and then **deliberately stopped at
+~20 %**: the plan contained a dogfood pass, and [`PROCESS-NOTES.md`](PROCESS-NOTES.md)'s 2026-10-13 rule says
+the dogfood goes first. That run learned it by throwing a suite away at 14 %; this one paid the lesson instead
+of re-learning it.
+
+**§11 closed the one ready item.** "Bugs" was read entry by entry: every one is a decided stand-down carrying
+numbers or gated on a measurement only his library has. "Features that serve real workflows" was read end to
+end: every entry shipped, closed, declined, or waiting on something that has not happened. The exception was
+the new **⭐ owner-approved Settings page redesign** — filed by a `docs:` commit **twenty minutes** before this
+run started, on PR **#1165** whose head was pushed at 19:46. Claimed-in-spirit *and* claimed by a live branch.
+It merged at ~20:20, during this run, which is the only reason its spec was editable here.
+
+**v0.495.15 — the tap that creates a taste took away the only way to undo it.** Found by
+`agent-dogfood.sh --dithered --editor`, the stalest flag (last run 2026-10-11), on the owner's own canvas
+shape: tapping "Too dark" left *"no note — and the Reset link lives inside it, so there is now no way to undo
+it"*, where the field sample three minutes earlier was fine. `AutoFeedback` renders Reset **inside** the "why
+Auto shifted" line, and `mergeMeasuredPreferences` keeps *the last measured* note across a scoped tap
+(right: the POST measures no picture and its sentence can over-claim about this one). **The first tap is the
+one case with nothing to keep** — a neutral profile has no note — so `note` became `null` and the control
+went with the sentence, until a background re-read that on a mosaic sits behind the Auto re-run the same tap
+starts. **The engine had already written the invariant down:** `auto_prefs.describe_profile` says *"the note is
+the only place the Reset link lives, so a note that vanished would take a control with it"*, and it keeps it —
+`None` on exactly the condition `is_neutral` is true. **The client was manufacturing the one state the server
+never serves.** The fix separates control from sentence (`resettable = !prefs.data.neutral`, which the POST
+answers for free) with a new `AUTO_TASTE_PLAIN_NOTE` standing in — claiming only that a taste exists and
+nothing about this picture, because borrowing the un-narrowed note would undo v0.492.56/.57. Tests +1, red
+before, measured by reverting the two render lines: exactly that test fails, the other 31 pass.
+
+**v0.495.14 — the solve path with no test behind its field of view, found by answering the spec's own
+question.** The merged spec asks a Builder to *"confirm how the solver uses `astap_fov_deg` vs the frame's own
+`FOCALLEN`/`XPIXSZ`"*. The answer: **the setting is a fallback everywhere** — `solve_one` derives from the
+frame, the rescue path from the reference sub, and *nothing* uses it unconditionally (Settings' own "Test
+ASTAP" looked like the exception and solves a real ingested frame through `solve_one`; that clause was wrong
+in my first draft and was caught by opening the function rather than trusting the grep line). So the proposed
+warning *"most frames won't be placed"* is **false of any Seestar frame**, "Read from my photos" cannot be one
+of three choices, and a three-way control cannot be stored at all (`astap_fov_deg` is a bounded float; an
+"auto" value would re-type the field, which §9 forbids). All of that is now in that row of the spec. **And the
+read found the gap:** the bootstrap path hands `_default_deep_solver` its FOV explicitly and **27 tests over
+that module asserted nothing about the number**, so passing `fov_deg` straight through would have stayed green
+while sending an S30's 2.1° field as 1.3°, on exactly the subs that already failed once. Tests +2, in a **new**
+fixture with the owner's own optics (the existing one writes none and could not have shown it); fail-before
+measured in a scratch worktree (`assert 7.5 == 0.2658526666666667`).
+
+**START HERE NEXT RUN.** (a) **Read `main`'s own CI result first** (`actions_list` on `ci.yml`/`main`) — one
+call, and it is the only thing that speaks for the merge commit. (b) **Slice 1 of the Settings redesign is the
+front of the queue**, and three things are already waiting for whoever takes it: the FOV row is **answered in
+the spec**; the page's form is seeded from an effect and is safe **only** because `queryDefaults.ts` sets
+`refetchOnWindowFocus: false`, so any slice that adds a query there re-opens it; and `dropEmptyFields` makes a
+cleared box a silent no-op, so **"Back to default" has to be an explicit control**. (c) **The inbox is still
+the frontier** and all four issues are owner-gated. (d) **The class worth carrying from v0.495.15 travels:**
+*which control is gated on which piece of data, and is that datum allowed to lag?* Reset was gated on a
+sentence that is deliberately allowed to be a beat late. Ask it of any control rendered inside a sentence.
+(e) Dogfood: this run paid **`--dithered --editor`**; `--editor --big` and `--calibration`/`--incoming-lag`
+were paid 2026-10-14, and `--empty`, `--closing`/`--restack`, `--deep`, `--combine` within two days — so
+**`--mosaic --dithered --big` is the stale corner now**. §2's whole-journey pass is paid to 2026-10-14.
+(f) Record files still have headroom (`SHIPPED.md` ~39.5k/64k, `PROCESS-NOTES.md` ~13.4k/18k). (g) Four reads
+that did **not** become findings are written up in [`PROCESS-NOTES.md`](PROCESS-NOTES.md) rather than left for
+the next run to redo — the resume cache's prefix match, the two Settings ones above, and a Library-wall
+pointer to the #903 repair that is **declined** (`routers/unstretched.py` already decided "it names; it never
+acts").
+
+**The method note worth carrying.** **When the backlog is gated and the inbox is quiet, the work is in the
+questions other runs wrote down for you.** A spec, a stand-down, a "confirm X before building Y" — each is a
+read of the code somebody already decided was necessary, costs minutes, and collides with nothing. One of
+those reads was going to be three sentences in a table cell and turned into v0.495.14 on the way. The sharper
+half, and it is about this run's own mistake: **my first draft of that cell was wrong in exactly the way this
+file keeps criticising filings for** — I wrote "the self-test has no frame to read" off a `grep` line instead
+of opening the function. Re-derive the premise, including your own, and prefer reading the function to reading
+its call site. Earlier notes stand below.)*
+
 *Last edited 2026-10-14 (Builder, branch `claude/determined-pasteur-7wyfto` — **the one "Bugs" entry with an
 actionable shape was a misfiled real bug: a `findByText` "flake" was the editor throwing away the click the
 test had just made. v0.495.13.**

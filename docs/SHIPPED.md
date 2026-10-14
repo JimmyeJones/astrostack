@@ -82,6 +82,122 @@ correctly marks the offending field in both places that render it.
 **What the next slice should know** is in the entry's own three notes under *Features that serve real
 workflows* in [`IMPROVEMENTS.md`](IMPROVEMENTS.md).
 
+## 2026-10-14 (Builder, branch `claude/nifty-lamport-2zshr5`) — the stalest dogfood flag, and a merged spec's unanswered question
+
+### v0.495.15 — 🔴 BUG FIX (editor — PRIORITY 1) — the tap that creates a taste stopped taking away the only way to undo it: `AutoFeedback.tsx`, `resettable`, `AUTO_TASTE_PLAIN_NOTE`
+
+**Found by the instrument, on the owner's own canvas shape.**
+`scripts/agent-dogfood.sh --dithered --editor` — the stalest flag, last run 2026-10-11 — tapped the live
+chip **"Too dark"** on the dithered mosaic and reported *"the taste 'Too dark' just taught has no note — and
+the Reset link lives inside it, so there is now no way to undo it"*, then *"no Reset link to undo the two
+taps — the scratch library keeps them"*, its own cleanup having failed for the same reason. The field-sample
+drive three minutes earlier in the same pass showed the note correctly, which is the whole shape of the bug.
+
+**What the feature promises.** `AutoFeedback`'s module docstring: *"each tap records a small, bounded bias
+into a per-library taste profile … A plain-language 'why' note explains how Auto is leaning, with a one-tap
+Reset back to the neutral, data-driven default — so the taste never drifts silently and is **fully
+reversible**."*
+
+**The mechanism.** The Reset link is rendered **inside** the "why Auto shifted" line:
+
+```jsx
+{note ? <Text>{note} <Anchor onClick={reset.mutate}>Reset</Anchor></Text> : null}
+```
+
+and `mergeMeasuredPreferences` deliberately keeps *the last measured* note across a scoped tap rather than
+the one the POST answers with —
+`note: scoped && !data.neutral ? (old?.note ?? null) : data.note` — because the POST measures no picture and
+its sentence can claim something about *this* image that is not true (v0.492.56/.57 are exactly that).
+
+That reasoning is right, and **the first tap is the one case where "keep the last measured note" has nothing
+to keep.** A neutral profile has no note, so `old?.note` is `undefined`, so `note` became `null` — and the
+control went with the sentence, at the moment the owner most wants it: immediately after the tap that
+created the taste. It came back only when the background `invalidateQueries` re-read landed, and on his
+mosaic that re-read sits behind the Auto re-run the same tap starts (`if (!limit) onRerun()`), which this
+repo measures in **seconds** at his scale. On the 6-frame field sample it is a blink — which is why five
+editor drives on that sample never saw it and the first `--dithered --editor` pass did.
+
+**The engine had already written the invariant down, in another language.**
+`seestack/edit/auto_prefs.py::describe_profile`'s docstring: *"**Nothing is dropped** … the note is the only
+place the Reset link lives, so a note that vanished would take a control with it."* And it keeps it exactly:
+`describe_profile` returns `None` on precisely the condition `is_neutral` is true, so a non-neutral profile
+always arrives with a sentence. **The client was manufacturing the one state the server is careful never to
+serve** — the same class as v0.495.11/.12 (a consumer out of step with a fact that gained a second author),
+read from the other end: here the consumer *synthesised* an impossible value, and the owner of the invariant
+was a docstring in the engine.
+
+**The fix separates the control from the sentence.** `resettable = !prefs.data.neutral` — the server's own
+answer to "is there a taste to undo?", which the feedback POST carries for free and
+`mergeMeasuredPreferences` passes through untouched — and the line renders on `note || resettable`. A new
+exported `AUTO_TASTE_PLAIN_NOTE` (*"Auto has learned a taste from your taps."*) stands in while the measured
+sentence is in flight. That stand-in claims only what `neutral: false` establishes and **nothing whatever
+about this picture**, which is the line the narrowing draws; borrowing the un-narrowed note to fill the gap
+would have undone v0.492.56/.57 in the same breath as fixing this.
+
+**Nothing moves in the decided cases**, each already pinned by an existing test: a neutral profile still
+offers no Reset; a tap that walks the last bias back to neutral still drops both the note and the link; and a
+profile that already had a narrowed note still keeps it across the tap.
+
+**Upgrade-safe (§9):** `frontend/` only — no endpoint, response field, config key, schema version, on-disk
+path or default is touched, and nothing persisted changes.
+
+**Tests +1, red before**, measured by reverting the two render lines alone: **exactly** the new test fails
+and the other 31 in the file pass. The suite's own shape is why it was never asked — the pending-refetch test
+starts from a profile that *already has* a note, and the neutral-start test lets the refetch resolve at once,
+so no existing case was both neutral at the start and still waiting after the tap.
+
+### v0.495.14 — ⚪ TEST GUARD + the spec's own Builder question answered: the rescue path's field of view (`tests/test_bootstrap_solve.py`, `_fov_deg_for_frame`, `docs/design/settings-redesign.md`)
+
+**Where this came from.** `docs/design/settings-redesign.md` (merged minutes earlier as PR #1165) shipped with
+a question addressed to whoever builds slice 1: *"confirm how the solver uses `astap_fov_deg` vs the frame's
+own `FOCALLEN`/`XPIXSZ` before wiring 'Read from my photos'; if the field is already only a fallback, say so
+in the help line."* Answering it is not slice 1 and collides with nothing.
+
+**The answer: the setting is a fallback everywhere.**
+
+- `seestack/solve/runner.py::solve_one` derives the FOV from the frame itself
+  (`_fov_deg_for_frame` → `fits_loader.fov_deg_from_header`) and uses the value it was passed only when the
+  header cannot answer;
+- `seestack/solve/bootstrap.py` — the rescue path — does the same for the deep image it builds, off the
+  **reference sub's** header (`_fov_deg_for_frame(paths[ref_index], fov_deg)`); its anchored branch never
+  solves at all, reusing an already-solved sub's WCS;
+- **nothing uses the setting unconditionally.** Settings' own "Test ASTAP" button looked like the exception
+  and is not: `webapp/routers/system.py` solves a *real ingested frame* through `solve_one`, so it re-derives
+  too.
+
+So the warning the spec proposed — *"If this doesn't match the telescope that took the photos, most frames
+won't be placed — and unplaced frames aren't stacked"* — is **false of any Seestar frame**, and it would have
+been the scariest sentence in the table, on the page whose entire purpose is to stop settings being scary.
+The spec's own rule ("Every warning must be **true of the code**") decides it. Two further consequences are
+now written into that row: **"Read from my photos" cannot be one of three choices**, because reading it from
+the photos is unconditional and cannot be switched off; and a three-way control cannot be stored at all,
+since `astap_fov_deg` is `float = Field(default=1.3, ge=0.1, le=20.0)` and inventing an "auto" value would
+re-type the field, which the spec's own "UI only" rule and §9 both forbid.
+
+**And the read found the gap.** `solve_one`'s derivation is pinned both ways
+(`test_solve_one_derives_fov_from_s30_header`, `…_falls_back_to_passed_fov_without_optics`). The **bootstrap**
+path reaches ASTAP by its own route — it writes a temp deep image carrying no optics headers of its own and
+hands `_default_deep_solver` the FOV explicitly — and **27 tests over `tests/test_bootstrap_solve.py`
+asserted nothing about that number** (`grep -n fov` on the file: no hits). Passing `fov_deg` straight through
+would have left all 27 green while handing ASTAP an S30's 2.1° field as the 1.3° fallback, on exactly the
+subs that had already failed to solve once — and ASTAP's quad-matching does not forgive a wrong FOV. That is
+the historical failure AGENTS.md §1 names on the owner's own hardware.
+
+**The fixture is the whole test.** `_make_project_with_faint_subs` deliberately writes **no**
+`FOCALLEN`/`XPIXSZ`, which is the one state in which the Settings fallback *is* the right answer — so a test
+built on it would have passed for the wrong reason, which is §8's *"a regression test whose fixture cannot
+show the bug is green for the same reason"*. `_make_project_with_faint_s30_subs` adds the owner's own optics
+(150 mm, 2.9 µm), where the derived field is **0.2659°** against a deliberately absurd **7.5°** fallback; and
+the test asserts **all** members derive one number, so it cannot pass by landing on a different reference sub.
+The second test is the control and the other half of the contract: a burst with no optics gets the Settings
+value, which is what that value is for.
+
+**Fail-before, measured** in a scratch worktree: `ref_fov = _fov_deg_for_frame(paths[ref_index], fov_deg)` →
+`ref_fov = fov_deg` gives `assert 7.5 == 0.2658526666666667`, with the no-optics control still green.
+
+**No production line changed in this version** — the code was already right; what was missing was anything
+that would notice if it stopped being. `tests/` and `docs/` only.
+
 ## 2026-10-14 (Builder, branch `claude/determined-pasteur-7wyfto`) — the "CI flake" was the editor throwing away a click
 
 ### v0.495.13 — 🔴 BUG FIX (editor — PRIORITY 1) — the editor's first-open decision stopped resetting a pipeline the user had already filled: `Editor.tsx`, `pipelineWritten`, `adoptWhatTheUserBuilt`
