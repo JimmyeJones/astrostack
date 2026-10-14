@@ -1,5 +1,64 @@
 # Shipped — the record
 
+## 2026-10-14 (Builder, branch `agent/reveal-read-off-loop`) — the reveal's per-sub read comes off the event loop, and takes turns
+
+### v0.495.8 — 🟠 ROBUSTNESS / friendliness (PRIORITY 3, on the pages he opens most): **the reveal's three `async` handlers did their whole per-sub SQLite read on the event loop, so one Target-page badge held up every other request the page was making — and the obvious fix, a thread each, is 16× worse than doing nothing.** `webapp/routers/stack.py::_reveal_read_off_the_loop`, `_NoiseRevealInputs`, `_BeforeAfterInputs`.
+
+The ⚪ TRACED entry filed with v0.495.5, whose gate was *"measure whether a Jobs or History page at his
+depth actually shows the stall"*. It does. Measured through the real ASGI app — one event loop, a synthetic
+project the size of his deepest target (35,894 subs), a cheap `/api/health` call as the witness, and four
+reveals at once, which is the shape of a History page (`History.tsx` mounts two queries per run card,
+`Jobs.tsx` one `StackNoiseBadge` per stack run shown):
+
+| where the read runs | the four reveals | the health call alongside |
+|---|---|---|
+| on the loop (before) | 1,244 ms | **1,241 ms** |
+| a thread each | 19,608 ms | 4.5 ms |
+| **a thread, one at a time (shipped)** | **1,145 ms** | **2.8 ms** |
+
+Best of three each. A *single* reveal in flight cost that health call 269 ms before and 1.7 ms after; two of
+them 636 ms before. So the whole stall goes and the reveals' own total does not move.
+
+**The limiter is the measurement, not caution — and it is why the naive hop would have been a regression.**
+These reads are *slower in parallel than in series*: four of them across four threads cost **19,427 ms**
+against **1,345 ms** run one after another on this box. It is not plain GIL contention — four pure-Python
+loops of the same length cost 4.3×, which is just serialisation — it is `sqlite3` handing the GIL back and
+forth around every row fetch, so the convoy grows with the row count: streaming three columns of those
+35,894 rows is 101 ms alone and **8,587 ms** four-up, while a `count(*)` that moves no rows is 3 ms and
+18 ms. Nothing is gained by letting them overlap, so a one-slot `asyncio.Semaphore` held *across* the hop keeps
+the total at the series figure while the loop stays free throughout. The gate is held before the thread is
+taken, so a waiting request waits on the loop and holds no worker — the pool every sync endpoint shares is
+untouched — and it is stdlib rather than `anyio`, which this app has only transitively. It is built lazily
+and kept **per running loop** on `app.state`, because an `asyncio` primitive binds to the first loop that
+awaits it and a test process builds many apps out of this one module.
+
+**What the filed entry had wrong, both ways.** It named two handlers; there are **three** — `before_after.jpg`
+does the same read through `_reference_sub_row`, which the entry's own grep had not reached. And its stated
+reason for standing down — *"moving one read into `run_in_threadpool` would make these two handlers disagree
+with their neighbours for no reason a reader could see"* — had a reason a reader can see, which is now
+written down where the hop happens: the neighbours are plain `def` handlers, which **FastAPI already runs in
+a worker thread**; only an `async def` body runs on the loop, and only this read scales with the target
+(`_pick_reference_sub` walks every sub to choose one, where a neighbour reads a row or two). Nothing else in
+the file changes, and the file's own `_zoom_clip_inputs` two endpoints up is the shape the two new
+`NamedTuple`s follow.
+
+**A pure hop: no answer moves.** Each endpoint returns exactly what it did, including every 404 and its
+wording, in the order it checked for them — the gather closures keep each handler's own checks in its own
+order rather than being merged into one shared read. No endpoint, response field, config key, schema
+version, on-disk path or default changes, and `_NOISE_RATIO_CACHE_VERSION` is untouched (the stamp is the
+same number, measured the same way).
+
+4 new tests, **all 4 verified red before**: three (one per endpoint) assert the per-sub pick runs where
+there is *no running event loop* — `asyncio.get_running_loop()` raising inside the read **is** the
+measurement, so nothing here is timed and nothing can flake — each with the trap armed first (the pick
+really did happen); the fourth fires two reveals at once and pins that their reads never overlap, red at
+`peak == 2` when the capacity is widened to 40. Full suite 7920 passed / 7 skipped locally.
+
+**Nothing is filed back, and that was checked.** The stamp-writing tail of `one_sub_vs_stack_noise`
+(`wproj.set_meta`, one row, best-effort) is still on the loop, and stays: it is O(1) where this read was
+O(subs), it runs only on a *fresh* measurement, and the "Bugs" section holds open bugs rather than notes
+about sub-millisecond writes.
+
 ## 2026-10-14 (Builder, branch `claude/relaxed-cray-8ak3vj`) — the four night summaries stop building a whole row for every sub, and three of them are one page
 
 *(Two versions, one sweep: v0.495.6 is the four night summaries, v0.495.7 the two streaming reads the same sweep turned up.)*
