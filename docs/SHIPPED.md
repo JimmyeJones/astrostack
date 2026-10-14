@@ -1,5 +1,64 @@
 # Shipped — the record
 
+## 2026-10-14 (Builder, branch `claude/determined-pasteur-7wyfto`) — the "CI flake" was the editor throwing away a click
+
+### v0.495.13 — 🔴 BUG FIX (editor — PRIORITY 1) — the editor's first-open decision stopped resetting a pipeline the user had already filled: `Editor.tsx`, `pipelineWritten`, `adoptWhatTheUserBuilt`
+
+**The symptom, in the owner's own words if he had seen it.** He opens a never-edited picture, presses
+**Use my default (2)**, reads *"Started from your default edit (2 steps) — Undo to revert, Save to keep"*,
+watches the two steps appear in the Pipeline — and a moment later the pipeline is **empty again** and the
+nudge is back, with no notification, no error and nothing to Undo. The same loss is reachable from
+**Use my previous edit**, from the suggested-preset chip, from the Presets menu, and from **Add
+operation** — anything that writes the pipeline.
+
+**The mechanism: a decision that waits, over a toolbar that does not.** `EditorView`'s first-open effect
+decides what the pipeline opens on, in three cases (saved recipe → open on it; a look of the user's own on
+offer → open empty with the nudge; neither → run Auto-process *for* them). Case 2 vs 3 needs both seed
+reads, so the effect holds on `ownLookSettled` — `(prevRecipe.isSuccess || isError) && (defaultRecipe…)`.
+But the editor renders as soon as `opsSchema` and `saved` are in, and each nudge button renders on **its
+own** query: `Use my default` on `defaultRecipe.data.count > 0` alone. The two reads are not equally quick
+on his box — the default recipe is one config read, the carry-over scans the target's other runs — so
+between them there is a window in which the pipeline is **interactive but undecided**. A write in that
+window was undone by the decision's own `openOn([])` → `resetOps([])` the instant the slower read landed.
+
+The window has a second, wider form on exactly the beginner path the seed exists for: with nothing of the
+user's own to offer, the decision fires `autoSeed.mutate()` and stays open for the whole Auto-process call —
+**seconds on a mosaic at his scale** — and `autoSeed`'s own `resetOps([])` ("clear the slate so the previous
+run's recipe cannot enter this run's history") then landed on top of whatever had been built meanwhile.
+
+**The fix: the decision stands aside for a write it did not make.** `useUndoable`'s setters are wrapped so
+that `pipelineWritten` records whether anything has written the pipeline since the slate was last cleared —
+every user edit goes through `setOps`, the decision clears through `resetOps`, and a run change clears it
+with the rest of the per-run state. When the decision (or a landing `autoSeed`) finds the flag set,
+`adoptWhatTheUserBuilt` closes the decision **over** what is there: `seedKey` and `committedKey` take the
+saved recipe's signature exactly as `openOn` sets them, so the work reads as unsaved and the leave guard
+still asks about it, and the undo history is deliberately **not** reset — because whatever put the work
+there promised *"Undo to revert"*. A landing `autoSeed` is dropped rather than applied, so "Started you off
+with Auto-process" is never said over a look the user built.
+
+**Nothing moves in the decided case**, which is every open where the two reads land before a click: the
+keys `adoptWhatTheUserBuilt` writes are byte-identical to `openOn`'s on an empty saved recipe, which is the
+only state it can be reached in.
+
+**How the bug was found, and why it was filed as something else.** It is the root cause of the
+`Editor.test.tsx` *"Unable to find an element with the text: Stretch"* failure filed on 2026-10-14 as a
+`findByText` timeout flake (job
+[115783255758](https://github.com/JimmyeJones/astrostack/actions/runs/38543351047/job/115783255758)). That
+entry's premise was wrong by a factor of twenty: `frontend/src/test/setup.ts` has raised
+`asyncUtilTimeout` to **20 000 ms** since the last round of this, so the wait that "timed out at
+testing-library's 1 s default" had in fact waited twenty seconds for ops that were never coming back. And
+the failing line the job log names — `Editor.test.tsx:1671` — is not one of the three static-toolbar waits
+the entry describes; it is **inside the default-seed test**, two lines after its `fireEvent.click`. CI
+reproduced the real bug and the filing explained the instrument.
+
+**Upgrade-safe:** `frontend/` only — no endpoint, response field, config key, schema version, on-disk path
+or default touched, and nothing persisted changes. Tests **+4, all 4 red before** (measured both ways by
+reverting `Editor.tsx` alone in a scratch worktree): the default seed and the carry-over seed each clicked
+while *the other* read is still in flight (the bug has two directions and one test can only reach one), a
+hand-added op made while the decision is pending, and an op built while the unasked-for Auto seed is in
+flight. The first also asserts what the fix must not break — Undo live, and the leave guard still asking
+*"Keep this look?"*.
+
 ## 2026-10-14 (Builder, branch `claude/relaxed-cray-4uwet8`) — the repair for #903 asked "is a cover pinned?" where it meant "did *he* pin it?"
 
 ### v0.495.12 — 🟠 BUG FIX (trust / enjoy-share — PRIORITY 3; the same sweep as v0.495.11, one more consumer) — `webapp/routers/gallery.py::get_best_pictures` asks `app_pin_reason` before calling a cover a favourite

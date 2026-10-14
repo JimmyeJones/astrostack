@@ -11,7 +11,9 @@ import {
 } from "@tabler/icons-react";
 import { notifications } from "@mantine/notifications";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState,
+} from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, type AutoAnalysis, type EditOp, type OpInstance, type Recipe } from "../api/client";
 import { useUndoable } from "../hooks/useUndoable";
@@ -288,8 +290,24 @@ export function EditorView() {
     [psf.data, sharpen.data, starSize.data, denoise.data],
   );
 
-  const { state: ops, set: setOps, reset: resetOps, undo, redo, canUndo, canRedo } =
+  const { state: ops, set: setOpsRaw, reset: resetOpsRaw, undo, redo, canUndo, canRedo } =
     useUndoable<OpInstance[]>([]);
+  // Has anything written the pipeline since this run's slate was last cleared?
+  // Every edit the user can make goes through `setOps`; `resetOps` is how the
+  // first-open decision (and a run change) clears the slate, so the flag answers
+  // exactly the question that decision has to ask before it overwrites anything —
+  // "did somebody get here before me?". A ref, not state: the decision reads it
+  // from inside an effect and must not re-render to see it.
+  const pipelineWritten = useRef(false);
+  const setOps = useCallback(
+    (next: OpInstance[] | ((prev: OpInstance[]) => OpInstance[]), coalesceKey?: string) => {
+      pipelineWritten.current = true;
+      setOpsRaw(next, coalesceKey);
+    }, [setOpsRaw]);
+  const resetOps = useCallback((value: OpInstance[]) => {
+    pipelineWritten.current = false;
+    resetOpsRaw(value);
+  }, [resetOpsRaw]);
   const [selected, setSelected] = useState<string | null>(null);
   const [showAllOps, setShowAllOps] = useState(false);
   const [outputName, setOutputName] = useState("");
@@ -333,6 +351,10 @@ export function EditorView() {
   const [committedKey, setCommittedKey] = useState<string | null>(null);
   useEffect(() => {
     setSeeded(false); setSeedKey(null); setCommittedKey(null);
+    // The outgoing run's edits are not a write to *this* run's pipeline; the seed
+    // effect clears `ops` itself a beat later (it is what holds the no-flash
+    // hand-over), so the flag has to be cleared here rather than by that reset.
+    pipelineWritten.current = false;
   }, [rid]);
   // Export/render jobs are polled in a loop that used to outlive the page: a poll
   // resolving after the user navigated away still clicked a hidden download link,
@@ -848,6 +870,18 @@ export function EditorView() {
     },
     onError: (e: Error) => notifications.show({ message: e.message, color: "red" }),
   });
+  // The pipeline already holds something the user put there, so *that* is what
+  // this run opened on: close the first-open decision over it instead of
+  // overwriting it. The keys are the saved recipe's, exactly as `openOn` sets
+  // them, so the work reads as unsaved and the leave guard asks about it — and
+  // the undo history is deliberately left alone, because whatever put the work
+  // there promised "Undo to revert".
+  const adoptWhatTheUserBuilt = useCallback(() => {
+    const ops0 = saved.data?.ops ?? [];
+    setSeedKey(JSON.stringify(ops0));
+    setCommittedKey(JSON.stringify(ops0));
+    setSeeded(true);
+  }, [saved.data]);
   // The same call, run *for* the user when they open a picture that has never been
   // edited — see the seed effect below. Deliberately its own mutation rather than
   // a flag on the one above: it must not claim the button's "applied — tweak from
@@ -856,6 +890,12 @@ export function EditorView() {
   const autoSeed = useMutation({
     mutationFn: fetchAuto,
     onSuccess: ({ recipe, analysis }) => {
+      // The user started editing while this call nobody asked for was in flight —
+      // on a mosaic that is seconds. The seed is only ever offered to an untouched
+      // pipeline, so applying it now would throw away work the editor's own
+      // toolbar invited, and "Started you off with Auto-process" would not be
+      // true. Drop it.
+      if (pipelineWritten.current) { adoptWhatTheUserBuilt(); return; }
       // `resetOps` first: on a run reached by navigating from another run, `ops`
       // still holds the *previous* run's recipe (only the seed effect clears it),
       // and it must not end up in this run's undo history.
@@ -876,6 +916,8 @@ export function EditorView() {
       });
     },
     onError: () => {
+      // Same as above: a failure must not take the user's own work with it.
+      if (pipelineWritten.current) { adoptWhatTheUserBuilt(); return; }
       // Never block the editor on it: fall through to the empty pipeline and its
       // nudge, which is exactly what this screen did before the seed existed.
       resetOps([]);
@@ -909,12 +951,21 @@ export function EditorView() {
       setCommittedKey(JSON.stringify(o));
       setSeeded(true);
     };
+    // Somebody got here first. This decision waits for *both* seed queries to
+    // settle, while every control that writes the pipeline — the nudge's two
+    // one-click seeds, the suggested preset, the Presets menu, Add operation — is
+    // live as soon as the toolbar renders, i.e. from the moment the saved recipe
+    // loads. A click inside that window used to be undone by the `openOn([])`
+    // below the moment the slower query landed, seconds after the notification
+    // had said the seed was applied.
+    if (pipelineWritten.current) { adoptWhatTheUserBuilt(); return; }
     if (ops0.length > 0 || autoSeedTried.current) { openOn(ops0); return; }
     if (!ownLookSettled) return;                 // decide once, with both answers
     if (ownLookOffered) { openOn(ops0); return; }
     autoSeedTried.current = true;
     autoSeed.mutate();
-  }, [saved.data, seeded, resetOps, ownLookSettled, ownLookOffered, autoSeed]);
+  }, [saved.data, seeded, resetOps, ownLookSettled, ownLookOffered, autoSeed,
+      adoptWhatTheUserBuilt]);
   const exportRun = useMutation({
     mutationFn: async () => {
       const committed = JSON.stringify(ops);
