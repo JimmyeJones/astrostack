@@ -1,5 +1,44 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-14 (Scout, branch `claude/funny-shannon-9rp4k8` — **inbox clear, QA rotation sweep (1)
+scale-dependent preview↔export parity on a mosaic canvas CLEAN (measured two ways on owner-shaped data),
+dogfood CLEAN. No code shipped — docs only, and that is the honest outcome.**
+
+**What this run did.** Baseline `main` green (**7909 passed, 7 skipped**), reset onto the newer `origin/main`
+v0.495.7 at merge (an unrelated Builder run landed mid-sweep; no collision). (1) **Issue inbox first:** four
+open, every one already acted-on and owner-gated, **no new observer issue** — #1015's repo-side half shipped
+(`/api/health` version, v0.479.3) and the owner holds it open for the Observer-side clone pin; #903/#880/#878
+are the standing owner-gated set. Full per-issue reckoning in [`PROCESS-NOTES.md`](PROCESS-NOTES.md). (2) **QA
+sweep (1): CLEAN.** The per-op parity suite (`tests/test_edit_proxy_parity.py`) already pins every pixel-sized
+op; the gap a sweep adds is the **composed one-click Auto recipe end to end** through the two real render
+paths (`editor._render_preview_array` on the strided proxy vs `pipeline._render_recipe_fullres` on the full-res
+FITS), where `tone.stretch` re-measures its anchors at apply time and is itself absent from the parity file.
+Measured on a 17 MP ragged 3×4 mosaic at proxy stride 4: **NaN mask bit-identical**, scale-invariant ops
+(level_coverage/final_gradient/color_calibrate) agree to **≤0.2/255**, **owner-visible sky background agrees to
+≤0.3/255**, and all remaining divergence enters at the stretch's steep-slope pixels and `detail.sharpen` — the
+documented, captioned proxy understatement, not a bug. `scripts/agent-dogfood.sh --mosaic --editor --big`
+corroborates: **`[scale] 0 of 16 canvas-independent answers moved`, CLEAN on everything asked**, editor drive
+clean, and the `--big` full-size check surfaces exactly the sharpen-understatement advisory for the one real
+divergence.
+
+**START HERE NEXT RUN.** (a) **The issue inbox is still the frontier** — list the open issues first; a new
+observer issue measured against the owner's real library is the highest-value thing an unattended run can
+find. The four open are all owner-gated. (b) **"Bugs" still holds nothing reproduced** — the DECIDE-DO-NOT-FLIP
+pass count (decided, with numbers), the two owner-data-gated LEADs (`PANEL_LINK_DIST_DEG`, the solve-retry
+rate), the inert-feedback-chip LEAD (stuck on telemetry the app does not have) and the ⚪ notes; re-read the
+*bodies* for a gate that is a judgement or a repo-gettable quantity. (c) **Rotation: (1) done → next sweep is
+(2)** — mosaic/walk-away divergence from a whole-target or *peak* number that is really per-panel. (d) **§2's
+whole-journey pass is paid to 2026-10-14** (this run's `--mosaic --editor --big` is a full editor drive), so it
+is not owed for two runs; both record files have headroom (`PROCESS-NOTES.md` ~12,700/18,000, `SHIPPED.md`
+~38,800/64,000).
+
+**The method note worth carrying.** A per-op parity suite as thorough as this one's can still miss the
+*composition*: the op that compounds divergence — the stretch re-measuring its own anchors at apply time — is
+itself not in the parity file, because its output "obviously" is whatever you feed it. The sweep that matters
+is running the **one recipe the owner actually gets** through **both real render entry points** and diffing,
+and judging it by the two numbers the owner can see (sky-background median ≤0.3/255, NaN mask identical), not
+by the whole-picture max the sharpen advisory already owns. Earlier notes stand below.)*
+
 *Last edited 2026-10-14 (Builder, branch `claude/relaxed-cray-8ak3vj` — **the caller sweep from the last
 run's method note, run mechanically rather than by inspiration, and it found a bigger cluster than the one it
 was looking for. v0.495.6 + v0.495.7.**
