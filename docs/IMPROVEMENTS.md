@@ -297,8 +297,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   disagree with their neighbours for no reason a reader could see, and moving all of them is a refactor
   AGENTS.md §10 ("don't rewrite large subsystems speculatively") wants a concrete improvement behind. The
   honest next step is to measure whether a Jobs or History page at his depth actually shows the stall in a
-  real browser (`scripts/agent-dogfood.sh --deep` is the flag with the row counts, and that is a number
-  nobody has) — not to move one `await`.
+  real browser — not to move one `await`. **And no flag can do that today, which was checked rather than
+  assumed** (Builder 2026-10-14, same run): `--deep` is the only flag that loads a thousand-sub target and it
+  deliberately leaves that target **unstacked**, so it has no run, so `StackNoiseBadge` and
+  `OneFrameVsStackCard` never mount on it and these handlers are never reached. Answering this needs a deep
+  target with *one* stack run — a flag change, not a dogfood pass.
 
 > **Open bugs and nothing else** (the three-file rule, AGENTS.md §2). The 227 resolved
 > entries and 24 QA sweep records this section used to carry were cut to

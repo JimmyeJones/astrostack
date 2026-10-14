@@ -25,10 +25,12 @@ ratios, same 404s.
 is unchanged except for **one new ⚪** filed by this run: both reveal handlers do their project read on the
 **event loop** (719 ms at his depth even after the fix) and the honest next step is a `--deep` pass in a real
 browser, not moving one `await`. The rest is as before: the DECIDE-DO-NOT-FLIP pass count (decided, with
-numbers), the two owner-data-gated LEADs, the inert-feedback-chip LEAD and the ⚪ notes. (c) **§2's big-picture
-pass is paid** (2026-10-13, `--combine`) and **no dogfood ran this run**, so the next one is owed soon — and
-`--deep` is now doubly the one to take: it is the stalest flag (last run 2026-09-17, ~40 versions back) *and*
-it is the instrument the new ⚪ note is gated on. (d) Both record files still have headroom
+numbers), the two owner-data-gated LEADs, the inert-feedback-chip LEAD and the ⚪ notes. (c) **`--deep` was run this run and came back
+CLEAN** (301 of 1,200 rows, 7,578 nodes, 1,685 ms first paint, the scroll-grow firing, every figure the
+standing baseline), so the stalest flags are now `--closing` (2026-09-26) and `--restack` (2026-10-05); §2's
+whole-journey pass is paid to 2026-10-13. Its one carried lesson: `--deep` **cannot** answer the new ⚪'s gate,
+because it deliberately leaves the deep target unstacked, so the reveal's handlers never mount there — a
+flag's documented omission is as load-bearing as what it loads. (d) Both record files still have headroom
 (`PROCESS-NOTES.md` ~12,500/18,000, `SHIPPED.md` ~38,800/64,000).
 
 **The method note worth carrying.** When a repo has *measured* a read and built a cheap replacement, the next

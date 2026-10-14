@@ -1,5 +1,45 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, same run as v0.495.5) — `scripts/agent-dogfood.sh --deep` CLEAN, and the gate it could not answer
+
+*(Run after the branch was pushed and while CI was running, so no `pytest` was in flight — §7's ordering.
+`--deep` was the stalest flag: last recorded pass **2026-09-20** at v0.471.1, ~24 versions back, and
+`docs/FOCUS.md` had named it and `--closing`/`--restack` as the oldest.)*
+
+**CLEAN, and every number is the standing baseline.** EXIT 0.
+
+* The deep target loaded at **1,200 subs** (above the flag's own 400-sub floor, so the pass is at scale).
+* `[deep] rows rendered: 301 of 1200 subs · page DOM nodes: 7578 · first paint 1685 ms` — against 301 /
+  7,485 / 1,708 ms on the 2026-09-20 pass. The windowed table is doing exactly what v0.455.2 built it to do.
+* Foot: *"Showing the first 300 of 1,200 subs. / Show all 1,200"*; scrolling to it grew the window to
+  **601 rows / 14,517 nodes** — the `IntersectionObserver` path jsdom cannot cover, still firing.
+* `[deep] no console errors, no failed requests`, and the page sweep *"nothing overflowing, no console
+  errors"*.
+* Page heights at the standing baseline: `[phone] /life-list [Still to shoot]` **14,513 px**, byte-identical
+  to the last several passes, so it is a control rather than a finding.
+* Read as one paragraph, the Target page's four notes point the same way (bigger than one frame → shoot a
+  3×3; 1 min of ~2 h, a good start; no darks but the background measures clean, so darks would mostly tidy
+  hot pixels; the framing verdict's own 9-panel arithmetic). Nothing guessing at what a sibling had measured
+  — which is the class the last four findings came from.
+* The expected side effect happened and is not a finding: the deep target is the deepest thing in the
+  scratch library, so `/tonight`'s week plan names it for every night. The flag's own header says to read
+  that column on an ordinary or `--mosaic` pass.
+
+**The one thing worth carrying is what the pass could NOT do.** This run filed a ⚪ about both reveal
+handlers doing their project read on the event loop, and wrote its gate as *"measure whether a Jobs or
+History page at his depth shows the stall in a real browser — `--deep` is the flag with the row counts"*.
+Running it showed that gate is unreachable: **`--deep` deliberately leaves the deep target unstacked** (its
+own comment: *"1,200 subs is a stack nobody in a scheduled run will wait for, and nothing this flag exists to
+measure needs a picture"*), so that target has **no stack run** — so `StackNoiseBadge` and
+`OneFrameVsStackCard` never mount on it, and the two handlers in question are never called at scale by any
+flag in this repo. The entry's gate is corrected to say so.
+
+**Generalisation:** a flag's *documented omission* is as load-bearing as what it loads. Before writing "X is
+gated on `--flag`", check that the flag reaches the **surface**, not just the magnitude — a sample sized for
+one cost can be structurally unable to exhibit a different one. The same shape as the `--deep` header's own
+warning that it scales with frame **count** and not with pixels, one level up: this one does not scale with
+*runs* at all.
+
 ## 2026-10-14 (Builder, branch `claude/brave-albattani-gqf5wp`) — v0.495.5: the read nobody had followed to its other callers, and what "bugs first" means on a dry Bugs section
 
 *(Baseline `main` green at `7a862c55`: **7908 passed, 7 skipped** in **18m39s** with `-n 4 --dist worksteal`
