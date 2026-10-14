@@ -161,6 +161,25 @@ self-test has no frame to read" off a `grep` line instead of opening the functio
 a real ingested frame. The guard is the one already written here: re-derive the premise, **including your
 own**, and prefer reading the function to reading its call site.
 
+### One cost of shipping two versions in one PR, measured after the fact
+
+This PR carried **v0.495.14 and v0.495.15** as two independently-green commits, because the harness pins a run
+to one branch and §5's "any one can be reverted alone" is about the commits rather than the merges. After the
+merge, `git tag --list` shows **v0.495.15 and no v0.495.14**: `release-tags.yml` tags "every version
+transition on main's **first-parent line**", and an intermediate version only ever existed on the branch side
+of the merge, so it is never a transition there.
+
+**It is not a reuse hazard, which was the thing worth checking.** `scripts/check-version-bump.sh`'s first arm
+refuses any `__version__` that is not strictly newer than the one on `main`, so with `main` at 0.495.15 no
+later PR can ship 0.495.14 — the tag arm never has to catch it. What *is* lost is one line of the tagger's own
+promise ("a deploy or a rollback can name an exact build, `git checkout v0.455.7`"): there is no
+`v0.495.14` to check out, only the merge above it and the branch commit below.
+
+So the rule, for a run deciding between one PR and two: **one version per merge if the intermediate state is
+worth being able to check out by name; two in one PR is fine when it is not.** Neither is wrong — §8's "one
+change per merge" is about revertability, which the separate commits already give — but the tag only ever
+lands on the last one.
+
 ### The §8 trailer drift — recorded, deliberately not guarded
 
 Of the last 300 commits' `Co-Authored-By:` trailers, **66 read `Claude Opus 5`, 5 `Claude Opus 4.8`, 3
