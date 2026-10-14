@@ -689,3 +689,104 @@ def test_a_rescue_that_stood_down_says_why_instead_of_nothing(tmp_path):
         assert summary["bootstrap_reason"] == "too few unsolved subs to bootstrap"
     finally:
         proj.close()
+
+
+# --------------------------------------------------------------------------- #
+# The field of view the deep solve is given — the one solve path whose FOV
+# derivation nothing asserted.
+#
+# ASTAP's quad-matching does not forgive a badly-wrong FOV, and the historical
+# hardcoded 1.3 deg default (an S50's long edge) silently failed every sub an
+# S30 owner shot — AGENTS.md §1 names that as the owner's own hardware, and
+# `seestack/io/fits_loader.fov_deg_from_header` exists to take the number off
+# the frame instead. `solve_one` has that pinned both ways
+# (`tests/test_solve_runner.py::test_solve_one_derives_fov_from_s30_header` and
+# `…_falls_back_to_passed_fov_without_optics`); the *rescue* path reaches ASTAP
+# by its own route — `bootstrap_solve` builds a deep image that carries no
+# optics headers of its own and hands `_default_deep_solver` the FOV
+# explicitly — and 27 tests over this module asserted nothing about it. So
+# passing `fov_deg` straight through, i.e. the Settings fallback, would have
+# left every one of them green while sending an S30's 2.1 deg field to ASTAP
+# as 1.3, on exactly the subs that already failed to solve once.
+# --------------------------------------------------------------------------- #
+
+#: The owner's own optics (AGENTS.md §1: an S30, 150 mm, 2.9 µm pixels).
+S30_FOCAL_MM = 150.0
+SEESTAR_PIXEL_UM = 2.9
+
+#: A fallback no derived value could be mistaken for: an S30 frame of this
+#: fixture's size derives ~0.27°, and the shipped Settings default is 1.3.
+SENTINEL_FALLBACK_FOV_DEG = 7.5
+
+
+def _make_project_with_faint_s30_subs(tmp_path, n=8):
+    """The same burst as :func:`_make_project_with_faint_subs`, plus the optics
+    keywords a real Seestar light carries.
+
+    A separate fixture on purpose: the original writes **no** ``FOCALLEN`` /
+    ``XPIXSZ``, which is the one state in which the Settings fallback *is* the
+    right answer — so a test built on it could not show the FOV being derived at
+    all, and would pass for the wrong reason.
+    """
+    proj = Project.create(tmp_path / "proj", name="Faint S30")
+    paths = []
+    for i in range(n):
+        dx, dy = SHIFTS[i]
+        p = tmp_path / f"s30_{i:03d}.fit"
+        write_seestar_fits(
+            p, width=W, height=H, n_stars=25, seed=7,
+            star_shift=(float(dx), float(dy)), noise_seed=200 + i,
+            focal_len_mm=S30_FOCAL_MM, pixel_size_um=SEESTAR_PIXEL_UM,
+        )
+        proj.add_frame(FrameRow(source_path=str(p)))
+        paths.append(p)
+    return proj, paths
+
+
+def _fov_capturing_solver(seen):
+    """``_ref_wcs_solver``, recording the ``fov_deg`` it was handed."""
+    def solver(*args, fov_deg, **kwargs):
+        seen.append(float(fov_deg))
+        return _ref_wcs_solver(*args, fov_deg=fov_deg, **kwargs)
+    return solver
+
+
+def test_the_deep_solve_gets_the_reference_sub_s_own_field_of_view(tmp_path):
+    from seestack.io.fits_loader import fov_deg_from_header, load_header
+
+    proj, paths = _make_project_with_faint_s30_subs(tmp_path, n=8)
+    seen: list[float] = []
+    try:
+        res = bootstrap_solve(
+            proj, min_frames=4, fov_deg=SENTINEL_FALLBACK_FOV_DEG,
+            deep_solver=_fov_capturing_solver(seen),
+        )
+        assert res.deep_solved
+        assert len(seen) == 1, "the deep image is solved exactly once"
+        # Every member carries the same optics, so "the reference sub's FOV" is
+        # one number however the burst picks its reference — asserted rather
+        # than assumed, so this test cannot pass by landing on a different sub.
+        derived = {fov_deg_from_header(load_header(str(p))) for p in paths}
+        assert len(derived) == 1
+        (expected,) = derived
+        assert expected is not None
+        assert seen[0] == pytest.approx(expected)
+        assert seen[0] != pytest.approx(SENTINEL_FALLBACK_FOV_DEG)
+    finally:
+        proj.close()
+
+
+def test_the_deep_solve_falls_back_to_the_settings_field_of_view_without_optics(tmp_path):
+    """The control, and the other half of the contract: a frame whose header
+    cannot answer is what the Settings value is *for*."""
+    proj, _ = _make_project_with_faint_subs(tmp_path, n=8)
+    seen: list[float] = []
+    try:
+        res = bootstrap_solve(
+            proj, min_frames=4, fov_deg=SENTINEL_FALLBACK_FOV_DEG,
+            deep_solver=_fov_capturing_solver(seen),
+        )
+        assert res.deep_solved
+        assert seen == [pytest.approx(SENTINEL_FALLBACK_FOV_DEG)]
+    finally:
+        proj.close()
