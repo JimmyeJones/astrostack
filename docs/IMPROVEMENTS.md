@@ -82,6 +82,37 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **⚪ REPRODUCED IN CI ONCE, NONDETERMINISTIC (Builder 2026-10-14) — v0.495.6's own drift guard
+  `test_the_card_builds_no_frame_row_for_the_whole_library` built **1** `FrameRow` where it asserts 0, on a
+  tree that passed the identical check three other times.** *(Pillar: the Python suite that gates every merge
+  — size **S to instrument, M to root-cause**; severity low-but-corrosive: it turns a green `main` into an
+  apparently red one, and AGENTS.md §2 makes a red `main` the next run's first task, so one flake can spend a
+  whole run on a phantom. Confidence: **observed in CI with the log read**; the cause is **not** identified,
+  and this entry is deliberate about saying so.)*
+  **The observation.** `main` CI run **2294** (job
+  [115780984978](https://github.com/JimmyeJones/astrostack/actions/runs/38542660893), the v0.495.9 merge
+  commit `89f01088`): `FAILED tests/webapp/test_last_night.py::test_the_card_builds_no_frame_row_for_the_whole_library
+  — AssertionError: built 1 FrameRow objects for the Last-night card, assert 1 == 0`. **1 failed, 7928 passed.**
+  The preceding assert in the same test (`n_frames == 7`) passed, so the card did answer off its own night and
+  the divergence is only the count.
+  **What was ruled out, and how.** *Not the diff*: v0.495.9 is `scripts/` + `tests/test_dogfood_view_switches.py`
+  + docs, which cannot reach this file. *Not an ordering difference between CI and local*: CI runs
+  `pytest tests/ -q` **serially** (no xdist), so its order is deterministic. *Not a different tree*: the merge
+  commit's tree is identical to the PR head whose own Python job passed (job 115763145699, 09:24), and the
+  same serial check then passed again on #1159 (10:38) and on `main` run **2297** (11:26). Locally the file is
+  green 3/3 in isolation, and twice inside full `-n 4` suites (**7936 passed, 7 skipped**). **So: same command,
+  same code, 4 CI/local observations pass and 1 fails.**
+  **Why it is filed and not fixed.** A one-in-four nondeterminism with no identified mechanism cannot be given
+  §5's fail-before, and the guard is **3 hours old** (v0.495.6) — its author's reasoning is fresh and worth
+  consulting before anyone edits it. Two candidate mechanisms, neither confirmed: the test disarms the
+  `SITELONG` sniff with `PUT /api/settings {site_lon}` because that read *does* walk frames and *"is not this
+  card's"* — a PUT that failed, or an app-level `detect_site_cached` entry crossing `SITE_LON_CACHE_TTL_S`
+  mid-request, would reopen exactly that path; or some second, conditional reader of one frame.
+  **The cheap next step is diagnostics, not a fix:** the guard counts `_row_to_frame` calls and reports only
+  the number, so the next occurrence says as little as this one did. Have `counting()` stash
+  `traceback.extract_stack()` for the **first** construction and put it in the assertion message — test-only,
+  weakens nothing, and turns the next flake into a named caller instead of another investigation from scratch.
+
 - **⚪ REPRODUCED IN CI, NOT FIXED (Builder 2026-10-14) — `Editor.test.tsx`'s `findByText("Stretch")` waits
   flake under CI load, on a file that has already been hardened for this once.** *(Pillar: the suite that
   gates every merge — size **S to change, M to be sure of**; severity low-but-corrosive: a red frontend job on

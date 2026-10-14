@@ -1,5 +1,51 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, after merging v0.495.9) — two flaky merge-gate guards in one run, and the check I nearly did not make
+
+The run's work was merged (#1158, #1159) and `main` was at v0.495.9 before this note's subject came up. It
+came up because of one habit worth keeping: **after merging, read `main`'s own CI run, not just the PR's.**
+They are different runs on different commits, and the PR's green does not speak for the merge commit's.
+
+`main` run **2294** — the v0.495.9 merge commit — was **red**, and the PR it came from had been green on all
+six checks forty minutes earlier. The failure was `tests/webapp/test_last_night.py::test_the_card_builds_no_frame_row_for_the_whole_library`,
+*"built 1 FrameRow objects, assert 1 == 0"* — a drift guard **v0.495.6 added three hours earlier**, in a file
+v0.495.9's diff (`scripts/` + one test + docs) cannot reach.
+
+### What made it answerable without guessing
+
+Four facts, each cheap, and together they close off every explanation except nondeterminism:
+
+1. **CI runs the suite serially** (`pytest tests/ -q`, no xdist — read from `ci.yml`). So CI's order is
+   deterministic and "a different shard layout" cannot be the cause. That also means my local
+   `-n 4 --dist worksteal` runs *structurally cannot* reproduce an order-dependency, which is why I checked
+   the invocation before trusting a local pass.
+2. **The merge commit's tree is identical to the PR head's.** I had merged `origin/main` into the branch
+   before the final suite, so `89f01088`'s tree == `bebba217`'s — and `bebba217`'s own Python job passed.
+3. **The same serial check passed three more times** on that code: PR #1158 (09:24), PR #1159 (10:38), and
+   `main` run **2297** (11:26, all five jobs green — so `main` is green now).
+4. **Locally green** 3/3 in isolation and inside two full suites (7936 passed, 7 skipped).
+
+So: one failure in five observations of the same test on the same code under the same command. Filed with that
+evidence, **not fixed** — a one-in-five with no identified mechanism cannot be given §5's fail-before, and the
+guard's author shipped it three hours ago.
+
+### The generalisable half
+
+**A counter-based guard that reports only its count tells you as little on its second failure as on its
+first.** This one says "built 1" and nothing about *who* built it, so the next occurrence costs another
+investigation from zero. The entry's proposed next step is therefore diagnostics rather than a fix: stash the
+first construction's `traceback.extract_stack()` and put it in the assertion message. Test-only, weakens
+nothing, and converts a recurring mystery into a named caller. **Worth applying to every guard of this shape
+when one of them next flakes.**
+
+### And it was the second flaky guard of this run
+
+The other was `Editor.test.tsx`'s 1 s `findByText` (see the note below this one), also reproduced on a
+docs-only diff, also the second occurrence at its line, also filed rather than blind-flipped. **Two in one
+run, in both halves of the merge gate**, is itself the observation: neither is urgent alone, and together they
+are the reason a run should read a red check before re-running it. Both entries carry a CI job URL, because a
+log that ages out takes the only evidence with it.
+
 ## 2026-10-14 (Builder, same run as v0.495.9) — the `--no-site` pass: CLEAN, the fix verified in its second state, and one lead that the pass itself cannot evidence
 
 ### Why a second pass, and the gap it closed in my own work
