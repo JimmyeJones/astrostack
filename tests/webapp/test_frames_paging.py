@@ -22,31 +22,29 @@ def _built(client, request_row_count):
     return rows
 
 
-def test_a_page_request_builds_only_that_pages_rows(client, built_library, monkeypatch):
+def test_a_page_request_builds_only_that_pages_rows(client, built_library):
     # The regression this guards is invisible from the outside: re-introduce a
     # whole-table read and every response stays byte-identical while the cost
     # goes back to O(target). Counting the rows the endpoint turns into objects
     # is the only way to see it, and it is the thing the change is for.
-    import seestack.io.project as project_module
+    from framerows import frame_rows_built_by
+
+    from webapp.routers import frames as frames_router
 
     all_rows = client.get("/api/targets/M_42/frames").json()
     assert len(all_rows) == 3, "fixture must have more frames than the page asks for"
 
-    built = 0
-    real = project_module._row_to_frame
-
-    def counting(row):
-        nonlocal built
-        built += 1
-        return real(row)
-
-    monkeypatch.setattr(project_module, "_row_to_frame", counting)
-    page = client.get(
-        "/api/targets/M_42/frames",
-        params={"sort": "fwhm_px", "order": "desc", "limit": 1},
-    ).json()
+    # Attributed to the endpoint's own stack, not to the process — see
+    # `tests/framerows.py` for the leaked `job-worker` this used to count. It
+    # matters doubly here, where the expected count is one rather than zero: a
+    # stray row would read as the page's own.
+    with frame_rows_built_by(frames_router.list_frames) as built:
+        page = client.get(
+            "/api/targets/M_42/frames",
+            params={"sort": "fwhm_px", "order": "desc", "limit": 1},
+        ).json()
     assert len(page) == 1
-    assert built == 1, f"built {built} frame rows to serve a 1-row page"
+    assert built() == 1, f"built {built()} frame rows to serve a 1-row page"
 
 
 def test_paging_through_a_target_visits_every_frame_exactly_once(client, built_library):

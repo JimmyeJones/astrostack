@@ -371,7 +371,7 @@ def test_last_night_never_speaks_for_a_target_that_was_not_shot_that_night(
 
 
 def test_the_card_builds_no_frame_row_for_the_whole_library(
-        client, built_library, monkeypatch):
+        client, built_library):
     """The one read here that opens **every** target: the recap needs when each
     sub landed, whether QC kept it and why not, and how long it was — five
     columns — and used to build a whole `FrameRow` per sub to get them.
@@ -382,8 +382,10 @@ def test_the_card_builds_no_frame_row_for_the_whole_library(
     this box has an OOM history, and the card is rebuilt whenever a scan moves a
     target's activity stamp.
     """
-    import seestack.io.project as project_module
+    from framerows import frame_rows_built_by
+
     from seestack.io.library import Library
+    from webapp.routers import stats
 
     night = dt.datetime(2026, 7, 8, 21, 0, 0, tzinfo=dt.timezone.utc)
     lib = Library.open_or_create(built_library / "library")
@@ -401,17 +403,13 @@ def test_the_card_builds_no_frame_row_for_the_whole_library(
     # not this card's and is not what is being measured here.
     client.put("/api/settings", json={"site_lon": 150.0})
 
-    built = 0
-    real = project_module._row_to_frame
-
-    def counting(row):
-        nonlocal built
-        built += 1
-        return real(row)
-
-    monkeypatch.setattr(project_module, "_row_to_frame", counting)
-    body = client.get("/api/last-night").json()
+    # Counted off the endpoint's own stack rather than off the whole process —
+    # a leaked `job-worker` from an earlier test built a row here on CI run
+    # 2294 and failed this very assertion on an innocent read. See
+    # `tests/framerows.py`.
+    with frame_rows_built_by(stats.get_last_night) as built:
+        body = client.get("/api/last-night").json()
     # The card really did answer off this night (otherwise zero rows would be
     # zero work rather than cheap work).
     assert body is not None and body["n_frames"] == 7
-    assert built == 0, f"built {built} FrameRow objects for the Last-night card"
+    assert built() == 0, f"built {built()} FrameRow objects for the Last-night card"

@@ -515,20 +515,16 @@ def test_sky_brightness_reads_four_columns_not_whole_frames(
     identical samples. Nothing in the response can see the difference, which is
     exactly why it needs a test of its own.
     """
-    import seestack.io.project as project_module
+    from framerows import frame_rows_built_by
 
-    built = 0
-    real = project_module._row_to_frame
+    from webapp.routers import frames as frames_router
 
-    def counting(row):
-        nonlocal built
-        built += 1
-        return real(row)
-
-    monkeypatch.setattr(project_module, "_row_to_frame", counting)
-    r = client.get("/api/targets/M_42/frames/sky-brightness")
+    # Attributed to the endpoint's own stack, not to the process — see
+    # `tests/framerows.py` for the leaked `job-worker` this used to count.
+    with frame_rows_built_by(frames_router.sky_brightness_read) as built:
+        r = client.get("/api/targets/M_42/frames/sky-brightness")
     assert r.status_code == 200
-    assert built == 0, f"built {built} FrameRow objects to read four columns"
+    assert built() == 0, f"built {built()} FrameRow objects to read four columns"
 
 
 def test_reject_summary_surfaces_accepted_unsolved_frames(client, built_library):

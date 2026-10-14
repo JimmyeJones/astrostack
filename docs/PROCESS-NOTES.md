@@ -1,50 +1,156 @@
 # Process notes & QA sweep records
 
-## 2026-10-14 (Builder, after merging v0.495.9) — two flaky merge-gate guards in one run, and the check I nearly did not make
+## 2026-10-14 (Builder, after merging v0.495.9) — the post-merge CI check that found a red `main`, and the §11 collision that then answered it better than I did
 
-The run's work was merged (#1158, #1159) and `main` was at v0.495.9 before this note's subject came up. It
-came up because of one habit worth keeping: **after merging, read `main`'s own CI run, not just the PR's.**
-They are different runs on different commits, and the PR's green does not speak for the merge commit's.
+**Read this alongside the v0.495.10 note below it, which is the answer.** My run and that one found the same
+red `main` within the hour; theirs root-caused and fixed it, mine got as far as "nondeterministic, mechanism
+unidentified" and filed a lead. **Theirs is right and mine was wrong on the mechanism** — recorded rather than
+quietly dropped, because the way I was wrong is reusable.
 
-`main` run **2294** — the v0.495.9 merge commit — was **red**, and the PR it came from had been green on all
-six checks forty minutes earlier. The failure was `tests/webapp/test_last_night.py::test_the_card_builds_no_frame_row_for_the_whole_library`,
-*"built 1 FrameRow objects, assert 1 == 0"* — a drift guard **v0.495.6 added three hours earlier**, in a file
-v0.495.9's diff (`scripts/` + one test + docs) cannot reach.
+### What still stands: read `main`'s own CI run after merging, not just the PR's
 
-### What made it answerable without guessing
+They are different runs on different commits, and a PR's green does not speak for the merge commit's. `main`
+run **2294** — the v0.495.9 merge commit — was red on
+`tests/webapp/test_last_night.py::test_the_card_builds_no_frame_row_for_the_whole_library` (*"built 1 FrameRow
+objects, assert 1 == 0"*), forty minutes after that PR had been green on all six checks. Both runs found it
+this way. Had neither looked, AGENTS.md §2 would have handed the next run a red `main` as its first task with
+no evidence attached.
 
-Four facts, each cheap, and together they close off every explanation except nondeterminism:
+Four cheap facts were worth gathering and are worth gathering again in this situation, because they close off
+the *wrong* explanations even when they do not produce the right one: CI runs the suite **serially**
+(`pytest tests/ -q`, read from `ci.yml`) so a shard layout cannot be the cause — and a local
+`-n 4 --dist worksteal` pass therefore does not clear an ordering bug; the merge commit's tree was
+**identical** to the PR head whose Python job passed; the same serial check passed on #1158, #1159 and `main`
+run 2297; and the file was green locally 3/3 in isolation. One failure in five observations.
 
-1. **CI runs the suite serially** (`pytest tests/ -q`, no xdist — read from `ci.yml`). So CI's order is
-   deterministic and "a different shard layout" cannot be the cause. That also means my local
-   `-n 4 --dist worksteal` runs *structurally cannot* reproduce an order-dependency, which is why I checked
-   the invocation before trusting a local pass.
-2. **The merge commit's tree is identical to the PR head's.** I had merged `origin/main` into the branch
-   before the final suite, so `89f01088`'s tree == `bebba217`'s — and `bebba217`'s own Python job passed.
-3. **The same serial check passed three more times** on that code: PR #1158 (09:24), PR #1159 (10:38), and
-   `main` run **2297** (11:26, all five jobs green — so `main` is green now).
-4. **Locally green** 3/3 in isolation and inside two full suites (7936 passed, 7 skipped).
+### Where I stopped, and why that was not good enough
 
-So: one failure in five observations of the same test on the same code under the same command. Filed with that
-evidence, **not fixed** — a one-in-five with no identified mechanism cannot be given §5's fail-before, and the
-guard's author shipped it three hours ago.
+I filed it as a lead with two candidate mechanisms — a failed `PUT /api/settings {site_lon}` reopening the
+`SITELONG` frame-walk, and `detect_site_cached` crossing its TTL mid-request — and **both are wrong.**
+v0.495.10 found the real one: `_row_to_frame` is a **module global**, `JobManager.stop()` signals its worker
+without joining it, so a `job-worker` daemon thread from a *previous* test is still alive and its QC phase
+builds exactly one `FrameRow` (`apply_qc_result_to_db` → `Project.get_frame`) — hence "built 1" rather than
+"built 35894". The counter was measuring the **process**, not the surface.
 
-### The generalisable half
+**The lesson is about where I looked.** I treated "which code path inside this request could build a row?" as
+the whole question, and the answer was that the row was not built by this request at all. *A process-global
+patch in a shared-process suite has a third possibility beside "my code did it" and "flake": somebody else's
+code did it, concurrently.* Enumerating that possibility costs one `threading.enumerate()` — which is exactly
+what the other run did, and it named the thread.
 
-**A counter-based guard that reports only its count tells you as little on its second failure as on its
-first.** This one says "built 1" and nothing about *who* built it, so the next occurrence costs another
-investigation from zero. The entry's proposed next step is therefore diagnostics rather than a fix: stash the
-first construction's `traceback.extract_stack()` and put it in the assertion message. Test-only, weakens
-nothing, and converts a recurring mystery into a named caller. **Worth applying to every guard of this shape
-when one of them next flakes.**
+My proposed next step (stash the first construction's traceback into the assertion message) was pointing the
+right way and still short of the fix: the caller chain is not a nicer error message, it is the **measurement**
+— `tests/framerows.py::frame_rows_built_by` counts a row only when a named call is on its own stack, so the
+guard measures the surface and a stray row cannot reach it. Anchoring on `__code__` rather than a string, so a
+rename cannot turn a guard into a tautology, is the detail worth copying.
 
-### And it was the second flaky guard of this run
+### The §11 note, honestly
 
-The other was `Editor.test.tsx`'s 1 s `findByText` (see the note below this one), also reproduced on a
-docs-only diff, also the second occurrence at its line, also filed rather than blind-flipped. **Two in one
-run, in both halves of the merge gate**, is itself the observation: neither is urgent alone, and together they
-are the reason a run should read a red check before re-running it. Both entries carry a CI job URL, because a
-log that ages out takes the only evidence with it.
+This is a collision of the kind this file keeps recording, and the sequence matters: I had no claim published
+for it (I was mid-CI-wait on an unrelated docs PR when I read run 2294), so the other run had nothing to see.
+Their fix landed as **v0.495.10** while my filing sat in CI. **Nothing of mine is re-applied on top** — the
+Bugs entry I had written is dropped rather than merged, because an entry describing an open bug that is
+already fixed is precisely the "backlog carries items already shipped" failure §1 warns about, and keeping it
+would have cost the next run a grep. What survives is this note.
+
+**And the one thing to carry into the next CI-wait:** a run that spots a red `main` should claim it *before*
+investigating, not after it has something to say. Investigation is exactly the phase long enough for another
+run to arrive, and the claim is the only thing that would have told either of us.
+
+### The other flaky guard this run is unaffected
+
+The `Editor.test.tsx` 1 s `findByText` finding (#1159) is a different mechanism — jsdom, no worker thread, a
+testing-library timeout under CI load — and its entry stands as filed. Two flaky merge-gate guards in one run,
+in both halves of the gate, was the observation; one of them now has a fix and the other does not.
+
+## 2026-10-14 (Builder, branch `claude/relaxed-cray-fzxacq`) — `main` was red on a *test*, and the authority that said so was free
+
+*(→ **v0.495.10**. Baseline: `main` at `89f01088` (v0.495.9), and its own CI run **2294** a **FAILURE** — one
+test of 7,929, five of six jobs green. Inbox **four open**, confirmed with `list_issues`: #878, #880, #903,
+#1015, every one previously acted-on and owner-gated, unchanged again. One open PR, **#1159**, docs-only from
+the previous run's branch; the `--no-site` LEAD it files was ~30 minutes old when this run read it, i.e.
+claimed-in-spirit under §11, and owner-data-gated besides. "Bugs" held nothing this repo can close and
+"Features that serve real workflows" no open ready entry, so without the red CI this would have been a
+dogfood run.)*
+
+### Read `main`'s own CI conclusion before paying for a local baseline
+
+The run opened by §2's habit — `git fetch`, read the two docs, `source scripts/agent-setup.sh`, start the full
+suite — and on this box that suite is **~70 minutes, not the documented ~11** (4 cores, load pinned at 4.4
+under `-n 4`, which is the right worker count here; the ~11 is someone else's box). At 15 % one
+`mcp__github__actions_list` call on `ci.yml` filtered to `main` answered the same question in seconds and
+answered it **differently**: run 2294 failed, with the failing test named in the job log. The local run was
+killed.
+
+**The rule worth keeping: `main`'s CI conclusion is the authority §8 names, it costs one call, and a local
+baseline is the expensive way to re-derive it.** The two prior runs' notes argue about *ordering* a local
+suite against a dogfood pass (2026-10-13, 2026-10-14); this is the cheaper question upstream of both — on a
+run that starts with `origin/main` unchanged since the last CI push, the baseline is already computed.
+
+### The failure, and why it was not about the code it accused
+
+```
+FAILED tests/webapp/test_last_night.py::test_the_card_builds_no_frame_row_for_the_whole_library
+  - AssertionError: built 1 FrameRow objects for the Last-night card
+```
+
+`_collect_last_night` has read `Project.iter_night_frames` since v0.495.6 and builds **no** `FrameRow`. The
+test passed alone here, passed under `-n 4` on the three local runs quoted in v0.495.6 – .9's own commit
+messages, and passed on every PR check.
+
+Established in this order:
+
+1. `seestack.io.project._row_to_frame` is a **module global**, so `monkeypatch.setattr` of it sees every
+   thread in the process.
+2. **A `job-worker` outlives the `client` fixture** — two tests in one scratch file proved it:
+   `client.post("/api/scan")` in the first, `threading.enumerate()` in the second →
+   `['MainThread', 'job-worker']`. `webapp/main.py`'s lifespan calls `jm.stop()`, which sets `_stop` and
+   pushes a queue sentinel but **never joins**, so a job already running finishes on its daemon thread,
+   against the previous test's `tmp_path` (which still exists).
+3. A scan builds exactly **one** `FrameRow` per frame through the only single-row reader in `Project`:
+   `qc.runner.apply_qc_result_to_db` opens with `project.get_frame(result.frame_id)`. That is the `1`, and
+   it is why the number was not 35,894.
+4. **CI runs `pytest tests/ -q` sequentially in one process; the documented local command is
+   `-n 4 --dist worksteal`.** Same collection order, four processes — so which neighbours precede a test, and
+   how far they overlap it, is a different question in each place.
+
+### Two false leads, recorded so nobody re-walks them
+
+**Fixture contamination: ruled out.** `data_root`, `built_library` and `client` are all function-scoped on
+`tmp_path`, so nothing accumulates across the tests of a file, and the xdist-distributes-a-file theory dies
+with it. **Random ordering: ruled out** — `pytest-randomly` is not installed (`pytest`, `pytest-qt`,
+`pytest-timeout`, `pytest-xdist`), so collection order is deterministic in both places.
+
+**A direct repro did not fire, and that is consistent rather than disconfirming.** Submitting a 120-frame
+scan in the test immediately before a copy of the counting test counted zero: the race needs one `get_frame`
+to land inside one request's window, and a scan either finishes first or spends that window elsewhere. The
+mechanism was established from its three independently-checkable parts instead, and the **fix** was then
+tested against the part that matters — a row built on another thread.
+
+### The generalisation, and the failure mode the fix had to avoid
+
+A test that patches a shared seam is measuring the **process**, and a webapp test does not own its process.
+So name the call: `tests/framerows.py::frame_rows_built_by` counts a row only when one of the named calls is
+on its own caller chain.
+
+The calls are passed **as objects** and matched on `__code__`, not by name, because the obvious stack-walk
+has one bad failure mode of its own: an anchor that never matches makes the count zero for ever and the guard
+passes **for the wrong reason** — silently, which is worse than the flake. An empty call list raises rather
+than defaulting to "count everything", which is the bug being removed. And the anchoring is *measured*, two
+ways, both through FastAPI's real `run_in_threadpool` hop: a scratch revert of `_collect_last_night` to
+`iter_frames()` turns the converted test red, and `test_a_page_request_builds_only_that_pages_rows` still
+asserts `built() == 1` — a non-zero expectation, which no silently-ignoring counter could satisfy.
+
+### What was left alone, with the reason
+
+`JobManager.stop()` still does not join. Joining would make a container stop — and every webapp test teardown
+— wait out a running stack, and the leak is otherwise harmless: a daemon thread writing into a scratch
+directory nobody reads again. Its only cost was to **process-global patches**, and the sweep for the rest of
+that class in `tests/webapp` found exactly one other: `test_skipped_folders.py`'s two `scanner` stand-ins,
+which *raise* — a leftover worker that hit one would fail its own job, not the test's assertion. The six
+engine-side `_row_to_frame` counters in `tests/` (`test_project.py`, `test_project_night_frames.py`,
+`test_project_health_frames.py`, `test_project_acquisition_values.py`, `test_project_frames_page.py`,
+`test_session_recap.py`) build no app, so there is no worker to leak into them; they keep the plain counter.
 
 ## 2026-10-14 (Builder, same run as v0.495.9) — the `--no-site` pass: CLEAN, the fix verified in its second state, and one lead that the pass itself cannot evidence
 

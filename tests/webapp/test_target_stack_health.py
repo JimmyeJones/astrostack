@@ -531,7 +531,7 @@ def test_stack_health_never_calls_an_unmeasured_run_clean(
 
 
 def test_the_card_reads_fields_not_whole_frames(client, solved_library,
-                                                data_root, monkeypatch):
+                                                data_root):
     """The card hands *every* sub of the target to three functions — the health
     notes, the darks guide and the reference-sub pick behind the noise
     yardstick — which between them read seven small fields and one bit ("did
@@ -545,23 +545,19 @@ def test_the_card_reads_fields_not_whole_frames(client, solved_library,
     history). The answer is unchanged either way, so only a test like this can
     see it.
     """
-    import seestack.io.project as project_module
+    from framerows import frame_rows_built_by
+
+    from webapp.routers import targets as targets_router
 
     _add_run(data_root, "M_42")
 
-    built = 0
-    real = project_module._row_to_frame
-
-    def counting(row):
-        nonlocal built
-        built += 1
-        return real(row)
-
-    monkeypatch.setattr(project_module, "_row_to_frame", counting)
-    r = client.get("/api/targets/M_42/stack-health")
+    # Attributed to the endpoint's own stack, not to the process — see
+    # `tests/framerows.py` for the leaked `job-worker` this used to count.
+    with frame_rows_built_by(targets_router.target_stack_health) as built:
+        r = client.get("/api/targets/M_42/stack-health")
     assert r.status_code == 200
     assert r.json()["notes"], "the card must still have graded the run"
-    assert built == 0, f"built {built} FrameRow objects to grade one stack"
+    assert built() == 0, f"built {built()} FrameRow objects to grade one stack"
 
 
 # ---- the master's own sky solution (observer #989) -------------------------
