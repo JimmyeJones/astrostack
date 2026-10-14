@@ -1,5 +1,65 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, same run as v0.495.9) — the `--no-site` pass: CLEAN, the fix verified in its second state, and one lead that the pass itself cannot evidence
+
+### Why a second pass, and the gap it closed in my own work
+
+v0.495.9 changes the behaviour of **two** pass-states — `--empty` and `--no-site` — and I had only ever run
+`--empty`. That is the same shape as the bug it fixes (a guard never run against the flag whose premise it
+breaks), so running the other one was not optional. **`--no-site` is CLEAN**: EXIT 0, *"nothing overflowing, no
+console errors"*, the one `[note] /tonight: no view switch expected on this pass` firing correctly on a library
+that *has* data but no site — which `--empty` could not have shown, since there the page is empty for two
+reasons at once. Heights on the standing baseline (`[phone] /life-list [Still to shoot]` **14,513 px**, the
+same figure the 2026-10-13 `--mosaic` pass recorded; `[phone] /glossary` 3,364).
+
+**Carry forward: when a change alters what a flag prints, run every flag it alters.** The list is small and
+mechanical — grep the constant you added for the pass-states that reach it — and it is exactly the step whose
+absence created the bug being fixed.
+
+### And the docs PR's own CI went red, which is the third record of this run
+
+`Frontend build + tests` **failed on a docs-only PR** (#1159) — `Editor.test.tsx > EditorView > offers the
+user's saved default recipe`, *"Unable to find an element with the text: Stretch"*. The diff touches four
+`.md` files, and the identical frontend code had passed on #1158 **49 minutes earlier**, so it is not this
+PR's. The temptation is to press re-run; what the rules ask for first is a root cause, and reading got one:
+the file is 142 tests and **62.6 s locally** (green), three of its tests gate on
+`await screen.findByText("Stretch")` at testing-library's 1 s default, and the comment directly above the
+failing line records that a previous run *already* moved this wait once because gating elsewhere *"raced and
+flaked in slower CI"*. **Second flake, same line, same shape** — filed with its evidence under "Bugs", not
+fixed, because a timeout that only fires under contention cannot be given the §5 fail-before and raising the
+constant on a hunch is a blind flip.
+
+**The method note worth keeping: a red check on a diff that cannot have caused it is a finding about the
+suite, not a reason to re-run.** Pressing re-run would have been correct by the letter of the flake rule (it
+passed earlier on this exact code) and would have thrown away the one observation that makes it actionable —
+that it is the *second* occurrence at that line. The cost of reading was five minutes.
+
+### The finding, and the discipline of not filing it as a bug
+
+Reading the Target-page paragraph as the probe asks produced a real pair: the readiness/grain card saying *"the
+background already looks clean at 1 min (grain 0.001) … more time from here mostly buys fainter detail rather
+than a visibly cleaner picture"*, and `/tonight`'s "Worth more time" card — *"ranked by how much another hour
+on each would improve it"* — saying *"another hour would cut its noise about 87%"*.
+
+**The numbers are both right**, which is the first thing to check and the thing that nearly made this a wrong
+filing: 1 min → 2 min is a 29 % cut and 1 min → 61 min is 87 %, both exactly √N. So this is not an arithmetic
+disagreement; it is a **verdict** disagreement, and the two surfaces reach it from different data.
+
+**And the pass cannot evidence it.** σ 0.001 at one minute is a property of the synthetic sample (its lights
+carry no hot pixels and no vignette — the `--calibration` caveat says so in as many words), not of the owner's
+sky. A real one-minute stack would not measure clean, so the specific sentence pair on screen is a fixture
+artefact. What survives that is the **mechanism**, traced in the code rather than read off the screen:
+`nightplan._depth_component` is `noise_gain_from_more_time(total_exposure_s)` and nothing else, so the ranking
+is structurally blind to the measured-σ verdict — and `grainProjection.ts`'s own comment says it took trouble
+to stop *"'already looks clean' beside 'would clean up the background nicely'"* between **two** surfaces,
+without noticing a third consumer of the same question.
+
+So it is filed as a **LEAD with its gate named** ("count his targets that are clean-but-still-ranked; if zero,
+close it with the measurement"), not as a reproduced bug. **The generalisable half: a fixture can show you a
+true mechanism through a false number.** Keep the mechanism, throw the number away, and say in the entry which
+is which — otherwise the next run reproduces the 87 % on the sample, calls it confirmed, and wires σ into a
+library-wide hot path that v0.495.5–.7 have just finished taking reads *out* of.
+
 ## 2026-10-14 (Builder, branch `claude/relaxed-cray-4vizeh`) — DOGFOOD `--empty`, the stalest flag: one finding, and it was the instrument rather than the app
 
 *(→ **v0.495.9**. Baseline: `main` at `23899a61`; the last **completed** CI run on `main` was green at
