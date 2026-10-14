@@ -267,8 +267,9 @@ class RefinishPreview(BaseModel):
     # Targets the job would re-finish with Auto.
     refinish: list[RefinishTarget]
     # Flat targets it leaves alone, by reason: "by_hand" (you finished the
-    # earlier picture yourself), "never_finished", "cover_pinned",
-    # "auto_edit_off".
+    # earlier picture yourself), "never_finished", "cover_pinned" (you pinned
+    # that picture — a cover the *app* pinned is not a choice and does not land
+    # here, :mod:`seestack.coverpin`), "auto_edit_off".
     left_alone: dict[str, list[RefinishTarget]]
 
 
