@@ -1,5 +1,98 @@
 # Shipped — the record
 
+## 2026-10-14 (Builder, branch `claude/brave-albattani-gqf5wp`) — the reveal's representative-sub pick stops reading every column of every sub
+
+### v0.495.5 — 🟠 BUG FIX (memory on the hot path, AGENTS.md §10's OOM history; PRIORITY 1-adjacent — the reveal is the app's one celebratory "trust me" surface): **the "one frame vs your stack" pick built a whole `FrameRow` for every sub of the target to choose one of them — 153 MB of plate-solution header text on his deepest target, on every Target-page view.** `webapp/routers/stack.py::_pick_reference_sub` now reads `Project.iter_health_frames`; new `_reference_sub_row` fetches the one winning row by id for the two callers that render it; `one_sub_vs_stack_noise` fetches that row **only on a cache miss**.
+
+*(Baseline: local suite **7908 passed, 7 skipped** in 18m39s on `main` at `7a862c55` (`__version__` 0.495.4),
+CI run 2276 green on that exact commit, no open PRs, and the inbox holding the same four open issues, every
+one already acted on and owner-gated.)*
+
+**Why this task.** "Bugs (fix these first)" holds nothing reproduced — the pass count is decided with
+numbers, the two `PANEL_LINK_DIST_DEG`/solve-retry LEADs and the inert-chip LEAD are gated on data only the
+owner's library has, and the rest are ⚪ notes — and §2's big-picture dogfood was paid on 2026-10-13. So the
+run read the *consumers* of the one read this repo has already measured twice, and found the siblings the
+measurement never reached.
+
+**The gap, in the repo's own words.** `Project.iter_health_frames` exists because the Target page's "How's my
+stack?" card hands every sub of the target to three grading functions that between them read seven small
+fields and one bit, while a `FrameRow` is `SELECT *` and the biggest column on a solved sub is its plate
+solution — `wcs_json`, a FITS header *text* of ~25 eighty-character cards. That card was moved onto it in
+v0.471.x. Then **v0.475.1 added `sky_adu_median` to `FrameHealth` specifically so the reference-sub pick
+could ride along on the same read**, and `FrameHealth`'s own docstring says so: *"it is there for the
+reference-sub pick that rides along on the same read … because the pick has to make the same choice for the
+card and for the reveal endpoint or the noise stamp never hits."* The *pure* function took the hint —
+`reference_sub_from_frames` documents that it reads four fields and that *"a caller may hand it `FrameHealth`
+records as readily as whole rows"*. The *endpoint-side* helper did not: `_pick_reference_sub` still did
+`list(proj.iter_frames(accepted_only=True))`.
+
+**Measured, on a project the size of the owner's deepest target** (35,894 subs, ~2 kB of `wcs_json` each,
+best of 3 — the same stand-in `tests/test_project_health_frames.py` measures the health read against):
+
+| the pick, over | elapsed | peak |
+|---|---|---|
+| whole rows (today) | 1,477 ms | **153.3 MB** |
+| `FrameHealth` records | 719 ms | **11.7 MB** |
+| records + one `get_frame` for the winner | 651 ms | 11.7 MB |
+
+Same sub chosen in all three. At 5,000 subs it is 192 ms / 21.3 MB → 90 ms / 1.6 MB. **The peak is the point
+rather than the milliseconds** (AGENTS.md §10 — this box has an OOM history, and §3 forbids trading memory
+safety for speed).
+
+**And it is not one page, which is what lifts this out of "a read could be cheaper".** Three surfaces fire
+these endpoints without anybody clicking anything:
+
+* `StackNoiseBadge` is mounted on **`Target.tsx`** for the latest run — so `…/one-sub-vs-stack/noise` is asked
+  on *every view of the Target page*, the page he opens most;
+* the same badge is mounted on **`Jobs.tsx`**, once per stack run shown, so a Jobs page with several recent
+  stacks asks for it several times;
+* `OneFrameVsStackCard` is mounted on **`History.tsx`** per run card with a preview, and fires *two* of them
+  (`one-sub-vs-stack` and `…/noise`) each.
+
+**The badge's own cache did not save it, and that is the sharpest part of the finding.** The noise ratio is
+remembered precisely so *"the repeat views this endpoint actually gets don't reload the master and re-debayer
+a sub for a number that cannot have changed"* — but the stamp is fingerprinted on the representative sub's
+**id** (`_noise_ratio_fingerprint`), and the only way the endpoint had to learn that integer was the whole-row
+sweep. So every cached repeat view paid 153 MB and 1.5 s to look up a number it already had: **the cache saved
+the pixels and not the rows.** It now asks the cheap read for the id, checks the stamp, and reads a frame row
+only when it is actually going to measure — a hit reads no row at all, and no longer `stat`s the sub either.
+
+**Why the pick cannot have moved, pinned rather than argued.** `reference_sub_from_frames` reads `accept`,
+`fwhm_px`, `sky_adu_median` and `id`, all of which `FrameHealth` carries, and the accepted-first/all-frames
+fallback is unchanged: with any accepted sub both reads hand it the same pool, and with none both fall back to
+every sub. A pick that *did* move would turn every stamped ratio in his library into a permanent miss, so it is
+asserted against the whole-row read's own answer rather than reasoned about.
+
+**The two callers that need the pixels take one row, not every row.** `reference-sub` and `before-after.jpg`
+render the chosen sub, so they need `source_path` and `bayer_pattern` — the two fields a `FrameHealth`
+deliberately drops. `_reference_sub_row` makes the pick over the records and then reads that one winner in
+full. It answers `None` when there is nothing to pick *and* when the chosen row has gone between the two
+reads, which is the one new path: both callers already answer that as "No frame to render for this run", so a
+sub deleted mid-request 404s rather than raising.
+
+**Upgrade safety (§9).** A read-path change inside four existing handlers. No endpoint added or removed, no
+response field changed, no config key, no schema version, no on-disk path, no default. `_NOISE_RATIO_CACHE_VERSION`
+is **not** bumped on purpose — the fingerprint's inputs are identical, so every ratio already stamped in his
+library still hits.
+
+**Tests: 8 new, 3 fail before** (each verified by a scratch revert of the pick's two lines, with
+`_reference_sub_row` left in place so the tests still collect and fail on their own assertions rather than on
+an import):
+
+* `tests/test_reference_sub_read_cost.py` — the cost claim in its own right (`tracemalloc`, 1,000 solved subs:
+  the pick peaked at 2,673 KiB against 2,652 KiB for the rows before, i.e. it *was* the row read; a quarter is
+  the deliberately wide bar, as in the health-frames test it mirrors); the pick matching the whole-row read's
+  choice; the all-rejected fallback; the empty target; the whole row the render callers get; and the
+  deleted-row path.
+* `tests/webapp/test_one_sub_vs_stack.py` — all four endpoints driven with `Project.iter_frames` **armed as
+  fatal** (and the trap proved live before the green is believed), and a remembered ratio shown to read
+  neither every row nor the one row.
+
+**What this deliberately did not touch.** `_pick_reference_sub` is called on the event loop rather than in a
+threadpool in both `async` handlers, so even 719 ms of it blocks every other request; that is the existing
+shape of these handlers and widening the change to move it is a separate call. Filed as a ⚪ note rather than
+built.
+
 ## 2026-10-13 (Builder, branch `claude/brave-albattani-32mwni`) — the `--combine` dogfood's one finding: the thin-stack warning stops guessing at a remedy the page has measured
 
 ### v0.495.4 — 🟡 BUG FIX (PRIORITY 1/3, the Target page's "what do I do next"; found by `scripts/agent-dogfood.sh --combine`, the §2 big-picture pass): **the thin-stack warning told the owner to check his plate solves and shoot another night, over a note that had already measured N subs accepted, located and simply absent from this stack.** `frontend/src/components/target/thinStack.ts::thinStackWarning` gains a fourth argument, `readyToStack`; `frontend/src/routes/Target.tsx` passes it, gated on the picture on show being the run the warning describes.

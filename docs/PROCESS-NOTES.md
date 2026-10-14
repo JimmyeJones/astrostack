@@ -1,5 +1,55 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, branch `claude/brave-albattani-gqf5wp`) — v0.495.5: the read nobody had followed to its other callers, and what "bugs first" means on a dry Bugs section
+
+*(Baseline `main` green at `7a862c55`: **7908 passed, 7 skipped** in **18m39s** with `-n 4 --dist worksteal`
+and the BLAS cap, on a 4-core box; CI run 2276 green on that exact commit. No open PRs. Inbox: the same four
+open issues, every one already acted on and owner-gated — nothing to do there this run.)*
+
+**How the task was found, which is the part worth carrying.** "Bugs (fix these first)" held nothing
+reproduced and §2's big-picture dogfood was paid the day before, so the usual two doors were both shut. The
+door that was open was neither the backlog nor a dogfood: it was **reading the consumers of a measurement
+this repo has already made.** `Project.iter_health_frames` carries two measured numbers in its own docstring
+(1,180 ms / 144.0 MB → 541 ms / 9.8 MB on 35,894 subs) and `FrameHealth` carries a sentence saying
+`sky_adu_median` is on it *"for the reference-sub pick that rides along on the same read"*. Both were written
+for the Target page's health card in v0.471.x/v0.475.1. Grepping for the *other* callers of that pick found
+four endpoints that had never been moved onto it — and the pure function in the middle
+(`reference_sub_from_frames`) even documents that it accepts either kind of record, which is how the two
+halves came to disagree without anyone noticing.
+
+**Generalisation:** when a repo has measured a read and built a cheap replacement, the bug is often not in
+the read or the replacement but in **the callers the migration stopped short of**. `grep` for the helper the
+measurement names, not for the symptom. The tell here was a docstring that described a capability
+("a caller may hand it `FrameHealth` records as readily as whole rows") that no caller used.
+
+**The second tell, and the one that turned a cheaper read into a finding worth a version: the cache that was
+supposed to make this page cheap did not cover it.** The noise badge's ratio is stamped so repeat views don't
+reload the master — but the stamp is fingerprinted on the representative sub's **id**, and the only way the
+endpoint had to learn that integer was the whole-row sweep. So every *cached* view paid 153 MB and 1.5 s to
+look up a number it already had. A cache is worth reading twice: once for what it saves, and once for **what
+it still has to compute in order to use it**.
+
+**And the magnitude only became a priority once the mounts were read.** 153 MB on one request is a number;
+`StackNoiseBadge` mounted on `Target.tsx` (every view), again on `Jobs.tsx` once per run shown, and
+`OneFrameVsStackCard` on `History.tsx` firing two queries per run card, is a page that can ask for it several
+times over. That is the same method note v0.495.4 recorded — **go and read how the host mounts/ranks the
+thing before sizing it** — applied to cost rather than to wording.
+
+**On the fail-before.** Reverting the fix outright makes `tests/test_reference_sub_read_cost.py`
+*uncollectable* (it imports the new `_reference_sub_row`), and an import error is a weaker proof than an
+assertion: it says the name is missing, not that the behaviour was wrong. So the scratch revert put back only
+the pick's two lines and left the new helper in place — and all three tests then failed on their own
+assertions: *"the pick peaked at 2673 KiB against 2652 KiB for the same frames as rows"*, *"built a FrameRow
+for every sub of the target"*, and `assert ['rows'] == []`. Worth doing that way round whenever a fix adds a
+symbol as well as changing a behaviour.
+
+**One thing deliberately not built, filed instead** (⚪ in Bugs): both `async` handlers here do the whole
+project read on the **event loop** while carefully putting the pixels in a threadpool, so the frame read
+blocks every other request — 719 ms at his depth even after this fix. Moving one read would make two handlers
+disagree with every neighbour in the file for no visible reason, and moving all of them is the speculative
+refactor §10 forbids; the honest next step is a `--deep` pass in a real browser to see whether the stall
+shows, which is a number nobody has.
+
 ## 2026-10-13 (Builder, branch `claude/brave-albattani-32mwni`) — the §2 big-picture dogfood on its stalest flag, and a §7 ordering mistake that cost 20 minutes
 
 *(→ **v0.495.4**. Baseline: **CI run 2274 green on `main` at `c800574c`**, no open PRs, inbox four open and

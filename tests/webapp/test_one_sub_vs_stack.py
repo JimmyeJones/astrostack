@@ -12,6 +12,7 @@ import json
 from io import BytesIO
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from seestack.io.library import Library
@@ -1163,3 +1164,95 @@ def test_a_run_that_was_not_drizzled_is_measured_exactly_as_before(
     r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise")
     assert r.status_code == 200
     assert seen == [1.0]
+
+
+# --- What the pick reads, on a target the size of his deepest -----------------
+#
+# All four endpoints below ask `_pick_reference_sub` which sub stands in for "one
+# raw frame", and it reads four small fields off every sub of the target — 35,894
+# of them on his deepest one. It used to get them by building a whole `FrameRow`
+# for each, `SELECT *` and plate solution and all, on pages the Target view and
+# the Jobs view both fire on sight. `Project.iter_health_frames` is the read for
+# exactly that shape, and already carries `sky_adu_median` *for this pick*; these
+# four endpoints are the ones it had not reached. The pick itself is unchanged —
+# `tests/test_reference_sub_read_cost.py` pins the sameness and the cost.
+
+
+def _no_whole_row_sweep(monkeypatch) -> None:
+    """Arm ``Project.iter_frames`` as fatal, and prove the trap is live first — a
+    green run under a trap that never armed says nothing."""
+    from seestack.io.project import Project
+
+    def fatal(self, *a, **kw):
+        raise AssertionError("built a FrameRow for every sub of the target")
+
+    monkeypatch.setattr(Project, "iter_frames", fatal)
+    with pytest.raises(AssertionError):
+        Project.iter_frames(None)
+
+
+def test_no_reveal_endpoint_builds_a_row_for_every_sub(
+    client, solved_library, monkeypatch,
+):
+    """All four endpoints behind the reveal, driven with the whole-row read armed
+    as fatal: the pick is made over the narrow records, and only the one sub that
+    actually gets *rendered* is read in full, by its id."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "cheap_read.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(solved_library, safe, master)
+
+    _no_whole_row_sweep(monkeypatch)
+
+    base = f"/api/targets/{safe}/stack-runs/{run_id}"
+    info = client.get(f"{base}/one-sub-vs-stack")
+    assert info.status_code == 200 and info.json()["available"] is True
+    noise = client.get(f"{base}/one-sub-vs-stack/noise")
+    assert noise.status_code == 200 and noise.json()["ratio"] is not None
+    sub = client.get(f"{base}/reference-sub")
+    assert sub.status_code == 200
+    assert Image.open(BytesIO(sub.content)).format == "PNG"
+    share = client.get(f"{base}/before-after.jpg")
+    assert share.status_code == 200
+    assert Image.open(BytesIO(share.content)).format == "JPEG"
+
+
+def test_a_remembered_noise_ratio_reads_no_frame_row_at_all(
+    client, solved_library, monkeypatch,
+):
+    """The badge's cache exists so the repeat views this endpoint actually gets
+    don't reload the master and re-debayer a sub. The stamp is fingerprinted on
+    the representative sub's **id**, which the pick already has — so a hit now
+    reads neither every row nor the one row, where before it swept every row of
+    every sub of the target to arrive at that one id."""
+    from seestack.io.project import Project
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    master = _master_for(solved_library, safe, "master_remembered.fits", sigma=2.0)
+    run_id = _register_run_with_master(solved_library, safe, master)
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise"
+
+    first = client.get(url)
+    assert first.status_code == 200 and first.json()["ratio"] is not None
+
+    reads: list[str] = []
+    real_rows, real_one = Project.iter_frames, Project.get_frame
+
+    def rows(self, *a, **kw):
+        reads.append("rows")
+        return real_rows(self, *a, **kw)
+
+    def one(self, frame_id):
+        reads.append("row")
+        return real_one(self, frame_id)
+
+    monkeypatch.setattr(Project, "iter_frames", rows)
+    monkeypatch.setattr(Project, "get_frame", one)
+
+    second = client.get(url)
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert reads == []

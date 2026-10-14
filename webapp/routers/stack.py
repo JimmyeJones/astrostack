@@ -3349,11 +3349,44 @@ def _pick_reference_sub(proj: Any) -> Any | None:
     flatter the ratio (see :func:`reference_sub_from_frames`). Falls back to the
     first accepted frame (then any frame) when no FWHM is measured, and returns
     ``None`` only when the target has no frames at all.
+
+    Made over :class:`~seestack.io.project.FrameHealth` records rather than whole
+    rows. The pick reads four small fields, and ``sky_adu_median`` is carried on
+    that record *for this pick* — see :meth:`Project.iter_health_frames`, which
+    the Target page's health card already reads it through. A ``FrameRow`` is
+    ``SELECT *`` and its biggest column is the plate solution, so the row read
+    held one FITS header text per sub, all at once: measured on a project the
+    size of the owner's deepest target (35,894 subs, ~2 kB of ``wcs_json`` each,
+    best of 3), **1,477 ms / 153.3 MB peak → 719 ms / 11.7 MB**, for the
+    identical pick. The peak is the point rather than the milliseconds
+    (AGENTS.md §10 — this box has an OOM history) and this sits on the pages he
+    opens most: the Target page's noise badge asks for it on every view, and the
+    Jobs page asks once per recent stack run shown.
+
+    A caller that goes on to *render* the chosen sub needs its path and Bayer
+    pattern, which this record does not carry — that caller takes
+    :func:`_reference_sub_row`, which reads the one winning row in full.
     """
-    frames = list(proj.iter_frames(accepted_only=True))
+    frames = list(proj.iter_health_frames(accepted_only=True))
     if not frames:
-        frames = list(proj.iter_frames())
+        frames = list(proj.iter_health_frames())
     return reference_sub_from_frames(frames)
+
+
+def _reference_sub_row(proj: Any) -> Any | None:
+    """:func:`_pick_reference_sub`'s choice as a whole :class:`FrameRow`, for the
+    callers that render it and so need its ``source_path`` and ``bayer_pattern``.
+
+    One row for the one sub, rather than every row of every sub to reach it: the
+    *pick* is made over the cheap records and only the winner is read in full.
+    ``None`` when there is nothing to pick, and also when the chosen row has gone
+    between the two reads — both of which every caller already answers as "no
+    frame to render for this run".
+    """
+    ref = _pick_reference_sub(proj)
+    if ref is None or ref.id is None:
+        return None
+    return proj.get_frame(ref.id)
 
 
 def _auto_edit_recipe_json(proj: Any, run: Any) -> str | None:
@@ -3524,7 +3557,7 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
         run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
         if run is None:
             raise HTTPException(status_code=404, detail="No such run")
-        ref = _pick_reference_sub(proj)
+        ref = _reference_sub_row(proj)
         if ref is None:
             raise HTTPException(status_code=404, detail="No frame to render for this run")
         src = readable_frame_path(ref)
@@ -3609,7 +3642,7 @@ async def before_after_jpeg(safe: str, run_id: int, request: Request,
                 status_code=404,
                 detail="This run's picture is an edited export, so a raw frame "
                        "can't be matched to it honestly.")
-        ref = _pick_reference_sub(proj)
+        ref = _reference_sub_row(proj)
         if ref is None:
             raise HTTPException(status_code=404, detail="No frame to render for this run")
         src = readable_frame_path(ref)
@@ -4046,10 +4079,6 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
         supersampling = canvas_supersampling(run.options_json)
         ref = _pick_reference_sub(proj)
         ref_id = getattr(ref, "id", None) if ref is not None else None
-        src = readable_frame_path(ref) if ref is not None else None
-        pattern = (ref.bayer_pattern or "RGGB").upper() if ref is not None else "RGGB"
-        if pattern not in _BAYER_PATTERNS:
-            pattern = "RGGB"
         fingerprint = (
             _noise_ratio_fingerprint(fits_path, ref_id) if fits_path else None
         )
@@ -4057,6 +4086,15 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
             _cached_noise_ratio(proj, run_id, fingerprint)
             if fingerprint is not None else (False, None, None)
         )
+        # Only a *fresh* measurement needs the sub's own pixels, and the stamp is
+        # keyed on its id, which the pick above already has. So the repeat views
+        # this endpoint actually gets now read no frame row at all — where before
+        # they built one for every sub of the target to arrive at one id.
+        row = proj.get_frame(ref_id) if (not hit and ref_id is not None) else None
+        src = readable_frame_path(row) if row is not None else None
+        pattern = (row.bayer_pattern or "RGGB").upper() if row is not None else "RGGB"
+        if pattern not in _BAYER_PATTERNS:
+            pattern = "RGGB"
     finally:
         proj.close()
         lib.close()
