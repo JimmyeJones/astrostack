@@ -1,5 +1,66 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-14 (Builder, branch `claude/determined-pasteur-7wyfto` — **the one "Bugs" entry with an
+actionable shape was a misfiled real bug: a `findByText` "flake" was the editor throwing away the click the
+test had just made. v0.495.13.**
+
+**What this run did.** Baseline the right way round: `main`'s CI run **2307** was still in flight on the exact
+HEAD (`06c255da`, v0.495.12) with four of its five jobs already green (frontend, image contract, version,
+identity), and run **2305** green before it; the local suite then agreed. Inbox listed with `list_issues`:
+**four open (#878, #880, #903, #1015), every one previously acted-on and owner-gated, nothing new owed.** **No
+open PRs at all**, so §11's claim check was trivial: of the top four "Bugs" entries three are decided
+stand-downs or gated on a number only his data has ("Worth more time", the de-levelling pass count,
+`PANEL_LINK_DIST_DEG`), and the fourth — the `Editor.test.tsx` flake, filed ~5 h earlier and no longer
+claimed-in-spirit — was the one [`FOCUS.md`](FOCUS.md) itself pointed at as actionable.
+
+**It was actionable, and it was not a flake.** Its proposed fix (a) was *"give this file an explicit
+`asyncUtilTimeout`, testing-library's default is 1 s"*. `frontend/src/test/setup.ts` has configured
+`asyncUtilTimeout: 20000` since the previous round of this, with twenty lines of comment about why — so the
+wait had not timed out at 1 s, it had waited **twenty seconds** for ops that were never coming back. And the
+line the job log names, `Editor.test.tsx:1671`, is **not** one of the three static-toolbar waits the entry
+describes: it is two lines after the `fireEvent.click` inside *"offers the user's saved default recipe"*. Both
+facts are in the artefacts the entry links.
+
+**v0.495.13 — the editor's first-open decision reset a pipeline the user had already filled.** `EditorView`'s
+decision about what the pipeline opens on holds on `ownLookSettled` (**both** seed reads), while every control
+that writes the pipeline renders on **its own** query — `Use my default` on `defaultRecipe.data.count > 0`
+alone. The two reads are not equally quick on his box (one config read vs a scan of the target's other runs),
+so between them the editor is **interactive but undecided**, and a click in that window was undone by
+`openOn([])` → `resetOps([])` the instant the slower read landed — after the notification had said *"Started
+from your default edit (2 steps) — Undo to revert"*. Reachable the same way from **Use my previous edit**, the
+suggested-preset chip, the Presets menu and **Add operation**; and **wider on the beginner path the seed
+exists for**, where the decision stays open for the whole unasked-for Auto-process call (seconds on a mosaic)
+and `autoSeed`'s own slate-clearing `resetOps([])` lands on the work. `pipelineWritten` (wrapped
+`useUndoable` setters) lets the decision stand aside for a write it did not make; `adoptWhatTheUserBuilt`
+closes it *over* what is there with `openOn`'s own keys and **keeps the undo history**. Tests +4, all 4 red
+before, measured by reverting `Editor.tsx` alone in a scratch worktree.
+
+**START HERE NEXT RUN.** (a) **Read `main`'s own CI result first** (`actions_list` on `ci.yml`/`main`) — and
+read the *jobs*, not just the run: a run still `in_progress` with frontend, image-contract, version and
+identity already green tells you almost everything in one call. (b) **The inbox is still the frontier**, and
+all four open issues are owner-gated. (c) **"Bugs" now holds nothing ungated at all** — the three leads at the
+top each name the measurement that would settle them and every one of those is a read of *his* library, which
+is the observer's job, not a Builder's. (d) **The class is "an effect gated on two queries, over UI gated on one"**, and
+it was checked for a second instance before this was called finished: `useUndoable` is imported by
+`Editor.tsx` and nothing else, and no other route resets state from an effect
+(`grep -n "resetOps\|\.reset(" frontend/src/routes/*.tsx` → six hits, all in `Editor.tsx`). The *question*
+still travels, though — ask it of any screen that renders before it has decided what to render.
+(e) Dogfood: this run paid `--editor --big` (the flags §7 requires for an editor change); the previous one
+paid `--calibration --incoming-lag`. Re-derive the stalest flag from the runs that **ran** it, not from the
+notes that mention it — a flag's name appears in the record that called it stale as often as in the record
+that cleared it. §2's whole-journey pass is paid to 2026-10-14.
+(f) Record files still have headroom (`SHIPPED.md` ~39.4k/64k, `PROCESS-NOTES.md` ~13.3k/18k).
+
+**The method note worth carrying.** **A filed finding's premise is evidence from the same run that could not
+finish it — re-derive it before building on it.** This entry was filed honestly and carefully; it named its
+confidence, refused to blind-flip a constant, and said *"do not simply re-run and move on"*, which is the
+instruction that made this fix happen. What it did not do is read `setup.ts` or the line number in its own
+job log, and both were one command away. The sharper half: **"it only fails under CI load" and "it is a real
+bug" are not alternatives.** Contention does not invent failures, it changes which order two async settles
+land in — which is exactly what a race needs to become visible. So when a flake's fix would be "wait longer",
+first ask what the test is waiting *for* and whether anything is still going to deliver it. Earlier notes
+stand below.)*
+
 *Last edited 2026-10-14 (Builder, branch `claude/relaxed-cray-4uwet8` — **the backlog was dry of ungated work and the
 inbox unchanged, so the run went looking for a bug instead of a task — and found two, of one class, by asking
 "who else reads this?" of a predicate v0.492.13 had re-authored. v0.495.11 + v0.495.12.**

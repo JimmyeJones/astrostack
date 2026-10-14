@@ -1685,6 +1685,149 @@ describe("EditorView", () => {
     expect(screen.queryByRole("button", { name: /Use my default/ })).toBeNull();
   });
 
+  // The two seeds above, and the suggested-preset chip beside them, are live as
+  // soon as their own query lands — while the editor's first-open decision waits
+  // for *both* seed queries to settle before it decides what the pipeline opens
+  // on. On the owner's box those two reads are not equally quick (the default
+  // recipe is one config read; the carry-over scans the target's other runs), so
+  // the window between them is real, and a click inside it was silently undone a
+  // beat later by the decision's own reset — after the notification had already
+  // said the seed was applied.
+  const SEED_TWO_OPS: client.OpInstance[] = [
+    { uid: "d1", id: "tone.stretch", enabled: true, params: { stretch: 0.6 } },
+    { uid: "d2", id: "tone.curves", enabled: true, params: { points: [[0, 0], [1, 1]] } },
+  ];
+
+  /** The shared half of a pre-decision race: an empty run, two ops in the schema,
+   * and a histogram — with each seed query left to the caller to pace. */
+  function mockUndecidedRun() {
+    vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES]);
+    vi.spyOn(client.api, "getRecipe").mockResolvedValue({ ops: [], base_run_id: 3 });
+    vi.spyOn(client.api, "listPresets").mockResolvedValue({ builtin: [], user: [] });
+    vi.spyOn(client.api, "getHistogram").mockResolvedValue(
+      { bins: 4, edges: [0, 0.25, 0.5, 0.75], r: [1, 2, 3, 4], g: [0, 0, 0, 0], b: [0, 0, 0, 0] });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+  }
+
+  it("keeps the default seed a user clicked while the slower seed query was still in flight",
+    async () => {
+      mockUndecidedRun();
+      // The default recipe has landed; the carry-over read has not, so the
+      // first-open decision cannot have run yet.
+      let settlePrev: (v: client.PreviousRecipe) => void = () => {};
+      vi.spyOn(client.api, "previousRecipe").mockReturnValue(
+        new Promise<client.PreviousRecipe>((resolve) => { settlePrev = resolve; }));
+      vi.spyOn(client.api, "getDefaultRecipe")
+        .mockResolvedValue({ count: 2, ops: SEED_TWO_OPS });
+
+      renderEditor();
+
+      fireEvent.click(await screen.findByRole("button", { name: /Use my default \(2\)/ }));
+      expect(await screen.findByText("Stretch")).toBeInTheDocument();
+
+      // Now the slower read lands and the decision finally runs. It must adopt
+      // what the user put there, not reset the pipeline back to empty.
+      settlePrev({ run_id: null, ops: [], count: 0 });
+      await waitFor(() => expect(client.api.previousRecipe).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(screen.getByText("Stretch")).toBeInTheDocument();
+      expect(screen.getByText("Curves")).toBeInTheDocument();
+      // And it is still the undoable, unsaved step the notification promised:
+      // Undo is live, and the leave guard knows there is something to lose.
+      expect(screen.getByLabelText("Undo")).toBeEnabled();
+      fireEvent.click(screen.getByText("Leave the editor"));
+      expect(await screen.findByText("Keep this look?")).toBeInTheDocument();
+    });
+
+  it("keeps the carry-over seed a user clicked while the slower seed query was still in flight",
+    async () => {
+      // The mirror case: whichever of the two reads is slower holds the decision
+      // open, so the bug has two directions and only one of them was reachable
+      // from the test above.
+      mockUndecidedRun();
+      vi.spyOn(client.api, "previousRecipe")
+        .mockResolvedValue({ run_id: 2, count: 2, ops: SEED_TWO_OPS });
+      let settleDefault: (v: client.DefaultRecipe) => void = () => {};
+      vi.spyOn(client.api, "getDefaultRecipe").mockReturnValue(
+        new Promise<client.DefaultRecipe>((resolve) => { settleDefault = resolve; }));
+
+      renderEditor();
+
+      fireEvent.click(await screen.findByRole("button", { name: /Use my previous edit \(2\)/ }));
+      expect(await screen.findByText("Stretch")).toBeInTheDocument();
+
+      settleDefault({ count: 0, ops: [] });
+      await waitFor(() => expect(client.api.getDefaultRecipe).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(screen.getByText("Stretch")).toBeInTheDocument();
+      expect(screen.getByText("Curves")).toBeInTheDocument();
+    });
+
+  it("keeps a hand-added operation made while the first-open decision was still pending",
+    async () => {
+      // Not just the nudge: `Add operation`, the Presets menu and the crop
+      // buttons live in the toolbar, which renders as soon as the saved recipe
+      // loads — so the window is not about the nudge's own buttons at all. This
+      // run has nothing of the user's own to offer, so the decision that the
+      // pending read is holding open is the one that would fire Auto-process:
+      // it must neither reset the hand-built op nor seed over the top of it.
+      mockUndecidedRun();
+      vi.spyOn(client.api, "previousRecipe").mockResolvedValue(
+        { run_id: null, ops: [], count: 0 });
+      let settleDefault: (v: client.DefaultRecipe) => void = () => {};
+      vi.spyOn(client.api, "getDefaultRecipe").mockReturnValue(
+        new Promise<client.DefaultRecipe>((resolve) => { settleDefault = resolve; }));
+      const autoProcess = vi.spyOn(client.api, "autoProcess").mockResolvedValue(SEED_RECIPE);
+
+      renderEditor();
+
+      fireEvent.click(await screen.findByText("Add operation"));
+      fireEvent.click(await screen.findByText("Curves"));
+      await screen.findAllByText("Curves");
+
+      // The decision now resolves — and with a hand-built op in the pipeline it
+      // must neither reset it nor run the unasked-for Auto seed over the top.
+      settleDefault({ count: 0, ops: [] });
+      await waitFor(() => expect(client.api.getDefaultRecipe).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(screen.getAllByText("Curves").length).toBeGreaterThan(0);
+      expect(autoProcess).not.toHaveBeenCalled();
+    });
+
+  it("keeps what the user built while the unasked-for Auto seed was still in flight",
+    async () => {
+      // The widest window of the three, and the one a beginner meets: on a run
+      // with nothing of the user's own the editor fires Auto-process *for* them,
+      // which on a mosaic at the owner's scale takes seconds. The pipeline is
+      // interactive throughout, and the seed's own "clear the slate first" reset
+      // used to land on top of whatever had been built in the meantime.
+      firstTimerMocks();
+      let settleAuto: (v: typeof SEED_RECIPE) => void = () => {};
+      const autoProcess = vi.spyOn(client.api, "autoProcess").mockReturnValue(
+        new Promise<typeof SEED_RECIPE>((resolve) => { settleAuto = resolve; }));
+
+      renderEditor();
+
+      await waitFor(() => expect(autoProcess).toHaveBeenCalled());
+      fireEvent.click(await screen.findByText("Add operation"));
+      fireEvent.click(await screen.findByText("Curves"));
+      await screen.findAllByText("Curves");
+
+      settleAuto(SEED_RECIPE);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Their op stands, and the seed is dropped rather than applied over it —
+      // so the note that would have claimed Auto chose this look is not shown.
+      expect(screen.getAllByText("Curves").length).toBeGreaterThan(0);
+      expect(screen.queryByText("What Auto-process did")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Started you off with Auto-process/)).toBeNull();
+    });
+
   it("flags a heavy op so the user knows the preview updates after a pause", async () => {
     vi.spyOn(client.api, "editorOps").mockResolvedValue([STRETCH, CURVES, DECONVOLVE]);
     vi.spyOn(client.api, "getRecipe").mockResolvedValue({

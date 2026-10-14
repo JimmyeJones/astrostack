@@ -1,5 +1,80 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, branch `claude/determined-pasteur-7wyfto`) — a "flake" whose premise was wrong by 20×, and what that says about flakes in general
+
+*(→ **v0.495.13**. Baseline: `main`'s CI run **2307** still in flight on the exact HEAD `06c255da`
+(v0.495.12), with **four of five jobs already green** — Frontend build + tests, Image contract, Version bump
+is sane, Commit identity — and run **2305** green before it; the local suite agreed. Inbox **four open**,
+confirmed with `list_issues`: #878, #880, #903, #1015, all previously acted-on and owner-gated. **No open
+PRs**, so §11's claim check was a formality.)*
+
+### Reading the *jobs* of an in-flight run is most of a baseline
+
+The previous two runs' note — read `main`'s own CI result before spending seventy minutes on a local
+suite — has a cheap extension: a run that is still `in_progress` is not a blank. `list_workflow_jobs`
+on it showed Frontend, Image contract, Version and Identity all green with only Python tests outstanding,
+which is enough to know `main` is not red in any way this run's change could collide with. One call,
+seconds, on a run that would not report for another half-hour.
+
+### The finding: the entry with an actionable shape was a misfiled real bug
+
+Of the top four "Bugs" entries, three are decided stand-downs or gated on a number only the owner's library
+has. The fourth was the `Editor.test.tsx` *"Unable to find an element with the text: Stretch"* failure, filed
+the same morning as a `findByText` timeout flake with two proposed shapes, of which (a) was *"give this file
+an explicit `asyncUtilTimeout` — testing-library's default is 1 s"*.
+
+**`frontend/src/test/setup.ts` has configured `asyncUtilTimeout: 20000` since the previous round of this**,
+under twenty lines of comment recording the 5 000 ms and 10 000 ms attempts that preceded it. So the wait had
+not expired at 1 s; it had waited **twenty seconds** for ops that were never coming back. And
+`Editor.test.tsx:1671`, the line the job log names, is not one of the three static-toolbar waits the entry
+describes — it is two lines after the `fireEvent.click` inside *"offers the user's saved default recipe"*.
+
+Both facts were inside the artefacts the entry itself linked, one command each. The entry was filed carefully
+and in good faith: it named its confidence, refused to flip a constant blind, and ended *"do not simply
+re-run and move on"* — which is the sentence that produced the fix. The gap is narrower and more ordinary
+than carelessness: **a filing is written by the run that could not finish the work, so its premise is a
+hypothesis with a citation, not a measured fact.** Re-derive the premise before building on it — and in this
+case the re-derivation (`cat setup.ts`, read the line number) was cheaper than the fix.
+
+### The general lesson: "only under load" and "a real bug" are not alternatives
+
+The reason the flake framing is seductive is that it explains the pattern perfectly — green locally, red on a
+loaded runner, red on a diff that cannot have caused it. But **contention does not invent failures; it
+changes which order two async settles land in**, and that is precisely what a race needs in order to become
+visible. The editor's first-open decision waits for *both* of its seed reads while each nudge button renders
+on *its own*, so whichever read is slower sets the width of a window in which the pipeline is interactive but
+undecided — and `vi.fn().mockResolvedValue()` on two queries is not a fixed order.
+
+So the test for a "wait longer" fix is one question: **what is this wait waiting for, and is anything still
+going to deliver it?** Here nothing was: `openOn([])` had already reset the pipeline the click filled. A
+raised timeout would have turned a reproducible red into an intermittent one and buried a user-facing bug
+under a constant.
+
+### What the fix is careful about, for whoever touches it next
+
+- **`adoptWhatTheUserBuilt` must not reset the undo history.** The notification that puts a seed in the
+  pipeline promises *"Undo to revert"*, so adopting the work with `openOn` (which clears history) would trade
+  one silent loss for another. It writes only the two keys.
+- **Its keys are `openOn`'s**, taken from the saved recipe — which is empty in the only state it is reachable
+  in — so the decided case (every open where both reads land before a click) is byte-identical to before, and
+  the leave guard still reads the click as unsaved work.
+- **`pipelineWritten` is cleared on a run change, not by the reset it guards.** The outgoing run's edits are
+  not a write to the incoming run's pipeline, and the hand-over reset deliberately happens a beat *later*
+  (it is what keeps the previous run's recipe on screen instead of flashing empty).
+- **Every `setOps` caller was checked to be a user action** before the flag was given that meaning: every
+  one is an event handler or a mutation callback, and none is in an effect — which is what lets
+  "something wrote the pipeline" stand in for "the user wrote the pipeline".
+
+### Measuring a frontend fail-before without touching the running suite
+
+The Python suite was running for the whole investigation, and §7 forbids editing the tree under it —
+`git stash` included. `git worktree add <scratch> origin/main` plus a symlink to the real
+`frontend/node_modules` gave a complete, independent frontend to write the fix and the tests in, at the cost
+of one `ln -s`. The 2026-10-05 caveat (a worktree does not isolate a module your change *adds*) does not
+apply here: the change edits an existing file, which resolves from the worktree. Fail-before was taken by
+`git checkout -- frontend/src/routes/Editor.tsx` inside the worktree — 4 red — and the file restored from a
+copy — 4 green.
+
 ## 2026-10-14 (Builder, branch `claude/relaxed-cray-4uwet8`) — the backlog was dry, so the run asked "who else reads this?" and the dogfood pass was clean
 
 *(→ **v0.495.11** + **v0.495.12**. Baseline: `main`'s own CI run **2300** green on the exact HEAD
