@@ -368,3 +368,50 @@ def test_last_night_never_speaks_for_a_target_that_was_not_shot_that_night(
     body = client.get("/api/last-night").json()
     assert {t["safe"] for t in body["targets"]} == {"M_42"}
     assert body["early_stop"] is None
+
+
+def test_the_card_builds_no_frame_row_for_the_whole_library(
+        client, built_library, monkeypatch):
+    """The one read here that opens **every** target: the recap needs when each
+    sub landed, whether QC kept it and why not, and how long it was — five
+    columns — and used to build a whole `FrameRow` per sub to get them.
+
+    Fail-before: a `FrameRow` is `SELECT *`, so on the owner's library this card
+    moved every sub's plate-solve header text (~2 kB each, ~150 MB alive at once
+    on his deepest target) to count subs and add up exposure. AGENTS.md §10 —
+    this box has an OOM history, and the card is rebuilt whenever a scan moves a
+    target's activity stamp.
+    """
+    import seestack.io.project as project_module
+    from seestack.io.library import Library
+
+    night = dt.datetime(2026, 7, 8, 21, 0, 0, tzinfo=dt.timezone.utc)
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _add_night(lib, "M_42", night, n=6)
+        _add_night(lib, "M_42", night + dt.timedelta(minutes=4), n=1,
+                   accept=False, reject_reason="auto:streak")
+    finally:
+        lib.close()
+
+    # A configured site, which is the only other thing in this request that
+    # reads frames: without one, `resolve_site_lon` sniffs `SITELONG` out of the
+    # subs' own headers (`webapp.site_location`), and the bundled samples
+    # deliberately carry none, so it walks every accepted frame. That read is
+    # not this card's and is not what is being measured here.
+    client.put("/api/settings", json={"site_lon": 150.0})
+
+    built = 0
+    real = project_module._row_to_frame
+
+    def counting(row):
+        nonlocal built
+        built += 1
+        return real(row)
+
+    monkeypatch.setattr(project_module, "_row_to_frame", counting)
+    body = client.get("/api/last-night").json()
+    # The card really did answer off this night (otherwise zero rows would be
+    # zero work rather than cheap work).
+    assert body is not None and body["n_frames"] == 7
+    assert built == 0, f"built {built} FrameRow objects for the Last-night card"

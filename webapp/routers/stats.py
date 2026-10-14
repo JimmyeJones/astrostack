@@ -797,9 +797,9 @@ def _collect_last_night(lib, targets, night_of=None):
     "did this night stop notably earlier than its own recent ones?"
     (:func:`~seestack.session_recap.early_stop`). The two are collected together
     because they read the *same* frame list: this loop already materialises every
-    target's frames in order to trim them, so the per-session end stamps cost one
-    pass over rows that are in memory anyway, where a second endpoint would
-    re-open every project to learn the same thing. Only the stamps are kept,
+    target's capture records in order to trim them, so the per-session end stamps
+    cost one pass over records that are in memory anyway, where a second endpoint
+    would re-open every project to learn the same thing. Only the stamps are kept,
     never the frames — one short string per capture session, so even a library of
     a hundred targets shot for a year is a few hundred kilobytes held between
     scans.
@@ -825,7 +825,11 @@ def _collect_last_night(lib, targets, night_of=None):
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
-            frames = list(proj.iter_frames())
+            # Five columns rather than whole rows: the recap reads when a sub
+            # landed, whether QC kept it and why not, and how long it was, and a
+            # `FrameRow` is `SELECT *` — see `Project.iter_night_frames`. This
+            # card is the one read here that opens *every* target.
+            frames = list(proj.iter_night_frames())
             # Every session's stop time, before the window trim below throws the
             # older ones away — the habit this target's newest night is judged
             # against.

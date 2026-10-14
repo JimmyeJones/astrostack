@@ -1,5 +1,84 @@
 # Shipped — the record
 
+## 2026-10-14 (Builder, branch `claude/relaxed-cray-8ak3vj`) — the four night summaries stop building a whole row for every sub, and three of them are one page
+
+### v0.495.6 — 🟠 BUG FIX (memory on the pages the owner opens most, AGENTS.md §10's OOM history): **the Target page's three night cards and the Dashboard's "Last night" each built a `FrameRow` for every sub of the target to read five small fields — and the three Target-page cards all mount on one view, so ~437 MB of plate-solve header text was asked for at once on his deepest target.** New `seestack/io/project.py::FrameNight` + `Project.iter_night_frames` (over `_NIGHT_COLUMNS`); `seestack/session_recap.py::session_recap`, `focus_trend` and `nights_breakdown` read it, and so does `webapp/routers/stats.py::_collect_last_night`.
+
+*(Baseline: local suite **7916 passed, 7 skipped** in 20m26s on `main` at `f437029e` (`__version__` 0.495.5),
+CI run 2279 green on that exact commit, no open PRs, and the inbox holding the same four open issues, every
+one already acted on and owner-gated.)*
+
+**Why this task.** "Bugs (fix these first)" still holds nothing reproduced — the de-levelling pass count is
+decided with numbers, the `PANEL_LINK_DIST_DEG`, solve-retry and inert-chip LEADs are gated on data only the
+owner's library has, and the rest are ⚪ notes — and §2's big-picture dogfood was paid on 2026-10-13. So this
+run did what the previous one's method note says to do: it read the **callers the last migration stopped
+short of**. v0.495.5 moved the reveal's reference-sub pick onto `iter_health_frames`; the same question asked
+of `iter_frames` itself turned up a second cluster, bigger than the first.
+
+**What was wrong.** Four surfaces cut a target's subs into nights and summarise them, and every one of them
+walks **every sub the target has**:
+
+| surface | where the owner sees it |
+|---|---|
+| `session_recap` | the Target page's "Last session" card (`SessionRecapCard`) |
+| `focus_trend` | the Target page's sharpness sparkline (`FocusTrendCard`) |
+| `nights_breakdown` | the Target page's Nights card (`NightsCard`) |
+| `library_session_recap` + `session_end_stamps` | the Dashboard's combined "Last night", over *every* target |
+
+Between them they read exactly **five** fields off a sub — `timestamp_utc`, `accept`, `exposure_s`,
+`reject_reason`, `fwhm_px` — to cluster subs by capture time, count the kept and the set-aside, add up
+exposure, bucket the reject reasons and take medians of star size. A `FrameRow` is `SELECT *`, and the
+biggest column on a solved sub is its plate solution (`wcs_json`, a FITS header *text* of ~25
+eighty-character cards). Not one of the four so much as tests that column for presence.
+
+**Measured** on a synthetic project the size of the owner's deepest target (35,894 subs over 300 nights,
+~2 kB of `wcs_json` each, best of 3), each surface called the way its endpoint calls it:
+
+| surface | whole rows | five columns |
+|---|---|---|
+| `session_recap` | 1,684 ms / **145.5 MB peak** | 664 ms / **12.1 MB** |
+| `focus_trend` | 1,571 ms / 145.4 MB | 707 ms / 12.0 MB |
+| `nights_breakdown` | 1,696 ms / 145.5 MB | 769 ms / 12.2 MB |
+| last-night (recap + stamps) | 1,745 ms / 145.8 MB | 756 ms / 12.5 MB |
+
+Every answer identical — and checked *through the functions themselves*, not field by field: the recap, the
+trend, the night list and the combined card are compared object-for-object against the same read done with
+whole rows.
+
+**What makes it a version rather than a cleanup, and it is the page rather than the milliseconds.** The three
+Target-page cards are not alternatives: `InsightTabs` renders every group and keeps the panels **mounted**
+(deliberately — it measures which cards produced DOM so a card with nothing to say gets no tab), so all three
+queries fire on every view of the page, and all three endpoints are plain `def`s FastAPI runs in its
+threadpool. Their peaks therefore coincide: **~437 MB → ~36 MB** for one look at his deepest target, on a
+RAM-capped NAS that may be stacking at the same time. The Dashboard's card then pays its own **per target**
+across the library, and its cache is keyed on each target's activity stamp, so a night of shooting rebuilds
+it every scan.
+
+**Why a record rather than tuples.** These four genuinely want *rows* — they cut the subs into sessions and
+then each session into kept and set aside — so this follows `FrameHealth`/`iter_health_frames` exactly
+(v0.471.x) rather than the column-major `AcquisitionValues`. `FrameNight` carries no `id`: none of the four
+identifies a sub, and the Nights card's "Set aside this night" button acts through the frames endpoint. The
+annotations in `session_recap.py` name a `NightFacts` Protocol — the five questions — rather than either
+record, because a `FrameRow` answers them too and one caller still hands over whole rows on purpose: the
+**sky-transparency trend** reads `transparency_score` and the pointing columns behind its per-panel split,
+which are not night facts.
+
+**Upgrade-safe (§9):** a read-path change only. No endpoint, response field, config key, schema version,
+on-disk path or default moves; nothing is removed; `iter_frames` is untouched and still what `livesession`,
+QC, grading and the stacker read.
+
+**Tests (+11; 4 fail before).** New `tests/test_project_night_frames.py`: the record equals the row
+field-by-field in both `accepted_only` modes, the field list is pinned against both the dataclass and
+`_NIGHT_COLUMNS` (so a field added to one and not the other goes red), the order is `iter_frames`' own,
+**no `FrameRow` is built** (counted through `_row_to_frame`), the retained set is under a quarter of the
+rows', and an empty target answers empty rather than raising. `tests/test_session_recap.py`: the three
+Target-page reads build no row (fail-before: *"session_recap built 34 FrameRow objects"*) and answer exactly
+what whole rows answered, on a fixture whose newest night really is judged soft against the two before it;
+and the Dashboard's pair answers the same off either read. `tests/webapp/test_last_night.py`: the endpoint
+builds **no** row for the whole library (fail-before: *"built 13 FrameRow objects"*) — with the site
+longitude configured first, because `resolve_site_lon` otherwise sniffs `SITELONG` out of the subs' own
+headers and that read is not this card's.
+
 ## 2026-10-14 (Builder, branch `claude/brave-albattani-gqf5wp`) — the reveal's representative-sub pick stops reading every column of every sub
 
 ### v0.495.5 — 🟠 BUG FIX (memory on the hot path, AGENTS.md §10's OOM history; PRIORITY 1-adjacent — the reveal is the app's one celebratory "trust me" surface): **the "one frame vs your stack" pick built a whole `FrameRow` for every sub of the target to choose one of them — 153 MB of plate-solution header text on his deepest target, on every Target-page view.** `webapp/routers/stack.py::_pick_reference_sub` now reads `Project.iter_health_frames`; new `_reference_sub_row` fetches the one winning row by id for the two callers that render it; `one_sub_vs_stack_noise` fetches that row **only on a cache miss**.
