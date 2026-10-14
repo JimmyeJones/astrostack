@@ -1,5 +1,71 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-14 (Builder, branch `claude/nifty-lamport-s6bmf8` — **the backlog's one ⭐ item was
+owner-approved and unclaimed, so this run built its first slice — and the slice's own "Back to default"
+found a save that had been silently refusing a blank for as long as the field has existed. v0.496.0.**
+
+**What this run did.** Baseline the way the last three notes say: `main`'s own CI run **2311** green on the
+exact HEAD (`af9ae259`), one call; the local suite then agreed at **7948 passed, 7 skipped** (19m43s).
+Inbox: the same **four open issues (#878, #880, #903, #1015)**, every one previously acted-on and
+owner-gated, nothing new owed — and the inbox is the Scout's anyway. **No open PRs.** "Bugs" was read end to
+end and FOCUS's own verdict held: **nothing ungated** — the four leads at the top each name a measurement
+that is a read of *his* library. So §11's "a ⭐ entry is always taken first" decided it: the **owner-approved
+Settings redesign** (⭐, "Yes go" 2026-10-14), whose spec landed in a `docs:` commit **2 h 21 m** before this
+run started, i.e. just outside the claimed-in-spirit window, with no PR behind it.
+
+**v0.496.0 — "More settings": the settings he called scary, in plain words, each warning the moment it leaves
+its default.** Slice 1 of five, in the order `docs/design/settings-redesign.md` gives. `/settings/more` is a
+section like the other seven: 15 cards over 20 `Settings` fields, each a title in his words, one sentence,
+the control, a **Safe to change / Changes future pictures / Has side effects** badge, a `Was: <old label>`
+line, and — only off-default — an amber **Heads up** with **Back to default (…)**. Plus **Find a setting**,
+matching new title, sentence, old label *and* the field's own name. **Additive on purpose:** every control
+also still sits where it always did, both over the page's one `form`, which is how "nothing is removed" is
+kept with four slices to come and is why no `settingsLink()` deep link moved.
+
+**The spec said to check each warning against the code, and two did not survive it.** The field-of-view
+card's *"Read from my photos"* is **not a choice**: `solve/runner._fov_deg_for_frame` derives the field from
+every frame's own `FOCALLEN`/`XPIXSZ` and only ever falls back to `astap_fov_deg`, so the help line says so
+and the warning no longer claims most frames go unplaced. And `astap_timeout_s` is per *attempt* over a
+three-strategy ladder, so its warning now quotes `3 ×` the slider — the number `HINTS` has carried all along.
+
+**🔴 And the slice's own first button found a live bug.** **Back to default (Standard)** clears
+`incoming_dir`/`library_root` — and did nothing, because `dropEmptyFields` drops every `""` before the PUT.
+That is right for a cleared numeric (a cleared ASTAP FOV used to 422 the whole form) and wrong for the three
+strings whose blank **is** the value, so on `main` today clearing **Incoming dir** and pressing Save says
+*"Settings saved"* and keeps the old path: **there has never been a way back from a custom folder.**
+`BLANKABLE_FIELDS` lets those three through; `data_root` deliberately still cannot be emptied. Regression
+test red before.
+
+**START HERE NEXT RUN.** (a) **Read `main`'s own CI result first** (`actions_list` on `ci.yml`/`main`) — still
+the only thing that speaks for the merge commit, still seconds. (b) **Slices 2–5 of the redesign are the
+front of the queue** and the entry in `IMPROVEMENTS.md` carries three notes written for whoever takes slice 2:
+the "nothing was removed" guard already exists and is **page-wide** (`lbl()` stamps `data-setting`; extend
+that test, don't write a second), expect one or two more spec-vs-code corrections per slice, and a card moved
+out of `/settings/more` must keep the inbound deep links. (c) **The inbox is unchanged and owner-gated**;
+"Bugs" still holds nothing ungated. (d) **The height `/settings/more` ships at is the number slice 2 inherits, and it is not small:** the probe
+puts it **4th tallest page in the whole app at phone width — 5,022 px** (desktop 3,736), against **2,758 px**
+for `/settings/maintenance`, the tallest Settings section before it. Nothing else moved (`[phone] /life-list
+[Still to shoot]` **14,513 px**, byte-identical to the standing baseline), and the sweep is **CLEAN** —
+nothing overflowing, no console errors, no clipped label. It was **not** shortened by collapsing the five
+groups, deliberately: the spec the owner approved says *"open by default; **not** 'expert'"*, and a group
+closed by default is a **Heads up** he does not see. The levers that stay open, in the order they look
+cheapest: the page's own `maw={680}` is what holds the grid to two columns on a 1440 px screen (the mockup's
+is `auto-fit minmax(300px, 1fr)`, i.e. three), and slice 2 is where the page's overall shape is decided
+anyway. **Measure it again on slice 2 and say the number.**
+(e) Stalest dogfood flags: this run paid the plain page sweep (the probe
+reads `SETTINGS_SECTIONS` from the app's own list, so `/settings/more` was swept the moment it existed);
+`--mosaic`/`--editor`/`--big` were paid 2026-10-14 by v0.495.13 and `--calibration`/`--incoming-lag` the run
+before. §2's whole-journey pass is paid to 2026-10-14. (f) Record files: `SHIPPED.md` ~39.5k/64k,
+`PROCESS-NOTES.md` ~13.3k/18k.
+
+**The method note worth carrying. Build the spec's own first button and it will tell you whether the app can
+keep the promise.** Nothing in reading `dropEmptyFields` says it is wrong; its comment is correct about the
+case it was written for, its two tests pass, and it has been on this page for months. What found the hole was
+needing **Back to default (Standard)** to actually work, and tracing the one patch it emits all the way to the
+request. A feature slice is a path through code nobody has walked in that direction before — so when a spec
+hands you a button, implement the button rather than the surface around it, and follow its value to the wire.
+Earlier notes stand below.)*
+
 *Last edited 2026-10-14 (Builder, branch `claude/determined-pasteur-7wyfto` — **the one "Bugs" entry with an
 actionable shape was a misfiled real bug: a `findByText` "flake" was the editor throwing away the click the
 test had just made. v0.495.13.**

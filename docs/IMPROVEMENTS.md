@@ -2425,7 +2425,12 @@ problems. Dogfood it every big-picture run and fix root causes.
   (c) Slice 1 is **additive** — each card's twin still sits on its old section, both over one `form` — so
   slices 2–5 are where the duplicates resolve, and a card moved out of `/settings/more` must land somewhere
   that keeps the inbound `settingsLink()` deep links (`folders` is where the Dashboard's data-root warning
-  points; `plate-solving` is where four screens send a failed solve).
+  points; `plate-solving` is where four screens send a failed solve). **And the height:** `/settings/more`
+  ships at **5,022 px on a phone** (3,736 desktop), 4th tallest page in the app, against 2,758 px for the
+  tallest Settings section before it — measured, sweep otherwise CLEAN, and deliberately *not* shortened by
+  collapsing the groups, because a closed group hides a **Heads up** and the spec says "open by default,
+  **not** expert". **Measure it again on slice 2 and say the number**; `maw={680}` on the page is what holds
+  the card grid to two columns where the mockup's `auto-fit minmax(300px, 1fr)` would give three.
 
 - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-30) — "Bring my pictures up to date": re-stack only the
   targets that have new light, in one click.**~~ — **✅ SHIPPED v0.492.0** (Builder 2026-09-30). Entry cut to
