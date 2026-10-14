@@ -1,5 +1,65 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-14 (Builder, branch `claude/relaxed-cray-4uwet8` — **the backlog was dry of ungated work and the
+inbox unchanged, so the run went looking for a bug instead of a task — and found two, of one class, by asking
+"who else reads this?" of a predicate v0.492.13 had re-authored. v0.495.11 + v0.495.12.**
+
+**What this run did.** Baseline the right way round, per the note below: **`main`'s own CI run 2300 was green**
+on the exact HEAD (`9e19088d`, v0.495.10) — one call, seconds — and the local suite then agreed at
+**7941 passed, 7 skipped** (21m28s). Inbox listed with `list_issues`: **four open (#878, #880, #903, #1015),
+every one previously acted-on and owner-gated, nothing new owed.** PR #1161 was live (branch pushed 33 minutes
+before this run started), and it had filed the top two "Bugs" entries within the previous ~1.5 h, so §11 made
+both of them claimed-in-spirit and this run took neither.
+
+**The backlog really was dry, and that was checked rather than inherited.** Every other open "Bugs" entry is a
+decided stand-down with numbers or gated on the owner's data, and "Features that serve real workflows" was read
+end to end: every entry is shipped, closed, or a deliberate decline. **Two gates were closed by reading rather
+than assumed:** the "full data" TIFF white point still needs his pixels (archived trace, 2026-09-03), and
+**observer #903's residual is genuinely owner-gated — the repair shipped as v0.479.3** ("Give back pictures a
+restack flattened"), so what is left is his click. Which is how the run found its actual work.
+
+**v0.495.11 — the repair asked "is a cover pinned?" where it meant "did *he* pin it?"** Reading v0.479.3
+adversarially because 44 of his pictures depend on it: `refinish_verdict` stood down on
+`entry.cover_stack_run_id is not None`, written when a cover had one author. **v0.492.13 gave it two** and built
+`seestack/coverpin.py` precisely to tell the app's pins from his — and brought three sites into line
+(`io/library.py` writes, `pipeline._displayed_picture_state` and `routers/newsubs.py` read) **and not this one**.
+Only `PIN_REASON_MERGE` reaches it, and that is asserted both ways: `merge_targets_result` pins whatever the
+destination was *showing* (`_displayed_run_id` never asks whether it is finished), while `KEPT_FINISHED` is on a
+finished picture and has already returned `None`. So a **Combine** performed while a picture was flat put it
+beyond his own repair and told him he had chosen it. An app pin now falls through to the whole ladder; no cover,
+pin or precedence moves. Tests +5, 3 fail before.
+
+**v0.495.12 — the same sweep, one module further.** `rank_portfolio` sorts on `not entry.pinned` **first**, so a
+pinned entry outranks *every* unpinned one; `_representative_run`'s `pinned` meant only "a cover is set", and
+`get_best_pictures` fed it to the ranker. So a Combine's pin floated above his genuinely best pictures on "My
+best pictures" and could push them off `limit`. **The repo had already named the distinction on the other side
+of the same feature** — `mergeSuggestions.ts::mergeCoverClause` exists to tell him about this very pin and calls
+it *"a cover the user never pinned"*. One condition at the single call site; `_representative_run` stays pure and
+the pinned run is still the **representative**, which is what every other wall shows. Tests +2, 1 fails before.
+
+**START HERE NEXT RUN.** (a) **Read `main`'s own CI result first** (`actions_list` on `ci.yml`/`main`) — seconds,
+and it is the only thing that speaks for the merge commit. (b) **The inbox is still the frontier**, and all four
+open issues are owner-gated; #903's repo side is now complete (v0.479.3 + these two). (c) **"Bugs" holds nothing
+ungated**, and the two freshest entries belong to PR #1161's run — re-check whether the `Editor.test.tsx`
+`findByText` flake is still claimed before taking it; it is the one entry with an actionable shape (an explicit
+per-file `asyncUtilTimeout` sized from the measured 62.6 s/142 tests). (d) **The `app_pin_reason` sweep is now
+finished and its leftovers are honest:** every other `cover_stack_run_id` reader asks *which run is displayed*
+(`finishedpicture.displayed_picture_run`, `picturesarchive`, `targets.py`, `unstretched`, `gallery`'s listing),
+which is correct whoever pinned it — the authorship question is only ever asked by the four sites that now all
+ask it. (e) Stalest dogfood flags remain `--calibration` and `--incoming-lag`; §2's whole-journey pass is paid
+to 2026-10-14. (f) Record files still have headroom.
+
+**The method note worth carrying.** **When a module gives an old fact a new author, the bug is in the readers,
+not the writer — and the readers are found by grep, not by inspiration.** v0.492.13 did the hard part
+correctly: it added provenance, wrote a careful module docstring, and converted the three call sites it was
+about. Both bugs here are sites it was *not* about, found by asking one mechanical question of every reader of
+`cover_stack_run_id` — *"does this ask which picture, or does it ask who chose it?"* — which separates the
+dozen harmless pass-throughs from the four that carry a claim. The sharper half: **the repo had already written
+the correct sentence somewhere else.** `mergeCoverClause` calls a merge pin "a cover the user never pinned" in
+the very confirmation the user reads, while two Python modules called it his favourite and his choice. A
+contradiction between a thing the app *says* and a thing the app *does* is cheap to grep for and is where this
+class lives. Earlier notes stand below.)*
+
 *Last edited 2026-10-14 (Builder, branch `claude/relaxed-cray-fzxacq` — **`main`'s CI was red, so §8 made that
 task #1, and the broken thing was the test rather than the code it accused. v0.495.10.**
 

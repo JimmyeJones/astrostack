@@ -482,3 +482,87 @@ def test_best_ranks_a_thin_raster_below_a_genuinely_deep_picture(
     assert [it["safe"] for it in items] == [single, mosaic]
     by_safe = {it["safe"]: it for it in items}
     assert by_safe[single]["score"] > by_safe[mosaic]["score"]
+
+
+def _app_pin_cover(data_root, safe: str, run_id: int, reason: str) -> None:
+    """Pin a cover the way the *app* does: the registry column plus the record
+    saying it was us. ``Library.merge_targets_result`` does exactly this pair
+    after a Combine (:mod:`seestack.coverpin`)."""
+    from seestack.coverpin import mark_app_pin
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        lib.set_target_cover(safe, run_id)
+        proj = lib.open_target(safe)
+        try:
+            mark_app_pin(proj, run_id, reason)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_a_cover_the_app_pinned_is_not_floated_as_a_favourite(client, solved_library):
+    """A Combine pins the deep target's own picture so a carried one-night stack
+    cannot replace it — ``mergeCoverClause`` calls that "a cover the user never
+    pinned". It is still the right *representative*, but it is no evidence of a
+    favourite, and floating it would let the app's own bookkeeping push his
+    genuinely best pictures off the wall."""
+    from seestack.coverpin import PIN_REASON_MERGE
+
+    targets = client.get("/api/targets").json()
+    a, b = targets[0]["safe_name"], targets[1]["safe_name"]
+    modest = _register_preview_run(solved_library, a, basename="modest",
+                                   n_frames=20, exposure_s=600, noise_sigma=0.09,
+                                   coverage_max=20)
+    _register_preview_run(solved_library, b, basename="deep", n_frames=500,
+                          exposure_s=15000, noise_sigma=0.01, coverage_max=500)
+    # Unpinned, the deep stack wins the single slot (the same control the
+    # favourite test uses).
+    assert client.get("/api/gallery/best?limit=1").json()["items"][0]["safe"] == b
+
+    _app_pin_cover(solved_library, a, modest, PIN_REASON_MERGE)
+    top = client.get("/api/gallery/best?limit=1").json()["items"]
+    assert len(top) == 1
+    assert top[0]["safe"] == b                      # the ranking still decides
+
+    # It is still the target's representative, and it does not claim to be his.
+    items = client.get("/api/gallery/best").json()["items"]
+    a_items = [it for it in items if it["safe"] == a]
+    assert len(a_items) == 1
+    assert a_items[0]["run_id"] == modest
+    assert a_items[0]["pinned"] is False
+
+
+def test_his_own_pin_still_floats_when_a_stale_app_record_names_another_run(
+        client, solved_library):
+    """``app_pin_reason``'s retirement rule at this seam: a record naming a run
+    other than the one pinned is not about this pin, so the pin is his and the
+    favourite still outranks the deeper stack."""
+    from seestack.coverpin import PIN_REASON_MERGE, mark_app_pin
+
+    targets = client.get("/api/targets").json()
+    a, b = targets[0]["safe_name"], targets[1]["safe_name"]
+    modest = _register_preview_run(solved_library, a, basename="modest",
+                                   n_frames=20, exposure_s=600, noise_sigma=0.09,
+                                   coverage_max=20)
+    other = _register_preview_run(solved_library, a, basename="other",
+                                  n_frames=10, exposure_s=300, noise_sigma=0.1,
+                                  coverage_max=10,
+                                  timestamp="2026-04-01T00:00:00Z")
+    _register_preview_run(solved_library, b, basename="deep", n_frames=500,
+                          exposure_s=15000, noise_sigma=0.01, coverage_max=500)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(a)
+        try:
+            mark_app_pin(proj, other, PIN_REASON_MERGE)   # a pin that is gone
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    _set_cover(solved_library, a, modest)                 # he chose this one
+
+    top = client.get("/api/gallery/best?limit=1").json()["items"]
+    assert top[0]["safe"] == a and top[0]["run_id"] == modest
+    assert top[0]["pinned"] is True

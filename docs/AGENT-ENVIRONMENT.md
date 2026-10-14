@@ -88,6 +88,22 @@ cd frontend && npm install
 > > it** (five seconds against eighteen minutes). Details in
 > > `docs/PROCESS-NOTES.md`, 2026-09-30.
 >
+> **⚠️ Naming test files from two directories in one invocation can lose
+> `tests/webapp/conftest.py`'s fixtures** *(added 2026-10-14)*. Picking a handful of
+> files to re-run is the normal way to check a fix, and mixing directories in that
+> list breaks it: a `tests/webapp/` file that follows a file from elsewhere under
+> `tests/` can come up `E fixture 'built_library' not found`, with its whole file
+> erroring at setup. Measured on one tree, same four files, order the only variable:
+> `tests/test_portfolio.py tests/webapp/test_refinish.py` → **38 passed**;
+> `tests/webapp/test_unstretched.py tests/test_portfolio.py tests/webapp/test_refinish.py`
+> → **47 passed, 16 errors**, the errors all in the *last* file while the first
+> webapp file was fine. It is **not** a broken checkout or a bad fixture, and the
+> same files pass alone and inside the full suite — so the mechanism is pytest's
+> conftest collection for an explicit file list, not anything in this repo. **Group
+> an ad-hoc list by directory, or just name the directory** (`pytest -q tests/webapp`).
+> The tell is an error — not a failure — at *setup*, naming a fixture that plainly
+> exists in `tests/webapp/conftest.py`.
+>
 > **⚠️ Clear `/tmp/pytest-of-root` between suite runs** *(added 2026-09-14)*. One
 > run leaves **~7 GB** there — pytest keeps the last three `tmp_path` roots per
 > invocation and `-n 4` multiplies them — so the fourth suite of a run hits

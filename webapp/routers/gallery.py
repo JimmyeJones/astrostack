@@ -489,11 +489,13 @@ class BestPicture(BaseModel):
     # a run recorded before the app tracked it, so a caller says nothing rather
     # than claiming a count it does not have. Additive.
     capture_nights: int | None = None
-    # True when this picture is the one the user pinned as its target's cover
+    # True when this picture is the one **the user** pinned as its target's cover
     # ("Set as cover" in History). A pinned picture represents its target here
     # instead of the newest stack, and is floated above the ranked tail so the
     # automatic ranking can never hide the favourite. False for an ordinary
-    # auto-picked entry (and ignored outright by an older frontend).
+    # auto-picked entry (and ignored outright by an older frontend) — and also
+    # for a cover the **app** pinned on his behalf (:mod:`seestack.coverpin`),
+    # which still represents its target but was nobody's choice of favourite.
     pinned: bool = False
     # "What am I looking at?" — the offline catalog's plain-language type
     # ("galaxy") and one-line blurb for this target, resolved exactly as the
@@ -601,7 +603,10 @@ def get_best_pictures(
     already uses, so the picture someone chose to represent a target represents it
     on this wall too instead of being silently replaced by the newest stack. A
     pinned entry is also floated above the ranked tail, so the automatic ranking
-    can never drop the one picture they said was their favourite.
+    can never drop the one picture they said was their favourite — but only when
+    the pin is **his**: a cover the app placed (a Combine's, :mod:`seestack.coverpin`)
+    still represents its target and is never floated, because it says nothing
+    about what he likes.
 
     Each entry carries its run's ``field_fulls`` (:mod:`webapp.field_fulls`), so
     the ranker reads this picture's integration, frame count and coverage **per
@@ -609,6 +614,7 @@ def get_best_pictures(
     the raster, and this wall ranks the picture, not the target. Same helper and
     the same one LIMIT-1 frame-shape read per target the Gallery listing already
     pays for."""
+    from seestack.coverpin import app_pin_reason
     from seestack.io.project import Project
     from seestack.nightplan import load_catalog
     from seestack.objectinfo import identify_object
@@ -652,6 +658,18 @@ def get_best_pictures(
                 pick, pinned = _representative_run(runs, t.cover_stack_run_id)
                 if pick is None:
                     continue
+                # ...but only a pin *he* placed is a favourite. The app pins
+                # covers too (:mod:`seestack.coverpin`): a Combine keeps the deep
+                # target's own picture on the wall so a carried one-night stack
+                # cannot replace it, and the confirmation it shows for that calls
+                # it "a cover the user never pinned" (`mergeCoverClause`). That
+                # pin is still the right *representative* — it is what every
+                # other wall surface displays — but it is no evidence of a
+                # favourite, and `rank_portfolio` sorts a favourite ahead of
+                # **every** unpinned entry, so leaving it set would let the app's
+                # own bookkeeping push his genuinely best pictures off `limit`.
+                if pinned and app_pin_reason(proj, t.cover_stack_run_id) is not None:
+                    pinned = False
                 key = f"{t.safe_name}:{pick.id}"
                 # One LIMIT-1 read on the project this loop already has open —
                 # the same pair the Gallery listing pays for once per target.

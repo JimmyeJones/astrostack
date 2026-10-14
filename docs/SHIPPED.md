@@ -2,6 +2,52 @@
 
 ## 2026-10-14 (Builder, branch `claude/relaxed-cray-4uwet8`) — the repair for #903 asked "is a cover pinned?" where it meant "did *he* pin it?"
 
+### v0.495.12 — 🟠 BUG FIX (trust / enjoy-share — PRIORITY 3; the same sweep as v0.495.11, one more consumer) — `webapp/routers/gallery.py::get_best_pictures` asks `app_pin_reason` before calling a cover a favourite
+
+**The symptom.** On "My best pictures", a cover **the app** pinned was treated as the owner's declared
+favourite: reported as `pinned: true` and **floated above every unpinned entry**, so the app's own
+bookkeeping could push his genuinely best pictures off the wall's `limit`.
+
+**The mechanism.** `seestack/portfolio.py::rank_portfolio` sorts on `not entry.pinned` first — a pinned entry
+outranks *every* unpinned one, by design, so "the automatic ranking can never drop the one picture they said
+was their favourite". `_representative_run` returns `(run, pinned)` where `pinned` was simply "a cover is
+set", and `get_best_pictures` fed that straight into both `BestPicture.pinned` and `PortfolioEntry.pinned`.
+Since v0.492.13 a cover has two authors, so "a cover is set" is no longer "he chose it".
+
+**This repo had already named the distinction on the other side of the same feature.**
+`frontend/src/components/mergeSuggestions.ts::mergeCoverClause` exists to tell the user about exactly this
+pin, and its comment calls it *"a cover the user never pinned"* — while the ranker two modules away was
+calling it his favourite. Same reachability as v0.495.11 and the same population: the standing remedy for
+observer [#878](https://github.com/JimmyeJones/astrostack/issues/878) is for him to **Combine** his ~24
+duplicate targets, and each Combine pins the destination's own picture.
+
+**The fix.** One condition at the one call site that consumes the flag, using the project handle the loop
+already has open: `if pinned and app_pin_reason(proj, t.cover_stack_run_id) is not None: pinned = False`.
+`_representative_run` stays a **pure function on plain records** (deliberately so, per its own docstring) and
+keeps choosing the pinned run as the target's **representative** — which is right, because it is what every
+other wall surface displays. Only the *favourite* claim and the float are withdrawn. The other caller
+(`routers/targets.py:896`) already discards the bool.
+
+**Upgrade-safe (§9).** No config, schema, migration, on-disk or default change, and no response-shape change
+— `pinned` keeps its name, type and `False` default; only its value is corrected for a pin he did not make.
+Nothing in `frontend/` reads it, so no frontend change.
+
+**Tests (+2 in `tests/webapp/test_gallery_best.py`; 1 fails before).** Red before: a merge-pinned modest
+picture no longer takes the single slot from a much deeper stack, is still its target's representative, and
+reports `pinned: false` — built as the exact mirror of the existing
+`test_a_pinned_favourite_is_never_cut_by_the_ranking`, reusing its unpinned control so the two cannot drift.
+The guard that passes before: **his** pin still floats even when a stale app record names a different run
+(`app_pin_reason`'s retirement rule, asserted at this seam too). The two existing pinned-cover tests use his
+own pin and are unchanged — nothing was loosened.
+
+**Also in this commit, unversioned:** one trap in [`AGENT-ENVIRONMENT.md`](AGENT-ENVIRONMENT.md), hit while
+checking this fix. Naming test files from two directories in one `pytest` invocation can make a later
+`tests/webapp/` file lose `tests/webapp/conftest.py`'s fixtures — measured on one tree with order as the only
+variable: `tests/test_portfolio.py tests/webapp/test_refinish.py` → 38 passed, but
+`tests/webapp/test_unstretched.py tests/test_portfolio.py tests/webapp/test_refinish.py` → 47 passed **and 16
+errors**, all in the last file. It reads exactly like a broken fixture, and the files pass alone and in the
+full suite.
+
 ### v0.495.11 — 🟠 BUG FIX (trust — PRIORITY 1-adjacent (the displayed picture) / 2; Builder-found and reproduced, observer issue [#903](https://github.com/JimmyeJones/astrostack/issues/903)'s repair) — `webapp/refinish.py::refinish_verdict` asks `seestack.coverpin.app_pin_reason`
 
 **The symptom.** "Give back pictures a restack flattened" (Settings → Maintenance, v0.479.3 — the repair the
