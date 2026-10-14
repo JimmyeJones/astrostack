@@ -2403,6 +2403,16 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-APPROVED (2026-10-14, "Yes go") — the Settings page redesign: plain words, visuals, and every
+  setting adjustable with a warning before it bites.** Owner: *"most of those terms are very confusing and can
+  seem scary to mess with to the average person"*, then *"I want the expert settings dumbed down so that an
+  average user can adjust all settings as needed… warned of any unexpected consequences."* **The full spec —
+  every section, control → `Settings` field mapping, and each consequence warning's exact sentence — is
+  [`docs/design/settings-redesign.md`](design/settings-redesign.md)**, with the approved mockup's source beside
+  it. UI only: no field renamed or default changed (§9); nothing removed (§1). **Five slices, one per run, in
+  the order the spec gives** — slice 1 is "More settings" with warnings + Back to default, which is what he
+  asked for. Each slice ships the "every old key is still on the page" guard test.
+
 - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-30) — "Bring my pictures up to date": re-stack only the
   targets that have new light, in one click.**~~ — **✅ SHIPPED v0.492.0** (Builder 2026-09-30). Entry cut to
   [`SHIPPED.md`](SHIPPED.md); one-liner under "Shipped" below. **The entry's one open question is answered, so

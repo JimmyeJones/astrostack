@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AstroStack — Settings (redesign)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&amp;family=Atkinson+Hyperlegible:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0b1020}
+a{color:#f2a84f}a:hover{color:#ffc982}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #0b1020; color: #eef1f7; font-family: 'Atkinson Hyperlegible', system-ui, sans-serif; font-size: 16px; line-height: 1.5">
+<div style="max-width: 1240px; margin: 0 auto; padding: 40px 24px 96px; box-sizing: border-box">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 32px">
+    <div style="flex: 1 1 520px; min-width: 0">
+      <h1 style="margin: 0 0 8px; font-family: 'Bricolage Grotesque', sans-serif; font-size: 40px; line-height: 1.1; font-weight: 700">Settings</h1>
+      <p style="margin: 0; max-width: 640px; color: #c1c9da; font-size: 17px">AstroStack works with the defaults. Change something only if you want it to behave differently — every card says what it does, and whether it's safe to touch.</p>
+    </div>
+    <label style="flex: 0 1 360px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: #aab3c8">
+      Find a setting
+      <input type="search" placeholder="Try “satellite”, “memory” or “location”" style="background: #141b2d; border: 1px solid #2a3553; border-radius: 10px; color: #eef1f7; padding: 12px 14px; font: inherit; font-size: 16px">
+    </label>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start">
+
+    <nav aria-label="Settings sections" style="flex: 1 1 200px; display: flex; flex-direction: column; gap: 4px; font-size: 15px">
+      <a href="#handsoff" style="padding: 10px 12px; border-radius: 8px; background: #1b2440; color: #eef1f7; text-decoration: none">How hands-off</a>
+      <a href="#arrive" style="padding: 10px 12px; border-radius: 8px; color: #c1c9da; text-decoration: none">When new photos arrive</a>
+      <a href="#frames" style="padding: 10px 12px; border-radius: 8px; color: #c1c9da; text-decoration: none">Bad frames</a>
+      <a href="#location" style="padding: 10px 12px; border-radius: 8px; color: #c1c9da; text-decoration: none">Where you observe</a>
+      <a href="#pictures" style="padding: 10px 12px; border-radius: 8px; color: #c1c9da; text-decoration: none">How pictures are made</a>
+      <a href="#nas" style="padding: 10px 12px; border-radius: 8px; color: #c1c9da; text-decoration: none">Your NAS</a>
+      <a href="#upkeep" style="padding: 10px 12px; border-radius: 8px; color: #c1c9da; text-decoration: none">Updates &amp; upkeep</a>
+      <a href="#expert" style="padding: 10px 12px; border-radius: 8px; color: #c1c9da; text-decoration: none">More settings</a>
+      <div style="margin-top: 16px; padding: 14px; border: 1px solid #2a3553; border-radius: 10px; font-size: 13px; color: #aab3c8; display: flex; flex-direction: column; gap: 8px">
+        <span style="display: flex; align-items: center; gap: 8px"><span style="width: 10px; height: 10px; border-radius: 50%; background: #63d2bd"></span>Safe to change</span>
+        <span style="display: flex; align-items: center; gap: 8px"><span style="width: 10px; height: 10px; border-radius: 2px; background: #f2a84f"></span>Changes future pictures</span>
+        <span style="display: flex; align-items: center; gap: 8px"><span style="width: 10px; height: 10px; transform: rotate(45deg); background: #c7a6f5"></span>Has side effects — read the note</span>
+      </div>
+    </nav>
+
+    <main style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 28px">
+
+      <!-- 1. How hands-off -->
+      <section id="handsoff" style="background: #141b2d; border: 1px solid #2a3553; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 18px">
+        <div>
+          <h2 style="margin: 0 0 6px; font-family: 'Bricolage Grotesque', sans-serif; font-size: 26px">How hands-off should AstroStack be?</h2>
+          <p style="margin: 0; color: #c1c9da">Pick one — it sets the steps below for you. You can still fine-tune each step afterwards.</p>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px">
+          <sc-for list="{{ presets }}" as="p" hint-placeholder-count="3">
+            <button type="button" onClick="{{ p.pick }}" aria-pressed="{{ p.pressed }}" style="{{ p.cardStyle }}">
+              <span style="font-family: 'Bricolage Grotesque', sans-serif; font-size: 19px; font-weight: 700">{{ p.title }}</span>
+              <span style="color: #c1c9da; font-size: 15px">{{ p.desc }}</span>
+              <span style="{{ p.tagStyle }}">{{ p.tag }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </section>
+
+      <!-- 2. Pipeline -->
+      <section id="arrive" style="background: #141b2d; border: 1px solid #2a3553; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 18px">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-start">
+          <div style="flex: 1 1 420px">
+            <h2 style="margin: 0 0 6px; font-family: 'Bricolage Grotesque', sans-serif; font-size: 26px">When new photos land in your drop folder</h2>
+            <p style="margin: 0; color: #c1c9da">Each step hands its work to the next. Switch off a step and everything after it waits for you.</p>
+          </div>
+          <span style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: #10302b; color: #9ff0de; font-size: 14px">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>
+            Your raw subs are only ever read — never moved or deleted
+          </span>
+        </div>
+        <ol style="list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px">
+          <sc-for list="{{ steps }}" as="s" hint-placeholder-count="6">
+            <li style="{{ s.boxStyle }}">
+              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+                <span style="{{ s.numStyle }}">{{ s.n }}</span>
+                <button type="button" onClick="{{ s.toggle }}" aria-pressed="{{ s.on }}" aria-label="{{ s.aria }}" style="{{ s.switchStyle }}"><span style="{{ s.knobStyle }}"></span></button>
+              </div>
+              <span style="font-family: 'Bricolage Grotesque', sans-serif; font-size: 18px; font-weight: 700">{{ s.title }}</span>
+              <span style="font-size: 14px; color: #c1c9da">{{ s.desc }}</span>
+              <span style="font-size: 12px; color: #8792ab; margin-top: auto">{{ s.status }}</span>
+            </li>
+          </sc-for>
+        </ol>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px">
+          <div style="border: 1px solid #2a3553; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+            <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><strong>Stack once there are enough frames</strong><span style="font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #3a2a12; color: #ffd39b">Changes future pictures</span></span>
+            <span style="color: #c1c9da; font-size: 14px">Wait for at least <strong style="color: #eef1f7">3</strong> placed frames, and for the night to go quiet for <strong style="color: #eef1f7">20 minutes</strong>, so a stack isn't started while you're still shooting.</span>
+          </div>
+          <div style="border: 1px solid #2a3553; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+            <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><strong>Two targets in one batch?</strong><span style="font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #10302b; color: #9ff0de">Safe to change</span></span>
+            <span style="color: #c1c9da; font-size: 14px">If a hands-off stack looks like two different patches of sky, skip it and ask you instead of blending them. <strong style="color: #eef1f7">On</strong></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Bad frames -->
+      <section id="frames" style="background: #141b2d; border: 1px solid #2a3553; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 18px">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-start">
+          <div style="flex: 1 1 420px">
+            <h2 style="margin: 0 0 6px; font-family: 'Bricolage Grotesque', sans-serif; font-size: 26px">Leaving out bad frames</h2>
+            <p style="margin: 0; color: #c1c9da">Clouds, wind shake and soft focus make a stack worse. AstroStack can leave those frames out for you. Left-out frames are never deleted — you can bring any of them back.</p>
+          </div>
+          <span style="font-size: 12px; padding: 4px 10px; border-radius: 999px; background: #3a2a12; color: #ffd39b">Changes future pictures</span>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center">
+          <span style="font-weight: 700">How picky?</span>
+          <div role="group" aria-label="How picky" style="display: inline-flex; background: #0b1020; border: 1px solid #2a3553; border-radius: 12px; padding: 4px; gap: 4px">
+            <sc-for list="{{ strictOpts }}" as="o" hint-placeholder-count="4">
+              <button type="button" onClick="{{ o.pick }}" aria-pressed="{{ o.pressed }}" style="{{ o.style }}">{{ o.label }}</button>
+            </sc-for>
+          </div>
+          <span style="color: #c1c9da; font-size: 14px">{{ strictNote }}</span>
+        </div>
+        <div aria-label="Illustration of which frames are kept" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 10px">
+          <sc-for list="{{ tiles }}" as="t" hint-placeholder-count="12">
+            <figure style="margin: 0; display: flex; flex-direction: column; gap: 6px; align-items: stretch">
+              <div style="{{ t.boxStyle }}">
+                <div style="{{ t.starsStyle }}">
+                  <span style="position: absolute; left: 22%; top: 30%; width: 5px; height: 5px; border-radius: 50%; background: #ffffff"></span>
+                  <span style="position: absolute; left: 62%; top: 22%; width: 4px; height: 4px; border-radius: 50%; background: #dfe8ff"></span>
+                  <span style="position: absolute; left: 48%; top: 62%; width: 6px; height: 6px; border-radius: 50%; background: #fff3d9"></span>
+                  <span style="position: absolute; left: 78%; top: 70%; width: 3px; height: 3px; border-radius: 50%; background: #ffffff"></span>
+                </div>
+                <sc-if value="{{ t.cloud }}" hint-placeholder-val="{{ false }}">
+                  <span style="position: absolute; inset: 0; background: radial-gradient(circle at 40% 45%, rgba(190,200,220,0.75), rgba(150,160,185,0.35) 60%, rgba(0,0,0,0) 80%)"></span>
+                </sc-if>
+                <sc-if value="{{ t.trail }}" hint-placeholder-val="{{ false }}">
+                  <span style="position: absolute; left: -10%; top: 50%; width: 120%; height: 2px; background: #ffffff; transform: rotate(-24deg)"></span>
+                </sc-if>
+              </div>
+              <figcaption style="{{ t.capStyle }}">{{ t.verdict }}</figcaption>
+              <span style="font-size: 11px; color: #8792ab; text-align: center">{{ t.what }}</span>
+            </figure>
+          </sc-for>
+        </div>
+        <p style="margin: 0; font-size: 12px; color: #8792ab">Illustration. Your own numbers appear on each target's Frames tab.</p>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px">
+          <div style="border: 1px solid #2a3553; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px">
+            <span style="display: flex; justify-content: space-between; align-items: center; gap: 8px"><strong>Satellite and plane trails</strong>
+              <button type="button" onClick="{{ toggleTrails }}" aria-pressed="{{ keepTrails }}" aria-label="Keep frames with trails" style="{{ trailSwitch }}"><span style="{{ trailKnob }}"></span></button></span>
+            <span style="color: #c1c9da; font-size: 14px">{{ trailNote }}</span>
+          </div>
+          <div style="border: 1px solid #2a3553; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px">
+            <strong>Was: “Auto-grade frames after QC”, “Sensitivity”, “Keep frames with satellite/plane streaks”</strong>
+            <span style="color: #8792ab; font-size: 13px">The old names stay searchable, so nothing you knew is lost.</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. Location -->
+      <section id="location" style="background: #141b2d; border: 1px solid #2a3553; border-radius: 16px; padding: 28px; display: flex; flex-wrap: wrap; gap: 28px">
+        <div style="flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+          <div>
+            <h2 style="margin: 0 0 6px; font-family: 'Bricolage Grotesque', sans-serif; font-size: 26px">Where you observe from</h2>
+            <p style="margin: 0; color: #c1c9da">Used only to plan your nights — what's up, and when. It stays on your NAS and is never sent anywhere.</p>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px">
+            <button type="button" style="background: #f2a84f; color: #1b1206; border: 0; border-radius: 10px; padding: 12px 16px; font: inherit; font-weight: 700; min-height: 44px">Read it from my photos</button>
+            <button type="button" style="background: transparent; color: #eef1f7; border: 1px solid #2a3553; border-radius: 10px; padding: 12px 16px; font: inherit; min-height: 44px">Type it in</button>
+          </div>
+          <span style="font-size: 14px; color: #c1c9da">Currently: <strong style="color: #eef1f7">[read from your Seestar's photos]</strong></span>
+          <label style="display: flex; flex-direction: column; gap: 8px">
+            <span><strong>Only suggest targets higher than {{ alt }}°</strong> <span style="color: #c1c9da">— above trees, roofs and low haze</span></span>
+            <input type="range" min="10" max="60" step="5" value="{{ alt }}" onChange="{{ setAlt }}" style="accent-color: #f2a84f">
+          </label>
+        </div>
+        <svg viewBox="0 0 320 180" width="320" height="180" role="img" aria-label="Sky above the horizon, with the lowest altitude AstroStack will suggest" style="flex: 0 1 320px; max-width: 100%; height: auto">
+          <rect x="0" y="0" width="320" height="180" rx="12" fill="#0b1020"/>
+          <path d="M20 160 A140 140 0 0 1 300 160" fill="none" stroke="#2a3553" stroke-width="2"/>
+          <path d="{{ altPath }}" fill="rgba(242,168,79,0.14)" stroke="#f2a84f" stroke-width="2"/>
+          <path d="M0 160 L40 148 L52 132 L64 150 L110 154 L128 138 L140 156 L200 152 L224 134 L240 154 L320 150 L320 180 L0 180 Z" fill="#1b2440"/>
+          <circle cx="232" cy="74" r="4" fill="#fff3d9"/><circle cx="118" cy="58" r="3" fill="#dfe8ff"/><circle cx="182" cy="40" r="3" fill="#ffffff"/>
+          <text x="160" y="24" fill="#aab3c8" font-size="12" text-anchor="middle" font-family="Atkinson Hyperlegible, sans-serif">Suggested targets come from the lit band</text>
+        </svg>
+      </section>
+
+      <!-- 5. Pictures -->
+      <section id="pictures" style="background: #141b2d; border: 1px solid #2a3553; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 18px">
+        <div>
+          <h2 style="margin: 0 0 6px; font-family: 'Bricolage Grotesque', sans-serif; font-size: 26px">How pictures are made</h2>
+          <p style="margin: 0; color: #c1c9da">The four choices that matter most. Each is “Automatic” unless you pick otherwise — that's the right answer for most nights.</p>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px">
+          <sc-for list="{{ pictureOpts }}" as="q" hint-placeholder-count="4">
+            <div style="border: 1px solid #2a3553; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px">
+              <span style="display: flex; justify-content: space-between; gap: 8px; align-items: center"><strong>{{ q.title }}</strong><span style="font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #3a2a12; color: #ffd39b; white-space: nowrap">Changes future pictures</span></span>
+              <span style="color: #c1c9da; font-size: 14px">{{ q.desc }}</span>
+              <span style="display: inline-flex; align-self: flex-start; padding: 6px 12px; border-radius: 8px; background: #0b1020; border: 1px solid #2a3553; font-size: 14px">{{ q.value }}</span>
+              <span style="font-size: 12px; color: #8792ab">Was: {{ q.was }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <button type="button" style="align-self: flex-start; background: transparent; color: #f2a84f; border: 1px solid #3a2a12; border-radius: 10px; padding: 10px 14px; font: inherit; min-height: 44px">Show all 40 stacking options</button>
+      </section>
+
+      <!-- 6. NAS -->
+      <section id="nas" style="background: #141b2d; border: 1px solid #2a3553; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 16px">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-start">
+          <div style="flex: 1 1 420px">
+            <h2 style="margin: 0 0 6px; font-family: 'Bricolage Grotesque', sans-serif; font-size: 26px">How hard your NAS works</h2>
+            <p style="margin: 0; color: #c1c9da">Stacking is heavy. These keep it from crowding out everything else your NAS does.</p>
+          </div>
+          <span style="font-size: 12px; padding: 4px 10px; border-radius: 999px; background: #10302b; color: #9ff0de">Safe to change</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <span><strong>Memory for stacking:</strong> <span style="color: #c1c9da">Automatic — up to [your NAS's free memory], measured before each stack</span></span>
+          <div aria-hidden="true" style="height: 18px; border-radius: 9px; background: #0b1020; border: 1px solid #2a3553; overflow: hidden; display: flex">
+            <span style="width: 34%; background: #3b4a72"></span>
+            <span style="width: 46%; background: #f2a84f"></span>
+          </div>
+          <span style="display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: #aab3c8"><span>■ Other apps on your NAS</span><span style="color: #ffd39b">■ Room AstroStack may use</span><span>□ Kept free</span></span>
+        </div>
+        <span><strong>Processor:</strong> <span style="color: #c1c9da">use all cores (recommended)</span></span>
+      </section>
+
+      <!-- 7. Upkeep -->
+      <section id="upkeep" style="background: #141b2d; border: 1px solid #2a3553; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 10px">
+        <h2 style="margin: 0; font-family: 'Bricolage Grotesque', sans-serif; font-size: 26px">Updates &amp; upkeep</h2>
+        <p style="margin: 0; color: #c1c9da">App updates, “Give back pictures a restack flattened”, re-stack everything, and how much job history to keep — the Maintenance tab's cards, unchanged, in one place.</p>
+      </section>
+
+      <!-- 8. More settings -->
+      <section id="expert" style="background: #141b2d; border: 1px solid #2a3553; border-radius: 16px; padding: 28px; display: flex; flex-direction: column; gap: 16px">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: center">
+          <div style="flex: 1 1 420px">
+            <h2 style="margin: 0 0 6px; font-family: 'Bricolage Grotesque', sans-serif; font-size: 26px">More settings</h2>
+            <p style="margin: 0; color: #c1c9da">Everything else, in plain words. You can change any of these — each one says what happens, warns you about side effects the moment you change it, and has a “Back to default” button.</p>
+          </div>
+          <button type="button" onClick="{{ toggleExpert }}" aria-expanded="{{ expertOpen }}" style="background: transparent; color: #eef1f7; border: 1px solid #3b4a72; border-radius: 10px; padding: 10px 16px; font: inherit; min-height: 44px">{{ expertLabel }}</button>
+        </div>
+        <sc-if value="{{ expertOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; gap: 22px">
+            <sc-for list="{{ moreGroups }}" as="g" hint-placeholder-count="5">
+              <div style="display: flex; flex-direction: column; gap: 10px">
+                <h3 style="margin: 0; font-family: 'Bricolage Grotesque', sans-serif; font-size: 19px; color: #eef1f7">{{ g.title }}</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px">
+                  <sc-for list="{{ g.items }}" as="m" hint-placeholder-count="3">
+                    <div style="{{ m.cardStyle }}">
+                      <div style="display: flex; justify-content: space-between; gap: 10px; align-items: flex-start">
+                        <strong style="font-size: 16px">{{ m.title }}</strong>
+                        <sc-if value="{{ m.isSwitch }}" hint-placeholder-val="{{ false }}">
+                          <button type="button" onClick="{{ m.flip }}" aria-pressed="{{ m.pressed }}" aria-label="{{ m.title }}" style="{{ m.switchStyle }}"><span style="{{ m.knobStyle }}"></span></button>
+                        </sc-if>
+                      </div>
+                      <span style="color: #c1c9da; font-size: 14px">{{ m.desc }}</span>
+                      <sc-if value="{{ m.isChoice }}" hint-placeholder-val="{{ false }}">
+                        <div role="group" aria-label="{{ m.title }}" style="display: flex; flex-wrap: wrap; gap: 6px">
+                          <sc-for list="{{ m.options }}" as="o" hint-placeholder-count="3">
+                            <button type="button" onClick="{{ o.pick }}" aria-pressed="{{ o.pressed }}" style="{{ o.style }}">{{ o.label }}</button>
+                          </sc-for>
+                        </div>
+                      </sc-if>
+                      <sc-if value="{{ m.isSlider }}" hint-placeholder-val="{{ false }}">
+                        <label style="display: flex; flex-direction: column; gap: 4px; font-size: 14px">
+                          <span><strong>{{ m.valueLabel }}</strong></span>
+                          <input type="range" min="{{ m.min }}" max="{{ m.max }}" step="{{ m.step }}" value="{{ m.value }}" onChange="{{ m.slide }}" aria-label="{{ m.title }}" style="accent-color: #f2a84f">
+                          <span style="display: flex; justify-content: space-between; color: #8792ab; font-size: 12px"><span>{{ m.minLabel }}</span><span>{{ m.maxLabel }}</span></span>
+                        </label>
+                      </sc-if>
+                      <sc-if value="{{ m.changed }}" hint-placeholder-val="{{ false }}">
+                        <div role="note" style="display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; background: #3a2a12; border: 1px solid #6b4d1f">
+                          <span style="display: flex; gap: 8px; align-items: flex-start; color: #ffe2b8; font-size: 14px">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="flex-shrink: 0; margin-top: 2px"><path d="M12 3l10 18H2z"/><path d="M12 10v5"/><path d="M12 18v.5"/></svg>
+                            <span><strong>Heads up:</strong> {{ m.warning }}</span>
+                          </span>
+                          <button type="button" onClick="{{ m.reset }}" style="align-self: flex-start; background: transparent; color: #ffd39b; border: 1px solid #6b4d1f; border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 14px; min-height: 36px">Back to default ({{ m.defaultLabel }})</button>
+                        </div>
+                      </sc-if>
+                      <span style="font-size: 12px; color: #8792ab; margin-top: auto">Was: {{ m.was }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </section>
+
+    </main>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":4300}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      preset: 'ready',
+      steps: { watch: true, ingest: true, qc: true, solve: true, stack: false, finish: false },
+      strict: 'balanced',
+      keepTrails: false,
+      alt: 30,
+      expertOpen: true,
+      more: {},
+    };
+  }
+
+  applyPreset(id) {
+    const all = id === 'all', ready = id === 'ready';
+    this.setState({ preset: id, steps: {
+      watch: all || ready, ingest: all || ready, qc: all || ready, solve: all || ready,
+      stack: all, finish: all,
+    } });
+  }
+
+  switchStyles(on) {
+    return {
+      sw: 'width: 52px; height: 30px; border-radius: 15px; border: 0; padding: 3px; cursor: pointer; display: inline-flex; flex-shrink: 0; background: ' + (on ? '#f2a84f' : '#3a4566') + '; justify-content: ' + (on ? 'flex-end' : 'flex-start'),
+      knob: 'width: 24px; height: 24px; border-radius: 50%; background: ' + (on ? '#1b1206' : '#c1c9da'),
+    };
+  }
+
+  moreGroups() {
+    const st = this.state;
+    const val = (id, dflt) => (id in st.more ? st.more[id] : dflt);
+    const setV = (id, v) => this.setState({ more: { ...st.more, [id]: v } });
+    const resetV = (id) => { const m = { ...st.more }; delete m[id]; this.setState({ more: m }); };
+    const card = (changed) => 'border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: #0f1526; border: 1px solid ' + (changed ? '#6b4d1f' : '#2a3553');
+    const build = (d) => {
+      const v = val(d.id, d.dflt);
+      const changed = v !== d.dflt;
+      const base = { title: d.title, desc: d.desc, was: d.was, changed, cardStyle: card(changed),
+        isSwitch: d.kind === 'switch', isChoice: d.kind === 'choice', isSlider: d.kind === 'slider',
+        reset: () => resetV(d.id), warning: changed ? (typeof d.warn === 'function' ? d.warn(v) : d.warn) : '',
+        defaultLabel: d.kind === 'switch' ? (d.dflt ? 'On' : 'Off') : d.kind === 'slider' ? d.fmt(d.dflt) : d.options.find((o) => o[0] === d.dflt)[1] };
+      if (d.kind === 'switch') {
+        const sw = this.switchStyles(v);
+        return { ...base, pressed: v ? 'true' : 'false', flip: () => setV(d.id, !v), switchStyle: sw.sw, knobStyle: sw.knob };
+      }
+      if (d.kind === 'choice') {
+        return { ...base, options: d.options.map(([id, label]) => ({ label, pressed: v === id ? 'true' : 'false', pick: () => setV(d.id, id),
+          style: 'font: inherit; font-size: 14px; border-radius: 9px; padding: 8px 12px; min-height: 40px; cursor: pointer; ' + (v === id ? 'background: #f2a84f; color: #1b1206; border: 1px solid #f2a84f; font-weight: 700' : 'background: transparent; color: #c1c9da; border: 1px solid #2a3553') })) };
+      }
+      return { ...base, min: d.min, max: d.max, step: d.step, value: v, valueLabel: d.fmt(v), minLabel: d.minLabel, maxLabel: d.maxLabel,
+        slide: (e) => setV(d.id, Number(e.target.value)) };
+    };
+    const groups = [
+      { title: 'Your folders and files', items: [
+        { id: 'folders', kind: 'choice', title: 'Where your photos and library live', dflt: 'std',
+          options: [['std', 'Standard (set when installed)'], ['custom', 'Choose other folders']],
+          desc: 'AstroStack reads new subs from your drop folder and keeps stacks and pictures in its library folder.',
+          warn: 'Nothing is moved for you. AstroStack will look in the new folders, so your library will look empty until you move the files there yourself. Your raw subs are never touched.',
+          was: 'Data root, Incoming dir, Library root' },
+        { id: 'copy', kind: 'switch', title: 'Make a working copy of each photo first', dflt: false,
+          desc: 'Off: AstroStack reads your subs right where they are. On: it copies each one into its library before using it.',
+          warn: 'Every sub is copied, so you need about as much free space again as your drop folder holds, and importing a big night takes longer. Only worth it if your drop folder is on a slow or unreliable network share.',
+          was: 'Copy frames into local cache' },
+        { id: 'history', kind: 'slider', title: 'How much job history to remember', dflt: 200, min: 50, max: 2000, step: 50,
+          fmt: (n) => 'Last ' + n + ' jobs', minLabel: '50', maxLabel: '2,000',
+          desc: 'The Jobs page keeps a record of finished imports and stacks.',
+          warn: (n) => n > 200 ? 'Uses a little more disk, and the Jobs page can take a moment longer to open. Your pictures aren’t affected.' : 'Older job records are forgotten sooner. Your pictures aren’t affected.',
+          was: 'Job history to keep' },
+      ] },
+      { title: 'Noticing new photos', items: [
+        { id: 'quiet', kind: 'slider', title: 'Wait after copying stops', dflt: 30, min: 10, max: 300, step: 10,
+          fmt: (n) => 'Wait ' + n + ' seconds', minLabel: '10 s', maxLabel: '5 min',
+          desc: 'AstroStack waits until a file has stopped changing before reading it, so it never reads one that’s half copied.',
+          warn: (n) => n < 30 ? 'A photo still being copied over Wi-Fi might be read half-finished and marked as bad. You can re-check it later from the target’s Frames tab.' : 'New subs will show up a little later after you copy them in.',
+          was: 'Quiet period (s)' },
+        { id: 'poll', kind: 'slider', title: 'Back-up check for new files', dflt: 300, min: 60, max: 1800, step: 60,
+          fmt: (n) => 'Every ' + Math.round(n / 60) + ' min', minLabel: '1 min', maxLabel: '30 min',
+          desc: 'AstroStack normally notices new files instantly. This is a safety-net check in case a network share doesn’t report them.',
+          warn: (n) => n < 300 ? 'Checks more often — a little more disk activity on your NAS, especially with a large drop folder.' : 'If your share doesn’t report new files, they could take up to ' + Math.round(n / 60) + ' minutes to show up.',
+          was: 'Poll interval (s)' },
+      ] },
+      { title: 'Finding where each photo points (plate solving)', items: [
+        { id: 'fov', kind: 'choice', title: 'Telescope field of view', dflt: 'auto',
+          options: [['auto', 'Read from my photos'], ['s30', 'Seestar S30'], ['s50', 'Seestar S50']],
+          desc: 'How much sky one photo covers. AstroStack reads it from your photos, so you normally never set it.',
+          warn: 'If this doesn’t match the telescope that took the photos, most frames won’t be placed — and frames that aren’t placed aren’t stacked.',
+          was: 'ASTAP FOV (deg)' },
+        { id: 'timeout', kind: 'slider', title: 'Time allowed per photo', dflt: 60, min: 20, max: 300, step: 10,
+          fmt: (n) => n + ' seconds', minLabel: '20 s', maxLabel: '5 min',
+          desc: 'How long to keep trying to place a hard photo (faint, cloudy or few stars) before giving up on it.',
+          warn: (n) => n > 60 ? 'More faint frames get placed, but a cloudy night can take much longer to process.' : 'Processing is quicker, but more faint frames end up unplaced and left out of your stacks.',
+          was: 'ASTAP timeout (s)' },
+        { id: 'hints', kind: 'switch', title: 'Use the telescope’s own target as a starting point', dflt: true,
+          desc: 'The Seestar records where it was pointing; starting the search there is much faster.',
+          warn: 'Each photo is searched for across the whole sky, so placing them takes a lot longer.',
+          was: 'Use telescope target as solve hint' },
+        { id: 'rescue', kind: 'switch', title: 'Rescue faint fields', dflt: false,
+          desc: 'When single photos have too few stars to place, stack a few first and place the combined image.',
+          warn: 'More of a faint target’s photos get used, but importing it takes noticeably longer.',
+          was: 'Rescue faint fields with a deep-image solve' },
+      ] },
+      { title: 'Your NAS', items: [
+        { id: 'cores', kind: 'choice', title: 'Processor cores to use', dflt: 'all',
+          options: [['all', 'All (fastest)'], ['half', 'Half'], ['one', 'One']],
+          desc: 'More cores finish imports and stacks sooner.',
+          warn: 'Imports and stacks will take longer; in exchange your NAS stays more responsive for other apps and file copies.',
+          was: 'CPU workers' },
+        { id: 'mem', kind: 'slider', title: 'Memory limit for stacking', dflt: 0, min: 0, max: 64, step: 2,
+          fmt: (n) => n === 0 ? 'Automatic (recommended)' : 'At most ' + n + ' GB', minLabel: 'Automatic', maxLabel: '64 GB',
+          desc: 'Big mosaics need a lot of memory. Automatic measures what’s free before each stack.',
+          warn: (n) => 'Set too low, big mosaics may be refused or drizzled at a smaller size. Set higher than your NAS really has free, and it can run out of memory — other apps (or AstroStack) may be stopped mid-job.',
+          was: 'Stack memory budget (GB)' },
+        { id: 'outlier', kind: 'switch', title: 'Let AstroStack choose satellite-trail removal on hands-off stacks', dflt: false,
+          desc: 'On hands-off stacks, decide automatically whether to run the extra outlier-removal pass.',
+          warn: 'Hands-off stacks may take longer (the extra pass re-reads the frames), but satellite trails and hot pixels are cleaned without you asking.',
+          was: 'Let AstroStack pick outlier removal on hands-off stacks' },
+      ] },
+      { title: 'Connecting to your Seestar', items: [
+        { id: 'scope', kind: 'switch', title: 'Show my Seestar’s live status', dflt: false,
+          desc: 'Find the telescope on your home Wi-Fi and show what it’s doing on the Live page.',
+          warn: 'AstroStack will look for the telescope on your home network every few minutes and check on it every few seconds while it’s on.',
+          was: 'Enable Seestar integration, Poll interval (s)' },
+        { id: 'control', kind: 'switch', title: 'Let AstroStack control the Seestar', dflt: false,
+          desc: 'Allow the Live page’s buttons to send commands to the telescope.',
+          warn: 'AstroStack can then start, stop and move the telescope. Leave this off unless you use those buttons — the Seestar app keeps working either way.',
+          was: 'Allow control commands' },
+        { id: 'find', kind: 'choice', title: 'How to find the Seestar', dflt: 'auto',
+          options: [['auto', 'Search my network'], ['manual', 'I’ll type its address']],
+          desc: 'Searching works on most home networks. Typing the address is for unusual setups.',
+          warn: 'If the telescope’s address changes (for example after your router restarts), AstroStack won’t find it until you update the address here.',
+          was: 'Scan subnet (CIDR), Known device IPs, Scan interval (s)' },
+      ] },
+    ];
+    return groups.map((g) => ({ title: g.title, items: g.items.map(build) }));
+  }
+
+  renderVals() {
+    const st = this.state;
+    const presetDefs = [
+      { id: 'all', title: 'Do it all for me', desc: 'New subs are sorted, checked, stacked and finished into a picture while you sleep.', tag: 'Fully hands-off' },
+      { id: 'ready', title: 'Get them ready — I’ll stack', desc: 'Subs are sorted, checked and placed in the sky. You press Stack when you’re happy.', tag: 'Your current setup' },
+      { id: 'manual', title: 'Hands on', desc: 'Nothing happens until you ask. Good for experimenting.', tag: 'Most control' },
+    ];
+    const presets = presetDefs.map((p) => {
+      const sel = st.preset === p.id;
+      return { ...p, pressed: sel ? 'true' : 'false', pick: () => this.applyPreset(p.id),
+        cardStyle: 'text-align: left; font: inherit; color: #eef1f7; cursor: pointer; display: flex; flex-direction: column; gap: 8px; padding: 18px; border-radius: 14px; min-height: 44px; background: ' + (sel ? '#1f2a4a' : '#0f1526') + '; border: 2px solid ' + (sel ? '#f2a84f' : '#2a3553'),
+        tagStyle: 'align-self: flex-start; font-size: 12px; padding: 2px 8px; border-radius: 999px; ' + (sel ? 'background: #f2a84f; color: #1b1206' : 'background: #1b2440; color: #aab3c8') };
+    });
+
+    const stepDefs = [
+      ['watch', 'Notice', 'Spots new files, then waits 30 s after copying stops so it never reads half a file.', 'Watch for new files automatically'],
+      ['ingest', 'Sort', 'Files each sub under the right target.', 'Ingest'],
+      ['qc', 'Check', 'Measures stars, sharpness and sky brightness on every frame.', 'QC'],
+      ['solve', 'Place', 'Works out exactly where in the sky each frame points.', 'Plate-solve'],
+      ['stack', 'Stack', 'Combines the frames into one deep, clean image.', 'Auto-stack'],
+      ['finish', 'Finish', 'Applies Auto, so you wake up to a picture — not a dark raw stack.', 'Auto-edit the auto-stacked master'],
+    ];
+    let blocked = false;
+    const steps = stepDefs.map(([id, title, desc, was], i) => {
+      const on = !!st.steps[id];
+      const live = on && !blocked;
+      if (!on) blocked = true;
+      const sw = this.switchStyles(on);
+      return { n: String(i + 1), title, desc, on: on ? 'true' : 'false', aria: title + ' automatically',
+        status: live ? 'Runs automatically · was “' + was + '”' : (on ? 'Waiting for an earlier step · was “' + was + '”' : 'You do this yourself · was “' + was + '”'),
+        toggle: () => this.setState({ preset: 'custom', steps: { ...st.steps, [id]: !on } }),
+        switchStyle: sw.sw, knobStyle: sw.knob,
+        boxStyle: 'display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 12px; min-height: 190px; box-sizing: border-box; background: ' + (live ? '#1b2440' : '#0f1526') + '; border: 1px solid ' + (live ? '#3b4a72' : '#232c45') + '; opacity: ' + (live ? '1' : '0.72'),
+        numStyle: 'width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; ' + (live ? 'background: #f2a84f; color: #1b1206' : 'background: #2a3553; color: #c1c9da') };
+    });
+
+    const strictDefs = [['off', 'Keep all'], ['gentle', 'Gentle'], ['balanced', 'Balanced'], ['strict', 'Strict']];
+    const strictOpts = strictDefs.map(([id, label]) => {
+      const sel = st.strict === id;
+      return { label, pressed: sel ? 'true' : 'false', pick: () => this.setState({ strict: id }),
+        style: 'font: inherit; font-size: 15px; border: 0; border-radius: 9px; padding: 8px 14px; min-height: 40px; cursor: pointer; ' + (sel ? 'background: #f2a84f; color: #1b1206; font-weight: 700' : 'background: transparent; color: #c1c9da') };
+    });
+    const notes = { off: 'Every frame goes into the stack.', gentle: 'Only clouded-out frames are left out.', balanced: 'Clouds and shaken or blurred frames are left out (recommended).', strict: 'Also leaves out frames that are only slightly soft — best when you have plenty.' };
+    const dropBy = { off: [], gentle: ['cloud'], balanced: ['cloud', 'blur'], strict: ['cloud', 'blur', 'soft'] };
+    const kinds = ['good', 'good', 'cloud', 'good', 'soft', 'good', 'trail', 'blur', 'good', 'good', 'soft', 'good'];
+    const whatOf = { good: 'Sharp', cloud: 'Cloud', blur: 'Shaken', soft: 'Bit soft', trail: 'Satellite' };
+    const tiles = kinds.map((k) => {
+      const dropped = k === 'trail' ? !st.keepTrails : dropBy[st.strict].includes(k);
+      const blur = k === 'blur' ? 2.2 : (k === 'soft' ? 0.9 : 0);
+      return { cloud: k === 'cloud', trail: k === 'trail', what: whatOf[k],
+        verdict: dropped ? 'Left out' : 'Kept',
+        boxStyle: 'position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: #050812; border: 2px solid ' + (dropped ? '#5a2a2a' : '#2b5b52') + '; opacity: ' + (dropped ? '0.45' : '1'),
+        starsStyle: 'position: absolute; inset: 0; filter: blur(' + blur + 'px)',
+        capStyle: 'text-align: center; font-size: 13px; font-weight: 700; color: ' + (dropped ? '#f5a99b' : '#8ee6d2') };
+    });
+
+    const trailSw = this.switchStyles(st.keepTrails);
+    const a = Math.max(10, Math.min(60, Number(st.alt) || 30));
+    const rad = a * Math.PI / 180;
+    const r = 140, cx = 160, cy = 160;
+    const x1 = cx - r * Math.cos(rad), y1 = cy - r * Math.sin(rad);
+    const x2 = cx + r * Math.cos(rad);
+    const altPath = 'M' + x1.toFixed(1) + ' ' + y1.toFixed(1) + ' A140 140 0 0 1 ' + x2.toFixed(1) + ' ' + y1.toFixed(1) + ' Z';
+
+    return {
+      presets, steps, strictOpts, tiles,
+      strictNote: notes[st.strict],
+      keepTrails: st.keepTrails ? 'true' : 'false',
+      toggleTrails: () => this.setState({ keepTrails: !st.keepTrails }),
+      trailSwitch: trailSw.sw, trailKnob: trailSw.knob,
+      trailNote: st.keepTrails
+        ? 'On: frames with a trail are kept; the stack’s outlier removal usually erases the trail.'
+        : 'Off (recommended): a frame with a satellite or plane trail is left out of the stack.',
+      alt: a, altPath,
+      setAlt: (e) => this.setState({ alt: Number(e.target.value) }),
+      pictureOpts: [
+        { title: 'Remove satellites & hot pixels', desc: 'Compares every frame and drops the odd one out at each spot.', value: 'Automatic', was: 'Sigma clipping / outlier rejection' },
+        { title: 'Sharper, bigger picture', desc: 'On deep targets, builds a finer image from the tiny shifts between frames.', value: 'Automatic when it pays off', was: 'Drizzle, drizzle scale, pixfrac' },
+        { title: 'Trim ragged mosaic edges', desc: 'Cuts off the uneven border a mosaic leaves.', value: 'On', was: 'Let Auto trim the ragged border off a mosaic' },
+        { title: 'Use my darks and flats', desc: 'Applies matching calibration frames you’ve added.', value: 'Ask me', was: 'Auto-apply matching calibration masters' },
+      ],
+      expertOpen: st.expertOpen ? 'true' : 'false',
+      expertLabel: st.expertOpen ? 'Hide' : 'Show all 15',
+      toggleExpert: () => this.setState({ expertOpen: !st.expertOpen }),
+      moreGroups: this.moreGroups(),
+    };
+  }
+}
+</script>
+</body>
+</html>
