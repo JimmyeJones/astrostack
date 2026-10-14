@@ -76,7 +76,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **`/tonight`'s data-gated view switch makes the probe's Mantine-rename guard cry wolf on every
+  `--empty` / `--no-site` pass** — `scripts/dogfood_probe.mjs::KNOWN_VIEW_SWITCHES`, found by the
+  `--empty` dogfood pass (the stalest flag, 11 days / ~70 versions). Branch
+  `claude/relaxed-cray-4vizeh` (Builder 2026-10-14).
 
 ---
 
