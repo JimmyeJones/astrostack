@@ -1,5 +1,179 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, branch `claude/nifty-lamport-2zshr5`) — the backlog's one ready item was claimed, so the run read a merged spec's unanswered question and ran the stalest dogfood flag; each found a bug
+
+*(→ **v0.495.14** and **v0.495.15**. Baseline: `main`'s CI run **2309** green on the exact HEAD `228970d8`
+(v0.495.13) — one `actions_list` call, seconds. Inbox **four open** (#878, #880, #903, #1015), all previously
+acted-on and owner-gated, nothing new owed. One live PR, **#1165**, which decided the shape of the run.)*
+
+### §11 closed the one ready item, and the two doors that were left both opened
+
+"Bugs (fix these first)" was read entry by entry: every one is a decided stand-down carrying numbers ("Worth
+more time", the de-levelling pass count, `PANEL_LINK_DIST_DEG`, the half-range charge) or gated on a
+measurement only the owner's library can supply. "Features that serve real workflows" was read end to end:
+every entry is shipped, closed, declined, or waiting on something that has not happened ("worth doing only
+once someone actually uploads a big archive").
+
+The one ready item was the new **⭐ owner-approved Settings page redesign**, and §11 ruled it out twice over:
+filed by a `docs:` commit **twenty minutes** before this run started, on PR **#1165** whose head was pushed at
+19:46 against a run starting ~20:06. It merged at ~20:20, *during* this run — which is what made its spec file
+editable here. So the run took the two doors §2 leaves open when the backlog is dry: **a dogfood pass on the
+stalest flag**, and **a question somebody else wrote down**. Both produced a bug.
+
+### The dogfood: `--dithered --editor`, the stalest flag (last run 2026-10-11)
+
+Mechanically healthy, and read as one paragraph rather than for errors:
+
+* **The dithered canvas is where it was recorded** — `1212×784` from 78 subs, coverage `0..40`, one panel 11,
+  all four matching the sample's stamped shape. Auto's trim **30.6 %** against the recorded 30.3 % apron
+  (the window is 25–36 %; the 15 % bar is for a *tiled* canvas, and this shape's apron is genuinely wide).
+  The panel map and the per-panel grain note are silent, which this sample's own `[NB]` explains and a test
+  pins: its 0.667° frame steps panels 0.547° against a 0.25° `PANEL_LINK_DIST_DEG`, so the re-frame that makes
+  the depths a continuum also chains one panel to the next. `--mosaic` is the control and does draw the map.
+* **Page heights at the standing DOGFOOD BASELINE**: `/life-list [Still to shoot]` **14,513 px** on a phone
+  against the recorded 14,513/14,492; the dithered Target page 3,850 px. Nothing overflowing, no console
+  errors, both editor drives re-rendering all 21 ops with Undo/Redo live.
+* **The three Target cards agree.** `🎯 Nicely framed` on the mosaic against `🧩 It's bigger than one frame`
+  on the single field is the pair behaving correctly, and next-best-move, the readiness card and the grain
+  measurement all price the depth **per panel** ("your 13 min is spread across about 6 fields of sky, so a
+  typical part of this picture has 2 min so far").
+* **The known near-finding was re-checked against the record, not re-filed**: `next-best-move` and
+  `framing-verdict` saying nearly the same thing on the single field is v0.443.0 working as designed (recorded
+  2026-10-14 below). The "Star cluster" verdict on M 42 is the filed ⚪ `classify_target` confidence entry.
+
+**The one finding, and it is real.** On the dithered run the probe tapped the live chip "Too dark" and
+reported *"the taste 'Too dark' just taught has no note — and the Reset link lives inside it, so there is now
+no way to undo it"*, then *"no Reset link to undo the two taps — the scratch library keeps them"* (its own
+cleanup failed for the same reason). The field-sample drive, three minutes earlier in the same pass, had shown
+the note. **v0.495.15** below is that bug.
+
+### v0.495.15 — the tap that creates a taste took away the only way to undo it
+
+`AutoFeedback`'s module docstring promises the taste is *"fully reversible"*, with *"a one-tap Reset back to
+the neutral, data-driven default"*. The Reset link is rendered **inside** the "why Auto shifted" line
+(`{note ? <Text>{note} <Anchor>Reset</Anchor></Text> : null}`), and `mergeMeasuredPreferences` deliberately
+keeps *the last measured note* across a scoped tap rather than the server's un-narrowed one —
+`note: scoped && !data.neutral ? (old?.note ?? null) : data.note` — because the POST measures no picture and
+its sentence can claim something about *this* image that is not true.
+
+That reasoning is right, and **the first tap is the one case where "keep the last measured note" has nothing
+to keep.** A neutral profile has no note, so `old?.note` is `undefined`, so `note` becomes `null` — and the
+control went with the sentence, immediately after the tap that created the taste, until the background
+re-read landed. On the owner's mosaic that re-read sits behind the Auto re-run the same tap starts
+(`if (!limit) onRerun()`), which this repo measures in seconds at his scale; on the 6-frame field sample it is
+a blink, which is why five editor drives never saw it and the first `--dithered --editor` pass did.
+
+**The sharpest part is that the engine had already written the invariant down.**
+`seestack/edit/auto_prefs.describe_profile`'s docstring: *"**Nothing is dropped** … the note is the only place
+the Reset link lives, so a note that vanished would take a control with it."* The engine keeps it exactly —
+`describe_profile` returns `None` on precisely the condition `is_neutral` is true, so a non-neutral profile
+always comes with a sentence. **The client was manufacturing the one state the server is careful never to
+serve.** Same class as v0.495.11/.12 (a stale consumer of a fact that gained a second author) read from the
+other end: here the *consumer* synthesised an impossible value, and the owner of the invariant was a docstring
+in another language.
+
+The fix separates the control from the sentence: `resettable = !prefs.data.neutral` — the server's own answer
+to "is there a taste to undo?", which the POST carries for free — and the line renders on `note || resettable`,
+with a new `AUTO_TASTE_PLAIN_NOTE` ("Auto has learned a taste from your taps.") standing in while the measured
+sentence is in flight. That stand-in claims only what `neutral: false` establishes and **nothing about this
+picture**, which is the line the narrowing draws; borrowing the un-narrowed note to fill the gap would have
+undone v0.492.56/.57. Nothing moves in the decided cases: a neutral profile still offers no Reset (two
+existing tests), and a tap that walks the last bias back to neutral still drops both (a third).
+
+Tests +1, red before, measured by reverting the two render lines alone: **exactly** that test fails and the
+other 31 in the file pass. The suite's own shape shows why it was never asked — the pending-refetch test
+starts from a profile that *already has* a note, and the neutral-start test lets the refetch resolve
+immediately.
+
+### v0.495.14 — a merged spec is a question list, and answering one found the solve path with no test behind it
+
+`docs/design/settings-redesign.md` shipped with a question addressed to whoever builds slice 1: *"confirm how
+the solver uses `astap_fov_deg` vs the frame's own `FOCALLEN`/`XPIXSZ` before wiring 'Read from my photos'"*.
+Answering it is not slice 1 and collides with nothing. The answer, traced through every consumer:
+
+- `solve/runner.py::solve_one` derives the FOV from the frame (`_fov_deg_for_frame` →
+  `fits_loader.fov_deg_from_header`) and uses the passed value only when the header cannot answer;
+- `solve/bootstrap.py` — the rescue path — does the same for the deep image it builds, off the **reference
+  sub's** header (`_fov_deg_for_frame(paths[ref_index], fov_deg)`);
+- **nothing uses the setting unconditionally.** Settings' own "Test ASTAP" button looked like the exception and
+  is not: `routers/system.py` solves a *real ingested frame* through `solve_one`, so it re-derives too.
+
+So the warning the spec proposed — *"If this doesn't match the telescope that took the photos, most frames
+won't be placed"* — is **false of any Seestar frame**, and it would have been the scariest sentence in the
+table on the page whose whole purpose is to stop settings being scary; the spec's own rule ("Every warning must
+be true of the code") decides it. Two more consequences are now written into that row: "Read from my photos"
+cannot be one of three *choices*, because reading from the photos is unconditional and cannot be switched off;
+and a three-way control cannot be stored at all, since `astap_fov_deg` is
+`float = Field(default=1.3, ge=0.1, le=20.0)` and an "auto" value would re-type the field, which the spec's own
+"UI only" rule and §9 both forbid.
+
+**And the read found the gap.** `solve_one`'s derivation is pinned both ways. The bootstrap path reaches ASTAP
+by its own route — it writes a temp deep image carrying no optics headers and hands `_default_deep_solver` the
+FOV explicitly — and **27 tests over `tests/test_bootstrap_solve.py` asserted nothing about that number**
+(`grep -n fov` on the file: no hits). Passing `fov_deg` straight through would have left all 27 green while
+sending an S30's 2.1° field as the 1.3° fallback, on exactly the subs that already failed to solve once —
+the historical failure AGENTS.md §1 names on the owner's own hardware.
+
+**The fixture is the whole test.** `_make_project_with_faint_subs` writes **no** `FOCALLEN`/`XPIXSZ`, which is
+the one state in which the fallback *is* right, so a test built on it would have passed for the wrong reason —
+§8's "a regression test whose fixture cannot show the bug is green for the same reason".
+`_make_project_with_faint_s30_subs` adds the owner's own optics (150 mm, 2.9 µm), where the derived field is
+0.2659° against a deliberately absurd 7.5° fallback, and the test asserts **all** members derive one number so
+it cannot pass by landing on a different reference sub. Fail-before measured in a scratch worktree:
+`ref_fov = _fov_deg_for_frame(…)` → `ref_fov = fov_deg` gives `assert 7.5 == 0.2658526666666667`, with the
+no-optics control still green. No production line changed in that version — the code was already right; what
+was missing was anything that would notice if it stopped being.
+
+### Four reads that did NOT become findings, recorded so they are not redone
+
+- **`webapp/edit_resume_cache`'s boundary against `edit_fit_cache`'s fingerprints.** `boundary()` returns a
+  position in the **enabled** op list while `remember()` stores `op_fingerprints(recipe)`, so a disabled op
+  inside the prefix looked like it would misalign the comparison — disabling a background op would then keep
+  its effect *and* skip the user's own stretch. It cannot: `op_fingerprints` already filters disabled ops, so
+  the two are the same list. The shape is exactly that of a real bug; the answer is one docstring away.
+- **The Settings form clobbering unsaved edits.** `SettingsView` seeds its form from an effect
+  (`if (settings.data) setForm(settings.data)`), so any refetch mid-edit would wipe the owner's work silently.
+  Closed by `frontend/src/queryDefaults.ts` — `refetchOnWindowFocus: false` — plus TanStack's structural
+  sharing keeping `data` identity when the payload is deep-equal. **Worth knowing now rather than later:**
+  slice 1 rewrites that file, and any slice that adds a query to the page or touches its staleTime re-opens it.
+- **Clearing a number field is silently a no-op.** `dropEmptyFields` drops `""` from the save patch, so a
+  cleared box keeps its stored value while the toast still says "Settings saved". Deliberate and tested
+  (`Settings.test.tsx`: the alternative was a 422 that discarded every other edit in the form). The
+  consequence for slice 1 is that **"Back to default" has to be an explicit control, never a cleared box.**
+- **A pointer from the Library wall to the #903 repair — declined, once, so it is not re-litigated.** The wall
+  chips each flat picture but the one-click library-wide repair lives only in Settings → Maintenance, so 44
+  flat targets read as 44 clicks. `webapp/routers/unstretched.py`'s own docstring already decided this: *"It
+  names; it never acts … there is no 'fix them all' button"*, with the #903 repair as the single narrow,
+  owner-requested exception — and the owner asked for that repair himself on 2026-09-26, so he knows where it
+  is. A second always-on line on the wall would be new surface against his standing clutter complaint, buying
+  a click he has already been told about.
+
+### The method note: the cheapest work available to a blocked run is somebody else's written-down question
+
+A spec, a stand-down, a "confirm X before building Y" — each is a read of the code that somebody already
+decided was necessary, and answering one costs minutes and collides with nothing. This run's answer was going
+to be three sentences in a table cell; on the way to it every consumer of one setting got read, which is how
+the untested rescue path turned up. The same shape twice over: the dogfood flag nobody had run in three days
+found the editor bug.
+
+**And my own first draft of that table cell was wrong, in the way this file keeps criticising.** I wrote "the
+self-test has no frame to read" off a `grep` line instead of opening the function — `routers/system.py` solves
+a real ingested frame. The guard is the one already written here: re-derive the premise, **including your
+own**, and prefer reading the function to reading its call site.
+
+### The §8 trailer drift — recorded, deliberately not guarded
+
+Of the last 300 commits' `Co-Authored-By:` trailers, **66 read `Claude Opus 5`, 5 `Claude Opus 4.8`, 3
+`Claude Opus 5.5` and 15 `Claude`** — the majority carry a model identifier, which §8 forbids outright ("never
+put a model identifier in commits, code or logs") and which the recorded resolution of this disagreement
+(2026-10-11, below) settles as `Co-Authored-By: Claude <noreply@anthropic.com>` and nothing else. This run's
+commits use that form.
+
+`scripts/check-commit-identity.sh` does not catch it and **was deliberately left alone**: it is an *email*
+guard, and extending it to refuse a model identifier would start refusing other runs' pushes over a point
+their kickoff prompts actively ask for. A guard that makes concurrent runs fight their own instructions is not
+a Builder's call — it is "needs owner sign-off" at most. Filed here, as §0 directs, rather than built.
+
 ## 2026-10-14 (Builder, branch `claude/determined-pasteur-7wyfto`) — a "flake" whose premise was wrong by 20×, and what that says about flakes in general
 
 *(→ **v0.495.13**. Baseline: `main`'s CI run **2307** still in flight on the exact HEAD `06c255da`
