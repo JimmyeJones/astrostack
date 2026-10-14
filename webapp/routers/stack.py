@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import math
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import partial
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -3338,6 +3339,84 @@ def reference_sub_from_frames(frames: list[Any]) -> Any | None:
     return pool[0]
 
 
+class _RevealReadGate(NamedTuple):
+    """One loop's turnstile for the reveal's per-sub reads, plus the capacity it
+    was built with so a test can pin the figure — see
+    :func:`_reveal_read_off_the_loop`, which carries the measurement behind it."""
+
+    loop: Any
+    turnstile: asyncio.Semaphore
+    at_a_time: int = 1
+
+
+def _reveal_read_gate(request: Request) -> _RevealReadGate:
+    """This app's turnstile for the current event loop, built on first use."""
+    loop = asyncio.get_running_loop()
+    gate = getattr(request.app.state, "reveal_read_gate", None)
+    if gate is None or gate.loop is not loop:
+        gate = _RevealReadGate(loop, asyncio.Semaphore(1))
+        request.app.state.reveal_read_gate = gate
+    return gate
+
+
+async def _reveal_read_off_the_loop(request: Request,
+                                    gather: Callable[[], Any]) -> Any:
+    """Run one of the reveal endpoints' synchronous project reads in a worker
+    thread — **one at a time**. Both halves were measured; see below.
+
+    The three handlers below are ``async def`` — they have to be, because each
+    one awaits its own image work — and an ``async def`` handler body runs **on
+    the event loop**, where a blocking read stalls every other request the server
+    is serving. Their sibling endpoints get this for free: FastAPI hands a plain
+    ``def`` handler (:func:`one_sub_vs_stack_info`, :func:`zoom_clip_info`, most
+    of this file) to a worker thread itself, which is why the inline reads there
+    are not this bug and these were.
+
+    It matters here rather than generally because this is the read that scales
+    with the *target*: :func:`_pick_reference_sub` walks every sub to choose one,
+    where a neighbour's read is a row or two. Measured through the real ASGI app
+    on a project the size of the owner's deepest target (35,894 subs), one event
+    loop, a cheap ``/api/health`` call as the witness, four reveals at once
+    (the shape of a History page, which mounts two queries per run card):
+
+    ========================  ================  ================
+    where the read runs       the four reveals  the health call
+    ========================  ================  ================
+    on the loop (before)      1,244 ms          **1,241 ms**
+    a thread each             19,608 ms         4.5 ms
+    a thread, one at a time   1,145 ms          2.8 ms
+    ========================  ================  ================
+
+    Best of three each, same box, same project. A *single* reveal in flight cost
+    a concurrent health call 269 ms before and 1.7 ms after; two of them 636 ms
+    before.
+
+    **The limiter is not caution, it is the measurement.** These reads are
+    *slower in parallel than in series* — four of them in four threads take
+    19,427 ms against 1,345 ms run one after another on this box. It is not plain
+    GIL contention (four pure-Python loops of the same length cost 4.3×, which is
+    just serialisation): it is ``sqlite3`` handing the GIL back and forth around
+    every row fetch, so the convoy grows with the row count. Streaming three
+    columns of those 35,894 rows is 101 ms alone and 8,587 ms four-up; nothing is
+    gained by letting them overlap, and the limiter keeps the *total* at the
+    series figure while the loop stays free throughout.
+
+    The gate is a plain :class:`asyncio.Semaphore` held *across* the hop, so a
+    second request waits on the event loop and holds no worker thread — the pool
+    every sync endpoint in this app shares is untouched. It is built lazily and
+    kept **per running loop** on ``app.state``: an ``asyncio`` primitive binds to
+    the first loop that awaits it, and a test process builds many apps and many
+    loops out of this one module.
+
+    A pure hop, so it changes no answer: every one of these endpoints returns
+    exactly what it did, including each 404 and its wording, in the order it
+    checked for them.
+    """
+    gate = _reveal_read_gate(request)
+    async with gate.turnstile:
+        return await run_in_threadpool(gather)
+
+
 def _pick_reference_sub(proj: Any) -> Any | None:
     """Choose a *representative* single accepted sub to stand in for "one raw
     frame".
@@ -3550,44 +3629,52 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
       * an in-place "Process target" **Auto edit** — the run's own stored recipe
         (``_auto_edit_recipe_json``), so both halves carry identical processing.
 
-    Runs in a threadpool so it never blocks the job worker.
+    Runs in a threadpool so it never blocks the job worker — **the DB read
+    included**, which is what :func:`_reveal_read_off_the_loop` is about.
     """
-    lib, proj = deps.open_target_project(request, safe)
-    try:
-        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
-        if run is None:
-            raise HTTPException(status_code=404, detail="No such run")
-        ref = _reference_sub_row(proj)
-        if ref is None:
-            raise HTTPException(status_code=404, detail="No frame to render for this run")
-        src = readable_frame_path(ref)
-        if not src:
-            raise HTTPException(status_code=404, detail="Frame file not found on disk")
-        pattern = (ref.bayer_pattern or "RGGB").upper()
-        if pattern not in _BAYER_PATTERNS:
-            pattern = "RGGB"
-        src_path = str(src)
-        recipe_json = _auto_edit_recipe_json(proj, run)
-        if _display_space_without_recipe(run, recipe_json):
-            # The stack half is tone-mapped and we have no way to put a sub
-            # through the same processing (a display-space export, or an
-            # auto-edited run whose recipe is missing, unreadable, or has drifted
-            # from the one its preview shows). The card already self-hides on
-            # exactly these runs and the download beside it already 404s — say the
-            # same thing here rather than serving a half that doesn't match.
-            raise HTTPException(
-                status_code=404,
-                detail="This run's picture is an edited export, so a raw frame "
-                       "can't be matched to it honestly.")
-        # If the run's preview was re-saved with a custom asinh stretch (History
-        # "Adjust"), render the sub through that same curve so the reveal's two
-        # halves differ only in noise/detail — not a tone offset. Both columns are
-        # NULL for the common default-STF preview, where we keep the STF render.
-        stretch = run.preview_stretch
-        black = run.preview_black
-    finally:
-        proj.close()
-        lib.close()
+    def _inputs() -> tuple[str, str, str | None, Any, Any]:
+        lib, proj = deps.open_target_project(request, safe)
+        try:
+            run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+            if run is None:
+                raise HTTPException(status_code=404, detail="No such run")
+            ref = _reference_sub_row(proj)
+            if ref is None:
+                raise HTTPException(status_code=404,
+                                    detail="No frame to render for this run")
+            src = readable_frame_path(ref)
+            if not src:
+                raise HTTPException(status_code=404,
+                                    detail="Frame file not found on disk")
+            pattern = (ref.bayer_pattern or "RGGB").upper()
+            if pattern not in _BAYER_PATTERNS:
+                pattern = "RGGB"
+            recipe_json = _auto_edit_recipe_json(proj, run)
+            if _display_space_without_recipe(run, recipe_json):
+                # The stack half is tone-mapped and we have no way to put a sub
+                # through the same processing (a display-space export, or an
+                # auto-edited run whose recipe is missing, unreadable, or has
+                # drifted from the one its preview shows). The card already
+                # self-hides on exactly these runs and the download beside it
+                # already 404s — say the same thing here rather than serving a
+                # half that doesn't match.
+                raise HTTPException(
+                    status_code=404,
+                    detail="This run's picture is an edited export, so a raw frame "
+                           "can't be matched to it honestly.")
+            # If the run's preview was re-saved with a custom asinh stretch
+            # (History "Adjust"), render the sub through that same curve so the
+            # reveal's two halves differ only in noise/detail — not a tone offset.
+            # Both columns are NULL for the common default-STF preview, where we
+            # keep the STF render.
+            return (str(src), pattern, recipe_json,
+                    run.preview_stretch, run.preview_black)
+        finally:
+            proj.close()
+            lib.close()
+
+    src_path, pattern, recipe_json, stretch, black = await _reveal_read_off_the_loop(
+        request, _inputs)
 
     if recipe_json:
         png = await run_in_threadpool(
@@ -3603,6 +3690,26 @@ async def reference_sub_png(safe: str, run_id: int, request: Request) -> Respons
     )
     return Response(content=png, media_type="image/png",
                     headers={"Cache-Control": "no-store"})
+
+
+class _BeforeAfterInputs(NamedTuple):
+    """Everything :func:`before_after_jpeg` needs from one DB read, so the read
+    can happen in a worker thread (:func:`_reveal_read_off_the_loop`) and the
+    compose below reads nothing. Named rather than a bare tuple of eleven: it is
+    the same shape as :class:`_ZoomClipInputs` two endpoints up, for the same
+    reason."""
+
+    src_path: str
+    pattern: str
+    recipe_json: str | None
+    preview_path: str
+    stretch: Any
+    black: Any
+    name: str
+    n_frames: int
+    integration_s: float | None
+    sub_exposure_s: float | None
+    basename: str
 
 
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg")
@@ -3625,45 +3732,55 @@ async def before_after_jpeg(safe: str, run_id: int, request: Request,
     includes the in-place Auto edit, where "identically" now means *available*: the
     sub goes through the run's own recipe, like the reveal's left half.
     Composed in a threadpool, like every other render here, so it never blocks
-    the job worker.
+    the job worker — **the DB read included**, see
+    :func:`_reveal_read_off_the_loop`.
     """
-    lib, proj = deps.open_target_project(request, safe)
-    try:
-        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
-        if run is None:
-            raise HTTPException(status_code=404, detail="No such run")
-        entry = lib.find_target(safe)
-        preview_path = run.preview_path
-        if not preview_path or not Path(preview_path).exists():
-            raise HTTPException(status_code=404, detail="No preview for this run")
-        recipe_json = _auto_edit_recipe_json(proj, run)
-        if _display_space_without_recipe(run, recipe_json):
-            raise HTTPException(
-                status_code=404,
-                detail="This run's picture is an edited export, so a raw frame "
-                       "can't be matched to it honestly.")
-        ref = _reference_sub_row(proj)
-        if ref is None:
-            raise HTTPException(status_code=404, detail="No frame to render for this run")
-        src = readable_frame_path(ref)
-        if not src:
-            raise HTTPException(status_code=404, detail="Frame file not found on disk")
-        pattern = (ref.bayer_pattern or "RGGB").upper()
-        if pattern not in _BAYER_PATTERNS:
-            pattern = "RGGB"
-        src_path = str(src)
-        # The run's own saved tone curve, exactly as `reference-sub` uses it, so
-        # the two halves of the download differ only in noise/detail.
-        stretch = run.preview_stretch
-        black = run.preview_black
-        name = (entry.name if entry is not None else None) or safe
-        n_frames = run.n_frames_used
-        integration_s = run.total_exposure_s
-        sub_exposure_s = ref.exposure_s
-        basename = run.output_basename
-    finally:
-        proj.close()
-        lib.close()
+    def _inputs() -> _BeforeAfterInputs:
+        lib, proj = deps.open_target_project(request, safe)
+        try:
+            run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+            if run is None:
+                raise HTTPException(status_code=404, detail="No such run")
+            entry = lib.find_target(safe)
+            preview_path = run.preview_path
+            if not preview_path or not Path(preview_path).exists():
+                raise HTTPException(status_code=404, detail="No preview for this run")
+            recipe_json = _auto_edit_recipe_json(proj, run)
+            if _display_space_without_recipe(run, recipe_json):
+                raise HTTPException(
+                    status_code=404,
+                    detail="This run's picture is an edited export, so a raw frame "
+                           "can't be matched to it honestly.")
+            ref = _reference_sub_row(proj)
+            if ref is None:
+                raise HTTPException(status_code=404,
+                                    detail="No frame to render for this run")
+            src = readable_frame_path(ref)
+            if not src:
+                raise HTTPException(status_code=404,
+                                    detail="Frame file not found on disk")
+            pattern = (ref.bayer_pattern or "RGGB").upper()
+            if pattern not in _BAYER_PATTERNS:
+                pattern = "RGGB"
+            # The run's own saved tone curve, exactly as `reference-sub` uses it,
+            # so the two halves of the download differ only in noise/detail.
+            return _BeforeAfterInputs(
+                src_path=str(src), pattern=pattern, recipe_json=recipe_json,
+                preview_path=preview_path,
+                stretch=run.preview_stretch, black=run.preview_black,
+                name=(entry.name if entry is not None else None) or safe,
+                n_frames=run.n_frames_used, integration_s=run.total_exposure_s,
+                sub_exposure_s=ref.exposure_s, basename=run.output_basename)
+        finally:
+            proj.close()
+            lib.close()
+
+    got = await _reveal_read_off_the_loop(request, _inputs)
+    src_path, pattern, recipe_json = got.src_path, got.pattern, got.recipe_json
+    preview_path, stretch, black = got.preview_path, got.stretch, got.black
+    name, n_frames = got.name, got.n_frames
+    integration_s, sub_exposure_s, basename = (
+        got.integration_s, got.sub_exposure_s, got.basename)
 
     from seestack.beforeafter import (
         DEFAULT_WIDTH,
@@ -4017,6 +4134,24 @@ def stamped_noise_ratio(proj: Any, run: Any, frames: list[Any]) -> float | None:
     return stamped_noise_measurement(proj, run, frames)[0]
 
 
+class _NoiseRevealInputs(NamedTuple):
+    """Everything :func:`one_sub_vs_stack_noise` needs from one DB read — the
+    run's own figures, the remembered measurement if there is one, and the
+    representative sub's path only when a fresh measurement needs its pixels.
+    Read in a worker thread; see :func:`_reveal_read_off_the_loop`."""
+
+    fits_path: str | None
+    n_frames: int
+    is_mosaic: bool | None
+    supersampling: float
+    fingerprint: dict | None
+    hit: bool
+    ratio: float | None
+    crop_depth: int | None
+    src: str | None
+    pattern: str
+
+
 @router.get("/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise")
 async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> dict[str, Any]:
     """The concrete "stacking cut your noise ~N×" number for the reveal card.
@@ -4058,46 +4193,59 @@ async def one_sub_vs_stack_noise(safe: str, run_id: int, request: Request) -> di
     """
     from seestack.stackhealth import noise_vs_expected, noise_yardstick_frames
 
-    lib, proj = deps.open_target_project(request, safe)
-    try:
-        run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
-        if run is None:
-            raise HTTPException(status_code=404, detail="No such run")
-        fits_path = run.fits_path
-        n_frames = run.n_frames_used
-        # A mosaic is held against the depth at the measured crop, not the whole
-        # target's frame count — see `noise_yardstick_frames`, which also
-        # withholds on the NULL an older run carries. Read here so every return
-        # path below has it.
-        is_mosaic = run.is_mosaic
-        # How many master pixels there are per sub pixel: 1.0 on every
-        # non-drizzled run, the run's own effective ``drizzle_scale`` when it
-        # drizzled (``stacker`` persists the *effective* options, so a scale the
-        # memory guard lowered is the one recorded here). The measurement needs
-        # it because a finer master pixel is a noisier one — see
-        # :func:`_measure_noise_ratio`.
-        supersampling = canvas_supersampling(run.options_json)
-        ref = _pick_reference_sub(proj)
-        ref_id = getattr(ref, "id", None) if ref is not None else None
-        fingerprint = (
-            _noise_ratio_fingerprint(fits_path, ref_id) if fits_path else None
-        )
-        hit, ratio, crop_depth = (
-            _cached_noise_ratio(proj, run_id, fingerprint)
-            if fingerprint is not None else (False, None, None)
-        )
-        # Only a *fresh* measurement needs the sub's own pixels, and the stamp is
-        # keyed on its id, which the pick above already has. So the repeat views
-        # this endpoint actually gets now read no frame row at all — where before
-        # they built one for every sub of the target to arrive at one id.
-        row = proj.get_frame(ref_id) if (not hit and ref_id is not None) else None
-        src = readable_frame_path(row) if row is not None else None
-        pattern = (row.bayer_pattern or "RGGB").upper() if row is not None else "RGGB"
-        if pattern not in _BAYER_PATTERNS:
-            pattern = "RGGB"
-    finally:
-        proj.close()
-        lib.close()
+    def _inputs() -> _NoiseRevealInputs:
+        lib, proj = deps.open_target_project(request, safe)
+        try:
+            run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+            if run is None:
+                raise HTTPException(status_code=404, detail="No such run")
+            fits_path = run.fits_path
+            n_frames = run.n_frames_used
+            # A mosaic is held against the depth at the measured crop, not the
+            # whole target's frame count — see `noise_yardstick_frames`, which
+            # also withholds on the NULL an older run carries. Read here so every
+            # return path below has it.
+            is_mosaic = run.is_mosaic
+            # How many master pixels there are per sub pixel: 1.0 on every
+            # non-drizzled run, the run's own effective ``drizzle_scale`` when it
+            # drizzled (``stacker`` persists the *effective* options, so a scale
+            # the memory guard lowered is the one recorded here). The measurement
+            # needs it because a finer master pixel is a noisier one — see
+            # :func:`_measure_noise_ratio`.
+            supersampling = canvas_supersampling(run.options_json)
+            ref = _pick_reference_sub(proj)
+            ref_id = getattr(ref, "id", None) if ref is not None else None
+            fingerprint = (
+                _noise_ratio_fingerprint(fits_path, ref_id) if fits_path else None
+            )
+            hit, ratio, crop_depth = (
+                _cached_noise_ratio(proj, run_id, fingerprint)
+                if fingerprint is not None else (False, None, None)
+            )
+            # Only a *fresh* measurement needs the sub's own pixels, and the stamp
+            # is keyed on its id, which the pick above already has. So the repeat
+            # views this endpoint actually gets now read no frame row at all —
+            # where before they built one for every sub of the target to arrive at
+            # one id.
+            row = proj.get_frame(ref_id) if (not hit and ref_id is not None) else None
+            src = readable_frame_path(row) if row is not None else None
+            pattern = (row.bayer_pattern or "RGGB").upper() if row is not None else "RGGB"
+            if pattern not in _BAYER_PATTERNS:
+                pattern = "RGGB"
+            return _NoiseRevealInputs(
+                fits_path=fits_path, n_frames=n_frames, is_mosaic=is_mosaic,
+                supersampling=supersampling, fingerprint=fingerprint,
+                hit=hit, ratio=ratio, crop_depth=crop_depth,
+                src=src, pattern=pattern)
+        finally:
+            proj.close()
+            lib.close()
+
+    got = await _reveal_read_off_the_loop(request, _inputs)
+    fits_path, n_frames, is_mosaic = got.fits_path, got.n_frames, got.is_mosaic
+    supersampling, fingerprint = got.supersampling, got.fingerprint
+    hit, ratio, crop_depth = got.hit, got.ratio, got.crop_depth
+    src, pattern = got.src, got.pattern
 
     def _answer(r: float | None, depth: int | None) -> dict[str, Any]:
         verdict = noise_vs_expected(r, n_frames, is_mosaic, depth)
