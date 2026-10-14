@@ -1,5 +1,68 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, after merging v0.495.9) — the post-merge CI check that found a red `main`, and the §11 collision that then answered it better than I did
+
+**Read this alongside the v0.495.10 note below it, which is the answer.** My run and that one found the same
+red `main` within the hour; theirs root-caused and fixed it, mine got as far as "nondeterministic, mechanism
+unidentified" and filed a lead. **Theirs is right and mine was wrong on the mechanism** — recorded rather than
+quietly dropped, because the way I was wrong is reusable.
+
+### What still stands: read `main`'s own CI run after merging, not just the PR's
+
+They are different runs on different commits, and a PR's green does not speak for the merge commit's. `main`
+run **2294** — the v0.495.9 merge commit — was red on
+`tests/webapp/test_last_night.py::test_the_card_builds_no_frame_row_for_the_whole_library` (*"built 1 FrameRow
+objects, assert 1 == 0"*), forty minutes after that PR had been green on all six checks. Both runs found it
+this way. Had neither looked, AGENTS.md §2 would have handed the next run a red `main` as its first task with
+no evidence attached.
+
+Four cheap facts were worth gathering and are worth gathering again in this situation, because they close off
+the *wrong* explanations even when they do not produce the right one: CI runs the suite **serially**
+(`pytest tests/ -q`, read from `ci.yml`) so a shard layout cannot be the cause — and a local
+`-n 4 --dist worksteal` pass therefore does not clear an ordering bug; the merge commit's tree was
+**identical** to the PR head whose Python job passed; the same serial check passed on #1158, #1159 and `main`
+run 2297; and the file was green locally 3/3 in isolation. One failure in five observations.
+
+### Where I stopped, and why that was not good enough
+
+I filed it as a lead with two candidate mechanisms — a failed `PUT /api/settings {site_lon}` reopening the
+`SITELONG` frame-walk, and `detect_site_cached` crossing its TTL mid-request — and **both are wrong.**
+v0.495.10 found the real one: `_row_to_frame` is a **module global**, `JobManager.stop()` signals its worker
+without joining it, so a `job-worker` daemon thread from a *previous* test is still alive and its QC phase
+builds exactly one `FrameRow` (`apply_qc_result_to_db` → `Project.get_frame`) — hence "built 1" rather than
+"built 35894". The counter was measuring the **process**, not the surface.
+
+**The lesson is about where I looked.** I treated "which code path inside this request could build a row?" as
+the whole question, and the answer was that the row was not built by this request at all. *A process-global
+patch in a shared-process suite has a third possibility beside "my code did it" and "flake": somebody else's
+code did it, concurrently.* Enumerating that possibility costs one `threading.enumerate()` — which is exactly
+what the other run did, and it named the thread.
+
+My proposed next step (stash the first construction's traceback into the assertion message) was pointing the
+right way and still short of the fix: the caller chain is not a nicer error message, it is the **measurement**
+— `tests/framerows.py::frame_rows_built_by` counts a row only when a named call is on its own stack, so the
+guard measures the surface and a stray row cannot reach it. Anchoring on `__code__` rather than a string, so a
+rename cannot turn a guard into a tautology, is the detail worth copying.
+
+### The §11 note, honestly
+
+This is a collision of the kind this file keeps recording, and the sequence matters: I had no claim published
+for it (I was mid-CI-wait on an unrelated docs PR when I read run 2294), so the other run had nothing to see.
+Their fix landed as **v0.495.10** while my filing sat in CI. **Nothing of mine is re-applied on top** — the
+Bugs entry I had written is dropped rather than merged, because an entry describing an open bug that is
+already fixed is precisely the "backlog carries items already shipped" failure §1 warns about, and keeping it
+would have cost the next run a grep. What survives is this note.
+
+**And the one thing to carry into the next CI-wait:** a run that spots a red `main` should claim it *before*
+investigating, not after it has something to say. Investigation is exactly the phase long enough for another
+run to arrive, and the claim is the only thing that would have told either of us.
+
+### The other flaky guard this run is unaffected
+
+The `Editor.test.tsx` 1 s `findByText` finding (#1159) is a different mechanism — jsdom, no worker thread, a
+testing-library timeout under CI load — and its entry stands as filed. Two flaky merge-gate guards in one run,
+in both halves of the gate, was the observation; one of them now has a fix and the other does not.
+
 ## 2026-10-14 (Builder, branch `claude/relaxed-cray-fzxacq`) — `main` was red on a *test*, and the authority that said so was free
 
 *(→ **v0.495.10**. Baseline: `main` at `89f01088` (v0.495.9), and its own CI run **2294** a **FAILURE** — one
