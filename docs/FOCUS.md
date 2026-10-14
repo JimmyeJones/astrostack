@@ -1,5 +1,47 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-14 (Builder, branch `claude/relaxed-cray-8ak3vj` — **the caller sweep from the last
+run's method note, run mechanically rather than by inspiration, and it found a bigger cluster than the one it
+was looking for. v0.495.6 + v0.495.7.**
+
+**What this run did.** `main` green (local **7916 passed, 7 skipped** in 20m26s; CI run 2279 on the exact HEAD
+`f437029e`), no open PRs, inbox four open and every one already acted-on and owner-gated — unchanged again.
+"Bugs" still holds nothing reproduced and §2's whole-journey pass was paid on 2026-10-13, so this run took the
+previous note's method and made it a procedure: `grep -rn 'iter_frames('` over `webapp/` and `seestack/`, then
+for each of the thirteen hits ask only *"which fields does this caller actually read?"*.
+
+**v0.495.6.** Four surfaces cut a target's subs into nights and summarise them — the Target page's "Last
+session" card, its sharpness sparkline, its Nights card, and the Dashboard's combined "Last night" over
+*every* target — and all four read **five** small fields while building a whole `FrameRow` (`SELECT *`, plate
+solution and all) per sub to do it. New `Project.iter_night_frames` / `FrameNight`: **1,684 ms / 145.5 MB →
+664 ms / 12.1 MB** on `session_recap` and the same shape on the other three, every answer identical. The
+number that made it a version is not any one of those: `InsightTabs` keeps every panel **mounted**, so the
+three Target-page cards all fire on one view and their peaks **coincide** — ~437 MB → ~36 MB for one look at
+his deepest target. **v0.495.7** is the rest of the same sweep: the Dashboard's night fold (1,552 → 920 ms)
+and the imaging-log CSV's median star size (937 → **192 ms**), both of which already streamed, so there the
+cost was only ever the rows.
+
+**START HERE NEXT RUN.** (a) **The issue inbox is still the frontier** — list the open issues first. (b)
+"Bugs" is unchanged: the DECIDE-DO-NOT-FLIP pass count (decided, with numbers), the two owner-data-gated
+LEADs, the inert-feedback-chip LEAD, and the ⚪ notes including the event-loop one filed 2026-10-14, whose
+gate (a deep target with *one* stack run) is still a flag change rather than a dogfood pass. (c) **The
+`iter_frames(` sweep is now finished and its leftovers are honest** — the stacker, QC, grading, `livesession`
+and the sky-transparency trend want whole rows; `site_location` and `system.py` break out early; `frames.py`'s
+auto-grade and bulk-reject read most of the row. The same question is **unasked** of `iter_stack_runs()`
+(nine callers materialise the list), and that one is *not* obviously wasteful — a `StackRunRow` has no
+`wcs_json`-sized column — so measure before assuming. (d) **No dogfood pass was run this run** (§7 forbids it
+beside `pytest`, and both suites ran back to back); §2's big-picture pass is paid to 2026-10-13, and the
+stalest flags are `--closing` (2026-09-26) and `--restack` (2026-10-05). (e) Both record files still have
+headroom (`PROCESS-NOTES.md` ~12,600/18,000, `SHIPPED.md` ~39,000/64,000).
+
+**The method note worth carrying.** A reduced record earns its name from the **set** of consumers, not from
+the first one found: this task began as a four-field record for one Dashboard card, and reading the *other*
+whole-row readers in the same module turned up three more surfaces wanting one extra field — three of them on
+the page the owner opens most. Before naming a record after a caller, grep its module for the other reads of
+the same table. And a per-endpoint cost has to be multiplied by **how many of those endpoints one page
+mounts**: reading `InsightTabs` is what turned 1.7 s into ~437 MB at once, the same "go and read how the host
+ranks/hosts them" move that sized v0.495.4. Earlier notes stand below.)*
+
 *Last edited 2026-10-14 (Builder, branch `claude/brave-albattani-gqf5wp` — **both usual doors were shut
 (Bugs dry, the big-picture dogfood paid), and the task came from reading the CALLERS of a read this repo had
 already measured. v0.495.5.**

@@ -324,3 +324,47 @@ def test_activity_calendar_off_night_is_null_without_enough_history(
         lib.close()
 
     assert client.get("/api/activity-calendar").json()["off_night"] is None
+
+
+def test_the_night_fold_builds_no_frame_row_for_the_whole_library(
+        client, built_library, monkeypatch):
+    """The fold opens every project in the library and reads three columns of
+    every accepted sub — the capture stamp, the exposure and the measured star
+    size — and it used to build a whole `FrameRow` per sub to get them.
+
+    Fail-before: a `FrameRow` is `SELECT *`, so the walk behind the imaging
+    calendar, the recap poster and the year recap moved every sub's plate-solve
+    header text to count nights. Measured at 1,552 ms → 920 ms on a project the
+    size of the owner's deepest target, for an identical fold.
+    """
+    import seestack.io.project as project_module
+
+    from seestack.io.library import Library
+
+    now = datetime.now(timezone.utc)
+    day = (now - timedelta(days=4)).date()
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _set_night_with_fwhm(lib, "M_42", day, 22, 60.0, fwhm_px=3.6)
+    finally:
+        lib.close()
+    # The only other frame read in this request: without a configured site,
+    # `resolve_site_lon` sniffs `SITELONG` out of the subs' own headers, and the
+    # bundled samples deliberately carry none (see `webapp.site_location`).
+    client.put("/api/settings", json={"site_lon": 150.0})
+
+    built = 0
+    real = project_module._row_to_frame
+
+    def counting(row):
+        nonlocal built
+        built += 1
+        return real(row)
+
+    monkeypatch.setattr(project_module, "_row_to_frame", counting)
+    data = client.get("/api/activity-calendar").json()
+    nights = {n["date"]: n for n in data["nights"]}
+    # The fold really did answer off this night (otherwise zero rows built would
+    # be zero work rather than cheap work).
+    assert nights[day.isoformat()]["median_fwhm_px"] == 3.6
+    assert built == 0, f"built {built} FrameRow objects for the night fold"

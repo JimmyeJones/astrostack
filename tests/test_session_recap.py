@@ -2173,3 +2173,128 @@ def test_split_night_drift_compares_whole_nights(tmp_path):
         assert recap.quality_drift.n_latest == 8
     finally:
         proj.close()
+
+
+# --- the night reads do not build a row per sub -------------------------------
+#
+# `session_recap`, `focus_trend` and `nights_breakdown` each walk **every** sub
+# of the target, and all three read the same five small fields — so they read
+# them as five columns (`Project.iter_night_frames`) rather than as whole
+# `FrameRow`s, which are `SELECT *` and carry the plate-solve header text none
+# of the three looks at. Pinned here as two claims: the answers do not move, and
+# no row is built to reach them.
+
+
+def _three_nights_every_way(proj) -> None:
+    """Three nights of subs, awkward in each of the ways the cards speak about:
+    some subs set aside with different reasons, some with no measured stars, one
+    undated sub, and a last night softer than the two before it."""
+    for night, (day, fwhm) in enumerate([(1, 3.0), (2, 3.1), (9, 5.0)]):
+        base = datetime(2026, 7, day, 22, 0, 0)
+        for i in range(10):
+            proj.add_frame(_frame(base + timedelta(minutes=i),
+                                  fwhm_px=None if i == 4 else fwhm + 0.02 * i))
+        proj.add_frame(_frame(base + timedelta(minutes=20), accept=False,
+                              reject_reason=["auto:streak", "qc_error:boom",
+                                             "user"][night]))
+    proj.add_frame(_frame(None))
+
+
+def _rows_built_by(call, monkeypatch):
+    """``(answer, n_FrameRow_built)`` for one call."""
+    import seestack.io.project as project_module
+
+    built = 0
+    real = project_module._row_to_frame
+
+    def counting(row):
+        nonlocal built
+        built += 1
+        return real(row)
+
+    monkeypatch.setattr(project_module, "_row_to_frame", counting)
+    answer = call()
+    monkeypatch.undo()
+    return answer, built
+
+
+def _whole_rows_instead(monkeypatch):
+    """Put the three readers back on whole rows, for the equivalence check."""
+    monkeypatch.setattr(
+        Project, "iter_night_frames",
+        lambda self, *, accepted_only=False: self.iter_frames(
+            accepted_only=accepted_only))
+
+
+def test_the_three_target_page_night_reads_build_no_frame_rows(tmp_path,
+                                                               monkeypatch):
+    """Fail-before: each of the three built a `FrameRow` for every sub of the
+    target — 35,894 of them on the owner's deepest, ~150 MB of them alive at
+    once — to read when a sub landed, whether it was kept and why not, how long
+    it was and how its stars measured."""
+    from seestack.session_recap import nights_breakdown
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _three_nights_every_way(proj)
+        for name, call in [("session_recap", lambda: session_recap(proj)),
+                           ("focus_trend", lambda: focus_trend(proj)),
+                           ("nights_breakdown", lambda: nights_breakdown(proj))]:
+            answer, built = _rows_built_by(call, monkeypatch)
+            assert answer is not None, name
+            assert built == 0, f"{name} built {built} FrameRow objects"
+    finally:
+        proj.close()
+
+
+def test_the_three_target_page_night_reads_answer_what_whole_rows_answered(
+        tmp_path, monkeypatch):
+    """The equivalence claim, through the functions themselves rather than
+    field by field (`tests/test_project_night_frames.py` does that half)."""
+    from seestack.session_recap import nights_breakdown
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _three_nights_every_way(proj)
+        calls = [lambda: session_recap(proj),
+                 lambda: focus_trend(proj),
+                 lambda: nights_breakdown(proj)]
+        records = [call() for call in calls]
+        _whole_rows_instead(monkeypatch)
+        rows = [call() for call in calls]
+        assert records == rows
+        # …and the fixture is worth something: all three said something, the
+        # newest night is judged soft against the two before it, and the reject
+        # buckets came out of three different reasons.
+        assert records[0].quality_drift is not None
+        assert records[1].n_points > 0
+        assert [n.verdict for n in records[2]][0] == "soft"
+        assert {b for n in records[2] for b in n.reject_buckets} == {
+            "trailed", "unreadable", "set aside by you"}
+    finally:
+        proj.close()
+
+
+def test_the_dashboards_combined_recap_reads_the_same_records(tmp_path,
+                                                              monkeypatch):
+    """`library_session_recap` and `session_end_stamps` are handed the same
+    five-field records by the Dashboard's loop, and must answer exactly what the
+    whole rows answered."""
+    from seestack.session_recap import session_end_stamps
+
+    proj = Project.create(tmp_path / "p", name="t")
+    try:
+        _three_nights_every_way(proj)
+
+        def answer(read):
+            frames = list(read())
+            window = recent_session_window_frames(frames)
+            return (session_end_stamps(frames),
+                    library_session_recap([("T", "T", window)]))
+
+        records = answer(proj.iter_night_frames)
+        rows = answer(proj.iter_frames)
+        assert records == rows
+        assert records[1] is not None and records[1].n_frames == 11
+    finally:
+        proj.close()

@@ -477,6 +477,53 @@ class FrameHealth:
     solved: bool
 
 
+#: The columns that say **when a sub landed and how that night went** — its
+#: capture time, whether QC kept it and why not, how long it was and how its
+#: stars measured.
+#:
+#: Read as a set of their own by :meth:`Project.iter_night_frames`, for the same
+#: reason :data:`_HEALTH_COLUMNS` is: the four surfaces that group a target's
+#: subs into *nights* ask these five questions of every sub it has, and a
+#: ``FrameRow`` is ``SELECT *``. The order here is the order
+#: :class:`FrameNight`'s fields are in, because the method builds one straight
+#: from the other.
+_NIGHT_COLUMNS: tuple[str, ...] = (
+    "timestamp_utc", "accept", "exposure_s", "reject_reason", "fwhm_px",
+)
+
+
+@dataclass(frozen=True)
+class FrameNight:
+    """One sub, reduced to the facts a *night* is summarised on.
+
+    What the four night-shaped reads over a whole target actually touch:
+    :func:`seestack.session_recap.session_recap` (the Target page's "Last
+    session" card), :func:`~seestack.session_recap.focus_trend` (its sharpness
+    sparkline), :func:`~seestack.session_recap.nights_breakdown` (the Nights
+    card) and :func:`~seestack.session_recap.library_session_recap` (the
+    Dashboard's combined "Last night", over *every* target). Between them they
+    cluster subs by capture time, count the kept and the set-aside, add up
+    exposure, bucket the reject reasons and take medians of star size — five of
+    a :class:`FrameRow`'s thirty-four fields, none of them the plate solution.
+
+    A record rather than the column-major :class:`AcquisitionValues` because
+    these consumers genuinely want *rows*: they cut the subs into sessions and
+    then each session into kept and set aside. Small enough that 35,894 of them
+    cost a tenth of what the whole rows do — see
+    :meth:`Project.iter_night_frames` for the measurement.
+
+    No ``id``: none of the four identifies a sub. They count them, sum them and
+    take medians, and the "Set aside this night" button beside the Nights card
+    acts through the frames endpoint rather than off these records.
+    """
+
+    timestamp_utc: str | None
+    accept: bool
+    exposure_s: float | None
+    reject_reason: str | None
+    fwhm_px: float | None
+
+
 def readable_frame_path(frame: "FrameRow") -> str | None:
     """Return the first of a frame's on-disk paths that actually exists.
 
@@ -1899,6 +1946,41 @@ class Project:
                 sky_adu_median=row[7],
                 solved=bool(row[8]),
             )
+
+    def iter_night_frames(self, *, accepted_only: bool = False
+                          ) -> Iterator[FrameNight]:
+        """This target's subs as :class:`FrameNight` records — when each one
+        landed and how that night went.
+
+        The whole-row read's replacement for the four night-shaped summaries
+        (:class:`FrameNight` names them), each of which walks **every** sub of
+        the target: three sit on the Target page and the fourth runs over every
+        target in the library for the Dashboard's "Last night" card. A
+        ``FrameRow`` is ``SELECT *``, and the biggest column on a solved sub is
+        its plate solution — ``wcs_json`` is a FITS header *text* of ~25
+        eighty-character cards — which not one of the four reads at all.
+
+        Measured on a synthetic project the size of the owner's deepest target
+        (35,894 subs over 300 nights, ~2 kB of ``wcs_json`` each, best of 3),
+        per surface — ``session_recap`` **1,684 ms / 145.5 MB peak → 664 ms /
+        12.1 MB**, ``focus_trend`` 1,571 / 145.4 → 707 / 12.0,
+        ``nights_breakdown`` 1,696 / 145.5 → 769 / 12.2, and the Dashboard's
+        recap-plus-stamps pass 1,745 / 145.8 → 756 / 12.5 — every answer
+        identical. Memory is the point rather than the milliseconds (AGENTS.md
+        §10 — this box has an OOM history): the first three sit on the Target
+        page in three cards that all mount on load, so those peaks **coincide**
+        (~437 MB → ~36 MB on one view of his deepest target), and the fourth
+        pays its own over every target in the library.
+
+        Order and ``accepted_only`` are :meth:`iter_frames`' own — the callers
+        split on capture time and take medians, where position decides the
+        answer.
+        """
+        for row in self.iter_frame_columns(*_NIGHT_COLUMNS,
+                                           accepted_only=accepted_only):
+            yield FrameNight(timestamp_utc=row[0], accept=bool(row[1]),
+                             exposure_s=row[2], reject_reason=row[3],
+                             fwhm_px=row[4])
 
     def iter_frame_columns(self, *columns: str,
                            accepted_only: bool = False,

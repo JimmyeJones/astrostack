@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from statistics import median
-from typing import Callable, Hashable, Sequence, TypeVar
+from typing import Callable, Hashable, Protocol, Sequence, TypeVar
 
 from seestack.io.project import (
     REJECT_REASON_BAD_SOLVE_PREFIX,
@@ -42,11 +42,36 @@ from seestack.qc.grading import CLOUD_METRIC_NAMES, SEEING_METRIC_NAMES
 # Any row whose first element is its capture time — see ``_split_sessions``.
 _TimedT = TypeVar("_TimedT", bound=Sequence)
 
+# One kind of per-sub record, handed back as the same kind it came in as — see
+# ``recent_session_window_frames``, which trims a list without reading it.
+_FrameT = TypeVar("_FrameT", bound="NightFacts")
+
 # Maps a capture stamp to whatever labels the observing night it belongs to
 # (``None`` when it can't be placed). Deliberately abstract: bucketing a stamp
 # into a local noon-to-noon night needs the observer's longitude, which lives in
 # the webapp's settings, and this module stays free of webapp imports.
 NightKeyFn = Callable[[str | None], Hashable | None]
+
+
+class NightFacts(Protocol):
+    """What every night-shaped read in this module asks of a sub: when it
+    landed, whether QC kept it and why not, how long it was, and how its stars
+    measured.
+
+    A :class:`~seestack.io.project.FrameRow` answers all five, and so does the
+    five-field :class:`~seestack.io.project.FrameNight` the readers below are
+    handed instead of whole rows — so the annotations name *the five questions*
+    rather than either record. (The sky-transparency trend still wants a whole
+    row: it reads ``transparency_score`` and the pointing columns behind the
+    per-panel split, which are not night facts.)
+    """
+
+    timestamp_utc: str | None
+    accept: bool
+    exposure_s: float | None
+    reject_reason: str | None
+    fwhm_px: float | None
+
 
 # A night's subs land minutes apart; the gap to the previous night is many hours.
 # Six hours cleanly separates two nights without splitting a single long session.
@@ -217,8 +242,8 @@ def _split_sessions(frames: list[_TimedT], gap_hours: float) -> list[list[_Timed
 
 
 def _last_session_frames(
-    frames: list[tuple[datetime, FrameRow]], gap_hours: float
-) -> list[tuple[datetime, FrameRow]]:
+    frames: list[_TimedT], gap_hours: float
+) -> list[_TimedT]:
     """Given (capture-time, frame) pairs sorted ascending, return the trailing
     run whose consecutive capture times are within ``gap_hours`` of each other —
     i.e. the most recent night's frames."""
@@ -255,8 +280,8 @@ LAST_NIGHT_WINDOW_HOURS = 30.0
 
 
 def recent_session_window_frames(
-    frames: list[FrameRow], *, window_hours: float = LAST_NIGHT_WINDOW_HOURS
-) -> list[FrameRow]:
+    frames: list[_FrameT], *, window_hours: float = LAST_NIGHT_WINDOW_HOURS
+) -> list[_FrameT]:
     """Trim ``frames`` to those captured within ``window_hours`` of the target's
     *own* latest capture — a memory bound for the cross-target
     :func:`library_session_recap` merge.
@@ -277,7 +302,7 @@ def recent_session_window_frames(
 
 
 def _session_median_fwhm(
-    session_pairs: list[tuple[datetime, FrameRow]]
+    session_pairs: list[tuple[datetime, NightFacts]]
 ) -> tuple[float | None, int]:
     """Median FWHM over the session's *accepted*, measured subs (the ones that
     actually feed the stack), or ``(None, 0)`` when too few carry a usable FWHM."""
@@ -292,7 +317,7 @@ def _session_median_fwhm(
 
 
 def _fwhm_quality_drift(
-    sessions: list[list[tuple[datetime, FrameRow]]]
+    sessions: list[list[tuple[datetime, NightFacts]]]
 ) -> SessionQualityDrift | None:
     """Compare the newest session's median FWHM against the target's **typical**
     prior session and flag a materially softer newest session. Needs at least two
@@ -360,9 +385,9 @@ def session_recap(
     a caller that can't supply one gets today's session-shaped answer rather
     than a guess, exactly as :func:`nights_breakdown` degrades.
     """
-    dated: list[tuple[datetime, FrameRow]] = []
+    dated: list[tuple[datetime, NightFacts]] = []
     total_kept_exposure_s = 0.0
-    for f in project.iter_frames():
+    for f in project.iter_night_frames():
         if f.accept:
             total_kept_exposure_s += f.exposure_s or 0.0
         dt = _parse(f.timestamp_utc)
@@ -470,7 +495,7 @@ def focus_trend(
     usable FWHM to trend. Read-only aggregation over the ``frames`` table."""
     dated = [
         (dt, f)
-        for f in project.iter_frames()
+        for f in project.iter_night_frames()
         if (dt := _parse(f.timestamp_utc)) is not None
     ]
     if not dated:
@@ -899,8 +924,8 @@ def nights_breakdown(
 
     Returns ``[]`` when nothing is datable (no frame carries a capture time).
     """
-    dated: list[tuple[datetime, FrameRow]] = [
-        (dt, f) for f in project.iter_frames()
+    dated: list[tuple[datetime, NightFacts]] = [
+        (dt, f) for f in project.iter_night_frames()
         if (dt := _parse(f.timestamp_utc)) is not None
     ]
     if not dated:
@@ -1137,7 +1162,7 @@ class LibrarySessionRecap:
 
 
 def library_session_recap(
-    targets: list[tuple[str, str, list[FrameRow]]],
+    targets: list[tuple[str, str, list[NightFacts]]],
     *,
     gap_hours: float = DEFAULT_SESSION_GAP_HOURS,
     night_of: NightKeyFn | None = None,
@@ -1177,7 +1202,7 @@ def library_session_recap(
     # trailing-cluster walk below makes the real "last night" cut over the *merged*
     # timeline, so an older isolated session still falls away — while a bridged one
     # is kept. The caller bounds memory with ``recent_session_window_frames``.
-    merged: list[tuple[datetime, str, str, FrameRow]] = []
+    merged: list[tuple[datetime, str, str, NightFacts]] = []
     for name, safe, frames in targets:
         for f in frames:
             dt = _parse(f.timestamp_utc)
@@ -1215,7 +1240,7 @@ def library_session_recap(
     # Group the night's frames by target, preserving each target's first-capture
     # order so ties read in the order they were actually shot.
     order: list[tuple[str, str]] = []
-    by_target: dict[tuple[str, str], list[FrameRow]] = {}
+    by_target: dict[tuple[str, str], list[NightFacts]] = {}
     for _dt, name, safe, f in night:
         key = (name, safe)
         if key not in by_target:
@@ -1343,7 +1368,7 @@ class EarlyStop:
 
 
 def session_end_stamps(
-    frames: list[FrameRow], *, gap_hours: float = DEFAULT_SESSION_GAP_HOURS
+    frames: list[NightFacts], *, gap_hours: float = DEFAULT_SESSION_GAP_HOURS
 ) -> list[str]:
     """The capture stamp of the **last** sub of each session, oldest first.
 
