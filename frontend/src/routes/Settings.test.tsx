@@ -1,7 +1,7 @@
 import { MantineProvider } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -79,6 +79,23 @@ describe("dropEmptyFields", () => {
     expect(out.astap_timeout_s).toBe(0);
     expect(out.watcher_enabled).toBe(false);
     expect(out.seestar_known_ips).toEqual([]);
+  });
+
+  it("sends the blank for the three fields whose blank IS the value", () => {
+    // Regression: these are the only way back from a custom folder or subnet —
+    // blank means "the standard folder under the data root" / "work the subnet
+    // out for me". Dropping their "" made clearing the box a no-op that said
+    // "Settings saved", so a custom Incoming dir could never be undone.
+    const out = dropEmptyFields({
+      incoming_dir: "", library_root: "", seestar_scan_subnet: "",
+      data_root: "",          // no blank meaning — still dropped
+      astap_fov_deg: "",      // a cleared numeric — still dropped
+    });
+    expect(out.incoming_dir).toBe("");
+    expect(out.library_root).toBe("");
+    expect(out.seestar_scan_subnet).toBe("");
+    expect(out).not.toHaveProperty("data_root");
+    expect(out).not.toHaveProperty("astap_fov_deg");
   });
 });
 
@@ -979,6 +996,11 @@ describe("astap_timeout_s hint honesty", () => {
 // owner's only copy of their raw subs. The server refuses that save and stays the
 // authority; this is the same question asked while the user types, so the answer
 // lands beside the field instead of arriving as a red toast reading "422: …".
+// The conflict is reported on the offending field, and that field now exists in
+// two places: the Folders section and the "More settings" folders card (both
+// edit the one form, so both must mark it). These assertions are scoped to the
+// *visible* tab panel so they test the section they are about rather than
+// counting how many sections render the same correct message.
 describe("folder conflict, while you type", () => {
   it("marks the offending field and holds Save", async () => {
     renderSettingsWith({}, "folders", {
@@ -994,8 +1016,8 @@ describe("folder conflict, while you type", () => {
       target: { value: "/data/incoming/library" },
     });
 
-    await waitFor(() => expect(
-      screen.getByText(/would sit inside the incoming folder/)).toBeVisible());
+    await waitFor(() => expect(within(screen.getByRole("tabpanel"))
+      .getByText(/would sit inside the incoming folder/)).toBeVisible());
     expect(screen.getAllByRole("button", { name: "Save settings" })[0]).toBeDisabled();
   });
 
@@ -1005,15 +1027,15 @@ describe("folder conflict, while you type", () => {
       library_root: "/data/incoming/library",
     });
 
-    await waitFor(() => expect(
-      screen.getByText(/would sit inside the incoming folder/)).toBeVisible());
+    await waitFor(() => expect(within(screen.getByRole("tabpanel"))
+      .getByText(/would sit inside the incoming folder/)).toBeVisible());
 
     fireEvent.change(screen.getByLabelText(/Library root/), {
       target: { value: "/data/library" },
     });
 
     await waitFor(() => expect(
-      screen.queryByText(/would sit inside the incoming folder/)).toBeNull());
+      screen.queryAllByText(/would sit inside the incoming folder/)).toHaveLength(0));
     expect(screen.getAllByRole("button", { name: "Save settings" })[0]).not.toBeDisabled();
   });
 
@@ -1216,5 +1238,125 @@ describe("Settings → Stacking → Memory", () => {
     expect(
       await screen.findByText(/Budget is higher than this machine's available RAM/),
     ).toBeVisible();
+  });
+});
+
+// --- "More settings" (the redesign's first slice) ---------------------------
+// The owner's words were that the old labels are "very confusing and can seem
+// scary to mess with to the average person", and then: "I want the expert
+// settings dumbed down so that an average user can adjust all settings as
+// needed. They should be warned of any unexpected consequences." So the two
+// things worth pinning are that a card is *silent* until you change it, and
+// that the moment you do it says what that costs and offers the way back.
+
+describe("More settings", () => {
+  it("is a section of its own, with an address like the others", async () => {
+    renderSettingsWith({}, "more");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
+    expect(screen.getByText("Where your photos and library live")).toBeVisible();
+    expect(screen.getByText("Memory limit for stacking")).toBeVisible();
+  });
+
+  it("prints the name each setting used to have, so it is still findable by it", async () => {
+    renderSettingsWith({}, "more");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
+    expect(screen.getByText("Was: Stack memory budget (GB)")).toBeVisible();
+    expect(screen.getByText("Was: Quiet period (s)")).toBeVisible();
+    expect(screen.getByText("Was: Scan subnet (CIDR), Known device IPs, Scan interval (s)"))
+      .toBeVisible();
+  });
+
+  it("says nothing alarming on an install that has changed nothing", async () => {
+    renderSettingsWith({}, "more", {
+      copy_to_cache: false, job_history_limit: 200, watch_quiet_period_s: 30,
+      watch_poll_interval_s: 300, astap_fov_deg: 1.3, astap_timeout_s: 60,
+      astap_use_solve_hints: true, astap_bootstrap_solve: false,
+      cpu_workers: null, max_stack_memory_gb: null, auto_reject_on_unattended: false,
+      seestar_enabled: false, seestar_control_enabled: false,
+      incoming_dir: "", library_root: "", seestar_known_ips: [],
+    });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
+    expect(screen.queryByText("Heads up")).toBeNull();
+  });
+
+  it("warns the moment a value leaves its default, and offers the way back", async () => {
+    renderSettingsWith({}, "more", { copy_to_cache: true });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
+
+    expect(screen.getByText(/you need about as much free space again/)).toBeVisible();
+    const back = screen.getByRole("button", { name: "Back to default (Off)" });
+    fireEvent.click(back);
+
+    await waitFor(() =>
+      expect(screen.queryByText(/you need about as much free space again/)).toBeNull());
+    expect(screen.getByLabelText("Make a working copy of each photo first"))
+      .not.toBeChecked();
+  });
+
+  it("edits the same buffer as the old control, so the two can never disagree", async () => {
+    // Every control here also still lives on the section it always did. Both
+    // read and write the page's one shared form, which is what makes "nothing
+    // was removed" safe rather than two switches arguing.
+    renderSettingsWith({}, "more", { copy_to_cache: true });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
+    expect(screen.getByLabelText(/Copy frames into local cache/)).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to default (Off)" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Copy frames into local cache/)).not.toBeChecked());
+  });
+
+  it("goes back to the standard folders by clearing them, and saves the blank", async () => {
+    const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
+    renderSettingsWith({}, "more", { incoming_dir: "/elsewhere/incoming", library_root: "" });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
+
+    expect(screen.getByText(/your library will look empty until you move the files/))
+      .toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Back to default (Standard (set when installed))" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText(/your library will look empty/)).toBeNull());
+    fireEvent.click(screen.getAllByRole("button", { name: /Save settings/ })[0]);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    // The blank has to survive `dropEmptyFields` or the card's one-click way
+    // back is a button that does nothing.
+    expect(put.mock.calls[0][0]).toMatchObject({ incoming_dir: "" });
+  });
+
+  it("finds a card by the name it used to have", async () => {
+    renderSettingsWith({}, "more");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
+
+    fireEvent.change(screen.getByLabelText("Find a setting"), { target: { value: "CIDR" } });
+
+    expect(screen.getByText("How to find the Seestar")).toBeVisible();
+    expect(screen.queryByText("Memory limit for stacking")).toBeNull();
+  });
+
+  it("shows a stored value it has no button for, rather than overwriting it", async () => {
+    renderSettingsWith({}, "more", { cpu_workers: 3 });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
+    const chip = screen.getByRole("button", { name: "Currently 3" });
+    expect(chip).toBeVisible();
+    expect(chip).toBeDisabled();
+  });
+});
+
+describe("Settings — nothing was removed", () => {
+  it("still renders every setting the page carried before the redesign", async () => {
+    // The owner's one hard constraint (AGENTS.md §1): "don't get rid of
+    // features, just move them to a more organized layout". `HINTS` is the
+    // page's own register of every labelled setting, and `lbl()` stamps each
+    // one onto the DOM — so this fails the moment a slice of the redesign
+    // drops one on the floor instead of rehoming it.
+    const { container } = renderSettingsWith({}, "more");
+    await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
+
+    const missing = Object.keys(HINTS).filter((k) =>
+      !container.querySelector(`[data-setting="${k}"], [data-settings~="${k}"]`));
+    expect(missing).toEqual([]);
   });
 });

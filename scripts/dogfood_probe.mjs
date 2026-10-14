@@ -245,7 +245,7 @@ const VIEW_SWITCH_SKIPPED = Object.fromEntries(
  * `folders` in it is two screenshots of a page we already have. */
 const SETTINGS_SECTIONS = [
   "folders", "automation", "plate-solving", "observing-site", "stacking",
-  "telescope", "maintenance",
+  "telescope", "maintenance", "more",
 ];
 
 // The real route table (frontend/src/main.tsx) — a typo here reads as a bug

@@ -1,5 +1,102 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, branch `claude/nifty-lamport-s6bmf8`) — build the spec's own first button, and it tells you whether the app can keep the promise
+
+*(→ **v0.496.0**, slice 1 of the owner-approved Settings redesign. Baseline: `main`'s CI run **2311**
+**green** on the exact HEAD `af9ae259`, one call; local suite then **7948 passed, 7 skipped** (19m43s).
+Inbox **four open** via `list_issues` — #878, #880, #903, #1015, all previously acted-on and owner-gated,
+and the inbox is the Scout's anyway. **No open PRs.** "Bugs" read end to end: nothing ungated, so §11's
+"a ⭐ entry is always taken first" picked the redesign, whose spec had landed in a `docs:` commit **2 h 21 m**
+earlier — just outside the claimed-in-spirit window, with no branch behind it.)*
+
+### The method note: a feature slice walks code in a direction nobody has walked it
+
+Nothing in *reading* `dropEmptyFields` says it is wrong. Its comment is accurate about the case it was
+written for (a cleared **ASTAP FOV** used to 422 the whole form and lose every other edit behind a pydantic
+toast), its two tests pass, and it has sat on this page for months. What found the hole was needing the
+slice's own first button — **Back to default (Standard)** — to *actually work*, and following the one patch
+it emits (`{incoming_dir: "", library_root: ""}`) all the way to the request. `dropEmptyFields` eats it.
+
+So on `main` today, clearing **Incoming dir** and pressing Save reports *"Settings saved"* and keeps the old
+path: **there has never been a way back from a custom folder**, nor from a custom library root or a pinned
+Seestar subnet. Three fields, one line of code, invisible to every reader of that function and to both of
+its tests, because the question *"which fields have a meaningful blank?"* was never asked of it.
+
+**The generalisation worth keeping:** a review reads code in the direction the author wrote it. A feature
+slice is forced to read it in the direction the *user* pushes a value — control → form → patch → wire — and
+that is where this class lives. When a spec hands you a button, implement the button rather than the surface
+around it, and follow its value to the wire. A second instance was checked for rather than assumed:
+`astap_path`'s control already sends `null` (so it was never affected), and `data_root` is the one string
+whose blank has **no** meaning, so it stays droppable — the allow-list is exactly three.
+
+### The spec's "every warning must be true of the code" rule earned its place twice
+
+`docs/design/settings-redesign.md` requires each consequence sentence to be re-checked against the field's
+use before it ships. Two of fifteen failed that check, and both would have *looked* right:
+
+* **Field of view.** The spec offers *Read from my photos / Seestar S30 / Seestar S50* and asks the Builder
+  to confirm first. There is no such choice: `seestack/solve/runner.py::_fov_deg_for_frame` derives the
+  field from every frame's own `FOCALLEN`/`XPIXSZ` and falls back to `astap_fov_deg` **only** when the
+  header lacks them, so reading from the photos cannot be switched off. The spec's warning —
+  *"most frames won't be placed"* — is therefore false of an ordinary Seestar library. Help line and
+  warning both rewritten; the two telescopes stay as buttons.
+* **Time allowed per photo.** `astap_timeout_s` is per **attempt**, over a three-strategy ladder, which
+  `HINTS.astap_timeout_s` has said all along and the mockup's sentence did not. The warning now quotes
+  `3 ×` the slider as the real cost of a photo that never places.
+
+Expect one or two of these per slice. They are the cheapest part of the work and the part a reviewer would
+never catch, because a plausible sentence about a field you have not read looks exactly like a true one.
+
+### Page sweep — CLEAN, and the height is the thing to carry forward
+
+`scripts/agent-dogfood.sh` (default flags; the probe reads `SETTINGS_SECTIONS` from
+`frontend/src/settingsSections.ts`, so `/settings/more` was swept the moment it existed — and
+`tests/test_dogfood_route_coverage.py` went red until the probe's mirrored list was updated, which is that
+guard working).
+
+* **Nothing overflowing, no console errors, no clipped label**, at 1440 px and 420 px, across every route.
+* Standing baseline **unchanged**: `[phone] /life-list [Still to shoot]` **14,513 px**, byte-identical.
+* **`[phone] /settings/more` 5,022 px / `[desktop]` 3,736 px** — 4th tallest page in the app on a phone,
+  against **2,758 px** for `/settings/maintenance`, the tallest Settings section before it.
+
+**It was not shortened, and that was a decision rather than an oversight.** The obvious lever is to collapse
+the five groups — which would make the section a short list of bars and **hide a Heads up** on a setting that
+is off its default, i.e. defeat the one thing the owner asked for in his second message. The spec he approved
+also says, in as many words, *"open by default; **not** 'expert'"*. Overriding an approved layout on a height
+heuristic is substituting a Builder's taste for his, so the number is **recorded** instead and handed to slice
+2, which is where the page's overall shape gets decided. The cheap lever that is still open and costs nothing
+in visibility: the page's own `maw={680}` is what holds the card grid to two columns on a 1440 px screen,
+where the approved mockup's `auto-fit minmax(300px, 1fr)` would give three.
+
+### Two existing assertions were scoped, not loosened
+
+`folder conflict, while you type` broke on the new section, correctly: the layout refusal now marks the
+offending field in **both** places that render it, and `getByText` found two. The fix is
+`within(screen.getByRole("tabpanel"))` — role queries skip a hidden `Tabs.Panel`, so each test now asserts
+about the section it is actually about. That is stricter than counting one match across the whole page, not
+weaker; the "cleared" case went to `queryAllByText(...).toHaveLength(0)`, which still fails if either copy
+survives.
+
+### Postscript after the pre-merge sync: the field-of-view call was reached twice, independently
+
+Merging `origin/main` before this branch's merge brought in **v0.495.14**, from a run that took the same
+*"Builder: confirm how the solver uses `astap_fov_deg`"* question out of the same spec and answered it the
+same way — and went further than this slice did, pinning it with
+`test_solve_one_derives_fov_from_s30_header` and
+`test_the_deep_solve_gets_the_reference_sub_s_own_field_of_view` (plus controls), and checking the
+**rescue** path (`solve/bootstrap.py`) and Settings' own *Test ASTAP* button, which this slice did not. Its
+rewritten spec row is now the authority, and it prescribes exactly the shape shipped here: a help line
+saying the app reads the field from each photo, with the S30/S50 presets as what goes in the fallback box,
+and **no** "Read from my photos" choice.
+
+Two things worth keeping from the coincidence. The first is reassurance about the method: two runs reading
+the same code from different directions produced the same verdict and the same wording, which is the
+strongest evidence available here that the reading is right. The second is a §11 cost: **the same question,
+written down in a shared document, was answered twice.** A spec that embeds *"Builder: confirm X"* is an
+unclaimable work item — it lives outside "Bugs", so no claim line exists for it, and both runs found it the
+same morning. If a future spec carries one, answer it **in the spec** (as v0.495.14 did) rather than only in
+the code that consumes it, so the next reader finds the answer where the question was.
+
 ## 2026-10-14 (Builder, branch `claude/nifty-lamport-2zshr5`) — the backlog's one ready item was claimed, so the run read a merged spec's unanswered question and ran the stalest dogfood flag; each found a bug
 
 *(→ **v0.495.14** and **v0.495.15**. Baseline: `main`'s CI run **2309** green on the exact HEAD `228970d8`

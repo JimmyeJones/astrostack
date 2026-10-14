@@ -1,5 +1,87 @@
 # Shipped — the record
 
+## 2026-10-14 (Builder, branch `claude/nifty-lamport-s6bmf8`) — the Settings redesign's first slice, and the save that silently refused a blank
+
+### v0.496.0 — ⭐ OWNER-APPROVED FEATURE (friendliness — PRIORITY 3), slice 1 of `docs/design/settings-redesign.md`: "More settings" — the scary settings in plain words, each warning the moment it leaves its default
+
+**What he asked for.** 2026-10-12: *"a major overhaul of the settings page may be nice — with visuals… most
+of those terms are very confusing and can seem scary to mess with to the average person."* On the mockup,
+2026-10-13: *"I want the expert settings to be dumbed down so that an average user can adjust all settings as
+needed. They should be warned of any unexpected consequences of editing things."* Approved **"Yes go"**
+2026-10-14. The spec's build order makes this slice **first** because it is the second sentence, verbatim.
+
+**What shipped.** `/settings/more` — a section of the page like the other seven, so it has an address, is one
+click away, and the probe sweeps it. Fifteen cards over twenty `Settings` fields, in five groups (your
+folders and files · noticing new photos · finding where each photo points · how hard your NAS works ·
+connecting to your Seestar). Each card is: a title in words he uses, **one** sentence on what it does, the
+control, a badge (**Safe to change** / **Changes future pictures** / **Has side effects — read the note**,
+word *and* shape, never colour alone), a `Was: <old label>` line, and — *only* while the value differs from
+the default — an amber `role="note"` **Heads up** carrying the consequence and **Back to default (…)**.
+Above them, **Find a setting**, which matches the new title, the plain sentence, the old label **and the
+field's own name**, so `CIDR`, "quiet period" and `astap_timeout_s` all still find their card.
+
+**It is additive, which is how "nothing is removed" is kept while four slices are still to come.** Every
+control here *also* still sits on the section that has always held it; both read and write the page's single
+`form` buffer, so the two can never disagree (pinned: pressing **Back to default** in More settings
+unchecks the old switch on Automation in the same test). That also leaves every inbound `settingsLink()`
+deep link landing where it always did — the Dashboard's data-root warning on `folders`, four screens' solve
+failures on `plate-solving` — which a *move* this slice would have stranded.
+
+**Two warnings the spec got wrong, and the rule that caught them.** The spec says *"every warning must be
+true of the code — re-read the field's use before shipping its sentence, and change the sentence (not the
+behaviour) if it isn't"*, and two did not survive that read:
+
+- **Field of view.** The spec offers *Read from my photos / Seestar S30 / Seestar S50*, with a note asking
+  the Builder to check first. It is **not a choice**: `seestack/solve/runner.py::_fov_deg_for_frame` derives
+  the field from every frame's own `FOCALLEN`/`XPIXSZ` (`fits_loader.fov_deg_from_header`) and falls back to
+  `astap_fov_deg` *only* when the header lacks them — reading from the photos cannot be switched off. So the
+  card offers the two Seestars, the help line says the app works it out from each photo, and the warning no
+  longer claims *"most frames won't be placed"* — it says what is true, that this bites a photo whose own
+  details are missing.
+- **Time allowed per photo.** `astap_timeout_s` is per **attempt** and the runner tries up to three
+  strategies, so the warning now quotes `3 ×` the slider as what a photo that never places actually costs —
+  the number `HINTS.astap_timeout_s` has carried all along and the mockup's sentence did not.
+
+**A control may offer fewer choices than its field allows — and must still show the truth.** Cores are
+*All / Half / One*, not a number box; field of view is two telescopes, not a float. A stored value none of
+the buttons covers is rendered as a **disabled** "Currently 3" chip: shown, selected, and never offered, so
+the one thing this shape could do wrong — silently overwriting a value it has no button for — cannot
+happen. ("Half" is dropped entirely on a two-core box, where it would mean the same as One.) Automatic is a
+value too: the memory slider's left-hand end stores `null`, never the `0` the field's `ge=0.5` would refuse.
+
+**🔴 The bug found on the way, fixed in the same branch (`BLANKABLE_FIELDS`).** The folders card's **Back to
+default (Standard)** clears `incoming_dir` and `library_root` — and did nothing. `dropEmptyFields` drops
+every `""` before the PUT, which is right for a cleared numeric (its reason: a cleared **ASTAP FOV** used to
+422 the whole form and lose every other edit) and wrong for the three strings whose blank **is** the value:
+`incoming_dir` and `library_root` mean *"the standard folder under the data root"* and `seestar_scan_subnet`
+means *"work it out for me"*. So on `main` today, clearing **Incoming dir** and pressing Save says
+*"Settings saved"* and keeps the old path — **there has never been a way back from a custom folder**, on the
+one page where the app promises there is. The three are now allow-listed; `data_root` deliberately is not
+(it has no blank meaning, and an emptied one must keep the installed path rather than repoint the app at
+nothing), and `astap_path`'s own control already sends `null`.
+
+**The guard the spec asks every slice for, built once and page-wide.** `lbl()` — the single funnel all 41
+labelled settings pass through — now stamps `data-setting=<key>` on each, and a More-settings card carries
+`data-settings="<keys>"`. *"Settings — nothing was removed"* renders the whole page and asserts every key in
+`HINTS` is reachable by one of those, so a later slice that **rehomes** a control is fine and one that
+**drops** it is red. Extend that test; don't write a second.
+
+**Upgrade-safe (§9):** `frontend/` plus one mirrored list in `scripts/dogfood_probe.mjs`. No `Settings`
+field renamed, removed, re-typed or re-defaulted; no schema, migration, on-disk or response-shape change.
+The one behaviour change outside the new section is the blank that now reaches the server, which is the bug
+fix above and is what the field already accepts.
+
+**Tests:** +33 vitest (`moreSettings.test.ts` — the arithmetic, every card silent at its defaults and
+specific off them, both directions of every direction-dependent warning, the read-only chip, the search;
+plus nine in `Settings.test.tsx` for the rendered section and the shared buffer) and +3 pytest
+(`tests/test_more_settings_fields.py`, a mirror test asserting every field name the TypeScript declares is
+real on `Settings` and none is a credential). **The `dropEmptyFields` regression test fails before.** Two
+existing folder-conflict assertions were **scoped** to the visible tab panel, not loosened: the message now
+correctly marks the offending field in both places that render it.
+
+**What the next slice should know** is in the entry's own three notes under *Features that serve real
+workflows* in [`IMPROVEMENTS.md`](IMPROVEMENTS.md).
+
 ## 2026-10-14 (Builder, branch `claude/nifty-lamport-2zshr5`) — the stalest dogfood flag, and a merged spec's unanswered question
 
 ### v0.495.15 — 🔴 BUG FIX (editor — PRIORITY 1) — the tap that creates a taste stopped taking away the only way to undo it: `AutoFeedback.tsx`, `resettable`, `AUTO_TASTE_PLAIN_NOTE`
