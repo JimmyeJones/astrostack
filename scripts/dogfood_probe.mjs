@@ -188,7 +188,11 @@ const VIEW_SWITCH_PRECONDITIONS = {
       + "the object-type filter",
     async ask() {
       const res = await fetch(`${BASE}/api/plan/tonight`);
-      if (!res.ok) return false;
+      // A route that cannot be *read* is not an exemption — see
+      // VIEW_SWITCH_SKIPPED below. Answering "met" here is what makes a 500,
+      // or a renamed endpoint, report the finding instead of quietly excusing
+      // /tonight on every pass.
+      if (!res.ok) return true;
       const d = (await res.json()) || {};
       return d.location_source !== "none" && Boolean(d.dark_window);
     },
@@ -198,9 +202,11 @@ const VIEW_SWITCH_PRECONDITIONS = {
 /** Which of those preconditions this pass fails, as route → why. Resolved once,
  * before the browser opens, like `COMPARE` and `YEAR` above.
  *
- * A precondition that cannot be *asked* (the request failed, the field is gone)
- * counts as **met**, so a probe talking to a broken app still reports the
- * finding rather than excusing itself out of it. */
+ * A precondition that cannot be *asked* counts as **met** — a throw here, and a
+ * non-OK response inside `ask` itself — so a probe talking to a broken app, or
+ * one whose endpoint has been renamed out from under it, still reports the
+ * finding rather than excusing itself out of it. The exemption needs a
+ * successful answer that actually says the control cannot render. */
 const VIEW_SWITCH_SKIPPED = Object.fromEntries(
   (await Promise.all(
     Object.entries(VIEW_SWITCH_PRECONDITIONS).map(async ([route, pre]) => {

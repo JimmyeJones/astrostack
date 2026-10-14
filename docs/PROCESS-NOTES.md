@@ -78,6 +78,16 @@ code change at all to arrive.
    is what makes "every sited pass is byte-for-byte unchanged" a measurement rather than a claim — and it is
    the direction that mattered, because the risk of this change is exempting `/tonight` *everywhere*.
 
+**A third thing, caught by re-reading my own diff rather than by a test, and it is the one worth copying.**
+The first version of `ask()` returned `false` on a non-OK response — i.e. an unreachable or renamed
+`/api/plan/tonight` would have *exempted* `/tonight` on every pass, silently, which is the exact failure the
+guard exists to prevent and the opposite of what the docstring two lines above it promised. The adversarial
+question that found it is cheap and general: **for a predicate that can grant an exemption, ask what each
+failure path grants.** It now answers "met" for a throw *and* for a non-OK response, so only a successful
+answer that genuinely says the control cannot render buys silence; a renamed endpoint reports instead of
+hiding. Verified by re-running the pass (still exempt, still clean) — the live app answers 200 with
+`location_source=none` on a first-run install, so the honest exemption goes through the success path.
+
 **The third condition was deliberately not covered.** The control also needs ≥ 2 object-type buckets among
 the targets clearing the minimum altitude (`typeOptions.length > 1`), which no honest precondition can ask
 without re-deriving the page's bucketing. So the finding's wording now names **both** candidates ("a Mantine
