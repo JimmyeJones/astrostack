@@ -52,7 +52,7 @@ same number, measured the same way).
 there is *no running event loop* — `asyncio.get_running_loop()` raising inside the read **is** the
 measurement, so nothing here is timed and nothing can flake — each with the trap armed first (the pick
 really did happen); the fourth fires two reveals at once and pins that their reads never overlap, red at
-`peak == 2` when the capacity is widened to 40. Full suite 7920 passed / 7 skipped locally.
+`peak == 2` when the capacity is widened to 40. Full suite **7933 passed / 7 skipped** locally in 20m36s (the baseline 7916 on `f437029e`, plus v0.495.6/.7's 13 and these 4).
 
 **Nothing is filed back, and that was checked.** The stamp-writing tail of `one_sub_vs_stack_noise`
 (`wproj.set_meta`, one row, best-effort) is still on the loop, and stays: it is O(1) where this read was
