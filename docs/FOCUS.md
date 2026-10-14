@@ -70,8 +70,12 @@ auto-grade and bulk-reject read most of the row. The same question is **unasked*
 (nine callers materialise the list), and that one is *not* obviously wasteful — a `StackRunRow` has no
 `wcs_json`-sized column — so measure before assuming. (d) **No dogfood pass was run this run** (§7 forbids it
 beside `pytest`, and both suites ran back to back); §2's big-picture pass is paid to 2026-10-13, and the
-stalest flags are `--closing` (2026-09-26) and `--restack` (2026-10-05). (e) Both record files still have
-headroom (`PROCESS-NOTES.md` ~12,600/18,000, `SHIPPED.md` ~39,000/64,000).
+stalest flags are `--closing` (2026-09-26) and `--restack` (2026-10-05). (e) **One version per PR** — this run put both in PR #1154 and
+`Release tags` tagged **only `v0.495.7`**, because its walk follows main's *first-parent* line and the PR's own
+commits are on the second parent. Nothing is red and 0.495.6 is not reusable (the version-sane job compares
+against `main`), but `git checkout v0.495.6` names nothing; the trade and the rule are in
+[`PROCESS-NOTES.md`](PROCESS-NOTES.md). (f) Both record files still have
+headroom (`PROCESS-NOTES.md` ~12,650/18,000, `SHIPPED.md` ~39,000/64,000).
 
 **The method note worth carrying.** A reduced record earns its name from the **set** of consumers, not from
 the first one found: this task began as a four-field record for one Dashboard card, and reading the *other*
