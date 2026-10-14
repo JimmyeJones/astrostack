@@ -327,7 +327,7 @@ def test_activity_calendar_off_night_is_null_without_enough_history(
 
 
 def test_the_night_fold_builds_no_frame_row_for_the_whole_library(
-        client, built_library, monkeypatch):
+        client, built_library):
     """The fold opens every project in the library and reads three columns of
     every accepted sub — the capture stamp, the exposure and the measured star
     size — and it used to build a whole `FrameRow` per sub to get them.
@@ -337,9 +337,10 @@ def test_the_night_fold_builds_no_frame_row_for_the_whole_library(
     header text to count nights. Measured at 1,552 ms → 920 ms on a project the
     size of the owner's deepest target, for an identical fold.
     """
-    import seestack.io.project as project_module
+    from framerows import frame_rows_built_by
 
     from seestack.io.library import Library
+    from webapp.routers import stats
 
     now = datetime.now(timezone.utc)
     day = (now - timedelta(days=4)).date()
@@ -353,18 +354,12 @@ def test_the_night_fold_builds_no_frame_row_for_the_whole_library(
     # bundled samples deliberately carry none (see `webapp.site_location`).
     client.put("/api/settings", json={"site_lon": 150.0})
 
-    built = 0
-    real = project_module._row_to_frame
-
-    def counting(row):
-        nonlocal built
-        built += 1
-        return real(row)
-
-    monkeypatch.setattr(project_module, "_row_to_frame", counting)
-    data = client.get("/api/activity-calendar").json()
+    # Attributed to the endpoint's own stack, not to the process — see
+    # `tests/framerows.py` for the leaked `job-worker` this used to count.
+    with frame_rows_built_by(stats.get_activity_calendar) as built:
+        data = client.get("/api/activity-calendar").json()
     nights = {n["date"]: n for n in data["nights"]}
     # The fold really did answer off this night (otherwise zero rows built would
     # be zero work rather than cheap work).
     assert nights[day.isoformat()]["median_fwhm_px"] == 3.6
-    assert built == 0, f"built {built} FrameRow objects for the night fold"
+    assert built() == 0, f"built {built()} FrameRow objects for the night fold"

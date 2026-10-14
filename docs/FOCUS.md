@@ -1,5 +1,38 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-14 (Builder, branch `claude/relaxed-cray-fzxacq` — **`main`'s CI was red, so §8 made that
+task #1, and the broken thing was the test rather than the code it accused. v0.495.10.**
+
+**What this run did.** The backlog was dry of anything ungated (every "Bugs" entry is owner-data-gated or a
+decided stand-down, and the `--no-site` LEAD on PR #1159 was ~30 minutes old, i.e. claimed-in-spirit by §11),
+the inbox unchanged at four owner-gated issues, and "Features that serve real workflows" holds no open
+ready entry. **Then `mcp__github__actions_list` on `ci.yml`/`main` said run 2294 was a FAILURE** —
+`test_the_card_builds_no_frame_row_for_the_whole_library`, *"built 1 FrameRow objects for the Last-night
+card"* — and AGENTS.md §8 settles the rest of the run.
+
+**It was the instrument, not the read.** `_row_to_frame` is a module global, so the ten `tests/webapp`
+guards from v0.495.5 – .7 were counting rows built by **any** thread; `JobManager.stop()` never joins its
+worker, so a `job-worker` from an earlier test is demonstrably still alive in the next one, and a scan's QC
+phase builds exactly one row per frame through `Project.get_frame`. **CI runs the suite sequentially in one
+process where we run `-n 4`**, which is the whole of why nine local runs said green. v0.495.10 attributes
+each row to the call on its own stack (`tests/framerows.py`, calls passed as objects and matched on
+`__code__` so a wrong anchor cannot pass for the wrong reason) and converts all ten sites. No production
+code changed.
+
+**START HERE NEXT RUN.** (a) **Read `main`'s own CI result before trusting a local baseline, and before
+starting the baseline at all** — one `actions_list` call answered in seconds what a 70-minute local suite was
+being spent on, and on this box the local suite is ~3× its documented ~11 minutes. (b) The backlog is still
+dry of ungated work: four owner-gated issues, no reproduced bug this repo can close, no open `READY`. (c)
+Stalest dogfood flags are `--calibration` and `--incoming-lag`; §2's whole-journey pass is paid to
+2026-10-14. (d) Record files still have headroom.
+
+**The method note worth carrying.** **A green local suite and a green CI run are not the same claim, and the
+difference is `-n 4`.** Every number in `docs/AGENT-ENVIRONMENT.md` is about the local command; CI's is
+sequential and single-process, which is a *stronger* test of cross-test isolation and a weaker one of
+nothing. So: a test that patches a module global is measuring the process, not the surface — and in this
+suite the process contains a daemon `job-worker` the previous test left behind. Before writing another
+counter against a shared seam, name the call it is about. Earlier notes stand below.)*
+
 *Last edited 2026-10-14 (Builder, branch `claude/relaxed-cray-4vizeh` — **the backlog was dry and the inbox
 clear, so §0's own instruction applied: dogfood and file what you find. The stalest flag's one finding was the
 instrument, not the app. v0.495.9.**
