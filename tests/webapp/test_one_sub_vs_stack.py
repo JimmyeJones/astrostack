@@ -9,6 +9,7 @@ is the noise/detail stacking bought.
 from __future__ import annotations
 
 import json
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -1256,3 +1257,112 @@ def test_a_remembered_noise_ratio_reads_no_frame_row_at_all(
     assert second.status_code == 200
     assert second.json() == first.json()
     assert reads == []
+
+
+# --- the reveal's per-sub read happens off the event loop ------------------
+#
+# The three endpoints below are `async def`, so their bodies run on the event
+# loop, and each one's first act is a read that scales with the *target*:
+# `_pick_reference_sub` walks every sub to choose one. On a project the size of
+# the owner's deepest target that read is ~0.3-0.7 s, and while it runs nothing
+# else the server is serving can proceed — measured through the real ASGI app at
+# 35,894 subs, a `/api/health` call alongside one of these waited 269 ms against
+# 0.8 ms on its own, 636 ms alongside two (the shape of a Jobs page) and 1,476 ms
+# alongside four (a History page). See
+# `webapp.routers.stack._reveal_read_off_the_loop`.
+#
+# The assertion is not a duration — a timing test would be flaky and would say
+# nothing about *why*. In a worker thread there is no running event loop, so
+# `asyncio.get_running_loop()` raising inside the read IS the measurement.
+
+
+def _where_the_pick_ran(monkeypatch) -> list[bool]:
+    """Record, per call, whether the representative-sub pick ran on the loop."""
+    import asyncio
+
+    from webapp.routers import stack as stack_router
+
+    seen: list[bool] = []
+    real = stack_router._pick_reference_sub
+
+    def spy(proj):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            seen.append(False)
+        else:
+            seen.append(True)
+        return real(proj)
+
+    monkeypatch.setattr(stack_router, "_pick_reference_sub", spy)
+    return seen
+
+
+@pytest.mark.parametrize("path", [
+    "one-sub-vs-stack/noise",
+    "reference-sub",
+    "before-after.jpg",
+])
+def test_the_per_sub_read_does_not_run_on_the_event_loop(
+    client, solved_library, monkeypatch, path,
+):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(solved_library, safe, with_preview=True)
+    seen = _where_the_pick_ran(monkeypatch)
+
+    r = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/{path}")
+    assert r.status_code == 200, r.text
+    # The trap has to be armed before its silence means anything: this endpoint
+    # really did make the pick.
+    assert seen, f"{path} never picked a representative sub"
+    assert not any(seen), f"{path} picked on the event loop"
+
+
+def test_two_reveals_at_once_read_one_at_a_time(client, solved_library,
+                                                monkeypatch):
+    """...and they take turns, which is the other half of the fix.
+
+    These reads are *slower in parallel than in series* — four of them at the
+    owner's depth cost 19,427 ms across four threads against 1,345 ms one after
+    another, because `sqlite3` hands the GIL back around every row fetch. So the
+    hop is capacity-limited to one, and this pins that: two requests in flight
+    never have their reads overlapping.
+    """
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from webapp.routers import stack as stack_router
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id = _register_run(solved_library, safe, with_preview=True)
+    url = f"/api/targets/{safe}/stack-runs/{run_id}/one-sub-vs-stack/noise"
+
+    real = stack_router._pick_reference_sub
+    lock = threading.Lock()
+    live = 0
+    peak = 0
+
+    def spy(proj):
+        nonlocal live, peak
+        with lock:
+            live += 1
+            peak = max(peak, live)
+        try:
+            # Long enough that an unlimited hop would certainly overlap, short
+            # enough to cost the suite nothing.
+            time.sleep(0.05)
+            return real(proj)
+        finally:
+            with lock:
+                live -= 1
+
+    monkeypatch.setattr(stack_router, "_pick_reference_sub", spy)
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        codes = [f.result().status_code
+                 for f in [ex.submit(client.get, url) for _ in range(2)]]
+
+    assert codes == [200, 200]
+    assert peak == 1, f"two reveals read at once (peak {peak})"
+    # The capacity itself, so a later edit cannot quietly widen it: the figure is
+    # the measurement above, not caution.
+    assert client.app.state.reveal_read_gate.at_a_time == 1

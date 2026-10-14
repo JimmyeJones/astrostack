@@ -1,5 +1,49 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, branch `agent/reveal-read-off-loop`, same run as v0.495.8) — a CLEAN dogfood record on the two stalest flags, a measured non-finding in Auto's apply-time curve, and the fix whose obvious version was 16× worse than the bug
+
+**The dogfood record: `--closing --restack`, CLEAN.** The two stalest configurations (last run 2026-09-26 and
+2026-10-05) in one pass, since they seed different states into one install and share a boot. Everything the
+flags exist to reach was reached and said so: `location_source=settings` with `n_closing=2` and both rows
+listed; the restack's two runs `#2/6 subs, #1/3 subs` (newest genuinely deeper, so no card is describing
+"no change"), `[reel] available=True over 2 stack(s), 3 -> 6 subs` with `dated_by=capture`, and
+`[noise-delta] available=True patch=160px pixel_exact=True ratio=1.658`. Page sweep: **"nothing overflowing,
+no console errors"**, heights at the standing baseline (`[phone] /life-list [Still to shoot]` **14,513 px**,
+identical to the last four records — and v0.492.2 already recorded that figure as *not* a bug, so it is a
+control here and not a layout slice waiting to be taken). The three prescribing paragraphs read as one voice:
+the Target page's coaching rung, framing verdict and readiness card all name the mosaic and the readiness card
+carries its `for this single field` scope clause (v0.444.2), and on Tonight the week plan defers to the
+closing card in the closing card's own words (v0.445.0). Nothing filed.
+
+**A measured non-finding, recorded so nobody re-derives it.** `measured_region` (v0.494.5/v0.495.3) narrowed
+every cue `auto_recipe` reads *at build time* to the rectangle the trim keeps. Two of Auto's ops instead derive
+their numbers **at apply time**, from the image entering them — `tone.curves(auto=True)` via
+`seestack/edit/curve.py` (`_sky_mode`, p50, p99.5) and `detail.sharpen`'s anchors — and Auto's `geometry.crop`
+runs **last**, so at that moment the ragged fringe is still in the array. That is exactly the "callers the
+migration stopped short of" shape, and it is **not** a bug: measured on the engine's own `_ragged` fixture at
+four fringe bands (6/10/14/24 px, keeping 94.1 %/90.2 %/86.4 %/77.3 % of the canvas), the whole canvas and the
+kept rectangle agree on the sky mode to **0.0003–0.005**, on p50 to 0.004 and on p99.5 to 0.002, and the
+assembled curve points are identical to three decimals in three of the four bands (the 24 px band moves one
+anchor by 0.003). The reason is structural rather than lucky: these are a *mode* and *percentiles* of a
+population that is 77–94 % interior, where the v0.495.3 cues that did move were a mean-ish level and a σ. So
+the general rule "narrow what Auto measures" does **not** extend automatically to apply-time measurements —
+check the estimator's own robustness before filing one.
+
+**The lesson from the fix, and it is about the obvious version.** The filed ⚪ said the honest next step was to
+measure the stall; it was, and the stall is real (a `/api/health` call alongside four reveals waited 1,241 ms).
+But the fix the entry named — `run_in_threadpool` on each read — measured **19,608 ms** for those four reveals
+against **1,244 ms** for leaving the bug in place: these reads are slower in parallel than in series, because
+`sqlite3` hands the GIL back around every row fetch and the convoy grows with the row count (three columns of
+35,894 rows: 101 ms alone, 8,587 ms four-up; a row-less `count(*)`: 3 ms and 18 ms; four pure-Python loops of
+the same length: 4.3×, i.e. just serialisation). **So "move the blocking work off the loop" is only half a
+fix on a read that is row-bound** — the other half is a one-slot gate, and the shipped version is better than
+both predecessors on both axes (1,145 ms for the four, 2.8 ms for the witness). Two generalisations worth
+carrying: when a fix is a *concurrency* change, measure the thing being fixed **and** the thing it competes
+with (here the user-visible latency of the very endpoints being helped, which the naive hop made 16× worse);
+and a one-line diagnostic separates the explanations — a `count(*)` that moves no rows and a pure-Python loop
+of the same duration told us it was the row traffic and not the GIL in general, which is what makes the gate
+a measurement rather than caution.
+
 ## 2026-10-14 (Scout, branch `claude/funny-shannon-9rp4k8`) — QA rotation sweep (1) scale-dependent preview↔export parity on a mosaic canvas: CLEAN. Inbox clear, dogfood clean. No code shipped — docs only, and that is the honest outcome.
 
 *(Baseline `main` green at `7a862c55` when the run started: **7909 passed, 7 skipped** in 16m06s with

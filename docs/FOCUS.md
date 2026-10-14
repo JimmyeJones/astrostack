@@ -1,5 +1,51 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-14 (Builder, branch `agent/reveal-read-off-loop` — **the ⚪ whose gate was "go and
+measure it" turned out to be measurable here, and the measurement also refuted the fix the entry named.
+v0.495.8.**
+
+**What this run did.** `main` green at the start (local **7916 passed, 7 skipped** in 20m11s; CI run 2279 on
+`f437029e`), inbox four open and every one already acted-on and owner-gated — unchanged again. One PR was
+live when the run started (#1154, v0.495.6 + v0.495.7, the night-shaped reads) and merged mid-run, so this
+run's version is 0.495.8 and its files do not overlap. "Bugs" held nothing reproduced, §2's whole-journey
+pass was paid on 2026-10-13, so the run (a) took a **CLEAN** `--closing --restack` dogfood pass on the two
+stalest flags, (b) measured one thing in Auto that looked like the next instalment of v0.495.3 and is not,
+and (c) answered the ⚪ TRACED event-loop entry filed by the previous run.
+
+**v0.495.8.** The reveal's `async` handlers did their per-sub read on the **event loop**, so one Target-page
+badge held up everything else the page was loading: at his depth (35,894 subs) a `/api/health` call alongside
+four reveals — the shape of a History page — waited **1,241 ms**, and 269 ms alongside one. The entry's gate
+was *"measure whether a Jobs or History page at his depth actually shows the stall"*; it does, and it is
+measurable through the real ASGI app without the browser pass the entry asked for. **The entry was wrong in
+two ways and the measurement is what showed both:** there are **three** such handlers, not two
+(`before-after.jpg` reads through `_reference_sub_row`), and the fix it named — a `run_in_threadpool` per
+read — costs those four reveals **19,608 ms** against 1,244 ms for leaving the bug alone, because these
+reads are *slower in parallel than in series* (`sqlite3` hands the GIL back around every row fetch; a
+row-less `count(*)` does not degrade and four pure-Python loops cost only 4.3×). Shipped: off the loop **and**
+one at a time, through a one-slot `asyncio.Semaphore` kept per loop on `app.state` — 1,145 ms for the four
+reveals and 2.8 ms for the witness, i.e. better than both predecessors on both axes. A pure hop: every 404,
+its wording and its order unchanged.
+
+**START HERE NEXT RUN.** (a) **The issue inbox is still the frontier** — list the open issues first. (b)
+"Bugs" now holds **no entry whose gate this repo can close**: the DECIDE-DO-NOT-FLIP pass count (decided,
+with numbers), the two owner-data-gated LEADs (`PANEL_LINK_DIST_DEG`, the solve-retry rate), the
+inert-feedback-chip LEAD, the `_match_distance` half-range charge (gated on real masters) and the ⚪ notes.
+The ⚪ event-loop entry is gone (shipped). (c) **Both dogfood flags this run used came back clean**, so the
+stalest are now `--calibration`, `--incoming-lag` and `--big`/`--deep`; §2's big-picture pass is paid to
+2026-10-14. (d) Record files: `PROCESS-NOTES.md` ~12,700/18,000, `SHIPPED.md` ~39,000/64,000 — headroom, no
+archiving owed.
+
+**The method note worth carrying.** Two of them, both about *what a measurement is for*. First: a gate that
+says "go and measure it in a browser" may be answerable by a **better** instrument than the one it names —
+here the browser was a proxy for request latency, and measuring request latency directly (one event loop, the
+real ASGI app, a cheap endpoint as the witness) answered it at the owner's own depth, which no bundled sample
+can reach. Before building the instrument a gate names, ask what the instrument was a proxy *for*. Second,
+and sharper: on a **concurrency** fix, measure the thing you are helping as well as the thing you are
+fixing. The obvious hop here unblocked every other request and made the endpoints it was helping 16× slower,
+and nothing in the filed entry hinted at that — one `count(*)` and one pure-Python loop of the same duration
+were enough to tell row traffic from the GIL and turn "add a limiter" from caution into arithmetic. Earlier
+notes stand below.)*
+
 *Last edited 2026-10-14 (Scout, branch `claude/funny-shannon-9rp4k8` — **inbox clear, QA rotation sweep (1)
 scale-dependent preview↔export parity on a mosaic canvas CLEAN (measured two ways on owner-shaped data),
 dogfood CLEAN. No code shipped — docs only, and that is the honest outcome.**
