@@ -44,6 +44,35 @@ and a one-line diagnostic separates the explanations — a `count(*)` that moves
 of the same duration told us it was the row traffic and not the GIL in general, which is what makes the gate
 a measurement rather than caution.
 
+## 2026-10-14 (Builder, same run as v0.495.6/v0.495.7) — a PR carrying two versions gets only the head one tagged
+
+**What happened.** This run shipped two independently-green commits in one PR (#1154): `v0.495.6` then
+`v0.495.7`. `Release tags` ran green on the merge and created **`v0.495.7` only** — `git tag -l 'v0.495.*'`
+now reads `….2 .3 .4 .5 .7`, with a hole where 0.495.6 is.
+
+**It is the workflow working as documented, not a failure.** `.github/workflows/release-tags.yml` tags "every
+version transition on **main's first-parent line** since the last tag". A merge commit's first parent is the
+previous `main`, so the PR's own commits sit on the *second* parent and are not on that line: the only
+transition the walk sees is `0.495.5 → 0.495.7` at the merge. Nothing went red because nothing was reused or
+moved backwards.
+
+**What it costs, stated honestly.** Small, and it is not a reusable number: CI's `Version bump is sane` job
+compares against `main`, which now reads 0.495.7, so no later PR can take 0.495.6 either. What is actually
+lost is the tag's own job — `git checkout v0.495.6` cannot name the build that shipped it, and a rollback has
+to name the merge commit or `v0.495.5`. `SHIPPED.md` and the PR carry the full description of both, so nothing
+is unrecorded.
+
+**The rule for next time.** **One version per PR.** Two versions in one PR is a deliberate trade — one CI
+cycle instead of two (~50 minutes on this runner), paid for with a missing tag on the lower number. If both
+tags matter, merge the first PR, then branch again from the new `main` for the second (AGENTS.md §11's warning
+about a run's second PR competing with its own first applies: merge before opening it, and choose the second
+number above whatever the first one shipped). This run took the single-PR trade because the two commits were
+halves of one sweep and the second was finished while the first was still in CI; the note exists so the next
+run makes that choice knowingly rather than discovering the hole afterwards. *(A `workflow_dispatch` backfill
+of `release-tags.yml` is documented as "safe to re-run" and walks to the root — but it is a workflow run an
+agent must not start on the owner's behalf, and AGENTS.md §8 is explicit that tags are written by workflows,
+never by an agent, so this is recorded rather than repaired.)*
+
 ## 2026-10-14 (Builder, branch `claude/relaxed-cray-8ak3vj`, same run as v0.495.6) — the caller sweep is now a *method*, and two notes it produced
 
 **The method, stated so it can be reused.** The previous run's note said that when a repo has measured a read
