@@ -44,6 +44,82 @@ and a one-line diagnostic separates the explanations — a `count(*)` that moves
 of the same duration told us it was the row traffic and not the GIL in general, which is what makes the gate
 a measurement rather than caution.
 
+## 2026-10-14 (Scout, branch `claude/funny-shannon-9rp4k8`) — QA rotation sweep (1) scale-dependent preview↔export parity on a mosaic canvas: CLEAN. Inbox clear, dogfood clean. No code shipped — docs only, and that is the honest outcome.
+
+*(Baseline `main` green at `7a862c55` when the run started: **7909 passed, 7 skipped** in 16m06s with
+`-n 4 --dist worksteal` and the BLAS cap on a 4-core box. Branch was reset onto the newer `origin/main`
+`54a2ef3a` / v0.495.7 at merge time — an unrelated Builder run (v0.495.6/7, night-shaped reads) landed while
+this one swept; no collision with the parity sweep or the inbox.)*
+
+**(1) Issue inbox first — four open, every one already acted-on and owner-gated, nothing new owed.** No new
+observer issue since #1120 (closed/shipped), and none of the four was touched since the last Scout run
+(2026-10-13):
+* **#1015** (clone/version drift) — the repo-side half shipped (`/api/health` carries the running version,
+  v0.479.3). The owner is deliberately holding it open until a reading confirms the Observer's clone pin;
+  the two outstanding fixes (pin the clone, mint the read-only token) are Observer/owner-side, not repo
+  changes. The 2026-10-12 follow-up adds evidence, no repo-actionable item. Nothing to do.
+* **#903** (reprocess-all auto-edit off replaced 44 displayed pictures) — owner-gated; forward mechanism
+  shipped (v0.448.1) and repair is `webapp/refinish.py`.
+* **#880** (mosaic on-device output accepted with a traceback reject reason) and **#878** (duplicate targets
+  / `<T>`+`<T>_sub` double-registration) — both owner-data-gated leads, previously acted-on.
+
+**(2) QA rotation sweep (1): scale-dependent preview↔export parity on a mosaic-size canvas — CLEAN, measured
+two ways on owner-shaped data.** AGENTS.md rotation: last recorded sweep was (4) the webapp routers on
+2026-10-13, so (1) was next. The subsystem is heavily hardened — `tests/test_edit_proxy_parity.py` already
+pins every pixel-sized op individually (color_calibrate, sharpen, stars.reduce, denoise bilateral/wavelet/tv,
+chroma_denoise, scnr, hot_pixels, deconvolve) with its own `scaled_px` scaling or a captioned advisory. The
+gap a *sweep* adds is the **composed one-click Auto recipe end to end** through both real paths, which no test
+covers: the preview path (`editor._render_preview_array` → `apply_recipe` on the strided proxy, with
+grain_ratio + strided coverage/framecov) vs the export path (`pipeline._render_recipe_fullres` on the full-res
+FITS, `proxy_scale=1`). In particular `tone.stretch` re-measures its black/white points at apply time on
+whatever array it is handed (`ctx.fit("stretch_stats", measure_stretch_stats)`) — proxy for preview, full-res
+for export — and it is **not** in the per-op parity file, so earlier-op divergences compound through it.
+
+* **Instrument A — engine parity probe** (`scratch/parity_probe.py`, not committed): a 3600×4800 ragged
+  3×4 mosaic (~17 MP, 1 % uncovered, per-panel sky steps, an LP gradient, a central nebula, correlated grain
+  falling as 1/√depth, NaN corners) written through `write_stack_outputs` with coverage + framecov siblings,
+  proxy stride **4** (the owner's mosaic regime). Recipe built **once** from the proxy exactly as
+  `build_auto_recipe_for_run` does (is_mosaic, trim, `grain_ratio=0.635`, proxy_scale=4), then rendered both
+  ways and the export strided onto the proxy grid. Result:
+  - **NaN/coverage mask bit-identical** (0 mismatched cells).
+  - Scale-invariant ops agree to **≤0.0008 (0.2/255)**: `background.level_coverage` max 0.0005,
+    `background.final_gradient` 0.0007, `tone.color_calibrate` 0.0008 — the additive-field fits and the
+    white-balance solve land the same number on the strided proxy and the full canvas.
+  - **Owner-visible sky background agrees to ≤0.3/255** per channel (R 0.2, G 0.3, B 0.2) — the stretch's
+    independent proxy-vs-full median/σ measurement moves the picture's exposure by an invisible amount.
+  - Whole-picture max 0.1009, mean 0.0041, p99.9 0.037 — and every bit of it enters at the two ops the
+    advisories already own: the stretch's steep-slope amplification at bright pixels (op 4: max 0.032) and
+    `detail.sharpen` at proxy step 4 (op 8: max 0.10), which is the documented, one-sided proxy
+    *understatement* (`sharpen_understates_on_proxy(1.5, 4.0)` fires True and the editor captions it).
+* **Instrument B — `scripts/agent-dogfood.sh --mosaic --editor --big`** (the sanctioned instrument, which
+  diffs the full-size mosaic against its decimated proxy): **`[scale] 0 of 16 canvas-independent answers moved
+  with the canvas` · `CLEAN on everything asked`.** The only differences are the honest ones the tool itself
+  flags as free to differ (the full-size canvas catches ~3.5× the sky: trim_fraction 0.079→0.065, coverage_pct
+  75→95, off_centre). `nothing overflowing, no console errors` on every page; `editor drive clean` (all 21 ops
+  + undo/redo). The `--big` full-size check surfaced exactly the right advisories — *"Preview shown at 847 px —
+  export renders at full resolution (2.0× larger)"* and the sharpen-understatement notice naming "Check it at
+  full size" — so the one real divergence the probe measured is the one the app already tells the owner about.
+
+  **One harness artifact, not a finding, recorded so it is not re-derived:** the `--big` run ends with
+  `page.waitForTimeout: Target page, context or browser has been closed` at `driveFullSizeCheck`
+  (`editor.mjs:248`). This is the wrapper death FOCUS warned about on 2026-10-13 — here it was this run's own
+  **background time-limit** killing the Playwright process at its final `waitForTimeout`, *after* every
+  substantive full-size-check assertion had already printed clean (the two advisories, the loupe caption and
+  the "[where]" line, lines 274-278 of the log). Give the probe ≥900 s / no background cap to see a clean exit.
+
+**No verified bug found. `docs/IMPROVEMENTS.md` left byte-for-byte as found** (the backlog is well-curated:
+the DECIDE-DO-NOT-FLIP entry with numbers, the two owner-data-gated LEADs, the inert-feedback-chip LEAD, the
+⚪ notes). **Rotation: (1) done → next sweep is (2)** — mosaic/walk-away divergence from a whole-target or
+*peak* number that is really per-panel.
+
+**The method note worth carrying.** A per-op parity suite as thorough as this one's can still miss the
+*composition*, because the thing that compounds divergence — the stretch re-measuring its own anchors at apply
+time — is itself an op nobody put in the parity file (its output is "obviously" what you feed it). The sweep
+that matters is not a better single-op test; it is running the **one recipe the owner actually gets** through
+**both real render entry points** and diffing. The two numbers that decided "clean" were the ones the owner
+can see — the sky-background median (≤0.3/255) and the NaN mask (identical) — not the whole-picture max, which
+is dominated by the sharpen advisory the app already raises.
+
 ## 2026-10-14 (Builder, same run as v0.495.6/v0.495.7) — a PR carrying two versions gets only the head one tagged
 
 **What happened.** This run shipped two independently-green commits in one PR (#1154): `v0.495.6` then
