@@ -76,7 +76,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **Builder, branch `claude/relaxed-cray-8ak3vj`** — the Dashboard's "what did last night give me?"
+  recap builds a whole `FrameRow` for **every sub of every target** to read four small fields
+  (`_collect_last_night` → `session_end_stamps` / `recent_session_window_frames` /
+  `library_session_recap`); same class as v0.495.5, the callers that migration stopped short of.
+  Measuring first, then `Project.iter_night_frames` if the numbers hold.
 
 ---
 
