@@ -57,6 +57,15 @@ name a precondition asked of the **running app** (for `/tonight`, the two fields
 read) and prints a `[note]` naming the unswept coverage instead of a finding; measured both ways against a
 live app, so every sited pass is unchanged. 3 tests, all 3 fail before.
 
+**Then `--no-site`, because v0.495.9 changes what TWO pass-states print and only one had been run** — the
+same shape as the bug it fixes. **CLEAN**, the `[note]` correct on a library that has data but no site (which
+`--empty` cannot show), heights on the standing baseline. Reading its Target-page paragraph produced one
+**LEAD**, filed with its gate and deliberately not as a bug: `nightplan._depth_component` scores on
+`total_exposure_s` alone, so "Worth more time" cannot know `grainProjection.ts` has already judged the picture
+measured-clean. **The pass's own sentence pair is not the evidence** — σ 0.001 at one minute is the synthetic
+sample, not his sky — so the entry keeps the traced mechanism and throws the number away. Measure before
+building; if no target of his is clean-but-still-ranked, close it with the measurement.
+
 **Carry forward:** a finding added to `dogfood_probe.mjs` is untested against every flag not run while it was
 written, and `--empty` / `--no-site` are the two where whole page bodies are absent — run a new finding under
 `--empty` before believing it. And **grepping a flag's name in `PROCESS-NOTES.md` finds the run that called it

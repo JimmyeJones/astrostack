@@ -82,6 +82,55 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **⚪ REPRODUCED IN CI, NOT FIXED (Builder 2026-10-14) — `Editor.test.tsx`'s `findByText("Stretch")` waits
+  flake under CI load, on a file that has already been hardened for this once.** *(Pillar: the suite that
+  gates every merge — size **S to change, M to be sure of**; severity low-but-corrosive: a red frontend job on
+  a diff that cannot have caused it is how a run learns to re-run rather than read. Confidence: **reproduced
+  in CI** — job
+  [115783255758](https://github.com/JimmyeJones/astrostack/actions/runs/38543351047/job/115783255758), `FAIL
+  src/routes/Editor.test.tsx > EditorView > offers the user's saved default recipe`, *"Unable to find an
+  element with the text: Stretch"* — on a **docs-only** PR (#1159) whose identical frontend code had passed
+  49 minutes earlier on #1158.)*
+  **What is measured.** The file is **142 tests and 62.6 s locally** (`npx vitest run
+  src/routes/Editor.test.tsx`, green), and three of its tests gate on
+  `await screen.findByText("Stretch")` — testing-library's default async timeout, 1 s. The comment directly
+  above the one that failed says a previous run *already* moved this wait off the static toolbar because
+  gating there *"raced and flaked in slower CI"*, so this is the **second** flake of the same shape at the same
+  line: the wait is now on the right element and is simply too short for a loaded runner.
+  **Why it is filed and not fixed.** It cannot be reproduced locally, so any fix would be unverifiable by the
+  §5 bar — "revert it and watch it fail" is impossible for a timeout that only fires under contention, and
+  raising a constant on a hunch is the blind-flip AGENTS.md §1 refuses. The two honest shapes, neither
+  blind: **(a)** give this file an explicit `asyncUtilTimeout` (testing-library config, per-file) sized from
+  the measured 62.6 s/142 tests rather than from a guess, which is bounded and reversible; **(b)** split the
+  142-test file, which is the root cause of the contention but is a refactor wanting its own justification.
+  **Do not simply re-run and move on** — that is what makes this corrosive rather than harmless.
+
+- **LEAD (Builder 2026-10-14, read off a `--no-site` dogfood pass that was otherwise CLEAN) — "Worth more
+  time" ranks a target by `total_exposure_s` alone, so it cannot know the picture has already been judged
+  *measured-clean* by the card on the target's own page.** *(Pillar: trust / friendliness — PRIORITY 3; size
+  **S to write, M to be sure is reachable**; severity low. Confidence: the mechanism is **traced in the code**;
+  whether the two ever disagree on the owner's own library is **not** measured, and that is the gate.)*
+  `seestack/nightplan.py::_depth_component` is `noise_gain_from_more_time(total_exposure_s)` clipped against
+  `_WORTHWHILE_NOISE_GAIN` — **exposure and nothing else**. The Target page's
+  `frontend/src/components/target/grainProjection.ts` instead measures the stack's own σ and can answer
+  `level: "clean"` → *"the background already looks clean … more time from here mostly buys fainter detail
+  rather than a visibly cleaner picture"*. That module's own comment says it took care to keep this card and
+  `nextBestMove` *"saying one thing about one picture, instead of 'already looks clean' beside 'would clean up
+  the background nicely'"* — and `/api/plan/best-tonight`, which feeds the Dashboard's **and** `/tonight`'s
+  "Worth more time" card (*"ranked by how much another hour on each would improve it"*), is a **third**
+  consumer that was never brought into that reasoning.
+  **Why it is a lead and not a bug, and what to settle first.** The exposure proxy may already handle it by
+  accident: a measured-clean picture is usually also a *deep* one, whose `noise_gain_from_more_time` is small,
+  so it de-ranks itself before the contradiction can be read. The divergence needs a target that is **short on
+  exposure yet measures clean** — plausible on a bright object under a dark sky, and certainly true of the
+  synthetic samples (the `--no-site` pass printed *"already looks clean at 1 min (grain 0.001)"* beside
+  *"another hour would cut its noise about 87%"*, but a 1-minute stack reading σ 0.001 is a property of the
+  fixture, not of his data, so **that pass is not the evidence**). **Measure before building:** for each target
+  with a picture, compare its stored σ against `CLEAN_SIGMA` and its `total_exposure_s` against the rank's own
+  bar, and count how many are clean-but-still-ranked. The observer can read both. If the count is zero, close
+  this with the measurement rather than wiring σ into the planner — the engine ranking is deliberately
+  library-wide and cheap, and a per-target σ read on a hot path is the cost v0.495.5–.7 have just been removing.
+
 - **DECIDE, DO NOT FLIP (Builder 2026-10-12, measured with the instrument v0.493.16 built, which is
   what made it answerable) — the de-levelling's fit-pass count buys agreement with the single field
   at ~60 ms a round, and 6 is where it sits for no measured reason.** *(Pillar: editor — PRIORITY 1;
