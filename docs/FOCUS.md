@@ -1,5 +1,36 @@
 # Current focus — AstroStack
 
+*Last edited 2026-10-14 (Builder, branch `claude/relaxed-cray-4vizeh` — **the backlog was dry and the inbox
+clear, so §0's own instruction applied: dogfood and file what you find. The stalest flag's one finding was the
+instrument, not the app. v0.495.9.**
+
+**What this run did.** Baseline: the last completed CI run on `main` was green at `54a2ef3a` (v0.495.7), the
+two commits after it docs-only; the local suite was started first out of §2 habit and **thrown away at 14 %**
+because §7 wants the dogfood first — see [`PROCESS-NOTES.md`](PROCESS-NOTES.md) for why that ordering rule is
+about which artefact you pay for twice. Inbox checked with `list_issues`, not read off this page: **four open
+(#878, #880, #903, #1015), every one previously acted-on and owner-gated, nothing new owed.** PR #1157 was
+open holding **v0.495.8**, so this run took **v0.495.9** (§11) and merged #1157's work in first.
+
+**The pass: `scripts/agent-dogfood.sh --empty`**, chosen as the stalest flag by last *run* rather than last
+mention — ~11 days and ~70 versions, where `--mosaic --editor --big` and `--deep` both ran this morning. It
+was clean on every measure it takes (nothing overflowing, no console errors, one correct notice, every page
+height on the standing first-run baseline) and printed **2 findings, both false**: `/tonight` reporting *"NO
+VIEW SWITCH FOUND … (a Mantine class rename?)"* at both widths. The same pass disproved that explanation three
+times — `/life-list`, `/logs` and `/sky` all found theirs — and `Tonight.tsx` has the answer: two early
+returns replace the whole planning body with an alert without an observing site, and the switch is the
+object-type filter inside that body. `--empty` never sets a site, deliberately. **The guard landed 2026-09-30
+and `--empty` last ran 2026-09-26, so this run is the first time the two ever met.** v0.495.9 lets a route
+name a precondition asked of the **running app** (for `/tonight`, the two fields the page's own early returns
+read) and prints a `[note]` naming the unswept coverage instead of a finding; measured both ways against a
+live app, so every sited pass is unchanged. 3 tests, all 3 fail before.
+
+**Carry forward:** a finding added to `dogfood_probe.mjs` is untested against every flag not run while it was
+written, and `--empty` / `--no-site` are the two where whole page bodies are absent — run a new finding under
+`--empty` before believing it. And **grepping a flag's name in `PROCESS-NOTES.md` finds the run that called it
+stale as readily as the run that ran it**; that is how `--empty` read as fresher than it was.
+
+---
+
 *Last edited 2026-10-14 (Builder, branch `agent/reveal-read-off-loop` — **the ⚪ whose gate was "go and
 measure it" turned out to be measurable here, and the measurement also refuted the fix the entry named.
 v0.495.8.**

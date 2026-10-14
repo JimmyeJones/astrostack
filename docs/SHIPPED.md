@@ -1,5 +1,91 @@
 # Shipped — the record
 
+## 2026-10-14 (Builder, branch `claude/relaxed-cray-4vizeh`) — the dogfood guard that cried wolf the first time its stalest flag met it
+
+### v0.495.9 — 🟡 TOOLING / QA honesty (the instrument behind every recent finding): **the view-switch guard reported "a Mantine class rename?" about a control the pass's own data cannot render**
+
+The one finding of the `--empty` dogfood pass, chosen as the stalest flag there is — last run **2026-10-03 by
+name only** (it was listed as stale, alongside `--closing`, and not run), genuinely last *run* before
+2026-09-30, i.e. ~11 days and ~70 versions back, where `--mosaic --editor --big`, `--deep` and `--combine`
+have all been run inside the last two days.
+
+**The pass was otherwise clean, and that is the point.** Nothing overflowing, no console errors, the notice
+board carrying exactly one note (*"Plate-solving isn't set up yet"*, the right one for a first-run install),
+and every page height on the standing first-run baseline — `[phone] /glossary` **3,364 px** against 3,364,
+`[phone] /life-list [Still to shoot]` 14,604 against the ordinary pass's 14,513. What it printed was
+**`2 thing(s) to look at`**, both of them this:
+
+```
+[desktop] /tonight: NO VIEW SWITCH FOUND, but this page has one — viewSwitches()
+found nothing to click (a Mantine class rename?). Everything behind it is unswept.
+[phone]   /tonight: … (the same, at the other width)
+```
+
+**Both are false, and the same pass disproves the one explanation they offer.** `/life-list`, `/logs` and
+`/sky` all found their switches on this very pass — `[phone] /life-list [Still to shoot]` is in the height
+table — so Mantine's class names are fine. `/tonight`'s switch is the **object-type filter inside "Start
+something new"**, and `Tonight.tsx` has two early returns above it: `location_source === "none"` and
+`!dark_window` each replace the whole planning body with an alert. A first-run install has no observing site
+(`--empty` never sets one, deliberately — a first-run app has none, and that empty state is what the pass
+exists to measure), so the panel that holds the control is not rendered at all. Even with the panel, the
+control is `typeOptions.length > 1`, i.e. ≥ 2 object-type buckets among the catalog targets that clear the
+minimum altitude — of which there are none without a site.
+
+**Why it was worth a version rather than a note.** The guard exists because switch discovery keys off
+Mantine's own class names, so a rename would find nothing *everywhere* and a sweep covering only landing
+views would report CLEAN exactly as before — its whole value is that a reader believes it. It was added
+**2026-09-30** (`de72b240`) and `--empty` had last run **2026-09-26**, so this run is the first time the two
+ever met: a guard against silence had been announcing, on the only flag where its premise is false, two
+findings on a pass whose every other measure was clean. The repo has watched a guard die this way before —
+its own docstring predicts the source-side version of it (*"delete a SegmentedControl from one of those pages
+and the probe starts crying wolf on every pass until someone reads the source"*); this is the same failure
+arrived at from the **data** side, which that docstring did not consider.
+
+**The fix: a route may name a precondition asked of the running app, never a second copy of the page's rule.**
+New `VIEW_SWITCH_PRECONDITIONS` in `scripts/dogfood_probe.mjs` maps a route to `{ reason, ask() }`; `/tonight`
+asks `GET /api/plan/tonight` for `location_source !== "none" && dark_window`, which are **the two fields
+`Tonight.tsx`'s own early returns read** rather than a re-derivation of them. Resolved once before the browser
+opens, beside `COMPARE` and `YEAR`. A route that fails its precondition is not a finding — and is not silent
+either: the pass prints one `[note]` (at one width, the idiom the claim read-outs already use) naming what it
+did not get to sweep, because coverage quietly shrinking is the whole failure this guard exists for.
+
+**A precondition that cannot be *asked* counts as met.** A failed request or a vanished field leaves the
+finding in place, so a probe talking to a broken app can never excuse itself out of reporting.
+
+**Measured both ways against a live app, not reasoned** (a scratch install on its own port):
+`location_source=none`, no dark window → precondition **False** → exempt; after one `PUT /api/settings`
+with a site → `location_source=settings`, dark window present → precondition **True** → the guard fires on a
+genuine absence exactly as before. So a sited pass — every ordinary pass, `--mosaic`, `--big`, `--deep`,
+`--combine`, `--closing` — is byte-for-byte unchanged, and only `--empty` and `--no-site` are affected.
+
+**After:** the same `--empty` pass prints `nothing overflowing, no console errors` and the one `[note]`, with
+every page height and the notice board identical to the run before it.
+
+**What this does NOT claim.** The precondition covers the page's two early returns, not the control's third
+condition (≥ 2 type buckets up). A sited pass on a night when only one bucket clears the floor would still
+report the finding — so the message no longer asserts a rename: it names *both* candidates ("a Mantine class
+rename, or this pass's data not reaching the control"). That is the honest state of the evidence, and it is
+cheap to tighten later if such a pass is ever seen.
+
+**Tests (+3, all three fail before** — `scripts/dogfood_probe.mjs` reverted to `origin/main` in place and the
+file re-run: `3 failed, 2 passed`**)**, in `tests/test_dogfood_view_switches.py`, source-level like the rest of
+that file (the probe needs a browser and a running app to execute):
+* `test_a_data_gated_switch_only_ever_exempts_a_route_the_guard_watches` — a precondition is an exemption from
+  a finding, so a route named there must be in `KNOWN_VIEW_SWITCHES` *and* in the test's own
+  `_ROUTE_COMPONENT`; otherwise it exempts nothing and reads as cover for a page nobody checks.
+* `test_tonights_precondition_asks_what_its_page_is_actually_gated_on` — both `location_source` and
+  `dark_window` must appear in the precondition **and** in `Tonight.tsx`, so a page that stops gating on one
+  of them turns the exemption red instead of leaving the probe silent for a reason that no longer holds.
+* `test_the_guard_consults_the_preconditions_before_reporting` — declaring the map is not using it; pins the
+  one line that turns it into behaviour.
+
+The two pre-existing tests pass before and after: the guard's behaviour on a route with no precondition is
+untouched.
+
+**No app code.** `scripts/` and `tests/` only — no endpoint, response field, config key, schema version,
+on-disk path or default changes, and nothing the Docker image ships (it carries neither `tests/` nor
+`scripts/agent-dogfood.sh`'s probe).
+
 ## 2026-10-14 (Builder, branch `agent/reveal-read-off-loop`) — the reveal's per-sub read comes off the event loop, and takes turns
 
 ### v0.495.8 — 🟠 ROBUSTNESS / friendliness (PRIORITY 3, on the pages he opens most): **the reveal's three `async` handlers did their whole per-sub SQLite read on the event loop, so one Target-page badge held up every other request the page was making — and the obvious fix, a thread each, is 16× worse than doing nothing.** `webapp/routers/stack.py::_reveal_read_off_the_loop`, `_NoiseRevealInputs`, `_BeforeAfterInputs`.

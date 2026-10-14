@@ -1,5 +1,107 @@
 # Process notes & QA sweep records
 
+## 2026-10-14 (Builder, branch `claude/relaxed-cray-4vizeh`) — DOGFOOD `--empty`, the stalest flag: one finding, and it was the instrument rather than the app
+
+*(→ **v0.495.9**. Baseline: `main` at `23899a61`; the last **completed** CI run on `main` was green at
+`54a2ef3a` (v0.495.7) and the two commits since are docs-only, HEAD's own run still in progress at the time.
+Inbox **four open**, confirmed with `list_issues` rather than from `FOCUS.md` — #878, #880, #903, #1015, every
+one previously acted-on and owner-gated, unchanged from the previous run's reckoning. One open PR, **#1157
+holding v0.495.8**, which is why this run took 0.495.9 and not 0.495.8; it merged mid-run and was merged in
+before the version was chosen.)*
+
+### The §7 ordering rule paid out, in the direction the 2026-10-13 note warned about
+
+I started the baseline suite out of §2 habit, read the backlog while it ran, concluded the queue was dry and
+the §0 instruction ("do a dogfood pass and file what you find") applied — and had to **throw the suite away at
+14 %** to run the dogfood, because the two cannot overlap. That is the 2026-10-13 record's lesson almost word
+for word (*"when the run's plan contains a dogfood pass at all, the dogfood goes first"*), and it cost ~12
+minutes this time rather than 20 because the same record's **other** number made the call easy: a suite
+started in the same minute as `scripts/agent-setup.sh` crawls (~14 % in 12 min here, against a clean ~25 min
+full run), so the run being abandoned was the slow one anyway. **The generalisable bit: the ordering rule is
+not about the risk of a collision, it is about which artefact you are willing to pay twice for.** The
+substitute baseline was the one §7 sanctions — CI's own green on `main`'s code — and the backlog read that
+filled the wait was not wasted.
+
+### Why `--empty` and not the others
+
+Ranked by last *run*, not last mentioned: `--mosaic --editor --big` and `--deep` both ran **today**,
+`--combine` yesterday, `--calibration`/`--incoming-lag` 2026-10-10, `--dithered` 2026-10-11, `--closing`
+2026-10-13. `--empty` appears in the 2026-10-03 record **only as the name of a stale flag** ("the longest-unverified
+flag alongside `--empty`") — it was not run — so its last real pass predates 2026-09-30. ~11 days, ~70
+versions. A reading trap worth carrying: **grepping a flag's name in this file finds the run that called it
+stale as readily as the run that ran it**, and the two read almost identically.
+
+### The pass: mechanically clean, two findings, both the probe's own
+
+Clean on every measure it takes — nothing overflowing, no console errors, the notice board carrying exactly
+one note (*"Plate-solving isn't set up yet"*, the correct one for a first-run install, `1 of 1 speaking notes
+visible without a click`), `/tonight` correctly prescribing nothing, and every page height on the standing
+first-run baseline: `[phone] /glossary` **3,364 px** against 3,364, `[phone] /life-list [Still to shoot]`
+14,604, `[desktop]` 5,236, `[phone] /settings/maintenance` 2,758.
+
+`2 thing(s) to look at`, and both were `[desktop] /tonight` and `[phone] /tonight` reporting
+*"NO VIEW SWITCH FOUND, but this page has one — … (a Mantine class rename?)"*.
+
+**What settled it was the same pass's other rows, not the source.** `/life-list` is in the height table as
+`[Still to shoot]`, i.e. its switch was found and clicked; `/logs` and `/sky` warned about nothing. So
+discovery works and Mantine's class names are intact — the one explanation the message offered was the one
+the pass itself disproved, three times over. The real answer is in `Tonight.tsx`: two early returns
+(`location_source === "none"`, `!dark_window`) replace the entire planning body with an alert, and the switch
+is the object-type filter **inside** that body. `--empty` never sets a site, by design.
+
+### The method note: a guard whose premise is false on one flag, and the flag it was never run against
+
+`KNOWN_VIEW_SWITCHES` landed **2026-09-30** (`de72b240`); `--empty` last ran **2026-09-26**. Those two dates
+are the whole bug. A guard that exists to stop a sweep from silently covering less had spent two weeks
+unable to produce anything *but* false findings on one flag, and nobody could have known, because the pass
+that would have shown it is the pass nobody ran. **Generalisable: a guard added to this probe is untested
+against every flag that was not run while it was being written — and `--empty` / `--no-site` are the two that
+most often falsify an assumption, because they are the two where whole page bodies are absent.** When adding
+a finding to `dogfood_probe.mjs`, run it under `--empty` before believing it, or say in its comment which
+pass-states it has not met.
+
+The probe's own docstring had predicted the *source*-side version of this (*"delete a SegmentedControl from
+one of those pages and the probe starts crying wolf on every pass until someone reads the source"*) and
+`tests/test_dogfood_view_switches.py` exists for it. Neither considered the **data** side, which needs no
+code change at all to arrive.
+
+### Two things checked rather than assumed, and both shaped the fix
+
+1. **The precondition is the page's own, read from the app.** Asking `GET /api/plan/tonight` for
+   `location_source !== "none" && dark_window` uses the two fields `Tonight.tsx`'s early returns read, rather
+   than a second copy of the rule in the probe — the shape this repo has fixed drift in repeatedly. A test
+   pins both fields against the page, so a page that stops gating on one of them goes red rather than leaving
+   the exemption standing for a reason that no longer holds.
+2. **Measured in both directions against a live app.** A scratch install on its own port: no site →
+   `location_source=none`, no dark window → precondition **False** (exempt); after one `PUT /api/settings`
+   with a site → `location_source=settings`, dark window present → **True** (the guard fires as before). That
+   is what makes "every sited pass is byte-for-byte unchanged" a measurement rather than a claim — and it is
+   the direction that mattered, because the risk of this change is exempting `/tonight` *everywhere*.
+
+**A third thing, caught by re-reading my own diff rather than by a test, and it is the one worth copying.**
+The first version of `ask()` returned `false` on a non-OK response — i.e. an unreachable or renamed
+`/api/plan/tonight` would have *exempted* `/tonight` on every pass, silently, which is the exact failure the
+guard exists to prevent and the opposite of what the docstring two lines above it promised. The adversarial
+question that found it is cheap and general: **for a predicate that can grant an exemption, ask what each
+failure path grants.** It now answers "met" for a throw *and* for a non-OK response, so only a successful
+answer that genuinely says the control cannot render buys silence; a renamed endpoint reports instead of
+hiding. Verified by re-running the pass (still exempt, still clean) — the live app answers 200 with
+`location_source=none` on a first-run install, so the honest exemption goes through the success path.
+
+**The third condition was deliberately not covered.** The control also needs ≥ 2 object-type buckets among
+the targets clearing the minimum altitude (`typeOptions.length > 1`), which no honest precondition can ask
+without re-deriving the page's bucketing. So the finding's wording now names **both** candidates ("a Mantine
+class rename, or this pass's data not reaching the control") instead of asserting the one, and a sited pass on
+a one-bucket night would still print it. Recorded rather than guessed at; cheap to tighten if such a pass is
+ever seen.
+
+### The re-run, which is the actual verification
+
+The same `--empty` pass after the change: `nothing overflowing, no console errors`, one
+`[note] /tonight: no view switch expected on this pass — …`, and **every** other figure identical to the run
+before it (same eight heights, same single notice). Printing the lost coverage rather than swallowing it is
+the half that keeps this from being a mute.
+
 ## 2026-10-14 (Builder, branch `agent/reveal-read-off-loop`, same run as v0.495.8) — a CLEAN dogfood record on the two stalest flags, a measured non-finding in Auto's apply-time curve, and the fix whose obvious version was 16× worse than the bug
 
 **The dogfood record: `--closing --restack`, CLEAN.** The two stalest configurations (last run 2026-09-26 and

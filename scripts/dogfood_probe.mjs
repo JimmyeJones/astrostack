@@ -160,6 +160,67 @@ const YEAR = await yearRoute();
  * library does not have, so "no switch here" is the honest landing state. */
 const KNOWN_VIEW_SWITCHES = ["/compare", "/logs", "/life-list", "/tonight", "/sky"];
 
+/** …and one of those five is gated on data a pass may not have, which is a
+ * *third* way for the guard above to be wrong.
+ *
+ * `/tonight`'s switch is the object-type filter inside "Start something new",
+ * and `Tonight.tsx` returns an **alert** in place of that whole planning body
+ * when the install has no observing site (`location_source === "none"`) or the
+ * night has no dark window — which is exactly the state `--empty` and
+ * `--no-site` exist to measure. The guard was added 2026-09-30 and `--empty`
+ * had last run 2026-09-26, so the first `--empty` pass to meet it (2026-10-14)
+ * printed "a Mantine class rename?" twice about a control that could not exist,
+ * on a page that was working correctly — while `/life-list`, `/logs` and `/sky`
+ * all found theirs on the same pass, i.e. the one explanation the message
+ * offered was the one the pass itself disproved. Two findings on a flag whose
+ * every other measure was clean is how a guard stops being read.
+ *
+ * So a route may name a **precondition asked of the running app** — never a
+ * second copy of the page's own rule; these are the two fields `Tonight.tsx`'s
+ * own early returns read. A route whose precondition fails is not a finding,
+ * and it is not silent either: the pass prints what it did not get to sweep,
+ * because coverage quietly shrinking is the whole failure this guard exists
+ * for. */
+const VIEW_SWITCH_PRECONDITIONS = {
+  "/tonight": {
+    reason: "this install has no observing site, or tonight has no dark window, "
+      + "so /tonight renders its alert instead of the planning body that holds "
+      + "the object-type filter",
+    async ask() {
+      const res = await fetch(`${BASE}/api/plan/tonight`);
+      // A route that cannot be *read* is not an exemption — see
+      // VIEW_SWITCH_SKIPPED below. Answering "met" here is what makes a 500,
+      // or a renamed endpoint, report the finding instead of quietly excusing
+      // /tonight on every pass.
+      if (!res.ok) return true;
+      const d = (await res.json()) || {};
+      return d.location_source !== "none" && Boolean(d.dark_window);
+    },
+  },
+};
+
+/** Which of those preconditions this pass fails, as route → why. Resolved once,
+ * before the browser opens, like `COMPARE` and `YEAR` above.
+ *
+ * A precondition that cannot be *asked* counts as **met** — a throw here, and a
+ * non-OK response inside `ask` itself — so a probe talking to a broken app, or
+ * one whose endpoint has been renamed out from under it, still reports the
+ * finding rather than excusing itself out of it. The exemption needs a
+ * successful answer that actually says the control cannot render. */
+const VIEW_SWITCH_SKIPPED = Object.fromEntries(
+  (await Promise.all(
+    Object.entries(VIEW_SWITCH_PRECONDITIONS).map(async ([route, pre]) => {
+      let met = true;
+      try {
+        met = await pre.ask();
+      } catch {
+        met = true;
+      }
+      return met ? null : [route, pre.reason];
+    }),
+  )).filter(Boolean),
+);
+
 /** The Settings page's own sections — the same blind spot again, and the one it
  * hid the most behind.
  *
@@ -719,13 +780,28 @@ for (const { name, width, height } of WIDTHS) {
     // nothing everywhere and a sweep that covers less reports CLEAN exactly as
     // before. Say so where a switch is known to exist.
     // `/compare` carries two picture refs in its query string, so match the path.
-    if (KNOWN_VIEW_SWITCHES.includes(route.split("?")[0]) && viewCount === 0) {
-      findings++;
-      console.log(
-        `[${name}] ${route}: NO VIEW SWITCH FOUND, but this page has one — ` +
-        `viewSwitches() found nothing to click (a Mantine class rename?). ` +
-        `Everything behind it is unswept.`,
-      );
+    const switchPath = route.split("?")[0];
+    if (KNOWN_VIEW_SWITCHES.includes(switchPath) && viewCount === 0) {
+      if (VIEW_SWITCH_SKIPPED[switchPath]) {
+        // Not a finding — the control cannot exist on this pass's data. Printed
+        // once (at one width, like the claim read-outs below) because the lost
+        // coverage is real even when the absence is honest.
+        if (name === "desktop") {
+          console.log(
+            `[note] ${switchPath}: no view switch expected on this pass — ` +
+            `${VIEW_SWITCH_SKIPPED[switchPath]}. Everything behind it is ` +
+            `unswept here; use a pass that supplies it.`,
+          );
+        }
+      } else {
+        findings++;
+        console.log(
+          `[${name}] ${route}: NO VIEW SWITCH FOUND, but this page has one — ` +
+          `viewSwitches() found nothing to click (a Mantine class rename, or ` +
+          `this pass's data not reaching the control). Everything behind it ` +
+          `is unswept.`,
+        );
+      }
     }
     // Collected at the desktop width only: the phone pass would say the same
     // sentences twice, and the fold is decided by priority rather than by width.
