@@ -3360,7 +3360,7 @@ def _reveal_read_gate(request: Request) -> _RevealReadGate:
 
 
 async def _reveal_read_off_the_loop(request: Request,
-                                   gather: Callable[[], Any]) -> Any:
+                                    gather: Callable[[], Any]) -> Any:
     """Run one of the reveal endpoints' synchronous project reads in a worker
     thread — **one at a time**. Both halves were measured; see below.
 
