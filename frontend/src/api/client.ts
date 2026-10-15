@@ -125,6 +125,18 @@ export interface TonightPick {
   field_fulls?: number | null;
 }
 
+/** `GET /api/plan/site` — the location every planner surface is using, plus
+ * what the subs' own headers say even while a typed location wins (so
+ * Settings can show what "Read it from my photos" would switch to). */
+export interface ObservingSite {
+  location_source: "settings" | "fits" | "none";
+  location_reason: SiteUnknownReason | null;
+  observer: { lat_deg: number; lon_deg: number; elevation_m: number } | null;
+  from_photos: { lat_deg: number; lon_deg: number } | null;
+  /** The header probe's own verdict: `found`, or why it found nothing. */
+  photos_reason: string;
+}
+
 /** `GET /api/plan/best-tonight` — "best use of your scope right now". */
 export interface BestTonight {
   location_source: "settings" | "fits" | "none";
@@ -4269,6 +4281,7 @@ export const api = {
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     return req<NightPlan>(`/api/plan/tonight${suffix}`);
   },
+  getSite: () => req<ObservingSite>("/api/plan/site"),
   // "Best use of your scope right now": the user's *own* targets ranked by how
   // well-placed they are at this moment × how much another hour would help.
   // Read-only; returns an empty `picks` when there's nothing worth suggesting.

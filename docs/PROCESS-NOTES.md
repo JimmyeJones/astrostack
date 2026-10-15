@@ -1,5 +1,17 @@
 # Process notes & QA sweep records
 
+## 2026-10-15 (Builder, branch `claude/adoring-planck-uubmsy`) — slice 4, and the seed race needed a bigger perturbation
+
+*(→ **v0.499.0**, Settings redesign slice 4; baseline 7953 passed / 7 skipped, `main` CI 2323 green, no open PRs.
+Dogfood heights are in `SHIPPED.md`; sweep CLEAN.)* Slice 4 made `SettingsView` heavier (two more cards, one
+more query), and CI then lost the `form`-seed race in **two tests the Scout's 0 ms perturbation had passed**:
+"Currently 3" (its chip *does* read `form.cpu_workers`; only the "Half" figure comes from `system.data`) and
+the slice-2 step-row test, whose `waitFor` waited on a state an *unseeded* form also shows. A 50 ms deferral
+still caught neither locally; **500 ms** caught that one and a third ("marks the offending field and holds
+Save"). **Method for next time:** perturb `setForm(settings.data)` by ~500 ms and run all of `Settings.test.tsx`
+once, then make each failure wait on a value only the *seeded* form has (a distinctive fixture value, not a
+default). All 123 pass that way and undeferred. A new Settings test should be written that way from the start.
+
 ## 2026-10-15 (Scout, branch `claude/funny-shannon-ezhbpa`) — a CI-only flake pins by perturbing the component under test, not by re-running it
 
 *(→ **v0.497.1**, test-only. This run opened on a red `main`: CI run **2319** (the v0.497.0 merge) **and** run

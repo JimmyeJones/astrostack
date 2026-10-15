@@ -1814,3 +1814,76 @@ def test_a_closing_row_with_no_stacked_picture_serves_no_scale(
                       params={"when": JAN_EVENING}).json()["targets"]
     assert rows, "Orion in mid-January is on its way out"
     assert all("field_fulls" in r and r["field_fulls"] is None for r in rows)
+
+
+# ---- "Where you observe from" (/api/plan/site) — Settings redesign slice 4 ----
+
+def test_site_without_any_location_says_why(client, solved_library):
+    # Solved synth frames carry no SITELAT, and nothing is typed in.
+    body = client.get("/api/plan/site").json()
+    assert body["location_source"] == "none"
+    assert body["observer"] is None
+    assert body["from_photos"] is None
+    assert body["photos_reason"] == "no-site-header"
+    assert body["location_reason"] == "no-site-header"
+
+
+def test_site_reports_a_typed_location_as_the_one_in_force(client, solved_library):
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13,
+                                      "site_elevation_m": 40})
+    body = client.get("/api/plan/site").json()
+    assert body["location_source"] == "settings"
+    assert body["observer"] == {"lat_deg": 51.5, "lon_deg": -0.13, "elevation_m": 40.0}
+    assert body["location_reason"] is None
+
+
+def test_site_reports_the_photos_location_even_while_a_typed_one_wins(
+        tmp_path: Path, monkeypatch):
+    """Settings needs both: what is in force, and what "Read it from my photos"
+    would switch to — so the probe answers even when a typed location wins."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from fastapi.testclient import TestClient
+    from synth import write_seestar_fits
+
+    from seestack.io.library import Library
+    from seestack.io.scanner import scan_and_organize
+    from webapp.main import create_app
+
+    data_root = tmp_path / "data"
+    incoming = data_root / "incoming" / "M_13"
+    incoming.mkdir(parents=True)
+    for i in range(2):
+        write_seestar_fits(
+            incoming / f"frame_{i:03d}.fit", add_wcs=True,
+            ra_center_deg=250.4, dec_center_deg=36.5,
+            site_lat=48.0, site_lon=11.0, seed=300 + i,
+        )
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        scan_and_organize(lib, data_root / "incoming", copy_to_cache=False)
+    finally:
+        lib.close()
+
+    monkeypatch.setenv("ASTROSTACK_DATA", str(data_root))
+    app = create_app()
+    with TestClient(app) as c:
+        c.put("/api/settings", json={"watcher_enabled": False})
+        body = c.get("/api/plan/site").json()
+        assert body["location_source"] == "fits"
+        assert body["from_photos"] == {"lat_deg": 48.0, "lon_deg": 11.0}
+        assert body["observer"]["lat_deg"] == 48.0
+        assert body["photos_reason"] == "found"
+
+        c.put("/api/settings", json={"site_lat": -33.9, "site_lon": 151.2})
+        body = c.get("/api/plan/site").json()
+        assert body["location_source"] == "settings"
+        assert body["observer"]["lat_deg"] == -33.9
+        # The photos' answer is still served beside it.
+        assert body["from_photos"] == {"lat_deg": 48.0, "lon_deg": 11.0}
+
+        # …and clearing both boxes — what the button writes — goes back to it.
+        c.put("/api/settings", json={"site_lat": None, "site_lon": None})
+        body = c.get("/api/plan/site").json()
+        assert body["location_source"] == "fits"

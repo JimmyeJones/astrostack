@@ -587,6 +587,15 @@ export function filterMoreGroups(groups: MoreGroup[], query: string): MoreGroup[
 }
 
 /** Every `Settings` field "More settings" can write, for the drift test. */
+/** The card with this id, wherever it is grouped — for a section that reuses one. */
+export function moreSettingById(id: string): MoreSetting {
+  for (const g of MORE_SETTINGS_GROUPS) {
+    const d = g.items.find((i) => i.id === id);
+    if (d) return d;
+  }
+  throw new Error(`No "More settings" card with id ${id}`);
+}
+
 export function moreSettingKeys(): string[] {
   const out = new Set<string>();
   for (const g of MORE_SETTINGS_GROUPS) for (const d of g.items) for (const k of d.keys) out.add(k);

@@ -1,5 +1,40 @@
 # Shipped — the record
 
+## 2026-10-15 (Builder, branch `claude/adoring-planck-uubmsy`) — Settings redesign slice 4
+
+### v0.499.0 — "Where you observe from", "How hard your NAS works", and "Updates & upkeep"
+
+**What.** Sections 4, 6 and 7 of `docs/design/settings-redesign.md`.
+**Observing site** opens with "Where you observe from" (`frontend/src/components/settings/ObservingSite.tsx`;
+copy and geometry in `observingSite.ts`): **Read it from my photos** / **Type it in**, a *Currently:* line that
+previews the form before Save, the privacy line, a height-above-sea-level box, and `min_target_altitude_deg` as a
+0–80° slider over a horizon drawing whose lit band redraws as it moves. It replaces the bare latitude / longitude /
+elevation / minimum-altitude boxes; the skyline editor below is unchanged. **Stacking**'s "Memory" card became
+"How hard your NAS works" (`NasSection.tsx`): the RAM drawn as other apps / room one stack may use / kept free
+(the engine's own `stack_budget_gb`, numbers in the legend, never colour alone), the memory-limit and cores cards
+reused from "More settings" via a now-exported `MoreCard` (warnings and Back to default included), an exact-figure
+box for a limit the slider can't land on, and both of the old card's advisories word for word. The cores box left
+Plate solving. **Maintenance** gained an "Updates & upkeep" heading and one sentence; its cards are unchanged.
+
+**Backend.** New read-only `GET /api/plan/site` — the location in force (the same precedence as
+`_resolve_observer_detail`) **plus** what the subs' headers say even while a typed location wins (`from_photos`),
+through the memoised, bounded `probe_site_cached`. Additive; no setting, schema or on-disk change.
+
+**Checked against the code.** A typed location wins only when *both* `site_lat` and `site_lon` are set, so
+"Read it from my photos" writes exactly `{site_lat: null, site_lon: null}` and a half-typed location says it is
+not in force yet. The photo probe gives only latitude/longitude — elevation is `site_elevation_m` either way — so
+that box is never hidden. The boxes stay visible whenever the photos have no location (the case the Tonight
+planner links here for), and the "unreadable" reason does not tell anyone to type a location, matching
+`siteUnknownCopy`.
+
+**Heights (dogfood, before → after).** Phone 420 px: observing-site 1,367 → 1,834; stacking 1,615 → 2,318;
+plate-solving 1,089 → 1,012; maintenance 2,858 → 2,969. Desktop 1440 px: observing-site 1,121 → 1,387; stacking
+1,445 → 1,903; plate-solving 900 → 900; maintenance 2,252 → 2,343. Sweep: nothing overflowing, no console errors.
+
+**Tests.** `observingSite.test.ts` (20), eight new render tests in `Settings.test.tsx`, three Python tests for
+`/api/plan/site`; the "nothing was removed" guard is unchanged and green. Existing tests re-pointed at the new
+labels, and the More-settings ones scoped to the open tab because two cards are now also drawn on Stacking.
+
 ## 2026-10-15 (Builder, branch `claude/adoring-planck-gyjo9b`) — Settings redesign slice 3
 
 ### v0.498.0 — "Leaving out bad frames": the "How picky?" control, a Kept / Left out illustration, and the trails switch, in plain words
