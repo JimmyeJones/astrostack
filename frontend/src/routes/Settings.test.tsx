@@ -1369,7 +1369,11 @@ describe("More settings", () => {
   it("shows a stored value it has no button for, rather than overwriting it", async () => {
     renderSettingsWith({}, "more", { cpu_workers: 3 });
     await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
-    const chip = screen.getByRole("button", { name: "Currently 3" });
+    // `findBy`: the chip reads the form, which `SettingsView` seeds in an effect
+    // a beat after the heading renders (the race v0.497.1 fixed for its
+    // neighbours; CI lost it here once Stacking also drew this card, v0.499.0).
+    const chip = await within(screen.getByRole("tabpanel"))
+      .findByRole("button", { name: "Currently 3" });
     expect(chip).toBeVisible();
     expect(chip).toBeDisabled();
   });
@@ -1571,7 +1575,11 @@ describe("Observing site — where you observe from", () => {
 
   it("'Type it in' opens the boxes, and Save sends what was typed", async () => {
     const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
-    renderSettingsWith({}, "observing-site", { site_lat: null, site_lon: null }, { enabled: false }, {}, PHOTOS);
+    renderSettingsWith({}, "observing-site",
+      { site_lat: null, site_lon: null, site_elevation_m: 12 }, { enabled: false }, {}, PHOTOS);
+    // Wait for a value only the seeded form has: an edit made before
+    // `SettingsView`'s seed effect commits would be overwritten by it.
+    await waitFor(() => expect(screen.getByLabelText(/Height above sea level/)).toHaveValue("12"));
     await waitFor(() => expect(screen.getByTestId("site-current")).toHaveTextContent(/photos/));
 
     fireEvent.click(screen.getByRole("button", { name: "Type it in" }));
@@ -1610,20 +1618,21 @@ describe("Observing site — where you observe from", () => {
 
   it("moves the lit band with the altitude slider, and saves the new floor", async () => {
     const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
-    renderSettingsWith({}, "observing-site", { min_target_altitude_deg: 30 });
+    renderSettingsWith({}, "observing-site", { min_target_altitude_deg: 25 });
     const slider = await screen.findByRole("slider", { name: "Lowest altitude to suggest" });
+    // 25, not the default 30, so this waits for the seeded form (see above).
     await waitFor(() =>
-      expect(screen.getByText("Only suggest targets higher than 30°")).toBeVisible());
+      expect(screen.getByText("Only suggest targets higher than 25°")).toBeVisible());
     const before = screen.getByTestId("altitude-band").getAttribute("d");
 
     fireEvent.keyDown(slider, { key: "ArrowRight" });
     await waitFor(() =>
-      expect(screen.getByText("Only suggest targets higher than 35°")).toBeVisible());
+      expect(screen.getByText("Only suggest targets higher than 30°")).toBeVisible());
     expect(screen.getByTestId("altitude-band").getAttribute("d")).not.toBe(before);
 
     fireEvent.click(screen.getAllByRole("button", { name: "Save settings" })[0]);
     await waitFor(() => expect(put).toHaveBeenCalled());
-    expect((put.mock.calls[0][0] as Record<string, unknown>).min_target_altitude_deg).toBe(35);
+    expect((put.mock.calls[0][0] as Record<string, unknown>).min_target_altitude_deg).toBe(30);
   });
 });
 
@@ -1639,13 +1648,16 @@ describe("Stacking — how hard your NAS works", () => {
 
   it("puts the cores choice here, with its warning and way back", async () => {
     const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
-    renderSettingsWith({}, "stacking", { cpu_workers: null });
+    renderSettingsWith({}, "stacking", { cpu_workers: null, max_stack_memory_gb: 8 });
     const nas = within(await screen.findByTestId("nas-section"));
+    // Only the seeded form says 8 GB; a click before the seed would be lost.
+    await waitFor(() =>
+      expect(nas.getByTestId("memory-headline")).toHaveTextContent("at most 8 GB per stack."));
     const one = await nas.findByRole("button", { name: "One" });
     fireEvent.click(one);
     await waitFor(() => expect(one).toHaveAttribute("aria-pressed", "true"));
     expect(nas.getByText(/Imports and stacks will take longer/)).toBeVisible();
-    fireEvent.click(nas.getByRole("button", { name: /Back to default/ }));
+    fireEvent.click(nas.getByRole("button", { name: /Back to default \(All/ }));
     await waitFor(() =>
       expect(nas.getByRole("button", { name: "All (fastest)" })).toHaveAttribute("aria-pressed", "true"));
 
