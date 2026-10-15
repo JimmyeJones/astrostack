@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **Settings redesign slice 2** (hands-off cards + six-step row, `HandsOffSection`) — branch `claude/adoring-planck-yziwqf`, Builder 2026-10-15.
 
 ---
 
