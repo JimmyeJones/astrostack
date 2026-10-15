@@ -25,6 +25,7 @@ import { NightSkySettings } from "../components/NightSkySettings";
 import { SkylineEditor } from "../components/SkylineEditor";
 import { SectionTabs, type PageSection } from "../components/SectionTabs";
 import { MoreSettingsSection } from "../components/settings/MoreSettings";
+import { HandsOffSection } from "../components/settings/HandsOff";
 import type { SettingsSection } from "../settingsSections";
 import { minMaxIgnoresWeightingHint } from "../weightingHint";
 import { folderConflict, settingsErrorMessage } from "../settingsFolders";
@@ -1000,7 +1001,16 @@ export function SettingsView() {
     automation: (
       <Paper withBorder p="lg">
         <Stack>
-          <Text fw={600}>Automatic pipeline</Text>
+          {/* Sections 1–2 of the approved redesign: the three "how hands-off?"
+              cards over the six steps a new sub goes through. They replace the
+              row of bare switches (Ingest / QC / Plate-solve / Auto-stack), the
+              auto-edit switch and the two stack-trigger boxes that used to open
+              this tab — same fields, same edit buffer, each still stamped
+              `data-setting` for the "nothing was removed" guard. */}
+          <HandsOffSection form={form} saved={settings.data} labelFor={lbl}
+            onPatch={(patch) => setForm((p) => ({ ...p, ...patch }))} />
+
+          <Divider label="More for hands-off nights" />
           <Switch
             size="md"
             checked={walkAway}
@@ -1012,30 +1022,9 @@ export function SettingsView() {
               + "calibration masters, drop obviously-bad subs, skip a batch that "
               + "looks like two different targets, and finish the picture for you — "
               + "so you can drop your subs in and come back to a calibrated, edited "
-              + "image. You can still fine-tune any of the individual switches below."
+              + "image. You can still fine-tune any of the individual switches on this tab."
             }
           />
-          <Group>
-            <Switch label={lbl("auto_ingest", "Ingest")} checked={bool("auto_ingest")}
-              onChange={(e) => set("auto_ingest", e.currentTarget.checked)} />
-            <Switch label={lbl("auto_qc", "QC")} checked={bool("auto_qc")}
-              onChange={(e) => set("auto_qc", e.currentTarget.checked)} />
-            <Switch label={lbl("auto_solve", "Plate-solve")} checked={bool("auto_solve")}
-              onChange={(e) => set("auto_solve", e.currentTarget.checked)} />
-            <Switch label={lbl("auto_stack", "Auto-stack")} checked={bool("auto_stack")}
-              onChange={(e) => set("auto_stack", e.currentTarget.checked)} />
-          </Group>
-          <Switch label={lbl("auto_edit_on_autostack", "Auto-edit the auto-stacked master into a finished picture")}
-            checked={bool("auto_edit_on_autostack")} disabled={!bool("auto_stack")}
-            onChange={(e) => set("auto_edit_on_autostack", e.currentTarget.checked)} />
-          <NumberInput label={lbl("auto_stack_min_frames", "Hands-off auto-stack: minimum located subs")}
-            value={num("auto_stack_min_frames")} min={1} max={1000} w={280}
-            disabled={!bool("auto_stack")}
-            onChange={(v) => set("auto_stack_min_frames", Number(v))} />
-          <NumberInput label={lbl("auto_stack_settle_min", "Hands-off auto-stack: wait for the night to settle (minutes)")}
-            value={num("auto_stack_settle_min")} min={0} max={1440} w={280}
-            disabled={!bool("auto_stack")}
-            onChange={(v) => set("auto_stack_settle_min", Number(v))} />
           <Switch label={lbl("auto_reject_on_unattended", "Let AstroStack pick outlier removal on hands-off stacks")}
             checked={bool("auto_reject_on_unattended")}
             onChange={(e) => set("auto_reject_on_unattended", e.currentTarget.checked)} />
@@ -1048,9 +1037,6 @@ export function SettingsView() {
           <Switch label={lbl("auto_bind_calibration", "Auto-apply matching calibration masters to hands-off stacks")}
             checked={bool("auto_bind_calibration")}
             onChange={(e) => set("auto_bind_calibration", e.currentTarget.checked)} />
-          <Switch label={lbl("mixed_pointing_guard", "Skip a hands-off stack when the batch looks like two different targets")}
-            checked={bool("mixed_pointing_guard")}
-            onChange={(e) => set("mixed_pointing_guard", e.currentTarget.checked)} />
           <Switch label={lbl("copy_to_cache", "Copy frames into local cache")}
             checked={bool("copy_to_cache")}
             onChange={(e) => set("copy_to_cache", e.currentTarget.checked)} />

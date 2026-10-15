@@ -861,8 +861,10 @@ describe("Settings sections", () => {
     await waitFor(() =>
       expect(screen.getByText("Watched folders")).toBeVisible());
     // Nothing was removed — every other section is in the DOM, one click away.
-    expect(screen.getByText("Automatic pipeline")).toBeInTheDocument();
-    expect(screen.getByText("Automatic pipeline")).not.toBeVisible();
+    // (The Automation tab opens with the redesign's hands-off cards since v0.497.0.)
+    const handsOff = "How hands-off should AstroStack be?";
+    expect(screen.getByText(handsOff)).toBeInTheDocument();
+    expect(screen.getByText(handsOff)).not.toBeVisible();
     expect(screen.getByText("Reprocess everything")).toBeInTheDocument();
     expect(screen.getByText("Reprocess everything")).not.toBeVisible();
   });
@@ -1358,5 +1360,77 @@ describe("Settings — nothing was removed", () => {
     const missing = Object.keys(HINTS).filter((k) =>
       !container.querySelector(`[data-setting="${k}"], [data-settings~="${k}"]`));
     expect(missing).toEqual([]);
+  });
+});
+
+// --- Settings redesign slice 2: hands-off cards + the six-step row (v0.497.0) --
+
+describe("Automation — how hands-off should AstroStack be?", () => {
+  // The owner's live setup (AGENTS.md §1): auto-stack and auto-edit off, the
+  // rest on — exactly the middle card.
+  const OWNER = {
+    watcher_enabled: true, auto_ingest: true, auto_qc: true, auto_solve: true,
+    auto_stack: false, auto_edit_on_autostack: false,
+  };
+
+  it("shows the owner's setup as the middle card, picked and marked as saved", async () => {
+    renderSettingsWith({}, "automation", OWNER);
+    const ready = await screen.findByRole("button", { name: /Get them ready/ });
+    await waitFor(() => expect(ready).toHaveAttribute("aria-pressed", "true"));
+    expect(within(ready).getByText("Your saved setup")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Do it all for me/ }))
+      .toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("hands-off-unsaved")).toBeNull();
+  });
+
+  it("previews a picked card until Save, then saves all six steps", async () => {
+    const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
+    renderSettingsWith({}, "automation", OWNER);
+    const all = await screen.findByRole("button", { name: /Do it all for me/ });
+    fireEvent.click(all);
+
+    await waitFor(() => expect(all).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.getByTestId("hands-off-unsaved")).toHaveTextContent(/Not saved yet/);
+    expect(screen.getByLabelText("Stack automatically")).toBeChecked();
+    expect(screen.getByLabelText("Finish automatically")).toBeChecked();
+    expect(put).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Save settings" })[0]);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const patch = put.mock.calls[0][0] as Record<string, unknown>;
+    for (const k of Object.keys(OWNER)) expect(patch[k]).toBe(true);
+  });
+
+  it("shows a hand-made mix as Custom, with no card picked", async () => {
+    renderSettingsWith({}, "automation", { ...OWNER, auto_qc: false });
+    await screen.findByTestId("hands-off-custom");
+    for (const name of [/Do it all for me/, /Get them ready/, /Hands on/]) {
+      expect(screen.getByRole("button", { name })).toHaveAttribute("aria-pressed", "false");
+    }
+  });
+
+  it("draws the steps after a switched-off one as waiting — but not past Check", async () => {
+    renderSettingsWith({}, "automation", { ...OWNER, auto_stack: true, auto_qc: false });
+    const step = (field: string) =>
+      document.querySelector(`li[data-setting="${field}"]`) as HTMLElement;
+    await waitFor(() => expect(step("auto_qc")).toHaveAttribute("data-step-state", "manual"));
+    expect(within(step("auto_qc")).getByText("You do this yourself")).toBeInTheDocument();
+    // Placing and stacking run whether or not frames were checked.
+    expect(step("auto_solve")).toHaveAttribute("data-step-state", "auto");
+    expect(step("auto_stack")).toHaveAttribute("data-step-state", "auto");
+    expect(step("auto_edit_on_autostack")).toHaveAttribute("data-step-state", "manual");
+
+    fireEvent.click(screen.getByLabelText("Notice automatically"));
+    await waitFor(() =>
+      expect(within(step("auto_solve")).getByText("Waiting for an earlier step")).toBeInTheDocument());
+    expect(step("auto_stack")).toHaveAttribute("data-step-state", "waiting");
+  });
+
+  it("keeps each step's old name on a Was: line", async () => {
+    renderSettingsWith({}, "automation", OWNER);
+    await screen.findByText("Was: Plate-solve");
+    expect(screen.getByText("Was: QC")).toBeInTheDocument();
+    expect(screen.getByText("Was: Auto-edit the auto-stacked master into a finished picture"))
+      .toBeInTheDocument();
   });
 });
