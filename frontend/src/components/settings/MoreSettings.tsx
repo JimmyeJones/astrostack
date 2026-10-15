@@ -97,14 +97,20 @@ export function MoreSettingsSection({
   );
 }
 
-function MoreCard({
-  d, form, ctx, onPatch, conflict, resolvedIncoming, resolvedLibrary,
+/**
+ * One card. Exported so a redesigned section can show the very same card —
+ * warning, Back to default and `Was:` line included — where its setting now
+ * also lives (the NAS section draws the cores and memory cards this way), rather
+ * than a second copy of the copy that could drift from this one.
+ */
+export function MoreCard({
+  d, form, ctx, onPatch, conflict = null, resolvedIncoming, resolvedLibrary,
 }: {
   d: MoreSetting;
   form: SettingsForm;
   ctx: MoreCtx;
   onPatch: (patch: SettingsPatch) => void;
-  conflict: FolderConflict | null;
+  conflict?: FolderConflict | null;
   resolvedIncoming?: string;
   resolvedLibrary?: string;
 }) {

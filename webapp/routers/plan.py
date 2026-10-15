@@ -312,6 +312,47 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
     return out
 
 
+@router.get("/site")
+def get_site(request: Request) -> dict[str, Any]:
+    """Where the planner thinks you observe from — and what your photos say.
+
+    Settings' "Where you observe from" needs both halves at once: the location
+    every planner surface is actually using (``location_source`` + ``observer``,
+    the same answer :func:`_resolve_observer_detail` gives them), **and** the one
+    the Seestar wrote into the subs' headers even while a typed location wins
+    (``from_photos``), so choosing "Read it from my photos" can say what it will
+    switch to before the owner saves. Read-only and bounded — headers only,
+    through the same memoised probe the activity calendar uses, never a scan.
+    """
+    settings = deps.get_settings(request)
+    from webapp.site_location import probe_site_cached
+
+    lib = deps.open_library(request)
+    try:
+        probe = probe_site_cached(request, lib)
+    finally:
+        lib.close()
+    elevation = float(settings.site_elevation_m or 0.0)
+    photos = ({"lat_deg": probe.site[0], "lon_deg": probe.site[1]}
+              if probe.site is not None else None)
+    if settings.site_lat is not None and settings.site_lon is not None:
+        source, reason = "settings", None
+        observer = {"lat_deg": float(settings.site_lat),
+                    "lon_deg": float(settings.site_lon), "elevation_m": elevation}
+    elif photos is not None:
+        source, reason = "fits", None
+        observer = {**photos, "elevation_m": elevation}
+    else:
+        source, reason, observer = "none", probe.reason, None
+    return {
+        "location_source": source,
+        "location_reason": reason,
+        "observer": observer,
+        "from_photos": photos,
+        "photos_reason": probe.reason,
+    }
+
+
 @router.get("/tonight")
 def get_tonight(
     request: Request,

@@ -810,6 +810,13 @@ function renderSettingsWith(
   // figures and no budget — so every existing caller is unchanged; the memory
   // tests pass the fields the endpoint really serves.
   memory: Record<string, unknown> = {},
+  // What `GET /api/plan/site` answers. The default is an empty library, so
+  // neither the photos nor Settings know where the owner is — the case the
+  // Tonight planner links here for.
+  site: Record<string, unknown> = {
+    location_source: "none", location_reason: "no-frames", observer: null,
+    from_photos: null, photos_reason: "no-frames",
+  },
 ) {
   vi.spyOn(client.api, "getSettings").mockResolvedValue({
     default_stack_options: stackDefaults, ...extraSettings,
@@ -822,6 +829,7 @@ function renderSettingsWith(
   } as never);
   vi.spyOn(client.api, "optionsSchema").mockResolvedValue(STACK_FIELDS);
   vi.spyOn(client.api, "authStatus").mockResolvedValue(authStatus as never);
+  vi.spyOn(client.api, "getSite").mockResolvedValue(site as never);
   const qc = new QueryClient();
   return render(
     <MantineProvider>
@@ -891,7 +899,7 @@ describe("Settings sections", () => {
     renderSettingsWith({}, "observing-site");
 
     await waitFor(() => expect(screen.getByLabelText(/Latitude/)).toBeVisible());
-    expect(screen.getByLabelText(/Minimum target altitude/)).toBeVisible();
+    expect(screen.getByRole("slider", { name: "Lowest altitude to suggest" })).toBeVisible();
   });
 
   it("lands the Dashboard's folder warning on a VISIBLE data-root field", async () => {
@@ -911,7 +919,7 @@ describe("Settings sections", () => {
     cleanup();
     renderSettingsWith({}, "stacking");
     await waitFor(() =>
-      expect(screen.getByLabelText(/Stack memory budget/)).toBeVisible());
+      expect(screen.getByLabelText(/Exact memory limit/)).toBeVisible());
 
     cleanup();
     renderSettingsWith({}, "maintenance");
@@ -1207,7 +1215,8 @@ describe("Settings → Stacking → Memory", () => {
     renderSettingsWith({}, "stacking", {}, { enabled: false },
       { total_gb: 16, available_gb: 6, stack_budget_gb: 4.1, stack_budget_source: "available" });
 
-    await waitFor(() => expect(screen.getByText("Memory")).toBeVisible());
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "How hard your NAS works" })).toBeVisible());
     // `findBy`, not `getBy`: the RAM figures come from `getSystem`, a *different*
     // query from the ones that render this card, so the "Memory" heading above is
     // on screen before they arrive. See the note on this describe block.
@@ -1222,7 +1231,8 @@ describe("Settings → Stacking → Memory", () => {
     renderSettingsWith({}, "stacking", { max_stack_memory_gb: 64 }, { enabled: false },
       { total_gb: 16, available_gb: 6, stack_budget_gb: 3, stack_budget_source: "env" });
 
-    await waitFor(() => expect(screen.getByText("Memory")).toBeVisible());
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "How hard your NAS works" })).toBeVisible());
     // Awaiting the override notice is what makes the `queryByText` below mean
     // anything: before `getSystem` resolves the advisory is absent because
     // nothing has loaded, which is not the fact this test is about.
@@ -1236,7 +1246,8 @@ describe("Settings → Stacking → Memory", () => {
     renderSettingsWith({}, "stacking", { max_stack_memory_gb: 64 }, { enabled: false },
       { total_gb: 16, available_gb: 6, stack_budget_gb: 64, stack_budget_source: "setting" });
 
-    await waitFor(() => expect(screen.getByText("Memory")).toBeVisible());
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "How hard your NAS works" })).toBeVisible());
     expect(
       await screen.findByText(/Budget is higher than this machine's available RAM/),
     ).toBeVisible();
@@ -1255,16 +1266,20 @@ describe("More settings", () => {
   it("is a section of its own, with an address like the others", async () => {
     renderSettingsWith({}, "more");
     await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
-    expect(screen.getByText("Where your photos and library live")).toBeVisible();
-    expect(screen.getByText("Memory limit for stacking")).toBeVisible();
+    // Scoped to the open tab: the cores and memory cards are also drawn on
+    // Stacking's "How hard your NAS works" (v0.499.0), which stays mounted.
+    const more = within(screen.getByRole("tabpanel"));
+    expect(more.getByText("Where your photos and library live")).toBeVisible();
+    expect(more.getByText("Memory limit for stacking")).toBeVisible();
   });
 
   it("prints the name each setting used to have, so it is still findable by it", async () => {
     renderSettingsWith({}, "more");
     await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
-    expect(screen.getByText("Was: Stack memory budget (GB)")).toBeVisible();
-    expect(screen.getByText("Was: Quiet period (s)")).toBeVisible();
-    expect(screen.getByText("Was: Scan subnet (CIDR), Known device IPs, Scan interval (s)"))
+    const more = within(screen.getByRole("tabpanel"));
+    expect(more.getByText("Was: Stack memory budget (GB)")).toBeVisible();
+    expect(more.getByText("Was: Quiet period (s)")).toBeVisible();
+    expect(more.getByText("Was: Scan subnet (CIDR), Known device IPs, Scan interval (s)"))
       .toBeVisible();
   });
 
@@ -1346,8 +1361,9 @@ describe("More settings", () => {
 
     fireEvent.change(screen.getByLabelText("Find a setting"), { target: { value: "CIDR" } });
 
-    expect(screen.getByText("How to find the Seestar")).toBeVisible();
-    expect(screen.queryByText("Memory limit for stacking")).toBeNull();
+    const more = within(screen.getByRole("tabpanel"));
+    expect(more.getByText("How to find the Seestar")).toBeVisible();
+    expect(more.queryByText("Memory limit for stacking")).toBeNull();
   });
 
   it("shows a stored value it has no button for, rather than overwriting it", async () => {
@@ -1528,5 +1544,129 @@ describe("Automation — leaving out bad frames", () => {
     for (const k of ["auto_grade_frames", "auto_grade_sensitivity", "keep_streaked_frames"]) {
       expect(document.querySelector(`[data-setting="${k}"]`)).not.toBeNull();
     }
+  });
+});
+
+// --- Settings redesign slice 4: location + horizon, the NAS bar, upkeep (v0.499.0)
+
+describe("Observing site — where you observe from", () => {
+  const PHOTOS = {
+    location_source: "fits" as const, location_reason: null,
+    observer: { lat_deg: 48, lon_deg: 11, elevation_m: 0 },
+    from_photos: { lat_deg: 48, lon_deg: 11 }, photos_reason: "found",
+  };
+
+  it("reads it from the photos by default, and says where that is", async () => {
+    renderSettingsWith({}, "observing-site", { site_lat: null, site_lon: null }, { enabled: false }, {}, PHOTOS);
+    await waitFor(() => expect(screen.getByTestId("site-current"))
+      .toHaveTextContent("Read from your Seestar's photos: 48.0° N, 11.0° E"));
+    expect(screen.getByRole("button", { name: "Read it from my photos" }))
+      .toHaveAttribute("aria-pressed", "true");
+    // Nothing to type while the photos already know — the boxes stay hidden…
+    expect(screen.queryByLabelText(/Latitude/)).toBeNull();
+    // …but the height is used either way, so it is never hidden.
+    expect(screen.getByLabelText(/Height above sea level/)).toBeVisible();
+    expect(screen.getByText(/AstroStack never sends it anywhere/)).toBeVisible();
+  });
+
+  it("'Type it in' opens the boxes, and Save sends what was typed", async () => {
+    const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
+    renderSettingsWith({}, "observing-site", { site_lat: null, site_lon: null }, { enabled: false }, {}, PHOTOS);
+    await waitFor(() => expect(screen.getByTestId("site-current")).toHaveTextContent(/photos/));
+
+    fireEvent.click(screen.getByRole("button", { name: "Type it in" }));
+    const lat = await screen.findByLabelText(/Latitude/);
+    fireEvent.change(lat, { target: { value: "51.5" } });
+    fireEvent.change(screen.getByLabelText(/Longitude/), { target: { value: "-0.1" } });
+    await waitFor(() => expect(screen.getByTestId("site-current"))
+      .toHaveTextContent("Typed in: 51.5° N, 0.1° W"));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Save settings" })[0]);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const patch = put.mock.calls[0][0] as Record<string, unknown>;
+    expect(patch.site_lat).toBe(51.5);
+    expect(patch.site_lon).toBe(-0.1);
+  });
+
+  it("'Read it from my photos' clears a typed location, previewed until Save", async () => {
+    const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
+    renderSettingsWith({}, "observing-site", { site_lat: 10, site_lon: 20 }, { enabled: false }, {}, PHOTOS);
+    await waitFor(() => expect(screen.getByTestId("site-current"))
+      .toHaveTextContent("Typed in: 10.0° N, 20.0° E"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Read it from my photos" }));
+    await waitFor(() => expect(screen.getByTestId("site-current"))
+      .toHaveTextContent("Read from your Seestar's photos: 48.0° N, 11.0° E"));
+    expect(put).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Save settings" })[0]);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const patch = put.mock.calls[0][0] as Record<string, unknown>;
+    // `null`, not dropped: the save keeps a cleared number, so the planner
+    // really does go back to the photos.
+    expect(patch).toHaveProperty("site_lat", null);
+    expect(patch).toHaveProperty("site_lon", null);
+  });
+
+  it("moves the lit band with the altitude slider, and saves the new floor", async () => {
+    const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
+    renderSettingsWith({}, "observing-site", { min_target_altitude_deg: 30 });
+    const slider = await screen.findByRole("slider", { name: "Lowest altitude to suggest" });
+    await waitFor(() =>
+      expect(screen.getByText("Only suggest targets higher than 30°")).toBeVisible());
+    const before = screen.getByTestId("altitude-band").getAttribute("d");
+
+    fireEvent.keyDown(slider, { key: "ArrowRight" });
+    await waitFor(() =>
+      expect(screen.getByText("Only suggest targets higher than 35°")).toBeVisible());
+    expect(screen.getByTestId("altitude-band").getAttribute("d")).not.toBe(before);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Save settings" })[0]);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect((put.mock.calls[0][0] as Record<string, unknown>).min_target_altitude_deg).toBe(35);
+  });
+});
+
+describe("Stacking — how hard your NAS works", () => {
+  it("draws memory as other apps / room for one stack / kept free", async () => {
+    renderSettingsWith({}, "stacking", {}, { enabled: false },
+      { total_gb: 16, available_gb: 6, stack_budget_gb: 4.2, stack_budget_source: "available" });
+    expect(await screen.findByText("Other apps on your NAS: 10 GB")).toBeVisible();
+    expect(screen.getByText("Room one stack may use: 4.2 GB")).toBeVisible();
+    expect(screen.getByText("Kept free: 1.8 GB")).toBeVisible();
+    expect(screen.getByTestId("memory-headline")).toHaveTextContent(/^Automatic/);
+  });
+
+  it("puts the cores choice here, with its warning and way back", async () => {
+    const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
+    renderSettingsWith({}, "stacking", { cpu_workers: null });
+    const nas = within(await screen.findByTestId("nas-section"));
+    const one = await nas.findByRole("button", { name: "One" });
+    fireEvent.click(one);
+    await waitFor(() => expect(one).toHaveAttribute("aria-pressed", "true"));
+    expect(nas.getByText(/Imports and stacks will take longer/)).toBeVisible();
+    fireEvent.click(nas.getByRole("button", { name: /Back to default/ }));
+    await waitFor(() =>
+      expect(nas.getByRole("button", { name: "All (fastest)" })).toHaveAttribute("aria-pressed", "true"));
+
+    fireEvent.click(nas.getByRole("button", { name: "One" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Save settings" })[0]);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect((put.mock.calls[0][0] as Record<string, unknown>).cpu_workers).toBe(1);
+  });
+
+  it("no longer files the cores box under Plate solving", async () => {
+    renderSettingsWith({}, "plate-solving");
+    await waitFor(() => expect(screen.getByLabelText(/ASTAP path/)).toBeVisible());
+    expect(screen.queryByLabelText(/CPU workers/)).toBeNull();
+  });
+});
+
+describe("Maintenance — updates & upkeep", () => {
+  it("heads the upkeep cards with what they are for", async () => {
+    renderSettingsWith({}, "maintenance");
+    expect(await screen.findByRole("heading", { name: "Updates & upkeep" })).toBeVisible();
+    expect(screen.getByText(/Nothing here touches your raw subs/)).toBeVisible();
+    expect(screen.getByText("Reprocess everything")).toBeVisible();
   });
 });

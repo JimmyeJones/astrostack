@@ -16,7 +16,6 @@ import {
 } from "../api/client";
 import { dependencyMet } from "../api/depends";
 import { compassPoint } from "../tonight";
-import { stackBudgetNote } from "../stackBudgetNote";
 import { RefinishPicturesCard } from "../components/RefinishPicturesCard";
 import { UpdatesCard } from "../components/UpdatesCard";
 import { HintLabel, StackOptionControl } from "../components/StackOptionControl";
@@ -27,6 +26,10 @@ import { SectionTabs, type PageSection } from "../components/SectionTabs";
 import { MoreSettingsSection } from "../components/settings/MoreSettings";
 import { FramePickySection } from "../components/settings/FramePicky";
 import { HandsOffSection } from "../components/settings/HandsOff";
+import { NasSection } from "../components/settings/NasSection";
+import {
+  ObservingSiteSection, PLAN_SITE_QUERY_KEY,
+} from "../components/settings/ObservingSite";
 import type { SettingsSection } from "../settingsSections";
 import { minMaxIgnoresWeightingHint } from "../weightingHint";
 import { folderConflict, settingsErrorMessage } from "../settingsFolders";
@@ -884,6 +887,7 @@ export function SettingsView() {
       notifications.show({ message: "Settings saved", color: "teal" });
       qc.invalidateQueries({ queryKey: ["settings"] });
       qc.invalidateQueries({ queryKey: ["system"] });
+      qc.invalidateQueries({ queryKey: PLAN_SITE_QUERY_KEY });
     },
     onError: (e: Error) => notifications.show({
       // The guards on this page already write a plain-language reason; the API
@@ -1066,13 +1070,11 @@ export function SettingsView() {
             value={(form.astap_path as string) ?? ""}
             placeholder="auto-detect"
             onChange={(e) => set("astap_path", e.currentTarget.value || null)} />
-          <SimpleGrid cols={{ base: 1, xs: 3 }}>
+          <SimpleGrid cols={{ base: 1, xs: 2 }}>
             <NumberInput label={lbl("astap_fov_deg", "ASTAP FOV (deg)")} value={num("astap_fov_deg")}
               step={0.1} min={0.1} onChange={(v) => set("astap_fov_deg", v === "" ? "" : Number(v))} />
             <NumberInput label={lbl("astap_timeout_s", "ASTAP timeout (s)")} value={num("astap_timeout_s")}
               min={5} onChange={(v) => set("astap_timeout_s", v === "" ? "" : Number(v))} />
-            <NumberInput label={lbl("cpu_workers", "CPU workers")} value={num("cpu_workers")}
-              min={1} onChange={(v) => set("cpu_workers", v === "" ? null : Number(v))} />
           </SimpleGrid>
           <Switch label={lbl("astap_use_solve_hints", "Use telescope target as solve hint")}
             checked={bool("astap_use_solve_hints")}
@@ -1087,27 +1089,14 @@ export function SettingsView() {
     "observing-site": (
       <Paper withBorder p="lg">
         <Stack>
-          <Text fw={600}>Observing site (Tonight planner)</Text>
-          <Text size="xs" c="dimmed">
-            Leave blank to read your location automatically from a plate-solved
-            Seestar frame. Only needed if you want to override it.
-          </Text>
-          <SimpleGrid cols={{ base: 1, xs: 3 }}>
-            <NumberInput label={lbl("site_lat", "Latitude (°N)")} value={num("site_lat")}
-              min={-90} max={90} step={0.1} decimalScale={4} placeholder="auto from frames"
-              onChange={(v) => set("site_lat", v === "" ? null : Number(v))} />
-            <NumberInput label={lbl("site_lon", "Longitude (°E)")} value={num("site_lon")}
-              min={-180} max={180} step={0.1} decimalScale={4} placeholder="auto from frames"
-              onChange={(v) => set("site_lon", v === "" ? null : Number(v))} />
-            <NumberInput label={lbl("site_elevation_m", "Elevation (m)")} value={num("site_elevation_m")}
-              min={-500} max={9000} step={10}
-              onChange={(v) => set("site_elevation_m", v === "" ? 0 : Number(v))} />
-          </SimpleGrid>
-          <NumberInput label={lbl("min_target_altitude_deg", "Minimum target altitude (°)")}
-            value={num("min_target_altitude_deg")} min={0} max={80} step={5}
-            allowDecimal={false} w={{ base: "100%", xs: 260 }}
-            onChange={(v) => set("min_target_altitude_deg", v === "" ? 30 : Number(v))} />
+          {/* Section 4 of the approved redesign: read it from my photos or
+              type it in, and the lowest altitude as a slider over a horizon
+              drawing. Replaces the bare latitude / longitude / elevation /
+              minimum-altitude boxes — same fields, same edit buffer. */}
+          <ObservingSiteSection form={form} labelFor={lbl}
+            onPatch={(patch) => setForm((p) => ({ ...p, ...patch }))} />
 
+          <Divider />
           <div data-setting="horizon_profile">
             <HintLabel label="Your skyline" hint={HINTS.horizon_profile} />
             <Text size="xs" c="dimmed" mb="xs">
@@ -1192,49 +1181,14 @@ export function SettingsView() {
           </Stack>
         </Paper>
 
+        {/* Section 6 of the approved redesign: memory as a bar, the memory
+            limit and cores cards, and an exact-figure box. Replaces the
+            "Memory" card that stood here, keeping both of its advisories. */}
         <Paper withBorder p="lg">
           <Stack>
-            <Text fw={600}>Memory</Text>
-            <NumberInput label={lbl("max_stack_memory_gb", "Stack memory budget (GB)")}
-              value={num("max_stack_memory_gb")} min={0.5} max={1024} step={0.5}
-              decimalScale={1} placeholder="auto (~70% of RAM)" w={{ base: "100%", xs: 260 }}
-              onChange={(v) => set("max_stack_memory_gb", v === "" ? null : Number(v))} />
-            {(() => {
-              // What the budget actually is right now, and which control set it —
-              // the engine's own answer, because the browser can't see the
-              // container's environment. `null` on an older backend.
-              const note = stackBudgetNote(system.data?.memory);
-              if (!note) return null;
-              return note.tone === "warning" ? (
-                <Alert color="orange" icon={<IconInfoCircle size={16} />}
-                  title="This field is being overridden">
-                  {note.text}
-                </Alert>
-              ) : (
-                <Text size="sm" c="dimmed">{note.text}</Text>
-              );
-            })()}
-            {(() => {
-              // Advisory only: a budget higher than the box's available RAM re-opens
-              // the OOM door the guard exists to close. Silent where the env
-              // override is in force: the field it is warning about is not the
-              // number any stack will be priced against, and the note above has
-              // already said so.
-              const budget = form.max_stack_memory_gb;
-              const avail = system.data?.memory?.available_gb;
-              if (system.data?.memory?.stack_budget_source === "env") return null;
-              if (typeof budget !== "number" || typeof avail !== "number") return null;
-              if (budget <= avail) return null;
-              return (
-                <Alert color="orange" icon={<IconInfoCircle size={16} />}
-                  title="Budget is higher than this machine's available RAM">
-                  You set {budget} GB, but only about {avail} GB is currently
-                  available on this box. A stack that actually uses this much could
-                  still run out of memory. Consider lowering it, or leave it blank
-                  for the automatic ~70%-of-RAM cap.
-                </Alert>
-              );
-            })()}
+            <NasSection form={form} labelFor={lbl} memory={system.data?.memory}
+              ctx={{ cpuCount: system.data?.cpu_count ?? null }}
+              onPatch={(patch) => setForm((p) => ({ ...p, ...patch }))} />
             {saveRow()}
           </Stack>
         </Paper>
@@ -1289,6 +1243,16 @@ export function SettingsView() {
     ),
     maintenance: (
       <Stack>
+        {/* Section 7 of the approved redesign: the upkeep cards, unchanged,
+            under one heading that says what they are for. */}
+        <Stack gap={4}>
+          <Title order={3}>Updates &amp; upkeep</Title>
+          <Text size="sm" c="dimmed">
+            Keeping AstroStack itself up to date, re-making pictures after an
+            improvement, and how much of its own history it keeps. Nothing here
+            touches your raw subs.
+          </Text>
+        </Stack>
         <UpdatesCard />
         <Maintenance />
         <RefinishPicturesCard />

@@ -1,5 +1,10 @@
 # Current focus — AstroStack
 
+*2026-10-15 (Builder, branch `claude/adoring-planck-uubmsy`) — **v0.499.0 shipped Settings redesign slice 4**
+("Where you observe from" + `GET /api/plan/site`, "How hard your NAS works", "Updates & upkeep"). Baseline 7953
+passed / 7 skipped; `main` CI run 2323 green on the start HEAD; no open PRs. **START HERE NEXT RUN:** slice 5 (the
+four picture cards over the stacking list) is the last slice; Stacking is now 2,318 px on a phone, so measure it.*
+
 *2026-10-15 (Builder, branch `claude/adoring-planck-gyjo9b`) — **v0.498.0 shipped Settings redesign slice 3**
 ("Leaving out bad frames": How picky? + frame illustration + trails switch on Automation, `FramePickySection`).
 `main`'s CI run 2321 was green on the start HEAD; no open PRs. Spec correction: the sensitivity levels differ in
