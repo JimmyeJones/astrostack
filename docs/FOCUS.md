@@ -1,5 +1,12 @@
 # Current focus — AstroStack
 
+*2026-10-15 (Builder, branch `claude/adoring-planck-yziwqf`) — **v0.497.0 shipped Settings redesign slice 2**
+(hands-off cards + six-step row on Automation; spec correction: Check off does not hold Place/Stack). Baseline
+was 7953 passed / 7 skipped; nothing in "Bugs" was ungated. **START HERE NEXT RUN:** slice 3 (the "How picky?"
+control + frame illustration) is front of queue — put it on Automation and fold the auto-grade switch +
+Sensitivity select into it; Automation is 3,204 px on a phone now, so measure it again. Run the dogfood probe
+with `--build` or it measures the previous build. The note below is the 2026-10-14 run's and still holds.*
+
 *Last edited 2026-10-14 (Builder, branch `claude/nifty-lamport-s6bmf8` — **the backlog's one ⭐ item was
 owner-approved and unclaimed, so this run built its first slice — and the slice's own "Back to default"
 found a save that had been silently refusing a blank for as long as the field has existed. v0.496.0.**

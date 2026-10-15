@@ -1,5 +1,55 @@
 # Shipped — the record
 
+## 2026-10-15 (Builder, branch `claude/adoring-planck-yziwqf`) — the Settings redesign's second slice, and the step row the pipeline would not let say "everything after it waits"
+
+### v0.497.0 — ⭐ OWNER-APPROVED FEATURE (friendliness — PRIORITY 3), slice 2 of `docs/design/settings-redesign.md`: "How hands-off should AstroStack be?" and the six steps a new sub goes through
+
+**What shipped.** The Automation tab now opens with the spec's sections 1–2 (`HandsOffSection`,
+`frontend/src/components/settings/HandsOff.tsx`, logic in `handsOff.ts`). Three cards — **Do it all for me**
+(all six on), **Get them ready — I'll stack** (Notice/Sort/Check/Place on, Stack/Finish off — the owner's own
+setup), **Hands on** (all off) — with `aria-pressed`, the card matching what is *saved* tagged **Your saved
+setup**, a hand-made mix shown as **Custom** with no card picked, and a **Not saved yet** line while a picked
+card is still a preview. Under them, the six steps as a numbered row (Notice → Sort → Check → Place → Stack →
+Finish = `watcher_enabled`, `auto_ingest`, `auto_qc`, `auto_solve`, `auto_stack`, `auto_edit_on_autostack`),
+one switch each, a status (**Runs automatically / Waiting for an earlier step / You do this yourself**), the
+old switch's hover hint on the new name and a `Was:` line; the Notice step quotes the real
+`watch_quiet_period_s`. Then the two cards the spec puts there: **Stack once there are enough frames**
+(`auto_stack_min_frames`, `auto_stack_settle_min`) and **Two targets in one batch?** (`mixed_pointing_guard`),
+and the green *"Your raw subs are only ever read — never moved or deleted"* line.
+
+**The duplicates resolve here, not elsewhere.** The bare `Ingest / QC / Plate-solve / Auto-stack` switch row,
+the auto-edit switch, the two stack-trigger number boxes and the two-targets switch that used to open this tab
+are gone *from this tab* because the new row and cards drive the same fields in the same edit buffer; every
+key is still stamped `data-setting` (the page-wide *"nothing was removed"* guard passes unchanged).
+`watcher_enabled` also keeps its switch on Folders. **Walk-away mode** stays, under a *"More for hands-off
+nights"* divider, its last sentence now pointing at "the individual switches on this tab".
+
+**The spec correction this slice needed (the notes said to expect one).** The mockup draws the six as a strict
+chain — *"Switch off a step and everything after it waits for you"*. `webapp/pipeline.py::_pipeline_body` does
+not: with **Check** off, `run_qc_and_solve(run_qc=False, run_solve=True)` still places frames, and auto-stack
+is its own pass "not gated on QC/solve being on". Drawing Place/Stack/Finish as *waiting* there would have told
+the owner his stacks had stopped when they had not. So each step names what it really needs (`needs` in
+`PIPELINE_STEPS`: Sort←Notice, Check←Sort, **Place←Sort**, Stack←Place, Finish←Stack), and the sentence says
+*"the steps that need it wait until you do it yourself — press Scan incoming, or upload from the browser"*
+(both trigger `submit_pipeline` regardless of the watcher). The other links were traced and hold: the watcher
+loop is the only thing that starts a scan on its own (`watcher.py::_run` checks `watcher_enabled`; the
+watchdog handler only wakes it), un-ingested subs aren't in the library for QC/solve to see, auto-stack takes
+only placed subs, and auto-edit runs only on a picture auto-stack just made.
+
+**Tests.** +19 vitest (`handsOff.test.ts` 14 pure: preset mapping, the owner's setup reading as "ready",
+round-trips, Custom, unsaved, every chain link incl. *Check off does not hold Place/Stack/Finish*; 5 rendered
+in `Settings.test.tsx`: saved-setup tag, preview-until-Save then all six in the PUT, Custom, the waiting
+statuses live, `Was:` lines). Fail-before: re-chaining Place onto Check turns two red. One existing test's
+section marker moved from the removed *"Automatic pipeline"* heading to the new one. No field, default,
+schema, on-disk or API change, so no upgrade test is owed beyond the existing config round-trip.
+
+**Height (`scripts/agent-dogfood.sh --build`, sweep CLEAN after one fix).** `/settings/automation`
+**1,568 → 3,204 px on a phone, 1,201 → 2,079 px desktop** — it carries two new sections, and it stays under
+`/settings/more` (5,022 / 3,736), which is unchanged. The first probe caught a clipped tag
+("You choose when to stack" in a 151 px box) — now "You press Stack" — and the step row was put in two columns
+on a phone (3,442 → 3,204). Beware: the probe **reuses** `webapp/static` unless given `--build`, so an
+"after" run straight after a "before" run measures the old page and reports identical heights.
+
 ## 2026-10-14 (Builder, branch `claude/nifty-lamport-s6bmf8`) — the Settings redesign's first slice, and the save that silently refused a blank
 
 ### v0.496.0 — ⭐ OWNER-APPROVED FEATURE (friendliness — PRIORITY 3), slice 1 of `docs/design/settings-redesign.md`: "More settings" — the scary settings in plain words, each warning the moment it leaves its default
