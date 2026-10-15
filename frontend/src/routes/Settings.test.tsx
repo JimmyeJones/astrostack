@@ -1285,7 +1285,12 @@ describe("More settings", () => {
     renderSettingsWith({}, "more", { copy_to_cache: true });
     await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
 
-    expect(screen.getByText(/you need about as much free space again/)).toBeVisible();
+    // The warning is driven by the form buffer, which a post-render effect seeds
+    // from the settings query — a beat after the heading renders. Wait for the
+    // state this test is about, not just for the page to exist, or the assertion
+    // races the seed (green locally, flaky under CI load).
+    await waitFor(() =>
+      expect(screen.getByText(/you need about as much free space again/)).toBeVisible());
     const back = screen.getByRole("button", { name: "Back to default (Off)" });
     fireEvent.click(back);
 
@@ -1301,7 +1306,11 @@ describe("More settings", () => {
     // was removed" safe rather than two switches arguing.
     renderSettingsWith({}, "more", { copy_to_cache: true });
     await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
-    expect(screen.getByLabelText(/Copy frames into local cache/)).toBeChecked();
+    // The old control's checked state comes from the shared form buffer, seeded
+    // a beat after the heading by a post-render effect — wait for it rather than
+    // racing the seed.
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Copy frames into local cache/)).toBeChecked());
 
     fireEvent.click(screen.getByRole("button", { name: "Back to default (Off)" }));
 
@@ -1314,8 +1323,11 @@ describe("More settings", () => {
     renderSettingsWith({}, "more", { incoming_dir: "/elsewhere/incoming", library_root: "" });
     await waitFor(() => expect(screen.getByRole("heading", { name: "More settings" })).toBeVisible());
 
-    expect(screen.getByText(/your library will look empty until you move the files/))
-      .toBeVisible();
+    // The off-default warning depends on the form buffer the settings query
+    // seeds a beat after the heading; wait for it instead of racing the seed.
+    await waitFor(() =>
+      expect(screen.getByText(/your library will look empty until you move the files/))
+        .toBeVisible());
     fireEvent.click(
       screen.getByRole("button", { name: "Back to default (Standard (set when installed))" }));
 

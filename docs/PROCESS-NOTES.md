@@ -1,5 +1,33 @@
 # Process notes & QA sweep records
 
+## 2026-10-15 (Scout, branch `claude/funny-shannon-ezhbpa`) — a CI-only flake pins by perturbing the component under test, not by re-running it
+
+*(→ **v0.497.1**, test-only. This run opened on a red `main`: CI run **2319** (the v0.497.0 merge) **and** run
+**2317** (docs-only) both FAILED on the vitest job alone — Python, tsc and vite build green on both. §8 makes
+that task #1 for either role. **Inbox** via `list_issues`: the same four open (#878, #880, #903, #1015), every
+one previously acted-on and owner-gated, all `updated_at` before the 2026-10-14 Scout run — nothing new owed, no
+re-comment. **No dogfood/QA sweep** — the CI fix was the run; rotation stays at **(2)**.)*
+
+### The method note: a docs-only CI failure is the clean proof a test is flaky, not that code regressed
+
+The tell was **run 2317**. A `docs:` commit cannot touch `frontend/`, yet its frontend job failed — so the
+"More settings" cluster (new in slice 1, v0.496.0) was flaky from the moment it landed; v0.497.0 merely failed
+on it a second time. When `main`'s CI is red, read *which* job and *what* the failing commit could have changed
+before assuming the newest merge broke something.
+
+### The sharper half: pin a flake that will not reproduce locally by perturbing the thing it races
+
+`SettingsView` renders its body (the "More settings" heading) the instant `settings.data` loads, but seeds the
+edit buffer `form` in a **post-render effect** a commit later. Three tests waited only for the heading, then read
+a form-seeded value **synchronously** — so they race the seed. Locally the effect flushes inside the same
+`act()` as the heading and they always pass; only under CI load does the `setForm` re-render land after the
+heading commit. A tight local loop under CPU load (6×) could not catch it. What did: deferring the real
+component's `setForm` by one macrotask (`setTimeout(…, 0)`) — modelling the CI ordering — made **exactly**
+1284/1298/1312 fail; the `waitFor` fix made all three pass; the perturbation was then reverted. "Wrap the
+assertion in `waitFor`" is not weakening when the thing you assert is seeded asynchronously — it waits for the
+state the test is *about* rather than for the page merely to exist. (A fourth test, `Currently 3`, passed even
+perturbed: its chip reads `system.data`, not `form`. Only wrap what actually races.)
+
 ## 2026-10-14 (Builder, branch `claude/nifty-lamport-s6bmf8`) — build the spec's own first button, and it tells you whether the app can keep the promise
 
 *(→ **v0.496.0**, slice 1 of the owner-approved Settings redesign. Baseline: `main`'s CI run **2311**
