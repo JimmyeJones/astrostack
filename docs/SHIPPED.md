@@ -28,6 +28,10 @@ unattended pipeline grades only while **Check** (`auto_qc`) is on (`_pipeline_bo
 `submit_qc_solve` and Process target grade regardless — so with grading on and Check off the section says so in
 an orange `role="note"`.
 
+**Height, measured (`scripts/agent-dogfood.sh`, --build).** `/settings/automation` at phone width **3,204 → 4,170 px**
+(+966 — the twelve tiles wrap to three rows of four); desktop 2,712 px. Sweep **CLEAN**: nothing overflowing, no
+console errors. Not shortened by folding the illustration: it is the one picture the spec asked this section for.
+
 **Tests.** +14 vitest in `framePicky.test.ts` (field mapping, round-trip, Keep all leaves sensitivity alone,
 unknown sensitivity picks nothing, the illustration is monotone in strictness, never cuts a sharp or a bit-soft
 frame, trail decided by the switch alone, both notes) and +6 in `Settings.test.tsx` (read-back, save-as-two-fields,
