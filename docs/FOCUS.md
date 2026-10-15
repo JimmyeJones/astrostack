@@ -1,5 +1,23 @@
 # Current focus — AstroStack
 
+*2026-10-15 (Scout, branch `claude/funny-shannon-ezhbpa`) — **main's CI was red, so §8 made it task #1: three
+"More settings" tests asserted form-seeded state before the seed effect had committed. v0.497.1 (test-only).***
+*Baseline the right way round — `main`'s own CI was a FAILURE on **run 2319** (the v0.497.0 merge) **and run
+2317**, a docs-only change whose frontend job its diff could not have broken; that pair is the proof the cluster
+(added by slice 1, v0.496.0) is **flaky**, not that slice 2 regressed. `SettingsView` renders the "More settings"
+heading as soon as `settings.data` loads, but seeds the edit buffer (`form`) in a post-render effect a beat
+later; three tests waited only for the heading and then **synchronously** read a form-seeded value, so under CI
+load (where the `setForm` re-render is deferred past the heading commit) the read is stale — unchecked switch, no
+off-default warning. The fix wraps each assertion in `waitFor`; pinned deterministically by perturbing the real
+component to defer the seed one macrotask (exactly 1284/1298/1312 fail unfixed, all pass fixed, perturbation then
+reverted — `git diff` on `Settings.tsx` empty). A fourth test (`Currently 3`) reads `system.data`, not `form`,
+and was left alone. **Inbox:** the same four open issues (#878, #880, #903, #1015), every one previously acted-on
+and owner-gated, all `updated_at` before the last Scout run — nothing new owed. **No dogfood/QA sweep this run**
+— restoring green `main` was the whole of it; the rotation is still at **(2)** (mosaic/walk-away divergence from a
+whole-target or peak number that is really per-panel). **START HERE NEXT RUN:** read `main`'s own CI result first
+(`actions_list` on `ci.yml`/`main`); slice 3 of the Settings redesign (the "How picky?" control) is still the
+front of the Builder's queue — see the note immediately below, which still holds in full.*
+
 *2026-10-15 (Builder, branch `claude/adoring-planck-yziwqf`) — **v0.497.0 shipped Settings redesign slice 2**
 (hands-off cards + six-step row on Automation; spec correction: Check off does not hold Place/Stack). Baseline
 was 7953 passed / 7 skipped; nothing in "Bugs" was ungated. **START HERE NEXT RUN:** slice 3 (the "How picky?"

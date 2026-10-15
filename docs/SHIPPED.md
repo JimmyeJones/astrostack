@@ -1,6 +1,37 @@
 # Shipped — the record
 
-## 2026-10-15 (Builder, branch `claude/adoring-planck-yziwqf`) — the Settings redesign's second slice, and the step row the pipeline would not let say "everything after it waits"
+## 2026-10-15 (Scout, branch `claude/funny-shannon-ezhbpa`) — main's CI was red; three "More settings" tests asserted form-seeded state before the seed effect had run
+
+### v0.497.1 — the Settings redesign's flaky "More settings" tests now wait for the state they assert, not just for the page to exist (test-only; no product change)
+
+**Why this was task #1 (AGENTS.md §8).** `main`'s CI was a FAILURE on two consecutive runs — **2319** (the
+v0.497.0 merge) and **2317** (a *docs-only* change). A docs commit cannot break the frontend, so the frontend
+job failing on 2317 is proof the "More settings" test cluster (added by slice 1, **v0.496.0**) is **flaky**, not
+that slice 2 regressed anything. Python, tsc and vite build were green on both runs; only the vitest job was red.
+
+**The race.** `SettingsView` gates its body on `settings.data` (a `<Loader/>` until the settings query resolves),
+so the "More settings" heading renders the moment the query lands. But the edit buffer (`form`) is seeded by a
+*post-render* effect — `useEffect(() => { if (settings.data) setForm(settings.data) }, [settings.data])` — which
+commits a beat later. Three tests waited only for the heading and then **synchronously** read a form-seeded value:
+the off-default "Heads up" warning (driven by `copy_to_cache: true` or a custom `incoming_dir`) and the old
+control's checked state. Locally the effect flushes inside the same `act()` as the heading, so they pass; under CI
+load the `setForm` re-render is deferred past the heading-visible commit, so the read sees `form={}` — unchecked,
+no warning — and fails. That is exactly run 2319's `Settings.test.tsx:1304 expect(...).toBeChecked()` and run
+2317's folder-clearing failure.
+
+**The fix.** The three assertions (`warns the moment a value leaves its default`, `edits the same buffer as the
+old control`, `goes back to the standard folders`) now sit inside `waitFor`, so each waits for the state it is
+about instead of racing the seed — strictly more correct, nothing weakened. A fourth test (`shows a stored value
+… Currently 3`) was left alone: its chip reads `system.data`, not the seeded form, and it passed even under the
+perturbation below.
+
+**Fail-before / pass-after, deterministically.** The flake will not reproduce locally in isolation (the effect
+flushes in the same `act()`), so the mechanism was pinned by perturbing the real component — `setForm` deferred
+one macrotask via `setTimeout(…, 0)`, modelling the CI ordering. Unfixed, exactly those three tests failed
+(1284/1298/1312); with the `waitFor` fix all three passed; the perturbation was then reverted (`git diff` on
+`Settings.tsx` empty). No production code changed.
+
+
 
 ### v0.497.0 — ⭐ OWNER-APPROVED FEATURE (friendliness — PRIORITY 3), slice 2 of `docs/design/settings-redesign.md`: "How hands-off should AstroStack be?" and the six steps a new sub goes through
 
