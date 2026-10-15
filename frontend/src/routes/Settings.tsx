@@ -1,6 +1,6 @@
 import {
   Accordion, Alert, Badge, Button, Center, Code, CopyButton, Divider, FileButton,
-  Group, Loader, NumberInput, Paper, Radio, Select, SimpleGrid, Stack, Switch,
+  Group, Loader, NumberInput, Paper, Radio, SimpleGrid, Stack, Switch,
   TagsInput, Text, TextInput, Title,
 } from "@mantine/core";
 import {
@@ -25,6 +25,7 @@ import { NightSkySettings } from "../components/NightSkySettings";
 import { SkylineEditor } from "../components/SkylineEditor";
 import { SectionTabs, type PageSection } from "../components/SectionTabs";
 import { MoreSettingsSection } from "../components/settings/MoreSettings";
+import { FramePickySection } from "../components/settings/FramePicky";
 import { HandsOffSection } from "../components/settings/HandsOff";
 import type { SettingsSection } from "../settingsSections";
 import { minMaxIgnoresWeightingHint } from "../weightingHint";
@@ -1010,6 +1011,13 @@ export function SettingsView() {
           <HandsOffSection form={form} saved={settings.data} labelFor={lbl}
             onPatch={(patch) => setForm((p) => ({ ...p, ...patch }))} />
 
+          {/* Section 3: "How picky?" — replaces the auto-grade switch, its
+              Sensitivity select and the trails switch that sat at the foot of
+              this tab. */}
+          <Divider />
+          <FramePickySection form={form} labelFor={lbl}
+            onPatch={(patch) => setForm((p) => ({ ...p, ...patch }))} />
+
           <Divider label="More for hands-off nights" />
           <Switch
             size="md"
@@ -1040,23 +1048,6 @@ export function SettingsView() {
           <Switch label={lbl("copy_to_cache", "Copy frames into local cache")}
             checked={bool("copy_to_cache")}
             onChange={(e) => set("copy_to_cache", e.currentTarget.checked)} />
-          <Switch label={lbl("keep_streaked_frames", "Keep frames with satellite/plane streaks")}
-            checked={bool("keep_streaked_frames")}
-            onChange={(e) => set("keep_streaked_frames", e.currentTarget.checked)} />
-          <Group align="flex-end">
-            <Switch label={lbl("auto_grade_frames", "Auto-grade frames after QC")}
-              checked={bool("auto_grade_frames")}
-              onChange={(e) => set("auto_grade_frames", e.currentTarget.checked)} />
-            <Select label={lbl("auto_grade_sensitivity", "Sensitivity")} size="xs" w={170}
-              allowDeselect={false} disabled={!bool("auto_grade_frames")}
-              data={[
-                { value: "conservative", label: "Conservative" },
-                { value: "balanced", label: "Balanced" },
-                { value: "aggressive", label: "Aggressive" },
-              ]}
-              value={(form.auto_grade_sensitivity as string) ?? "balanced"}
-              onChange={(v) => set("auto_grade_sensitivity", v ?? "balanced")} />
-          </Group>
           {saveRow()}
         </Stack>
       </Paper>
