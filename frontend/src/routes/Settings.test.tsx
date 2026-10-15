@@ -1019,6 +1019,10 @@ describe("folder conflict, while you type", () => {
 
     await waitFor(() =>
       expect(screen.getByText("Watched folders")).toBeVisible());
+    // The seeded form, not just the heading: an edit typed before
+    // `SettingsView`'s seed effect commits is overwritten by it.
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Data root/)).toHaveValue("/data"));
     const save = screen.getAllByRole("button", { name: "Save settings" })[0];
     expect(save).not.toBeDisabled();
 
@@ -1445,10 +1449,13 @@ describe("Automation — how hands-off should AstroStack be?", () => {
     renderSettingsWith({}, "automation", { ...OWNER, auto_stack: true, auto_qc: false });
     const step = (field: string) =>
       document.querySelector(`li[data-setting="${field}"]`) as HTMLElement;
-    await waitFor(() => expect(step("auto_qc")).toHaveAttribute("data-step-state", "manual"));
-    expect(within(step("auto_qc")).getByText("You do this yourself")).toBeInTheDocument();
+    // "auto" only once the form is seeded — an unseeded form reads every
+    // step as off, so waiting on `auto_qc`'s "manual" alone passed too early
+    // (CI, 2026-10-15).
     // Placing and stacking run whether or not frames were checked.
-    expect(step("auto_solve")).toHaveAttribute("data-step-state", "auto");
+    await waitFor(() => expect(step("auto_solve")).toHaveAttribute("data-step-state", "auto"));
+    expect(step("auto_qc")).toHaveAttribute("data-step-state", "manual");
+    expect(within(step("auto_qc")).getByText("You do this yourself")).toBeInTheDocument();
     expect(step("auto_stack")).toHaveAttribute("data-step-state", "auto");
     expect(step("auto_edit_on_autostack")).toHaveAttribute("data-step-state", "manual");
 
