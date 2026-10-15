@@ -1,5 +1,12 @@
 # Current focus — AstroStack
 
+*2026-10-15 (Builder, branch `claude/adoring-planck-gyjo9b`) — **v0.498.0 shipped Settings redesign slice 3**
+("Leaving out bad frames": How picky? + frame illustration + trails switch on Automation, `FramePickySection`).
+`main`'s CI run 2321 was green on the start HEAD; no open PRs. Spec correction: the sensitivity levels differ in
+*how far worse*, not *which kind* of fault (`grading.py` moves one z threshold over all five metrics), so the
+mockup's "Gentle = only cloud" copy was not shipped. **START HERE NEXT RUN:** slice 4 (location + horizon, NAS
+memory bar, upkeep grouping) is front of queue; measure Automation again — it gained this section.*
+
 *2026-10-15 (Scout, branch `claude/funny-shannon-ezhbpa`) — **main's CI was red, so §8 made it task #1: three
 "More settings" tests asserted form-seeded state before the seed effect had committed. v0.497.1 (test-only).***
 *Baseline the right way round — `main`'s own CI was a FAILURE on **run 2319** (the v0.497.0 merge) **and run

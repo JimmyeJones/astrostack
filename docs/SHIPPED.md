@@ -1,5 +1,45 @@
 # Shipped — the record
 
+## 2026-10-15 (Builder, branch `claude/adoring-planck-gyjo9b`) — Settings redesign slice 3
+
+### v0.498.0 — "Leaving out bad frames": the "How picky?" control, a Kept / Left out illustration, and the trails switch, in plain words
+
+**What.** Section 3 of `docs/design/settings-redesign.md`, on Automation under the hands-off cards
+(`frontend/src/components/settings/FramePicky.tsx` draws; `framePicky.ts` holds the copy and arithmetic). One
+four-way **How picky?** control — *Keep all* (`auto_grade_frames` off) / *Gentle* / *Balanced* / *Strict*
+(`auto_grade_sensitivity` = conservative / balanced / aggressive) — a twelve-tile illustration marking each kind
+of frame **Kept** or **Left out** for the current choice (labelled *Illustration*), and the trails switch
+(`keep_streaked_frames`) with a note for each position. It replaces the bare auto-grade switch, the Sensitivity
+select and the trails switch that sat at the foot of the tab; the three fields keep their `data-setting` stamps
+(the page-wide "nothing was removed" guard is unchanged and green) and the three old labels sit on a `Was:` line.
+*Keep all* only switches grading off and leaves the stored sensitivity alone, so the old level is one click back.
+
+**The spec correction this slice had to make, by reading the grader.** The mockup says *Gentle* leaves out
+"only clouded-out frames" and *Strict* "also frames that are only slightly soft". `seestack/qc/grading.py` does
+neither: every level grades **every** metric (FWHM, eccentricity, sky, star count, transparency) and the levels
+only move one robust-z threshold (`SENSITIVITY_THRESHOLDS` 5.0 / 3.5 / 2.5), while each metric's "meaningfully
+worse" floor (≥25 % softer, ≥30 % fewer stars, …) does not move at all. So the notes speak of *how far worse than
+the rest of the night*, the illustration orders kinds by how extreme they are (thick cloud and a bad shake go at
+Gentle, soft focus and thin haze at Balanced, a borderline frame only at Strict), and a "bit soft" frame is
+**kept at every level** — a unit test pins that. Two further sentences are there because they are true of the
+code: it never leaves out more than a quarter of a target's frames (`MAX_REJECT_FRACTION`) and needs ten frames
+before it judges any (`MIN_FRAMES_FOR_GRADING`). And one because a beginner would otherwise be misled: the
+unattended pipeline grades only while **Check** (`auto_qc`) is on (`_pipeline_body` gates the hook on it), whereas
+`submit_qc_solve` and Process target grade regardless — so with grading on and Check off the section says so in
+an orange `role="note"`.
+
+**Height, measured (`scripts/agent-dogfood.sh`, --build).** `/settings/automation` at phone width **3,204 → 4,170 px**
+(+966 — the twelve tiles wrap to three rows of four); desktop 2,712 px. Sweep **CLEAN**: nothing overflowing, no
+console errors. Not shortened by folding the illustration: it is the one picture the spec asked this section for.
+
+**Tests.** +14 vitest in `framePicky.test.ts` (field mapping, round-trip, Keep all leaves sensitivity alone,
+unknown sensitivity picks nothing, the illustration is monotone in strictness, never cuts a sharp or a bit-soft
+frame, trail decided by the switch alone, both notes) and +6 in `Settings.test.tsx` (read-back, save-as-two-fields,
+the trails switch/note/tile together, the Check-off note, the `Was:` line and stamps). The component tests wait
+for the edit buffer to seed before clicking — the race v0.497.1 fixed. No `Settings` field, default, schema,
+on-disk or API change, so no upgrade test is touched (the existing `test_config_upgrade.py` round-trip covers the
+three fields unchanged).
+
 ## 2026-10-15 (Scout, branch `claude/funny-shannon-ezhbpa`) — main's CI was red; three "More settings" tests asserted form-seeded state before the seed effect had run
 
 ### v0.497.1 — the Settings redesign's flaky "More settings" tests now wait for the state they assert, not just for the page to exist (test-only; no product change)

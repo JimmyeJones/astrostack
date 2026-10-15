@@ -1446,3 +1446,87 @@ describe("Automation — how hands-off should AstroStack be?", () => {
       .toBeInTheDocument();
   });
 });
+
+// --- Settings redesign slice 3: "Leaving out bad frames" (How picky?) ----------
+
+describe("Automation — leaving out bad frames", () => {
+  const picky = () => screen.getByRole("group", { name: "How picky?" });
+
+  it("shows grading off as Keep all, with the trail tile left out", async () => {
+    renderSettingsWith({}, "automation", { auto_qc: true, auto_grade_frames: false });
+    await waitFor(() =>
+      expect(within(picky()).getByRole("button", { name: "Keep all" }))
+        .toHaveAttribute("aria-pressed", "true"));
+    expect(screen.getByTestId("picky-note")).toHaveTextContent(/No frame is left out/);
+    const leftOut = [...document.querySelectorAll('[data-left-out="true"]')]
+      .map((el) => el.getAttribute("data-frame-kind"));
+    expect(leftOut).toEqual(["trail"]);
+  });
+
+  it("reads a stored sensitivity back as its level", async () => {
+    renderSettingsWith({}, "automation",
+      { auto_qc: true, auto_grade_frames: true, auto_grade_sensitivity: "aggressive" });
+    await waitFor(() =>
+      expect(within(picky()).getByRole("button", { name: "Strict" }))
+        .toHaveAttribute("aria-pressed", "true"));
+    expect(within(picky()).getByRole("button", { name: "Keep all" }))
+      .toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("saves a picked level as the two old fields, and Keep all leaves the sensitivity alone", async () => {
+    const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
+    renderSettingsWith({}, "automation",
+      { auto_qc: true, auto_grade_frames: false, auto_grade_sensitivity: "balanced" });
+    // Wait for the edit buffer to be seeded (auto_qc alone on reads as Custom),
+    // or the seed would land after the click and overwrite it.
+    await screen.findByTestId("hands-off-custom");
+    const gentle = screen.getByRole("button", { name: "Gentle" });
+    fireEvent.click(gentle);
+    await waitFor(() => expect(gentle).toHaveAttribute("aria-pressed", "true"));
+    // The illustration redraws with the choice.
+    expect(document.querySelector('[data-frame-kind="cloud"]'))
+      .toHaveAttribute("data-left-out", "true");
+    expect(document.querySelector('[data-frame-kind="soft"]'))
+      .toHaveAttribute("data-left-out", "false");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Save settings" })[0]);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    let patch = put.mock.calls[0][0] as Record<string, unknown>;
+    expect(patch.auto_grade_frames).toBe(true);
+    expect(patch.auto_grade_sensitivity).toBe("conservative");
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep all" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Save settings" })[0]);
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(2));
+    patch = put.mock.calls[1][0] as Record<string, unknown>;
+    expect(patch.auto_grade_frames).toBe(false);
+    expect(patch.auto_grade_sensitivity).toBe("conservative");
+  });
+
+  it("flips the trails switch, its note and the trail tile together", async () => {
+    renderSettingsWith({}, "automation", { auto_qc: true, keep_streaked_frames: false });
+    await screen.findByTestId("hands-off-custom");
+    const sw = await screen.findByRole("switch", { name: /Keep frames with a satellite or plane trail/ });
+    await waitFor(() => expect(screen.getByTestId("trail-note")).toHaveTextContent(/^Off \(recommended\)/));
+    fireEvent.click(sw);
+    await waitFor(() => expect(sw).toBeChecked());
+    expect(screen.getByTestId("trail-note")).toHaveTextContent(/^On:/);
+    expect(document.querySelector('[data-frame-kind="trail"]'))
+      .toHaveAttribute("data-left-out", "false");
+  });
+
+  it("warns when grading is on but Check is off", async () => {
+    renderSettingsWith({}, "automation", { auto_qc: false, auto_grade_frames: true });
+    await waitFor(() =>
+      expect(screen.getByTestId("picky-waiting")).toHaveTextContent(/Check \(step 3\) is off/));
+    expect(screen.getByTestId("picky-waiting")).toHaveAttribute("role", "note");
+  });
+
+  it("keeps the three old names on a Was: line, and stamps all three fields", async () => {
+    renderSettingsWith({}, "automation", {});
+    await screen.findByText(/Was: “Auto-grade frames after QC”, “Sensitivity”/);
+    for (const k of ["auto_grade_frames", "auto_grade_sensitivity", "keep_streaked_frames"]) {
+      expect(document.querySelector(`[data-setting="${k}"]`)).not.toBeNull();
+    }
+  });
+});
