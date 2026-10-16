@@ -1,5 +1,26 @@
 # Current focus — AstroStack
 
+*2026-10-16 (Scout, branch `claude/funny-shannon-dyejl9`) — **QA rotation sweep (2) — mosaic/walk-away
+divergence from a whole-target or *peak* number that is really per-panel — came back CLEAN on the owner's own
+2×2 mosaic shape, and the inbox is unchanged. No code shipped; docs only, which is the honest outcome.** Baseline:
+`main`'s own CI run **2330** green on the exact HEAD `52712296` (v0.500.0), no open PRs, working tree clean.
+**Inbox** (`list_issues`): the same four open (#878, #880, #903, #1015), every one previously acted-on and
+owner-gated, all `updated_at` before the last Scout run — nothing new owed. **Sweep (2):** the `--mosaic` pass
+stacked the owner's 2×2 mosaic and every per-panel surface **engaged** (no fall-back to target-wide), then each
+threshold was read adversarially — `auto_reject_depth` (thinnest panel), `typical_panel_depth` (frame-weighted
+median), `coverage_thin_fraction` (panel depth, not the peak — peak-bug fixed v0.389.2/.492.62), photometric &
+weighting (`per_pointing`), autodrizzle (per-pixel depth, worst-panel dither), grading (per-panel rail), mosaicmap
+("typical" = median panel), `field_fulls` readiness (area-based per-panel goal), walkaway (defers to the engine).
+All correct; the `--mosaic` Target-page numbers reconcile (4 min ÷ ~3 fields ≈ 1 min/typical panel; top-right 30 s
+= the thin panel; goal ~6.9 h = ~2.3 h × 3 fields). The **one** live divergence in this class is the already-filed,
+owner-gated `PANEL_LINK_DIST_DEG` collapse LEAD (v0.493.0) — the fall-back reached through the clustering *gate*,
+not a wrong reference in any one function; its gate is a read of his library. Full record in `PROCESS-NOTES.md`.
+Dogfood `--mosaic` CLEAN (no overflow, no console errors, heights on baseline). **START HERE NEXT RUN:** the
+backlog's ⭐ queue is still empty and "Bugs" still holds nothing ungated (all LEADs/decided stand-downs gated on
+his data); the Builder's queue is the next beginner feature or editor item per §3. **Rotation: (2) done → next
+sweep is (3)** (ASTAP/ffmpeg filesystem side effects with a stub binary). Record files have headroom
+(`SHIPPED.md` ~39.7k/64k, `PROCESS-NOTES.md` ~13.7k/18k).*
+
 *2026-10-16 (Builder, branch `claude/adoring-planck-4auhzb`) — **v0.500.0 shipped Settings redesign slice 5, the
 last** ("How pictures are made": four cards over the stacking list, `PicturesSection`). The ⭐ redesign entry is
 closed. Baseline 7956 passed / 7 skipped; `main` CI run 2328 green on the start HEAD; no open PRs. Spec
