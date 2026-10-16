@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-10-16 (Builder, branch `claude/adoring-planck-qbhchl`) — nothing ungated to build; `--mosaic --editor` and first-run `--empty` dogfood CLEAN
+
+*Baseline: `main`'s CI run 2334 green on HEAD `f46d2189` (v0.500.1); no open PRs; local suite **7959 passed / 7
+skipped**. "Bugs" re-read: every entry is still a LEAD or note gated on a read of the owner's library or an owner
+decision, and the open "Features" ideas are closed, shipped or deprioritised in their own text — so per AGENTS.md
+§2 the run was a dogfood pass, the first `--empty` one since the Settings redesign (v0.496–v0.500) rebuilt the
+pages a fresh install opens. `--mosaic --editor`: no overflow, no console errors, mosaic Auto trim 7.9 %, all 21
+ops re-render on both runs, Undo/Redo apply, taste chips answer correctly (live vs. marked). The page sentences
+read as one paragraph hold together (panel map and grain note both say "about 30 s behind, evens out"; framing
+verdict and next-best-move both say 3×3 mosaic). `--empty`: clean; tallest `[phone] /life-list [Still to shoot]`
+14,604 px (deliberately uncollapsed, v0.492.2), `[phone] /settings/more` 5,042, `/settings/automation` 4,078,
+`/settings/stacking` 3,351. Known non-findings re-seen and not re-filed: the "Star cluster" label on the
+stars-only samples. One harness note: a 600 s tool timeout killed the first editor drive mid-op ("Target page …
+has been closed") — that is the caller, not the app; the full drive takes ~15 min, run it in the background.*
+
 ## 2026-10-16 (Builder, branch `claude/adoring-planck-ud57rp`) — backlog has nothing ungated; `--mosaic --editor` and `--big --editor` dogfood CLEAN; one probe misreading fixed (v0.500.1)
 
 *Baseline: `main`'s CI run 2332 green on HEAD `01029103`; no open PRs. "Bugs" re-read: every entry still gated on
