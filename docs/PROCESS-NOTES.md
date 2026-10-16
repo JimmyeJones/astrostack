@@ -1,5 +1,75 @@
 # Process notes & QA sweep records
 
+## 2026-10-16 (Scout, branch `claude/funny-shannon-dyejl9`) — QA rotation sweep (2) mosaic/walk-away divergence from a whole-target or peak number that is really per-panel: CLEAN. Inbox four open, all previously acted-on and owner-gated. Dogfood `--mosaic` CLEAN.
+
+*(No code shipped — docs only, and that is the honest outcome. Baseline: `main`'s own CI run **2330** green on the
+exact HEAD `52712296` (v0.500.0), read with `actions_list` on `ci.yml`/`main` — the cheap signal the record keeps
+pointing at. Working tree clean at that HEAD. **Inbox** via `list_issues`: the same four open (#878, #880, #903,
+#1015), every one previously acted-on and owner-gated, all `updated_at` before the last Scout run (2026-10-15) —
+nothing new owed, no re-comment. The `--mosaic` page sweep is CLEAN at both widths: nothing overflowing, no console
+errors, every page height on the standing baseline (`/life-list [Still to shoot]` 14,513 px, `/settings/more`
+5,022 px).)*
+
+### The sweep: every mosaic/walk-away per-panel threshold is already correct, and the historical peak/whole-target bugs are all fixed with cited versions
+
+AGENTS.md's rotation sweep (2) is "any threshold taken from a whole-target or *peak* number that is really
+per-panel", and it counts only if it ran the code on data shaped like the owner's. It did — the `--mosaic` pass
+stacked the owner's own 2×2 mosaic shape (four overlapping panels, uneven depth 6/6/6/3, one hazy panel, a ragged
+union canvas), and every per-panel surface **engaged** on it (the fallback-to-target-wide path was *not* taken), so
+this is a measurement and not a code read alone. Read adversarially, every candidate threshold uses the right
+reference:
+
+- **`stacker.auto_reject_depth`** → `min(substantial panel counts)` — the **thinnest** panel, because one shallow
+  panel decides whether κ-σ can bite. Correct and deliberate.
+- **`stacker.typical_panel_depth`** (the walk-away thin-hold floor, `pipeline._auto_stack_panel_depth`) → the
+  **frame-weighted median** panel depth, not the frame count and not the thinnest. The frame-count-as-depth bug
+  this exists to close (a 3×3 one pass in reads `9 ≥ 3` and publishes one-sub-deep speckle) is fixed.
+- **`stacker.coverage_thin_fraction`** → measures the thin share against `coverage_panel_depth`, **not** the
+  coverage map's peak. The peak-as-reference bug (on a mosaic the peak is the panel *overlap*, 2–4× a panel, so
+  ordinary panels read as a ragged border — 22 % of the 2×2 sample, 74 % of a 12×8) was fixed in **v0.389.2**, and
+  the dithered/plateau variant where `panel_coverage_level` fell through to the peak in **v0.492.62**.
+- **`stack/photometric.py`** and **`stack/weighting.py`** → the position-dependent metrics (transparency; stars,
+  sky, transparency) are normalised **per panel** (`_pointing_references` / `_positional_medians`, gated by
+  `pointing_groups`), with FWHM and eccentricity deliberately target-wide (seeing and tracking are properties of the
+  night, not the pointing). The 2.2× / 0.73× panel-gain errors this prevents are the sweep's exact class.
+- **`stack/autodrizzle.py`** → the drizzle decision is on **depth per output pixel**, not the target's frame total,
+  and the dither spread is measured per panel carrying the **worst** panel's figure (`samples_per_output_pixel`,
+  cites observer #901). Correct.
+- **`qc/grading.py`** → the auto-grade population is split **per panel** with a per-panel rail and a documented
+  fall-back to the target-wide population only for a panel too thin to grade on its own.
+- **`mosaicmap.py`** → "a typical panel" is the **median** panel exposure (not the mean, not the peak), and the
+  thin verdict compares `thinnest < THIN_FRACTION · median`. Correct.
+- **`webapp/field_fulls.py`** (readiness goal) → compares total integration against `goal_hours · field_fulls`,
+  an **area-based** per-panel depth that is robust even when `pointing_groups` would collapse.
+- **`webapp/walkaway.py`** → defers the per-panel rejection-method choice to the engine's `auto_reject_depth`
+  (thinnest panel); it injects only `auto_reject=True`, no whole-target number of its own.
+
+The `--mosaic` Target-page paragraph corroborates on the owner's shape, and its numbers **reconcile** rather than
+merely each looking plausible: 4 min total ÷ ~3 field-fulls ≈ **1 min on a typical panel**; the top-right panel
+**30 s** = the thin one (half depth); grain note **~23 % at 3 subs where most has 6** (half depth, ~1.4× grainier);
+readiness **goal ~6.9 h = ~2.3 h × 3 fields**; seams flat so the grain *is* a depth difference, not a sky step. No
+surface presents a whole-target total or a peak as if it were a per-panel figure.
+
+### What is NOT clean, and why it is not this sweep's to file
+
+The one live divergence in this class is **already filed** and owner-gated: the `PANEL_LINK_DIST_DEG` (0.25°)
+single-linkage collapse (Bugs LEAD, Builder 2026-10-10, v0.493.0). When a mosaic's **nightly re-framing** exceeds
+~a quarter of the panel step, `pointing_groups` returns `None` and every per-panel surface above silently falls back
+to the **target-wide** population — which is exactly "a per-panel judgement made against a whole-target number", but
+reached through the *gate* rather than through a wrong reference inside any one function. Its gate is a read of the
+owner's own library (per-night centroid spread vs 0.25°), which only the observer can take, so re-measuring the
+individual thresholds here would not advance it. Do **not** widen `PANEL_LINK_DIST_DEG` blind — it is the shared
+gate behind QC grading, photometric normalisation and quality weighting.
+
+**Carry forward.** The engine side of this class is mature: every per-panel decision routes through
+`pointing_groups` / `panel_frame_counts` with a documented gate and a target-wide fall-back, and the historical
+peak/whole-target mistakes (v0.389.2, v0.492.62, #901, #965, and the `per_pointing` splits in
+grading/weighting/photometric) are all closed. A future sweep (2) should spend its time on a surface that does
+**not** yet route through that gate — a new per-panel number added since, or a webapp card that summarises panels
+without asking the engine — rather than re-reading the functions above, and on the open LEAD's gate if the observer
+ever supplies the re-framing spread. **Rotation: (2) done → next sweep is (3)** (ASTAP/ffmpeg filesystem side
+effects with a stub binary).
+
 ## 2026-10-15 (Builder, branch `claude/adoring-planck-uubmsy`) — slice 4, and the seed race needed a bigger perturbation
 
 *(→ **v0.499.0**, Settings redesign slice 4; baseline 7953 passed / 7 skipped, `main` CI 2323 green, no open PRs.
