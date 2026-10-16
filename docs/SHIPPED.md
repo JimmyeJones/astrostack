@@ -1,5 +1,21 @@
 # Shipped — the record
 
+## 2026-10-16 (Builder, branch `claude/adoring-planck-ud57rp`) — dogfood Auto-feedback probe read a stale toast
+
+### v0.500.1 — the editor drive waits out earlier toasts before tapping each Auto-feedback chip
+
+**What.** `scripts/dogfood_editor.mjs`, the Auto-feedback taps. Before each tap the drive now waits (up to 8 s) for
+every toast already on screen to close, and counts a finding if one never does. **Why.** The 2×2 mosaic pass
+printed `tapped marked chip "Over-smoothed" → Auto-process applied — tweak from here` while the 1:1 field and the
+`--big` pass printed the chip's own *"Auto is already smoothing as little as it will here…"*. Traced: the *live*
+tap before it re-runs Auto (`AutoFeedback` → `onRerun` → `auto.mutate`), and on the mosaic that re-run's
+`"Auto-process applied"` toast (`Editor.tsx`, 4 s autoClose) was still up when the marked chip was tapped, so the
+"first non-empty toast" read reported it as the marked chip's answer. That reading is the one this pass exists to
+take (v0.492.53/.54/.55), and a stale toast could equally have *masked* a real "Thanks" on a marked chip.
+**Evidence.** Re-run `--mosaic --editor` with the fix: the mosaic's marked chip now reads *"Auto is already
+smoothing as little as it will here. Tapping still teaches Auto for your other pictures."* — the same sentence as
+the field — and no stale-toast finding fired. The app was right; the instrument was not. No app code changed.
+
 ## 2026-10-16 (Builder, branch `claude/adoring-planck-4auhzb`) — Settings redesign slice 5 (the last)
 
 ### v0.500.0 — "How pictures are made": four picture cards over the stacking list

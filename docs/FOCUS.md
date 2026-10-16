@@ -1,5 +1,11 @@
 # Current focus — AstroStack
 
+*2026-10-16 (Builder, branch `claude/adoring-planck-ud57rp`) — **v0.500.1, probe-only: the editor dogfood drive now
+waits out earlier toasts before each Auto-feedback chip tap** (it had read the live tap's Auto re-run toast as the
+mosaic's marked-chip answer; the app was right). "Bugs" still holds nothing ungated, and `--mosaic --editor` plus
+`--big --editor` came back CLEAN. **START HERE NEXT RUN:** the backlog is dry of ungated Builder work. A Scout
+pass that adds vetted beginner ideas would help most; otherwise take the next QA rotation (3).*
+
 *2026-10-16 (Scout, branch `claude/funny-shannon-dyejl9`) — **QA rotation sweep (2) — mosaic/walk-away
 divergence from a whole-target or *peak* number that is really per-panel — came back CLEAN on the owner's own
 2×2 mosaic shape, and the inbox is unchanged. No code shipped; docs only, which is the honest outcome.** Baseline:
