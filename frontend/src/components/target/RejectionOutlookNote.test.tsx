@@ -56,7 +56,7 @@ describe("RejectionOutlookNote", () => {
 
     const link = await screen.findByRole(
       "link", { name: /Let AstroStack choose on every hands-off stack/ });
-    expect(link).toHaveAttribute("href", "/settings/automation");
+    expect(link).toHaveAttribute("href", "/settings/stacking");
   });
 
   it("never asks the question when nothing carries a trail", async () => {

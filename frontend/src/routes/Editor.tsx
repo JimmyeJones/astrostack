@@ -1719,7 +1719,7 @@ export function EditorView() {
             <Group gap={4} wrap="nowrap">
               <Switch size="xs" label="Auto-crop edges" checked={autoCrop}
                 onChange={(e) => setAutoCropOverride(e.currentTarget.checked)} />
-              <HintIcon hint="Auto normally trims the ragged, uneven edge off a mosaic so the picture is cleanly framed. Turn this off to keep the full frame, edges and all — you can still crop by hand with 'Trim border'. The default for every target is in Settings → Automation." />
+              <HintIcon hint="Auto normally trims the ragged, uneven edge off a mosaic so the picture is cleanly framed. Turn this off to keep the full frame, edges and all — you can still crop by hand with 'Trim border'. The default for every target is in Settings → Stacking." />
             </Group>
           ) : null}
           {/* One preview mode serves both crop offers ("Trim border" and

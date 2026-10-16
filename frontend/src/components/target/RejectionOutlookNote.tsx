@@ -62,7 +62,7 @@ export function RejectionOutlookNote(
         </Button>
         {note.unattendedChoiceHelps && (
           <Button size="xs" variant="subtle" color="orange" component={Link}
-            to={settingsLink("automation")}>
+            to={settingsLink("stacking")}>
             Let AstroStack choose on every hands-off stack
           </Button>
         )}
