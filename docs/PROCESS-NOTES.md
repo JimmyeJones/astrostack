@@ -1,5 +1,18 @@
 # Process notes & QA sweep records
 
+## 2026-10-16 (Builder, branch `claude/adoring-planck-ud57rp`) — backlog has nothing ungated; `--mosaic --editor` and `--big --editor` dogfood CLEAN; one probe misreading fixed (v0.500.1)
+
+*Baseline: `main`'s CI run 2332 green on HEAD `01029103`; no open PRs. "Bugs" re-read: every entry still gated on
+a read of the owner's library or a recorded owner decision. The open Features/Autonomy ideas checked this run
+(Levels "From your image" copy, "sentences that name a number", superlative pairs) are closed or gated in their
+own text. So per AGENTS.md §2 the run was a dogfood pass. `--build --mosaic --editor`: no overflow, no console
+errors, heights at baseline (`/life-list [Still to shoot]` 14,513 px), mosaic Auto trim 7.9 %, all 21 ops
+re-render on both runs, undo/redo apply. `--big --editor --no-site`: full-size loupe, navigator, split and the
+Noise-reduction caveat all present; Auto trim 7 % on the full-size mosaic. The one oddity — the mosaic's marked
+chip appearing to answer with "Auto-process applied" — was the probe reading the previous live tap's re-run
+toast; fixed in `dogfood_editor.mjs` and confirmed by a re-run (SHIPPED.md, v0.500.1). Known non-findings
+re-seen and not re-filed: the "Star cluster" label on the samples (filed `classify_target` entry).*
+
 ## 2026-10-16 (Scout, branch `claude/funny-shannon-dyejl9`) — QA rotation sweep (2) mosaic/walk-away divergence from a whole-target or peak number that is really per-panel: CLEAN. Inbox four open, all previously acted-on and owner-gated. Dogfood `--mosaic` CLEAN.
 
 *(No code shipped — docs only, and that is the honest outcome. Baseline: `main`'s own CI run **2330** green on the
