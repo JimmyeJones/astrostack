@@ -647,6 +647,28 @@ if (!(await autoButton.count())) {
       // reading after them went with it, which is how one bad selector turned
       // into a dead mosaic pass rather than one bad line.
       try {
+        // Let the toasts already on screen go first. A *live* tap re-runs Auto,
+        // and that re-run ends in its own "Auto-process applied — tweak from
+        // here" toast — on the 2x2 mosaic it lands near the end of the settle
+        // below, so it is still up (4 s autoClose) when the *marked* chip is
+        // tapped, and the "first non-empty toast" read below printed the
+        // re-run's sentence as the marked chip's answer. That is the one reading
+        // this pass exists to take, so a stale toast must not be able to stand
+        // in for it. Waiting them out (rather than diffing texts) also covers a
+        // stale toast that is *identical* to the one the tap should produce.
+        const staleToasts = page.locator('[class*="mantine-Notification-description"]');
+        let stale = [];
+        for (let waited = 0; waited < 8000; waited += 200) {
+          stale = (await staleToasts.allInnerTexts())
+            .map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
+          if (!stale.length) break;
+          await page.waitForTimeout(200);
+        }
+        if (stale.length) {
+          findings++;
+          console.log(`  ! a toast from before the "${label}" tap never closed, so`
+            + ` the reading below may be it: ${stale.join(" / ")}`);
+        }
         await page.getByRole("button", { name: label, exact: true }).first().click();
         // Read the toast FIRST, and poll for it rather than waiting out the
         // render. `<Notifications />` is mounted with Mantine's default
