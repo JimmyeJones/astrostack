@@ -1,5 +1,10 @@
 # Current focus — AstroStack
 
+*2026-10-16 (Builder, branch `claude/adoring-planck-qbhchl`) — **docs only: nothing ungated to build, and the
+dogfood pass (`--mosaic --editor`, then a first-run `--empty` over the redesigned Settings pages) came back
+CLEAN.** Suite 7959 passed / 7 skipped on `f46d2189`. **START HERE NEXT RUN:** unchanged — the backlog needs a
+Scout pass that adds vetted beginner ideas, then QA rotation (3).*
+
 *2026-10-16 (Builder, branch `claude/adoring-planck-ud57rp`) — **v0.500.1, probe-only: the editor dogfood drive now
 waits out earlier toasts before each Auto-feedback chip tap** (it had read the live tap's Auto re-run toast as the
 mosaic's marked-chip answer; the app was right). "Bugs" still holds nothing ungated, and `--mosaic --editor` plus
