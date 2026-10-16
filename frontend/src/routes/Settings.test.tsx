@@ -1073,17 +1073,25 @@ describe("folder conflict, while you type", () => {
 // satellite trail below about 11 subs. `auto_reject_on_unattended` is the opt-in
 // that hands that choice back to the app on hands-off stacks only.
 describe("Automatic pipeline — let AstroStack pick outlier removal", () => {
-  const LABEL = /Let AstroStack pick outlier removal on hands-off stacks/;
+  // Its switch moved from the foot of Automation to the "Remove satellites &
+  // hot pixels" card on Stacking (slice 5, v0.500.0) — where the Target page's
+  // "Let AstroStack choose on every hands-off stack" button now lands.
+  const LABEL = /Choose for me even when a method is saved/;
 
   it("is off for an install that has never set it", async () => {
-    renderSettingsWith({}, "automation");
+    renderSettingsWith({}, "stacking");
     const sw = await screen.findByLabelText(LABEL);
     expect(sw).not.toBeChecked();
   });
 
   it("reads the saved value back", async () => {
-    renderSettingsWith({}, "automation", { auto_reject_on_unattended: true });
+    renderSettingsWith({}, "stacking", { auto_reject_on_unattended: true });
     await waitFor(() => expect(screen.getByLabelText(LABEL)).toBeChecked());
+  });
+
+  it("is VISIBLE where the Target page's rejection note sends the user", async () => {
+    renderSettingsWith({}, "stacking");
+    await waitFor(() => expect(screen.getByLabelText(LABEL)).toBeVisible());
   });
 
   it("is not bundled into Walk-away mode", () => {
@@ -1687,5 +1695,79 @@ describe("Maintenance — updates & upkeep", () => {
     expect(await screen.findByRole("heading", { name: "Updates & upkeep" })).toBeVisible();
     expect(screen.getByText(/Nothing here touches your raw subs/)).toBeVisible();
     expect(screen.getByText("Reprocess everything")).toBeVisible();
+  });
+});
+
+// --- Settings redesign slice 5: "How pictures are made" (v0.500.0) ----------
+
+describe("Stacking — how pictures are made", () => {
+  it("opens on the four cards, each with its current value", async () => {
+    renderSettingsWith({}, "stacking", { auto_drizzle: true, auto_crop_border: false });
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "How pictures are made" })).toBeVisible());
+    for (const id of ["outliers", "drizzle", "trim", "calibration"]) {
+      expect(screen.getByTestId(`picture-card-${id}`)).toBeVisible();
+    }
+    await waitFor(() =>
+      expect(screen.getByTestId("picture-value-trim")).toHaveTextContent("Off"));
+    expect(screen.getByTestId("picture-value-drizzle"))
+      .toHaveTextContent("Automatic when it pays off");
+  });
+
+  it("no longer carries the four bare switches on Automation, and points to them", async () => {
+    renderSettingsWith({}, "automation");
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: /Stacking → How pictures are made/ })).toBeVisible());
+    expect(screen.getByRole("link", { name: /Stacking → How pictures are made/ }))
+      .toHaveAttribute("href", "/settings/stacking");
+    expect(screen.queryByLabelText(/Let Auto trim the ragged border off a mosaic/)).toBeNull();
+  });
+
+  it("saves a card's switch with the rest of the form", async () => {
+    const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
+    renderSettingsWith({}, "stacking", { auto_bind_calibration: false });
+    const sw = await screen.findByLabelText(/Use matching ones automatically/);
+    await waitFor(() => expect(screen.getByTestId("picture-value-calibration"))
+      .toHaveTextContent("Only when I pick them"));
+    fireEvent.click(sw);
+    expect(screen.getByTestId("picture-value-calibration")).toHaveTextContent("Automatic");
+    fireEvent.click(screen.getAllByRole("button", { name: "Save settings" })[0]);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect((put.mock.calls[0][0] as Record<string, unknown>).auto_bind_calibration).toBe(true);
+  });
+
+  it("says when a saved drizzle overrules the switch, and hands the choice back", async () => {
+    const put = vi.spyOn(client.api, "putSettings").mockResolvedValue({} as never);
+    renderSettingsWith({ drizzle: true, quality_weighted: true }, "stacking", { auto_drizzle: true });
+    await waitFor(() => expect(screen.getByTestId("picture-value-drizzle"))
+      .toHaveTextContent("Always — your stacking defaults"));
+    expect(screen.getByText(/this switch has no effect/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Let AstroStack decide instead" }));
+    expect(screen.getByTestId("picture-value-drizzle"))
+      .toHaveTextContent("Automatic when it pays off");
+    fireEvent.click(screen.getAllByRole("button", { name: "Save settings" })[0]);
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    const patch = put.mock.calls[0][0] as Record<string, unknown>;
+    expect(patch.default_stack_options).toEqual({ quality_weighted: true });
+    expect(patch.auto_drizzle).toBe(true);
+  });
+
+  it("folds the full stacking list under one button, and opens it unchanged", async () => {
+    renderSettingsWith({}, "stacking");
+    const show = await screen.findByRole("button", { name: "Show all 3 stacking options" });
+    expect(show).toHaveAttribute("aria-expanded", "false");
+    // Still mounted (nothing removed), just not shown until asked for.
+    expect(screen.getByLabelText(/Min\/max rejection/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Min\/max rejection/)).not.toBeVisible();
+    fireEvent.click(show);
+    await waitFor(() => expect(screen.getByLabelText(/Min\/max rejection/)).toBeVisible());
+    expect(screen.getByRole("button", { name: "Hide stacking options" }))
+      .toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps the min/max caution in view while the list is folded", async () => {
+    renderSettingsWith({ min_max_reject: true, quality_weighted: true, drizzle: false });
+    await waitFor(() =>
+      expect(screen.getByText(/On any stack of 3 or more subs/)).toBeVisible());
   });
 });

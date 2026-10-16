@@ -1,5 +1,13 @@
 # Current focus — AstroStack
 
+*2026-10-16 (Builder, branch `claude/adoring-planck-4auhzb`) — **v0.500.0 shipped Settings redesign slice 5, the
+last** ("How pictures are made": four cards over the stacking list, `PicturesSection`). The ⭐ redesign entry is
+closed. Baseline 7956 passed / 7 skipped; `main` CI run 2328 green on the start HEAD; no open PRs. Spec
+correction: the calibration card's "Ask me" was false (nothing asks) and the outlier/drizzle cards had to read the
+global stacking defaults to stay true. Stacking is now 3,330 px on a phone. **START HERE NEXT RUN:** the
+backlog's ⭐ queue is empty; "Bugs" was gated as of the 2026-10-14 read — re-read it, then take the next beginner
+feature or editor item per §3.*
+
 *2026-10-15 (Builder, branch `claude/adoring-planck-uubmsy`) — **v0.499.0 shipped Settings redesign slice 4**
 ("Where you observe from" + `GET /api/plan/site`, "How hard your NAS works", "Updates & upkeep"). Baseline 7953
 passed / 7 skipped; `main` CI run 2323 green on the start HEAD; no open PRs. **START HERE NEXT RUN:** slice 5 (the

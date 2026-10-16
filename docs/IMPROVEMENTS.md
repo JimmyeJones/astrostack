@@ -2403,44 +2403,9 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-APPROVED (2026-10-14, "Yes go") — the Settings page redesign: plain words, visuals, and every
-  setting adjustable with a warning before it bites.** Owner: *"most of those terms are very confusing and can
-  seem scary to mess with to the average person"*, then *"I want the expert settings dumbed down so that an
-  average user can adjust all settings as needed… warned of any unexpected consequences."* **The full spec —
-  every section, control → `Settings` field mapping, and each consequence warning's exact sentence — is
-  [`docs/design/settings-redesign.md`](design/settings-redesign.md)**, with the approved mockup's source beside
-  it. UI only: no field renamed or default changed (§9); nothing removed (§1). **Five slices, one per run, in
-  the order the spec gives** — slice 1 is "More settings" with warnings + Back to default, which is what he
-  asked for. Each slice ships the "every old key is still on the page" guard test.
-  **✅ Slice 1 shipped v0.496.0** (Builder 2026-10-14) — `/settings/more`, 15 cards, the guard test, and the
-  `Was:`-matching search. **✅ Slice 2 shipped v0.497.0** (Builder 2026-10-15) — hands-off cards + six-step row
-  on Automation (`HandsOffSection`); its spec correction: **Check off does not hold Place/Stack** (the pipeline
-  solves with `run_qc=False` and auto-stack is its own pass), so steps carry a real `needs`, not "everything
-  after". Automation is now 3,204 px on a phone. **✅ Slice 3 shipped v0.498.0** (Builder 2026-10-15) — "How
-  picky?" + frame illustration + trails switch on Automation (`FramePickySection`, `framePicky.ts`), replacing the
-  old auto-grade switch, Sensitivity select and trails switch; its spec correction: **levels differ in how far out,
-  not which kind** (every level grades every metric; the ≥25 %-softer floors never move), so Gentle is not
-  "only cloud" and a "bit soft" frame is kept even on Strict. **✅ Slice 4 shipped v0.499.0** (Builder 2026-10-15) —
-  "Where you observe from" (`ObservingSite.tsx`, new read-only `GET /api/plan/site`), "How hard your NAS works"
-  (`NasSection.tsx`, memory bar + the cores/memory `MoreCard`s; cores left Plate solving) and an "Updates & upkeep"
-  heading on Maintenance. **Only slice 5 is still open** (the four picture cards over the stacking list);
-  read these three before taking one. (a) The guard the spec asks each slice for now exists and is **page-wide**: `lbl()` stamps
-  `data-setting=<key>` on every labelled control and a `MoreCard` carries `data-settings`, so
-  *"Settings — nothing was removed"* in `Settings.test.tsx` fails the moment a slice drops a key instead of
-  rehoming it — don't write a second one, extend that. (b) The spec's **"Read it from my photos"** field-of-view
-  choice **does not exist and cannot**: `solve/runner._fov_deg_for_frame` derives the field from every frame's
-  own `FOCALLEN`/`XPIXSZ` and only ever falls back to `astap_fov_deg`, so reading from the photos is not
-  switchable; slice 1 says so in the help line and rewrote the warning to match, as the spec's own
-  *"every warning must be true of the code"* rule requires. Expect one or two more of these per slice.
-  (c) Slice 1 is **additive** — each card's twin still sits on its old section, both over one `form` — so
-  slices 2–5 are where the duplicates resolve, and a card moved out of `/settings/more` must land somewhere
-  that keeps the inbound `settingsLink()` deep links (`folders` is where the Dashboard's data-root warning
-  points; `plate-solving` is where four screens send a failed solve). **And the height:** `/settings/more`
-  ships at **5,022 px on a phone** (3,736 desktop), 4th tallest page in the app, against 2,758 px for the
-  tallest Settings section before it — measured, sweep otherwise CLEAN, and deliberately *not* shortened by
-  collapsing the groups, because a closed group hides a **Heads up** and the spec says "open by default,
-  **not** expert". **Measure it again on slice 2 and say the number**; `maw={680}` on the page is what holds
-  the card grid to two columns where the mockup's `auto-fit minmax(300px, 1fr)` would give three.
+- ~~**⭐ OWNER-APPROVED (2026-10-14, "Yes go") — the Settings page redesign.**~~ — **✅ ALL FIVE SLICES SHIPPED
+  (v0.496.0–v0.500.0).** Spec stays at [`docs/design/settings-redesign.md`](design/settings-redesign.md); each
+  slice's record, including every spec-vs-code correction, is in [`SHIPPED.md`](SHIPPED.md). Do not re-pick it.
 
 - ~~**🌟 NEW BEGINNER FEATURE (Scout 2026-09-30) — "Bring my pictures up to date": re-stack only the
   targets that have new light, in one click.**~~ — **✅ SHIPPED v0.492.0** (Builder 2026-09-30). Entry cut to
@@ -3591,6 +3556,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.500.0 **Slice 5 (the last) of the Settings redesign: "How pictures are made" — four picture cards (outlier removal, drizzle, mosaic trim, darks & flats) over the stacking list, each saying what the next hands-off stack will really do** (`PicturesMade.tsx`, `picturesMade.ts`); the four Automation switches moved here and the full defaults list folds behind "Show all N stacking options". Full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.499.0 **Slice 4 of the Settings redesign: "Where you observe from" (read it from my photos / type it in, `GET /api/plan/site`, altitude slider over a horizon drawing), "How hard your NAS works" (memory bar, cores + memory cards) and the "Updates & upkeep" heading** (`ObservingSite.tsx`, `NasSection.tsx`, `observingSite.ts`). Full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.498.0 **Slice 3 of the Settings redesign: "Leaving out bad frames" — the "How picky?" control (Keep all / Gentle / Balanced / Strict over `auto_grade_frames` + `auto_grade_sensitivity`), a 12-tile Kept / Left out illustration and the trails switch** (`FramePicky.tsx`, `framePicky.ts`) on Automation, replacing the old three controls; every note checked against `seestack/qc/grading.py`. Full entry in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.497.0 **Slice 2 of the Settings redesign: "How hands-off should AstroStack be?" + the six-step row** (`HandsOff.tsx`, `handsOff.ts`) on Automation — three cards over `watcher_enabled`…`auto_edit_on_autostack`, each step's real prerequisite (Check off does not hold Place/Stack), the stack-trigger and two-targets cards; the old bare switches there are replaced, every key still stamped. Full entry in [`SHIPPED.md`](SHIPPED.md)

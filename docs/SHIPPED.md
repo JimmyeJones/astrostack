@@ -1,5 +1,40 @@
 # Shipped — the record
 
+## 2026-10-16 (Builder, branch `claude/adoring-planck-4auhzb`) — Settings redesign slice 5 (the last)
+
+### v0.500.0 — "How pictures are made": four picture cards over the stacking list
+
+**What.** Section 5 of `docs/design/settings-redesign.md`, completing the owner-approved redesign. **Stacking**
+now opens with "How pictures are made" (`frontend/src/components/settings/PicturesMade.tsx`; copy and logic in
+`picturesMade.ts`): four cards — *Remove satellites & hot pixels* (`auto_reject_on_unattended`), *Sharper, bigger
+picture* (`auto_drizzle`), *Trim ragged mosaic edges* (`auto_crop_border`), *Use my darks and flats*
+(`auto_bind_calibration`) — each with the **Changes future pictures** badge, what the next hands-off stack will
+actually do as a value pill and one sentence, its switch, and a `Was:` line. The four bare switches at the foot of
+Automation moved here (Automation now has a one-line link to them); the full "Automated stacking defaults" list
+is folded behind **Show all N stacking options** (still mounted, one click away), with the min/max-vs-weighting
+caution kept in view outside the fold. The Target page's "Let AstroStack choose on every hands-off stack" button
+and the editor's auto-crop hint now point at Stacking.
+
+**Checked against the code — two mockup values did not survive.** (1) The calibration card's *"Ask me"*: nothing
+asks; off means a hands-off stack uses only the masters its target's saved defaults name
+(`pipeline._auto_bind_calibration`), so off reads **"Only when I pick them"**. (2) Outlier removal and drizzle are
+"Automatic" only while the **global stacking defaults** name no choice — `walkaway.apply_unattended_rejection`
+stands aside for any saved `auto_reject`/`sigma_clip`/`min_max_reject` (unless `auto_reject_on_unattended`), and
+`walkaway.apply_auto_drizzle` for any saved `drizzle`, on or off. So each card reads the defaults too and says
+which wins ("Your choice: drop the odd ones out", "Always — your stacking defaults"); an absent `sigma_clip` is
+read as `StackOptions`' own default (on). Where a saved `drizzle` overrules the switch the card says so and offers
+**Let AstroStack decide instead**, which drops only that key — pinned server-side that a settings PUT *replaces*
+`default_stack_options`, so the key really is gone after Save.
+
+**Heights (dogfood, before → after).** Phone 420 px: stacking 2,318 → 3,330; automation 4,170 → 4,040. Desktop
+1440 px: stacking 1,903 → 2,280. No horizontal overflow, no console errors.
+
+**Tests.** `picturesMade.test.ts` (15), six new render tests in `Settings.test.tsx`, three Python tests
+(`tests/webapp/test_settings_picture_cards.py`: the drizzle hand-back round trip, the rejection-key pairing, an
+old config with the four fields round-tripping). The `auto_reject_on_unattended` render tests and the editor's
+hint test re-pointed at the control's new home; the "nothing was removed" guard is unchanged and green. UI only:
+no field, default, schema, on-disk or API change.
+
 ## 2026-10-15 (Builder, branch `claude/adoring-planck-uubmsy`) — Settings redesign slice 4
 
 ### v0.499.0 — "Where you observe from", "How hard your NAS works", and "Updates & upkeep"

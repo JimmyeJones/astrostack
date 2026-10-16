@@ -1,6 +1,6 @@
 import {
-  Accordion, Alert, Badge, Button, Center, Code, CopyButton, Divider, FileButton,
-  Group, Loader, NumberInput, Paper, Radio, SimpleGrid, Stack, Switch,
+  Accordion, Alert, Anchor, Badge, Button, Center, Code, Collapse, CopyButton, Divider,
+  FileButton, Group, Loader, NumberInput, Paper, Radio, SimpleGrid, Stack, Switch,
   TagsInput, Text, TextInput, Title,
 } from "@mantine/core";
 import {
@@ -9,7 +9,7 @@ import {
 } from "@tabler/icons-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { notifications } from "@mantine/notifications";
 import {
   api, type AutoCastSummary, type AutoHighlightSummary, type ReprocessStatus,
@@ -27,10 +27,11 @@ import { MoreSettingsSection } from "../components/settings/MoreSettings";
 import { FramePickySection } from "../components/settings/FramePicky";
 import { HandsOffSection } from "../components/settings/HandsOff";
 import { NasSection } from "../components/settings/NasSection";
+import { PicturesSection } from "../components/settings/PicturesMade";
 import {
   ObservingSiteSection, PLAN_SITE_QUERY_KEY,
 } from "../components/settings/ObservingSite";
-import type { SettingsSection } from "../settingsSections";
+import { settingsLink, type SettingsSection } from "../settingsSections";
 import { minMaxIgnoresWeightingHint } from "../weightingHint";
 import { folderConflict, settingsErrorMessage } from "../settingsFolders";
 import { readonlyCurlExample, readonlyTokenBlurb } from "../readonlyToken";
@@ -874,6 +875,9 @@ export function SettingsView() {
   const system = useQuery({ queryKey: ["system"], queryFn: api.getSystem });
   const stackSchema = useQuery({ queryKey: ["schema"], queryFn: api.optionsSchema });
   const [form, setForm] = useState<Record<string, unknown>>({});
+  // The full stacking-defaults list sits folded under the picture cards
+  // (slice 5): one click away, as the spec asks, not removed.
+  const [showAllStack, setShowAllStack] = useState(false);
 
   useEffect(() => {
     if (settings.data) setForm(settings.data);
@@ -1034,21 +1038,18 @@ export function SettingsView() {
               + "calibration masters, drop obviously-bad subs, skip a batch that "
               + "looks like two different targets, and finish the picture for you — "
               + "so you can drop your subs in and come back to a calibrated, edited "
-              + "image. You can still fine-tune any of the individual switches on this tab."
+              + "image. You can still fine-tune any of the individual switches on this tab "
+              + "and under Stacking → How pictures are made."
             }
           />
-          <Switch label={lbl("auto_reject_on_unattended", "Let AstroStack pick outlier removal on hands-off stacks")}
-            checked={bool("auto_reject_on_unattended")}
-            onChange={(e) => set("auto_reject_on_unattended", e.currentTarget.checked)} />
-          <Switch label={lbl("auto_drizzle", "Use super-resolution on hands-off stacks when the subs can pay for it")}
-            checked={form.auto_drizzle !== false}
-            onChange={(e) => set("auto_drizzle", e.currentTarget.checked)} />
-          <Switch label={lbl("auto_crop_border", "Let Auto trim the ragged border off a mosaic")}
-            checked={form.auto_crop_border !== false}
-            onChange={(e) => set("auto_crop_border", e.currentTarget.checked)} />
-          <Switch label={lbl("auto_bind_calibration", "Auto-apply matching calibration masters to hands-off stacks")}
-            checked={bool("auto_bind_calibration")}
-            onChange={(e) => set("auto_bind_calibration", e.currentTarget.checked)} />
+          {/* Outlier removal, drizzle, the border trim and calibration moved
+              to Stacking's "How pictures are made" cards (slice 5). */}
+          <Text size="sm" c="dimmed">
+            How each hands-off picture is stacked and finished — removing
+            satellites, drizzle, trimming a mosaic's edge, darks and flats — is
+            under{" "}
+            <Anchor component={Link} to={settingsLink("stacking")}>Stacking → How pictures are made</Anchor>.
+          </Text>
           <Switch label={lbl("copy_to_cache", "Copy frames into local cache")}
             checked={bool("copy_to_cache")}
             onChange={(e) => set("copy_to_cache", e.currentTarget.checked)} />
@@ -1129,6 +1130,15 @@ export function SettingsView() {
     ),
     stacking: (
       <Stack>
+        {/* Section 5 of the approved redesign: the four picture cards. They
+            replace the four bare switches that sat at the foot of Automation. */}
+        <Paper withBorder p="lg">
+          <Stack>
+            <PicturesSection form={form} labelFor={lbl}
+              onPatch={(patch) => setForm((p) => ({ ...p, ...patch }))} />
+            {saveRow()}
+          </Stack>
+        </Paper>
         <Paper withBorder p="lg">
           <Stack>
             <Group gap={6}>
@@ -1141,8 +1151,15 @@ export function SettingsView() {
               Options used when <b>Auto-stack</b> stacks a target automatically. A target's own
               “Save as defaults” (from its Stack page) takes precedence over these.
             </Text>
+            <Button variant="default" size="sm" mih={44} style={{ alignSelf: "flex-start" }}
+              aria-expanded={showAllStack} aria-controls="all-stacking-options"
+              onClick={() => setShowAllStack((v) => !v)}>
+              {showAllStack ? "Hide stacking options"
+                : fields.length ? `Show all ${fields.length} stacking options` : "Show all stacking options"}
+            </Button>
+            <Collapse in={showAllStack} id="all-stacking-options">
             {stackSchema.isLoading ? <Loader size="sm" /> : (
-              <>
+              <Stack>
                 {simple.map((f) => (
                   <StackOptionControl
                     key={f.key} field={f} value={optVal(f.key)}
@@ -1166,8 +1183,9 @@ export function SettingsView() {
                     </Accordion.Panel>
                   </Accordion.Item>
                 </Accordion>
-              </>
+              </Stack>
             )}
+            </Collapse>
             {stackDefaultsWeightingHint ? (
               <Alert color="yellow" variant="light" py={6} px="sm">
                 <Text size="xs">{stackDefaultsWeightingHint}</Text>
