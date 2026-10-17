@@ -1,5 +1,34 @@
 # Process notes & QA sweep records
 
+## 2026-10-17 (Builder, branch `claude/adoring-planck-r0cfc9`) — nothing ungated to build; crash-fuzz of every `/api` route and every editor op: CLEAN (0 × 5xx)
+
+Baseline **7961 passed / 7 skipped** on `2de14833` (xdist `-n 3`, BLAS capped, 31m21s); no open PRs. The
+backlog is unchanged since the previous Builder run — every "Bugs" entry is a LEAD or decided stand-down
+gated on the owner's data — so this run spent its time on a probe the earlier dry runs had not tried.
+
+**Route crash-fuzz (HTTP contract only, NOT the Scout's rotation (4) semantic audit).** A scratch script built
+a real two-target library (synthetic Seestar subs, scanned in place) plus one stack run with a gapped coverage
+sibling, booted `create_app()` under `TestClient(raise_server_exceptions=False)`, enumerated every `/api`
+operation from `/openapi.json`, and hit each with path params `1/0/-1/nan/x/M_42`, every query param set in turn
+to `-1, 0, 999999999, nan, ±inf, 1e308, abc, "", .., M_42, ../../etc`, and (for mutating verbs, minus
+shutdown/restart/reset) bodies `none, {}, [], non-JSON, {"target":"../x","frame_ids":[-1,1e12],…}`.
+**8,717 requests, zero 5xx** (4,231 GET 422, 1,693 GET 404, 754 POST 422, 450 POST 400, 159 POST 409, the rest
+2xx). Only hang: `GET /api/seestar/{id}/events`, an SSE stream — by design, skipped. Every background job those
+POSTs started failed with its own plain-language error, never a crash.
+
+**Editor op fuzz (priority 1).** For each of the 21 ops in `/api/editor/ops/schema`, each param at its min,
+max, default, `-1e9`, `1e9`, `0`, `"nan"`, `null` (enums: every option plus `"bogus"`; lists: `[]`, `"x"`,
+out-of-range curve points) after a `tone.stretch`, on three canvases — 200×300 with a NaN-gapped coverage map,
+a 7×9 and a 3×2 sliver — through both `/editor/preview` and `/editor/histogram`, then 150 random 2–8-op combos
+with random extreme params on all three: **2,952 renders, zero 5xx, every preview a PNG.**
+
+**What this does and does not say.** It pins that no router or editor op turns bad input into a 500 on this
+shape of data; it says nothing about whether a 200's *answer* is right, which is what sweep (4) is for — the
+rotation is still due at (4). **Two harness traps** if someone repeats it: the script must sit under
+`if __name__ == "__main__"` (the solve/QC jobs spawn a process pool that re-imports `__main__`), and putting
+`tests/` on `sys.path` shadows the real `webapp` package with `tests/webapp/` — load `synth.py` by file path.
+`pkill -f <script>` also kills the shell whose command line names it; kill by PID.
+
 ## 2026-10-17 (Builder, branch `claude/adoring-planck-f5f1vy`) — nothing ungated to build; `--mosaic --calibration --editor` dogfood CLEAN
 
 Baseline **7961 passed / 7 skipped** on `1246e9ca` (xdist, BLAS capped, 16m36s); no open PRs. The backlog
