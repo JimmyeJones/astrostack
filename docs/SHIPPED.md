@@ -1,5 +1,19 @@
 # Shipped — the record
 
+## 2026-10-17 (Builder, branch `claude/adoring-planck-inoaqp`) — editor Rotate help named the wrong direction
+
+### v0.500.2 — the Rotate op's help says the way it really turns
+
+**What.** The help under the editor's Rotate → Angle slider (`geometry.rotate`, `seestack/edit/ops/geometry.py`)
+said *"Degrees to rotate, clockwise"*. `_rotate` hands the angle to `scipy.ndimage.rotate(axes=(0, 1))` with row 0
+at the top of the picture, so a positive angle turns it **anticlockwise** on screen: a star straight above the
+centre moves left at +30° and right at −30°. A beginner straightening a picture went the wrong way on every first
+try. The help now reads *"A positive angle turns it anticlockwise, a negative one clockwise."* **Why the words and
+not the pixels:** flipping the direction would re-render every saved recipe with a Rotate in it as a different
+picture (§9), so the copy moves to match the code. No other surface states a direction (grepped the frontend and
+the glossary). **Tests** +2 (`tests/test_edit_rotate_direction.py`, both signs, checked against the pixels; both
+fail on the old text).
+
 ## 2026-10-16 (Builder, branch `claude/adoring-planck-ud57rp`) — dogfood Auto-feedback probe read a stale toast
 
 ### v0.500.1 — the editor drive waits out earlier toasts before tapping each Auto-feedback chip

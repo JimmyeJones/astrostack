@@ -258,8 +258,9 @@ register(OpSpec(
     apply=_rotate, proxy_safe=True, help="Rotate by an arbitrary angle.",
     params=[
         EditParam("angle", "Angle (°)", "float", default=0.0, min=-180.0, max=180.0,
-                  step=0.5, help="Degrees to rotate, clockwise. Corners exposed by the "
-                                 "rotation are left transparent (rendered black)."),
+                  step=0.5, help="Degrees to turn the picture. A positive angle turns it "
+                                 "anticlockwise, a negative one clockwise. Corners exposed by "
+                                 "the rotation are left transparent (rendered black)."),
         EditParam("expand", "Expand canvas", "bool", default=True, group="advanced",
                   help="Grow the image to fit the whole rotated frame (nothing is lost; "
                        "exposed corners are transparent). Turn off to keep the original "
