@@ -1,5 +1,11 @@
 # Current focus — AstroStack
 
+*2026-10-17 (Builder, branch `claude/adoring-planck-f5f1vy`) — **docs only: nothing ungated to build, and a
+`--mosaic --calibration --editor` dogfood pass came back CLEAN** (first calibrated pass in ~a month: both
+masters discovered, built and applied; health card and suggestions agree). Suite 7961 passed / 7 skipped on
+`1246e9ca`. **START HERE NEXT RUN:** unchanged — the backlog needs vetted beginner ideas from a Scout; next QA
+rotation is (4), the webapp routers.*
+
 *2026-10-17 (Scout, branch `claude/funny-shannon-cx6sbe`) — **QA rotation sweep (3) — filesystem side effects of
 ASTAP/ffmpeg with a stub binary — came back CLEAN, run on owner-shaped data; the inbox is unchanged; no code
 shipped, docs only, which is the honest outcome.** Baseline: `main`'s own CI run **2338** green on the exact HEAD

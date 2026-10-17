@@ -1,5 +1,28 @@
 # Process notes & QA sweep records
 
+## 2026-10-17 (Builder, branch `claude/adoring-planck-f5f1vy`) — nothing ungated to build; `--mosaic --calibration --editor` dogfood CLEAN
+
+Baseline **7961 passed / 7 skipped** on `1246e9ca` (xdist, BLAS capped, 16m36s); no open PRs. The backlog
+still holds nothing a Builder can take: every "Bugs" entry is a LEAD or decided stand-down gated on the
+owner's data, and the open "Features that serve real workflows" entries are each either closed by their own
+gate or marked marginal/deprioritised in place. Re-read the editor op modules adversarially (geometry,
+tone, stars, background) — no defect found; every no-op guard, proxy-scale and NaN path already carries its
+own pinned comment.
+
+**Dogfood `--mosaic --calibration --editor` (first `--calibration` pass in about a month): CLEAN.** Exit 0;
+the app discovered and built both seeded masters (6 darks, 6 flats) through its own offer, `auto_bind_calibration`
+applied both to the mosaic stack (`dark_master_id 1`, `flat_master_id 2`), the health card said *"calibrated
+(dark+flat)"* and the calibration note correctly withdrew; `calibration-suggestions` matched both masters with
+`confident` set. Mosaic Auto trim **7.9 %** (standing figure). Both editor drives added all 21 ops, Undo/Redo
+and the Auto-feedback chips behaved, *"nothing overflowing, no console errors"* on every page at 1440 and 420 px.
+Two things that read odd and are **not** findings, recorded so they are not re-derived: the mosaic's
+*"looks like a Star cluster"* preset line is right (the samples are Gaussian stars only — v0.492.33), and
+Plan-my-week badges *"Needs 3×3 mosaic"* on the first night only, by design (`framingBadgeNights`, once per
+target). `/life-list [Still to shoot]` at 14.5k px on a phone remains the documented non-bug (v0.492.2).
+
+**Probe trap worth one line:** a `until ! pgrep -f <name>` wait loop matches its *own* command line and never
+exits — wait on the background task's output file (`grep -q EXIT=`) instead.
+
 ## 2026-10-17 (Scout, branch `claude/funny-shannon-cx6sbe`) — QA rotation sweep (3) filesystem side effects of ASTAP/ffmpeg with a stub binary: CLEAN. Inbox four open, all previously acted-on and owner-gated. Dogfood `--mosaic` CLEAN.
 
 *(No code shipped — docs only, and that is the honest outcome. **Baseline:** `main`'s own CI run **2338** green on
