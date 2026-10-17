@@ -1,5 +1,56 @@
 # Process notes & QA sweep records
 
+## 2026-10-17 (Scout, branch `claude/funny-shannon-cx6sbe`) — QA rotation sweep (3) filesystem side effects of ASTAP/ffmpeg with a stub binary: CLEAN. Inbox four open, all previously acted-on and owner-gated. Dogfood `--mosaic` CLEAN.
+
+*(No code shipped — docs only, and that is the honest outcome. **Baseline:** `main`'s own CI run **2338** green on
+the exact HEAD `1f3b3f8a` (v0.500.2), read with `actions_list` on `ci.yml`/`main`; no open PRs; working tree reset
+onto that HEAD. **Inbox** via `list_issues`: the same four open (#878, #880, #903, #1015), every one previously
+acted-on and owner-gated, all `updated_at` before the last Scout run (2026-10-16) — nothing new owed, no re-comment.*
+
+*__Sweep (3), what it covered and how it was run.__ The rotation item is the filesystem side effects of the two
+subprocesses this app shells out to — ASTAP (`seestack/solve/`) and ffmpeg/ffprobe (`seestack/video/`) — the one
+surface a code-reading sweep cannot see through, and the one §10 cares about most because the owner's raws live in
+`incoming/` with no backup. Both wrappers were read end to end and then **run on owner-shaped data**:*
+
+*• **ASTAP never touches the source.** `ASTAPSolver._solve_once` copies each frame into a fresh
+`tempfile.TemporaryDirectory(prefix="astrostack-solve-")` and points `-f` at the copy, because ASTAP writes its
+`.wcs`/`.ini` sidecars beside `-f` and with `copy_to_cache` off that path is a raw sub in `incoming/`. The scratch
+dir takes the sidecars with it; the WCS **content** is read out and persisted to the project DB (`runner.solve_one`
+→ `wcs_json`), never a sidecar on disk. The bootstrap deep-solve (`bootstrap._default_deep_solver`) writes its
+`deep.fits` into its **own** `astrostack-bootstrap-*` tempdir, then hands that to the same copy-into-scratch
+solver. `solve_one` is picklable/process-pool-safe and each call gets its own scratch dir, so parallel solves
+cannot collide on a path.*
+
+*• **ffmpeg only reads.** `probe_video` (ffprobe, metadata) and `iter_frames` (ffmpeg `-i <src> … -f rawvideo
+-pix_fmt rgb24 -` → stdout) both read the capture in place and write **no** output file; there is no ffmpeg
+*encode* path anywhere in the tree (no timelapse/share-as-video feature). The lucky stack (`video/lucky.py`) is
+in-memory; the result store (`webapp/video.py`) reads the clip from `incoming/` and writes stills only under
+`<data_root>/video/<id>/`. Discovery (`video/discover.py`) is a read-only `scandir`/`stat` walk.*
+
+*__Ran the code, not just read it__ (a sweep counts only if it ran on owner-shaped data). `tests/webapp/
+test_incoming_readonly_guard.py` **11 passed** — its layer-1 behavioural snapshot seeds a realistic incoming tree
+(mosaic `_sub` folders, a bare on-device output folder, a loose top-level sub, a stray non-FITS) and drives
+scan→ingest→QC→stack, the cache clears, run-prune, target merge, `DELETE … remove_files=true`, reprocess-all and
+the video pipeline, then asserts every seeded file is byte/size/mtime-identical and the listing unchanged; layer-2
+is a call-level spy on every destructive stdlib entry point; layer-4 drives a **stub ASTAP** that writes sidecars
+beside `-f` and proves none land in `incoming/` across a solve and three re-solves; and
+`test_the_video_pipeline_never_touches_the_capture_it_stacks` ran **real ffmpeg** (installed here, as in CI) on a
+synth lunar clip through stack→crop→uncrop, incoming unchanged. Engine-side `test_astap.py` + `test_solve_runner.py`
++ `test_bootstrap_solve.py` + `test_video_discover.py` + `test_video_lucky.py` + `test_video_cfa_mosaic.py`
+**166 passed**. Nothing to file: the subsystem is comprehensively hardened and already pinned by a five-layer guard
+whose own positive controls (`test_the_sentinel_actually_fires`, `test_the_stub_astap_really_would_litter`) prove
+the guard is live. Per the rotation rule, (3) is done → **next sweep is (4), the webapp routers.***
+
+*__Dogfood `--mosaic`__ (required flag): CLEAN at both widths — nothing overflowing, no console errors, mosaic Auto
+trim **7.9 %** (well under the ~15 % bug threshold), every per-panel surface engaged and the Target-page sentences
+reconcile (top-right panel ~30 s behind vs ~1 min typical; readiness goal ~6.9 h ≈ 2.3 h × 3 fields). Page heights
+on the standing baseline (`[phone] /life-list [Still to shoot]` **14,513 px**, `/settings/more` 5,022). **Backlog:**
+"In progress" empty; "Bugs" holds only the owner-gated LEADs and the numbered DECIDE-DO-NOT-FLIP stand-down — left
+untouched (§1 "do not re-litigate a stand-down that carries numbers"). "Features that serve real workflows" is now
+almost entirely shipped/closed, which is the state a prior Builder flagged as "needs vetted beginner ideas"; no
+genuinely novel, grepped-clean beginner feature was in hand this run, and §2 says STOP rather than manufacture a
+marginal one — so none was forced, and IMPROVEMENTS.md is left exactly as found.)*
+
 ## 2026-10-16 (Builder, branch `claude/adoring-planck-qbhchl`) — nothing ungated to build; `--mosaic --editor` and first-run `--empty` dogfood CLEAN
 
 *Baseline: `main`'s CI run 2334 green on HEAD `f46d2189` (v0.500.1); no open PRs; local suite **7959 passed / 7

@@ -1,5 +1,28 @@
 # Current focus — AstroStack
 
+*2026-10-17 (Scout, branch `claude/funny-shannon-cx6sbe`) — **QA rotation sweep (3) — filesystem side effects of
+ASTAP/ffmpeg with a stub binary — came back CLEAN, run on owner-shaped data; the inbox is unchanged; no code
+shipped, docs only, which is the honest outcome.** Baseline: `main`'s own CI run **2338** green on the exact HEAD
+`1f3b3f8a` (v0.500.2); no open PRs; working tree clean. **Inbox** (`list_issues`): the same four open (#878, #880,
+#903, #1015), every one previously acted-on and owner-gated, all `updated_at` before the last Scout run — nothing
+new owed. **Sweep (3):** both subprocess wrappers read end to end and then run. ASTAP never touches the source —
+`ASTAPSolver._solve_once` copies each frame into its own `astrostack-solve-*` tempdir, points `-f` at the copy, and
+persists the WCS *content* to the project DB (not a sidecar); the bootstrap deep-solve writes `deep.fits` into its
+own `astrostack-bootstrap-*` tempdir; `solve_one` is process-pool-safe with a per-call scratch dir. ffmpeg only
+reads (`probe_video`, `iter_frames` → stdout) — there is **no encode path anywhere**, the lucky stack is in-memory,
+and `webapp/video.py` writes stills only under `<data_root>/video/`. Ran the code: `test_incoming_readonly_guard.py`
+**11 passed** (layer-1 behavioural snapshot on a realistic incoming tree through the whole destructive-looking
+workflow + video pipeline; layer-2 call spy; layer-4 **stub ASTAP** across a solve and three re-solves; the video
+test drove **real ffmpeg** on a synth lunar clip, not skipped), plus `test_astap/solve_runner/bootstrap_solve/
+video_discover/video_lucky/video_cfa_mosaic` **166 passed**. Nothing to file — the surface is hardened and already
+pinned by a five-layer guard with live positive controls. Full record in `PROCESS-NOTES.md`. Dogfood `--mosaic`
+CLEAN (Auto trim 7.9 %, per-panel surfaces engaged and reconciling, heights on baseline). **START HERE NEXT RUN:**
+the backlog's ⭐ queue is empty and "Bugs" holds nothing ungated (all LEADs/decided stand-downs gated on his data);
+the Builder's queue is the next beginner feature or editor item per §3. **Rotation: (3) done → next sweep is (4)**
+(the webapp routers). "Features that serve real workflows" is now almost entirely shipped/closed — a genuinely
+novel, grepped-clean beginner idea would help most, but do not force a marginal one (§2). Record files have
+headroom (`PROCESS-NOTES.md` ~13.7k/18k lines, `SHIPPED.md` ~39.7k/64k).*
+
 *2026-10-16 (Builder, branch `claude/adoring-planck-qbhchl`) — **docs only: nothing ungated to build, and the
 dogfood pass (`--mosaic --editor`, then a first-run `--empty` over the redesigned Settings pages) came back
 CLEAN.** Suite 7959 passed / 7 skipped on `f46d2189`. **START HERE NEXT RUN:** unchanged — the backlog needs a
