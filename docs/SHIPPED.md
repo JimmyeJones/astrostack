@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-10-18 (Builder, branch `agent/calendar-twin-dedupe`) — imaging calendar counted double-registered subs twice
+
+### v0.500.4 — the night fold counts each sub once
+
+**What.** `_collect_night_acc` (`webapp/routers/stats.py`) opens every target's project and folds its accepted subs
+into per-night tallies — the Dashboard imaging calendar, "your best night", "was last night off?", the recap poster
+and the year recap all read that one cached fold. Issue #878 registers one mosaic's subs under two targets, so each
+such sub, its exposure and its star size were folded once per target: the night's `n_frames`/`exposure_s`, the
+window's `total_exposure_s` and the per-night FWHM median's sample all doubled. The third surface named by the
+Scout's 2026-10-18 rotation-(4) lead; the cheap one, because this walk already reads every row.
+
+**Fix.** `accumulate_nights` takes an optional fifth tuple element (the sub's file) and a `seen` set shared across
+the fold; a file already folded under another target adds only that target's name to the night (both targets did
+shoot it). The walk reads `source_path` as a fourth column. Without `seen` the fold is byte-for-byte as before.
+Measured on a 35,894-sub project: no measurable extra read time; the set peaks at ~6.4 MB, released with the call.
+
+**Upgrade-safe (§9):** no response-shape, config, schema, on-disk or default change.
+
+**Tests (+4):** engine — a shared sub folds once keeping both names and the first measurement; no `seen` → unchanged;
+an empty file name is never merged. Webapp — a full twin gives 3 subs / 180 s, not 6 / 360 s. Engine and webapp
+regressions fail on the pre-fix code.
+
 ## 2026-10-18 (Builder, branch `agent/storage-incoming-dedupe`) — Storage counted double-registered subs twice
 
 ### v0.500.3 — "your subs in incoming/ are the only copy" counts each file once

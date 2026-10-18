@@ -1166,6 +1166,13 @@ def _collect_night_acc(lib, targets, *, lon_deg):
     from seestack.io.project import Project
 
     acc: dict = {}
+    # Every sub's file, across the whole fold, so a sub two targets registered
+    # (#878's mosaic twins) is counted under the first one only. One short
+    # string per *distinct* accepted sub for the length of this call — the walk
+    # already reads every one of those rows, and the result is cached. Measured
+    # on a project the size of his deepest target (35,894 subs): the extra
+    # column costs no measurable read time and the set peaks at ~6.4 MB.
+    seen: set[str] = set()
     for t in targets:
         proj = None
         try:
@@ -1188,11 +1195,11 @@ def _collect_night_acc(lib, targets, *, lon_deg):
             # time rather than peak memory — measured at 1,552 ms → 920 ms on a
             # project the size of his deepest target, for an identical fold.
             accumulate_nights(
-                ((ts, exposure_s, t.name, fwhm_px)
-                 for ts, exposure_s, fwhm_px in proj.iter_frame_columns(
-                     "timestamp_utc", "exposure_s", "fwhm_px",
+                ((ts, exposure_s, t.name, fwhm_px, source)
+                 for ts, exposure_s, fwhm_px, source in proj.iter_frame_columns(
+                     "timestamp_utc", "exposure_s", "fwhm_px", "source_path",
                      accepted_only=True)),
-                acc, lon_deg=lon_deg,
+                acc, lon_deg=lon_deg, seen=seen,
             )
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
             pass

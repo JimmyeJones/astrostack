@@ -101,10 +101,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Dashboard's frame count, **integration hours** and `acceptance_rate` denominator, and the summary's
   `n_subs_kept` / `total_integration_s` + the shareable caption, are all inflated roughly in proportion.
   `webapp/library_summary.py::summarize_library` (`n_subs_kept = sum(n_frames_accepted)`,
-  `total_integration_s = sum(total_exposure_s)`) is the second confirmed surface; **check two more before fixing**
-  — the activity calendar's per-night `n_frames`/`exposure_s` (`stats._collect_night_acc` opens *every* project
-  and folds a sub that sits in both DBs twice into one night) and `storage.get_storage`'s `total_frames` →
-  nightly-growth estimate.
+  `total_integration_s = sum(total_exposure_s)`) is the second confirmed surface. The activity calendar's
+  per-night fold (`stats._collect_night_acc`) was a third and is **✅ fixed in v0.500.4** (it already opened
+  every project, so a `seen` set of `source_path`s cost nothing extra); `storage.get_storage`'s `total_frames` →
+  nightly-growth estimate is still to check.
   **Why it is a lead and not the cheap dedup v0.500.3 shipped.** Storage and incoming-lag only ever de-duplicate
   the *folders two or more targets claim*, paid for by opening just those projects — but `campaign_stats` and
   `summarize_library` open **no** project at all; they read registry columns. There is no `source_path` to
@@ -3593,6 +3593,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.500.4 **The imaging calendar (and the best-night / off-night reads and recap poster on the same fold) counted a sub two targets registered (#878) twice — its sub, exposure and star size** (`stats._collect_night_acc`, `activity_calendar.accumulate_nights(seen=…)`). Full text in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.500.3 **Storage's "Your N subs in incoming/ are the only copy" line counted a sub twice when two targets registered it (#878's mosaic double-registration) — the same summed-across-targets tally v0.492.35 fixed in `/api/incoming-lag`** (`webapp/routers/storage.py::_incoming_overcount`, new `Project.source_sizes_in_folder`). Full text in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.500.2 **The editor's Rotate help said a positive angle turns the picture clockwise; it turns it anticlockwise** (`geometry.rotate` Angle help in `seestack/edit/ops/geometry.py`; copy fixed, direction unchanged so saved recipes render as before). Full text in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.500.1 **The editor dogfood drive waits out earlier toasts before tapping each Auto-feedback chip — on the 2×2 mosaic it had printed the previous tap's "Auto-process applied" re-run toast as the marked chip's answer** (`scripts/dogfood_editor.mjs`; probe-only, app was right). Full text in [`SHIPPED.md`](SHIPPED.md).
