@@ -1,5 +1,31 @@
 # Shipped — the record
 
+## 2026-10-18 (Builder, branch `agent/storage-incoming-dedupe`) — Storage counted double-registered subs twice
+
+### v0.500.3 — "your subs in incoming/ are the only copy" counts each file once
+
+**What.** `GET /api/storage` builds the Storage page's honesty line (`incomingCopyNote`: *"Your N subs (X GB) in
+incoming/ are the only copy AstroStack knows of"*) by adding every target's `Project.source_frames_under` tally.
+That sum is exact only while no two targets hold rows for one file — and issue #878's mosaic double-registration is
+exactly that shape (the same subs registered under two targets, which `webapp/routers/incominglag.py` documents as
+covering most of the owner's frames until the in-app de-duplication is run, and which a Combine that could not carry
+every picture also leaves behind). So the page could overstate both the sub count and the gigabytes of his only copy
+by up to 2×. `/api/incoming-lag` had the identical sum and was fixed in v0.492.35; this endpoint was its untouched
+sibling. Found by this run's QA-rotation (4) read of the routers' *answers* (traced in the code, reproduced in a test).
+
+**Fix.** The per-target sums stay; `_incoming_overcount` then reads, **only for a folder two or more targets claim**
+(`source_folders_under`, one grouped count per target), each claimant's `(relative path, size)` rows via the new
+`Project.source_sizes_in_folder` (same SQL dirname expression as `source_paths_in_folder`), and subtracts the excess
+over the distinct files. A duplicate row with no recorded size does not make the total "at least" when another row
+knows the size. A folder whose union cannot be completed keeps the old summed figure, and nothing 500s.
+
+**Upgrade-safe (§9):** no response-shape, config, schema, on-disk or default change; one additive read-only Project
+method. Still reads only frame rows — nothing under `incoming/` is opened or stat-ed (the existing guard test passes).
+
+**Tests (+5, `tests/webapp/test_storage.py`):** a full twin counts 6 not 9 with the true on-disk bytes; a partial twin
+adds nothing; a sizeless twin row keeps bytes exact and unsized at 0; no extra reads without a shared folder (spy
+proven live); a failed union keeps the old sum and returns 200. The first four fail on the pre-fix router.
+
 ## 2026-10-17 (Builder, branch `claude/adoring-planck-inoaqp`) — editor Rotate help named the wrong direction
 
 ### v0.500.2 — the Rotate op's help says the way it really turns

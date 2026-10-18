@@ -2789,6 +2789,31 @@ class Project:
         ).fetchall()
         return [str(r[0]) for r in rows]
 
+    def source_sizes_in_folder(self, prefix: str, folder: str,
+                               sep: str = os.sep) -> list[tuple[str, int | None]]:
+        """:meth:`source_paths_in_folder` with each frame's recorded
+        ``source_size_bytes`` alongside (``None`` for a row ingested before the
+        column existed).
+
+        For ``/api/storage``'s "your subs in incoming/" line, which sums sizes
+        across every target and so has to de-duplicate a folder two targets
+        registered by *path* before it can add up *bytes*. Same SQL dirname
+        expression, same relative paths, so the two cannot disagree about which
+        frames sit in ``folder``; answered from the ``frames`` rows alone.
+        """
+        assert self._conn is not None
+        start = len(prefix) + 1
+        rows = self._conn.execute(
+            "WITH rest AS ("
+            "  SELECT substr(source_path, ?) AS r, source_size_bytes AS b"
+            "    FROM frames WHERE substr(source_path, 1, ?) = ?"
+            ") "
+            "SELECT r, b FROM rest "
+            " WHERE rtrim(rtrim(r, replace(r, ?, '')), ?) = ?",
+            (start, len(prefix), prefix, sep, sep, folder),
+        ).fetchall()
+        return [(str(r[0]), None if r[1] is None else int(r[1])) for r in rows]
+
     def frame_night_counts(self) -> dict[str, int]:
         """Tally *all* frames (accepted or rejected) by capture night.
 
