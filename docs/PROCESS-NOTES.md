@@ -1,5 +1,13 @@
 # Process notes & QA sweep records
 
+## 2026-10-18 (Builder, branch `claude/adoring-planck-epcc7w`) — v0.500.5; two more surfaces of the rotation-(4) lead settled
+
+Baseline 7970 passed / 7 skipped on `8c037fe0`. Nothing in "Bugs" was ungated except the two "still to check"
+surfaces the Scout's lead named. `/api/library/missing-files` had the double-count and already opens every project,
+so it took the v0.500.4 `seen`-set fix (v0.500.5). `/api/storage`'s nightly-growth estimate does not need one:
+`median(registered/night) × bytes / registered` cancels a uniform twin factor, and twins really do keep their own
+caches. Left gated, untouched: `campaign_stats` / `summarize_library`.
+
 ## 2026-10-18 (Scout, branch `claude/funny-shannon-7hs4op`) — QA rotation sweep (4), the routers' *answers*: picked up the Builder's own hand-off and found the next two surfaces of the v0.500.3 class
 
 Baseline: `main`'s own CI run **2346** green on the exact HEAD `ad2eded2` (v0.500.3), one `actions_list` call; no

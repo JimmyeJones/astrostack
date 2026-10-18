@@ -579,12 +579,22 @@ class LibraryMissingFilesOut(BaseModel):
 def _collect_missing_files(lib, targets) -> LibraryMissingFilesOut:
     """Count, across the whole library, accepted frames with neither their cache
     nor their source on disk right now. A broken project is skipped, never 500s
-    the dashboard — the same rule the other roll-ups follow."""
+    the dashboard — the same rule the other roll-ups follow.
+
+    The library totals count each **sub** once. Issue #878 registers one
+    mosaic's subs under two targets, so adding the per-target counts said an
+    outage had taken out up to twice the subs it had. A sub is missing if any
+    target that lists it can't read it (each per-target row stays that target's
+    own count — neither can stack it), so the total is never below a row's.
+    The sets are the same shape as the night fold's (``_collect_night_acc``):
+    one path per accepted sub, released with the call."""
     from seestack.io.project import Project
 
     rows: list[MissingFilesTargetOut] = []
     n_missing = 0
     n_accepted = 0
+    seen: set[str] = set()
+    seen_missing: set[str] = set()
     for t in targets:
         # The registry already knows a target has collected nothing; there is
         # no file to be missing, so don't pay for the open.
@@ -593,16 +603,29 @@ def _collect_missing_files(lib, targets) -> LibraryMissingFilesOut:
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
-            missing = proj.count_unreadable_frames(accepted_only=True)
-            accepted = proj.count(accepted_only=True)
+            # Materialised, so a project that fails part-way adds nothing to
+            # the totals rather than half its subs.
+            presence = list(proj.iter_accepted_source_presence())
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
             continue
         finally:
             if proj is not None:
                 proj.close()
-        n_accepted += accepted
+        missing = 0
+        for src, readable in presence:
+            missing += not readable
+            if not src:
+                # No file name to recognise it by: always its own sub.
+                n_accepted += 1
+                n_missing += not readable
+                continue
+            if src not in seen:
+                seen.add(src)
+                n_accepted += 1
+            if not readable and src not in seen_missing:
+                seen_missing.add(src)
+                n_missing += 1
         if missing > 0:
-            n_missing += missing
             rows.append(MissingFilesTargetOut(
                 safe=t.safe_name, name=t.name, n_missing=missing,
             ))

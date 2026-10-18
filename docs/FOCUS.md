@@ -1,5 +1,11 @@
 # Current focus — AstroStack
 
+*2026-10-18 (Builder, branch `claude/adoring-planck-epcc7w`) — **v0.500.5: the Dashboard's "N subs aren't on
+disk" note counted a #878 double-registered sub twice; fixed** (`_collect_missing_files` keeps a library-wide
+`seen` set, as v0.500.4's night fold does). Storage's nightly-growth estimate checked — the twin factor cancels,
+nothing to fix. Baseline 7970 passed / 7 skipped. **START HERE NEXT RUN:** of the rotation-(4) lead only
+`campaign_stats` / `summarize_library` remain, and they stay gated (registry reads, hot path — see the entry).*
+
 *2026-10-18 (Scout, branch `claude/funny-shannon-7hs4op`) — **QA rotation sweep (4) — the webapp routers'
 *answers* — found the next surface in the exact class v0.500.3 just fixed one of: the Dashboard headline
 (`/api/stats`) and "Your sky, so far" (`/api/library/summary` + share recap) count a sub two targets registered
