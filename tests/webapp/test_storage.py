@@ -292,3 +292,110 @@ def test_storage_says_nothing_about_incoming_on_a_fresh_install(client, data_roo
     body = client.get("/api/storage").json()
     assert body["incoming_frames"] == 0
     assert body["incoming_bytes"] == 0
+
+
+# ---- a folder two targets registered is still one set of files ------------
+#
+# Issue #878's mosaic double-registration left the same subs registered under two
+# targets, and the "only copy" line added every target's tally together — so it
+# reported each such sub (and its bytes) twice. ``/api/incoming-lag`` had the same
+# sum and was de-duplicated in v0.492.35; this line is the same fix for sizes.
+
+
+def _twin_first_target(root, name="twin", *, keep=None, drop_size=False):
+    """Register a second target over (some of) the first target's subs, with
+    their recorded sizes — #878's shape. Nothing on disk moves."""
+    from seestack.io.project import FrameRow
+
+    lib = Library.open_or_create(root / "library")
+    try:
+        entry = lib.list_targets()[0]
+        proj = lib.open_target(entry.safe_name)
+        try:
+            frames = list(proj.iter_frames())
+        finally:
+            proj.close()
+        frames = frames if keep is None else frames[:keep]
+        _, twin = lib.create_target(name)
+        try:
+            twin.add_frames([FrameRow(
+                source_path=f.source_path,
+                source_size_bytes=None if drop_size else f.source_size_bytes)
+                for f in frames])
+        finally:
+            twin.close()
+    finally:
+        lib.close()
+    return frames
+
+
+def test_storage_counts_a_sub_two_targets_registered_once(client, solved_library):
+    """Two targets of three subs, one of them registered twice over: still six
+    files and their real bytes, not nine."""
+    _twin_first_target(solved_library)
+    body = client.get("/api/storage").json()
+    assert body["incoming_frames"] == 6
+    on_disk = sum(p.stat().st_size
+                  for p in (solved_library / "incoming").rglob("*.fit"))
+    assert body["incoming_bytes"] == on_disk
+    assert body["incoming_unsized_frames"] == 0
+
+
+def test_storage_keeps_a_partial_twin_s_extra_subs_out_of_the_count(
+        client, solved_library):
+    """A twin holding only some of a folder's subs adds nothing either — the
+    union is the original three, and the other target's three are untouched."""
+    _twin_first_target(solved_library, keep=2)
+    body = client.get("/api/storage").json()
+    assert body["incoming_frames"] == 6
+    assert body["incoming_unsized_frames"] == 0
+
+
+def test_a_twin_row_without_a_size_does_not_make_the_total_a_floor(
+        client, solved_library):
+    """The file's size is known from the original row, so a duplicate row that
+    predates the size column must neither add an "at least" nor lose bytes."""
+    _twin_first_target(solved_library, drop_size=True)
+    body = client.get("/api/storage").json()
+    on_disk = sum(p.stat().st_size
+                  for p in (solved_library / "incoming").rglob("*.fit"))
+    assert (body["incoming_frames"], body["incoming_bytes"],
+            body["incoming_unsized_frames"]) == (6, on_disk, 0)
+
+
+def test_storage_reads_no_extra_rows_without_a_shared_folder(
+        client, solved_library, monkeypatch):
+    """The de-duplication is paid only where targets overlap; prove the spy is
+    wired by watching it fire once the twin exists."""
+    from seestack.io.project import Project
+
+    asked: list[str] = []
+    real = Project.source_sizes_in_folder
+
+    def spy(self, prefix, folder, *a, **k):
+        asked.append(folder)
+        return real(self, prefix, folder, *a, **k)
+
+    monkeypatch.setattr(Project, "source_sizes_in_folder", spy)
+    assert client.get("/api/storage").json()["incoming_frames"] == 6
+    assert asked == []
+
+    _twin_first_target(solved_library)
+    assert client.get("/api/storage").json()["incoming_frames"] == 6
+    assert len(asked) == 2              # one read per target that claims it
+
+
+def test_a_dedupe_that_cannot_complete_keeps_the_old_sum(
+        client, solved_library, monkeypatch):
+    """A union missing a target's frames is never used, and never 500s the page."""
+    from seestack.io.project import Project
+
+    _twin_first_target(solved_library)
+
+    def boom(self, *a, **k):
+        raise OSError("database disk image is malformed")
+
+    monkeypatch.setattr(Project, "source_sizes_in_folder", boom)
+    r = client.get("/api/storage")
+    assert r.status_code == 200
+    assert r.json()["incoming_frames"] == 9

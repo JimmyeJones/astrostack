@@ -1,5 +1,10 @@
 # Current focus — AstroStack
 
+*2026-10-18 (Builder, branch `agent/storage-incoming-dedupe`) — **v0.500.3: Storage's "your subs in incoming/ are
+the only copy" line counted a double-registered sub (#878) twice; fixed.** Found by reading the routers' *answers*
+(rotation 4): `storage` and `incominglag` done. Suite 7966 passed / 7 skipped. **START HERE NEXT RUN:** continue
+rotation (4) on the other routers' answers — look for any other library-wide sub/byte tally summed per target.*
+
 *2026-10-17 (Builder, branch `claude/adoring-planck-r0cfc9`) — **docs only: nothing ungated to build; a
 crash-fuzz of every `/api` route (8,717 requests) and every editor op at extreme params on a gapped mosaic and
 two slivers (2,952 renders) found zero 5xx.** Suite 7961 passed / 7 skipped on `2de14833`. **START HERE NEXT

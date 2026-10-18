@@ -162,6 +162,74 @@ def purge_stack_run(proj: Any, run: StackRunRow) -> None:
     delete_run_meta(proj, run.id)
 
 
+def _incoming_overcount(lib: Any, prefix: str,
+                        claimed_by: dict[str, list]) -> tuple[int, int, int]:
+    """``(frames, bytes, unsized)`` the per-target sums counted **twice over**.
+
+    The "your subs in incoming/ are the only copy" line adds each target's
+    :meth:`~seestack.io.project.Project.source_frames_under` together, and that
+    sum is exact only while no two targets hold rows for one file. Issue #878's
+    mosaic double-registration is exactly that shape — the same subs registered
+    under two targets, across most of the owner's frames — so the page could say
+    he had nearly twice the subs and gigabytes he really keeps there, in the one
+    sentence written to tell him how much of his data has no second copy.
+    ``/api/incoming-lag`` had the same sum and was fixed in v0.492.35
+    (:func:`webapp.routers.incominglag.imported_by_folder`); this is the same
+    de-duplication, by path, for the sizes this page also reports.
+
+    Paid only for a folder two or more targets claim, so a library with no
+    double registration reads not one extra row. A folder whose union cannot be
+    completed (a target that opened for the counts and not here) is left
+    uncorrected — the old figure, rather than one missing a target's frames.
+    """
+    from seestack.io.project import Project
+
+    entries: dict[str, Any] = {}
+    wanted: dict[str, list[str]] = {}
+    for folder, targets in claimed_by.items():
+        if len(targets) < 2:
+            continue
+        for t in targets:
+            entries[t.safe_name] = t
+            wanted.setdefault(t.safe_name, []).append(folder)
+    if not wanted:
+        return (0, 0, 0)
+
+    # Per folder: the summed tallies as source_frames_under added them, and the
+    # distinct files behind them (path -> any recorded size).
+    summed: dict[str, list[int]] = {}
+    distinct: dict[str, dict[str, int | None]] = {}
+    incomplete: set[str] = set()
+    for safe, folders in wanted.items():
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(entries[safe]))
+            for folder in folders:
+                tally = summed.setdefault(folder, [0, 0, 0])
+                seen = distinct.setdefault(folder, {})
+                for rel, size in proj.source_sizes_in_folder(prefix, folder):
+                    tally[0] += 1
+                    tally[1] += size or 0
+                    tally[2] += size is None
+                    if seen.get(rel) is None:
+                        seen[rel] = size
+        except Exception:  # noqa: BLE001 — a refinement must not 500 the page
+            incomplete.update(folders)
+        finally:
+            if proj is not None:
+                proj.close()
+
+    over = [0, 0, 0]
+    for folder, (n, b, u) in summed.items():
+        if folder in incomplete:
+            continue
+        sizes = distinct[folder].values()
+        over[0] += n - len(sizes)
+        over[1] += b - sum(s or 0 for s in sizes)
+        over[2] += u - sum(1 for s in sizes if s is None)
+    return (over[0], over[1], over[2])
+
+
 class TargetStorage(BaseModel):
     safe: str
     name: str
@@ -221,6 +289,9 @@ def get_storage(request: Request) -> StorageResponse:
     # trailing separator matters: without it a sibling like `incoming2/` matches.
     incoming_prefix = os.path.join(str(settings.resolved_incoming_dir), "")
     incoming_frames = incoming_bytes = incoming_unsized = 0
+    # Which targets registered each incoming/ folder, so a folder two of them
+    # hold rows for is counted once rather than twice (see _incoming_overcount).
+    claimed_by: dict[str, list] = {}
     try:
         for t in lib.list_targets():
             tdir = lib.target_dir(t)
@@ -253,6 +324,9 @@ def get_storage(request: Request) -> StorageResponse:
                 incoming_frames += n_inc
                 incoming_bytes += b_inc
                 incoming_unsized += u_inc
+                if n_inc:
+                    for folder, _n in proj.source_folders_under(incoming_prefix):
+                        claimed_by.setdefault(folder, []).append(t)
             except Exception:  # noqa: BLE001
                 pass
             finally:
@@ -266,6 +340,11 @@ def get_storage(request: Request) -> StorageResponse:
                 proxies_bytes=proxies,
                 n_stack_runs=n_runs,
             ))
+        over_n, over_b, over_u = _incoming_overcount(lib, incoming_prefix,
+                                                     claimed_by)
+        incoming_frames -= over_n
+        incoming_bytes -= over_b
+        incoming_unsized -= over_u
     finally:
         lib.close()
 

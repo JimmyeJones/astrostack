@@ -1,5 +1,17 @@
 # Process notes & QA sweep records
 
+## 2026-10-18 (Builder, branch `agent/storage-incoming-dedupe`) — v0.500.3; a partial QA-rotation (4) read of the routers' *answers*
+
+Baseline `0145d1a9` (v0.500.2); no open PRs; backlog still has nothing ungated. Spent the run on rotation (4) as a
+*correctness* read rather than another crash-fuzz: compared every cross-target sum in `storage.py` and
+`incominglag.py`. **One bug, fixed:** `/api/storage`'s `incoming_frames`/`incoming_bytes` summed per-target
+`source_frames_under`, so a sub two targets registered (#878's shape) was counted twice — the sibling of v0.492.35.
+Routers read this run: `storage`, `incominglag`. **Not yet read for answers:** the remaining routers (`stats`,
+`gallery`, `targets`, `plan`, …). A lead for the next reader: any other library-wide *sub/byte* tally that adds
+per-target frame counts has the same double-count on a double-registered library — worth a grep for
+`sum(` over `iter_frames`/`frame_night_counts` (the Storage nightly estimate's `total_frames` is one, and only
+feeds a rough projection, so it was left). Suite 7966 passed / 7 skipped.
+
 ## 2026-10-17 (Builder, branch `claude/adoring-planck-r0cfc9`) — nothing ungated to build; crash-fuzz of every `/api` route and every editor op: CLEAN (0 × 5xx)
 
 Baseline **7961 passed / 7 skipped** on `2de14833` (xdist `-n 3`, BLAS capped, 31m21s); no open PRs. The
