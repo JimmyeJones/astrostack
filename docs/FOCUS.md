@@ -1,5 +1,30 @@
 # Current focus — AstroStack
 
+*2026-10-18 (Scout, branch `claude/funny-shannon-7hs4op`) — **QA rotation sweep (4) — the webapp routers'
+*answers* — found the next surface in the exact class v0.500.3 just fixed one of: the Dashboard headline
+(`/api/stats`) and "Your sky, so far" (`/api/library/summary` + share recap) count a sub two targets registered
+(#878) twice. Filed as a reproduced LEAD; docs only.** Baseline: `main`'s own CI run **2346** green on the exact
+HEAD `ad2eded2` (v0.500.3); no open PRs; working tree clean. **Inbox** (`list_issues`): the same four open
+(#878, #880, #903, #1015), every one previously acted-on and owner-gated, all `updated_at` before the last Scout
+run — nothing new owed. **Sweep (4):** `seestack/io/library.py::campaign_stats` is a pure registry
+`SUM(n_frames/n_frames_accepted/total_exposure_s)`, and `_refresh_target_stats_locked` stamps each per-target
+column from that target's own project DB — so #878's twin makes both count the shared sub. Reproduced end to end
+on a real `Library`/`Project` (two targets, three shared subs → `6 / 6 / 180.0` where the distinct truth is
+`3 / 3 / 90.0`); on his library (~76 % double-registered) the frame count, **integration hours**,
+`acceptance_rate` denominator, `n_subs_kept` and `total_integration_s` are inflated roughly in proportion.
+`webapp/library_summary.py::summarize_library` is the second confirmed surface; the activity calendar's per-night
+fold (`stats._collect_night_acc`), storage's `total_frames` estimate and `/api/library/missing-files`'s
+`n_accepted` are the same shape to check. **Not the cheap dedup v0.500.3 shipped** — storage/incoming-lag
+de-duplicate only the *folders two targets claim*, but these open no project at all, so a distinct-sub count means
+a library-wide `source_path` read on the Dashboard's hot path (the cost the backlog already flagged against
+touching `campaign_stats`). It also self-resolves when the owner runs **Combine** (item 16, offered in-app), so
+the entry gates on measuring his real inflation vs. how many pairs are still un-combined. Full entry under "Bugs".
+Dogfood `--mosaic` **CLEAN** (Auto trim 7.9 %, per-panel surfaces engaged and reconciling, nothing overflowing,
+no console errors, heights on the standing baseline). **START HERE NEXT RUN:** inbox first (all four owner-gated);
+"Bugs" now carries this reproduced LEAD plus the standing owner-gated set — it is PRIORITY 3 and self-resolving,
+so it does not outrank an editor bug; next QA rotation is **(1)** (scale-dependent preview↔export parity on a
+mosaic canvas). Record files have headroom (`PROCESS-NOTES.md` ~13.7k/18k, `SHIPPED.md` ~39.7k/64k).*
+
 *2026-10-18 (Builder, branch `agent/storage-incoming-dedupe`) — **v0.500.3: Storage's "your subs in incoming/ are
 the only copy" line counted a double-registered sub (#878) twice; fixed.** Found by reading the routers' *answers*
 (rotation 4): `storage` and `incominglag` done. Suite 7966 passed / 7 skipped. **START HERE NEXT RUN:** continue

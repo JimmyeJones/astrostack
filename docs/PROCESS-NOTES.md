@@ -1,5 +1,51 @@
 # Process notes & QA sweep records
 
+## 2026-10-18 (Scout, branch `claude/funny-shannon-7hs4op`) — QA rotation sweep (4), the routers' *answers*: picked up the Builder's own hand-off and found the next two surfaces of the v0.500.3 class
+
+Baseline: `main`'s own CI run **2346** green on the exact HEAD `ad2eded2` (v0.500.3), one `actions_list` call; no
+open PRs; working tree clean. **Inbox** (`list_issues`): the same four open (#878, #880, #903, #1015), every one
+previously acted-on and owner-gated, all `updated_at` before the last Scout run (2026-10-17) — nothing new owed.
+
+**The sweep took the lead the v0.500.3 Builder note left for "the next reader":** *"any other library-wide
+sub/byte tally that adds per-target frame counts has the same double-count … worth a grep for `sum(` over
+`iter_frames`/`frame_night_counts`."* It is a real class and it is not yet drained. The two most prominent
+surfaces both carry it:
+
+* `seestack/io/library.py::campaign_stats` — a single registry `SUM(n_frames/n_frames_accepted/total_exposure_s)`
+  over the `targets` table, each column stamped per target from its own project DB by `_refresh_target_stats_locked`.
+  Feeds `/api/stats` (Dashboard headline: frames, accepted, **integration hours**, `acceptance_rate` denominator).
+* `webapp/library_summary.py::summarize_library` — `n_subs_kept = sum(n_frames_accepted)`,
+  `total_integration_s = sum(total_exposure_s)`. Feeds `/api/library/summary` ("Your sky, so far") and the
+  shareable recap caption/poster.
+
+**Reproduced** on a real `Library`/`Project` (scratch repro, same `_twin_first_target` shape
+`tests/webapp/test_storage.py` uses for the line v0.500.3 fixed): two targets over three shared 30 s subs →
+`campaign_stats` returns `n_frames=6, n_frames_accepted=6, total_exposure_s=180.0` where the distinct truth is
+`3 / 3 / 90.0`. On his library (#878, ~76 % double-registered across 11 mosaic pairs) all of the above are
+inflated roughly in proportion. Same shape, **not yet confirmed-by-repro but traced** and named in the Bugs
+entry as surfaces to check before a fix: the activity-calendar per-night fold (`stats._collect_night_acc` opens
+every project and folds a sub in both DBs twice), `storage.get_storage`'s `total_frames` → nightly estimate, and
+`/api/library/missing-files`'s `n_accepted`/`n_missing`.
+
+**Why it is filed as a LEAD, not Scout-fixed, and not the cheap v0.500.3 dedup.** Storage and incoming-lag
+de-duplicate only the *folders two or more targets claim*, paying to open just those projects. `campaign_stats`
+and `summarize_library` open **no** project — they read registry columns — so there is no `source_path` to
+de-duplicate by without opening every project and unioning library-wide, on `/api/stats`, the Dashboard's hot
+path (the exact cost the backlog's "tick the solve step on solved frames" entry already flagged against touching
+`campaign_stats`). It is also PRIORITY 3 and self-resolving: the overcount vanishes the moment the owner runs
+**Combine into `<T> (mosaic)`** (one-sitting item 16, "YES", in-app since v0.482.1). So the entry gates on a
+measurement the observer can take (his real `/api/stats` inflation vs. how many pairs are still un-combined) and
+proposes, if it must be paid, a registry-level twin marker written at combine/scan time rather than a per-tile
+library-wide read. This is building, not a small obviously-safe fix, so it is the Builder's (AGENTS.md §1/§4).
+
+**Dogfood `scripts/agent-dogfood.sh --mosaic --build`: CLEAN.** Auto trim 7.9 %; per-panel surfaces engaged and
+reconciling (top-right panel ~30 s vs ~1 min typical; grain-uneven and seams-flat agree); nothing overflowing, no
+console errors; page heights on the standing baseline (`[phone] /life-list [Still to shoot]` 14,513 px unchanged,
+`/settings/more` 5,022 px). The only notice is the expected ASTAP-not-set-up alert a scratch install always shows.
+
+**Rotation: (4) read for its two headline surfaces → next sweep is (1)** (scale-dependent preview↔export parity
+on a mosaic-size canvas). No code shipped — docs only, one reproduced LEAD filed, which is the honest outcome.
+
 ## 2026-10-18 (Builder, branch `agent/storage-incoming-dedupe`) — v0.500.3; a partial QA-rotation (4) read of the routers' *answers*
 
 Baseline `0145d1a9` (v0.500.2); no open PRs; backlog still has nothing ungated. Spent the run on rotation (4) as a

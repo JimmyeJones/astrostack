@@ -82,6 +82,43 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
+  v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
+  (`/api/library/summary` + the share recap) count a sub registered in two targets (#878) twice, in exactly
+  the way `/api/incoming-lag` (v0.492.35) and `/api/storage` (v0.500.3) have already been hardened against.**
+  *(Pillar: trust / friendliness — PRIORITY 3; size **S to measure, L to fix cheaply**; severity low-to-moderate
+  — it over-states a progress number the owner is proud of on the first screen the observer also reads, not a
+  data-safety claim. Confidence: **reproduced end to end** on #878-shaped data; the fix cost and whether it is
+  worth paying are the gate.)*
+  **What is reproduced.** `seestack/io/library.py::Library.campaign_stats` is a single SQL
+  `SUM(n_frames)/SUM(n_frames_accepted)/SUM(total_exposure_s)` over the `targets` registry, and
+  `_refresh_target_stats_locked` stamps each of those per-target columns from that target's *own* project DB
+  (`proj.count`, `proj.iter_frames`) — so #878's twin, holding a frame row for the same `source_path`, makes
+  both targets count it. Two targets of three shared subs (30 s each) → `campaign_stats` returns
+  `n_frames=6, n_frames_accepted=6, total_exposure_s=180.0` where the distinct truth is `3 / 3 / 90.0`
+  (scratch repro, real `Library`/`Project`; the same `_twin_first_target` shape `tests/webapp/test_storage.py`
+  uses for the fixed line). On his library (#878: ~76 % of frames double-registered across 11 mosaic pairs) the
+  Dashboard's frame count, **integration hours** and `acceptance_rate` denominator, and the summary's
+  `n_subs_kept` / `total_integration_s` + the shareable caption, are all inflated roughly in proportion.
+  `webapp/library_summary.py::summarize_library` (`n_subs_kept = sum(n_frames_accepted)`,
+  `total_integration_s = sum(total_exposure_s)`) is the second confirmed surface; **check two more before fixing**
+  — the activity calendar's per-night `n_frames`/`exposure_s` (`stats._collect_night_acc` opens *every* project
+  and folds a sub that sits in both DBs twice into one night) and `storage.get_storage`'s `total_frames` →
+  nightly-growth estimate.
+  **Why it is a lead and not the cheap dedup v0.500.3 shipped.** Storage and incoming-lag only ever de-duplicate
+  the *folders two or more targets claim*, paid for by opening just those projects — but `campaign_stats` and
+  `summarize_library` open **no** project at all; they read registry columns. There is no `source_path` to
+  de-duplicate by without opening every project and unioning library-wide, and `/api/stats` is the Dashboard's
+  hot path (polled every ~10 s) — the exact cost the backlog already flagged against touching `campaign_stats`
+  (the "tick the solve step on solved frames" entry, further down). So **do not** wire a per-sub cross-target
+  read onto the registry sum blind. **Settle first, cheapest route:** the overcount self-resolves the moment the
+  owner runs **Combine into `<T> (mosaic)`** (one-sitting item 16, "YES", offered in-app since v0.482.1), so the
+  measurement that decides priority is how inflated his real headline is *today* against how many pairs are still
+  un-combined — the observer can read both (`/api/stats` vs a distinct-`source_path` count per shared folder). If
+  he has combined them, close this with the measurement rather than paying the hot-path cost. The honest fix if
+  it must be paid is probably a registry-level "these targets are twins over the same subs" marker written at
+  combine/scan time (so the sum can subtract without a library-wide source_path read), not a scan on every tile.
+
 - **LEAD (Builder 2026-10-14, read off a `--no-site` dogfood pass that was otherwise CLEAN) — "Worth more
   time" ranks a target by `total_exposure_s` alone, so it cannot know the picture has already been judged
   *measured-clean* by the card on the target's own page.** *(Pillar: trust / friendliness — PRIORITY 3; size
