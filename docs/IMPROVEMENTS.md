@@ -102,9 +102,9 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `n_subs_kept` / `total_integration_s` + the shareable caption, are all inflated roughly in proportion.
   `webapp/library_summary.py::summarize_library` (`n_subs_kept = sum(n_frames_accepted)`,
   `total_integration_s = sum(total_exposure_s)`) is the second confirmed surface. The activity calendar's
-  per-night fold (`stats._collect_night_acc`) was a third and is **✅ fixed in v0.500.4** (it already opened
-  every project, so a `seen` set of `source_path`s cost nothing extra); `storage.get_storage`'s `total_frames` →
-  nightly-growth estimate is still to check.
+  per-night fold (`stats._collect_night_acc`) was a third and is done (see `SHIPPED.md`, "the night fold counts
+  each sub once" — it already opened every project, so de-duplicating there cost nothing extra);
+  `storage.get_storage`'s `total_frames` → nightly-growth estimate is still to check.
   **Why it is a lead and not the cheap dedup v0.500.3 shipped.** Storage and incoming-lag only ever de-duplicate
   the *folders two or more targets claim*, paid for by opening just those projects — but `campaign_stats` and
   `summarize_library` open **no** project at all; they read registry columns. There is no `source_path` to
