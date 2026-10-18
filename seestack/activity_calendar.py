@@ -197,6 +197,7 @@ def accumulate_nights(
     acc: dict[date, _NightAgg],
     *,
     lon_deg: float | None = None,
+    seen: set | None = None,
 ) -> None:
     """Fold ``(timestamp_utc, exposure_s, target_name)`` tuples into ``acc``
     (keyed by observing-night date), summing exposure and counting subs.
@@ -210,10 +211,18 @@ def accumulate_nights(
     size ``fwhm_px``, which feeds the per-night median behind "your sharpest
     night". It is read positionally and only when present, so every existing
     3-tuple caller folds byte-for-byte as before; a ``None`` or non-finite value
-    is skipped rather than counted as a measurement."""
+    is skipped rather than counted as a measurement.
+
+    An **optional fifth element** names the file the sub came from. With a
+    ``seen`` set passed (the same one for every target of one fold), a sub whose
+    file was already folded under another target adds that target's name to the
+    night and nothing else — issue #878 registers one mosaic's subs under two
+    targets, and the fold opens both projects, so without this the calendar
+    counted every such sub, its exposure and its star size twice."""
     for entry in entries:
         timestamp_utc, exposure_s, target_name = entry[0], entry[1], entry[2]
         fwhm_px = entry[3] if len(entry) > 3 else None
+        source = entry[4] if len(entry) > 4 else None
         if not timestamp_utc:
             continue
         night = night_date_of(timestamp_utc, lon_deg)
@@ -222,6 +231,12 @@ def accumulate_nights(
         agg = acc.get(night)
         if agg is None:
             agg = acc[night] = _NightAgg()
+        if seen is not None and source:
+            if source in seen:
+                if target_name:
+                    agg.targets.add(target_name)
+                continue
+            seen.add(source)
         agg.exposure_s += float(exposure_s) if exposure_s else 0.0
         agg.n_frames += 1
         if target_name:

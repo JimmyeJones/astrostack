@@ -363,3 +363,43 @@ def test_the_night_fold_builds_no_frame_row_for_the_whole_library(
     # be zero work rather than cheap work).
     assert nights[day.isoformat()]["median_fwhm_px"] == 3.6
     assert built() == 0, f"built {built()} FrameRow objects for the night fold"
+
+
+def test_a_sub_two_targets_registered_counts_once_on_the_calendar(
+        client, built_library):
+    """Issue #878's shape: a second target holding rows for the very same
+    files. The fold opens both projects, and used to count every shared sub,
+    its exposure and its star size twice — the heatmap's night, the window's
+    total and the recap poster that reads them all said double."""
+    import dataclasses
+
+    from seestack.io.library import Library
+
+    now = datetime.now(timezone.utc)
+    day = (now - timedelta(days=5)).date()
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        _set_night_with_fwhm(lib, "M_42", day, 22, 60.0, fwhm_px=3.0)
+        proj = lib.open_target("M_42")
+        try:
+            frames = list(proj.iter_frames())
+        finally:
+            proj.close()
+        _, twin = lib.create_target("M 42 twin")
+        try:
+            twin.add_frames([dataclasses.replace(f, id=None) for f in frames])
+        finally:
+            twin.close()
+    finally:
+        lib.close()
+    client.put("/api/settings", json={"site_lon": 0.0})
+
+    data = client.get("/api/activity-calendar").json()
+    nights = {n["date"]: n for n in data["nights"]}
+    night = nights[day.isoformat()]
+    assert night["n_frames"] == 3
+    assert night["exposure_s"] == 180.0
+    assert night["n_measured"] == 3
+    assert data["total_exposure_s"] == 180.0
+    # Both targets really did shoot that night — the name is kept.
+    assert sorted(night["targets"]) == ["M 42 twin", "M_42"]

@@ -386,3 +386,47 @@ def test_off_night_reads_the_latest_night_even_from_an_unordered_list():
     shuffled = [n(14, 4.5), n(11, 3.0), n(13, 3.0), n(10, 3.0), n(12, 3.0)]
     read = off_night(shuffled)
     assert read is not None and read.night == "2026-07-14"
+
+
+def test_a_sub_two_targets_registered_is_folded_once_with_a_seen_set():
+    """Issue #878 registers one mosaic's subs under two targets. The fold walks
+    both, so a ``seen`` set shared across them must count each file once — its
+    sub, its exposure and its star size — while still naming both targets."""
+    from seestack.activity_calendar import accumulate_nights, nights_from
+
+    subs = [("2026-07-10T22:0%dZ" % i, 30.0, f"/data/incoming/m42/s{i}.fit")
+            for i in range(3)]
+    acc: dict = {}
+    seen: set = set()
+    for name, fwhm in (("M 42", 2.0), ("M 42 (twin)", 9.0)):
+        accumulate_nights(((ts, exp, name, fwhm, src) for ts, exp, src in subs),
+                          acc, seen=seen)
+    (night,) = nights_from(acc)
+    assert (night.n_frames, night.exposure_s, night.n_measured) == (3, 90.0, 3)
+    # The first target's measurement stands; the twin's copy adds nothing.
+    assert night.median_fwhm_px == 2.0
+    assert night.targets == ["M 42", "M 42 (twin)"]
+
+
+def test_the_source_element_is_ignored_without_a_seen_set():
+    """Every existing caller passes no ``seen`` and folds exactly as before,
+    even when its tuples happen to carry a file name."""
+    from seestack.activity_calendar import accumulate_nights, nights_from
+
+    acc: dict = {}
+    entries = [("2026-07-10T22:00:00Z", 30.0, "A", None, "/x.fit")] * 2
+    accumulate_nights(entries, acc)
+    (night,) = nights_from(acc)
+    assert (night.n_frames, night.exposure_s) == (2, 60.0)
+
+
+def test_a_sub_with_no_file_name_is_never_merged_away():
+    """An empty/None file name is not a key: two such subs are two subs."""
+    from seestack.activity_calendar import accumulate_nights, nights_from
+
+    acc: dict = {}
+    entries = [("2026-07-10T22:00:00Z", 30.0, "A", None, None),
+               ("2026-07-10T22:01:00Z", 30.0, "A", None, "")]
+    accumulate_nights(entries, acc, seen=set())
+    (night,) = nights_from(acc)
+    assert night.n_frames == 2
