@@ -1,5 +1,32 @@
 # Shipped — the record
 
+## 2026-10-18 (Builder, branch `claude/adoring-planck-epcc7w`) — the missing-files note counted double-registered subs twice
+
+### v0.500.5 — "your subs aren't on disk" counts each sub once
+
+**What.** `GET /api/library/missing-files` (`_collect_missing_files`, `webapp/routers/stats.py`) feeds the Dashboard's
+library-wide outage note (*"N subs across K targets aren't on disk"*). It added every target's
+`count_unreadable_frames` together, so a sub issue #878 registered under two targets was counted once per target:
+an offline share read as up to twice the subs it had taken out, and `n_accepted` was inflated the same way. The
+fourth surface of the Scout's 2026-10-18 rotation-(4) lead, and a cheap one — this roll-up already opens every
+project and stats every accepted row.
+
+**Fix.** New `Project.iter_accepted_source_presence()` yields `(source_path, readable)` over the same two columns and
+the same `first_existing_frame_path` rule as `count_unreadable_frames` (no whole rows — the existing guard test still
+holds). The roll-up keeps library-wide `seen` / `seen_missing` sets: a sub counts once in `n_accepted`, and once in
+`n_missing` if any target listing it can't read it, so the total is never below a per-target row. Each target's own
+row stays its own count (neither can stack the sub). A row with no `source_path` is never merged. A project that
+fails mid-read adds nothing (its rows are materialised before they are counted). Same memory shape as v0.500.4's
+night fold, released with the call; behind the existing 60 s cache.
+
+**Also checked, nothing to fix:** `/api/storage`'s nightly-growth estimate — the twin factor cancels (see the lead).
+
+**Upgrade-safe (§9):** no response-shape, config, schema, on-disk or default change.
+
+**Tests (+3, `tests/webapp/test_library_missing_files.py`):** a healthy twin leaves `n_accepted` unchanged; two
+missing twinned subs read as 2 across 2 targets, not 4; an unrelated outage in a third target still adds. All three
+fail on the pre-fix code.
+
 ## 2026-10-18 (Builder, branch `agent/calendar-twin-dedupe`) — imaging calendar counted double-registered subs twice
 
 ### v0.500.4 — the night fold counts each sub once

@@ -2449,6 +2449,23 @@ class Project:
                 n += 1
         return n
 
+    def iter_accepted_source_presence(self) -> Iterator[tuple[str, bool]]:
+        """Yield ``(source_path, readable)`` for every accepted frame.
+
+        :meth:`count_unreadable_frames` with ``accepted_only`` — the same two
+        columns, the same :func:`first_existing_frame_path` rule, the same one
+        ``stat()`` per row — but keeping *which* sub each answer is about. For
+        the library-wide missing-files roll-up, which adds every target's
+        answer together and so has to recognise a sub two targets registered
+        (issue #878) before it can count it once. ``source_path`` is ``""`` for
+        a row without one; the caller must not merge those.
+        """
+        assert self._conn is not None
+        for row in self._conn.execute(
+                "SELECT cached_path, source_path FROM frames WHERE accept = 1"):
+            yield (str(row[1] or ""),
+                   first_existing_frame_path(row[0], row[1]) is not None)
+
     def count_accepted_unsolved_tried(self) -> int:
         """Count accepted, still-unsolved frames the **solver has already tried**.
 

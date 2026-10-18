@@ -197,3 +197,74 @@ def test_the_roll_up_never_builds_a_frame_row_per_sub(client, built_library,
     body = client.get("/api/library/missing-files").json()
     assert body["n_missing"] == 2
     assert [t["safe"] for t in body["targets"]] == ["M_42"]
+
+
+# --- issue #878: a sub two targets registered is one sub -------------------
+#
+# The mosaic double-registration lists the same subs under two targets. Each
+# target really can't stack a missing one, so each keeps its own row — but the
+# library totals added those rows together and said an outage had taken out
+# up to twice the subs it had.
+
+
+def _twin(data_root: Path, safe: str, name: str = "twin") -> None:
+    """Register a second target over every one of ``safe``'s accepted subs —
+    #878's shape. Nothing on disk moves."""
+    from seestack.io.project import FrameRow
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            frames = list(proj.iter_frames(accepted_only=True))
+        finally:
+            proj.close()
+        entry, twin = lib.create_target(name)
+        try:
+            twin.add_frames([FrameRow(source_path=f.source_path, accept=True)
+                             for f in frames])
+        finally:
+            twin.close()
+        lib.refresh_target_stats(entry.safe_name)
+    finally:
+        lib.close()
+
+
+def test_a_sub_two_targets_registered_counts_once(client, built_library, data_root):
+    """Healthy library, one target twinned: the denominator is the real number
+    of subs, not the sum of both targets' rows."""
+    before = client.get("/api/library/missing-files").json()["n_accepted"]
+    _twin(data_root, "M_42")
+    body = client.get("/api/library/missing-files").json()
+    assert body["n_accepted"] == before
+    assert body["n_missing"] == 0
+
+
+def test_a_missing_twinned_sub_counts_once_but_both_targets_are_named(
+        client, built_library, data_root):
+    """Two of M 42's subs go missing and a twin lists them too: the note says
+    two subs across two targets — each target can't stack them — not four."""
+    _twin(data_root, "M_42")
+    _unlink_accepted(data_root, "M_42", 2)
+
+    body = client.get("/api/library/missing-files").json()
+    assert body["n_missing"] == 2
+    assert body["n_targets_missing"] == 2
+    named = {t["safe"]: t["n_missing"] for t in body["targets"]}
+    assert named["M_42"] == 2
+    assert sorted(named.values()) == [2, 2]
+    # Never below a row the same answer names.
+    assert body["n_missing"] >= max(named.values())
+
+
+def test_distinct_subs_in_different_targets_still_add_up(client, built_library,
+                                                         data_root):
+    """The de-duplication is by file, not by count: a twin alongside an
+    unrelated outage in another target still adds that target's subs."""
+    _twin(data_root, "M_42")
+    _unlink_accepted(data_root, "M_42", 1)
+    _unlink_accepted(data_root, "NGC_7000", 1)
+
+    body = client.get("/api/library/missing-files").json()
+    assert body["n_missing"] == 2
+    assert body["n_targets_missing"] == 3

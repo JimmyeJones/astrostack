@@ -104,7 +104,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `total_integration_s = sum(total_exposure_s)`) is the second confirmed surface. The activity calendar's
   per-night fold (`stats._collect_night_acc`) was a third and is done (see `SHIPPED.md`, "the night fold counts
   each sub once" — it already opened every project, so de-duplicating there cost nothing extra);
-  `storage.get_storage`'s `total_frames` → nightly-growth estimate is still to check.
+  `/api/library/missing-files` was a fourth and is done too (v0.500.5, `SHIPPED.md`). `storage.get_storage`'s
+  nightly-growth estimate was checked and **holds** (Builder 2026-10-18): it is `median(recent registered
+  subs/night) × library_bytes / registered subs`, so a twin scales both by one factor and cancels — and each
+  twin keeps its own caches, so bytes per *registered* sub is the right unit for disk growth. Nothing to fix.
   **Why it is a lead and not the cheap dedup v0.500.3 shipped.** Storage and incoming-lag only ever de-duplicate
   the *folders two or more targets claim*, paid for by opening just those projects — but `campaign_stats` and
   `summarize_library` open **no** project at all; they read registry columns. There is no `source_path` to
@@ -3593,6 +3596,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.500.5 **The Dashboard's "N subs across K targets aren't on disk" note counted a sub two targets registered (#878) twice — total and denominator now count each sub once; per-target rows unchanged** (`stats._collect_missing_files`, `Project.iter_accepted_source_presence`)
 - ✅ v0.500.4 **The imaging calendar (and the best-night / off-night reads and recap poster on the same fold) counted a sub two targets registered (#878) twice — its sub, exposure and star size** (`stats._collect_night_acc`, `activity_calendar.accumulate_nights(seen=…)`). Full text in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.500.3 **Storage's "Your N subs in incoming/ are the only copy" line counted a sub twice when two targets registered it (#878's mosaic double-registration) — the same summed-across-targets tally v0.492.35 fixed in `/api/incoming-lag`** (`webapp/routers/storage.py::_incoming_overcount`, new `Project.source_sizes_in_folder`). Full text in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.500.2 **The editor's Rotate help said a positive angle turns the picture clockwise; it turns it anticlockwise** (`geometry.rotate` Angle help in `seestack/edit/ops/geometry.py`; copy fixed, direction unchanged so saved recipes render as before). Full text in [`SHIPPED.md`](SHIPPED.md).
