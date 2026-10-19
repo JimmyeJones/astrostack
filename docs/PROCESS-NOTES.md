@@ -2,7 +2,7 @@
 
 ## 2026-10-19 (Builder, branch `claude/modest-bohr-c0p735`) — nothing ungated to build; a numeric preview↔export parity probe of the whole Auto chain on a gapped mosaic, and Auto's border trim on alt-az field-rotated mosaics: CLEAN
 
-Baseline on `c4109c9c` (see the FOCUS line for the count); no open PRs, working tree clean. "Bugs" unchanged since
+Baseline **7973 passed / 7 skipped** on `c4109c9c` (xdist `-n 4`, BLAS capped, 16m52s); no open PRs, working tree clean. "Bugs" unchanged since
 the run above: every entry is a LEAD or a decided stand-down gated on the owner's data, and no `READY` entry is
 open. So no code this run; two probes aimed at angles the recent runs had not measured.
 

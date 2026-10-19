@@ -1,5 +1,12 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Builder, branch `claude/modest-bohr-c0p735`) — **docs only: nothing ungated to build; a numeric
+preview↔export parity probe of the whole nine-op Auto chain on a gapped 2×3 mosaic at proxy scale 3 (NaN mismatch 0,
+final medians within 0.4/255) and Auto's border trim on alt-az field-rotated mosaics (large trims are ≥75 % forced
+by the rotated outline, within `TRIM_KEEP_RATIO`) both came back CLEAN.** Suite 7973 passed / 7 skipped on
+`c4109c9c`. **START HERE NEXT RUN:** unchanged — the backlog needs vetted beginner ideas from a Scout; the next
+Scout QA rotation is (1).*
+
 *2026-10-19 (Builder, branch `claude/adoring-planck-jbml2l`) — **docs only: nothing ungated to build; every
 editor op keeps "NaN = no coverage" on a gapped canvas at proxy scale 1 and 3, and a `--mosaic --editor` +
 `--big --editor` dogfood came back CLEAN** (Auto trim 7.9 %). Suite 7973 passed / 7 skipped on `c9d155ca`.
