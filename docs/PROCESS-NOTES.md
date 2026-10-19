@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-10-19 (Scout, branch `claude/zen-curie-hhl9uy`) — QA rotation sweep (4), the routers' *answers*, on the never-read cross-target notes: one bug, Scout-fixed (v0.501.5)
+## 2026-10-19 (Scout, branch `claude/zen-curie-hhl9uy`) — QA rotation sweep (4), the routers' *answers*, on the never-read cross-target notes: one bug, Scout-fixed (v0.501.6)
 
 *Baseline: local suite **8004 passed / 7 skipped** on `b444b8cc` (xdist `-n 4`, BLAS capped, 14m45s); no open
 PRs. **Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and
