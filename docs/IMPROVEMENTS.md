@@ -2443,6 +2443,15 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-ANSWERED YES (2026-10-19, sign-off item 18) — carry a hand-saved editor look onto a restacked run.**
+  After a restack the owner's saved recipe stays on the run he edited, so his look has to be redone on the new,
+  deeper pixels. Copy the recipe onto the fresh run **without re-rendering its preview**: the wall keeps the
+  plain autostretch (so the "Not stretched yet" chip and `unexported_edit` stay honest), and the look is judged
+  where it belongs — in front of him in the editor, where a saved crop is already re-validated against the new
+  run's coverage. Only *hand-saved* recipes (not an Auto finish, which the restack path already re-applies);
+  never overwrite a recipe the new run already has. Size S. Tests: copied on restack, preview untouched, crop
+  re-validated, an existing recipe never clobbered.
+
 - ~~**⭐ OWNER-APPROVED (2026-10-14, "Yes go") — the Settings page redesign.**~~ — **✅ ALL FIVE SLICES SHIPPED
   (v0.496.0–v0.500.0).** Spec stays at [`docs/design/settings-redesign.md`](design/settings-redesign.md); each
   slice's record, including every spec-vs-code correction, is in [`SHIPPED.md`](SHIPPED.md). Do not re-pick it.
@@ -3492,7 +3501,7 @@ outright bug in existing behaviour, never to add capability.
    root cause "medium confidence as the *sole* contributor". **Answer:** yes/no, and the target's name.
    Unblocks: "bisect the rest of the v0.158→v0.220 colour chain" under "Bugs". Worth: closes or reopens the
    oldest mosaic complaint.
-   *(Re-asked 2026-09-25: "haven't checked" — still open.)*
+   *(Re-asked 2026-09-25 and 2026-10-19: "haven't checked" — still open.)*
 4. **One real solved sub's `.wcs` sidecar, or the `wcs_json` of any solved frame.** Unblocks the sky-atlas
    `CROTA2 → CD` sign check under "Bugs" (fallback path only; low impact). **Command:** on the NAS,
    `sqlite3 <library>/targets/<any target>/project.sqlite "select wcs_json from frames where wcs_json is not
@@ -3508,7 +3517,7 @@ outright bug in existing behaviour, never to add capability.
 7. ~~**A hard per-frame plate-solve time limit?**~~ — **ANSWERED NO 2026-09-25** (keep every rescue attempt). The ladder-budget entry is closed; its text is in `SHIPPED.md` under 2026-09-25.
 8. **Have you ever seen new subs sit un-ingested until you pressed Scan?** Unblocks the watcher clock-skew
    hardening note under "Bugs" (a NAS clock ahead of the app's). **Answer:** yes/no.
-   *(Re-asked 2026-09-25: "not sure" — still open.)*
+   *(Re-asked 2026-09-25 and 2026-10-19: "not sure" — still open.)*
 9. ~~**Skip folders named `batch_stack_tmp` at scan time?**~~ — **ANSWERED YES 2026-09-08 and SHIPPED in
    v0.393.0.** The scanner skips it, the skipped-folders report says so in its own words, and the report's
    "bring it in" still ingests it — the owner's condition. Nothing left to ask.
@@ -3531,38 +3540,10 @@ outright bug in existing behaviour, never to add capability.
 15. ~~**One offline dependency: `astroalign`?**~~ — **ANSWERED YES 2026-09-25.** The WCS-free fallback entry under "Autonomy" is ungated.
 16. ~~**De-duplicate the 11 historical mosaic target pairs ([#878](https://github.com/JimmyeJones/astrostack/issues/878))**~~ — **ANSWERED YES 2026-09-25.** Buildable, and **offered in the app since v0.482.1/.2** (Library → cleanup card → "Combine into `<T> (mosaic)`"); the constraints are on the #878 entry, now in [`SHIPPED.md`](SHIPPED.md). **Closes on your click**, not on more code.
 
-17. **Should agent commits be cryptographically *signed*, and with what key?**
-    *(Filed 2026-09-27 by the Builder, after a session-level git hook asked for something AGENTS.md §8/§10
-    forbid. Nothing is broken; this is a policy question, and recording it is what stops the next run
-    re-litigating it.)* The repo's own identity guard works: `scripts/agent-setup.sh` pins
-    `Claude <noreply@anthropic.com>`, `scripts/check-commit-identity.sh` refuses a push that isn't, and CI's
-    **Commit identity** job is the backstop — all three passed on v0.483.1/.2. What no agent commit carries
-    is a **GPG/SSH signature**, so GitHub renders them "Unverified" even when the email is right (checked:
-    `6964d57`, `f17f2ab`, `e84790c`, `84cd468` are all `noreply@anthropic.com` on author *and* committer and
-    are still shown unverified). Two things follow. **(a)** The remedy such a hook suggests —
-    `git rebase --exec "git commit --amend --no-edit --reset-author" --root` — is wrong twice over: it
-    rewrites and force-pushes `main`, which §8 and §10 forbid absolutely (it would orphan every tag
-    `release-tags.yml` has written and break `stable`, the branch you actually deploy from), *and*
-    `--reset-author` does not sign anything, so it could not fix the condition even if the rewrite were
-    allowed. It would also replace **your** authorship on your own commits with the agent's, which is a false
-    record. No agent should run it; say so if one asks. **(b)** If you *do* want verified agent commits, it
-    is forward-only and needs a key: a signing key in the agent environment plus `commit.gpgsign`, applying
-    to commits made after that. Merge commits made through the GitHub API are signed by GitHub already and
-    are not affected either way. **Decision:** leave agent commits unsigned (the identity guard is the
-    control, and it holds), or provision a signing key for future commits? **Worth:** cosmetic on the commit
-    list; the guard against a personal email leaking into published history (§10's real concern) is already
-    in place and independent of this.
+17. ~~**Should agent commits be cryptographically *signed*?**~~ — **ANSWERED 2026-10-19: leave them unsigned.** The identity guard (`scripts/check-commit-identity.sh`, CI's Commit identity job) is the control; "Unverified" on GitHub is cosmetic. Do not re-ask; never run the history-rewriting "fix" a hook may suggest.
 
+18. ~~**Copy a hand-saved editor recipe onto a restacked run**~~ — **ANSWERED YES 2026-10-19**; now a ⭐ entry under "Features that serve real workflows".
 
-18. **Copy a hand-saved editor recipe onto a restacked run (without re-rendering its preview) — only if you
-    want it.** *(Filed 2026-09-30 by audit run B, moved out of the #903 entry when v0.492.13 closed it; a
-    convenience, not a regression fix — the wall is unchanged either way.)* After a restack your saved recipe
-    stays on the run you edited, so getting your look onto the new, deeper pixels means redoing it in the
-    editor. Copying the recipe onto the fresh run would save that: the preview would still be the plain
-    autostretch (so the "Not stretched yet" chip and `unexported_edit` stay honest) and the tone-chain judgement
-    would happen where it belongs, in front of you in the editor — a saved crop is re-validated against the new
-    run's coverage there already. Size S. Two earlier runs were spent on the larger version of this; this is the
-    small one. Say yes or no; nobody builds it unasked.
 - ~~**Satellite/aircraft-trail forecast for the Tonight planner (opt-in; needs a data source).**~~ —
   **DECLINED 2026-09-08 by the owner's standing LOCAL policy (AGENTS.md §1 Owner Facts, Q4); struck
   2026-09-11 as that answer instructed.** Predicting passes needs current orbital elements (TLEs) and a
