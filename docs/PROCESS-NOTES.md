@@ -1,5 +1,26 @@
 # Process notes & QA sweep records
 
+## 2026-10-19 (Scout, branch `claude/zen-curie-krbrs7`) — QA rotation sweep (3), ASTAP/ffmpeg filesystem side effects, re-run with a *hostile* stub: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+*(Docs only — the honest outcome. **Baseline:** local suite **8004 passed / 7 skipped** on `984a049d`; no open PRs.
+**Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none
+updated since 2026-10-12 — nothing new owed.*
+
+*__Sweep (3), new angle.__ Earlier sweeps used a stub that only writes sidecars beside `-f`. This one drove the
+real `runner.solve_one` → `ASTAPSolver._solve_once` on a sub inside an `incoming/<T>_mosaic_sub/` tree with a
+stub that (a) writes `.wcs`/`.ini` beside `-f`, (b) writes a file in its **cwd**, (c) writes a log beside the
+directory of **every absolute argument** it is handed, and (d) on a second call **hangs past the timeout** on every
+ladder rung. Result: solved frame read back (centre 83.8°), the hang returns `solve timed out after 2s on every
+attempt` (the canonical `SOLVE_FAILED_TIMEOUT` shape) in 3 × 2 s; incoming byte/mtime-identical, no file added
+there, no `astrostack-solve-*` scratch dir left behind. Two notes, neither filed: the cwd write lands in the app's
+own cwd (`/app` in the image), never `incoming/` — real ASTAP writes nothing there; and `subprocess.run`'s timeout
+kills ASTAP but not a **grandchild** (the stub's `sleep` outlived it) — the bundled `astap_cli` is one process, so
+this only matters if someone points `astap_path` at a wrapper script; not worth code. ffmpeg's `iter_frames`
+re-read: `Popen` killed + waited in its `finally`; no encode path exists. (3) done → **next sweep is (4)**.*
+
+*__Dogfood `--mosaic`__: CLEAN — nothing overflowing, no console errors, mosaic Auto trim **7.9 %**, readiness goal
+~6.9 h ≈ 3 fields, Target-page sentences reconcile. Backlog left exactly as found (curated earlier today).)*
+
 ## 2026-10-19 (Scout, branch `claude/zen-curie-vf9rx8`) — QA rotation sweep (2): one finding, filed — an un-located mosaic panel read by three whole-target gates
 
 Baseline **8004 passed / 7 skipped** on `a7398b7c` (xdist, BLAS capped, 19m16s); no open PRs. Inbox: #878, #880,
