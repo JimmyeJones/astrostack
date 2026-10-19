@@ -1,5 +1,33 @@
 # Process notes & QA sweep records
 
+## 2026-10-19 (Builder, branch `claude/modest-bohr-c0p735`) — nothing ungated to build; a numeric preview↔export parity probe of the whole Auto chain on a gapped mosaic, and Auto's border trim on alt-az field-rotated mosaics: CLEAN
+
+Baseline **7973 passed / 7 skipped** on `c4109c9c` (xdist `-n 4`, BLAS capped, 16m52s); no open PRs, working tree clean. "Bugs" unchanged since
+the run above: every entry is a LEAD or a decided stand-down gated on the owner's data, and no `READY` entry is
+open. So no code this run; two probes aimed at angles the recent runs had not measured.
+
+**Preview↔export parity, numerically, op by op (priority 1).** A 3600×2400 linear canvas, 2×3 overlapping
+panels of unequal depth with four uncovered regions, 3,000 stars, a gradient and depth-dependent noise;
+`auto_recipe` measured on the `::3` proxy (`is_mosaic`, coverage on the proxy grid, `proxy_scale=3`) gave the
+nine-op chain level_coverage → final_gradient → color_calibrate → denoise → stretch → scnr → saturation →
+curves → chroma_denoise. Each prefix rendered on the proxy and at full size, the full render strided `::3`
+and compared: **NaN mismatch 0.0000 at every step**; after the stretch the mean signed difference is
+**+0.10–0.52 / 255** and the medians agree to **≤0.4 / 255** (final 42.8 vs 43.2). The per-pixel spread
+(median |d| ~4 / 255) is the denoise seeing three times the neighbours at full size — noise, not a level or
+colour shift. Also read: `webapp/pipeline.py::_render_recipe_fullres` re-implements the op loop rather than
+calling `apply_recipe`, so it never sets `ctx.op_uid` — checked, harmless today: with no `frozen_fits` every
+`fit` recomputes, notes are not read off the export, and no op reads `already_display`. Worth knowing if the
+export ever starts carrying fits or notes.
+
+**Auto's border trim on field-rotated mosaics (the "trim above ~15 % is a bug" bar).** The Seestar is alt-az, so
+a panel's subs land at a spread of rotations (the #1095 measurement: M 42's single field is 43.8 % empty
+canvas). Synthetic 2×2 and 3×2 rasters, 40 subs a panel, rotation spread ±5/10/25°, canvas cropped to the
+footprint union as the stacker does: `largest_covered_rect` trims **0.10–0.39** of the canvas — over 15 % from
+±10° — but the largest rectangle inside *any* coverage already forces **0.08–0.30**, and the chosen rectangle
+stays within `TRIM_KEEP_RATIO` of that bound in every case (chosen/forced ≈ 1.3). So the large number is the
+rotated outline, not a panel cropped away; the 15 % bar is a tiled-canvas bar. **Not filed.** If the owner's
+"What Auto did" ever reads a large trim on a mosaic, check the rotation spread before calling it D1.
+
 ## 2026-10-19 (Builder, branch `claude/adoring-planck-jbml2l`) — nothing ungated to build; NaN-gap probe of every editor op and a `--mosaic --editor` + `--big --editor` dogfood: CLEAN
 
 Baseline **7973 passed / 7 skipped** on `c9d155ca` (v0.500.5; xdist `-n 4`, BLAS capped, 24m45s); no open PRs,
