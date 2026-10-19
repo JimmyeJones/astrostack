@@ -1,5 +1,10 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Builder, branch `claude/modest-bohr-uij5yz`) — **docs only: nothing ungated to build; the v0.501.0
+carry-over re-read and a degenerate-input probe of the non-editor stretch paths came back CLEAN** (record in
+`PROCESS-NOTES.md`). Baseline 7982 passed / 7 skipped on `74ab2b0b`. **START HERE NEXT RUN:** unchanged — the
+backlog needs vetted beginner ideas from a Scout; the next Scout QA rotation is (2).*
+
 *2026-10-19 (Builder, branch `claude/modest-bohr-y5iopa`) — **v0.501.1: a degenerate-canvas probe of every editor op
 (tiny, flat, one-channel-flat, mostly/all-NaN, at proxy 1 and 3) found one real defect — the default wavelet denoise
 NaN'd a zero-variance channel and the fallback stretch blanked the picture silently; fixed in `_denoise`.** Baseline
