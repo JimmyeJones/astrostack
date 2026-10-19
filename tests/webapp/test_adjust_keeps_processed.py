@@ -224,6 +224,28 @@ def test_a_plain_slider_save_still_replaces_the_processed_picture(
                  f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run_id}") is None
 
 
+@pytest.mark.parametrize("body", [
+    '{"stretch": NaN, "black": 0.35}',
+    '{"stretch": 0.5, "black": NaN}',
+    '{"stretch": Infinity, "black": 0.35}',
+    '{"stretch": 1%s, "black": 0.35}' % ("0" * 400),
+], ids=["nan-stretch", "nan-black", "inf-stretch", "huge-int"])
+def test_a_non_finite_slider_save_is_refused_and_keeps_the_picture(
+        client, solved_library, body):
+    """``_clamp`` reads NaN as the top of the range, so a JSON ``NaN`` stretch
+    used to overwrite the run's picture with the strongest stretch, silently; an
+    integer too big for a float was an unhandled 500. Both are refused now and
+    the picture on disk is left alone."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    run_id, preview = _register_run(solved_library, safe)
+    before = preview.read_bytes()
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/{run_id}/preview", content=body,
+                    headers={"content-type": "application/json"})
+    assert r.status_code == 400
+    assert preview.read_bytes() == before
+
+
 def test_keep_processed_re_bakes_the_picture_instead_of_a_flat_stretch(
         client, solved_library):
     """The heart of it: saving with ``keep_processed`` reproduces the processed

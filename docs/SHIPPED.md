@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## 2026-10-19 (Builder, branch `claude/festive-knuth-r1qt84`) — the dict-body half of the non-finite class
+
+### v0.501.5 — a malformed recipe body or a `NaN` slider save no longer 500s or rewrites the picture
+
+**What.** v0.501.2–.4 closed non-finite numbers in recipe *params* and in query params; this run probed the
+endpoints that take an **unvalidated `dict` body** (`put_recipe`, `save_stack_preview`, `build_master`,
+`update_stack_run`, `set_defect_repair`, `set_password`, `put_stack_defaults`/`trigger_stack`). Two real holes:
+(1) `seestack/edit/recipe.py::recipe_from_dict` — the parser behind recipe save and the query-recipe preview —
+iterated `ops` unchecked (`{"ops": 5}` / `{"ops": true}` → `TypeError`, a 500) and `int()`'d `version` without
+catching `OverflowError` (`"version": Infinity` → 500). A non-list `ops` now reads as no ops, an infinite
+version as the current one. (2) `stack.save_stack_preview` (History's "Adjust" save) clamped `stretch`/`black`
+with `_clamp`, which reads NaN as the **top** of the range — so a JSON `NaN` silently re-baked the run's picture
+at the strongest stretch — and a JSON integer too big for a float raised `OverflowError` (500). Non-finite and
+overflowing values are now refused with the same 400 a non-number already got, and the picture on disk is left
+alone. `build_master`'s `sigma: NaN` was checked and **holds** (every comparison fails, the clip degrades to the
+robust median — no crash, no bad master); the other bodies already type-check. Tests:
+`test_a_malformed_recipe_body_is_not_a_500` (3 cases, save + preview) and
+`test_a_non_finite_slider_save_is_refused_and_keeps_the_picture` (4 cases) — all 7 fail with the fix reverted.
+
 ## 2026-10-19 (Builder, branch `claude/festive-knuth-bqrr89`) — the query-param half of the non-finite class
 
 ### v0.501.4 — a `nan`/`inf` query param no longer 500s the stack estimate or the full-size loupe

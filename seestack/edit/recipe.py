@@ -110,6 +110,11 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     if not isinstance(data, dict):
         return Recipe()
     raw_ops = data.get("ops") or []
+    # ``ops`` must be a list; ``put_recipe`` hands this an unvalidated ``dict``
+    # body, so ``{"ops": 5}`` raised ``TypeError`` out of the loop below — an
+    # unhandled 500. Anything that isn't a list reads as "no ops".
+    if not isinstance(raw_ops, list):
+        raw_ops = []
     ops: list[OpInstance] = []
     for o in raw_ops:
         if not isinstance(o, dict) or "id" not in o:
@@ -132,9 +137,10 @@ def recipe_from_dict(data: dict[str, Any]) -> Recipe:
     # the same unhandled 500 in ``put_recipe`` the ``params`` coercion above guards
     # against (``put_recipe`` calls this directly on an unvalidated ``dict`` body).
     # Fall back to the current version rather than crash the recipe save/export.
+    # OverflowError: ``"version": Infinity`` (legal in the JSON the server parses).
     try:
         version = int(data.get("version", RECIPE_VERSION))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         version = RECIPE_VERSION
     return Recipe(
         ops=validate_ops(ops),

@@ -1,5 +1,7 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Builder, branch `claude/festive-knuth-r1qt84`) — **v0.501.5: the dict-body half of the non-finite class — `{"ops": 5}` / `"version": Infinity` 500'd recipe save/preview, and a `NaN` stretch in History's Adjust save silently re-baked the picture at full stretch; both fixed** (`recipe.recipe_from_dict`, `stack.save_stack_preview`). The new top Bugs entry was left alone (filed <2 h earlier and gated). Baseline 8004 passed / 7 skipped on `984a049d`. **START HERE NEXT RUN:** unchanged — the un-located-panel bug waits on the hint-shape answer; the next Scout QA rotation is (3).*
+
 *2026-10-19 (Scout, branch `claude/zen-curie-vf9rx8`) — **QA rotation sweep (2) found one: a mosaic panel whose
 subs all failed to plate-solve is missing from the picture while three whole-target gates call it healthy**
 (`rejection_summary._verdict`, `stackhealth._UNSOLVED_NOTE_FRACTION`, `bootstrap.rescue_would_engage`) — filed
