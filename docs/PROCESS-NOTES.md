@@ -1,5 +1,91 @@
 # Process notes & QA sweep records
 
+## 2026-10-19 (Scout, branch `claude/funny-shannon-46japi`) — QA rotation sweep (1), scale-dependent preview↔export parity on a mosaic canvas: CLEAN (the two scale-dependent ops neither the per-op suite nor the composed-Auto probe covers). Inbox four open, all previously acted-on and owner-gated. Dogfood `--mosaic --editor --big` CLEAN.
+
+*(Baseline: `main`'s own CI run **2358** green on the exact HEAD `4f299ac1`; no open PRs; working tree clean.
+Reset `claude/funny-shannon-46japi` onto `origin/main` before starting.)*
+
+### Inbox: the same four, all owner-gated, nothing new
+
+`list_issues` → **#878, #880, #903, #1015**, every one previously acted-on and owner-gated, all `updated_at`
+before the last Scout run (2026-10-18). No new observer issue. The standing per-issue reckoning in the
+2026-10-18 Scout record still holds in full; nothing new owed, so nothing re-posted (§"be frugal about GitHub
+replies"). An issue whose work is done gets closed in the same run — none is: #878 closes on the owner's
+Combine click (code side shipped), #903's repo side is complete and it holds open for the owner, #880 and
+#1015 are owner-gated.
+
+### The sweep: what the two existing instruments already cover, and the two scale-dependent ops left over
+
+AGENTS.md rotation (1) is "scale-dependent preview↔export parity on a mosaic-size canvas." Two instruments
+already own most of this surface, and re-deriving them adds nothing (the Builder re-ran a numeric Auto-chain
+parity probe 2026-10-19, CLEAN):
+
+* `tests/test_edit_proxy_parity.py` pins, per op, every pixel-sized parameter's scaling:
+  `detail.sharpen`, `stars.reduce`, `detail.denoise`, `detail.chroma_denoise`, `tone.scnr`,
+  `detail.hot_pixels`, `detail.deconvolve`, `tone.color_calibrate`.
+* The composed-Auto probe (2026-10-14 sweep + 2026-10-19 Builder) pins the one-click Auto recipe end to end
+  through both real render paths — which includes `background.level_coverage`, `background.final_gradient`,
+  `tone.color_calibrate` and the `tone.stretch` re-measurement chain.
+
+Enumerating `all_specs()` (21 ops) against those two lists, the **only** scale-dependent ops (ones that read
+`ctx.proxy_scale`) left uncovered by either are **`background.subtract`** (box_size + object-mask dilate) and
+**`stars.boost_nebula`** (star-mask footprint). Everything else is either in one of the two instruments or
+carries no pixel-sized/scale-dependent parameter (crop/rotate/resize work in fractional coords or scale-expand;
+white_balance/saturation/levels/curves/neutralize are per-pixel; `hot_pixels` is skipped on the proxy by
+`hot_pixels_skipped_on_proxy` with the export captioned).
+
+**Read first (both are hardened by construction).** `background._subtract` / `_final_gradient` /
+`_level_coverage` route `box_size` and the object-mask `dilate_px` through `_scaled_box` (= `ctx.scaled_px`,
+floored) **and** pass `proxy_scale` into the underlying detector so its own internal full-res pixel measures
+scale too; at `proxy_scale == 1` every one is identity, so the export is byte-for-byte unchanged.
+`stars._boost_nebula` calls `star_mask(size_px=size, ctx=ctx)`, and `starmask.star_mask` sets the opening
+footprint `s = max(1, round(size_px / proxy_scale))` and scales the post-mask blur by the same `s` — so both
+the footprint and its feather hold the same **physical** size on preview and export.
+
+**Then ran the code on owner-shaped data** (`scratchpad/parity_sweep.py`): a 3600×2400 linear OSC mosaic —
+tinted sky + a smooth vignette/gradient (so `subtract` has a real gradient to flatten), 900 neutral
+~3 px-FWHM stars, a faint extended nebula blob (so `boost_nebula` has something to lift), a sensor cast, and
+two triangular NaN corners (ragged mosaic coverage, ~97 % covered). For each of the owner's real proxy steps
+**3 / 4 / 5**, render the op on the full canvas (export) and on the strided proxy (preview), decimate the
+export to the proxy grid, and diff by the owner-visible numbers:
+
+| step | `background.subtract` sky-bg median Δ | whole-field median \|Δ\| / p99 | `boost_nebula` nebula-lift Δ | whole-canvas median \|Δ\| / p99 |
+|---|---|---|---|---|
+| 3 | 0.000/255 | 0.016 / 0.159 | 0.002/255 | 0.000 / 0.269 |
+| 4 | 0.003/255 | 0.019 / 0.231 | 0.000/255 | 0.000 / 0.208 |
+| 5 | 0.005/255 | 0.025 / 0.360 | 0.003/255 | 0.000 / 0.482 |
+
+All in units of /255. The owner-visible background level and the nebula lift agree preview↔export to
+**≤0.005/255**; the only values above ~0.5/255 are a handful of isolated star-rim pixels (boost_nebula max
+~2.3/255 at step 5) produced by the `max(1, round(size_px/scale))` integer footprint quantization — confined
+to exactly the star rims the op deliberately does not touch (it lifts the non-star background), the same
+documented-and-captioned decimation class `detail.sharpen`/`stars.reduce` already carry advisories for.
+**No owner-visible preview↔export divergence.**
+
+### Corroborated by the app's own scale-pair instrument
+
+`scripts/agent-dogfood.sh --mosaic --editor --big` — the `--big`/`--mosaic` pair differs in **scale alone**, so
+its instrument (the one that found v0.492.33) asks both samples the same questions and diffs:
+**`[scale] 0 of 16 canvas-independent answers moved with the canvas — CLEAN on everything asked`.** The five
+preview↔export advisories and the loupe are all live at the decimated **1693×1150** `--big` canvas
+(`full-size check available=True`). The only annotated differences are honest: `trim_fraction` is a fixed
+*pixel* jitter that is a smaller *share* of the bigger canvas (0.079→0.065); `coverage_pct` 75→95 / `level` /
+`off_centre` because the full-size canvas catches ~3.5× the sky; and the `confidence`/`reason` note is the
+already-filed 2026-10-04 backlog item (`classify_target` confidence pinned 1.0). Editor drive (all 21 ops)
+clean; full-size check re-opened with Noise reduction in the recipe; Auto-process taste row coherent; mosaic
+trim **7.9 %** (< 15 %); "what the app SAYS" reconciles (top-right panel ~30 s behind → evens out; seams flat =
+depth not step); nothing overflowing, no console errors. The pass was stopped by the background time limit at
+its final step (the mosaic-page re-probe), after every substantive block — the scale instrument, the editor
+drive, the Auto row, and the mosaic "what the app SAYS" + trim — had already printed.
+
+### Nothing to file, and why that is the honest outcome
+
+The scale-dependent editor surface is hardened by construction (every pixel measure through `scaled_px` /
+`_scaled_box`, `proxy_scale` into every detector/mask), pinned per-op and composed by two existing instruments,
+and now the two leftover ops are measured CLEAN on owner-shaped data two independent ways. No bug; docs only.
+**Rotation: (1) done → next sweep is (2)** (mosaic/walk-away divergence from a whole-target or *peak* number
+that is really per-panel).
+
 ## 2026-10-19 (Builder, branch `claude/modest-bohr-c0p735`) — nothing ungated to build; a numeric preview↔export parity probe of the whole Auto chain on a gapped mosaic, and Auto's border trim on alt-az field-rotated mosaics: CLEAN
 
 Baseline **7973 passed / 7 skipped** on `c4109c9c` (xdist `-n 4`, BLAS capped, 16m52s); no open PRs, working tree clean. "Bugs" unchanged since
