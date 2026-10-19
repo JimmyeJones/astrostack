@@ -2699,3 +2699,266 @@ def test_a_yielding_slice_carries_the_cover_counters_forward(solved_library, mon
     assert summary["kept_displayed"] == 1
     assert summary["kept_displayed_targets"] == ["M 42"]
     assert summary["cover_advanced"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# Carrying a hand-saved edit onto the restacked run (owner answer 2026-10-19)
+# --------------------------------------------------------------------------- #
+
+_HAND_OPS = [
+    {"id": "tone.stretch", "enabled": True, "params": {"mode": "asinh", "stretch": 0.3}},
+    {"id": "geometry.crop", "enabled": True,
+     "params": {"x0": 0.1, "y0": 0.1, "x1": 0.9, "y1": 0.9}},
+]
+
+
+def _seed_hand_saved_recipe(proj, *, ops=None, baked_look_of=None,
+                            options=None) -> int:
+    """A previewed run carrying a recipe the owner pressed Save on — no bake, so
+    its preview is still the plain autostretch. ``baked_look_of`` stamps the
+    ``editor_auto_baked_look`` an unattended Auto pass writes, for the cases
+    where that Auto recipe is (or was) the run's look."""
+    from webapp.routers.editor import AUTO_EDIT_BAKED_LOOK_PREFIX, RECIPE_META_PREFIX
+    from webapp.routers.stack import _recipe_look
+
+    run_id = proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-05-01T00:00:00Z",
+        output_basename="master", fits_path=None, tiff_path=None,
+        preview_path="/tmp/does-not-need-to-exist/preview.png",
+        n_frames_used=3, canvas_h=10, canvas_w=10,
+        coverage_min=1, coverage_max=3,
+        options_json=json.dumps(options or {"method": "sigma", "sigma_kappa": 4.25}),
+        engine_version="0.0.1",
+    ))
+    proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}",
+                  json.dumps({"ops": ops if ops is not None else _HAND_OPS}))
+    if baked_look_of is not None:
+        proj.set_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run_id}",
+                      json.dumps(_recipe_look(json.dumps({"ops": baked_look_of}))))
+    return run_id
+
+
+def _saved_recipe(lib, safe, run_id):
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    proj = lib.open_target(safe)
+    try:
+        raw = proj.get_meta(f"{RECIPE_META_PREFIX}{run_id}")
+    finally:
+        proj.close()
+    return None if raw is None else json.loads(raw)
+
+
+def _look(recipe):
+    """A recipe's look as the editor would load it — unknown params dropped,
+    defaults filled — which is what the copy goes through on its way over."""
+    from seestack.edit.recipe import recipe_from_dict
+    from webapp.routers.stack import _recipe_look
+
+    return _recipe_look(recipe_from_dict(recipe).to_json())
+
+
+def test_reprocess_all_carries_a_hand_saved_edit_onto_the_new_run(
+        solved_library, monkeypatch):
+    """Owner answer 2026-10-19: his saved look lands on the deeper restack, so
+    it does not have to be redone. Fails before: the new run had no recipe and
+    ``carried_edits`` did not exist."""
+    _patch_run_stack_new_run(monkeypatch)
+    edited = _record_auto_edits(monkeypatch)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            source = _seed_hand_saved_recipe(proj)
+        finally:
+            proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job)
+        assert summary["carried_edits"] == 1
+        # His look is never "finished" for him by Auto — nothing was auto-edited.
+        assert edited == [] and summary["auto_edited"] == 0
+        copied = _saved_recipe(lib, safe, NEW_RUN_ID)
+        assert copied is not None
+        assert _look(copied) == _look({"ops": _HAND_OPS})
+        assert copied["base_run_id"] == NEW_RUN_ID
+        # The edit he made is still on the run he made it on.
+        assert _look(_saved_recipe(lib, safe, source)) == _look({"ops": _HAND_OPS})
+    finally:
+        lib.close()
+
+
+def test_carry_never_overwrites_a_recipe_the_new_run_already_has(solved_library):
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            _seed_hand_saved_recipe(proj)
+            theirs = json.dumps({"ops": [
+                {"id": "tone.stretch", "enabled": True, "params": {"amount": 0.2}}]})
+            proj.set_meta(f"{RECIPE_META_PREFIX}{NEW_RUN_ID}", theirs)
+        finally:
+            proj.close()
+        assert pipeline._carry_hand_saved_recipe(lib, safe, NEW_RUN_ID) is None
+        assert _saved_recipe(lib, safe, NEW_RUN_ID) == json.loads(theirs)
+    finally:
+        lib.close()
+
+
+def test_reprocess_all_switch_on_keeps_autos_finish_over_the_hand_edit(
+        solved_library, monkeypatch):
+    """With "also auto-edit each result" on, the Auto finish chained onto the new
+    run is that run's look — the carry stands down rather than clobber it."""
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    _patch_run_stack_new_run(monkeypatch)
+    auto = json.dumps({"ops": [
+        {"id": "tone.stretch", "enabled": True, "params": {"amount": 1.0}}]})
+
+    def _fake_auto(lib, safe, run_id, auto_crop=True):  # noqa: ANN001
+        proj = lib.open_target(safe)
+        try:
+            proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", auto)
+        finally:
+            proj.close()
+        return 1
+
+    monkeypatch.setattr("webapp.pipeline._auto_edit_process_run", _fake_auto)
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            _seed_hand_saved_recipe(proj)
+        finally:
+            proj.close()
+        job = Job(kind="reprocess_all")
+        summary = _run_body(pipeline.submit_reprocess_all,
+                            _settings(solved_library), job, auto_edit=True)
+        assert summary["carried_edits"] == 0
+        assert _saved_recipe(lib, safe, NEW_RUN_ID) == json.loads(auto)
+    finally:
+        lib.close()
+
+
+def test_carry_leaves_an_untouched_auto_finish_to_the_auto_path(solved_library):
+    """When the newest look is Auto's own bake, unchanged, his latest look *is*
+    Auto — an older hand recipe further back is not copied over it."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            _seed_hand_saved_recipe(proj)                       # older, by hand
+            auto_ops = [{"id": "tone.stretch", "enabled": True,
+                         "params": {"amount": 1.0}}]
+            _seed_hand_saved_recipe(proj, ops=auto_ops, baked_look_of=auto_ops)
+        finally:
+            proj.close()
+        assert pipeline._carry_hand_saved_recipe(lib, safe, NEW_RUN_ID) is None
+        assert _saved_recipe(lib, safe, NEW_RUN_ID) is None
+    finally:
+        lib.close()
+
+
+def test_carry_copies_an_auto_finish_he_changed_and_saved(solved_library):
+    """A baked Auto recipe he re-opened, changed and saved is his look now."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            source = _seed_hand_saved_recipe(
+                proj, baked_look_of=[{"id": "tone.stretch", "enabled": True,
+                                      "params": {"amount": 1.0}}])
+        finally:
+            proj.close()
+        assert pipeline._carry_hand_saved_recipe(lib, safe, NEW_RUN_ID) == source
+        assert _look(_saved_recipe(lib, safe, NEW_RUN_ID)) == _look({"ops": _HAND_OPS})
+    finally:
+        lib.close()
+
+
+def test_carry_walks_past_exports_and_empty_recipes(solved_library):
+    """An editor export's pixels are already tone-mapped, so a recipe saved on
+    one is no recipe for a linear master; an all-disabled recipe is no look."""
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            source = _seed_hand_saved_recipe(proj)
+            _seed_hand_saved_recipe(
+                proj, ops=[{"id": "tone.stretch", "enabled": False,
+                            "params": {"amount": 0.3}}])
+            _seed_hand_saved_recipe(
+                proj, ops=[{"id": "tone.stretch", "enabled": True,
+                            "params": {"amount": 0.3}}],
+                options={"editor_recipe": {"ops": []}, "display_space": True})
+        finally:
+            proj.close()
+        assert pipeline._carry_hand_saved_recipe(lib, safe, NEW_RUN_ID) == source
+        assert _look(_saved_recipe(lib, safe, NEW_RUN_ID)) == _look({"ops": _HAND_OPS})
+    finally:
+        lib.close()
+
+
+def test_reprocess_all_endpoint_carries_the_edit_without_baking_it(
+        solved_client, solved_library):
+    """End to end on a real restack: the new run opens with his look, its stored
+    preview is still the plain autostretch (so the wall stays honest about it),
+    and a saved crop is judged against the *new* run's coverage."""
+    from webapp.finishedpicture import run_is_a_finished_picture
+
+    sliver = [
+        {"id": "tone.stretch", "enabled": True, "params": {"mode": "asinh", "stretch": 0.3}},
+        # Keeps 4 % of the canvas — far tighter than any framing choice, so the
+        # crop check on the new single-field run must call it stale.
+        {"id": "geometry.crop", "enabled": True,
+         "params": {"x0": 0.4, "y0": 0.4, "x1": 0.6, "y1": 0.6}},
+    ]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            _seed_hand_saved_recipe(proj, ops=sliver)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    r = solved_client.post("/api/reprocess-all")
+    body = _wait_job(solved_client, r.json()["job_id"])
+    assert body["state"] == "done"
+    assert body["result"]["carried_edits"] == 1
+
+    runs = solved_client.get(f"/api/targets/{safe}/stack-runs").json()
+    rid = runs[0]["id"]  # newest first — the reprocessed run
+    # Saved and not shown: the surfaces that offer "finish your edit" see it.
+    assert runs[0]["unexported_edit"] is True
+    recipe = solved_client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe").json()
+    assert _look(recipe) == _look({"ops": sliver})
+    assert recipe["base_run_id"] == rid
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == rid)
+            assert run.preview_path
+            # Not baked: the wall's "Not stretched yet" chip stays true.
+            assert run_is_a_finished_picture(proj, run) is False
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    health = solved_client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/crop-health").json()
+    assert health["stored_keep_fraction"] is not None
+    assert health["stale"] is True

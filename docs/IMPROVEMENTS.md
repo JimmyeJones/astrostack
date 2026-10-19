@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- ⭐ **Carry a hand-saved editor look onto a restacked run** (`pipeline._carry_hand_saved_recipe`, reprocess-all) — branch `claude/modest-bohr-slr9jz`, 2026-10-19.
+*No live claims.*
 
 ---
 
@@ -2443,15 +2443,6 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
-- **⭐ OWNER-ANSWERED YES (2026-10-19, sign-off item 18) — carry a hand-saved editor look onto a restacked run.**
-  After a restack the owner's saved recipe stays on the run he edited, so his look has to be redone on the new,
-  deeper pixels. Copy the recipe onto the fresh run **without re-rendering its preview**: the wall keeps the
-  plain autostretch (so the "Not stretched yet" chip and `unexported_edit` stay honest), and the look is judged
-  where it belongs — in front of him in the editor, where a saved crop is already re-validated against the new
-  run's coverage. Only *hand-saved* recipes (not an Auto finish, which the restack path already re-applies);
-  never overwrite a recipe the new run already has. Size S. Tests: copied on restack, preview untouched, crop
-  re-validated, an existing recipe never clobbered.
-
 - ~~**⭐ OWNER-APPROVED (2026-10-14, "Yes go") — the Settings page redesign.**~~ — **✅ ALL FIVE SLICES SHIPPED
   (v0.496.0–v0.500.0).** Spec stays at [`docs/design/settings-redesign.md`](design/settings-redesign.md); each
   slice's record, including every spec-vs-code correction, is in [`SHIPPED.md`](SHIPPED.md). Do not re-pick it.
@@ -3542,7 +3533,7 @@ outright bug in existing behaviour, never to add capability.
 
 17. ~~**Should agent commits be cryptographically *signed*?**~~ — **ANSWERED 2026-10-19: leave them unsigned.** The identity guard (`scripts/check-commit-identity.sh`, CI's Commit identity job) is the control; "Unverified" on GitHub is cosmetic. Do not re-ask; never run the history-rewriting "fix" a hook may suggest.
 
-18. ~~**Copy a hand-saved editor recipe onto a restacked run**~~ — **ANSWERED YES 2026-10-19**; now a ⭐ entry under "Features that serve real workflows".
+18. ~~**Copy a hand-saved editor recipe onto a restacked run**~~ — **ANSWERED YES 2026-10-19; SHIPPED v0.501.0.**
 
 - ~~**Satellite/aircraft-trail forecast for the Tonight planner (opt-in; needs a data source).**~~ —
   **DECLINED 2026-09-08 by the owner's standing LOCAL policy (AGENTS.md §1 Owner Facts, Q4); struck
@@ -3577,6 +3568,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.501.0 **A restack batch ("Reprocess everything" / "Bring my pictures up to date") copies the owner's own saved editor look onto each fresh run — saved, not rendered, so the wall and its "Not stretched yet" chip are unchanged and the crop is re-checked on the new canvas** (`pipeline._carry_hand_saved_recipe`, `carried_edits`). Full text in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.500.5 **The Dashboard's "N subs across K targets aren't on disk" note counted a sub two targets registered (#878) twice — total and denominator now count each sub once; per-target rows unchanged** (`stats._collect_missing_files`, `Project.iter_accepted_source_presence`)
 - ✅ v0.500.4 **The imaging calendar (and the best-night / off-night reads and recap poster on the same fold) counted a sub two targets registered (#878) twice — its sub, exposure and star size** (`stats._collect_night_acc`, `activity_calendar.accumulate_nights(seen=…)`). Full text in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.500.3 **Storage's "Your N subs in incoming/ are the only copy" line counted a sub twice when two targets registered it (#878's mosaic double-registration) — the same summed-across-targets tally v0.492.35 fixed in `/api/incoming-lag`** (`webapp/routers/storage.py::_incoming_overcount`, new `Project.source_sizes_in_folder`). Full text in [`SHIPPED.md`](SHIPPED.md).

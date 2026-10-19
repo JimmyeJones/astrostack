@@ -578,7 +578,11 @@ export function Maintenance() {
         + "opens as a finished picture, not a flat linear stack. This only sets "
         + "the new results' edits — your existing edits are untouched, and every "
         + "auto-edit is reversible in the editor.\n\n"
-      : "")
+      // Switch off: his own saved edit is copied onto the fresh result (saved,
+      // not rendered). With it on, Auto's finish is that result's edit instead.
+      : "Where you saved your own edit, it is copied onto the fresh result, so "
+        + "the editor opens with your look on the deeper stack. The picture on "
+        + "the wall doesn't change until you export it.\n\n")
       // What happens to the pictures already on the wall: the ones you finished
       // yourself stay, the ones the app finished are re-finished. Said in the
       // dialog too, because it is the one consequence the rest of it doesn't

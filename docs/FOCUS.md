@@ -1,5 +1,10 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Builder, branch `claude/modest-bohr-slr9jz`) — **v0.501.0: the ⭐ owner-approved recipe carry-over
+shipped — a restack batch copies his hand-saved editor look onto each fresh run, saved and not rendered**
+(`pipeline._carry_hand_saved_recipe`, `carried_edits`). Baseline 7973 passed / 7 skipped on `4f299ac1`. **START
+HERE NEXT RUN:** the backlog needs vetted beginner ideas from a Scout; the next Scout QA rotation is (1).*
+
 *2026-10-19 (Builder, branch `claude/modest-bohr-c0p735`) — **docs only: nothing ungated to build; a numeric
 preview↔export parity probe of the whole nine-op Auto chain on a gapped 2×3 mosaic at proxy scale 3 (NaN mismatch 0,
 final medians within 0.4/255) and Auto's border trim on alt-az field-rotated mosaics (large trims are ≥75 % forced
