@@ -1,5 +1,21 @@
 # Shipped — the record
 
+## 2026-10-19 (Builder, branch `claude/festive-knuth-jt99t2`) — malformed-recipe probe of editor param validation
+
+### v0.501.2 — a non-finite number in a recipe no longer 500s the editor or lands a param on its minimum
+
+**What.** `seestack/edit/recipe.py::_coerce_param` is the one gate every recipe passes (save, preview, presets,
+export/batch jobs). Python's JSON parser — which FastAPI and `_decode_recipe_query` use — accepts `NaN`,
+`Infinity` and `1e999`. An infinite **int** param (e.g. `background.subtract.box_size`) raised `OverflowError`
+out of `int(round(...))`, which the guard's `(TypeError, ValueError)` did not catch: an unhandled 500 on
+`PUT …/editor/recipe` and on the preview. A NaN **float** param slid through the clamp as the param's *minimum*
+(`max(lo, nan)` is `lo`), so `detect_sigma: NaN` became 1.0 instead of the 2.5 default — a value nobody chose.
+Both now read as "not given" and take the op's default, the same disposition a non-numeric string already got.
+Reach is low (the frontend's `JSON.stringify` turns non-finite numbers into `null`), so severity is low; the fix
+is three lines. Stored recipes are unaffected — every saved value already passed the clamp and is finite.
+**Tests (+4, all fail before):** three parametrised engine cases (±inf, NaN on an int and a float param) and one
+API case (`Infinity` in a PUT body and in a preview query → 200, default stored).
+
 ## 2026-10-19 (Builder, branch `claude/modest-bohr-y5iopa`) — degenerate-canvas probe of every editor op
 
 ### v0.501.1 — the default (wavelet) denoise no longer blanks a picture whose channel has no variance

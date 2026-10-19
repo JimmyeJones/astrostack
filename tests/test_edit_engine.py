@@ -443,6 +443,21 @@ def test_recipe_from_dict_tolerates_non_int_version(bad_version):
     assert rec.version == RECIPE_VERSION
 
 
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan")])
+def test_recipe_validation_treats_a_non_finite_number_as_not_given(bad):
+    # JSON lets a body carry NaN / Infinity / 1e999. An infinite *int* param raised
+    # OverflowError out of ``int(round(...))`` — an unhandled 500 in put_recipe and
+    # the preview — and a NaN *float* slid through the clamp as the param's minimum
+    # (``max(lo, nan)`` is ``lo``). Neither is a value anyone chose: take the default.
+    rec = recipe_from_dict({"ops": [
+        {"id": "background.subtract", "params": {"box_size": bad}},          # int
+        {"id": "background.final_gradient", "params": {"detect_sigma": bad}},  # float
+    ]})
+    assert rec.ops[0].params["box_size"] == get_op("background.subtract").defaults()["box_size"]
+    assert rec.ops[1].params["detect_sigma"] == (
+        get_op("background.final_gradient").defaults()["detect_sigma"])
+
+
 def test_every_op_renders_in_preview():
     # A live preview must show EVERY enabled action — including the heavy
     # deconvolution op, which used to be skipped. What you see = what you export.

@@ -628,6 +628,24 @@ def test_recipe_round_trip_and_validation(client, solved_library):
     assert saved["base_run_id"] == rid
 
 
+def test_a_non_finite_param_is_not_a_500(client, solved_library):
+    from seestack.edit.registry import get_op
+
+    # ``Infinity`` is legal in the JSON the server parses; an infinite int param
+    # used to raise OverflowError out of recipe validation on save and on preview.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+    body = '{"ops": [{"id": "background.subtract", "params": {"box_size": Infinity}}]}'
+    put = client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", content=body,
+                     headers={"content-type": "application/json"})
+    assert put.status_code == 200
+    saved = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe").json()
+    assert saved["ops"][0]["params"]["box_size"] == get_op("background.subtract").defaults()["box_size"]
+    q = base64.urlsafe_b64encode(body.encode()).decode()
+    prev = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/preview?recipe={q}")
+    assert prev.status_code == 200
+
+
 def test_previous_recipe_carry_over(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     # An older run the user edited...
