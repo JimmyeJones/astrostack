@@ -3206,9 +3206,18 @@ async def save_stack_preview(
         return await _save_processed_preview(request, safe, run, north_up=north_up_req)
 
     try:
-        stretch = _clamp(float(body.get("stretch", _STRETCH_DEFAULT)), _STRETCH_MIN, _STRETCH_MAX)
-        black = _clamp(float(body.get("black", _BLACK_DEFAULT)), _BLACK_MIN, _BLACK_MAX)
-    except (TypeError, ValueError) as exc:
+        stretch = float(body.get("stretch", _STRETCH_DEFAULT))
+        black = float(body.get("black", _BLACK_DEFAULT))
+        # ``_clamp`` turns a NaN into the top of the range (``min(hi, nan)`` is
+        # ``hi``), so a JSON ``NaN`` silently saved the strongest stretch over the
+        # run's picture; refuse it like any other non-number. (``±Infinity`` is
+        # refused with it — neither is a slider position.)
+        if not (math.isfinite(stretch) and math.isfinite(black)):
+            raise ValueError("not a finite number")
+        stretch = _clamp(stretch, _STRETCH_MIN, _STRETCH_MAX)
+        black = _clamp(black, _BLACK_MIN, _BLACK_MAX)
+    # OverflowError: a JSON integer literal too big for a float.
+    except (TypeError, ValueError, OverflowError) as exc:
         raise HTTPException(status_code=400,
                             detail=f"stretch/black must be numbers: {exc}") from exc
     north_up = north_up_req

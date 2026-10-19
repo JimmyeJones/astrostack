@@ -661,6 +661,27 @@ def test_an_overflowing_integer_param_is_not_a_500(client, solved_library):
     assert saved["ops"][0]["params"]["box_size"] == get_op("background.subtract").defaults()["box_size"]
 
 
+@pytest.mark.parametrize("body", [
+    '{"ops": 5}',
+    '{"ops": true}',
+    '{"ops": [], "version": Infinity}',
+])
+def test_a_malformed_recipe_body_is_not_a_500(client, solved_library, body):
+    # ``put_recipe`` takes an unvalidated ``dict`` body: a non-list ``ops`` raised
+    # TypeError out of the op loop, and an infinite ``version`` OverflowError out
+    # of ``int()`` — both unhandled 500s, on save and on the query-recipe preview.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+    put = client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", content=body,
+                     headers={"content-type": "application/json"})
+    assert put.status_code == 200
+    saved = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe").json()
+    assert saved["ops"] == []
+    q = base64.urlsafe_b64encode(body.encode()).decode()
+    prev = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/preview?recipe={q}")
+    assert prev.status_code == 200
+
+
 def test_previous_recipe_carry_over(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     # An older run the user edited...
