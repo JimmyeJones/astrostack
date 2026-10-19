@@ -8,6 +8,7 @@ op's schema, exactly like ``coerce_stack_options`` does for stacking.
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -57,10 +58,16 @@ def _coerce_param(p: EditParam, value: Any) -> Any:
     try:
         if p.type == "bool":
             return bool(value)
-        if p.type == "int":
-            v = int(round(float(value)))
-        elif p.type == "float":
-            v = float(value)
+        if p.type in ("int", "float"):
+            # JSON lets a body carry ``NaN`` / ``Infinity`` (and ``1e999``). An
+            # infinite int raised ``OverflowError`` out to an unhandled 500, and a
+            # NaN float slid through the clamp below as the param's *minimum*
+            # (``max(lo, nan)`` is ``lo``) — neither is a value anyone chose, so
+            # both read as "not given" and take the default.
+            f = float(value)
+            if not math.isfinite(f):
+                return p.default
+            v = int(round(f)) if p.type == "int" else f
         elif p.type == "enum":
             return value if (not p.options or value in p.options) else p.default
         elif p.type == "curve":

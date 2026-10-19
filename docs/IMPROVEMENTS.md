@@ -3568,6 +3568,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.501.2 **A `NaN`/`Infinity` param in a recipe 500'd the save and preview (int) or landed on the param's minimum (float) — both now take the op's default** (`seestack/edit/recipe.py::_coerce_param`)
 - ✅ v0.501.1 **The default wavelet denoise turned a channel with no variance into NaN, and the fallback stretch then blanked the whole picture with no error — a flat channel now keeps its own values** (`seestack/edit/ops/detail.py::_denoise`; degenerate-canvas probe of every editor op otherwise clean).
 - ✅ v0.501.0 **A restack batch ("Reprocess everything" / "Bring my pictures up to date") copies the owner's own saved editor look onto each fresh run — saved, not rendered, so the wall and its "Not stretched yet" chip are unchanged and the crop is re-checked on the new canvas** (`pipeline._carry_hand_saved_recipe`, `carried_edits`). Full text in [`SHIPPED.md`](SHIPPED.md)
 - ✅ v0.500.5 **The Dashboard's "N subs across K targets aren't on disk" note counted a sub two targets registered (#878) twice — total and denominator now count each sub once; per-target rows unchanged** (`stats._collect_missing_files`, `Project.iter_accepted_source_presence`)

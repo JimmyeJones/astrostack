@@ -1,5 +1,7 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Builder, branch `claude/festive-knuth-jt99t2`) — **v0.501.2: a malformed-recipe probe of editor param validation found that a JSON `Infinity` in an int param 500'd recipe save/preview and a `NaN` float landed on the param's minimum; both now take the default** (`recipe._coerce_param`). Baseline 7982 passed / 7 skipped on `c8348bba`. **START HERE NEXT RUN:** unchanged — the backlog needs vetted beginner ideas from a Scout; the next Scout QA rotation is (2).*
+
 *2026-10-19 (Builder, branch `claude/modest-bohr-uij5yz`) — **docs only: nothing ungated to build; the v0.501.0
 carry-over re-read and a degenerate-input probe of the non-editor stretch paths came back CLEAN** (record in
 `PROCESS-NOTES.md`). Baseline 7982 passed / 7 skipped on `74ab2b0b`. **START HERE NEXT RUN:** unchanged — the
