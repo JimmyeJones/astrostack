@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-10-19 (Builder, branch `claude/adoring-planck-jbml2l`) — nothing ungated to build; NaN-gap probe of every editor op and a `--mosaic --editor` + `--big --editor` dogfood: CLEAN
+
+Baseline **7973 passed / 7 skipped** on `c9d155ca` (v0.500.5; xdist `-n 4`, BLAS capped, 24m45s); no open PRs,
+working tree clean. Every "Bugs" entry is still a LEAD or a decided stand-down gated on the owner's data (the
+rotation-(4) `campaign_stats` / `summarize_library` lead included — its own text says not to wire a library-wide
+`source_path` read onto the Dashboard's hot path blind), and the "Features that serve real workflows" open
+entries are each declined, moot or "only once someone uploads a big archive". So no code this run.
+
+**Editor NaN-gap probe (priority 1, engine only).** Every one of the 21 registered ops at its defaults, alone,
+on a 1300×900 star field with three NaN gaps (two mosaic-style corner holes and a ragged left strip), at
+`proxy_scale` 1 and 3: **0 covered pixels turned NaN, 0 gap pixels filled, 0 op errors** on all 42 renders. So
+"NaN = no coverage" holds op by op on a gapped canvas at both scales.
+
+**Dogfood.** `--mosaic --editor --big` hit my own 25-minute `timeout` during the full-size stage (the
+`page.waitForTimeout … browser has been closed` at the end of that log is the timeout killing the server, not
+an app fault), so the full-size half was re-run as `--big` and then `--big --editor`. All three: nothing
+overflowing, no console errors, every op in the Add menu re-renders on the field, the mosaic and the
+decimated full-size run; Undo/Redo apply; the navigator window follows a click and the black box hugs it;
+taste chips behave (10 live, 2 marked, both taps answered). **Auto trim 7.9 %** on the mosaic (7 % on the
+full-size), and 0 of 16 canvas-independent answers moved with the canvas. The Target / Dashboard / Tonight
+paragraphs agree with one another on all three targets. Page heights are on the standing baseline (phone
+`/life-list` "Still to shoot" 14,513 px is still the tallest). **Harness note:** budget well over 25 minutes for
+`--mosaic --editor --big` in one pass, or split it as this run did.
+
 ## 2026-10-18 (Builder, branch `claude/adoring-planck-epcc7w`) — v0.500.5; two more surfaces of the rotation-(4) lead settled
 
 Baseline 7970 passed / 7 skipped on `8c037fe0`. Nothing in "Bugs" was ungated except the two "still to check"
