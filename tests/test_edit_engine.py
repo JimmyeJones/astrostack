@@ -155,6 +155,28 @@ def test_denoise_on_a_one_px_thin_image_is_a_safe_noop(shape, method):
     assert np.allclose(out, img, atol=1e-6)  # a sliver is left exactly as-is
 
 
+@pytest.mark.parametrize("flat_value", [0.0, 0.05])
+def test_wavelet_denoise_leaves_a_zero_variance_channel_finite(flat_value):
+    # BayesShrink's threshold is σ_noise² / σ_signal: on a channel with no
+    # variance at all that is 0/0, and skimage returned NaN for every pixel of
+    # it. The pipeline's fallback stretch then read those covered pixels as "no
+    # coverage" in *all three* channels, so the default denoise silently blanked
+    # the whole picture with no error. A flat channel has no noise to remove.
+    rng = np.random.default_rng(0)
+    img = (0.05 + 0.01 * rng.standard_normal((60, 80, 3))).astype("float32")
+    img[..., 2] = flat_value
+    op = get_op("detail.denoise")
+    out = op.apply(img.copy(), {"method": "wavelet", "strength": 0.6}, EditContext())
+    assert np.isfinite(out).all()
+    assert np.allclose(out[..., 2], flat_value, atol=1e-6)
+    # The noisy channels are still denoised.
+    assert float(out[..., 0].std()) < 0.8 * float(img[..., 0].std())
+
+    rendered = apply_recipe(img.copy(), Recipe(ops=[OpInstance(id="detail.denoise",
+                                                              params=op.defaults())]))
+    assert np.isfinite(rendered).all()
+
+
 def test_curves_identity_is_noop():
     img = _img()
     spec = get_op("tone.curves")

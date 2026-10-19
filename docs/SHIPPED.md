@@ -1,5 +1,30 @@
 # Shipped — the record
 
+## 2026-10-19 (Builder, branch `claude/modest-bohr-y5iopa`) — degenerate-canvas probe of every editor op
+
+### v0.501.1 — the default (wavelet) denoise no longer blanks a picture whose channel has no variance
+
+**What.** A scratch probe ran every registered editor op, at proxy scale 1 and 3, on degenerate canvases (7×5,
+1×40, 40×1, flat, all-zero, mostly-NaN, all-NaN, striped-NaN, one channel flat, ADU-scaled, negative). One real
+defect: `detail.denoise`'s wavelet branch (the recommended method) — skimage's BayesShrink threshold is
+σ_noise²/σ_signal, which is 0/0 on a channel with no variance, and it returned NaN for **every** pixel of that
+channel. The pipeline's fallback stretch then marked those covered pixels "no coverage" in all three channels, so
+the render came back blank with **no error** (the op did not raise). `_denoise` now keeps a non-finite wavelet
+output at the channel's own clipped value — a flat channel has no noise to remove. Bilateral and TV were already
+clean. Trigger is rare on real OSC data (it needs an exactly constant channel), so severity is low; it is the same
+NaN-in-covered-pixels class the 1-px sliver guard fixed.
+
+**Everything else the probe raised is an honest, surfaced refusal, not a bug:** `background.subtract` /
+`final_gradient` report "All input pixels are masked" and return the input on a canvas with almost no coverage
+(every-other-row NaN, or ≤6 % of a 160 px toy). Re-run at owner proxy size (1500×1000, coverage strips and
+opposite-corner panels down to 3 %): no failures.
+
+**Upgrade-safe (§9):** pixel change only where the output was NaN before; no config, schema, API or default change.
+
+**Tests:** +2 py (`tests/test_edit_engine.py::test_wavelet_denoise_leaves_a_zero_variance_channel_finite`, zero and
+non-zero flat channel; fails before the fix, passes after; also checks the noisy channels are still denoised and the
+full `apply_recipe` render stays finite).
+
 ## 2026-10-19 (Builder, branch `claude/modest-bohr-slr9jz`) — the owner's saved look follows his restack
 
 ### v0.501.0 — a restack batch carries a hand-saved editor recipe onto the fresh run (owner answer 2026-10-19, sign-off item 18)
