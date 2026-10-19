@@ -1,5 +1,38 @@
 # Shipped — the record
 
+## 2026-10-19 (Builder, branch `claude/modest-bohr-slr9jz`) — the owner's saved look follows his restack
+
+### v0.501.0 — a restack batch carries a hand-saved editor recipe onto the fresh run (owner answer 2026-10-19, sign-off item 18)
+
+**What.** After "Reprocess everything" / "Bring my pictures up to date", the owner's saved editor recipe stayed on
+the run he edited, so his look had to be redone on the new, deeper pixels. New `pipeline._carry_hand_saved_recipe`
+runs per restacked target in `submit_reprocess_all`, **after** the Auto chain, and copies the newest *hand-saved* look
+onto the fresh run: it walks runs newest first, skipping the new run, editor exports / channel combines (tone-mapped
+or not this target's stack) and recipes with no enabled op. It stands down when the newest look is an Auto bake
+nobody changed (`editor_auto_baked_look` agrees — the batch's own carry-forward re-derives Auto there), and **never
+writes over a recipe the new run already has** (so with "also auto-edit" on, Auto's finish is that run's edit). A
+baked Auto recipe he re-opened and changed counts as his. The copy goes through `recipe_from_json` (stale ops dropped,
+params clamped, as the editor's own load does) and gets `base_run_id` = the new run.
+
+**Not rendered, on purpose (the owner's condition).** Only the recipe meta is written — no preview, no
+`preview_display_space`, no baked-look stamp — so the wall keeps the plain autostretch, `run_is_a_finished_picture`
+stays false, `unexported_edit` is true (the existing "finish your edit" surfaces see it), and
+`routers.editor.crop_health_for_run` judges the copied crop against the *new* run's coverage. The hand-finished
+cover-keep (`_settle_cover_after_restack`) is unchanged.
+
+**Said in plain words.** The job summary (`Jobs.tsx::reprocessSummary`) adds "copied your saved edit onto N new
+restack(s); open it in the editor to see your look on the deeper stack"; the batch's confirm dialog (switch off)
+says where a saved edit goes and that the wall doesn't change until he exports.
+
+**Upgrade-safe (§9):** additive `carried_edits` key on the job result (also carried across a yield/resume slice);
+no config, schema, on-disk or default change; nothing existing is overwritten.
+
+**Tests:** +7 py (`tests/webapp/test_reprocess_all.py`) — copied on restack with `base_run_id`, source untouched;
+an existing recipe never clobbered; switch on keeps Auto's; an untouched Auto bake is left to the Auto path; a
+changed Auto bake is copied; exports and all-disabled recipes walked past; end to end on a real restack, the new
+run opens with the look, is not finished, is `unexported_edit`, and its sliver crop is stale against the new
+canvas. **6 fail on the pre-change code** (the two guards pass before). +2 vitest (`Jobs.test.tsx`).
+
 ## 2026-10-18 (Builder, branch `claude/adoring-planck-epcc7w`) — the missing-files note counted double-registered subs twice
 
 ### v0.500.5 — "your subs aren't on disk" counts each sub once

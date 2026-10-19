@@ -1810,6 +1810,89 @@ def _settle_cover_after_restack(lib: Library, safe: str,
     return None
 
 
+def _carry_hand_saved_recipe(lib: Library, safe: str,
+                             new_run_id: int | None) -> int | None:
+    """Copy the owner's own saved editor look onto a freshly restacked run, so
+    his edit meets the deeper pixels instead of having to be redone on them.
+
+    Returns the id of the run the recipe was copied **from**, or ``None`` when
+    nothing was copied. The rule, in order:
+
+    * **Never over a recipe the new run already has** — the Auto finish the
+      batch may just have chained on (the switch, or ``kept_finished``) is that
+      run's look, and anything else on it is somebody's.
+    * The source is the **newest other run carrying a look** (a saved recipe with
+      an enabled op), walking past editor exports and channel combines: their
+      pixels are already tone-mapped or are not this target's stack, so a recipe
+      saved on one is no recipe for a linear master.
+    * Only a **hand-saved** look is copied. When that newest look is one the app
+      baked and nobody has changed since (``editor_auto_baked_look`` agrees with
+      it), the owner's latest look *is* Auto's, which the batch already
+      re-derives for the new pixels where it should (``_picture_is_auto_finished``)
+      — so an older hand recipe further back is no evidence of what he wants now.
+      A baked recipe he re-opened and changed is his, and is copied.
+
+    **The preview is deliberately not re-rendered** (owner answer, 2026-10-19).
+    The copied recipe is a saved-but-unbaked edit, exactly as if he had opened the
+    run and pressed Save: the wall keeps the plain autostretch, so the "Not
+    stretched yet" chip and ``unexported_edit`` stay honest, and the look is
+    judged where it belongs — in the editor, where a saved crop is re-checked
+    against *this* run's coverage (``routers.editor.crop_health_for_run`` reads
+    the recipe by run id, so the copy is judged on the new canvas, not the old).
+    The recipe goes through ``recipe_from_json`` on the way, so ops a newer
+    build dropped and out-of-range params are cleaned exactly as the editor
+    would clean them on load.
+
+    Best-effort: an unreadable target or recipe copies nothing and never fails
+    the batch.
+    """
+    from seestack.edit.recipe import recipe_from_json
+    from seestack.io.project import Project
+    from webapp.routers.editor import AUTO_EDIT_BAKED_LOOK_PREFIX, RECIPE_META_PREFIX
+    from webapp.routers.stack import _baked_look_disagrees, _recipe_look
+
+    if new_run_id is None:
+        return None
+    try:
+        entry = lib.find_target(safe)
+        if entry is None:
+            return None
+        proj = Project.open(lib.target_dir(entry))
+        try:
+            if proj.get_meta(f"{RECIPE_META_PREFIX}{new_run_id}"):
+                return None
+            for run in proj.iter_stack_runs():  # newest first
+                if run.id is None or run.id == new_run_id:
+                    continue
+                try:
+                    opts = json.loads(run.options_json or "null")
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    opts = None
+                if isinstance(opts, dict) and any(
+                        opts.get(k) for k in ("editor_recipe", "display_space",
+                                              "channel_combine")):
+                    continue
+                raw = proj.get_meta(f"{RECIPE_META_PREFIX}{run.id}")
+                look = _recipe_look(raw)
+                if not look:
+                    continue
+                baked = proj.get_meta(f"{AUTO_EDIT_BAKED_LOOK_PREFIX}{run.id}")
+                if baked and not _baked_look_disagrees(baked, look):
+                    return None
+                recipe = recipe_from_json(raw)
+                if not any(op.enabled for op in recipe.ops):
+                    continue
+                recipe.base_run_id = new_run_id
+                recipe.updated_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                proj.set_meta(f"{RECIPE_META_PREFIX}{new_run_id}", recipe.to_json())
+                return int(run.id)
+        finally:
+            proj.close()
+    except Exception:  # noqa: BLE001 — the batch's bookkeeping never fails a target
+        log.warning("reprocess-all: could not carry %s's saved edit", safe, exc_info=True)
+    return None
+
+
 def _reprocess_yield(settings: Settings, jm: JobManager, job: Job, waiting_kind: str, *,
                      remaining: list[str], counters: dict[str, Any],
                      stale_only: bool, deep_rescan: bool,
@@ -1850,6 +1933,7 @@ def _reprocess_yield(settings: Settings, jm: JobManager, job: Job, waiting_kind:
         "kept_displayed": int(counters.get("kept_displayed") or 0),
         "kept_displayed_targets": list(counters.get("kept_displayed_targets") or []),
         "cover_advanced": int(counters.get("cover_advanced") or 0),
+        "carried_edits": int(counters.get("carried_edits") or 0),
         "failed": list(counters.get("failed") or []),
         "cancelled": False,
         # Additive: this slice stopped early *on purpose* and the work continues
@@ -2028,6 +2112,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
             kept_displayed_targets: list[str] = list(
                 prior.get("kept_displayed_targets") or [])
             cover_advanced = int(prior.get("cover_advanced") or 0)
+            carried_edits = int(prior.get("carried_edits") or 0)
             failed: list[dict[str, str]] = list(prior.get("failed") or [])
             cancelled = False
             for i, entry in enumerate(targets):
@@ -2053,6 +2138,7 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                             "kept_displayed": kept_displayed,
                             "kept_displayed_targets": kept_displayed_targets,
                             "cover_advanced": cover_advanced,
+                            "carried_edits": carried_edits,
                             "failed": failed,
                         },
                         stale_only=stale_only, deep_rescan=deep_rescan,
@@ -2149,6 +2235,12 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                             # runs: it was keeping a finished picture finished.
                             if keep_finish:
                                 kept_finished += 1
+                    # His own saved look goes onto the deeper run too, unbaked —
+                    # after the Auto chain above, so a run that just got Auto's
+                    # finish keeps it (the helper never writes over a recipe).
+                    if (run_id is not None and not job.cancel_requested()
+                            and _carry_hand_saved_recipe(lib, safe, run_id) is not None):
+                        carried_edits += 1
                     # Now that the fresh run is the newest: is the picture on
                     # the wall one this batch may replace? A hand-finished one
                     # stays (pinned); a pin the app placed for a reason that is
@@ -2182,6 +2274,10 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                 "kept_displayed": kept_displayed,
                 "kept_displayed_targets": kept_displayed_targets,
                 "cover_advanced": cover_advanced,
+                # Restacked runs that now open in the editor with the owner's
+                # own saved edit (copied, not rendered — the wall still shows the
+                # plain stretch). Always present, as above.
+                "carried_edits": carried_edits,
                 "failed": failed,
                 "cancelled": cancelled,
                 # Always present so a reader never has to tell "did not yield"

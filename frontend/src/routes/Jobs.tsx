@@ -181,6 +181,7 @@ export function reprocessSummary(r: Record<string, unknown>): {
     ? (r.kept_displayed_targets as unknown[]).map(String).filter(Boolean)
     : [];
   const coverAdvanced = Number(r.cover_advanced ?? 0);
+  const carriedEdits = Number(r.carried_edits ?? 0);
   const failedArr = Array.isArray(r.failed) ? r.failed : [];
   // ``name`` is the display name the backend now sends beside the safe one; an
   // older backend sends only ``target``, and then that is what the list shows.
@@ -254,6 +255,14 @@ export function reprocessSummary(r: Record<string, unknown>): {
     line += coverAdvanced === 1
       ? " — 1 target now shows its new, deeper picture in place of a cover the app had pinned"
       : ` — ${coverAdvanced} targets now show their new, deeper pictures in place of covers the app had pinned`;
+  }
+  // His own saved edit was copied onto the deeper restack, so he does not have
+  // to redo it — but only *saved* there, not rendered (the picture on the wall
+  // is unchanged), so the line says where to see it. Silent when none was.
+  if (carriedEdits > 0) {
+    line += carriedEdits === 1
+      ? " — copied your saved edit onto 1 new restack; open it in the editor to see your look on the deeper stack"
+      : ` — copied your saved edits onto ${carriedEdits} new restacks; open them in the editor to see your look on the deeper stacks`;
   }
   if (skipped > 0) line += ` — ${skipped} already up to date`;
   if (failed.length) line += ` — ${failed.length} failed`;
