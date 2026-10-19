@@ -1,5 +1,12 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Scout, branch `claude/zen-curie-hhl9uy`) — **v0.501.5: QA rotation sweep (4) read the never-swept
+cross-target notes for their answers and found one — exporting the old picture after a stack refused silently
+retired the "your last stack didn't run" note** (`stackfailures._last_stack_utc`; Scout-fixed, small and pinned).
+`overtrim`, `unstretched`, `newsubs` hold. Inbox: the same four, all owner-gated. Baseline 8004 passed / 7 skipped
+on `b444b8cc`; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** unchanged — the top Bugs entry
+(un-located mosaic panel) waits on the observer's hint-shape answer. **Rotation: (4) done → next sweep is (1).***
+
 *2026-10-19 (Scout, branch `claude/zen-curie-krbrs7`) — **QA rotation sweep (3) re-run with a hostile stub ASTAP
 (cwd writes, writes beside every absolute arg, a hang past the timeout) came back CLEAN** — incoming untouched, no
 scratch dir leaked, timeout reported canonically. Inbox: the same four, all owner-gated. Baseline 8004 passed / 7

@@ -197,3 +197,53 @@ def test_endpoint_retires_the_failure_once_a_stack_succeeds(client, solved_libra
         lib.close()
 
     assert client.get("/api/stack-failures").json()["failures"] == []
+
+
+def test_an_editor_export_after_the_failure_does_not_retire_it(client, solved_library):
+    """An export (or a channel combine) re-renders light a stack already
+    combined — it is a ``stack_runs`` row with a fresh stamp, but it is not a
+    stack that *succeeded*. Exporting the old picture the morning after a refusal
+    used to make "this target stopped producing pictures" vanish while the target
+    still could not stack."""
+    import json
+    from pathlib import Path
+
+    from PIL import Image
+
+    from seestack.io.library import Library
+    from seestack.io.project import StackRunRow
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    _persist(client, _job("stack", state="error", target=safe, error=MEMORY_MSG,
+                          when="2026-08-20T00:00:00Z"))
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            preview = Path(lib.target_dir(lib.find_target(safe))) / "master_preview.png"
+            Image.new("RGB", (32, 32)).save(preview)
+
+            def add(stamp: str, options: dict) -> int:
+                return proj.add_stack_run(StackRunRow(
+                    id=None, timestamp_utc=stamp,
+                    output_basename="master", fits_path=None, tiff_path=None,
+                    preview_path=str(preview), n_frames_used=3,
+                    canvas_h=32, canvas_w=32, coverage_min=1, coverage_max=3,
+                    options_json=json.dumps(options),
+                ))
+
+            # The genuine stack is from *before* the failure …
+            stack_id = add("2026-08-19T22:15:03.412+00:00", {})
+            # … and the export and the combine land after it.
+            add("2026-08-21T09:00:00+00:00",
+                {"editor_recipe": {"ops": []}, "derived_from": stack_id,
+                 "display_space": True})
+            add("2026-08-21T10:00:00+00:00", {"channel_combine": [], "weights": {}})
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    body = client.get("/api/stack-failures").json()
+    assert [f["safe"] for f in body["failures"]] == [safe]

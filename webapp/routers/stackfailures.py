@@ -36,6 +36,11 @@ _JOB_SCAN_LIMIT = 200
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
+#: ``options_json`` keys that mark a run as derived from light a stack already
+#: combined (an editor export, a channel combine) rather than a stack itself.
+_DERIVED_RUN_KEYS = frozenset({"editor_recipe", "channel_combine"})
+
+
 class StackFailureOut(BaseModel):
     safe: str
     name: str
@@ -50,8 +55,19 @@ class StackFailuresResponse(BaseModel):
 
 
 def _last_stack_utc(lib, entry) -> str | None:  # noqa: ANN001, ANN202
-    """Timestamp of this target's newest stack run, or ``None`` if it has none."""
+    """Timestamp of this target's newest *genuine* stack run, or ``None`` if it
+    has none.
+
+    An editor export or a channel combine is a ``stack_runs`` row with a fresh
+    stamp, but it re-renders light a stack already combined — it is not a stack
+    that succeeded. Counting it let exporting the old picture the morning after a
+    refusal retire the note while the target still could not stack. A run that
+    recorded no settings at all is still a stack (older builds wrote those), so
+    this asks only about the two derived kinds rather than
+    :func:`run_has_reusable_options`, which also refuses an empty one.
+    """
     from seestack.io.project import Project
+    from webapp.run_options import parse_run_options
 
     proj = None
     try:
@@ -61,7 +77,9 @@ def _last_stack_utc(lib, entry) -> str | None:  # noqa: ANN001, ANN202
             proj.close()
         return None
     try:
-        run = next(iter(proj.iter_stack_runs()), None)
+        run = next((r for r in proj.iter_stack_runs()  # newest first
+                    if not _DERIVED_RUN_KEYS & parse_run_options(r.options_json).keys()),
+                   None)
         return run.timestamp_utc if run is not None else None
     except Exception:  # noqa: BLE001
         return None
