@@ -1,5 +1,11 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Scout, branch `claude/zen-curie-krbrs7`) — **QA rotation sweep (3) re-run with a hostile stub ASTAP
+(cwd writes, writes beside every absolute arg, a hang past the timeout) came back CLEAN** — incoming untouched, no
+scratch dir leaked, timeout reported canonically. Inbox: the same four, all owner-gated. Baseline 8004 passed / 7
+skipped on `984a049d`; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** unchanged — the top Bugs entry
+(un-located mosaic panel) waits on the observer's hint-shape answer. **Rotation: (3) done → next sweep is (4).***
+
 *2026-10-19 (Scout, branch `claude/zen-curie-vf9rx8`) — **QA rotation sweep (2) found one: a mosaic panel whose
 subs all failed to plate-solve is missing from the picture while three whole-target gates call it healthy**
 (`rejection_summary._verdict`, `stackhealth._UNSOLVED_NOTE_FRACTION`, `bootstrap.rescue_would_engage`) — filed
