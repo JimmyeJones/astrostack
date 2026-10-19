@@ -616,3 +616,24 @@ def test_a_mono_canvas_reads_as_three_equal_channels(tmp_path):
     assert got.shape == (8, 9, 3)
     for c in range(3):
         assert np.array_equal(got[..., c], plane[5:13, 6:15])
+
+
+def test_a_click_that_is_not_a_number_looks_at_the_centre(client, built_library):
+    """``fx``/``fy`` are float query params, and FastAPI parses ``nan`` into one.
+    A NaN survives the 0..1 clamp (every comparison with it is false) and used to
+    reach ``int(round(nan))`` as an unhandled 500. It is no place on the picture,
+    so it reads as "not given" — the documented default, the centre."""
+    run_id = _big(client, built_library, basename="nan")
+    centre = _window(client.get(
+        f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe",
+        params={"recipe": _enc(FLAT_RECIPE), "size": 256}))
+    for fx, fy in (("nan", "0.5"), ("0.5", "nan"), ("nan", "nan")):
+        r = client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe",
+                       params={"recipe": _enc(FLAT_RECIPE), "fx": fx, "fy": fy,
+                               "size": 256})
+        assert r.status_code == 200, (fx, fy, r.text)
+        win = _window(r)
+        if fx == "nan":
+            assert win["x"] == centre["x"]
+        if fy == "nan":
+            assert win["y"] == centre["y"]
