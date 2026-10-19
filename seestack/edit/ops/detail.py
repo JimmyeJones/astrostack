@@ -238,6 +238,12 @@ def _denoise(rgb: np.ndarray, params: dict, ctx: EditContext) -> np.ndarray:
                 full = restoration.denoise_wavelet(
                     clipped, channel_axis=-1, rescale_sigma=True,
                     method="BayesShrink", mode="soft")
+                # A channel with no variance at all makes BayesShrink's threshold
+                # 0/0, and skimage hands back NaN for every pixel of it — which the
+                # fallback stretch then reads as "no coverage" in all three
+                # channels, blanking the picture. A flat channel has no noise to
+                # remove, so it keeps its own (clipped) values.
+                full = np.where(np.isfinite(full), full, clipped)
                 full = np.where(norm > 1.0, norm, full)
                 # denoise_wavelet has no strength knob → blend toward it by strength.
                 den = norm + strength * (full - norm)

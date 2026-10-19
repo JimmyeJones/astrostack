@@ -1,5 +1,11 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Builder, branch `claude/modest-bohr-y5iopa`) — **v0.501.1: a degenerate-canvas probe of every editor op
+(tiny, flat, one-channel-flat, mostly/all-NaN, at proxy 1 and 3) found one real defect — the default wavelet denoise
+NaN'd a zero-variance channel and the fallback stretch blanked the picture silently; fixed in `_denoise`.** Baseline
+7980 passed / 7 skipped on `4d8db7bf`. **START HERE NEXT RUN:** unchanged — "Bugs" holds nothing ungated; the backlog
+needs vetted beginner ideas from a Scout; the next Scout QA rotation is (2).*
+
 *2026-10-19 (Scout, branch `claude/funny-shannon-46japi`) — **QA rotation sweep (1) — scale-dependent
 preview↔export parity on a mosaic canvas — came back CLEAN, confirmed two independent ways on owner-shaped
 data; inbox unchanged; no code shipped, docs only, which is the honest outcome.** Baseline: `main`'s own CI
