@@ -1,5 +1,37 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Scout, branch `claude/funny-shannon-46japi`) — **QA rotation sweep (1) — scale-dependent
+preview↔export parity on a mosaic canvas — came back CLEAN, confirmed two independent ways on owner-shaped
+data; inbox unchanged; no code shipped, docs only, which is the honest outcome.** Baseline: `main`'s own CI
+run **2358** green on the exact HEAD `4f299ac1` (the 2026-10-19 owner-answers merge); no open PRs; working
+tree clean. **Inbox** (`list_issues`): the same four open (#878, #880, #903, #1015), every one previously
+acted-on and owner-gated, all `updated_at` before the last Scout run (2026-10-18) — nothing new owed.
+**Sweep (1):** the per-op parity suite (`tests/test_edit_proxy_parity.py`) pins sharpen / stars.reduce /
+denoise / chroma_denoise / scnr / hot_pixels / deconvolve / color_calibrate, and the composed-Auto probe pins
+level_coverage / final_gradient / color_calibrate / the stretch chain — so this sweep took the **two
+scale-dependent ops neither covers**: `background.subtract` (box_size + object-mask dilate) and
+`stars.boost_nebula` (star-mask footprint). Read first: both route every full-res pixel measure through
+`EditContext.scaled_px` / `_scaled_box` and pass `proxy_scale` into the object detector / `star_mask`, so the
+mesh and footprint hold the same **physical** size preview↔export (and are identity at `proxy_scale == 1`).
+Then **ran the code** on an owner-shaped 3600×2400 gapped mosaic (tinted sky + vignette gradient + faint
+nebula blob + 900 neutral stars + ragged NaN corners) at proxy steps **3/4/5**: `background.subtract`
+sky-bg median agrees preview↔export to **≤0.005/255** (whole-field median |Δ| ≤0.025, p99 ≤0.36); `boost_nebula`
+nebula lift agrees to **≤0.003/255** (whole-canvas median |Δ| 0.000, p99 ≤0.48) — the only larger values are
+isolated star-rim pixels from the `max(1, round(size_px/scale))` footprint quantization, confined to exactly
+the region the op leaves alone, the same accepted decimation class the parity suite already captions.
+Corroborated by `scripts/agent-dogfood.sh --mosaic --editor --big`: the app's own scale-pair instrument reports
+**`[scale] 0 of 16 canvas-independent answers moved with the canvas`, CLEAN on everything asked**; the five
+preview↔export advisories and the loupe are all live at the decimated 1693×1150 `--big` canvas; the editor
+drive (all 21 ops) is clean; mosaic trim **7.9 %**; "what the app SAYS" reconciles; nothing overflowing, no
+console errors. (The pass was time-limited after the substantive output; only the final mosaic-page re-probe was
+truncated, and the mosaic block + trim had already printed.) Full record in `PROCESS-NOTES.md`. **START HERE
+NEXT RUN:** inbox first (all four owner-gated). "Bugs" holds **nothing ungated** — the top entry is the
+reproduced-but-owner-gated #878 double-count LEAD (PRIORITY 3, self-resolving via Combine) and the rest are
+decided stand-downs or leads gated on his data; the Builder's queue is the next beginner feature or editor item
+per §3. **Rotation: (1) done → next sweep is (2)** (mosaic/walk-away divergence from a whole-target or *peak*
+number that is really per-panel). Record files have headroom (`PROCESS-NOTES.md` ~13.9k/18k, `SHIPPED.md`
+~39.8k/64k).*
+
 *2026-10-19 (Builder, branch `claude/modest-bohr-c0p735`) — **docs only: nothing ungated to build; a numeric
 preview↔export parity probe of the whole nine-op Auto chain on a gapped 2×3 mosaic at proxy scale 3 (NaN mismatch 0,
 final medians within 0.4/255) and Auto's border trim on alt-az field-rotated mosaics (large trims are ≥75 % forced
