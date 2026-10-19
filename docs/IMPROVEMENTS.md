@@ -3568,6 +3568,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.501.4 **A `nan`/`inf` query param 500'd the Stack form's estimate and the editor's full-size loupe — the estimate now judges its sizing knobs by the submit path's own rule (422), and a NaN click looks at the centre** (`stack.stack_estimate` → `validate_stack_options`, `editor._loupe_window`)
 - ✅ v0.501.3 **The three non-finite holes v0.501.2's guard left: a too-big JSON integer still 500'd recipe save/preview, a NaN curve point became a stray black control point, and `sigma_kappa: NaN` was accepted for a stack** (`recipe._coerce_param`, `schemas.validate_stack_options`)
 - ✅ v0.501.2 **A `NaN`/`Infinity` param in a recipe 500'd the save and preview (int) or landed on the param's minimum (float) — both now take the op's default** (`seestack/edit/recipe.py::_coerce_param`)
 - ✅ v0.501.1 **The default wavelet denoise turned a channel with no variance into NaN, and the fallback stretch then blanked the whole picture with no error — a flat channel now keeps its own values** (`seestack/edit/ops/detail.py::_denoise`; degenerate-canvas probe of every editor op otherwise clean).

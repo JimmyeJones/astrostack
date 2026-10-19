@@ -938,3 +938,40 @@ def test_pixel_depth_does_not_move_the_method_the_engine_picks(
     resolved = data["auto_reject_resolved"]
     assert resolved["panel_depth"] == basis.panel_depth == 6
     assert resolved["method"] == ("min_max" if eff.min_max_reject else "sigma_clip")
+
+
+@pytest.mark.parametrize("params", [
+    {"drizzle": "true", "drizzle_scale": "nan"},
+    {"drizzle": "true", "drizzle_scale": "inf"},
+    {"drizzle": "true", "drizzle_scale": "1e300"},
+    {"sigma_kappa": "nan"},
+    {"sigma_kappa": "inf"},
+    {"auto_reject": "true", "sigma_kappa": "nan"},
+    {"min_max_reject": "true", "min_max_reject_count": "-5"},
+    {"mosaic_canvas": "bogus"},
+])
+def test_a_value_the_stack_form_cannot_send_is_a_422_not_a_500(
+        client, solved_library, params):
+    """The estimate's sizing knobs are query params, so ``nan``/``inf`` parse into
+    floats — and used to reach the engine as unhandled 500s (``math.ceil(nan)`` in
+    the print plan, ``int(inf)`` in the auto-reject picker). Every other knob value
+    the submit path refuses (``validate_stack_options``) is a run that can never be
+    made, so sizing it answered a question nobody can act on — and an unknown
+    ``mosaic_canvas`` was even cached as a basis of its own. Same rule, same
+    plain-language message, as the 400 the Stack button would get."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    r = client.get(f"/api/targets/{safe}/stack-estimate", params=params)
+    assert r.status_code == 422, (params, r.status_code, r.text[:200])
+    assert isinstance(r.json()["detail"], str)
+
+
+def test_every_value_the_stack_form_can_send_still_sizes(client, solved_library):
+    """The bounds are the form's own, so its whole range still gets an answer."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    for params in ({"drizzle": "true", "drizzle_scale": 1.0},
+                   {"drizzle": "true", "drizzle_scale": 4.0},
+                   {"sigma_kappa": 1.0}, {"sigma_kappa": 5.0},
+                   {"min_max_reject": "true", "min_max_reject_count": 5},
+                   {"mosaic_canvas": "union"}, {"mosaic_canvas": "reference"}):
+        r = client.get(f"/api/targets/{safe}/stack-estimate", params=params)
+        assert r.status_code == 200, (params, r.text[:200])

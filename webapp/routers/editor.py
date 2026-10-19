@@ -2068,6 +2068,12 @@ def _loupe_window(full_h: int, full_w: int, rec: Recipe,
     it untouched) and then clamped so the window is always wholly inside the
     canvas, and never larger than it.
     """
+    # A query-param float can be ``nan``, which survives the clamp below (every
+    # comparison with it is false) and reached ``int(round(nan))`` as a 500. It
+    # names no place on the picture, so it takes the documented default, the
+    # centre. (``±inf`` already clamps to an edge.)
+    fx = 0.5 if math.isnan(fx) else fx
+    fy = 0.5 if math.isnan(fy) else fy
     x0f, y0f, x1f, y1f = _preview_extent(rec)
     sx = x0f + min(max(fx, 0.0), 1.0) * (x1f - x0f)
     sy = y0f + min(max(fy, 0.0), 1.0) * (y1f - y0f)

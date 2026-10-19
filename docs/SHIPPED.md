@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-10-19 (Builder, branch `claude/festive-knuth-bqrr89`) — the query-param half of the non-finite class
+
+### v0.501.4 — a `nan`/`inf` query param no longer 500s the stack estimate or the full-size loupe
+
+**What.** v0.501.2–.3 closed non-finite numbers in JSON *bodies*; this run enumerated every **float query
+param** across the routers (9 of them) and sent each `nan`, `±inf` and `1e300` through a real `TestClient`.
+Two endpoints 500'd. (1) `GET …/stack-estimate` — the Stack form's sizing/advice query — passed
+`drizzle_scale` and `sigma_kappa` straight into `StackOptions`: `drizzle_scale=nan` reached `math.ceil(nan)` in
+the print plan, `nan`/`inf`/`1e300` reached `int(inf)` in the auto-reject picker. It also had no check at all on
+the other knobs: `min_max_reject_count=-5` was sized, and an unknown `mosaic_canvas` was computed **and cached
+as a canvas basis of its own** (`estimate_cache` keys on the string). It now runs the four sizing knobs through
+`schemas.validate_stack_options` — the same rule and the same plain-language message the Stack button's submit
+gets — and answers 422. The bounds are the form's own descriptors, so every value the form can hold still sizes
+(pinned at both ends of each range). The only visible change is while someone is mid-typing a number above a
+field's max (Mantine clamps on blur): the advice block now waits for the clamp instead of sizing a run that
+could never be submitted. (2) `GET …/editor/loupe` — `fx`/`fy=nan` survived the 0..1 clamp (every comparison
+with NaN is false) and reached `int(round(nan))`; it now takes the documented default, the centre (`±inf`
+already clamped to an edge and still does). `star-mask`, `render` and `trim-suggestion` were probed and hold —
+their clamps happen to map NaN to a bound. Reach is low (the form's `NumberInput` drops non-finite values, and
+the editor sends click fractions), severity low. No API shape, config or schema change.
+**Tests (+11, all fail before):** eight 422 cases for `stack-estimate` (NaN/inf/1e300 drizzle scale, NaN/inf κ,
+with and without auto-reject, a negative extreme count, an unknown canvas mode), the form's full range still
+sizing, and the loupe's NaN click landing on the centre.
+
 ## 2026-10-19 (Builder, branch `claude/festive-knuth-mb2ra0`) — the rest of the non-finite-number class
 
 ### v0.501.3 — the three holes v0.501.2's guard left in recipe and stack-option validation

@@ -703,6 +703,20 @@ def stack_estimate(
     )
     from seestack.stacktime import estimate_from_runs, stack_cost_class
 
+    # The sizing knobs arrive as query params, so ``nan``/``inf`` parse into
+    # floats and used to surface as unhandled 500s deep in the engine; any other
+    # value the submit path refuses is a run nobody can make, and an unknown
+    # ``mosaic_canvas`` was even cached as a basis of its own. Judge them by the
+    # same rule — and in the same words — as the Stack button.
+    try:
+        validate_stack_options({
+            "drizzle_scale": drizzle_scale, "mosaic_canvas": mosaic_canvas,
+            "min_max_reject_count": min_max_reject_count,
+            "sigma_kappa": sigma_kappa,
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     settings = deps.get_settings(request)
     lib, proj = deps.open_target_project(request, safe)
     try:
