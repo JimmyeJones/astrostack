@@ -458,6 +458,30 @@ def test_recipe_validation_treats_a_non_finite_number_as_not_given(bad):
         get_op("background.final_gradient").defaults()["detect_sigma"])
 
 
+def test_recipe_validation_treats_an_overflowing_integer_as_not_given():
+    # JSON integer literals are unbounded; one too big for a float raised
+    # OverflowError past the guard (a 500 on save/preview), in a number param and
+    # in a curve point alike.
+    huge = 10 ** 400
+    rec = recipe_from_dict({"ops": [
+        {"id": "background.subtract", "params": {"box_size": huge}},
+        {"id": "background.final_gradient", "params": {"detect_sigma": huge}},
+        {"id": "tone.curves", "params": {"points": [[0, 0], [0.5, huge], [1, 1]]}},
+    ]})
+    assert rec.ops[0].params["box_size"] == get_op("background.subtract").defaults()["box_size"]
+    assert rec.ops[1].params["detect_sigma"] == (
+        get_op("background.final_gradient").defaults()["detect_sigma"])
+    assert rec.ops[2].params["points"] == get_op("tone.curves").defaults()["points"]
+
+
+def test_a_nan_curve_point_is_dropped_not_pinned_to_black():
+    # ``max(0.0, nan)`` is 0.0, so a NaN coordinate used to survive as an extra
+    # control point on the black axis that nobody placed.
+    rec = recipe_from_dict({"ops": [{"id": "tone.curves", "params": {"points": [
+        [0.0, 0.0], [float("nan"), 0.9], [0.5, float("nan")], [0.25, 0.4], [1.0, 1.0]]}}]})
+    assert rec.ops[0].params["points"] == [[0.0, 0.0], [0.25, 0.4], [1.0, 1.0]]
+
+
 def test_every_op_renders_in_preview():
     # A live preview must show EVERY enabled action — including the heavy
     # deconvolution op, which used to be skipped. What you see = what you export.

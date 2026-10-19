@@ -1,5 +1,25 @@
 # Shipped — the record
 
+## 2026-10-19 (Builder, branch `claude/festive-knuth-mb2ra0`) — the rest of the non-finite-number class
+
+### v0.501.3 — the three holes v0.501.2's guard left in recipe and stack-option validation
+
+**What.** A follow-up probe of the same gate found three inputs the v0.501.2 `isfinite` check never sees.
+(1) A JSON **integer literal too big for a float** (`1` followed by 400 zeros — Python's parser makes it an
+`int`, not `inf`) raised `OverflowError` out of `float(value)` in `recipe._coerce_param`, for a number param and
+for a `tone.curves` point alike: still an unhandled 500 on `PUT …/editor/recipe` and the preview. Now caught and
+treated as "not given" (the op's default). (2) A **NaN curve coordinate** survived the clamp as 0
+(`max(0.0, nan)` is 0.0), so `[NaN, 0.9]` became a second control point on the black axis that nobody placed —
+contrary to the line's own "keep finite pairs" comment. Non-finite pairs are now dropped. (3) The sibling gate,
+`schemas.validate_stack_options`, let **`sigma_kappa: NaN`** (and any NaN in a bounded field) through both range
+checks — every comparison with NaN is false — so `POST …/stack`, the per-target stack defaults and the global
+`default_stack_options` accepted it with a 200 and handed it to the engine. It is now a plain-language 400/422
+("expected a finite number"). Reach is low for all three (the frontend's `JSON.stringify` writes non-finite numbers
+as `null`); severity low. Upgrade-safe: stored recipes and configs are only ever re-validated on the way in, and a
+saved value already passed the clamp.
+**Tests (+8, all fail before):** engine cases for the overflowing int (number + curve) and the NaN curve point; an
+API case for the overflowing int on save; the validator for NaN / ±inf / a huge int; `POST …/stack` with `NaN` → 400.
+
 ## 2026-10-19 (Builder, branch `claude/festive-knuth-jt99t2`) — malformed-recipe probe of editor param validation
 
 ### v0.501.2 — a non-finite number in a recipe no longer 500s the editor or lands a param on its minimum
