@@ -1,5 +1,14 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Scout, branch `claude/zen-curie-vf9rx8`) — **QA rotation sweep (2) found one: a mosaic panel whose
+subs all failed to plate-solve is missing from the picture while three whole-target gates call it healthy**
+(`rejection_summary._verdict`, `stackhealth._UNSOLVED_NOTE_FRACTION`, `bootstrap.rescue_would_engage`) — filed
+**reproduced** at the top of "Bugs", gated on one observer shape-read (are Seestar header RA/DEC hints per-panel
+or the mosaic centre?). Inbox: the same four (#878, #880, #903, #1015), all owner-gated, none updated since the
+last Scout run. Baseline 8004 passed / 7 skipped on `a7398b7c`; dogfood `--mosaic` CLEAN (trim 7.9 %).
+**START HERE NEXT RUN:** the new Bugs entry needs the hint-shape answer before a Builder designs the per-panel
+split; otherwise unchanged. **Rotation: (2) done → next sweep is (3).***
+
 *2026-10-19 (Builder, branch `claude/festive-knuth-bqrr89`) — **v0.501.4: the query-param half of the non-finite class — every float query param across the routers (9) was probed with `nan`/`±inf`/`1e300`; `stack-estimate` and the editor loupe 500'd, both fixed** (`stack.stack_estimate` now runs `validate_stack_options` → 422; `editor._loupe_window` reads a NaN click as the centre). Baseline 7994 passed / 7 skipped on `5848faf7`. **START HERE NEXT RUN:** unchanged — the backlog needs vetted beginner ideas from a Scout; the next Scout QA rotation is (2).*
 
 *2026-10-19 (Builder, branch `claude/festive-knuth-mb2ra0`) — **v0.501.3: the rest of v0.501.2's class — a too-big JSON integer still 500'd recipe save/preview, a NaN curve point became a stray black point, and `sigma_kappa: NaN` was accepted for a stack; all three closed** (`recipe._coerce_param`, `schemas.validate_stack_options`). Baseline 7986 passed / 7 skipped on `1290fc8f`. **START HERE NEXT RUN:** unchanged — the backlog needs vetted beginner ideas from a Scout; the next Scout QA rotation is (2).*
