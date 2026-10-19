@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-10-19 (Scout, branch `claude/zen-curie-vf9rx8`) — QA rotation sweep (2): one finding, filed — an un-located mosaic panel read by three whole-target gates
+
+Baseline **8004 passed / 7 skipped** on `a7398b7c` (xdist, BLAS capped, 19m16s); no open PRs. Inbox: #878, #880,
+#903, #1015, all previously acted-on and owner-gated, none updated since the last Scout run — nothing owed.
+Following the 2026-10-16 carry-forward ("spend sweep (2) on a surface that does not route through
+`pointing_groups`"), the sweep read the surfaces that judge **un-located** subs, which by construction have no
+`ra_center_deg` and so never reach the per-panel gate. Three do so against whole-target totals:
+`rejection_summary._verdict`, `stackhealth`'s `unsolved` note (`_UNSOLVED_NOTE_FRACTION`) and
+`bootstrap.rescue_would_engage` (≥8 solved anywhere on the target ⇒ no rescue). Ran on mosaic-shaped records
+(60 subs/panel, one panel all `solve_failed:` with hints): 2×2 / 3×3 → "still a solid stack", 4×4 → "a healthy
+night", health note `solid` throughout. Filed in "Bugs" with the design gate. Also read and **cleared**:
+`AUTO_STACK_DEGRADED_MAX_RATIO` (a whole-target ratio, but its only trigger is a storage outage, which does not
+pick one panel — not worth per-panel bookkeeping), `session_recap.transparency_trend` (already panel-rescaled),
+`focus_trend` (FWHM is target-wide by design), `_compute_transparency_ratio` (per-panel since its fix), the
+`REJDEPTH` peak (paired with the half-picture verdict). Dogfood `--mosaic` CLEAN: trim 7.9 %, nothing
+overflowing, no console errors, the per-panel paragraph reconciles as on 2026-10-16.
+
 ## 2026-10-19 (Builder, branch `claude/modest-bohr-cw9yx1`) — nothing ungated to build; the two stalest dogfood configurations, `--combine` and `--mosaic --restack --editor`: CLEAN
 
 Baseline **7982 passed / 7 skipped** on `c8348bba` (xdist, BLAS capped, 25m49s); no open PRs. "Bugs" still holds
