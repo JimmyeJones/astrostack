@@ -646,6 +646,21 @@ def test_a_non_finite_param_is_not_a_500(client, solved_library):
     assert prev.status_code == 200
 
 
+def test_an_overflowing_integer_param_is_not_a_500(client, solved_library):
+    from seestack.edit.registry import get_op
+
+    # A JSON integer literal too big for a float raised OverflowError out of
+    # recipe validation — the case the ``Infinity`` guard above never sees.
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe)
+    body = '{"ops": [{"id": "background.subtract", "params": {"box_size": 1%s}}]}' % ("0" * 400)
+    put = client.put(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe", content=body,
+                     headers={"content-type": "application/json"})
+    assert put.status_code == 200
+    saved = client.get(f"/api/targets/{safe}/stack-runs/{rid}/editor/recipe").json()
+    assert saved["ops"][0]["params"]["box_size"] == get_op("background.subtract").defaults()["box_size"]
+
+
 def test_previous_recipe_carry_over(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     # An older run the user edited...

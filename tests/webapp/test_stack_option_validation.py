@@ -40,6 +40,15 @@ def test_validate_rejects_non_numeric_for_numeric_field():
         validate_stack_options({"sigma_kappa": "lots"})
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), 10 ** 400],
+                         ids=["nan", "inf", "-inf", "huge-int"])
+def test_validate_rejects_a_non_finite_number(bad):
+    # A NaN fails every comparison, so it slipped past both range checks and
+    # ``sigma_kappa: NaN`` was accepted and handed to the engine.
+    with pytest.raises(ValueError, match="finite"):
+        validate_stack_options({"sigma_kappa": bad})
+
+
 def test_validate_rejects_fractional_float_for_int_field():
     # An int-typed option (e.g. max_workers) must be a whole number. A fractional
     # float would otherwise slip past coerce_stack_options (no coercion) into the
@@ -89,6 +98,14 @@ def test_trigger_stack_rejects_out_of_range_with_400(client, solved_library):
     r = client.post("/api/targets/M_42/stack", json={"drizzle_scale": 99.0})
     assert r.status_code == 400
     assert "maximum" in r.json()["detail"].lower()
+
+
+def test_trigger_stack_rejects_nan_with_400(client, solved_library):
+    # ``NaN`` is legal in the JSON the server parses; it used to get a 200 job.
+    r = client.post("/api/targets/M_42/stack", content='{"sigma_kappa": NaN}',
+                    headers={"content-type": "application/json"})
+    assert r.status_code == 400
+    assert "finite" in r.json()["detail"].lower()
 
 
 def test_trigger_stack_still_accepts_valid_options(client, solved_library):

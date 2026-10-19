@@ -9,6 +9,7 @@ the descriptors stay in lockstep with the dataclass fields.
 from __future__ import annotations
 
 import dataclasses
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -1507,6 +1508,16 @@ def validate_stack_options(data: dict[str, Any]) -> None:
             # bool is a subclass of int — a checkbox value in a numeric field is wrong.
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ValueError(f"{fld.label}: expected a number, got {value!r}")
+            # JSON lets a body carry ``NaN``, and a NaN slips past both range checks
+            # below (every comparison with it is false), so ``sigma_kappa: NaN`` was
+            # accepted with a 200 and handed to the engine. (An integer too big for a
+            # float makes ``isfinite`` raise; it is out of range anyway.)
+            try:
+                finite = math.isfinite(value)
+            except OverflowError:
+                finite = False
+            if not finite:
+                raise ValueError(f"{fld.label}: expected a finite number, got {value!r}")
             # An ``int``-typed option must be a whole number. ``coerce_stack_options``
             # does no coercion (StackOptions is a plain dataclass), so a fractional
             # float (e.g. ``max_workers=3.5``) would otherwise slip through and reach

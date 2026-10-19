@@ -72,13 +72,18 @@ def _coerce_param(p: EditParam, value: Any) -> Any:
             return value if (not p.options or value in p.options) else p.default
         elif p.type == "curve":
             # list of [x, y] control points in [0,1]; keep finite pairs, sorted by x.
+            # A NaN coordinate used to survive as 0 (``max(0.0, nan)`` is 0.0) — an
+            # extra point pinned to black that nobody placed — so drop the pair.
             pts = [[float(a), float(b)] for a, b in value
                    if a is not None and b is not None]
+            pts = [ab for ab in pts if math.isfinite(ab[0]) and math.isfinite(ab[1])]
             pts = [[min(1.0, max(0.0, a)), min(1.0, max(0.0, b))] for a, b in pts]
             return sorted(pts, key=lambda ab: ab[0]) or p.default
         else:  # str
             return str(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: a JSON integer literal too big for a float (``1`` and 400
+        # zeros) — the case the ``isfinite`` check above never gets to see.
         return p.default
     if p.min is not None:
         v = max(p.min if p.type == "float" else int(p.min), v)
