@@ -1,5 +1,19 @@
 # Process notes & QA sweep records
 
+## 2026-10-19 (Builder, branch `claude/modest-bohr-cw9yx1`) — nothing ungated to build; the two stalest dogfood configurations, `--combine` and `--mosaic --restack --editor`: CLEAN
+
+Baseline **7982 passed / 7 skipped** on `c8348bba` (xdist, BLAS capped, 25m49s); no open PRs. "Bugs" still holds
+only gated leads and decided stand-downs. With nothing ready, the run took the flags with the oldest last run.
+**`--combine`**: the expected no-solve refusal says `no_solved_frames` in plain words;
+the merge nudge finds the pair; Combine keeps 1 picture pinned, carries notes and tags; a rescan stays combined, and
+a sub dropped into the combined-away folder lands in the deep target; §10 incoming/ fingerprint unchanged
+(create-new only). The Dashboard's "3 subs aren't in the picture yet" after the merge is **correct**, not an
+off-by-one against 8 − 4: the post-merge sub was given no solution, and `new_light_since_picture` counts accepted
+*solved* subs only. **`--mosaic --restack --editor`**: thin (3) then deep (6) runs; reel 3 → 6, noise-delta
+pixel-exact (ratio 1.66 — above √2 because min/max rejection on 3 subs keeps one value); mosaic trim 7.9 %; panel
+map ("top-right ~30 s behind") and `grain_uneven` ("23 % has 3 subs where most has 6") say the same thing;
+editor drives clean on both the single field and the mosaic; nothing overflowing, no console errors. Nothing to file.
+
 ## 2026-10-19 (Builder, branch `claude/modest-bohr-uij5yz`) — nothing ungated to build; v0.501.0 carry-over re-read and a degenerate-input probe of the non-editor stretch paths: CLEAN
 
 Baseline **7982 passed / 7 skipped** on `74ab2b0b` (xdist, BLAS capped, 17m22s); no open PRs. "Bugs" still holds

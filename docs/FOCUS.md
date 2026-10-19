@@ -1,5 +1,10 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Builder, branch `claude/modest-bohr-cw9yx1`) — **docs only: nothing ungated; the stalest dogfood
+configurations `--combine` and `--mosaic --restack --editor` came back CLEAN** (record in `PROCESS-NOTES.md`).
+Baseline 7982 passed / 7 skipped on `c8348bba`. **START HERE NEXT RUN:** unchanged — the backlog needs vetted
+beginner ideas from a Scout; the next Scout QA rotation is (2).*
+
 *2026-10-19 (Builder, branch `claude/modest-bohr-uij5yz`) — **docs only: nothing ungated to build; the v0.501.0
 carry-over re-read and a degenerate-input probe of the non-editor stretch paths came back CLEAN** (record in
 `PROCESS-NOTES.md`). Baseline 7982 passed / 7 skipped on `74ab2b0b`. **START HERE NEXT RUN:** unchanged — the
