@@ -1,5 +1,24 @@
 # Process notes & QA sweep records
 
+## 2026-10-19 (Scout, branch `claude/zen-curie-hhl9uy`) — QA rotation sweep (4), the routers' *answers*, on the never-read cross-target notes: one bug, Scout-fixed (v0.501.6)
+
+*Baseline: local suite **8004 passed / 7 skipped** on `b444b8cc` (xdist `-n 4`, BLAS capped, 14m45s); no open
+PRs. **Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and
+owner-gated, none updated since 2026-10-12 — nothing new owed. **Dogfood `--mosaic`: CLEAN** (Auto trim 7.9 %,
+per-panel cards agree, nothing overflowing, no console errors; only the scratch install's ASTAP-not-set-up alert).*
+
+*__Sweep (4), new angle.__ Counted which routers earlier sweep records ever named: `stackfailures`, `jobs`, `logs`,
+`seestar`, `glossary`, `auth` never; `overtrim`, `unstretched`, `newsubs` rarely. Read the library-wide *notes* among
+them for whether a 200's answer is right. `overtrim`, `unstretched` (incl. the thin-picture half — a whole-target
+"typical depth" by design, the per-panel case is the mosaic-map card's) and `newsubs` hold. **`stackfailures` did
+not:** its "has a stack succeeded since?" read the target's newest `stack_runs` row, and an editor export
+(`pipeline.py` export body) and a channel combine both add one stamped *now*. Reproduced through the real endpoint
+(`tests/webapp/test_stack_failures.py::test_an_editor_export_after_the_failure_does_not_retire_it` fails on
+`b444b8cc`), fixed in `stackfailures._last_stack_utc` as the one small, obviously-safe Scout fix: skip runs whose
+options carry `editor_recipe`/`channel_combine` — **not** `run_has_reusable_options`, which also refuses a run with
+empty options and broke the existing supersession test on the first attempt. Not yet read for answers: `jobs`,
+`logs`, `seestar`, `glossary`, `auth`, and the big four (`stats`, `gallery`, `targets`, `plan`).*
+
 ## 2026-10-19 (Scout, branch `claude/zen-curie-krbrs7`) — QA rotation sweep (3), ASTAP/ffmpeg filesystem side effects, re-run with a *hostile* stub: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 *(Docs only — the honest outcome. **Baseline:** local suite **8004 passed / 7 skipped** on `984a049d`; no open PRs.

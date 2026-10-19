@@ -1,5 +1,20 @@
 # Shipped — the record
 
+## 2026-10-19 (Scout, branch `claude/zen-curie-hhl9uy`) — QA rotation sweep (4), the routers' answers
+
+### v0.501.6 — an editor export no longer retires a target's "your last stack didn't run" note
+
+**What.** `GET /api/stack-failures` (the Dashboard's "stopped producing pictures" notice and the Target page's
+`StackFailedNote`) hides a failure once *"a stack has succeeded since"*, and it read that as *the target's newest
+`stack_runs` row* (`stackfailures._last_stack_utc`). An editor export and a channel combine both write a
+`stack_runs` row stamped *now* — they re-render light a stack already combined, they are not stacks. So the
+morning after a refusal (a memory-budget refusal on a big target is the one this note exists for), opening the
+previous picture in the editor and exporting it made the note vanish while the target still could not stack.
+The newest run is now the newest one whose `options_json` carries neither `editor_recipe` nor
+`channel_combine`; a run that recorded no settings at all still counts as a stack (older builds wrote those, and
+the existing supersession test pins it). Severity low–moderate (a true warning silently withdrawn); reach: any
+manual stack that fails on a target that already has a picture. No API shape, config or schema change.
+**Tests (+1, fails before):** a failure followed by an export and a combine stays on the endpoint.
 ## 2026-10-19 (Builder, branch `claude/festive-knuth-r1qt84`) — the dict-body half of the non-finite class
 
 ### v0.501.5 — a malformed recipe body or a `NaN` slider save no longer 500s or rewrites the picture
