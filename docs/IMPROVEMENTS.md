@@ -82,6 +82,28 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
+  missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
+  autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
+  beside it and no rescue offered; nothing is lost on disk. Confidence: **reproduced** on mosaic-shaped
+  records through the real functions; occurrence on the owner's library **unmeasured**.)*
+  Only solved subs stack, so an un-located panel simply isn't on the canvas. Each gate divides by the whole
+  target: `webapp/rejection_summary.py::_verdict` (`dropped/total` < 10 % → "healthy", < 30 % → "still a solid
+  stack"; the `unsolved > used` branch needs a majority), `seestack/stackhealth.py` `_UNSOLVED_NOTE_FRACTION`
+  (0.30 of tried subs), and `seestack/solve/bootstrap.py::rescue_would_engage` (stands down once the *target*
+  has `DEFAULT_MIN_FRAMES` = 8 solved — so "Try harder to locate these" can never be offered for one panel).
+  Scratch repro, 60 subs/panel, one panel all `solve_failed:` with header hints: **2×2** 25 % unsolved →
+  "A few frames didn't make the cut — still a solid stack."; **3×3** 11 % → same; **4×4** 6 % → "This is normal
+  — a healthy night."; `stack_health` → only `solid` in all three. `MosaicMap` can't flag it either: it counts
+  solved subs, so the panel has no entry to call thin. **Gate for the fix design:** the per-panel split needs
+  each unsolved sub's own pointing, and the only one it has is `ra_hint_deg`/`dec_hint_deg`
+  (`fits_loader._target_ra_deg`). Whether the Seestar writes the **panel's** pointing or the **mosaic centre**
+  there decides it — the observer can answer from his DB as a shape (in a `_mosaic_sub` target, how many
+  `ra_hint` clusters vs `ra_center` clusters at `PANEL_LINK_DIST_DEG`). If hints are per-panel: group the
+  un-located subs by `pointing_groups` over hints and (a) let the verdict/health note speak when any hint-panel
+  has ≥ `_UNSOLVED_MIN_ACCEPTED` tried and none located, (b) gate the rescue per hint-panel. Don't lower the
+  whole-target thresholds instead — that makes a single field cry wolf.
+
 - **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
   v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
   (`/api/library/summary` + the share recap) count a sub registered in two targets (#878) twice, in exactly
