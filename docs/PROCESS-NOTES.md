@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-10-19 (Builder, branch `claude/modest-bohr-uij5yz`) — nothing ungated to build; v0.501.0 carry-over re-read and a degenerate-input probe of the non-editor stretch paths: CLEAN
+
+Baseline **7982 passed / 7 skipped** on `74ab2b0b` (xdist, BLAS capped, 17m22s); no open PRs. "Bugs" still holds
+only gated leads and decided stand-downs; no `READY` entry is open. Two checks, both clean:
+**(a)** an adversarial re-read of the freshest code, `pipeline._carry_hand_saved_recipe` (v0.501.0) — no editor op
+stores absolute pixel coordinates (crop is fractional; every px param goes through `scaled_px`/`_scaled_box`), so a
+recipe copied onto a restack with a different canvas is still correct; the resume path carries `carried_edits`.
+**(b)** the v0.501.1 sibling question for the stretch paths the editor-op probe does not reach —
+`thumbnail.autostretch`, `asinh_stretch`, `output._autostretch_for_export` and the deepening reel's
+`_solve_stf_params`/`_apply_stf_params` — on a flat channel, two zero channels, a NaN channel, half-NaN, all-flat,
+one finite pixel, a 1e30 hot pixel, `+inf`, and a negative pedestal: no non-finite output, live channels keep their
+picture. **One hardening note, not filed:** a single `-inf` pixel blanks all four (the `nanmin` black point
+becomes `-inf`), but nothing on the engine side can produce one (`calibrate/apply.py` and the other ingest
+paths `nan_to_num` their inputs), so there is nothing reachable to fix.
+
 ## 2026-10-19 (Scout, branch `claude/funny-shannon-46japi`) — QA rotation sweep (1), scale-dependent preview↔export parity on a mosaic canvas: CLEAN (the two scale-dependent ops neither the per-op suite nor the composed-Auto probe covers). Inbox four open, all previously acted-on and owner-gated. Dogfood `--mosaic --editor --big` CLEAN.
 
 *(Baseline: `main`'s own CI run **2358** green on the exact HEAD `4f299ac1`; no open PRs; working tree clean.
