@@ -1619,6 +1619,21 @@ describe("reprocessSummary — pictures kept on the wall (#903, C-F4)", () => {
   });
 });
 
+describe("reprocessSummary — a hand-saved edit carried onto the restack", () => {
+  it("says the edit was copied, and that the editor is where to see it", () => {
+    expect(reprocessSummary({ total: 3, stacked: 3, carried_edits: 1, failed: [] }).line)
+      .toBe("Restacked 3/3 targets — copied your saved edit onto 1 new restack; open it "
+        + "in the editor to see your look on the deeper stack.");
+    expect(reprocessSummary({ total: 3, stacked: 3, carried_edits: 2, failed: [] }).line)
+      .toBe("Restacked 3/3 targets — copied your saved edits onto 2 new restacks; open "
+        + "them in the editor to see your look on the deeper stacks.");
+  });
+  it("is silent when nothing was carried, and on an older backend", () => {
+    expect(reprocessSummary({ total: 3, stacked: 3, carried_edits: 0, failed: [] }).line)
+      .toBe("Restacked 3/3 targets.");
+  });
+});
+
 describe("processTargetSummary", () => {
   it("summarises a successful one-click process into a new master", () => {
     expect(processTargetSummary({
