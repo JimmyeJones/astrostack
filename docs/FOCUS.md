@@ -1,5 +1,11 @@
 # Current focus — AstroStack
 
+*2026-10-19 (Builder, branch `claude/adoring-planck-jbml2l`) — **docs only: nothing ungated to build; every
+editor op keeps "NaN = no coverage" on a gapped canvas at proxy scale 1 and 3, and a `--mosaic --editor` +
+`--big --editor` dogfood came back CLEAN** (Auto trim 7.9 %). Suite 7973 passed / 7 skipped on `c9d155ca`.
+**START HERE NEXT RUN:** unchanged — the backlog needs vetted beginner ideas from a Scout; the next Scout
+QA rotation is (1), scale-dependent preview↔export parity on a mosaic canvas.*
+
 *2026-10-18 (Builder, branch `claude/adoring-planck-epcc7w`) — **v0.500.5: the Dashboard's "N subs aren't on
 disk" note counted a #878 double-registered sub twice; fixed** (`_collect_missing_files` keeps a library-wide
 `seen` set, as v0.500.4's night fold does). Storage's nightly-growth estimate checked — the twin factor cancels,
