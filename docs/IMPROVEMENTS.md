@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- ⭐ **Carry a hand-saved editor look onto a restacked run** (`pipeline._carry_hand_saved_recipe`, reprocess-all) — branch `claude/modest-bohr-slr9jz`, 2026-10-19.
 
 ---
 
