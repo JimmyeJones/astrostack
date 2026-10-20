@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-v7lnvp`) — QA rotation sweep (4), the routers' *answers*, on `stats`: one bug, Scout-fixed (v0.501.13). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+*(**Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none
+updated since 2026-10-12 — nothing owed. No open PRs. **Dogfood `--mosaic`: CLEAN** — Auto trim 7.9 %, nothing
+overflowing, no console errors.)*
+
+*__Sweep (4).__ Took `stats`, first on the 2026-10-20 never-read list, and asked each of its multi-target
+answers the #878 question (a sub registered under two targets). `/api/stats` and `/api/library/summary`: the
+known gated lead (registry sums, hot path) — not re-filed. `/api/activity-calendar` and the recaps built on its
+fold: hold (`seen` set, shipped earlier). `/api/imaging-log.csv`: one row per stack run, which is per target by
+design — holds. **`/api/last-night` did not hold:** `_collect_last_night` fed every target's subs to
+`library_session_recap` with no de-duplication; real `Library`/`Project`, 360 × 10 s subs under two twin targets
+→ 2 targets, 720 subs, 2.0 h for one hour. Unlike the registry sums it already opens every project, so the
+calendar's fix costs one short column — Scout-fixed in v0.501.13 (fail-before shown). Not yet read for
+answers: `logs`, `seestar`, `glossary`, `auth`, `gallery`, `targets`, `plan`. (4) done → **next sweep is (1)**.*
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-ba36k9`) — QA rotation sweep (3), ffmpeg/ffprobe with a logging *and* hostile stub driving the whole Moon & Sun API: one bug, Scout-fixed (v0.501.12)
 
 *(**Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none

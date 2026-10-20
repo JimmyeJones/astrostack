@@ -132,7 +132,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `total_integration_s = sum(total_exposure_s)`) is the second confirmed surface. The activity calendar's
   per-night fold (`stats._collect_night_acc`) was a third and is done (see `SHIPPED.md`, "the night fold counts
   each sub once" — it already opened every project, so de-duplicating there cost nothing extra);
-  `/api/library/missing-files` was a fourth and is done too (v0.500.5, `SHIPPED.md`). `storage.get_storage`'s
+  `/api/library/missing-files` was a fourth and is done too (v0.500.5), the "Last night" card a fifth (v0.501.13). `storage.get_storage`'s
   nightly-growth estimate was checked and **holds** (Builder 2026-10-18): it is `median(recent registered
   subs/night) × library_bytes / registered subs`, so a twin scales both by one factor and cancels — and each
   twin keeps its own caches, so bytes per *registered* sub is the right unit for disk growth. Nothing to fix.
@@ -3618,6 +3618,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.501.13 **The Dashboard's "Last night" card counted a sub two targets registered (#878's twins) twice — one night on a twinned mosaic read as two targets and twice the hours; it now counts each sub once** (`stats._collect_last_night`).
 - ✅ v0.501.12 **The folder guard let `incoming/` be set to the app's own `<data>/video` or `<data>/state` folder; a Moon/Sun stack then wrote `meta.json`/`stack.png`/`stack.tiff` beside the raw clip — the save is now refused** (`config.nested_incoming_conflict`, `DATA_ROOT_MANAGED_SUBDIRS`, Scout rotation sweep (3))
 - ✅ v0.501.11 **On a single field a restack after a re-pointed night kept the canvas size, so "Reprocess everything" copied his saved crop unchanged and it framed sky 40–90 px off — the crop is re-aimed whenever the sky moved, not only when the canvas changed size** (`pipeline._recrop_for_new_canvas(same_shape=…)`, Scout rotation sweep (2))
 - ✅ v0.501.10 **A mosaic's registry centre landed on one panel (per-axis median over subs), so his M31 mosaic was missing from the life list — it is now the midpoint of the panels' extent** (`library._panel_extent_centre`).

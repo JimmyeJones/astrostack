@@ -835,7 +835,7 @@ def _collect_last_night(lib, targets, night_of=None):
     night is shot in two goes). The caller merges and judges; see
     :func:`get_last_night`.
     """
-    from seestack.io.project import Project
+    from seestack.io.project import FrameNight, Project
     from seestack.session_recap import (
         library_session_recap,
         recent_session_window_frames,
@@ -844,15 +844,31 @@ def _collect_last_night(lib, targets, night_of=None):
 
     rows: list[tuple[str, str, list]] = []
     early: dict[str, list[str]] = {}
+    # The files of every sub already counted into the recap, so a sub two
+    # targets registered (#878's mosaic twins) is counted under the first one
+    # only — the activity calendar's rule (`_collect_night_acc`). Without it his
+    # one night on a twinned mosaic read as two targets and twice the hours.
+    # Only the recent-night window's subs are kept here, never a whole library.
+    seen: set[str] = set()
     for t in targets:
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
-            # Five columns rather than whole rows: the recap reads when a sub
+            # Six columns rather than whole rows: the recap reads when a sub
             # landed, whether QC kept it and why not, and how long it was, and a
-            # `FrameRow` is `SELECT *` — see `Project.iter_night_frames`. This
-            # card is the one read here that opens *every* target.
-            frames = list(proj.iter_night_frames())
+            # `FrameRow` is `SELECT *` — see `Project.iter_night_frames`, whose
+            # five this is plus the sub's file for the de-duplication above.
+            # This card is the one read here that opens *every* target.
+            frames: list[FrameNight] = []
+            paths: list[str] = []
+            for (ts, accept, exposure_s, reason, fwhm_px,
+                 path) in proj.iter_frame_columns(
+                    "timestamp_utc", "accept", "exposure_s", "reject_reason",
+                    "fwhm_px", "source_path"):
+                frames.append(FrameNight(
+                    timestamp_utc=ts, accept=bool(accept), exposure_s=exposure_s,
+                    reject_reason=reason, fwhm_px=fwhm_px))
+                paths.append(path)
             # Every session's stop time, before the window trim below throws the
             # older ones away — the habit this target's newest night is judged
             # against.
@@ -864,7 +880,15 @@ def _collect_last_night(lib, targets, night_of=None):
             # but — unlike a per-target last-session trim — without severing a
             # night that another target bridges: the precise cross-target "last
             # night" cut is made inside library_session_recap.
-            last = recent_session_window_frames(frames)
+            in_window = {id(f) for f in recent_session_window_frames(frames)}
+            last = []
+            for f, path in zip(frames, paths, strict=True):
+                if id(f) not in in_window:
+                    continue
+                if path in seen:
+                    continue
+                seen.add(path)
+                last.append(f)
             if last:
                 rows.append((t.name, t.safe_name, last))
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
