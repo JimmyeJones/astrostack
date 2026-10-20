@@ -566,3 +566,41 @@ def test_his_own_pin_still_floats_when_a_stale_app_record_names_another_run(
     top = client.get("/api/gallery/best?limit=1").json()["items"]
     assert top[0]["safe"] == a and top[0]["run_id"] == modest
     assert top[0]["pinned"] is True
+
+
+def test_one_unreadable_preview_does_not_take_down_the_wall(
+    client, solved_library, monkeypatch,
+):
+    """A preview the filesystem can't answer about drops that one target, not the wall.
+
+    ``Path.exists`` only swallows "not there" errors; a stale NFS handle, an EIO or
+    an EACCES on one target's preview raised straight out of ``_run_has_preview``
+    and 500'd "My best pictures" (and the slideshow built on it) for every target,
+    while ``/api/gallery``, the pictures zip and the montage all degraded. The
+    same "I can't tell reads as not this one" rule ``targets._readable_file``
+    already applies to the current picture.
+    """
+    import errno
+    import pathlib
+
+    targets = client.get("/api/targets").json()
+    good1, good2 = targets[0]["safe_name"], targets[1]["safe_name"]
+    bad = _create_target(solved_library, "M13 Stale Mount")
+    for safe, n in ((good1, 100), (good2, 80), (bad, 90)):
+        _register_preview_run(solved_library, safe, basename=f"pic_{n}",
+                              n_frames=n, exposure_s=n * 30.0,
+                              noise_sigma=0.05, coverage_max=n)
+
+    real_stat = pathlib.Path.stat
+
+    def stat(self, *args, **kwargs):
+        if self.name == "pic_90.png":
+            raise OSError(errno.ESTALE, "Stale file handle", str(self))
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "stat", stat)
+    r = client.get("/api/gallery/best")
+    assert r.status_code == 200  # fail-before: OSError [Errno 116] out of the wall
+    safes = {it["safe"] for it in r.json()["items"]}
+    assert {good1, good2} <= safes
+    assert bad not in safes
