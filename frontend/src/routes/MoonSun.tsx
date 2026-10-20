@@ -81,6 +81,9 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
   const [keep, setKeep] = useState<string>(DEFAULT_KEEP);
   const [crop, setCrop] = useState(false);
   const [sharpen, setSharpen] = useState<string>(DEFAULT_SHARPEN);
+  // On by default: the owner asked for "drizzle when possible", and the engine
+  // only keeps it when it is worth it — otherwise the picture is the ordinary one.
+  const [drizzle, setDrizzle] = useState(true);
   const [file, setFile] = useState<string | null>(
     capture.files.length === 1 ? capture.files[0].name : null,
   );
@@ -94,6 +97,7 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
       file_name: file ?? undefined,
       crop: over.crop ?? crop,
       sharpen: Number(sharpen),
+      drizzle,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -215,6 +219,11 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
       {result ? (
         <Stack gap={4} mb="sm">
           <Text size="sm">{resultSummary(result)}</Text>
+          {/* Which resolution the stack chose, and why — so a 1.5× bigger
+              picture (or an unchanged one) is never a mystery. */}
+          {result.drizzle_note ? (
+            <Text size="xs" c="dimmed">{result.drizzle_note}</Text>
+          ) : null}
           {cropped ? (
             <Group gap="xs" wrap="nowrap" align="center">
               <Text size="xs" c="dimmed">{cropped}</Text>
@@ -469,6 +478,20 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
             mb="sm"
             checked={crop}
             onChange={(e) => setCrop(e.currentTarget.checked)}
+          />
+
+          <Checkbox
+            label="Drizzle for extra resolution when it's worth it"
+            description={
+              "When hundreds of frames each moved a little, they are combined "
+              + "onto a finer grid for a sharper picture 1.5× the size. Skipped "
+              + "(and we'll say why) when there are too few frames or they "
+              + "didn't move. Adds a few minutes."
+            }
+            size="sm"
+            mb="sm"
+            checked={drizzle}
+            onChange={(e) => setDrizzle(e.currentTarget.checked)}
           />
 
           <Button

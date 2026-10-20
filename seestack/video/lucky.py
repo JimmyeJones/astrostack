@@ -23,8 +23,11 @@ needs *N* frames of RAM; a single pass can't know what "best" means yet) and
 keeps the memory bound flat, which is what matters on the NAS.
 
 Deliberately simple (beginner scope): whole-disk alignment, no multi-point
-alignment, no derotation, no drizzle. The result flows into the normal editor
-if the user wants to sharpen further.
+alignment, no derotation. **Drizzle is "Auto, when worth it"** (owner ask,
+2026-10-20; :mod:`seestack.video.drizzle`): when asked for, pass 2 also feeds a
+×1.5 Bayer-drizzle canvas beside the ordinary one and keeps it only if enough
+frames were stacked and their measured shifts really varied sub-pixel —
+otherwise the camera-sized stack is returned exactly as before.
 """
 
 from __future__ import annotations
@@ -38,6 +41,8 @@ from pathlib import Path
 import numpy as np
 
 from seestack.stack.accumulator import WeightedSumAccumulator
+from seestack.video import drizzle as _drizzle
+from seestack.video.drizzle import LuckyDrizzle
 from seestack.video.ffmpeg import VideoInfo, iter_frames, probe_video
 
 log = logging.getLogger(__name__)
@@ -71,6 +76,12 @@ _DISK_MAX_FRACTION = 0.85
 #: centre is good to about a pixel; anything larger is not a refinement.
 _MAX_REFINE_PX = 2.0
 
+#: Gaussian σ (px) taken off both windows before the disk refinement correlates
+#: them. Just enough to blunt pixel-scale sensor structure (fixed-pattern noise,
+#: the CFA's residue after an 8-bit debayer) while the limb and the surface
+#: detail, which carry the shift, pass through. See :func:`_measure_disk_shift`.
+_REFINE_SMOOTH_SIGMA = 0.7
+
 #: Frames we refuse to work below — a 2-frame "video" has nothing to be lucky
 #: about, and the sharpness ranking would be meaningless.
 MIN_FRAMES = 3
@@ -92,6 +103,11 @@ class LuckyOptions:
     #: Align each kept frame to the first one before averaging. Off gives a
     #: plain average of the sharpest frames (useful only if alignment misfires).
     align: bool = True
+    #: Drizzle onto a ×1.5 grid **when it is worth it** — enough frames, and
+    #: frames that really moved sub-pixel (:mod:`seestack.video.drizzle`). Off
+    #: here so an omitted option is the picture every earlier version made; the
+    #: Moon/Sun page asks for it by default.
+    drizzle: bool = False
 
     def __post_init__(self) -> None:
         if not (1.0 <= self.keep_percent <= 100.0):
@@ -138,8 +154,10 @@ class LuckyResult:
 
     #: (H, W, 3) float32 mean of the aligned kept frames, in the decoder's 0–1
     #: range. Uncovered pixels (vacated by an alignment shift) are NaN, matching
-    #: the engine-wide "NaN = no coverage" rule.
+    #: the engine-wide "NaN = no coverage" rule. ×``drizzle_scale`` the
+    #: capture's size on each axis when the stack drizzled.
     image: np.ndarray
+    #: The size of :attr:`image` — the capture's own unless it drizzled.
     width: int
     height: int
     #: Frames actually decoded and graded (after ``max_frames`` sampling).
@@ -168,6 +186,21 @@ class LuckyResult:
     scores: tuple[float, ...] = ()
     source: str = ""
     warnings: list[str] = field(default_factory=list)
+    #: 1.0 = camera resolution; 1.5 = the stack drizzled onto a finer grid.
+    drizzle_scale: float = 1.0
+    #: Why it did or didn't (``seestack.video.drizzle.REASON_*``).
+    drizzle_reason: str = _drizzle.REASON_OFF
+    #: Worst-axis sub-pixel spread of the measured shifts (``None`` = unmeasured).
+    drizzle_spread_px: float | None = None
+
+    @property
+    def drizzle_note(self) -> str:
+        """One plain sentence on what the drizzle did — empty when it was off."""
+        return _drizzle.sentence(
+            _drizzle.DrizzleDecision(self.drizzle_reason, self.drizzle_scale,
+                                     self.drizzle_spread_px),
+            self.n_stacked,
+        )
 
     @property
     def noise_gain(self) -> float:
@@ -299,7 +332,9 @@ def ordinal(n: int) -> str:
     return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(abs(n) % 10, 'th') }"
 
 
-def _measure_shift(ref_luma: np.ndarray, luma: np.ndarray) -> tuple[float, float] | None:
+def _measure_shift(
+    ref_luma: np.ndarray, luma: np.ndarray, *, whiten: bool = True,
+) -> tuple[float, float] | None:
     """Sub-pixel (dy, dx) that brings ``luma`` onto ``ref_luma``, or ``None``.
 
     Phase cross-correlation on the whole frame: a lunar/solar disk is a single
@@ -307,13 +342,20 @@ def _measure_shift(ref_luma: np.ndarray, luma: np.ndarray) -> tuple[float, float
     locks onto it far more reliably than any star-based method would (there are
     no stars). Returns ``None`` when scikit-image is unavailable or the
     correlation fails, so the caller can fall back to stacking unaligned.
+
+    ``whiten=False`` asks for a plain cross-correlation instead of the
+    phase-only one — see :func:`_measure_disk_shift` for why the disk refinement
+    needs it.
     """
     try:
         from skimage.registration import phase_cross_correlation
     except ImportError:  # pragma: no cover — skimage is a hard dependency
         return None
     try:
-        shift, _, _ = phase_cross_correlation(ref_luma, luma, upsample_factor=10)
+        shift, _, _ = phase_cross_correlation(
+            ref_luma, luma, upsample_factor=10,
+            normalization="phase" if whiten else None,
+        )
     except Exception as exc:  # noqa: BLE001 — a bad correlation must not sink the run
         log.debug("video phase_cross_correlation failed: %s", exc)
         return None
@@ -333,6 +375,20 @@ def _measure_disk_shift(
     camera's stationary noise pattern — identical in every frame — won the
     whole-frame correlation, so it reported ~0 shift while the disk moved a
     median 22 px: 138 of 143 sampled frames were stacked misaligned.
+
+    **The refinement is a plain cross-correlation of lightly smoothed windows,
+    not a phase-only one** *(2026-10-20)*. Phase correlation whitens the
+    spectrum, so every frequency votes equally — and on a debayered raw frame
+    the high frequencies are mostly the sensor's own stationary structure (the
+    CFA's residue after an 8-bit bilinear debayer, fixed-pattern noise) rather
+    than the disk. Measured with known sub-pixel jitter, median error, whitened
+    → now: a raw ``GBRG`` fixture 0.51 → 0.12 px (whitened was only ever the
+    integer centre); the same with 4 DN of fixed pattern and ±30 px drift
+    0.40 → 0.06 px (worst frame 2.4 → 0.12); the small striped-pattern Sun of
+    ``test_video_lucky`` 0.36 → 0.18 px (worst 0.62 → 0.44). A whole-pixel-only alignment blurs the
+    stack by up to half a pixel, and leaves a drizzle no sub-pixel variety to
+    use. Weighting by power lets the limb and the surface detail decide; the
+    :data:`_REFINE_SMOOTH_SIGMA` blur keeps a striped sensor from leaning on it.
     """
     ry, rx = int(round(ref_disk.cy)), int(round(ref_disk.cx))
     cy, cx = int(round(disk.cy)), int(round(disk.cx))
@@ -343,10 +399,14 @@ def _measure_disk_shift(
     if (min(ry, cy) - half_h < 0 or min(rx, cx) - half_w < 0
             or max(ry, cy) + half_h > h or max(rx, cx) + half_w > w):
         return coarse          # no room for a common window: the centre is still right
-    a = ref_luma[ry - half_h:ry + half_h, rx - half_w:rx + half_w].astype(np.float32)
-    b = luma[cy - half_h:cy + half_h, cx - half_w:cx + half_w].astype(np.float32)
+    from scipy.ndimage import gaussian_filter
+
+    a = gaussian_filter(ref_luma[ry - half_h:ry + half_h, rx - half_w:rx + half_w]
+                        .astype(np.float32), _REFINE_SMOOTH_SIGMA)
+    b = gaussian_filter(luma[cy - half_h:cy + half_h, cx - half_w:cx + half_w]
+                        .astype(np.float32), _REFINE_SMOOTH_SIGMA)
     win = np.outer(np.hanning(a.shape[0]), np.hanning(a.shape[1])).astype(np.float32)
-    fine = _measure_shift((a - a.mean()) * win, (b - b.mean()) * win)
+    fine = _measure_shift((a - a.mean()) * win, (b - b.mean()) * win, whiten=False)
     # The centre is already good to about a pixel, so the refinement may only
     # nudge it. A bigger "correction" is the sensor's fixed pattern lining up
     # with itself at the integer offset between the two windows — measured: it
@@ -523,6 +583,28 @@ def stack_video(
     # Nothing else needs the reference *frame* once its luma is measured, and it
     # is the one full frame pass 1 was holding.
     graded.best_frame = None
+    # The drizzle runs beside the ordinary accumulator, because whether it is
+    # worth keeping depends on the shifts this pass is about to measure. What can
+    # be ruled out up front is, so a short capture never builds the finer canvas.
+    drizzle_reason = _drizzle.planned(
+        enabled=opts.drizzle, align=opts.align, n_keep=n_keep,
+        height=vinfo.height, width=vinfo.width,
+    )
+    cfa: dict[str, str] = {}
+    driz: LuckyDrizzle | None = None
+    shifts: list[tuple[float, float]] = []
+
+    def add(rgb: np.ndarray, dy: float, dx: float, *, shift: bool = True) -> None:
+        nonlocal driz
+        acc.add(_shift_frame(rgb, dy, dx) if shift else rgb)
+        if drizzle_reason is None:
+            if driz is None:
+                # Built on the first kept frame: ``iter_frames`` has latched the
+                # stream's CFA phase by then, and a colour stream has none.
+                driz = LuckyDrizzle(vinfo.height, vinfo.width, pattern=cfa.get("pattern"))
+            driz.add(rgb, dy, dx)
+            shifts.append((dy, dx))
+
     n_stacked = 0
     n_align_failed = 0
     max_shift = max(2.0, _MAX_SHIFT_FRACTION * min(vinfo.height, vinfo.width))
@@ -535,7 +617,7 @@ def stack_video(
         # threw away one line later. The frames it *does* keep are decoded and
         # demosaiced exactly as before, so the stacked result is unchanged.
         iter_frames(src, stride=stride, width=vinfo.width, height=vinfo.height,
-                    pix_fmt=vinfo.pix_fmt, wanted=keep_idx)
+                    pix_fmt=vinfo.pix_fmt, wanted=keep_idx, cfa=cfa)
     ):
         if frame is None:
             continue
@@ -553,7 +635,7 @@ def stack_video(
                 ref_index = i
                 ref_luma = frame_luma(frame)
                 ref_disk = _find_disk(ref_luma)
-            acc.add(rgb)
+            add(rgb, 0.0, 0.0, shift=False)
             n_stacked += 1
         else:
             luma = frame_luma(frame)
@@ -566,19 +648,19 @@ def stack_video(
                     n_align_failed += 1
                 else:
                     dy, dx = _measure_disk_shift(ref_luma, ref_disk, luma, disk)
-                    acc.add(_shift_frame(rgb, dy, dx))
+                    add(rgb, dy, dx)
                     n_stacked += 1
             elif ref_disk is not None:
                 n_align_failed += 1     # the disk is gone from this frame (cloud, slew)
             else:
                 shift = _measure_shift(ref_luma, luma)
                 if shift is None:
-                    acc.add(rgb)
+                    add(rgb, 0.0, 0.0, shift=False)
                     n_stacked += 1
                 elif abs(shift[0]) > max_shift or abs(shift[1]) > max_shift:
                     n_align_failed += 1
                 else:
-                    acc.add(_shift_frame(rgb, shift[0], shift[1]))
+                    add(rgb, shift[0], shift[1])
                     n_stacked += 1
         done += 1
         if progress is not None:
@@ -595,10 +677,21 @@ def stack_video(
             f"and were left out."
         )
 
+    decision = _drizzle.DrizzleDecision(drizzle_reason or _drizzle.REASON_OFF, 1.0)
+    if driz is not None:
+        decision = _drizzle.decide(shifts, n_stacked=n_stacked, scale=driz.scale)
+        log.info(
+            "%s: drizzle %s (%d frames, sub-pixel spread %s px)", src.name,
+            decision.reason, n_stacked,
+            "?" if decision.spread_px is None else f"{decision.spread_px:.2f}",
+        )
+    image = driz.result() if driz is not None and decision.drizzled else acc.result()
+    driz = None
+
     return LuckyResult(
-        image=acc.result(),
-        width=vinfo.width,
-        height=vinfo.height,
+        image=image,
+        width=int(image.shape[1]),
+        height=int(image.shape[0]),
         n_graded=n_graded,
         n_kept=n_keep,
         n_stacked=n_stacked,
@@ -611,6 +704,9 @@ def stack_video(
         scores=tuple(float(s) for s in scores),
         source=str(src),
         warnings=warnings,
+        drizzle_scale=decision.scale,
+        drizzle_reason=decision.reason,
+        drizzle_spread_px=decision.spread_px,
     )
 
 

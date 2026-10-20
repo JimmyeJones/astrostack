@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Any
 
 from seestack.stack.output import pack_unit, write_full_res_png
+from seestack.video import drizzle as video_drizzle
 from seestack.video.detail import SHARPEN_MAX, sharpen_still
 from seestack.video.discover import VideoCapture, find_video_capture
 from seestack.video.ffmpeg import (
@@ -188,6 +189,12 @@ class VideoStackMeta:
     #: advisory. Additive: an older build ignores the key, a newer one reads a
     #: missing key as 0.
     colour_build: int = 0
+    #: 1.0 = camera resolution; 1.5 = the stack drizzled onto a finer grid
+    #: (``width``/``height`` are then the finer size). ``drizzle_note`` is the
+    #: sentence saying which and why. Both defaulted, so a ``meta.json`` written
+    #: before the Moon/Sun stack could drizzle reads as what it was: not drizzled.
+    drizzle_scale: float = 1.0
+    drizzle_note: str = ""
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -975,6 +982,7 @@ def submit_video_stack(
     align: bool = True,
     crop: bool = False,
     sharpen: float = 0.0,
+    drizzle: bool = False,
 ) -> Job:
     """Enqueue a lucky-imaging stack of one video capture."""
 
@@ -982,7 +990,7 @@ def submit_video_stack(
         return _video_stack_body(
             settings, job, capture_id,
             keep_percent=keep_percent, file_name=file_name, align=align,
-            crop=crop, sharpen=sharpen,
+            crop=crop, sharpen=sharpen, drizzle=drizzle,
         )
 
     return jm.submit(JOB_KIND, body, target=capture_id)
@@ -1127,6 +1135,23 @@ def _apply_framing(display, crop: bool, label: str, warnings: list[str]):
     return crop_to_disk(display, framing), framing
 
 
+def stack_progress_message(
+    n_keep: int, *, drizzle: bool, align: bool, height: int, width: int,
+) -> str:
+    """The running stack's one line — and, when it will try a drizzle, how long
+    that adds (the owner's 2026-10-13 answer: say how long, then run it)."""
+    base = f"Stacking the sharpest {n_keep} frames"
+    if video_drizzle.planned(
+        enabled=drizzle, align=align, n_keep=n_keep, height=height, width=width,
+    ) is not None:
+        return base
+    minutes = max(1, round(video_drizzle.extra_seconds(n_keep, height, width) / 60.0))
+    return (
+        f"{base}, and drizzling them for extra resolution if they moved enough "
+        f"(adds about {minutes} min)"
+    )
+
+
 def _video_stack_body(
     settings: Settings,
     job: Job,
@@ -1137,18 +1162,22 @@ def _video_stack_body(
     align: bool,
     crop: bool = False,
     sharpen: float = 0.0,
+    drizzle: bool = False,
 ) -> dict[str, Any]:
     capture, source = _resolve_source(settings, capture_id, file_name)
     job.set_progress("probe", 0, 0, f"Reading {Path(source).name}")
     info = probe_video(source)
 
-    options = LuckyOptions(keep_percent=keep_percent, align=align)
+    options = LuckyOptions(keep_percent=keep_percent, align=align, drizzle=drizzle)
 
     def on_progress(stage: str, done: int, total: int) -> None:
         if stage == "grade":
             job.set_progress("grade", done, total, "Grading every frame for sharpness")
         else:
-            job.set_progress("stack", done, total, f"Stacking the sharpest {total} frames")
+            job.set_progress("stack", done, total, stack_progress_message(
+                total, drizzle=drizzle, align=align,
+                height=info.height, width=info.width,
+            ))
 
     try:
         result = stack_video(
@@ -1238,6 +1267,8 @@ def _video_stack_body(
         # these stills apart from its own.
         colour_current=True,
         colour_build=_COLOUR_PIPELINE_BUILD,
+        drizzle_scale=float(result.drizzle_scale),
+        drizzle_note=result.drizzle_note,
     )
     _write_meta(out_dir, meta)
     return {
