@@ -1,5 +1,16 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-wncymw`) — QA rotation sweep (1), scale-dependent parity, taken one grid further out — frame-QC pixels vs master pixels — on the editor's FWHM-driven numbers: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Inbox:** the same four open (#878, #880, #903, #1015), none updated since the last Scout run; all owner-gated, nothing owed. No open PRs.
+- **Dogfood** `--mosaic`: CLEAN (trim 7.9 %, no console errors, nothing overflowing).
+- **Sweep (1):** every per-op proxy↔export parity and the proxy-measured suggestion solvers (highlights, denoise) are pinned, so this run read the
+  *inputs* the FWHM-driven suggestions get. `Project.median_fwhm` is the frames' QC `fwhm_px`, measured on `green_channel` (half-resolution);
+  `detail.sharpen.radius`, `detail.deconvolve.psf_sigma` and `stars.reduce.size` are full-resolution master pixels. Ran real
+  `compute_frame_metrics` + `run_stack` (6 synth subs, 960×640, plain and ×1.5 drizzle): QC 2.09 px, master 3.82 / 4.36 px → every offered value
+  about half (Bugs entry, top). The proxy side of those ops was read again and is fine (`ctx.scaled_px`).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-ur5fu9`) — QA rotation sweep (4), the routers' *answers*, on `gallery` and `logs`: one bug Scout-fixed (v0.502.5), one reproduced surface added to the twin-overcount lead. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 *(**Suite:** 8076 passed / 7 skipped on `81886435` (xdist `-n 4`, BLAS capped, 18m24s). **Inbox** (`list_issues`): the
