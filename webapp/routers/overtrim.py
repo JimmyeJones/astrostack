@@ -24,7 +24,7 @@ name different pictures. A test pins that.
 links to its own editor, where the one-click re-seed lives and where he can see
 the picture before and after.
 
-Deliberately cheap on a healthy library: per target, the newest run's saved
+Deliberately cheap on a healthy library: per target, the displayed run's saved
 recipe is read from the project DB, and a run with no enabled ``geometry.crop``
 answers before any coverage FITS is opened. Only a target that actually carries a
 crop costs a strided coverage read.
@@ -66,11 +66,16 @@ def scan_over_trimmed(lib) -> list[OverTrimmedItem]:  # noqa: ANN001
     """Every target whose newest edited picture still carries an older build's
     over-trim — worst (smallest surviving sliver) first.
 
-    Only the **newest** run per target is judged: that is the picture every other
-    surface shows, and offering to re-seed a superseded run's recipe would be
-    noise. A broken project DB is skipped exactly as the other cross-target reads
-    skip it, so one corrupt target cannot cost the whole answer."""
+    Only the **displayed** run per target is judged — the pinned cover, else the
+    newest run with a picture (:func:`webapp.finishedpicture.displayed_picture_run`,
+    the precedence the Library card, hero and thumbnail use) — falling back to the
+    newest run when none has a picture yet. A cover the owner (or a reprocess
+    batch) pinned is the picture on the wall even when a newer run sits in
+    History, and offering to re-seed a superseded run's recipe would be noise. A
+    broken project DB is skipped exactly as the other cross-target reads skip it,
+    so one corrupt target cannot cost the whole answer."""
     from seestack.io.project import Project
+    from webapp.finishedpicture import displayed_picture_run
     from webapp.routers.editor import crop_health_for_run
 
     found: list[OverTrimmedItem] = []
@@ -78,7 +83,9 @@ def scan_over_trimmed(lib) -> list[OverTrimmedItem]:  # noqa: ANN001
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
-            run = next(iter(proj.iter_stack_runs()), None)  # newest first
+            runs = list(proj.iter_stack_runs())  # newest first
+            run = (displayed_picture_run(runs, t.cover_stack_run_id)
+                   or next(iter(runs), None))
             if run is None:
                 continue
             health = crop_health_for_run(proj, run)

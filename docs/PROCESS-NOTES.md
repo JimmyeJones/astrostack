@@ -1,9 +1,13 @@
 # Process notes & QA sweep records
 
-## 2026-10-20 (Scout, branch `claude/zen-curie-crvp1t`) — QA rotation sweep (1), scale-dependent preview↔export parity: the four proxy-measured "From your image" suggestions the `highlights` sweep left open: CLEAN. Inbox unchanged. Dogfood `--mosaic --editor --big` CLEAN.
+## 2026-10-20 (Scout, branch `claude/zen-curie-crvp1t`) — QA rotation sweep (1), scale-dependent preview↔export parity: the four proxy-measured "From your image" suggestions the `highlights` sweep left open: CLEAN. Inbox unchanged. Dogfood `--mosaic --editor --big` CLEAN as far as it ran.
 
+- **Suite:** 8133 passed / 7 skipped on `f861920a` (xdist `-n 4`, BLAS capped, 19m31s). **Dogfood
+  `--mosaic --editor --big`:** page probes on the sample, mosaic and full-size targets CLEAN (trim 7.9 %, nothing
+  overflowing, no console errors), editor drives on sample and mosaic clean; the full-size editor drive was stopped by
+  the 30-minute background-tool limit before it printed a verdict (harness, not the app — run `--big` alone next time).
 - **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12 — nothing owed. Open PR #1228 (a
-  concurrent Scout, sweep (4), pushed 18:39Z) — live, left alone; this run's sweep is (1) so the two do not overlap.
+  concurrent Scout, sweep (4), pushed 18:39Z, merged mid-run as v0.502.12); this run's sweep is (1) so the two do not overlap.
 - **Sweep (1), the lead `claude/zen-curie-m3p3kh` left open:** do `levels-`, `stretch-`, `curve-` and
   `denoise-suggestion` share `highlights`' per-pixel-gradient shape? **By the code, no:** the first three are pure
   value-population statistics (percentiles, median, MAD, a lower-half histogram mode) — unbiased under
@@ -18,6 +22,21 @@
   0.0262→0.0267 (+2 %), which crosses one 0.05 slider step (0.50→0.55) at strides ≥ 3 — inside the
   "approximate with a linear op ahead" the endpoint's own comment owns, not filed. That closes the four-endpoint
   lead. (1) done → **next sweep is (2)**.
+## 2026-10-20 (Scout, branch `claude/zen-curie-uic6x9`) — QA rotation sweep (4), the routers' *answers*, on the never-swept `wishlist`, `sample`, `updates`, `stackfailures` and `overtrim`: one bug Scout-fixed (v0.502.12), one filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8114 passed / 7 skipped on `6724173b` (xdist `-n 4`, BLAS capped, 20m34s). **Inbox:** the same four (#878, #880,
+  #903, #1015), no activity since 2026-10-12, all owner-gated — nothing new owed. **Dogfood** `--mosaic`: CLEAN, trim 7.9 %.
+- **Picked by count:** `grep -c` of each router's name in this file — `wishlist` and `sample` had 0, `updates` 1,
+  `stackfailures` 2. Read each for *what it answers* against the owner's shapes (#878 twins, pinned covers, a
+  days-long `reprocess_all`).
+- **`wishlist` — CLEAN.** Capture status is delegated to `lifelist.catalog_capture_status`, so v0.502.6's mosaic
+  footprints reach it unchanged; a twin tie (`sep <= best_sep`, last wins) could pick the twin without a preview,
+  but #878 says both twins carry stack runs — not filed. **`sample` — CLEAN:** `remove_sample` deletes only its
+  reserved `Sample: …` names through `delete_target(remove_files=True)`, which refuses `incoming/`. **`updates` —
+  CLEAN:** every POST takes a JSON body (the CSRF guard), `apply` re-checks the offered version.
+- **`overtrim` — BUG, Scout-fixed (v0.502.12):** judged the newest run while a pinned cover is what the wall shows.
+- **`stackfailures` — BUG, filed reproduced:** Reprocess-all's `result["failed"]` is a third recording site
+  `latest_stack_failures` never reads (entry at the end of Bugs).
 
 ## 2026-10-20 (Scout, branch `claude/zen-curie-jwnetb`) — QA rotation sweep (4), the `wishlist` and `video` routers' answers: wishlist CLEAN; one Moon/Sun bug Scout-fixed (v0.502.9). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
