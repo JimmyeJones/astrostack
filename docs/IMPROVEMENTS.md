@@ -154,6 +154,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   nightly-growth estimate was checked and **holds** (Builder 2026-10-18): it is `median(recent registered
   subs/night) × library_bytes / registered subs`, so a twin scales both by one factor and cancels — and each
   twin keeps its own caches, so bytes per *registered* sub is the right unit for disk growth. Nothing to fix.
+  **A sixth surface, and the cheap one (Scout 2026-10-20, sweep (4), reproduced):** "My deep-sky wall"
+  (`gallery._montage_tiles`, `shown_s += hero.total_exposure_s` → `montage_title`) sums the registry column per
+  tile, so twins on the wall print `3 targets, 2 min of light` over 60 s of distinct subs. Unlike the headline it
+  is a one-tap download that already resolves ≤16 tiles — unioning the placed tiles' accepted `source_path` →
+  `exposure_s` costs ≤16 project opens off the hot path, the v0.500.5 shape. Buildable without the gate above.
   **Why it is a lead and not the cheap dedup v0.500.3 shipped.** Storage and incoming-lag only ever de-duplicate
   the *folders two or more targets claim*, paid for by opening just those projects — but `campaign_stats` and
   `summarize_library` open **no** project at all; they read registry columns. There is no `source_path` to
@@ -3614,6 +3619,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.5 **One target's unreadable preview (a stale mount, EIO, EACCES) 500'd "My best pictures" and its slideshow for every target — it now drops just that target, as the other gallery surfaces already did** (`gallery._file_answers`, `_run_has_preview`, Scout rotation sweep (4)).
 - ✅ v0.502.4 **Cancelling a scan left every queued plate-solve (and QC read) running in the process pool after the job said "cancelled" — `shutdown(wait=False, cancel_futures=True)` cancels nothing; each pending future is now cancelled by hand** (`scanner._map_jobs`, Scout sweep (3); full text in SHIPPED.md)
 - ✅ v0.502.3 **The "Hold back highlights" suggestion weakened with the editor proxy's step — 1.00 native, 0.40 on his 2×2 mosaic, silent on a big canvas — because its flatness tests read one-proxy-pixel gradients; they are now judged per native pixel** (`highlights._per_native_px`, `suggest_highlight_protect(proxy_scale=…)`, Scout rotation sweep (1)).
 - ✅ v0.502.2 **The life list matched with an S50-sized 0.35° radius, so M32 (0.40° from M31) stayed grey though it is in every frame of his S30 M31 field — each target now matches inside 80 % of its own measured half-field (registry `frame_short_deg`), never below the old floor** (`lifelist.match_radius_deg`, `library._frame_short_deg`).
@@ -4908,33 +4914,3 @@ _Newest first. One line each: what + commit/PR. Entries that had grown to paragr
 
 - **Warn on a mismatched calibration master pick** — the Stack form now shows an
 
-- **Auto-suggest a matching flat-dark** — `recommend_masters` now also returns
-
-- **Drizzle flux-scale fix** — `DrizzleStacker.result()` no longer divides the
-
-- **Auto-suggest calibration masters** — new `recommend_masters` ranks the
-
-- **Stack info panel** — new `GET /stack-runs/{id}/info` reads the provenance
-
-- `run_stack` edge-case tests — single accepted frame (degenerate stack, coverage
-
-- Editor-export provenance — the derived `master.fits` from an editor recipe now
-
-- Channel-combine provenance — the LRGB/RGB combined FITS now carries
-- Accessibility sweep — added `aria-label` to the remaining icon-only
-- Channel-combine NaN fix — LRGB pixels covered in G/B/L but uncovered in a
-- **Flat-dark support** — a master flat can now be dark-subtracted before
-- **Dashboard stats caching** — `GET /api/stats` no longer re-opens every target's
-- **Settings backup & restore** — `GET /api/settings/export` downloads a portable
-- **FITS output provenance headers** — `master.fits` now records OBJECT (target),
-- CI safety net (`.github/workflows/ci.yml`) — full Python + frontend suites run
-
-- **Autonomous run (agent, this session):** security fixes — Seestar `goto`
-- **Autonomous run #1 (agent):** security + reliability/operability hardening +
-- Autonomous dev playbook (`AGENTS.md`) + this backlog.
-- Mono stacking + LRGB/RGB channel combine — `StackOptions.mono`, `channel_combine`,
-- Star-mask-aware local edits — `edit/starmask.py`, mask-gated `stars.reduce`,
-- Optional HTTP Basic access control (opt-in, PBKDF2, middleware). (v0.10.0, `7a995fc`)
-- Dark/flat calibration — engine, master store, build job, API, UI. (v0.9.0)
-- Keyboard shortcuts for frame grading on the Target page. (`2de2099`)
-- Sigma-clip fix: no longer over-clips single-coverage (mosaic-edge) pixels. (`ab3883d`)

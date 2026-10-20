@@ -549,9 +549,24 @@ class BestPicturesResponse(BaseModel):
     n_finished: int = 0
 
 
+def _file_answers(raw: str | None) -> bool:
+    """Whether ``raw`` is a file the filesystem says is there.
+
+    ``Path.exists`` swallows only "not there"; a stale mount, an EIO or an
+    EACCES raised out of the wall and 500'd it for every target. "I can't
+    tell" reads as "not this one", as in ``targets._readable_file``.
+    """
+    if not raw:
+        return False
+    try:
+        return Path(raw).exists()
+    except OSError:
+        return False
+
+
 def _run_has_preview(run: Any) -> bool:
     """Whether a run has a rendered preview still on disk (a *finished picture*)."""
-    return bool(run.preview_path and Path(run.preview_path).exists())
+    return _file_answers(run.preview_path)
 
 
 def _representative_run(runs: list[Any], cover_run_id: int | None) -> tuple[Any, bool]:
@@ -699,8 +714,8 @@ def get_best_pictures(
                     capture_night_end=night_end,
                     capture_nights=nights,
                     has_preview=True,
-                    has_fits=bool(pick.fits_path and Path(pick.fits_path).exists()),
-                    has_tiff=bool(pick.tiff_path and Path(pick.tiff_path).exists()),
+                    has_fits=_file_answers(pick.fits_path),
+                    has_tiff=_file_answers(pick.tiff_path),
                     preview_url=(
                         f"/api/targets/{t.safe_name}/stack-runs/{pick.id}/preview"
                     ),
@@ -973,7 +988,7 @@ def _montage_tiles(request: Request, limit: int) -> tuple[list, float]:
             for t in raw
         ]
         summary = summarize_library(
-            targets, preview_exists=lambda p: bool(p) and Path(p).exists())
+            targets, preview_exists=_file_answers)
         tiles: list[MontageTile] = []
         shown_s = 0.0
         for hero in summary.heroes:
