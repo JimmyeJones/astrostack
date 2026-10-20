@@ -16,6 +16,23 @@ degrades gracefully — true of the readers, but it never asked whether the pict
 excludes the cover run; an explicit `ids` list (the caller naming the run) is honoured as before. Pinned in
 `tests/webapp/test_storage.py` (+1, fails before by scratch revert). No config, schema, on-disk, default or
 API-shape change (`deleted` simply omits the cover).
+## 2026-10-20 (Builder, branch `claude/festive-knuth-1cl9ql`) — Add → Resize goes last; the loupe declines a Resize ahead of other ops
+
+### v0.502.14 — `stageConflicts.insertOnCorrectSide` puts geometry last; `_loupe_geometry_problem` refuses a Resize ahead of any op
+
+**What.** `geometry.*` ops are `stage="nonlinear"`, so the editor's Add menu (`insertOnCorrectSide`) spliced a new
+Resize **directly after the stretch** — on Auto's recipe that is ahead of `detail.sharpen`. The export then ran the
+sharpen on the resized grid (radius 3 at scale 0.5 = 6 native px, though Auto sized it in master px), and "Check it at
+full size", which disables geometry and renders 1:1, ran it at 3 px — and vouched for it, because
+`_loupe_geometry_problem` only refused geometry ahead of an *additive-field* op. Scout sweep (1) repro: the loupe
+radius best matching the export window was 6.0, not 3.0. **Fix:** a Crop, Rotate or Resize added from the menu (or
+moved by "fix stage") now goes to the **end** of the recipe, as Auto's own crop already does; and the loupe declines
+(fixable, "Move the Resize to the end") a *reshaping* `geometry.resize` followed by any enabled op. **Deliberately
+any op, not a list:** which ops read pixel sizes from the render (`scaled_px`, `proxy_scale`, the star mask) is spread
+across six modules, and a prose list of such ops is exactly what the registry warns went wrong for the loupe before;
+a pointwise op after a Resize loses the offer, and the refusal says how to get it back. Pinned in
+`tests/webapp/test_editor_loupe.py` (+2, the refusal fails before) and `stageConflicts.test.ts` (+2, both fail
+before). No config, schema, on-disk, default, endpoint or response-shape change.
 
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-fsp4dq`) — Reprocess-all refusals reach the stack-failures note
 

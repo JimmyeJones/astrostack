@@ -2098,7 +2098,7 @@ LOUPE_MAX_SIZE_PX = 1024
 def _loupe_geometry_problem(rec: Recipe) -> str | None:
     """Why this recipe's preview can't be mapped back to source pixels, or ``None``.
 
-    Two distinct refusals, and both are refusals rather than guesses:
+    Three distinct refusals, and all are refusals rather than guesses:
 
     * **A rotation.** ``preview_crop_of_recipe`` returns ``UNKNOWN`` for an enabled
       ``geometry.rotate`` with a real angle — the render simply isn't a crop of the
@@ -2117,6 +2117,9 @@ def _loupe_geometry_problem(rec: Recipe) -> str | None:
       priority-1 control while naming a crop or resize the recipe did not have.
       :func:`~seestack.edit.ops.geometry.reshapes_frame` is the question, and it is
       deliberately conservative: only a *certain* no-op changes the answer.
+    * **A Resize ahead of any other op.** The window renders at 1:1 with geometry
+      off, so whatever runs after a real ``geometry.resize`` on the export —
+      Auto's sharpen above all — would be shown at the wrong pixel scale.
     """
     from seestack.edit.ops.geometry import reshapes_frame
     from seestack.previewcrop import UNKNOWN
@@ -2126,15 +2129,30 @@ def _loupe_geometry_problem(rec: Recipe) -> str | None:
                 "original frame you're looking at. Turn the rotation off to check "
                 "it at full size.")
     seen_geometry = False
+    seen_resize = False
     for op in rec.ops:
         if not op.enabled:
             continue
         if op.id.startswith("geometry."):
-            seen_geometry = seen_geometry or reshapes_frame(op.id, op.params)
+            reshapes = reshapes_frame(op.id, op.params)
+            seen_geometry = seen_geometry or reshapes
+            seen_resize = seen_resize or (reshapes and op.id == "geometry.resize")
         elif seen_geometry and (spec := get_op(op.id)) is not None and spec.additive_field:
             return ("This recipe crops or resizes before its background pass, so "
                     "the full-size view can't line up with the preview. Move the "
                     "crop after the background steps to check it at full size.")
+        elif seen_resize:
+            # The window is rendered with geometry off, at 1:1 — but the export
+            # runs every op after a Resize on the *resized* grid, so a sharpen
+            # radius, a star-reduction footprint or a denoise extent lands
+            # 1/scale wider (or narrower) there than here. Which ops read their
+            # pixel sizes from the render is not something this can list
+            # honestly, so any op after the Resize declines; the editor's Add
+            # menu puts a Resize last, where nothing follows it.
+            return ("This recipe resizes the picture before some of its steps, so "
+                    "the full-size view would show them at a different scale than "
+                    "your export. Move the Resize to the end of the list to check "
+                    "it at full size.")
     return None
 
 
