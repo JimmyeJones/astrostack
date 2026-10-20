@@ -109,6 +109,40 @@ def test_it_judges_the_newest_picture_not_a_superseded_one(client, solved_librar
     ).json()["stale"] is True
 
 
+def test_it_judges_the_pinned_cover_not_a_newer_run_in_history(client,
+                                                                solved_library):
+    """A pinned cover is the picture the Library card, the hero and the share
+    sheet show, even with a newer run in History — the owner's own pin, or the
+    one Reprocess-all places to keep a hand-finished picture on the wall. Until
+    v0.502.9 the scan judged the newest run instead, so a pinned over-trimmed
+    picture never reached the Dashboard while the editor called it stale."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    old = _make_run(solved_library, safe, basename="old", h=80, w=100,
+                    is_mosaic=True, ts="2026-05-01T00:00:00Z", with_preview=True)
+    new = _make_run(solved_library, safe, basename="new", h=80, w=100,
+                    is_mosaic=True, ts="2026-06-01T00:00:00Z", with_preview=True)
+    for base in ("old", "new"):
+        _write_frame_coverage(solved_library, safe, _ragged_border_coverage(),
+                              basename=base)
+    _save_crop(client, safe, old, _AUDIT_SLIVER)
+    assert _over_trimmed(client)["count"] == 0      # the newest run is shown
+
+    r = client.put(f"/api/targets/{safe}/cover", json={"run_id": old})
+    assert r.status_code == 200, r.text
+    body = _over_trimmed(client)
+    assert body["count"] == 1
+    assert body["items"][0]["run_id"] == old
+    # One definition, two surfaces: the editor's note on that run agrees.
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{old}/editor/crop-health"
+    ).json()["stale"] is True
+    assert new != old
+
+    # Unpinning hands the wall back to the newer, uncropped run — silent again.
+    client.put(f"/api/targets/{safe}/cover", json={"run_id": None})
+    assert _over_trimmed(client)["count"] == 0
+
+
 def test_a_correctly_trimmed_mosaic_never_appears(client, solved_library):
     """The picture today's Auto produces. If this ever fires, the note starts
     nagging about every mosaic on the owner's install."""
