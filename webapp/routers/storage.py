@@ -433,7 +433,16 @@ class PruneRequest(BaseModel):
 @router.post("/api/targets/{safe}/stack-runs/prune")
 def prune_stack_runs(safe: str, body: PruneRequest, request: Request) -> dict:
     """Delete old stack runs and their output files. Either keep the N newest
-    (``keep``) or delete a specific ``ids`` list."""
+    (``keep``) or delete a specific ``ids`` list.
+
+    **"Keep the N newest" never deletes the target's pinned cover** — the
+    picture on the wall. A cover is pinned because it is *not* the newest run:
+    the owner's "Set as cover", or the app keeping a hand-finished picture over
+    a fresh linear restack (``pipeline.submit_reprocess_all``, issue #903's
+    shape). Counting it among "the rest" deleted exactly that finished picture,
+    files and all, on the Storage page's routine housekeeping button. An
+    explicit ``ids`` list is the caller naming the run and is honoured as-is.
+    """
     if body.keep is None and not body.ids:
         raise HTTPException(status_code=400, detail="Provide 'keep' or 'ids'")
     if body.keep is not None and body.keep < 0:
@@ -450,7 +459,9 @@ def prune_stack_runs(safe: str, body: PruneRequest, request: Request) -> dict:
             if body.ids is not None:
                 to_delete = [r for r in runs if r.id in set(body.ids)]
             else:
-                to_delete = runs[body.keep:]
+                entry = lib.find_target(safe)
+                cover_id = entry.cover_stack_run_id if entry is not None else None
+                to_delete = [r for r in runs[body.keep:] if r.id != cover_id]
             for run in to_delete:
                 purge_stack_run(proj, run)
         finally:

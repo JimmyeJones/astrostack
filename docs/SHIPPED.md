@@ -1,5 +1,22 @@
 # Shipped — the record
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-pvo4tr`) — Storage's "Keep the N newest" spares the pinned cover
+
+### v0.502.15 — `storage.prune_stack_runs` never deletes `cover_stack_run_id`
+
+**What.** QA rotation sweep (4) read the Storage page's *Prune stacks* answer against the pin. `prune_stack_runs`
+with `keep` took `runs[keep:]` and purged every one — including the target's **pinned cover**, which is pinned
+precisely *because* it is not the newest run: the owner's "Set as cover", or the app's own `kept_finished` pin
+(`pipeline.submit_reprocess_all`, issue #903's protection) holding a hand-finished picture over fresh linear
+restacks — the owner's live `auto_edit_on_autostack` off makes that the ordinary shape. Repro through the real
+client: a pinned editor export, one older and three newer linear stacks, *Keep 3* (the page's default) → the
+export's row **and** its FITS/preview deleted, `cover_stack_run_id` left dangling, the wall falling back to a flat
+linear stack. The 2026-09-27 sweep (4) (PROCESS-NOTES) cleared "prune the cover" as *safe* because the dangling id
+degrades gracefully — true of the readers, but it never asked whether the picture should be deleted. Now `keep`
+excludes the cover run; an explicit `ids` list (the caller naming the run) is honoured as before. Pinned in
+`tests/webapp/test_storage.py` (+1, fails before by scratch revert). No config, schema, on-disk, default or
+API-shape change (`deleted` simply omits the cover).
+
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-fsp4dq`) — Reprocess-all refusals reach the stack-failures note
 
 ### v0.502.13 — `stackfailure.latest_stack_failures` reads the batch's `result["failed"]`
