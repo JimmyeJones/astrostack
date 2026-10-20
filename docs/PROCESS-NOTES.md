@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-10-20 (Scout, branch `claude/zen-curie-pvo4tr`) — QA rotation sweep (4), the `storage` router's prune answer against the pin: one bug, Scout-fixed (v0.502.15). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+## 2026-10-20 (Scout, branch `claude/zen-curie-pvo4tr`) — QA rotation sweep (4), the `storage` router's prune answer against the pin: one bug, Scout-fixed (v0.502.16). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8138 passed / 7 skipped on `b7be90a0` (xdist `-n 4`, BLAS capped, 15m48s). **Inbox:** the same four (#878, #880,
   #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs. **Dogfood `--mosaic`:** CLEAN

@@ -2,7 +2,7 @@
 
 ## 2026-10-20 (Scout, branch `claude/zen-curie-pvo4tr`) — Storage's "Keep the N newest" spares the pinned cover
 
-### v0.502.15 — `storage.prune_stack_runs` never deletes `cover_stack_run_id`
+### v0.502.16 — `storage.prune_stack_runs` never deletes `cover_stack_run_id`
 
 **What.** QA rotation sweep (4) read the Storage page's *Prune stacks* answer against the pin. `prune_stack_runs`
 with `keep` took `runs[keep:]` and purged every one — including the target's **pinned cover**, which is pinned
@@ -16,6 +16,23 @@ degrades gracefully — true of the readers, but it never asked whether the pict
 excludes the cover run; an explicit `ids` list (the caller naming the run) is honoured as before. Pinned in
 `tests/webapp/test_storage.py` (+1, fails before by scratch revert). No config, schema, on-disk, default or
 API-shape change (`deleted` simply omits the cover).
+
+## 2026-10-20 (Builder, branch `claude/festive-knuth-1cl9ql`) — the life list's margin is per panel
+
+### v0.502.15 — `lifelist.parse_footprint` gives each `_Panel` its own `margin_deg`
+
+**What.** `parse_footprint` set one `Footprint.margin_deg = min(cap, max(1′, max(spread)))` over **all** panels and
+`footprint_covers` asked every point of that circle to be inside some panel — a per-panel question answered with the
+worst panel's number. Scout sweep (2) repro, re-run here through `Library.refresh_target_stats`: S30 2×2, an object
+0.07° inside the south-west panel's west edge; all panels tight → margin 0.040° → captured; half the north-east
+panel's subs re-pointed 0.15° (a second night) → margin 0.101° for all four → **grey**, though the SW panel's subs
+never moved. **Fix:** each `_Panel` carries its own floored and capped margin from its own `spread`;
+`footprint_covers` accepts when some panel holding the object has its *own* margin circle inside the union of panels
+(still never claims sky no panel covered). `Footprint.margin_deg` stays, as the widest panel's. Pinned by
+`tests/test_library.py::test_one_wobbly_panel_does_not_grey_what_a_tight_panel_holds` (3 cases; the two re-pointed
+ones fail before, and an object as close to the re-pointed panel's own edge stays grey) and a per-panel parse
+assertion in `tests/test_lifelist.py`. No config, schema, registry-format, on-disk or API-shape change.
+
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-1cl9ql`) — Add → Resize goes last; the loupe declines a Resize ahead of other ops
 
 ### v0.502.14 — `stageConflicts.insertOnCorrectSide` puts geometry last; `_loupe_geometry_problem` refuses a Resize ahead of any op

@@ -517,24 +517,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
   scratchpad (`wcs_repro.py`).)_
 
-- **🟢 (Scout 2026-10-20, QA rotation sweep (2)) — the life list keeps *every* panel of a mosaic clear of its
-  edges by the *worst* panel's dither, so one re-pointed panel greys an object another, tight panel plainly
-  holds.** *(Pillar: trust — PRIORITY 3; size **S**; severity low — a false "not captured" near a mosaic's outer
-  edge, never a false "captured", nothing on disk. Confidence: **reproduced** through the real
-  `Library.refresh_target_stats` + `catalog_capture_status`; occurrence on the owner's library **unmeasured**.)*
-  `seestack/lifelist.py::parse_footprint` sets one `Footprint.margin_deg = min(cap, max(1′, max(spread)))` over
-  **all** panels (`spread` is each panel's own 90th-percentile sub offset, `library._panel_footprint`), and
-  `footprint_covers` asks every point of that circle to be inside some panel. A per-panel question answered with
-  a peak number. Scratch repro: S30 2×2 at 15 % overlap, 60 subs/panel, ±0.04° dither; an object 0.07° inside
-  the **south-west** panel's west edge. All panels tight → spreads 0.045° → **captured**. Re-point half of the
-  **north-east** panel's subs 0.15° (a second night) → its spread 0.116°, margin 0.116° for all four →
-  **grey**; at 0.25° the margin hits the 0.12° cap, still grey. The SW panel's subs never moved: the object is
-  in every one of them. **Fix direction:** carry each panel's own margin (`_Panel.margin_deg` from its own
-  `spread`, same 1′ floor and cap) and ask the margin circle of the panel(s) that hold the object itself —
-  e.g. try each panel containing the object and accept if the circle at *that* panel's margin lies inside the
-  union. Keeps "never claims sky no panel covered". Regression test: the repro above in
-  `tests/test_library.py`'s `_add_s30_mosaic` shape (needs a per-panel offset knob).
-
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
@@ -3613,7 +3595,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
-- ✅ v0.502.15 **Storage's "Keep the N newest" no longer deletes the target's pinned cover — a hand-finished picture kept over newer linear restacks lost its row and files on the page's default *Keep 3*** (`storage.prune_stack_runs` skips `cover_stack_run_id`, Scout rotation sweep (4))
+- ✅ v0.502.16 **Storage's "Keep the N newest" no longer deletes the target's pinned cover — a hand-finished picture kept over newer linear restacks lost its row and files on the page's default *Keep 3*** (`storage.prune_stack_runs` skips `cover_stack_run_id`, Scout rotation sweep (4))
+- ✅ v0.502.15 **The life list keeps each mosaic panel clear of its edges by its *own* subs' spread — one re-pointed panel no longer greys an object a tight panel holds in every sub** (`lifelist._Panel.margin_deg`, `footprint_covers` asks the holding panel's margin). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.14 **Add → Resize now lands last, behind Auto's sharpen — spliced in after the stretch it made the export sharpen 1/scale wider than Auto chose and the full-size check vouched for it** (`stageConflicts.insertOnCorrectSide`/`moveToCorrectSide` put geometry last; `_loupe_geometry_problem` declines a real Resize ahead of any op). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.13 **A target refused inside *Reprocess all* now reaches "this target stopped producing pictures" on the Dashboard and Target page — the batch's `result["failed"]` rows are the third recording site `latest_stack_failures` reads, each row stamped with its own `failed_utc` so a yielded slice's carried rows keep their time** (`stackfailure.latest_stack_failures`, `pipeline.submit_reprocess_all`, Scout sweep (4))
 - ✅ v0.502.12 **"Some of your pictures were trimmed too far" judges the picture on the wall — a pinned cover — not the newest run in History** (`overtrim.scan_over_trimmed` → `finishedpicture.displayed_picture_run`, Scout rotation sweep (4))

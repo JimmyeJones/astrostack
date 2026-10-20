@@ -737,11 +737,13 @@ def test_v5_registry_without_frame_short_deg_upgrades_in_place(tmp_path):
 
 def _add_s30_mosaic(proj: Project, centre: tuple[float, float], cols: int, rows: int,
                     *, overlap: float = 0.15, n: int = 40, skip: tuple = (),
-                    rotation: float | None = 0.0) -> None:
+                    rotation: float | None = 0.0,
+                    repoint: dict | None = None) -> None:
     """S30 portrait subs (3.99″/px, 1080 x 1920 — 1.197° E-W x 2.128° N-S at
     rotation 0) on a ``cols`` x ``rows`` grid, with a small dither and a ±1°
     spread of solved rotation; ``skip`` lists ``(col, row)`` panels never shot
-    (col grows east, row north)."""
+    (col grows east, row north); ``repoint`` maps a ``(col, row)`` panel to a
+    northward shift (degrees) its second half of subs took — a second night."""
     import math
     ra0, dec0 = centre
     step_ra = 1.197 * (1 - overlap) / math.cos(math.radians(dec0))
@@ -757,7 +759,9 @@ def _add_s30_mosaic(proj: Project, centre: tuple[float, float], cols: int, rows:
                 proj.add_frame(FrameRow(
                     source_path=f"f_{_counter[0]}.fit", exposure_s=10.0,
                     ra_center_deg=(ra + 0.02 * ((k % 5) - 2)) % 360.0,
-                    dec_center_deg=dec + 0.02 * ((k % 3) - 1),
+                    dec_center_deg=(dec + 0.02 * ((k % 3) - 1)
+                                    + ((repoint or {}).get((c, r), 0.0)
+                                       if k >= n // 2 else 0.0)),
                     pixscale_arcsec=3.99, width_px=1080, height_px=1920,
                     rotation_deg=(None if rotation is None
                                   else rotation + ((k % 7) - 3) / 3.0),
@@ -805,6 +809,51 @@ def test_life_list_lights_what_any_mosaic_panel_holds(tmp_path, centre_id, cols,
     assert entry.panel_footprint is not None
     assert [i for i in lit if not captured[i]] == []
     assert [i for i in grey if captured[i]] == []
+
+
+@pytest.mark.parametrize("repoint", [None, {(1, 1): 0.15}, {(1, 1): 0.25}],
+                         ids=["all-tight", "ne-repointed", "ne-capped"])
+def test_one_wobbly_panel_does_not_grey_what_a_tight_panel_holds(tmp_path, repoint):
+    """Each panel is kept clear of the edges by its *own* subs' spread. A single
+    mosaic-wide margin — the worst panel's — greyed an object 0.07° inside the
+    south-west panel's west edge as soon as the north-east panel took a second
+    night 0.15° off, though the south-west panel's subs never moved and the
+    object is in every one of them. The re-pointed panel still asks its own,
+    wider margin: an object as close to *its* east edge stays grey."""
+    import math
+
+    from seestack.lifelist import catalog_capture_status
+    from seestack.nightplan import CatalogObject
+
+    ra0, dec0 = 150.0, 30.0
+    step_ra = 1.197 * 0.85 / math.cos(math.radians(dec0))
+    step_dec = 2.128 * 0.85
+    lib = Library.create(tmp_path / "lib")
+    try:
+        _entry, proj = lib.create_target("W")
+        try:
+            _add_s30_mosaic(proj, (ra0, dec0), 2, 2, repoint=repoint)
+        finally:
+            proj.close()
+        entry = lib.refresh_target_stats("W")
+
+        def near_edge(cid: str, col: int, row: int, east: bool) -> CatalogObject:
+            dec = dec0 + (row - 0.5) * step_dec
+            ra = (ra0 + (col - 0.5) * step_ra
+                  + (1 if east else -1) * (1.197 / 2 - 0.07) / math.cos(math.radians(dec)))
+            return CatalogObject(id=cid, name="", type="Gx", con="", ra_deg=ra,
+                                 dec_deg=dec, size_arcmin=1.0,
+                                 blurb="")
+
+        sw = near_edge("SW", 0, 0, east=False)
+        ne = near_edge("NE", 1, 1, east=True)
+        status = {e.catalog_id: e.captured
+                  for e in catalog_capture_status([sw, ne], lib.list_targets())}
+        assert entry.panel_footprint is not None
+        assert status["SW"] is True
+        assert status["NE"] is (repoint is None)
+    finally:
+        lib.close()
 
 
 def test_life_list_never_claims_the_quadrant_an_l_shaped_mosaic_never_shot(tmp_path):
