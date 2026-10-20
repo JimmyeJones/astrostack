@@ -17,6 +17,7 @@ Read-only and side-effect free, so it is safe to call on every page load.
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -45,11 +46,27 @@ MATCH_RADIUS_DEG = 0.35
 #: inscribed circle rather than on its edge. On the owner's S30 (≈2.1° × 1.2°)
 #: that is ≈0.48° — enough for M32, 0.40° from M31 and plainly in his M31 field,
 #: which the S50-sized floor left grey. On an S50 it is ≈0.29°, under the floor,
-#: so an S50 library matches exactly as before. On a mosaic the centre is the
-#: middle of its panels (``library._panel_extent_centre``) and one frame's
-#: inscribed circle around it is covered by the panels meeting there, so this is
-#: a lower bound on what the mosaic holds — it never claims sky no panel covered.
+#: so an S50 library matches exactly as before. A mosaic whose panels are known
+#: is judged against the panels themselves instead (:func:`footprint_covers`),
+#: and the rest of the half-field — ``1 - FIELD_MATCH_FRACTION`` of it — is the
+#: most it asks an object to sit inside them by.
 FIELD_MATCH_FRACTION = 0.8
+
+#: The least a mosaic's object must sit inside its panels by, in degrees (one
+#: arc-minute), however tightly the panels' subs were pointed: the panel centre
+#: is still a median, and a catalog position is the middle of an object.
+MIN_PANEL_MARGIN_DEG = 1.0 / 60.0
+
+#: How many points on the margin circle :func:`footprint_covers` checks besides
+#: the object itself. At 16 they sit at most ≈0.05° apart (an S30's widest
+#: ≈0.12° margin), so a gap between panels narrower than that is the most the
+#: test can step over — far below a panel step; the gaps a real mosaic leaves
+#: are whole panels.
+_MARGIN_POINTS = 16
+
+#: The widest step between the position angles a panel's rectangle is tested at,
+#: across the rotation range its subs were taken at.
+_ROTATION_STEP_DEG = 5.0
 
 
 def match_radius_deg(target: Any, floor_deg: float = MATCH_RADIUS_DEG) -> float:
@@ -68,6 +85,126 @@ def match_radius_deg(target: Any, floor_deg: float = MATCH_RADIUS_DEG) -> float:
     if short_f is None or not math.isfinite(short_f) or short_f <= 0:
         return float(floor_deg)
     return max(float(floor_deg), FIELD_MATCH_FRACTION * short_f / 2.0)
+
+
+@dataclass(frozen=True)
+class _Panel:
+    ra_deg: float
+    dec_deg: float
+    #: The position angles (radians) the panel's rectangle must hold the point at.
+    angles: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class Footprint:
+    """A mosaic's panels on the sky, parsed from the registry's ``panel_footprint``."""
+
+    half_w_deg: float
+    half_h_deg: float
+    panels: tuple[_Panel, ...]
+    #: How far inside the panels an object must sit (degrees).
+    margin_deg: float
+
+
+def parse_footprint(raw: Any) -> Footprint | None:
+    """The registry's ``panel_footprint`` JSON as a :class:`Footprint`, or ``None``.
+
+    ``None`` for anything malformed, non-finite or out of range, so a damaged
+    registry value falls back to today's single-circle match rather than raising
+    on the page or claiming sky on a nonsense rectangle.
+    """
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        data = json.loads(raw)
+        w, h = float(data["w_deg"]), float(data["h_deg"])
+        rows = data["panels"]
+        if not isinstance(rows, list) or not rows:
+            return None
+        panels = []
+        spread = 0.0
+        for row in rows:
+            ra, dec, lo, hi, sp = (float(v) for v in row)
+            if not all(math.isfinite(v) for v in (ra, dec, lo, hi, sp)):
+                return None
+            if not -90.0 <= dec <= 90.0 or hi < lo or sp < 0:
+                return None
+            spread = max(spread, sp)
+            n = max(1, math.ceil(min(hi - lo, 180.0) / _ROTATION_STEP_DEG))
+            angles = tuple(math.radians(lo + (min(hi - lo, 180.0)) * k / n)
+                           for k in range(n + 1))
+            panels.append(_Panel(ra % 360.0, dec, angles))
+    except (ValueError, TypeError, KeyError, IndexError):
+        return None
+    if not (math.isfinite(w) and math.isfinite(h)) or not (0 < w <= 20 and 0 < h <= 20):
+        return None
+    # Clear of the edges by as far as the widest panel's subs spread around its
+    # centre — so the object is in (nearly) every sub of the panel holding it,
+    # the same ask the single field's circle makes — and never by more than that
+    # circle leaves of the half-field.
+    cap = (1.0 - FIELD_MATCH_FRACTION) * min(w, h) / 2.0
+    return Footprint(
+        half_w_deg=w / 2.0, half_h_deg=h / 2.0, panels=tuple(panels),
+        margin_deg=min(cap, max(MIN_PANEL_MARGIN_DEG, spread)),
+    )
+
+
+def _tangent_offset_deg(ra: float, dec: float, ra0: float,
+                        dec0: float) -> tuple[float, float] | None:
+    """Gnomonic offsets (east, north), in degrees, of a point about a frame centre;
+    ``None`` for a point on the far side of the sky."""
+    d, d0 = math.radians(dec), math.radians(dec0)
+    dra = math.radians(ra - ra0)
+    cosc = math.sin(d0) * math.sin(d) + math.cos(d0) * math.cos(d) * math.cos(dra)
+    if cosc <= 0:
+        return None
+    xi = math.cos(d) * math.sin(dra) / cosc
+    eta = (math.cos(d0) * math.sin(d) - math.sin(d0) * math.cos(d) * math.cos(dra)) / cosc
+    return math.degrees(xi), math.degrees(eta)
+
+
+def _in_panel(ra: float, dec: float, panel: _Panel, fp: Footprint) -> bool:
+    """Is the point inside the panel's frame at **every** angle its subs were
+    taken at? The axes are those of a solved sub whose ``CROTA2`` is the angle,
+    with ``CDELT1 < 0`` as a Seestar header carries."""
+    off = _tangent_offset_deg(ra, dec, panel.ra_deg, panel.dec_deg)
+    if off is None:
+        return False
+    xi, eta = off
+    for rot in panel.angles:
+        c, s = math.cos(rot), math.sin(rot)
+        if abs(xi * c + eta * s) > fp.half_w_deg or abs(eta * c - xi * s) > fp.half_h_deg:
+            return False
+    return True
+
+
+def _offset_point(ra: float, dec: float, dist_deg: float,
+                  bearing: float) -> tuple[float, float]:
+    """The point ``dist_deg`` from ``(ra, dec)`` along ``bearing`` (radians, east of north)."""
+    d, delta = math.radians(dec), math.radians(dist_deg)
+    d2 = math.asin(max(-1.0, min(1.0, math.sin(d) * math.cos(delta)
+                                 + math.cos(d) * math.sin(delta) * math.cos(bearing))))
+    dra = math.atan2(math.sin(bearing) * math.sin(delta) * math.cos(d),
+                     math.cos(delta) - math.sin(d) * math.sin(d2))
+    return (ra + math.degrees(dra)) % 360.0, math.degrees(d2)
+
+
+def footprint_covers(fp: Footprint, ra: float, dec: float) -> bool:
+    """Is ``(ra, dec)`` inside the mosaic, by at least the footprint's margin?
+
+    The object and :data:`_MARGIN_POINTS` points on a circle of
+    ``fp.margin_deg`` around it must each fall inside *some* panel — so an object
+    near where panels meet counts (the overlap covers it), while one in the
+    quadrant an L-shaped mosaic never shot, or just past the outer edge, does not.
+    The margin is the dither and drift a panel's subs spread over around its
+    median centre (see :func:`parse_footprint`).
+    """
+    points = [(ra, dec)] + [
+        _offset_point(ra, dec, fp.margin_deg, 2.0 * math.pi * k / _MARGIN_POINTS)
+        for k in range(_MARGIN_POINTS)
+    ]
+    return all(any(_in_panel(pra, pdec, p, fp) for p in fp.panels)
+               for pra, pdec in points)
 
 
 @dataclass(frozen=True)
@@ -136,7 +273,10 @@ def catalog_capture_status(
     per night, so three nights on M31 is three targets until they are merged —
     the **closest** wins, so the list shows one capture rather than an arbitrary
     one. Each target is judged against its own field (:func:`match_radius_deg`),
-    so a wide-field target can hold a neighbour a narrow one could not.
+    so a wide-field target can hold a neighbour a narrow one could not — and a
+    mosaic whose panels the registry knows (``panel_footprint``) against those
+    panels (:func:`footprint_covers`), so it holds what any panel holds and
+    never the sky of a panel that was not shot.
     Returned in display order: Messier numerically, then the rest.
     """
     solved = [
@@ -147,15 +287,29 @@ def catalog_capture_status(
     ]
 
     radii = [match_radius_deg(t, radius_deg) for t in solved]
+    footprints = [parse_footprint(getattr(t, "panel_footprint", None)) for t in solved]
+    # Beyond this distance from a mosaic's centre no panel can reach, so the
+    # per-panel test is skipped for every object not near it.
+    reaches = [
+        None if fp is None else max(
+            _angular_separation_deg(p.ra_deg, p.dec_deg, float(t.ra_deg), float(t.dec_deg))
+            for p in fp.panels
+        ) + math.hypot(fp.half_w_deg, fp.half_h_deg)
+        for t, fp in zip(solved, footprints, strict=True)
+    ]
     entries: list[LifeListEntry] = []
     for obj in catalog:
         best = None
         best_sep = 0.0
-        for t, r in zip(solved, radii, strict=True):
+        for t, r, fp, reach in zip(solved, radii, footprints, reaches, strict=True):
             sep = _angular_separation_deg(
                 obj.ra_deg, obj.dec_deg, float(t.ra_deg), float(t.dec_deg),
             )
-            if sep <= r and (best is None or sep <= best_sep):
+            if fp is None:
+                inside = sep <= r
+            else:
+                inside = sep <= reach and footprint_covers(fp, obj.ra_deg, obj.dec_deg)
+            if inside and (best is None or sep <= best_sep):
                 best_sep, best = sep, t
         entries.append(LifeListEntry(
             catalog_id=obj.id,
