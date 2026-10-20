@@ -1394,6 +1394,27 @@ describe("friendlyJobError", () => {
     expect(friendlyJobError("whatever", "no_fits_in_folder").message)
       .toMatch(/No FITS frames were found/);
   });
+  it("translates a full disk, by kind and by the OS's own wording", () => {
+    const raw = "OSError: [Errno 28] No space left on device: '/data/targets/M_42/master.fits'";
+    const r = friendlyJobError(raw, "disk_full");
+    expect(r.message).toMatch(/ran out of space/);
+    expect(r.next).toMatch(/Storage page/);
+    expect(r.action?.href).toBe("/storage");
+    // Older backend (no kind) and the unattended path (text only).
+    expect(friendlyJobError(raw).message).toMatch(/ran out of space/);
+    expect(friendlyJobError("OSError: [Errno 122] Disk quota exceeded: '/data/x'").message)
+      .toMatch(/ran out of space/);
+  });
+  it("translates a permission refusal without sending you to Settings", () => {
+    const raw = "PermissionError: [Errno 13] Permission denied: '/data/targets/M_42'";
+    const r = friendlyJobError(raw, "no_permission");
+    expect(r.message).toMatch(/wasn't allowed to open or save a file/);
+    expect(r.next).toMatch(/permissions/);
+    expect(r.action).toBeUndefined();
+    expect(friendlyJobError(raw).message).toMatch(/wasn't allowed/);
+    expect(friendlyJobError("OSError: [Errno 30] Read-only file system: '/data'").message)
+      .toMatch(/wasn't allowed/);
+  });
   it("returns the raw text verbatim for anything unrecognised", () => {
     expect(friendlyJobError("OSError: disk is full")).toEqual({ message: "OSError: disk is full" });
   });

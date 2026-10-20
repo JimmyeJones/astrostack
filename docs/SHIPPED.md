@@ -1,5 +1,39 @@
 # Shipped — the record
 
+## 2026-10-20 (Builder, branch `claude/festive-knuth-atn1ry`) — "error messages on long-running jobs", the NAS half
+
+### v0.501.7 — a job that fills the disk or is refused a file says so in plain words
+
+**What.** A failed job is translated into a sentence + next step by a stable `error_kind`
+(`webapp/jobs.py::classify_job_error`, read by `Jobs.tsx::friendlyJobError`, which also drives the Target page's
+and Dashboard's `StackFailedAlert`). The five kinds were all about the *picture* (memory budget, nothing solved,
+no alignment, no reference WCS, empty calibration folder). The two failures a long job on a NAS meets that are
+about the *box* had none, so the owner read a bare `OSError: [Errno 28] No space left on device: '/data/…'` or
+`PermissionError: [Errno 13] Permission denied: …` — on the Jobs list with no next step, and on the
+"your last stack didn't run" note as its own headline. Two new kinds:
+- **`disk_full`** — `errno` ENOSPC or EDQUOT (a TrueNAS dataset quota reads the same to the owner and has the
+  same cure). Says the library's disk ran out of room while saving, and links to **Storage** (which shows what
+  the app's own files use and which caches are safe to clear).
+- **`no_permission`** — EACCES, EPERM, EROFS. Says the app was not allowed to open or save a file, and that this
+  is usually the dataset's permissions (read on incoming, read + write on the library). No action link: there is
+  no in-app control for it.
+
+**How it is classified.** By `errno` when the exception is in hand — only a *real* errno is trusted, so an
+`OSError("disk is full")` from our own code (the existing tests' "unrecognised" example) stays raw, and
+`FileNotFoundError` is not dressed up as either. The unattended auto-stack keeps only `str(exc)`, so
+`classify_error_message` (and the frontend's older-backend fallback) match the OS's own strerror phrases
+exactly — never a loose "full"/"denied". The raw line is still stored whole and still shown beneath the
+translation where the failure is the whole screen.
+
+**Upgrade-safe (§9):** two new values of an existing nullable string field; no config, schema, layout or default
+change. An older frontend shows the raw text as before; an older stored job (no kind) is caught by the text
+fallback.
+
+**Tests:** `tests/webapp/test_jobs.py` +2 — the classification on a *real* ENOSPC (a write to Linux's `/dev/full`),
+EDQUOT, EACCES/EPERM/EROFS and the negatives; and a JobManager job raising ENOSPC stamped `disk_full` with the raw
+line kept (both **fail before** the fix). `Jobs.test.tsx` +2 — both kinds by kind and by raw text, Storage link
+only on the disk one.
+
 ## 2026-10-19 (Scout, branch `claude/zen-curie-hhl9uy`) — QA rotation sweep (4), the routers' answers
 
 ### v0.501.6 — an editor export no longer retires a target's "your last stack didn't run" note

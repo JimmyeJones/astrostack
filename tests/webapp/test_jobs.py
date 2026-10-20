@@ -248,6 +248,71 @@ def test_classify_job_error_maps_known_signatures():
     assert classify_job_error(OSError("disk is full")) is None
 
 
+def test_classify_job_error_names_a_full_disk_and_a_permission_refusal():
+    """The two NAS failures a long job meets that are about the box, not the
+    picture, get their own kinds instead of a bare ``[Errno 28] …`` line —
+    by ``errno`` when the exception is in hand, by the OS's own wording when
+    only ``str(exc)`` survived (the walk-away auto-stack path)."""
+    import errno
+    import os
+
+    from webapp.jobs import classify_error_message, classify_job_error
+
+    # A *real* full disk, not a constructed one: Linux's /dev/full answers
+    # every write with ENOSPC, exactly what a full pool does mid-save.
+    full = None
+    if os.path.exists("/dev/full"):
+        try:
+            with open("/dev/full", "wb") as fh:
+                fh.write(b"x" * 4096)
+                fh.flush()
+        except OSError as exc:
+            full = exc
+    if full is None:
+        full = OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), "/data/targets/M_42/x.fits")
+    assert full.errno == errno.ENOSPC
+    assert classify_job_error(full) == "disk_full"
+    assert classify_error_message(f"{type(full).__name__}: {full}") == "disk_full"
+    assert classify_error_message(str(full)) == "disk_full"
+    if hasattr(errno, "EDQUOT"):  # a TrueNAS dataset quota reads the same
+        quota = OSError(errno.EDQUOT, os.strerror(errno.EDQUOT), "/data/out.png")
+        assert classify_job_error(quota) == "disk_full"
+        assert classify_error_message(str(quota)) == "disk_full"
+
+    for code in (errno.EACCES, errno.EPERM, errno.EROFS):
+        exc = PermissionError(code, os.strerror(code), "/data/targets/M_42")
+        assert classify_job_error(exc) == "no_permission", code
+        assert classify_error_message(str(exc)) == "no_permission", code
+
+    # Only a real errno is trusted: our own words carry none and stay raw, and
+    # a file-not-found (an OSError too) is not dressed up as either.
+    assert classify_job_error(OSError("disk is full")) is None
+    assert classify_job_error(PermissionError("nope")) is None
+    assert classify_job_error(
+        FileNotFoundError(errno.ENOENT, "No such file or directory", "/x")) is None
+    # The memory guard still wins over everything else.
+    assert classify_job_error(MemoryError("needs working memory")) == "memory_budget"
+
+
+def test_a_job_that_fills_the_disk_is_stamped_disk_full(tmp_path):
+    import errno
+    import os
+
+    jm = JobManager(tmp_path / "jobs.sqlite")
+    jm.start()
+    try:
+        def boom(job: Job):
+            raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC), "/data/targets/M_42/master.fits")
+
+        job = jm.submit("stack", boom)
+        assert _wait(lambda: jm.get(job.id).state == "error")
+        assert jm.get(job.id).error_kind == "disk_full"
+        # The raw line is kept whole beside the kind — nothing is hidden.
+        assert "No space left on device" in jm.get(job.id).error
+    finally:
+        jm.stop()
+
+
 def test_error_kind_persisted_and_reloaded(tmp_path):
     db = tmp_path / "jobs.sqlite"
     jm = JobManager(db)
