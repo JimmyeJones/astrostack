@@ -3608,6 +3608,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.501.9 **The upload card's "Target folder" box crashed the whole page ("Duplicate options are not supported") when one incoming folder's subs sit in two library targets — each folder is now suggested once** (`uploadDestination.destinationFolders`, owner-reported 2026-10-20; the duplicate registration itself is issue #878)
 - ✅ v0.501.8 **A restack batch copied his hand-saved crop onto a mosaic whose canvas had grown as raw fractions, framing different sky — the crop is now re-aimed through the two masters' WCS, or left off when it can't be placed** (`pipeline._recrop_for_new_canvas`, `wcs_io.crop_reprojected_between_fits`, Scout rotation sweep (2))
 - ✅ v0.501.7 **A job that hit a full disk (or a dataset quota) or a permission refusal said only `[Errno 28] No space left on device: …` — it now says what happened in plain words, and a full disk links to Storage** (`jobs.classify_job_error` → `disk_full` / `no_permission`, `Jobs.friendlyJobError`)
 - ✅ v0.501.6 **Exporting the old picture (or a channel combine) after a stack refused silently withdrew "this target stopped producing pictures" while the target still could not stack — only a genuine stack run retires the note now** (`stackfailures._last_stack_utc`, Scout rotation sweep (4))
