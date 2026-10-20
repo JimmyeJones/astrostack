@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-a2csji`) — QA rotation sweep (1), scale-dependent parity, on the star-scale suggestions: one bug, filed reproduced (frame FWHM is half-res, op px are full-res). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+*(**Suite:** 8106 passed / 7 skipped on `f337fbd0` (xdist `-n 4`, BLAS capped, 17m16s). **Inbox** (`list_issues`): the
+same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none updated since 2026-10-12 — nothing
+owed. No open PRs. **Dogfood `--mosaic`: CLEAN** — Auto trim 7.9 %, nothing overflowing, no console errors.)*
+
+**Sweep (1), the angle the last (1) left open — the other proxy-measured suggestions.** `levels-`, `curve-` and
+`stretch-suggestion` are percentile / MAD statistics of the pixel *distribution*; `build_proxy` strides (it does not
+block-average), so a strided sample of that distribution is unbiased — CLEAN by construction, no gradient term.
+`denoise-suggestion` already carries the stride correction (`_auto_measure_grain_ratio`). Then the scale nobody had
+checked: the three **from-your-stars** buttons and Auto's sharpen radius read `Project.median_fwhm()`, which QC
+measures on the **half-resolution** `green_channel`, while the ops' px are full-resolution master px. Scratch probe
+(1920×1080 raw, Gaussian stars at native σ 1.5/2.0/3.0): QC `fwhm_px` reads 1.89–1.95× smaller than the same stars
+measured at native res, so every suggested radius / PSF σ / star size is about half the right size (a drizzled master
+doubles it again). Filed at the top of Bugs, size S. **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-ur5fu9`) — QA rotation sweep (4), the routers' *answers*, on `gallery` and `logs`: one bug Scout-fixed (v0.502.5), one reproduced surface added to the twin-overcount lead. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 *(**Suite:** 8076 passed / 7 skipped on `81886435` (xdist `-n 4`, BLAS capped, 18m24s). **Inbox** (`list_issues`): the

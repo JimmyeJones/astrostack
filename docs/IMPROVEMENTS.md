@@ -82,6 +82,25 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 (Scout 2026-10-20, QA rotation sweep (1)) — every star-scale editor number is half the right size: the
+  frames' FWHM is measured at half resolution, the ops' px are full-resolution master px.** *(Pillar: editor —
+  PRIORITY 1 / image quality; size **S**; severity moderate — Auto sharpens, and the "From your stars" buttons
+  deconvolve and shrink stars, at about half the star's real scale, on every run; nothing is lost. Confidence:
+  **reproduced** through the real QC and suggestion functions; owner's numbers unmeasured, but the factor is
+  structural.)* `seestack/qc/metrics.py::compute_frame_metrics` measures `fwhm_px` on `green_channel` — a
+  **half-resolution** plane (one value per 2×2 Bayer cell); `_compute_stack_fwhm` says so and block-averages
+  the stack to match. But a non-drizzle master is `bilinear_debayer`ed at **full** sensor resolution, and
+  `detail.sharpen` `radius`, `detail.deconvolve` `psf_sigma` and `stars.reduce` `size` are full-res master px
+  (`ctx.scaled_px`). `Project.median_fwhm()` is handed straight to `presets._sharpen_radius_from_fwhm` (Auto,
+  on by default) and to `editor.psf_sigma_for_fwhm` / `sharpen_radius_for_fwhm` / `star_size_for_fwhm`. Scratch
+  repro, 1920×1080 raw, 300 Gaussian stars: native σ 1.5/2.0/3.0 → true FWHM 3.53/4.71/7.06, QC `fwhm_px`
+  1.87/2.43/3.49 (ratio 1.89–1.95). For the σ 2.0 frame: sharpen radius **1.0** vs 2.0, PSF σ **1.0** vs 2.0, star
+  size **2** vs 5. A drizzled master doubles the error again. **Fix shape:** one helper that converts frame FWHM
+  to master px (`× 2 × the run's drizzle scale`), used by all four call sites, plus the *"N px stars"* clause if
+  it is meant in master px. Auto's sharpen radius changes on every run, so check the result with
+  `scripts/agent-dogfood.sh --editor --mosaic` before and after (strength may want re-tuning at the larger radius),
+  and pin one test that goes from a synthetic raw through QC to the suggested radius.
+
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
