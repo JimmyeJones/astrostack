@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-6t1j5s`) — QA rotation sweep (3), ASTAP/ffmpeg filesystem side effects, new angle — the *scratch copy itself* failing: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+*(Docs only. **Baseline:** local suite **8014 passed / 7 skipped** (xdist `-n 4`, BLAS capped, 13m18s) on `a112689b`; no open PRs. **Inbox** (`list_issues`): the same four (#878,
+#880, #903, #1015), all previously acted-on and owner-gated, none updated since 2026-10-12 — nothing owed.*
+
+*__Sweep (3), new angle.__ Every earlier (3) sweep varied what the *stub binary* does. This one broke the step
+before it: `ASTAPSolver._solve_once` copies each sub into an `astrostack-solve-*` scratch dir with
+`shutil.copy2`. Drove the real `runner.solve_one` on a sub in `incoming/M_42_mosaic_sub/` (stub ASTAP that writes
+sidecars beside `-f`) with the copy made to write a partial file and then raise **ENOSPC**, **EACCES** and **EIO**,
+and with `TemporaryDirectory` itself raising ENOSPC (a full container `/tmp`). Every case returns `solved=False`
+with the errno text, the scratch dir is gone (partial file included), no `astrostack-solve-*` dir is left in
+`/tmp`, and `incoming/` is byte/mtime-identical. One note, **not filed**: the stored reason is
+`solve_failed:OSError: [Errno 28] …`, which the Target page shows as the generic "Plate-solve failed" chip, so a
+full container `/tmp` reads like N subs that would not match the catalogue. Not worth code: `build_solve_arglist`
+re-offers every `solve_failed:` frame on the next scan, so it self-heals once space is back, and a disk that full
+fails the job's own DB/cache writes too — which `jobs.classify_job_error` already words as `disk_full` (v0.501.7).
+ffmpeg: no new surface since 2026-10-19 (`probe_video`/`iter_frames` read-only, no encode path). (3) done →
+**next sweep is (4)**.*
+
+*__Dogfood `--mosaic`__: CLEAN — nothing overflowing, no console errors, mosaic Auto trim **7.9 %**. Backlog left
+exactly as found.)*
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-0y9ec1`) — QA rotation sweep (2), on the one per-panel surface added since the last sweep: one bug, filed (a carried crop on a grown mosaic canvas)
 
 Baseline **8005 passed / 7 skipped** on `7e039637` (xdist, BLAS capped, 17m42s); no open PRs. Inbox: #878, #880,
