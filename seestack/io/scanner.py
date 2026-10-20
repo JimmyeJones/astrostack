@@ -1850,8 +1850,13 @@ def _map_jobs(
         done = 0
         for fut in as_completed(futures):
             if _stopped(should_stop):
-                # Drop everything still queued and bail out promptly.
-                ex.shutdown(wait=False, cancel_futures=True)
+                # Drop everything still queued and bail out promptly. Cancel each
+                # future by hand: ``shutdown(wait=False, cancel_futures=True)``
+                # cancels nothing on CPython 3.11–3.13, so every queued solve still
+                # ran in the background after the job said "cancelled".
+                for pending in futures:
+                    pending.cancel()
+                ex.shutdown(wait=False)
                 return
             try:
                 value = fut.result()

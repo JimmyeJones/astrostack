@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-d5n9db`) — a cancelled scan stops its queued solves
+
+### v0.502.4 — Cancelling a scan no longer leaves every queued plate-solve running in the background
+
+**What.** `seestack/io/scanner.py::_map_jobs` (the process pool behind the scan job's QC and plate-solve passes)
+bailed out on cancel with `ex.shutdown(wait=False, cancel_futures=True)`. On CPython 3.11, 3.12.3, 3.12.13 and
+3.13 that cancels **nothing**: the generator returns, the job reads "cancelled" and the next job starts, while the
+pool keeps working through every queued job and throws the results away. Through the real `run_qc_and_solve` with
+a logging stub ASTAP (1.5 s a solve, 4 workers, the scan job's `should_stop`), a pass cancelled 3 solves into 40
+returned in 2.7 s and **36 ASTAP runs then started after it** — on a first scan of a 35,894-sub target that is
+hours of hidden NAS load competing with the next stack, none of it saved. Each pending future is now cancelled by
+hand before `shutdown(wait=False)`: only the jobs a worker already holds plus the executor's one-slot prefetch
+still start (8 in the same repro; ≤ 2 × workers + 1). `shutdown(wait=True, cancel_futures=True)` also works but
+blocks the cancel for the in-flight solves; the old "bail promptly" contract is kept.
+
+**Tests.** `tests/test_scanner.py::test_map_jobs_cancel_drops_the_queued_pool_jobs` — 30 pool jobs that log their
+start, cancelled after two; at most `2 × workers + 2` may start after `_map_jobs` returns. Fails before (19 of 24
+started after the cancel), passes after (three runs).
+
+**Not changed:** the desktop GUI's `seestack/core/jobs.py::JobRunner.cancel` has the same call; the GUI is the
+historical desktop front end (PLAN.md), so it is left as is and noted in PROCESS-NOTES.
+
+**Upgrade-safe (§9):** no config, schema, layout, default or API change.
+
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-1t0fcu`) — "Hold back highlights" no longer weakens on a mosaic
 
 ### v0.502.3 — the highlight suggestion is measured per native pixel, not per proxy pixel
