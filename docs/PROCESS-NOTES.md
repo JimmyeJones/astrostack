@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-crvp1t`) — QA rotation sweep (1), scale-dependent preview↔export parity: the four proxy-measured "From your image" suggestions the `highlights` sweep left open: CLEAN. Inbox unchanged. Dogfood `--mosaic --editor --big` CLEAN as far as it ran.
+
+- **Suite:** 8133 passed / 7 skipped on `f861920a` (xdist `-n 4`, BLAS capped, 19m31s). **Dogfood
+  `--mosaic --editor --big`:** page probes on the sample, mosaic and full-size targets CLEAN (trim 7.9 %, nothing
+  overflowing, no console errors), editor drives on sample and mosaic clean; the full-size editor drive was stopped by
+  the 30-minute background-tool limit before it printed a verdict (harness, not the app — run `--big` alone next time).
+- **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12 — nothing owed. Open PR #1228 (a
+  concurrent Scout, sweep (4), pushed 18:39Z, merged mid-run as v0.502.12); this run's sweep is (1) so the two do not overlap.
+- **Sweep (1), the lead `claude/zen-curie-m3p3kh` left open:** do `levels-`, `stretch-`, `curve-` and
+  `denoise-suggestion` share `highlights`' per-pixel-gradient shape? **By the code, no:** the first three are pure
+  value-population statistics (percentiles, median, MAD, a lower-half histogram mode) — unbiased under
+  `build_proxy`'s pick-stride, and `suggest_asinh_stretch`'s `lo = min` (the one order statistic that *is*
+  stride-biased) cancels out of `black` and `x_med` exactly as it does in the op. Denoise already carries the
+  `grain_lag_ratio` correction. **Run anyway, on mosaic-shaped data:** scratch probe (not committed), a
+  3600×4800 2×2-mosaic canvas (25/25/25/26-sub coverage, a +0.01 panel step, two ragged NaN corners and a
+  missing-panel notch, gradient sky, nebula, 2,500 FWHM-4 stars, σ=0.8 px-correlated noise), the real Auto recipe
+  (built at stride 4), each suggestion fed the recipe prefix through `apply_recipe` with a proxy `EditContext` at
+  strides **1–6**. Levels (0.0, 0.78) γ 1.15, stretch and curve (fallback, sky 0.139–0.147) identical or within
+  rounding at every stride; raw denoise σ 0.0223→0.0224 (strength 0.45 throughout); recipe-prefixed denoise σ
+  0.0262→0.0267 (+2 %), which crosses one 0.05 slider step (0.50→0.55) at strides ≥ 3 — inside the
+  "approximate with a linear op ahead" the endpoint's own comment owns, not filed. That closes the four-endpoint
+  lead. (1) done → **next sweep is (2)**.
 ## 2026-10-20 (Scout, branch `claude/zen-curie-uic6x9`) — QA rotation sweep (4), the routers' *answers*, on the never-swept `wishlist`, `sample`, `updates`, `stackfailures` and `overtrim`: one bug Scout-fixed (v0.502.12), one filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8114 passed / 7 skipped on `6724173b` (xdist `-n 4`, BLAS capped, 20m34s). **Inbox:** the same four (#878, #880,
