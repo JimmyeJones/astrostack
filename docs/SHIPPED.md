@@ -1,5 +1,25 @@
 # Shipped — the record
 
+## 2026-10-20 (Builder, branch `claude/festive-knuth-9xjd2t`) — the Moon/Sun stacker: sub-pixel alignment, then drizzle
+
+### v0.501.13 — the Moon/Sun disk aligner measures sub-pixel shifts on a raw capture instead of whole pixels
+
+**What.** `seestack/video/lucky.py::_measure_disk_shift` refines the disk-centre shift with a correlation of two
+Hann-windowed windows that follow the disk. That correlation was **phase-only** (`phase_cross_correlation`'s
+default whitening), so every frequency voted equally — and on a debayered 8-bit raw frame (what `iter_frames`
+hands the stacker for the owner's `pal8` solar AVI) the high frequencies are mostly the sensor's own stationary
+structure: the CFA's residue after `bilinear_debayer` truncates back to `uint8`, and fixed-pattern noise. The
+refinement locked onto it and came back on a whole pixel every time, so the stack was aligned only to the
+integer centre (±0.5 px). Found while building the drizzle (v0.502.0), which needs the sub-pixel shifts and saw
+none: an 80-frame raw fixture with ±3 px jitter measured a sub-pixel spread of 0.02 px (true 0.28).
+**Fix.** The refinement is now a plain (unwhitened) cross-correlation of windows lightly smoothed by
+`_REFINE_SMOOTH_SIGMA` = 0.7 px (`_measure_shift(..., whiten=False)`); the whole-frame fallback is unchanged.
+Median alignment error, before → after, measured with known jitter: raw `GBRG` fixture 0.51 → 0.12 px; the same
+with 4 DN of fixed pattern and ±30 px drift 0.40 → 0.06 px (worst frame 2.4 → 0.12); the striped-pattern small
+Sun of `test_video_lucky` 0.36 → 0.18 px (worst 0.62 → 0.44). σ was chosen across 0 / 0.5 / 0.7 / 1.0 / 1.5:
+0 lets the striped Sun reach 1.13 px, ≥1.0 starts costing the raw fixture.
+**Pinned.** `tests/test_video_disk_subpixel.py` (both parametrisations fail before: median ≈ 0.5 px).
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-ba36k9`) — the folder guard and the data root's own folders
 
 ### v0.501.12 — `incoming/` can no longer be set to the app's own stills, state or archive folder

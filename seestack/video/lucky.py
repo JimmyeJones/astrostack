@@ -71,6 +71,12 @@ _DISK_MAX_FRACTION = 0.85
 #: centre is good to about a pixel; anything larger is not a refinement.
 _MAX_REFINE_PX = 2.0
 
+#: Gaussian σ (px) taken off both windows before the disk refinement correlates
+#: them. Just enough to blunt pixel-scale sensor structure (fixed-pattern noise,
+#: the CFA's residue after an 8-bit debayer) while the limb and the surface
+#: detail, which carry the shift, pass through. See :func:`_measure_disk_shift`.
+_REFINE_SMOOTH_SIGMA = 0.7
+
 #: Frames we refuse to work below — a 2-frame "video" has nothing to be lucky
 #: about, and the sharpness ranking would be meaningless.
 MIN_FRAMES = 3
@@ -299,7 +305,9 @@ def ordinal(n: int) -> str:
     return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(abs(n) % 10, 'th') }"
 
 
-def _measure_shift(ref_luma: np.ndarray, luma: np.ndarray) -> tuple[float, float] | None:
+def _measure_shift(
+    ref_luma: np.ndarray, luma: np.ndarray, *, whiten: bool = True,
+) -> tuple[float, float] | None:
     """Sub-pixel (dy, dx) that brings ``luma`` onto ``ref_luma``, or ``None``.
 
     Phase cross-correlation on the whole frame: a lunar/solar disk is a single
@@ -307,13 +315,20 @@ def _measure_shift(ref_luma: np.ndarray, luma: np.ndarray) -> tuple[float, float
     locks onto it far more reliably than any star-based method would (there are
     no stars). Returns ``None`` when scikit-image is unavailable or the
     correlation fails, so the caller can fall back to stacking unaligned.
+
+    ``whiten=False`` asks for a plain cross-correlation instead of the
+    phase-only one — see :func:`_measure_disk_shift` for why the disk refinement
+    needs it.
     """
     try:
         from skimage.registration import phase_cross_correlation
     except ImportError:  # pragma: no cover — skimage is a hard dependency
         return None
     try:
-        shift, _, _ = phase_cross_correlation(ref_luma, luma, upsample_factor=10)
+        shift, _, _ = phase_cross_correlation(
+            ref_luma, luma, upsample_factor=10,
+            normalization="phase" if whiten else None,
+        )
     except Exception as exc:  # noqa: BLE001 — a bad correlation must not sink the run
         log.debug("video phase_cross_correlation failed: %s", exc)
         return None
@@ -333,6 +348,20 @@ def _measure_disk_shift(
     camera's stationary noise pattern — identical in every frame — won the
     whole-frame correlation, so it reported ~0 shift while the disk moved a
     median 22 px: 138 of 143 sampled frames were stacked misaligned.
+
+    **The refinement is a plain cross-correlation of lightly smoothed windows,
+    not a phase-only one** *(2026-10-20)*. Phase correlation whitens the
+    spectrum, so every frequency votes equally — and on a debayered raw frame
+    the high frequencies are mostly the sensor's own stationary structure (the
+    CFA's residue after an 8-bit bilinear debayer, fixed-pattern noise) rather
+    than the disk. Measured with known sub-pixel jitter, median error, whitened
+    → now: a raw ``GBRG`` fixture 0.51 → 0.12 px (whitened was only ever the
+    integer centre); the same with 4 DN of fixed pattern and ±30 px drift
+    0.40 → 0.06 px (worst frame 2.4 → 0.12); the small striped-pattern Sun of
+    ``test_video_lucky`` 0.36 → 0.18 px (worst 0.62 → 0.44). A whole-pixel-only alignment blurs the
+    stack by up to half a pixel, and leaves a drizzle no sub-pixel variety to
+    use. Weighting by power lets the limb and the surface detail decide; the
+    :data:`_REFINE_SMOOTH_SIGMA` blur keeps a striped sensor from leaning on it.
     """
     ry, rx = int(round(ref_disk.cy)), int(round(ref_disk.cx))
     cy, cx = int(round(disk.cy)), int(round(disk.cx))
@@ -343,10 +372,14 @@ def _measure_disk_shift(
     if (min(ry, cy) - half_h < 0 or min(rx, cx) - half_w < 0
             or max(ry, cy) + half_h > h or max(rx, cx) + half_w > w):
         return coarse          # no room for a common window: the centre is still right
-    a = ref_luma[ry - half_h:ry + half_h, rx - half_w:rx + half_w].astype(np.float32)
-    b = luma[cy - half_h:cy + half_h, cx - half_w:cx + half_w].astype(np.float32)
+    from scipy.ndimage import gaussian_filter
+
+    a = gaussian_filter(ref_luma[ry - half_h:ry + half_h, rx - half_w:rx + half_w]
+                        .astype(np.float32), _REFINE_SMOOTH_SIGMA)
+    b = gaussian_filter(luma[cy - half_h:cy + half_h, cx - half_w:cx + half_w]
+                        .astype(np.float32), _REFINE_SMOOTH_SIGMA)
     win = np.outer(np.hanning(a.shape[0]), np.hanning(a.shape[1])).astype(np.float32)
-    fine = _measure_shift((a - a.mean()) * win, (b - b.mean()) * win)
+    fine = _measure_shift((a - a.mean()) * win, (b - b.mean()) * win, whiten=False)
     # The centre is already good to about a pixel, so the refinement may only
     # nudge it. A bigger "correction" is the sensor's fixed pattern lining up
     # with itself at the integer offset between the two windows — measured: it

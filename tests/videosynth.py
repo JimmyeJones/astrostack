@@ -225,3 +225,48 @@ def lunar_video(
             seed=i,
         ))
     return write_video(path, frames, fps=fps)
+
+
+#: The jittered raw fixture's frame size, disk radius and surface-detail period
+#: (input px). The period is finer than one colour's Bayer sampling (every 2 px)
+#: resolves — what a debayer smears and a drizzle over many shifted frames
+#: gets back.
+JITTER_W, JITTER_H, JITTER_DISK_RADIUS = 128, 96, 30.0
+JITTER_DETAIL_PERIOD = 2.6
+
+
+def jitter_detail(y, x, period: float = JITTER_DETAIL_PERIOD):
+    """The fixture's surface detail, measured from the disk centre."""
+    return np.sin(2 * np.pi * x / period) * np.cos(2 * np.pi * y / (1.1 * period))
+
+
+def cfa_gain(h: int, w: int, pattern: str) -> np.ndarray:
+    """Per-pixel colour-filter transmission for a ``pattern`` sensor."""
+    tl, tr, bl, br = _CFA_LAYOUTS[pattern.upper()]
+    gain = np.empty((h, w), dtype=np.float32)
+    gain[0::2, 0::2] = _CFA_TRANSMISSION[tl]
+    gain[0::2, 1::2] = _CFA_TRANSMISSION[tr]
+    gain[1::2, 0::2] = _CFA_TRANSMISSION[bl]
+    gain[1::2, 1::2] = _CFA_TRANSMISSION[br]
+    return gain
+
+
+def solar_raw_jittered_video(
+    path: Path, n_frames: int, *, jitter: float, seed: int = 0, pattern: str = "GBRG",
+) -> Path:
+    """A raw ``pal8`` solar capture (the owner's file shape) whose disk — and the
+    fine surface detail riding on it — wanders up to ``jitter`` px between frames,
+    the way seeing moves a real one. ``jitter=0`` is a disk that never moves."""
+    rng = np.random.default_rng(seed)
+    h, w, radius = JITTER_H, JITTER_W, JITTER_DISK_RADIUS
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    gain = cfa_gain(h, w, pattern)
+    planes = []
+    for _ in range(n_frames):
+        jy, jx = rng.uniform(-jitter, jitter, 2) if jitter else (0.0, 0.0)
+        cy, cx = h / 2 + jy, w / 2 + jx
+        disk = np.clip((radius - np.hypot(xx - cx, yy - cy)) / 2.0 + 0.5, 0.0, 1.0)
+        scene = 8.0 + disk * (170.0 + 30.0 * jitter_detail(yy - cy, xx - cx))
+        img = scene * gain + rng.normal(0.0, 1.5, scene.shape)
+        planes.append(np.clip(img, 0, 255).astype(np.uint8))
+    return write_pal8_video(path, planes)

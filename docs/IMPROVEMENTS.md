@@ -3618,6 +3618,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.501.13 **The Moon/Sun disk aligner's refinement was phase-only, so on a debayered raw capture it locked onto the sensor's stationary pattern and every shift came back on a whole pixel — it is now a plain correlation of lightly smoothed windows (median error 0.5 → 0.1 px)** (`lucky._measure_disk_shift`, `_REFINE_SMOOTH_SIGMA`).
 - ✅ v0.501.12 **The folder guard let `incoming/` be set to the app's own `<data>/video` or `<data>/state` folder; a Moon/Sun stack then wrote `meta.json`/`stack.png`/`stack.tiff` beside the raw clip — the save is now refused** (`config.nested_incoming_conflict`, `DATA_ROOT_MANAGED_SUBDIRS`, Scout rotation sweep (3))
 - ✅ v0.501.11 **On a single field a restack after a re-pointed night kept the canvas size, so "Reprocess everything" copied his saved crop unchanged and it framed sky 40–90 px off — the crop is re-aimed whenever the sky moved, not only when the canvas changed size** (`pipeline._recrop_for_new_canvas(same_shape=…)`, Scout rotation sweep (2))
 - ✅ v0.501.10 **A mosaic's registry centre landed on one panel (per-axis median over subs), so his M31 mosaic was missing from the life list — it is now the midpoint of the panels' extent** (`library._panel_extent_centre`).
