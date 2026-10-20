@@ -517,24 +517,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
   scratchpad (`wcs_repro.py`).)_
 
-- **🟡 (Scout 2026-10-20, QA rotation sweep (1)) — *Add → Resize* lands ahead of Auto's sharpen, so the full-size
-  check shows sharpening at the wrong scale and the export sharpens 1/scale wider than the radius Auto chose.**
-  *(Pillar: editor — PRIORITY 1; size **S**; severity low–moderate — the loupe is the control the sharpen
-  advisory sends a beginner to; nothing is lost. Confidence: **reproduced** through the real `apply_recipe` and
-  the router's `_without_geometry` / `_loupe_geometry_problem`.)* `geometry.*` ops are `stage="nonlinear"`, so
-  `stageConflicts.ts::insertOnCorrectSide` splices a new Resize **directly after the stretch** — on Auto's recipe
-  (`… tone.stretch, scnr, saturation, curves, detail.sharpen`) that is ahead of `detail.sharpen`. The export then
-  runs the sharpen radius on the resized grid (radius 3 at scale 0.5 = 6 native px; Auto sized it in master px),
-  and the loupe, which disables geometry and renders at 1:1, runs it at 3 native px; `_loupe_geometry_problem`
-  only refuses geometry ahead of an *additive-field* op, so it vouches for this. Scratch repro (1200² star field,
-  `[stretch, resize 0.5, sharpen r=3]`): the loupe radius that best reproduces the export window is **6.0**
-  (mean |Δ| 0.00117 vs 0.00185 at the true 3.0); control with Resize last → best **3.0**. The decimated preview
-  agrees with the export (radius ratios cancel), so only the loupe and the *intent* are wrong. Same shape for
-  `stars.reduce` / `detail.chroma_denoise` after a Resize. **Fix direction:** append geometry ops at the end in
-  `insertOnCorrectSide` (Auto already puts `geometry.crop` last; `mosaicTrim.applyTrimCrop` uses the same
-  helper), and have `_loupe_geometry_problem` refuse a reshaping `geometry.resize` ahead of an op that reads
-  `ctx.scaled_px` for hand-ordered recipes. Pin both with the repro above.
-
 - **🟢 (Scout 2026-10-20, QA rotation sweep (2)) — the life list keeps *every* panel of a mosaic clear of its
   edges by the *worst* panel's dither, so one re-pointed panel greys an object another, tight panel plainly
   holds.** *(Pillar: trust — PRIORITY 3; size **S**; severity low — a false "not captured" near a mosaic's outer
@@ -3631,6 +3613,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.14 **Add → Resize now lands last, behind Auto's sharpen — spliced in after the stretch it made the export sharpen 1/scale wider than Auto chose and the full-size check vouched for it** (`stageConflicts.insertOnCorrectSide`/`moveToCorrectSide` put geometry last; `_loupe_geometry_problem` declines a real Resize ahead of any op). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.13 **A target refused inside *Reprocess all* now reaches "this target stopped producing pictures" on the Dashboard and Target page — the batch's `result["failed"]` rows are the third recording site `latest_stack_failures` reads, each row stamped with its own `failed_utc` so a yielded slice's carried rows keep their time** (`stackfailure.latest_stack_failures`, `pipeline.submit_reprocess_all`, Scout sweep (4))
 - ✅ v0.502.12 **"Some of your pictures were trimmed too far" judges the picture on the wall — a pinned cover — not the newest run in History** (`overtrim.scan_over_trimmed` → `finishedpicture.displayed_picture_run`, Scout rotation sweep (4))
 - ✅ v0.502.11 **One killed QC/solve pool worker no longer throws away the rest of the pass — the jobs the broken pool took down are re-run once in a fresh pool of half the workers; and the orphaned `astrostack-solve-*`/`astrostack-bootstrap-*` scratch copies a killed worker leaves in `/tmp` are swept at app start** (`scanner._map_jobs`, `astap.sweep_stale_solve_scratch`; full text in SHIPPED.md)

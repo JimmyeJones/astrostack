@@ -73,17 +73,28 @@ export function stageConflicts(
   return out;
 }
 
+/** Whether `op` is one of the editor's geometry ops (Crop, Rotate, Resize). */
+function isGeometryOp(op: OpInstance): boolean {
+  return op.id.startsWith("geometry.");
+}
+
 /** Return a new op list with a freshly-added `op` inserted on the correct side of
  * the enabled stretch: `linear` ops just before it, `nonlinear` ops just after it.
  * Falls back to appending at the end when there's no enabled stretch or the op's
  * stage isn't a hard side (`any`), matching the plain "add at the end" behaviour —
  * so the common add-then-tune flow never lands an op on the wrong side of the
- * stretch (which would immediately trip the stage-conflict caution). */
+ * stretch (which would immediately trip the stage-conflict caution).
+ *
+ * A Crop, Rotate or Resize goes **last**, not just after the stretch: every op
+ * after a Resize runs on the resized grid, so one spliced in ahead of Auto's
+ * sharpen made the export sharpen 1/scale wider than Auto chose and left the
+ * full-size check unable to show it. Auto already puts its crop last. */
 export function insertOnCorrectSide(
   ops: OpInstance[],
   op: OpInstance,
   specs: Record<string, EditOp>,
 ): OpInstance[] {
+  if (isGeometryOp(op)) return [...ops, op];
   const stage = specs[op.id]?.stage;
   if (stage !== "linear" && stage !== "nonlinear") return [...ops, op];
   const s = ops.findIndex((o) => o.enabled && specs[o.id]?.is_stretch);
@@ -97,7 +108,8 @@ export function insertOnCorrectSide(
 /** Return a new op list with `uid` moved to the correct side of the enabled
  * stretch: `linear` ops just before it, `nonlinear` ops just after it. A no-op
  * (returns the same array) when there's no enabled stretch, the op is missing, or
- * the op's stage isn't a hard side (`any`). */
+ * the op's stage isn't a hard side (`any`). A geometry op goes last, as in
+ * {@link insertOnCorrectSide}. */
 export function moveToCorrectSide(
   ops: OpInstance[],
   uid: string,
@@ -111,6 +123,7 @@ export function moveToCorrectSide(
   const rest = ops.filter((o) => o.uid !== uid);
   const s = rest.findIndex((o) => o.enabled && specs[o.id]?.is_stretch);
   if (s < 0) return ops;
+  if (isGeometryOp(op)) return [...rest, op];
   const at = stage === "linear" ? s : s + 1;
   const next = [...rest];
   next.splice(at, 0, op);
