@@ -15,6 +15,7 @@ restart.
 
 from __future__ import annotations
 
+import errno
 import logging
 import queue
 import sqlite3
@@ -54,14 +55,34 @@ def classify_job_error(exc: BaseException) -> str | None:
     ``memory_budget`` (the OOM guard refused the stack before running),
     ``no_solved_frames`` (nothing accepted + plate-solved to stack),
     ``no_alignment`` (frames didn't overlap / solved to different fields),
-    ``no_reference_wcs`` (the reference frame isn't plate-solved), and
-    ``no_fits_in_folder`` (a Build-master job pointed at a folder with no FITS).
+    ``no_reference_wcs`` (the reference frame isn't plate-solved),
+    ``no_fits_in_folder`` (a Build-master job pointed at a folder with no FITS),
+    ``disk_full`` (the disk — or the dataset's quota — ran out mid-write), and
+    ``no_permission`` (the app's user may not read or write a file it needs).
     """
     # Type-based first — reword-proof. The stacker refuses an over-budget canvas
     # by raising MemoryError (see stacker.py's memory guard).
     if isinstance(exc, MemoryError):
         return "memory_budget"
+    # The two NAS failures a long job meets that are about the box, not the
+    # picture. Read off ``errno`` rather than the text: the OS words them per
+    # platform, and only a *real* errno is trusted — an ``OSError("disk is
+    # full")`` raised by our own code carries none and stays unclassified.
+    if isinstance(exc, OSError) and exc.errno is not None:
+        if exc.errno in _DISK_FULL_ERRNOS:
+            return "disk_full"
+        if exc.errno in _NO_PERMISSION_ERRNOS:
+            return "no_permission"
     return classify_error_message(str(exc))
+
+
+# ENOSPC is a full pool; EDQUOT a TrueNAS dataset quota, which reads the same to
+# the owner ("there's no room") and has the same cure.
+_DISK_FULL_ERRNOS = frozenset(
+    e for e in (errno.ENOSPC, getattr(errno, "EDQUOT", None)) if e is not None)
+# EROFS belongs here, not with "full": a read-only mount is a permissions-shaped
+# problem in the dataset/app setup, and freeing space would not fix it.
+_NO_PERMISSION_ERRNOS = frozenset((errno.EACCES, errno.EPERM, errno.EROFS))
 
 
 def classify_error_message(message: str) -> str | None:
@@ -91,6 +112,15 @@ def classify_error_message(message: str) -> str | None:
     # are internal and shouldn't be dressed up as a folder problem.
     if "no fits files found" in msg:
         return "no_fits_in_folder"
+    # The unattended path keeps only ``str(exc)``, so match the OS's own strerror
+    # wording — the exact phrases, never a loose "full"/"denied", which our own
+    # messages could contain.
+    if ("no space left on device" in msg or "disk quota exceeded" in msg
+            or "[errno 28]" in msg):
+        return "disk_full"
+    if ("permission denied" in msg or "operation not permitted" in msg
+            or "read-only file system" in msg):
+        return "no_permission"
     return None
 
 

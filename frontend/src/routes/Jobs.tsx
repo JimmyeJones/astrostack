@@ -121,6 +121,26 @@ const JOB_ERROR_KIND: Record<string, JobErrorHelp> = {
       "Point it at the folder that holds your calibration frames (the .fits darks, "
       + "flats or bias subs) and build the master again.",
   },
+  // The disk (or the dataset's quota) ran out while the job was writing. On a NAS
+  // this is the one failure that is about the box rather than the picture, and
+  // the raw `[Errno 28] No space left on device: '/data/…'` names neither.
+  disk_full: {
+    message:
+      "The disk your library is on ran out of space (or reached its quota) "
+      + "while this was being saved, so it couldn't finish.",
+    next:
+      "Free up some room — the Storage page shows what the app's own files use "
+      + "and which caches are safe to clear — then run it again.",
+    action: { label: "Open Storage →", href: "/storage" },
+  },
+  // The app's user isn't allowed to read or write a file the job needs.
+  no_permission: {
+    message: "The app wasn't allowed to open or save a file this needed.",
+    next:
+      "This is usually the folder's permissions on the NAS: the app needs to be "
+      + "able to read your incoming folder and to read and write your library "
+      + "folder. Check the dataset's permissions, then run it again.",
+  },
 };
 
 // Translate a failed job into a plain sentence + next step. Prefer the backend's
@@ -151,6 +171,15 @@ export function friendlyJobError(
   }
   if (s.includes("no fits files found")) {
     return JOB_ERROR_KIND.no_fits_in_folder;
+  }
+  // The OS's own wording (mirrors webapp/jobs.py::classify_error_message).
+  if (s.includes("no space left on device") || s.includes("disk quota exceeded")
+      || s.includes("[errno 28]")) {
+    return JOB_ERROR_KIND.disk_full;
+  }
+  if (s.includes("permission denied") || s.includes("operation not permitted")
+      || s.includes("read-only file system")) {
+    return JOB_ERROR_KIND.no_permission;
   }
   return { message: raw };
 }
