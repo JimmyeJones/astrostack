@@ -2,7 +2,7 @@
 
 ## 2026-10-20 (Scout, branch `claude/zen-curie-v7lnvp`) — QA rotation sweep (4), the routers' *answers*, on `stats`: one bug, Scout-fixed (v0.502.1). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
-*(**Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none
+*(**Suite:** 8059 passed / 7 skipped on the merged branch (xdist `-n 4`, BLAS capped, 15m02s). **Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none
 updated since 2026-10-12 — nothing owed. No open PRs. **Dogfood `--mosaic`: CLEAN** — Auto trim 7.9 %, nothing
 overflowing, no console errors.)*
 
