@@ -1843,6 +1843,12 @@ def _carry_hand_saved_recipe(lib: Library, safe: str,
     build dropped and out-of-range params are cleaned exactly as the editor
     would clean them on load.
 
+    **A crop is re-aimed when the canvas changed shape** (a mosaic night that
+    added a row or column, a drizzle-scale change): its fractions are of the
+    *source* canvas, so copied as-is they frame different sky — and the crop
+    check above only measures how much a crop keeps, never where it sits. See
+    :func:`_recrop_for_new_canvas`. A same-shape restack copies byte-for-byte.
+
     Best-effort: an unreadable target or recipe copies nothing and never fails
     the batch.
     """
@@ -1861,7 +1867,9 @@ def _carry_hand_saved_recipe(lib: Library, safe: str,
         try:
             if proj.get_meta(f"{RECIPE_META_PREFIX}{new_run_id}"):
                 return None
-            for run in proj.iter_stack_runs():  # newest first
+            runs = list(proj.iter_stack_runs())  # newest first
+            new_run = next((r for r in runs if r.id == new_run_id), None)
+            for run in runs:
                 if run.id is None or run.id == new_run_id:
                     continue
                 try:
@@ -1882,6 +1890,11 @@ def _carry_hand_saved_recipe(lib: Library, safe: str,
                 recipe = recipe_from_json(raw)
                 if not any(op.enabled for op in recipe.ops):
                     continue
+                if new_run is not None and (
+                        (run.canvas_h, run.canvas_w)
+                        != (new_run.canvas_h, new_run.canvas_w)):
+                    recipe = _recrop_for_new_canvas(recipe, run.fits_path,
+                                                    new_run.fits_path)
                 recipe.base_run_id = new_run_id
                 recipe.updated_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 proj.set_meta(f"{RECIPE_META_PREFIX}{new_run_id}", recipe.to_json())
@@ -1891,6 +1904,55 @@ def _carry_hand_saved_recipe(lib: Library, safe: str,
     except Exception:  # noqa: BLE001 — the batch's bookkeeping never fails a target
         log.warning("reprocess-all: could not carry %s's saved edit", safe, exc_info=True)
     return None
+
+
+def _recrop_for_new_canvas(recipe, src_fits: str | None,  # noqa: ANN001,ANN201
+                           dst_fits: str | None):
+    """``recipe`` with its crop moved onto a restack whose canvas changed shape,
+    so it frames the same sky the owner framed.
+
+    Only the **first crop that really reshapes** is re-aimed, through the two
+    masters' WCS (:func:`seestack.io.wcs_io.crop_reprojected_between_fits`):
+    every later crop is fractions of *that* crop's output, which now covers the
+    same sky, so it carries unchanged, and a resize or a rotate after it is
+    canvas-independent. When the crop can't be placed — either WCS unreadable,
+    the framed sky not on the new canvas, or a real rotate *before* it (its
+    fractions are of a rotated grid) — every reshaping crop is **dropped**, so the
+    editor's own trim frames the new canvas instead of a crop aimed at the wrong
+    sky; the rest of the look still carries. Mutates and returns ``recipe``.
+    """
+    from seestack.edit.ops.geometry import reshapes_frame
+    from seestack.io.wcs_io import crop_reprojected_between_fits
+    from seestack.previewcrop import make_crop
+
+    first = None
+    rotated_before = False
+    for op in recipe.ops:
+        if not op.enabled or not reshapes_frame(op.id, op.params):
+            continue
+        if op.id == "geometry.rotate":
+            rotated_before = True
+        elif op.id == "geometry.crop":
+            first = op
+            break
+    if first is None:
+        return recipe
+    moved = None
+    if not rotated_before:
+        p = first.params
+        crop = make_crop(p.get("x0", 0.0), p.get("y0", 0.0),
+                         p.get("x1", 1.0), p.get("y1", 1.0))
+        moved = crop_reprojected_between_fits(src_fits, dst_fits, crop)
+    if moved is not None:
+        first.params = {**first.params, "x0": moved.x0, "y0": moved.y0,
+                        "x1": moved.x1, "y1": moved.y1}
+        return recipe
+    log.info("reprocess-all: the saved crop can't be placed on the new canvas; "
+             "carrying the look without it")
+    recipe.ops = [op for op in recipe.ops
+                  if not (op.id == "geometry.crop" and op.enabled
+                          and reshapes_frame(op.id, op.params))]
+    return recipe
 
 
 def _reprocess_yield(settings: Settings, jm: JobManager, job: Job, waiting_kind: str, *,
