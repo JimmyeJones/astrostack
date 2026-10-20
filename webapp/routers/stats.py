@@ -861,14 +861,13 @@ def _collect_last_night(lib, targets, night_of=None):
             # This card is the one read here that opens *every* target.
             frames: list[FrameNight] = []
             paths: list[str] = []
-            for (ts, accept, exposure_s, reason, fwhm_px,
-                 path) in proj.iter_frame_columns(
+            for row in proj.iter_frame_columns(
                     "timestamp_utc", "accept", "exposure_s", "reject_reason",
                     "fwhm_px", "source_path"):
-                frames.append(FrameNight(
-                    timestamp_utc=ts, accept=bool(accept), exposure_s=exposure_s,
-                    reject_reason=reason, fwhm_px=fwhm_px))
-                paths.append(path)
+                frames.append(FrameNight(timestamp_utc=row[0], accept=bool(row[1]),
+                                         exposure_s=row[2], reject_reason=row[3],
+                                         fwhm_px=row[4]))
+                paths.append(row[5])
             # Every session's stop time, before the window trim below throws the
             # older ones away — the habit this target's newest night is judged
             # against.
