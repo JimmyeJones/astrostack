@@ -107,7 +107,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 - **🟡 (Scout 2026-10-20, QA rotation sweep (2)) — "My life list" judges a mosaic against one panel's field: an
   object his mosaic plainly holds stays grey because the match radius is one sub's inscribed circle around the
   mosaic's middle (`seestack/lifelist.py::match_radius_deg`, `library._frame_short_deg`).** *(Pillar: trust /
-  enjoy — PRIORITY 3; size **S–M**; severity low — a grey tile on a page he is proud of, never a false claim.
+  enjoy — PRIORITY 3; size **S–M**; severity low — a grey tile on a page he is proud of — **and one false ✓ (added below)**.
   Confidence: **reproduced** through the real `Library.refresh_target_stats` + `catalog_capture_status`; ungated.)*
   v0.502.2 matches within `0.8 × frame_short_deg / 2` (≈0.48° on his S30) of the registry centre, and its own
   note calls that "a lower bound on what the mosaic holds". It is a per-panel number answering a whole-target
@@ -122,6 +122,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   centre along the long axis). Single field / unknown rotation / no panel split → today's radius, byte-for-byte.
   Regression: the three mosaics above light their neighbour; an object just outside every panel, and the missing
   corner of an L-shaped 3-panel mosaic, stay grey; M110 on a single S30 field stays grey.
+  **Today it is also a false claim** (Scout `claude/zen-curie-45367f`, same day, reproduced through the same two
+  functions): a 2×2 S30 at 10 % overlap with the NE panel absent keeps its centre and 0.479° disc at the 2×2
+  middle, **14.8 % of the disc is sky no panel covered** (11.6 % at the old 0.35° floor — v0.501.10 made it
+  possible, v0.502.2 widened it), and an object 0.40° into the missing quadrant reads `captured=True`. The
+  per-panel-footprint fix closes both; the L-shaped regression above is therefore fail-before today.
 
 - **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
   v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
