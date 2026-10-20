@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-jjqmic`) — the carried crop on a single field
+
+### v0.501.11 — a restack that kept the canvas size but moved the sky re-aims the carried crop too
+
+**What.** v0.501.8 re-aimed a hand-saved crop carried onto a restack only when the canvas changed *shape*
+(`pipeline._carry_hand_saved_recipe` compared `canvas_h/canvas_w`). A single field's canvas is the footprint of
+its **reference sub** (`run_stack` §1b: the union canvas only engages above `AUTO_UNION_AREA_RATIO`), and the
+reference is the sub nearest the median pointing (`reference.pick_reference_frame`) — so a night shot from a
+re-pointed GoTo moves the median, swaps the reference, and shifts every pixel's sky while the size stays the
+sensor's. Measured with the real `run_stack` on a 480x320 single field, 5 subs then 7 more re-pointed east: the
+carried 0.3–0.7 crop framed sky **40 px** (3.3′) and **90 px** (7.5′) off for a 40 / 90 px re-point, on a 192 px
+crop. Now a same-shape restack goes through `_recrop_for_new_canvas` too, with `same_shape=True`: a crop that
+moves by under half a pixel is kept byte-for-byte, and one it cannot place (no WCS, a rotate before it) is kept
+as drawn — the pre-v0.501.8 behaviour — rather than dropped. With the fix the same repro moves 0.0 px.
+
+**Tests.** `tests/webapp/test_reprocess_all.py` — a same-shape canvas whose reference moved 5 rows is re-aimed
+(fails before: fractions copied as drawn); an identical WCS keeps the crop exactly; no source WCS keeps it as
+drawn.
+
+**Upgrade-safe (§9):** no config, schema, layout, default or API change; reaches only the next "Reprocess
+everything" batch.
+
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-ohmg45`) — a mosaic's registry centre
 
 ### v0.501.10 — the registry centre of a mosaic is the middle of its panels, not one panel
