@@ -60,6 +60,10 @@
      "_why": "a relative path resolves against the server's cwd, which a browser cannot know"},
     {"incoming": "/data/incoming", "library": "/data/incoming/../incoming/lib",
      "data_root": "/data", "verdict": "server",
-     "_why": "`..` needs the real filesystem to resolve safely — the client declines rather than guesses"}
+     "_why": "`..` needs the real filesystem to resolve safely — the client declines rather than guesses"},
+    {"incoming": "/data/video", "library": "", "data_root": "/data", "verdict": "server",
+     "_why": "the app's own Moon & Sun stills folder — a capture's folder there IS its stills folder"},
+    {"incoming": "/data/state", "library": "", "data_root": "/data", "verdict": "server",
+     "_why": "the folder config.json and the jobs database are rewritten in"}
   ]
 }
