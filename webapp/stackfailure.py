@@ -12,7 +12,7 @@ records (whatever shape carries ``kind``/``state``/``target``/``error``/
 router supplies the jobs and decides which failures a later success has already
 made moot.
 
-Two kinds of failure have to be read, because they are recorded in two places:
+Three kinds of failure have to be read, because they are recorded in three places:
 
   * A **manual** stack (``kind="stack"`` / ``"process_target"``) fails the job
     itself: ``state="error"`` with the message on the record.
@@ -22,6 +22,11 @@ Two kinds of failure have to be read, because they are recorded in two places:
     under ``stack_errors: {safe: message}`` and the scan job itself finishes
     ``done``. Reading only failed jobs would therefore miss the unattended case
     entirely — which is the one this exists for.
+  * **Reprocess all** (``kind="reprocess_all"``) also isolates each target and
+    finishes ``done``; its refusals are rows in ``result["failed"]``
+    (``{target, name, error, error_kind, failed_utc}``). A yielded slice carries
+    the earlier slices' rows forward, so each row's own ``failed_utc`` is the
+    stamp, falling back to the job's for rows an older build wrote.
 """
 
 from __future__ import annotations
@@ -38,6 +43,10 @@ STACK_JOB_KINDS = frozenset({"stack", "process_target"})
 
 #: The key the scan job's result uses for per-target auto-stack failures.
 SCAN_STACK_ERRORS_KEY = "stack_errors"
+
+#: The batch restack job, and the result key it lists per-target failures under.
+REPROCESS_ALL_KIND = "reprocess_all"
+REPROCESS_FAILED_KEY = "failed"
 
 
 @dataclass(frozen=True)
@@ -76,7 +85,7 @@ def _newer(a: StackFailure, b: StackFailure) -> StackFailure:
 def latest_stack_failures(jobs: Iterable[Any]) -> dict[str, StackFailure]:
     """Newest stack failure per target ``safe``, from a job history.
 
-    Reads both recording sites (see the module docstring). Job order doesn't
+    Reads all three recording sites (see the module docstring). Job order doesn't
     matter — the newest stamp wins — so a caller can hand over
     ``JobManager.list()`` exactly as it comes.
     """
@@ -99,9 +108,25 @@ def latest_stack_failures(jobs: Iterable[Any]) -> dict[str, StackFailure]:
                     job_id=getattr(job, "id", None),
                 ))
             continue
+        result = getattr(job, "result", None)
+        if kind == REPROCESS_ALL_KIND:
+            rows = result.get(REPROCESS_FAILED_KEY) if isinstance(result, dict) else None
+            for row in rows if isinstance(rows, list) else ():
+                if not isinstance(row, dict):
+                    continue
+                safe, message = row.get("target"), row.get("error")
+                if not safe or not message:
+                    continue
+                offer(StackFailure(
+                    safe=str(safe), message=str(message),
+                    kind=(row.get("error_kind") or None)
+                    or classify_error_message(str(message)),
+                    when_utc=row.get("failed_utc") or _stamp(job) or None,
+                    unattended=True, job_id=getattr(job, "id", None),
+                ))
+            continue
         # The unattended half: a *successful* scan job whose result records that
         # one target's auto-stack blew up.
-        result = getattr(job, "result", None)
         errors = result.get(SCAN_STACK_ERRORS_KEY) if isinstance(result, dict) else None
         if not isinstance(errors, dict):
             continue
