@@ -143,6 +143,11 @@ class VideoResultOut(BaseModel):
     #: Additive with a neutral default: a still made by this build, and every
     #: ordinary colour capture, reads ``false``.
     colour_stale: bool = False
+    #: 1.0 = camera resolution; 1.5 = the stack drizzled onto a finer grid. With
+    #: ``drizzle_note``, one plain sentence saying which and why. Additive with
+    #: neutral defaults: a still from an older version reads as not drizzled.
+    drizzle_scale: float = 1.0
+    drizzle_note: str = ""
 
 
 class VideoCaptureOut(BaseModel):
@@ -192,6 +197,10 @@ class VideoStackRequest(BaseModel):
     #: picture the previous version made. Bounded to what the engine offers, so
     #: a stray value fails here with a clear 422 rather than mid-job.
     sharpen: float = Field(default=0.0, ge=0.0, le=SHARPEN_MAX)
+    #: Drizzle onto a finer grid when enough frames moved sub-pixel ("Auto, when
+    #: worth it"). Off when omitted, for the same reason as the two above; the
+    #: Moon/Sun page asks for it by default.
+    drizzle: bool = False
 
 
 def _size_of(path: str) -> int:
@@ -347,6 +356,8 @@ def _build_result_out(settings, capture_id: str, meta) -> VideoResultOut:  # noq
         sharpen_amount=meta.sharpen_amount,
         sharpen_editable=video.can_resharpen(meta),
         colour_stale=colour_stale,
+        drizzle_scale=meta.drizzle_scale,
+        drizzle_note=meta.drizzle_note,
     )
 
 
@@ -476,6 +487,7 @@ def stack_one_video(
         align=req.align,
         crop=req.crop,
         sharpen=req.sharpen,
+        drizzle=req.drizzle,
     )
     return {"job_id": job.id}
 

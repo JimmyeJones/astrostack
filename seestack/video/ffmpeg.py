@@ -321,6 +321,7 @@ def iter_frames(
     height: int | None = None,
     pix_fmt: str | None = None,
     wanted: Collection[int] | None = None,
+    cfa: dict[str, str] | None = None,
 ) -> Iterator[np.ndarray | None]:
     """Stream a capture's frames as ``(H, W, 3)`` uint8 RGB arrays.
 
@@ -375,6 +376,12 @@ def iter_frames(
     assumed, because a ``pal8`` stream whose palette is not a grey ramp would
     decode to real colour — in which case the frame is passed through
     untouched, since demosaicing it would be nonsense.
+
+    ``cfa``, when given, is filled with ``{"pattern": …}`` the moment the stream
+    is found to be a mosaic — before the first frame is yielded — so a caller
+    that needs each pixel's *own* colour (the lucky stack's Bayer drizzle) reads
+    the one phase this generator debayered with instead of guessing a second.
+    Left empty for a colour stream.
     """
     exe = ffmpeg_path()
     if exe is None:
@@ -432,6 +439,8 @@ def iter_frames(
                         # per frame could only ever make the *colours change
                         # mid-capture* if one frame were too flat to call.
                         pattern = detect_cfa_pattern(frame[..., 0])
+                        if cfa is not None:
+                            cfa["pattern"] = pattern
                         log.info(
                             "%s is a raw sensor mosaic — debayering it as %s",
                             Path(path).name, pattern,
