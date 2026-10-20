@@ -180,6 +180,37 @@ def test_a_crop_after_the_background_pass_is_fine(client, built_library):
     assert info["available"] is True
 
 
+_SHARPEN = {"uid": "sh", "id": "detail.sharpen", "enabled": True,
+            "params": {"amount": 0.6, "radius": 3.0}}
+_HALF = {"uid": "rz", "id": "geometry.resize", "enabled": True,
+         "params": {"scale": 0.5}}
+
+
+def test_a_resize_ahead_of_the_sharpen_is_declined(client, built_library):
+    """The window renders at 1:1 with geometry off, but the export runs the
+    sharpen on the *resized* grid — radius 3 at scale 0.5 is 6 native px there —
+    so the check would vouch for sharpening the export does not apply. This is
+    the order the Add menu used to build (a Resize spliced in straight after the
+    stretch, ahead of Auto's sharpen)."""
+    run_id = _big(client, built_library, basename="resizefirst")
+    bad = _enc([*FLAT_RECIPE, _HALF, _SHARPEN])
+    info = _info(client, run_id, bad)
+    assert info["available"] is False
+    assert info["fixable"] is True
+    assert "Resize" in info["reason"]
+    assert client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe",
+                      params={"recipe": bad}).status_code == 409
+
+
+def test_a_resize_at_the_end_is_fine(client, built_library):
+    """…and with the Resize last — where the Add menu now puts it — nothing runs
+    on the resized grid, so the 1:1 window is the export's own pixels."""
+    run_id = _big(client, built_library, basename="resizelast")
+    info = _info(client, run_id, _enc([*FLAT_RECIPE, _SHARPEN, _HALF]))
+    assert info["reason"] is None
+    assert info["available"] is True
+
+
 @pytest.mark.parametrize("geom", [
     {"uid": "cr", "id": "geometry.crop", "enabled": True, "params": {}},
     {"uid": "cr", "id": "geometry.crop", "enabled": True,

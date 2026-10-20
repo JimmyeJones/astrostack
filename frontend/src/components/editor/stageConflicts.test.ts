@@ -17,6 +17,9 @@ const SPECS: Record<string, EditOp> = {
   "tone.stretch": spec("tone.stretch", "any", true),
   "tone.saturation": spec("tone.saturation", "nonlinear"),
   "tone.scnr": spec("tone.scnr", "any"),
+  "detail.sharpen": spec("detail.sharpen", "nonlinear"),
+  "geometry.resize": spec("geometry.resize", "nonlinear"),
+  "geometry.crop": spec("geometry.crop", "nonlinear"),
 };
 
 function op(id: string, uid: string, enabled = true): OpInstance {
@@ -170,6 +173,24 @@ describe("insertOnCorrectSide", () => {
   it("appends to an empty pipeline", () => {
     const next = insertOnCorrectSide([], op("background.subtract", "bg"), SPECS);
     expect(next.map((o) => o.uid)).toEqual(["bg"]);
+  });
+
+  it("puts a Resize last, behind Auto's sharpen, not just after the stretch", () => {
+    // Every op after a Resize runs on the resized grid: spliced in after the
+    // stretch it made the export sharpen 1/scale wider than Auto chose.
+    const ops = [op("tone.stretch", "s"), op("tone.saturation", "sat"),
+                 op("detail.sharpen", "sh")];
+    const next = insertOnCorrectSide(ops, op("geometry.resize", "rz"), SPECS);
+    expect(next.map((o) => o.uid)).toEqual(["s", "sat", "sh", "rz"]);
+  });
+});
+
+describe("moveToCorrectSide — geometry", () => {
+  it("moves a geometry op sitting before the stretch to the end", () => {
+    const ops = [op("geometry.crop", "cr"), op("tone.stretch", "s"),
+                 op("detail.sharpen", "sh")];
+    const next = moveToCorrectSide(ops, "cr", SPECS);
+    expect(next.map((o) => o.uid)).toEqual(["s", "sh", "cr"]);
   });
 });
 
