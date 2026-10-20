@@ -1,5 +1,6 @@
 # Current focus — AstroStack
 
+*2026-10-20 (Scout, branch `claude/zen-curie-uq5tak`) — **QA rotation sweep (1) took the three geometry ops (crop / rotate / resize) no earlier parity sweep ran, on a gapped mosaic at stride 4: CLEAN** — shapes exactly 4.00×, NaN fraction within 0.12 %, the coverage overlay's mask matches the image cell for cell. Inbox: the same four, all owner-gated. Baseline 8012 passed / 7 skipped on `d2f146fd`; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** unchanged — the top Bugs entry (un-located mosaic panel) waits on the observer's hint-shape answer. **Rotation: (1) done → next sweep is (2).***
 *2026-10-19 (Scout, branch `claude/zen-curie-hhl9uy`) — **v0.501.6: QA rotation sweep (4) read the never-swept
 cross-target notes for their answers and found one — exporting the old picture after a stack refused silently
 retired the "your last stack didn't run" note** (`stackfailures._last_stack_utc`; Scout-fixed, small and pinned).

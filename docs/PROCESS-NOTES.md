@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-10-19 (Scout, branch `claude/zen-curie-uq5tak`) — QA rotation sweep (1), scale-dependent preview↔export parity, on the three **geometry** ops no earlier sweep (1) ran: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+*(Docs only — the honest outcome. **Baseline:** local suite **8012 passed / 7 skipped** on `d2f146fd` (xdist `-n 4`, BLAS capped, 17m58s); no open PRs. **Inbox**
+(`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none updated
+since 2026-10-12 — nothing new owed. **Dogfood `--mosaic`: CLEAN** — Auto trim 7.9 %, nothing overflowing, no
+console errors.)*
+
+*__Sweep (1), new angle.__ Earlier (1) sweeps covered every pixel-sized op, the composed Auto chain,
+`background.subtract` and `stars.boost_nebula`; none ran `geometry.crop` / `geometry.rotate` / `geometry.resize`
+on a gapped mosaic, though each reshapes the canvas every later op's `scaled_px` is measured against. Scratch
+probe (not committed): a 3600×4800 mosaic-shaped canvas (gradient sky, nebula, 2,500 stars, two ragged NaN corners
+and a missing-panel notch), proxy stride **4**, real `apply_recipe` both ways. Recipes: stretch→rotate 12°
+(expand on / off); stretch→rotate 30°→sharpen→stars.reduce; stretch→resize 0.5→sharpen→stars.reduce;
+stretch→crop→resize 2.0. **Every output shape is exactly 4.00× the preview's on both axes** (e.g. 4519×5444 vs
+1130×1361), the uncovered (NaN) fraction agrees to **≤0.0012** (rotate's order-1 NaN fringe is one pixel at either
+resolution), and tone percentiles 5/50/95 agree within 0.002–0.005 on the geometry-only recipes. The remaining gaps
+come from the downstream sharpen/stars.reduce, and they are present just as large **without** any geometry op in front
+(isolated: export p95 0.779 vs preview 0.691 at default radius 2 / stride 4), i.e. the existing captioned
+`sharpen_understates_on_proxy` / `star_reduce_differs_on_proxy` class, not a geometry interaction — a resize shrinks
+the export and the proxy by the same factor, so `proxy_scale` stays true for every later op. **Overlay alignment:**
+`apply_geometry_to_map` on the coverage map vs the rendered image's NaN mask, for rotate 17° and crop→rotate −40°
+→resize 0.6 at stride 1 and 4: shapes equal, **0 mismatched cells**. Not yet run in a sweep (1): the full-size loupe
+on a recipe whose geometry op sits *after* its background pass (the allowed order) on a mosaic.*
+
 ## 2026-10-19 (Scout, branch `claude/zen-curie-hhl9uy`) — QA rotation sweep (4), the routers' *answers*, on the never-read cross-target notes: one bug, Scout-fixed (v0.501.6)
 
 *Baseline: local suite **8004 passed / 7 skipped** on `b444b8cc` (xdist `-n 4`, BLAS capped, 14m45s); no open
