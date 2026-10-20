@@ -2790,7 +2790,7 @@ off by default. Don't re-file it.)*
 
 ### UX & polish
 - Mobile layout polish across the newer pages (Calibration, Combine). (S)
-- Better empty-states and error messages on long-running jobs. (S)
+- Better empty-states and error messages on long-running jobs. (S) *(Full disk / permission refusal done v0.501.7.)*
 
 ### Performance (only with a measurement)
 
@@ -3613,6 +3613,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.501.7 **A job that hit a full disk (or a dataset quota) or a permission refusal said only `[Errno 28] No space left on device: …` — it now says what happened in plain words, and a full disk links to Storage** (`jobs.classify_job_error` → `disk_full` / `no_permission`, `Jobs.friendlyJobError`)
 - ✅ v0.501.6 **Exporting the old picture (or a channel combine) after a stack refused silently withdrew "this target stopped producing pictures" while the target still could not stack — only a genuine stack run retires the note now** (`stackfailures._last_stack_utc`, Scout rotation sweep (4))
 - ✅ v0.501.5 **A malformed recipe body (`{"ops": 5}`, `"version": Infinity`) 500'd recipe save/preview, and a `NaN` stretch in History's Adjust save silently re-baked the picture at full stretch — both now handled** (`recipe.recipe_from_dict`, `stack.save_stack_preview`)
 - ✅ v0.501.4 **A `nan`/`inf` query param 500'd the Stack form's estimate and the editor's full-size loupe — the estimate now judges its sizing knobs by the submit path's own rule (422), and a NaN click looks at the centre** (`stack.stack_estimate` → `validate_stack_options`, `editor._loupe_window`)
