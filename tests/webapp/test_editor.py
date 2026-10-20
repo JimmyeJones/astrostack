@@ -3375,6 +3375,36 @@ def test_highlight_suggestion_solves_against_the_users_own_stretch(
     assert seen_params[0]["highlights"] == 0.0
 
 
+def test_highlight_suggestion_measures_per_native_pixel(client, solved_library,
+                                                        monkeypatch):
+    # The solver's flatness tests are one-pixel differences; on a decimated
+    # proxy one pixel spans `proxy_scale` native ones, so the endpoint must hand
+    # the proxy's own step down or a mosaic gets a weaker button than a single
+    # field (Scout 2026-10-20, sweep (1)).
+    import seestack.edit.highlights as hl_mod
+    import webapp.routers.editor as editor_mod
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, basename="hilite_scale")
+    real_get_proxy = editor_mod.get_proxy
+    monkeypatch.setattr(editor_mod, "get_proxy",
+                        lambda *a, **k: (real_get_proxy(*a, **k)[0], 3.0))
+    captured = {}
+    real_suggest = hl_mod.suggest_highlight_protect
+
+    def _spy(linear, restretch, proxy_scale=1.0):
+        captured["proxy_scale"] = proxy_scale
+        return real_suggest(linear, restretch, proxy_scale=proxy_scale)
+
+    monkeypatch.setattr(hl_mod, "suggest_highlight_protect", _spy)
+    q = _enc({"ops": [{"id": "tone.stretch", "uid": "s1", "params": {}}]})
+    r = client.get(
+        f"/api/targets/{safe}/stack-runs/{rid}/editor/highlight-suggestion"
+        f"?recipe={q}&uid=s1")
+    assert r.status_code == 200
+    assert captured["proxy_scale"] == 3.0
+
+
 def test_highlight_suggestion_unknown_uid_falls_back(client, solved_library):
     # A stale uid must not 404 — it drops the stretch op(s) and measures the
     # linear proxy against the op's defaults, exactly like the sibling endpoints.

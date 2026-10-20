@@ -187,3 +187,84 @@ def test_local_gradient_ignores_non_finite_neighbours():
     assert np.isfinite(grad).all()
     assert grad[0, 0] == pytest.approx(0.0)      # flat corner stays flat
     assert grad[2, 2] > 3.0                      # the real step is still seen
+
+
+# --- the editor proxy's step (Scout 2026-10-20, QA rotation sweep (1)) ---------
+#
+# The suggestion is measured on the decimated editor proxy, whose step is 2 on a
+# single S30 field and 3+ on a mosaic. Both flatness tests compare a one-pixel
+# difference against a fixed threshold, and one proxy pixel spans ``step`` native
+# ones, so the same core read ``step``× steeper there: the button weakened as the
+# canvas grew (0.40 at step 3 for a core whose export needed 1.00) and went
+# silent on a big canvas. ``proxy_scale`` puts the measurement per native pixel.
+
+
+def _proxy_case(noise):
+    """An exponential bright core on a soft disk, at native resolution, through
+    the real ``tone.stretch`` op at its defaults (the Auto recipe's stretch)."""
+    from seestack.edit.registry import EditContext, get_op
+
+    h, w = 600, 900
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    r = np.hypot(yy - h / 2, xx - w / 2)
+    rng = np.random.default_rng(0)
+    img = (0.05 + 0.02 * np.exp(-r / 100.0) + 0.3 * np.exp(-r / 12.0)
+           + rng.normal(0.0, noise, (h, w)))
+    img = np.repeat(img.astype(np.float32)[..., None], 3, axis=2)
+    spec = get_op("tone.stretch")
+    params = dict(spec.defaults())
+
+    def suggest(step, **kw):
+        lin = np.ascontiguousarray(img[::step, ::step])   # build_proxy's decimation
+        ctx = EditContext(proxy_scale=float(step), is_proxy=step > 1)
+        return hl.suggest_highlight_protect(
+            lin, lambda p: spec.apply(lin, {**params, "highlights": p}, ctx), **kw)
+
+    return suggest
+
+
+def test_the_suggestion_does_not_shrink_with_the_proxy_step():
+    """The same core gets the same button on a single field's proxy and on a
+    mosaic's: within two slider stops of the native answer at steps 2–4 (it
+    reads 0.35 / 0.35 / 0.30 against 0.40). Before the fix this read 0.05, then
+    nothing at all."""
+    suggest = _proxy_case(noise=0.0005)
+    native = suggest(1)
+    assert native is not None
+    stop = hl._strength_grid()[0]
+    for step in (2, 3, 4):
+        found = suggest(step, proxy_scale=float(step))
+        assert found is not None, f"no suggestion at proxy step {step}"
+        assert abs(found.strength - native.strength) <= 2 * stop + 1e-9, (
+            step, found.strength, native.strength)
+
+
+def test_a_noisy_core_still_gets_a_suggestion_on_a_mosaic_proxy():
+    """With visible grain the per-pixel test is noisier, but a decimated proxy
+    must still offer at least what the native measurement does, not fall
+    silent (it returned ``None`` at every step ≥ 2 before the fix)."""
+    suggest = _proxy_case(noise=0.004)
+    native = suggest(1)
+    assert native is not None
+    for step in (2, 3, 4):
+        found = suggest(step, proxy_scale=float(step))
+        assert found is not None, f"no suggestion at proxy step {step}"
+        assert found.strength >= native.strength
+
+
+def test_proxy_scale_one_is_the_unscaled_measurement():
+    """The export / an undecimated proxy is byte-for-byte what it always was."""
+    img = _target()
+    assert hl.suggest_highlight_protect(img, _stf(img)) == \
+        hl.suggest_highlight_protect(img, _stf(img), proxy_scale=1.0)
+    g = hl._local_gradient(luminance_of(img))
+    assert hl._per_native_px(g, 1.0) is g
+    assert hl._per_native_px(g, float("nan")) is g
+    assert np.allclose(hl._per_native_px(g, 3.0), g / 3.0)
+
+
+def luminance_of(img):
+    from seestack.edit.registry import luminance
+
+    return luminance(img)
+
