@@ -300,7 +300,7 @@ class ASTAPSolver:
         #   -wcs            write a .wcs sidecar
         #   -update         also update FITS header (we DON'T want this — keep raws untouched)
         radius = radius_deg if radius_deg is not None else self.search_radius_deg
-        with tempfile.TemporaryDirectory(prefix="astrostack-solve-") as td:
+        with tempfile.TemporaryDirectory(prefix=SOLVE_SCRATCH_PREFIXES[0]) as td:
             # Same *name* as the source: ASTAP derives the sidecar names from the
             # file it is given, and the log tail reads better when it names the
             # frame the user recognises.
@@ -389,6 +389,57 @@ class ASTAPSolver:
             solved=solved,
             log_tail=log_tail,
         )
+
+
+# Prefixes of the scratch directories a solve creates under the system temp dir
+# (``ASTAPSolver.solve`` and ``bootstrap``'s deep-stack solve). Each holds a full
+# copy of a raw sub plus ASTAP's sidecars.
+SOLVE_SCRATCH_PREFIXES = ("astrostack-solve-", "astrostack-bootstrap-")
+# A scratch dir untouched for this long belongs to no live solve (the longest
+# solve timeout a user can set is far shorter); it was orphaned by a worker that
+# was killed before its ``TemporaryDirectory`` could clean up.
+STALE_SOLVE_SCRATCH_AGE_S = 6 * 3600.0
+
+
+def sweep_stale_solve_scratch(
+    tmp_root: str | os.PathLike[str] | None = None,
+    *,
+    max_age_s: float = STALE_SOLVE_SCRATCH_AGE_S,
+    now: float | None = None,
+) -> int:
+    """Remove orphaned solve scratch dirs from the temp dir; return how many.
+
+    A worker killed mid-solve (the OOM killer) never runs its
+    ``TemporaryDirectory`` cleanup, so its copy of the sub stays in ``/tmp`` —
+    the container's own layer, which only a recreate clears. Only our own
+    prefixed, non-symlink directories directly under ``tmp_root`` that are older
+    than ``max_age_s`` are touched; the copies inside are scratch, never a raw.
+    """
+    import time
+
+    root = Path(tmp_root) if tmp_root is not None else Path(tempfile.gettempdir())
+    cutoff = (time.time() if now is None else now) - max_age_s
+    removed = 0
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        if not entry.name.startswith(SOLVE_SCRATCH_PREFIXES):
+            continue
+        try:
+            if entry.is_symlink() or not entry.is_dir():
+                continue
+            if entry.stat().st_mtime > cutoff:
+                continue
+        except OSError:
+            continue
+        shutil.rmtree(entry, ignore_errors=True)
+        if not entry.exists():
+            removed += 1
+    if removed:
+        log.info("Removed %d orphaned solve scratch dir(s) from %s", removed, root)
+    return removed
 
 
 def _is_fatal_solve_error(log_tail: str) -> bool:

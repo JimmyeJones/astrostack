@@ -114,7 +114,7 @@ def test_it_judges_the_pinned_cover_not_a_newer_run_in_history(client,
     """A pinned cover is the picture the Library card, the hero and the share
     sheet show, even with a newer run in History — the owner's own pin, or the
     one Reprocess-all places to keep a hand-finished picture on the wall. Until
-    v0.502.10 the scan judged the newest run instead, so a pinned over-trimmed
+    v0.502.12 the scan judged the newest run instead, so a pinned over-trimmed
     picture never reached the Dashboard while the editor called it stale."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     old = _make_run(solved_library, safe, basename="old", h=80, w=100,

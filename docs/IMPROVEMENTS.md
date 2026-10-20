@@ -517,23 +517,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
   scratchpad (`wcs_repro.py`).)_
 
-- **🟡 (Scout 2026-10-20, QA rotation sweep (3)) — one killed QC/solve pool worker throws away the rest of the
-  pass for that target, and leaks a scratch copy of each in-flight sub into the container's `/tmp`.**
-  *(Pillar: autonomy — PRIORITY 2; size **S**; severity low — nothing is lost or mis-marked; the frames stay
-  "never tried" and a later pass solves them. Confidence: **reproduced** with a stub ASTAP and a SIGKILLed
-  worker; occurrence on the owner's box **unmeasured** — gate: an observer `/api/logs` line reading
-  "process pool was terminated abruptly".)* `scanner._map_jobs` catches the `BrokenProcessPool` per future,
-  so once any worker dies (the OOM killer, given this app's OOM history) **every** remaining future fails at
-  once: real `run_qc_and_solve`, 16 subs, 4 workers, one worker killed 2 s in → `solve_ok` **4 of 16**, 12 logged
-  "Solving job failed". Those 12 get no DB write (correct), but the scan only re-runs `touched_names`, so they
-  wait for the next new sub on that target or a manual re-solve — and a walk-away auto-stack in between would
-  stack 4. The executor also terminates the healthy workers, so **all four** `astrostack-solve-*` dirs stayed in
-  `/tmp`, each a full copy of a raw sub plus sidecars (`TemporaryDirectory` cleanup never ran); `/tmp` is the
-  container layer, cleared only on recreate. `incoming/` untouched. **Fix direction:** in `_map_jobs`, on
-  `BrokenProcessPool` re-submit the not-yet-finished args once to a fresh pool (then give up as now); sweep
-  stale `astrostack-solve-*`/`astrostack-bootstrap-*` dirs older than the solve timeout at app start. Pin with
-  a worker that `os._exit`s on one arg.
-
 - **🟡 (Scout 2026-10-20, QA rotation sweep (4)) — a target that fails inside *Reprocess all* never reaches
   "this target stopped producing pictures" (`/api/stack-failures`).** *(Pillar: autonomy/friendliness —
   PRIORITY 2; size **S**; severity low — the old picture stays on the wall and the batch's own Jobs card names
@@ -3629,7 +3612,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
-- ✅ v0.502.10 **"Some of your pictures were trimmed too far" judges the picture on the wall — a pinned cover — not the newest run in History** (`overtrim.scan_over_trimmed` → `finishedpicture.displayed_picture_run`, Scout rotation sweep (4))
+- ✅ v0.502.12 **"Some of your pictures were trimmed too far" judges the picture on the wall — a pinned cover — not the newest run in History** (`overtrim.scan_over_trimmed` → `finishedpicture.displayed_picture_run`, Scout rotation sweep (4))
+- ✅ v0.502.11 **One killed QC/solve pool worker no longer throws away the rest of the pass — the jobs the broken pool took down are re-run once in a fresh pool of half the workers; and the orphaned `astrostack-solve-*`/`astrostack-bootstrap-*` scratch copies a killed worker leaves in `/tmp` are swept at app start** (`scanner._map_jobs`, `astap.sweep_stale_solve_scratch`; full text in SHIPPED.md)
 - ✅ v0.502.9 **Moon & Sun sharpening was about half as strong on a drizzled still — `SHARPEN_SIGMA_PX` counted the ×1.5 still's pixels, so every preset lifted crater-scale detail 46–63 % as much as on the camera-sized still; the radius now follows the still's `drizzle_scale`, at stack time and on every re-sharpen/crop/uncrop** (`detail.sharpen_still(scale=)`, `webapp.video._drizzle_scale`, Scout rotation sweep (4); full text in SHIPPED.md)
 - ✅ v0.502.8 **Re-opening an editor export in the editor sized every "From your stars" suggestion and Auto's sharpen radius as if its source had not drizzled (⅔ of the star on an export of a ×1.5 drizzle) — an export is now read on its source's grid, walked down the export chain, times its own recipe's resize** (`editor.run_grid_supersampling`, `master_fwhm_for_run(…, runs)`; full text in SHIPPED.md)
 - ✅ v0.502.7 **Every "From your stars" editor suggestion (star size, sharpen radius, PSF σ) and Auto's sharpen radius was about half the star it aimed at — QC's half-res `fwhm_px` fed to master-pixel ops; it is now put on the edited run's master grid (×2 green decimation × the run's drizzle)** (`metrics.frame_fwhm_to_master_px`, `editor.master_fwhm_for_run`, suggestion endpoints' optional `run_id`; full text in SHIPPED.md)
