@@ -2,6 +2,55 @@
 
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-9xjd2t`) — the Moon/Sun stacker: sub-pixel alignment, then drizzle
 
+### v0.502.0 — ⭐ owner ask: the Moon/Sun stacker drizzles when it is worth it
+
+**What.** New `seestack/video/drizzle.py`. When asked (`LuckyOptions.drizzle`, `VideoStackRequest.drizzle`; off
+when omitted so an older client gets the picture it always got — the Moon & Sun page ticks it by default), pass
+2 of `lucky.stack_video` feeds a `LuckyDrizzle` canvas ×1.5 the capture beside the ordinary accumulator. On a raw
+CFA stream it is a **Bayer drizzle**: each pixel deposits only its own native colour (read back out of the
+debayered frame — `bilinear_debayer` keeps every native sample, pinned for all four phases), at the frame's
+measured shift; `iter_frames(cfa=…)` reports the one phase it debayered with. At ×1.5 each 2×2-cell position lands
+on a stride-3 output lattice with one shared fractional offset, so a frame is 16 strided slice-adds, not a
+scatter (bit-identical to a `bincount` scatter, ~7× faster: 0.08 s per 1080p raw frame, 0.16 s colour).
+**"Worth it"** is decided after pass 2 (`drizzle.decide`): ≥ `LUCKY_DRIZZLE_MIN_FRAMES` (200, the engine's
+"typically 200+") stacked, and the measured shifts' worst-axis sub-pixel spread (`autodrizzle.dither_spread_px`)
+≥ `LUCKY_DRIZZLE_MIN_SPREAD_PX` (0.15 — below deep-sky's 0.2 because the disk aligner leans a little towards
+whole pixels: phases filling the pixel read 0.20–0.25, a still disk 0.00, a ±0.15 px wobble 0.06). What is known
+up front (`drizzle.planned`: off, unaligned, too few kept, canvas over 12 MP) never builds the canvas. Declined →
+the plain stack, **bit-identical** to `drizzle=False` (pinned). The result carries `drizzle_scale` and a one-line
+`drizzle_note` ("Drizzled to 1.5× the camera's resolution using 412 frames — …" / "Kept at camera resolution —
+…") through `meta.json` (additive, defaulted) to `VideoResultOut` and the page; the running job's line says
+"…and drizzling them for extra resolution if they moved enough (adds about N min)" (`stack_progress_message`).
+**Measured.** 220-frame raw `GBRG` fixture, ±3 px jitter, detail finer than the Bayer cell: correlation with the
+true detail 0.84 plain → 0.98 drizzled; with exact shifts, RMSE against the scene 0.140 → 0.050.
+**Found on the way:** v0.501.13 (the aligner only ever measured whole pixels on a raw capture, so the drizzle
+saw no sub-pixel variety).
+**Tests.** `tests/test_video_lucky_drizzle.py`, `tests/webapp/test_video_drizzle_api.py`, `MoonSun.test.tsx`.
+
+**The spec as filed:**
+
+- **⭐ OWNER-ASKED (2026-10-20) — the Moon/Sun stacker drizzles when it is worth it ("use drizzles when
+  possible").** He reports the solar stacker is now fixed (v0.493.17: colour, alignment, frame choice) and wants
+  the same resolution gain the deep-sky side got in v0.494.0. Today `seestack/video/lucky.py::stack_video`
+  shifts each keeper with `_shift_frame` onto a sensor-sized `WeightedSumAccumulator` — the module docstring
+  says "no drizzle" outright. **Why it is worth more here than on deep-sky:** a lucky-imaging run keeps
+  hundreds of frames (30 % of up to 1,500), and seeing jitters every one sub-pixel, so the two "worth it" tests
+  in `seestack/stack/autodrizzle.py` (depth per output pixel, sub-pixel spread on both axes) are normally met;
+  and his captures are **raw CFA streams** (`ffmpeg.source_is_cfa_mosaic`), so a Bayer drizzle — dropping
+  each kept frame's R/G/B sites straight onto a finer RGB grid at the measured disk shift instead of
+  debayering first — recovers the resolution the debayer interpolates away.
+  **Spec:** (1) the same answer as deep-sky — **"Auto, when worth it"** — reusing `autodrizzle`'s ideas, not a
+  new knob: drizzle ×1.5 when the kept count and the measured shift spread (from the per-frame shifts pass 2
+  already measures) clear the bar; otherwise stack as today; (2) the Moon/Sun result says which it did in one
+  plain sentence ("Sharpened ×1.5 using 412 frames" / "Kept at camera resolution — too few frames moved"),
+  and the stack form keeps a way to force it off; (3) the owner's 2026-10-13 answer applies: say how long
+  it will take, then run it (lucky stacks are minutes, so one line on the running job is enough);
+  (4) stays two-pass streaming and memory-flat — the finer canvas is one ×1.5² accumulator plus weights,
+  never held frames. **Tests on owner-shaped data:** the lossless CFA fixture in
+  `tests/test_video_cfa_mosaic.py` with known sub-pixel jitter must come back measurably sharper (spot depth
+  / MTF on a resolution edge) than the plain path, and the frame-count and no-motion cases must decline.
+  Size **M–L**. Priority 4 (image quality) on a direct owner ask, hence ⭐.
+
 ### v0.501.13 — the Moon/Sun disk aligner measures sub-pixel shifts on a raw capture instead of whole pixels
 
 **What.** `seestack/video/lucky.py::_measure_disk_shift` refines the disk-centre shift with a correlation of two

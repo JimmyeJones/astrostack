@@ -3382,6 +3382,11 @@ export interface VideoResult {
   // sensor mosaic as a fine mesh, and re-stacking would fix it. Optional: an
   // older backend sends nothing and nothing is claimed.
   colour_stale?: boolean;
+  // 1 = camera resolution; 1.5 = the stack drizzled onto a finer grid, with
+  // `drizzle_note` the one sentence saying which and why. Optional: an older
+  // backend sends neither and nothing is claimed.
+  drizzle_scale?: number;
+  drizzle_note?: string;
 }
 
 export interface VideoCapture {
@@ -4841,6 +4846,9 @@ export const api = {
       // Omitted by an older client, which then gets exactly the picture it
       // always got.
       sharpen?: number;
+      // Drizzle onto a finer grid when enough frames moved sub-pixel. Omitted
+      // (an older client) means off — the picture it always got.
+      drizzle?: boolean;
     },
   ) => req<{ job_id: string }>(`/api/videos/${encodeURIComponent(id)}/stack`, {
     method: "POST", body: JSON.stringify(body),

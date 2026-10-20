@@ -95,7 +95,7 @@ describe("MoonSunView", () => {
     fireEvent.click(screen.getByRole("button", { name: /Stack video/i }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("Lunar_video", {
       keep_percent: Number(DEFAULT_KEEP), file_name: "clip.mp4", crop: false,
-      sharpen: Number(DEFAULT_SHARPEN),
+      sharpen: Number(DEFAULT_SHARPEN), drizzle: true,
     }));
   });
 
@@ -481,8 +481,39 @@ describe("cropping the empty sky", () => {
     fireEvent.click(screen.getByRole("button", { name: /Stack video/i }));
     await waitFor(() => expect(post).toHaveBeenCalledWith("Lunar_video", {
       keep_percent: Number(DEFAULT_KEEP), file_name: "clip.mp4", crop: true,
-      sharpen: Number(DEFAULT_SHARPEN),
+      sharpen: Number(DEFAULT_SHARPEN), drizzle: true,
     }));
+  });
+
+  it("lets the owner turn the drizzle off before stacking", async () => {
+    vi.spyOn(client.api, "listVideoCaptures")
+      .mockResolvedValue(list({ captures: [capture()] }));
+    const post = vi.spyOn(client.api, "stackVideoCapture")
+      .mockResolvedValue({ job_id: "j1" });
+    renderView();
+    const box = await waitFor(() =>
+      screen.getByRole("checkbox", { name: /Drizzle for extra resolution/i }));
+    expect(box).toBeChecked();
+    fireEvent.click(box);
+    fireEvent.click(screen.getByRole("button", { name: /Stack video/i }));
+    await waitFor(() => expect(post).toHaveBeenCalledWith("Lunar_video", {
+      keep_percent: Number(DEFAULT_KEEP), file_name: "clip.mp4", crop: false,
+      sharpen: Number(DEFAULT_SHARPEN), drizzle: false,
+    }));
+  });
+
+  it("says which resolution the stack chose, and nothing for an older still", async () => {
+    const note = "Drizzled to 1.5× the camera's resolution using 412 frames — the "
+      + "small shifts between them let the stack recover finer detail than any one frame holds.";
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [
+        capture({ result: result({ drizzle_scale: 1.5, drizzle_note: note }) }),
+        capture({ id: "Old_video", label: "Old", result: result() }),
+      ],
+    }));
+    renderView();
+    await waitFor(() => expect(screen.getByText(note)).toBeInTheDocument());
+    expect(screen.getAllByText(/Drizzled to|Kept at camera resolution/)).toHaveLength(1);
   });
 
   it("reports a cropped still instead of offering to crop it again", async () => {
