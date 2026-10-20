@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  destinationAdvice, normalizeTargetName, targetNameForFolder,
+  destinationAdvice, destinationFolders, normalizeTargetName, targetNameForFolder,
   type UploadDestination,
 } from "./uploadDestination";
 
@@ -124,5 +124,12 @@ describe("destinationAdvice", () => {
     const a = destinationAdvice("M 31", [])!;
     expect(a.tone).toBe("info");
     expect(a.fixFolder).toBeUndefined();
+  });
+});
+
+describe("destinationFolders", () => {
+  it("lists a folder registered under two targets once, busiest order kept", () => {
+    const dup: UploadDestination = { target: "M 31 (2)", folder: "M 31_sub", n_frames: 40 };
+    expect(destinationFolders([M31, NGC, dup])).toEqual(["M 31_sub", "NGC 6888"]);
   });
 });

@@ -7,7 +7,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type UploadResult } from "../api/client";
-import { destinationAdvice, type UploadDestination } from "../uploadDestination";
+import {
+  destinationAdvice, destinationFolders, type UploadDestination,
+} from "../uploadDestination";
 
 // Match the server's accepted FITS suffixes (seestack.io.ingest.FITS_SUFFIXES),
 // plus the .zip the server unpacks for us.
@@ -379,7 +381,7 @@ export function UploadFits({ compact = false }: { compact?: boolean }) {
         <Autocomplete
           label="Target folder (optional)"
           placeholder="e.g. M 31_sub"
-          data={dests.map((d) => d.folder)}
+          data={destinationFolders(dests)}
           value={target}
           onChange={setTarget}
           w={{ base: "100%", xs: 200 }}

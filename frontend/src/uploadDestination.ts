@@ -72,6 +72,17 @@ export function normalizeTargetName(name: string): string {
   return name.toLowerCase().replace(/[\s_-]+/g, "");
 }
 
+/** The suggestion list for the "Target folder" box: each folder once.
+ *
+ *  One folder can come back on two rows — its subs registered under two library
+ *  targets (a duplicate target minted on a busy scan) — and Mantine's
+ *  Autocomplete throws on a repeated option, taking the whole page down with
+ *  "Duplicate options are not supported". Keeps the first (busiest) row's
+ *  order. */
+export function destinationFolders(destinations: UploadDestination[]): string[] {
+  return [...new Set(destinations.map((d) => d.folder))];
+}
+
 function plural(n: number, one: string, many: string): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`;
 }
