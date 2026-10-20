@@ -4985,7 +4985,8 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
             return None
         proj = Project.open(lib.target_dir(entry))
         try:
-            run = next((r for r in proj.iter_stack_runs() if r.id == run_id), None)
+            runs = list(proj.iter_stack_runs())
+            run = next((r for r in runs if r.id == run_id), None)
             if run is None or not run.fits_path or not Path(run.fits_path).exists():
                 return None
             # Never write over a look somebody *saved* — a condition of the owner
@@ -5020,14 +5021,14 @@ def _auto_edit_process_run(lib: Library, safe: str, run_id: int,
             prefs = _read_auto_preferences(lib)
             recipe = build_auto_recipe_for_run(
                 proj.project_dir, run, median_fwhm, prefs=prefs,
-                auto_crop=auto_crop)
+                auto_crop=auto_crop, runs=runs)
             proj.set_meta(f"{RECIPE_META_PREFIX}{run_id}", recipe.to_json())
             # Stamp a plain-language "what Auto did (and why)" note so the History
             # Info panel can explain this silently-applied edit — the same reasoning
             # the interactive editor shows when a user clicks Auto themselves.
             try:
                 analysis = build_auto_analysis_for_run(
-                    proj.project_dir, run, median_fwhm, auto_crop=auto_crop)
+                    proj.project_dir, run, median_fwhm, auto_crop=auto_crop, runs=runs)
                 note = presets_mod.auto_edit_summary(recipe, analysis)
             except Exception:  # noqa: BLE001 — the note is a nicety, never fatal
                 note = presets_mod.auto_edit_summary(recipe, None)

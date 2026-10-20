@@ -82,21 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟡 (Scout 2026-10-20, QA rotation sweep (2) on v0.502.7) — re-opening an editor *export* in the editor
-  sizes every "From your stars" suggestion and Auto's sharpen radius as if its source had not drizzled.**
-  *(Pillar: editor — PRIORITY 1; size **S**; severity low — on an export of a ×1.5 drizzle each star-derived
-  number is ⅔ of the star, the class v0.502.7 closed for stacking runs; nothing is lost. Confidence:
-  **reproduced** through the real `webapp.routers.editor.master_fwhm_for_run`.)* An export's run row stores
-  `{"editor_recipe", "derived_from", "display_space"}` (`pipeline.py`, the editor-export `add_stack_run`) — no
-  `drizzle`/`drizzle_scale` — so `canvas_supersampling` reads 1.0. Scratch repro, QC median 2.0 px: source run
-  (`drizzle_scale` 1.5) → **6.0** master px; its export → **4.0**. `auto_drizzle` is on for unattended stacks, so
-  the source is often drizzled. A `geometry.resize` in the export's recipe moves the grid again (×`scale`).
-  **Fix direction:** in `_suggestion_fwhm` / `build_auto_*_for_run` resolve a derived run to its source
-  (`webapp.run_options.derived_from_run_id`, the walk `derived_light` already does for chained exports) for the
-  drizzle, and multiply by the export recipe's `geometry.resize` scale. Pin with an export-of-a-drizzle case.
-  The mosaic side of v0.502.7 holds: a mosaic canvas is native scale and a memory step-down's lowered
-  `drizzle_scale` is the one persisted (`asdict(eff)`), so no per-panel divergence.
-
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
@@ -3610,6 +3595,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.8 **Re-opening an editor export in the editor sized every "From your stars" suggestion and Auto's sharpen radius as if its source had not drizzled (⅔ of the star on an export of a ×1.5 drizzle) — an export is now read on its source's grid, walked down the export chain, times its own recipe's resize** (`editor.run_grid_supersampling`, `master_fwhm_for_run(…, runs)`; full text in SHIPPED.md)
 - ✅ v0.502.7 **Every "From your stars" editor suggestion (star size, sharpen radius, PSF σ) and Auto's sharpen radius was about half the star it aimed at — QC's half-res `fwhm_px` fed to master-pixel ops; it is now put on the edited run's master grid (×2 green decimation × the run's drizzle)** (`metrics.frame_fwhm_to_master_px`, `editor.master_fwhm_for_run`, suggestion endpoints' optional `run_id`; full text in SHIPPED.md)
 - ✅ v0.502.6 **"My life list" judged a mosaic by one frame's circle at its middle — M20 grey on his Lagoon 2×2, M87/M99 on a Markarian 3×3, M110 on an M31 2×2, and an object in an L-shaped mosaic's never-shot quadrant ticked — it now tests each object against the panels themselves** (registry `panel_footprint`, `library._panel_footprint`, `lifelist.footprint_covers`; full text in SHIPPED.md)
 - ✅ v0.502.5 **One target's unreadable preview (a stale mount, EIO, EACCES) 500'd "My best pictures" and its slideshow for every target — it now drops just that target, as the other gallery surfaces already did** (`gallery._file_answers`, `_run_has_preview`, Scout rotation sweep (4)).

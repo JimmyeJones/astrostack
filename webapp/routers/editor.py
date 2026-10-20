@@ -55,6 +55,7 @@ from webapp import edit_fit_cache
 from webapp import edit_resume_cache
 from webapp import stale_crop
 from webapp.field_fulls import canvas_supersampling
+from webapp.run_options import derived_from_run_id, parse_run_options
 from webapp.schemas import EditOpOut, editor_ops_schema
 
 router = APIRouter(tags=["editor"])
@@ -371,7 +372,7 @@ def _auto_measure_grain_ratio(project_dir: Path, run, scale: float) -> float | N
 
 def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
                               prefs: dict | None = None,
-                              auto_crop: bool = True) -> Recipe:
+                              auto_crop: bool = True, runs=None) -> Recipe:
     """The one-click Auto recipe for a run, built from its own proxy — the same
     logic the ``…/editor/auto`` endpoint serves, factored out so the one-click
     "Process target" job can chain an auto-edit onto the stack it just produced
@@ -393,12 +394,13 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
 
     ``median_fwhm`` is the target's per-frame QC median (``Project.median_fwhm``,
     half-resolution green pixels); it is put on this run's master grid here
-    (:func:`master_fwhm_for_run`) before it sizes the sharpen radius."""
+    (:func:`master_fwhm_for_run`) before it sizes the sharpen radius; ``runs``
+    (the target's stack runs) lets an editor export find its source's grid."""
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     is_mosaic = _run_is_mosaic(run, load=True)
     trim = _trim_rect_for_run(run) if is_mosaic else None
     return presets_mod.auto_recipe(
-        rgb, median_fwhm=master_fwhm_for_run(median_fwhm, run), is_mosaic=is_mosaic, trim_crop=trim,
+        rgb, median_fwhm=master_fwhm_for_run(median_fwhm, run, runs), is_mosaic=is_mosaic, trim_crop=trim,
         prefs=prefs, auto_crop=auto_crop,
         coverage=_auto_measure_coverage(run, scale, is_mosaic),
         proxy_scale=scale,
@@ -406,7 +408,7 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
 
 
 def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | None,
-                                auto_crop: bool = True) -> dict:
+                                auto_crop: bool = True, runs=None) -> dict:
     """The measured cues that *drove* the Auto recipe for a run — the causal
     inputs behind the ops (sky level, background noise, star size, mosaic trim).
     Mirrors ``build_auto_recipe_for_run`` exactly (same proxy, same mosaic verdict,
@@ -420,7 +422,7 @@ def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | Non
     is_mosaic = _run_is_mosaic(run, load=True)
     trim = _trim_rect_for_run(run) if is_mosaic else None
     return presets_mod.analyze_auto_inputs(
-        rgb, median_fwhm=master_fwhm_for_run(median_fwhm, run), is_mosaic=is_mosaic, trim_crop=trim,
+        rgb, median_fwhm=master_fwhm_for_run(median_fwhm, run, runs), is_mosaic=is_mosaic, trim_crop=trim,
         auto_crop=auto_crop,
         coverage=_auto_measure_coverage(run, scale, is_mosaic),
         grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
@@ -1338,7 +1340,55 @@ def previous_recipe(safe: str, run_id: int, request: Request) -> PreviousRecipeO
 _FWHM_TO_SIGMA = 1.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))  # ≈ 0.4247
 
 
-def master_fwhm_for_run(frame_fwhm: float | None, run) -> float | None:
+def _export_resize_factor(options_json: str | None) -> float:
+    """How much an editor export's own recipe rescaled its source's grid.
+
+    The product of the enabled ``geometry.resize`` scales in the stored
+    ``editor_recipe`` (validated on load, so a hand-edited value is clamped the
+    way the render clamped it); ``1.0`` for a stack, or a recipe with none.
+    Crop and rotate move pixels about but leave each one the size it was."""
+    raw = parse_run_options(options_json).get("editor_recipe")
+    if not isinstance(raw, dict):
+        return 1.0
+    factor = 1.0
+    for op in recipe_from_dict(raw).ops:
+        if op.enabled and op.id == "geometry.resize":
+            scale = float(op.params.get("scale", 1.0))
+            if math.isfinite(scale) and scale > 0 and abs(scale - 1.0) >= 1e-3:
+                factor *= scale
+    return factor
+
+
+def run_grid_supersampling(run, runs=None) -> float:
+    """Master pixels per native frame pixel on ``run``'s own grid.
+
+    A stack's answer is its drizzle (:func:`canvas_supersampling`). An editor
+    export stores the recipe it rendered, not stack knobs, so it would read as
+    undrizzled: its grid is its *source's*, times whatever its recipe resized.
+    ``runs`` (the target's stack runs) lets the derived chain be walked down to
+    the stack at its bottom — the same walk ``derived_light.root_stack`` does;
+    without it, or with the source pruned, an export is taken at what it can
+    say about itself."""
+    if run is None:
+        return 1.0
+    by_id = {r.id: r for r in runs} if runs is not None else {}
+    factor = 1.0
+    seen = {getattr(run, "id", None)}
+    current = run
+    while True:
+        options_json = getattr(current, "options_json", None)
+        source_id = derived_from_run_id(options_json)
+        if source_id is None:
+            return factor * canvas_supersampling(options_json)
+        factor *= _export_resize_factor(options_json)
+        source = by_id.get(source_id)
+        if source is None or source_id in seen:
+            return factor
+        seen.add(source_id)
+        current = source
+
+
+def master_fwhm_for_run(frame_fwhm: float | None, run, runs=None) -> float | None:
     """The target's per-frame median star FWHM on ``run``'s own master grid.
 
     Every frame ``fwhm_px`` is measured by QC on the half-resolution green
@@ -1347,12 +1397,13 @@ def master_fwhm_for_run(frame_fwhm: float | None, run) -> float | None:
     drizzled. Feeding the raw number straight across offered about half the
     star the user was aiming at (×1.8 measured on a plain master, ×2.1 on a
     ×1.5 drizzle). ``None`` when nothing was measured; a run whose stored
-    options don't say it drizzled (or no run at all) is taken at 1.0."""
+    options don't say it drizzled (or no run at all) is taken at 1.0.
+
+    An editor export is read on its source's grid (see
+    :func:`run_grid_supersampling`, which needs ``runs`` to find the source)."""
     if frame_fwhm is None or not frame_fwhm > 0:
         return None
-    supersampling = (canvas_supersampling(getattr(run, "options_json", None))
-                     if run is not None else 1.0)
-    return frame_fwhm_to_master_px(frame_fwhm, supersampling)
+    return frame_fwhm_to_master_px(frame_fwhm, run_grid_supersampling(run, runs))
 
 
 def _suggestion_fwhm(request: Request, safe: str,
@@ -1365,9 +1416,9 @@ def _suggestion_fwhm(request: Request, safe: str,
     lib, proj = deps.open_target_project(request, safe)
     try:
         fwhm = proj.median_fwhm()
-        runs = proj.iter_stack_runs()
+        runs = list(proj.iter_stack_runs())
         if run_id is None:
-            run = next(runs, None)
+            run = runs[0] if runs else None
         else:
             run = next((r for r in runs if r.id == run_id), None)
             if run is None:
@@ -1377,7 +1428,7 @@ def _suggestion_fwhm(request: Request, safe: str,
         lib.close()
     if fwhm is None or fwhm <= 0:
         return None, None
-    return fwhm, master_fwhm_for_run(fwhm, run)
+    return fwhm, master_fwhm_for_run(fwhm, run, runs)
 
 
 def psf_sigma_for_fwhm(fwhm: float) -> float:
@@ -2590,6 +2641,7 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
     lib, proj = deps.open_target_project(request, safe)
     try:
         median_fwhm = proj.median_fwhm()
+        runs = list(proj.iter_stack_runs())
         # The library-wide Adaptive-Auto taste profile (neutral if unset) shifts
         # Auto's data-driven values toward the owner's taste. Read here while the
         # library is open; neutral ⇒ today's Auto unchanged.
@@ -2605,7 +2657,7 @@ async def auto_process(safe: str, run_id: int, request: Request) -> dict:
         # is_mosaic verdict, never the old coverage_max>min heuristic.
         return build_auto_recipe_for_run(
             project_dir, run, median_fwhm, prefs=prefs,
-            auto_crop=auto_crop).to_dict()
+            auto_crop=auto_crop, runs=runs).to_dict()
 
     return await run_in_threadpool(work)
 
@@ -2622,13 +2674,14 @@ async def auto_analysis(safe: str, run_id: int, request: Request) -> dict:
     lib, proj = deps.open_target_project(request, safe)
     try:
         median_fwhm = proj.median_fwhm()
+        runs = list(proj.iter_stack_runs())
     finally:
         proj.close()
         lib.close()
 
     def work() -> dict:
         return build_auto_analysis_for_run(project_dir, run, median_fwhm,
-                                           auto_crop=auto_crop)
+                                           auto_crop=auto_crop, runs=runs)
 
     return await run_in_threadpool(work)
 
