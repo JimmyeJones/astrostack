@@ -1,5 +1,25 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-ba36k9`) — QA rotation sweep (3), ffmpeg/ffprobe with a logging *and* hostile stub driving the whole Moon & Sun API: one bug, Scout-fixed (v0.501.12)
+
+*(**Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none
+updated since 2026-10-12 — nothing owed. No open PRs.*
+
+*__Sweep (3), new angle.__ Earlier (3) sweeps ran ASTAP with hostile stubs and read ffmpeg; none drove the
+**video API end to end through a stub ffmpeg**. Pointed `SEESTACK_FFMPEG_PATH`/`SEESTACK_FFPROBE_PATH` at
+wrappers that log argv + cwd and drop a file in their cwd, then `exec` the real binaries; dropped an owner-shaped
+undebayered pal8 `…-Solar-RAW (1).avi` (space and parentheses in the name) and a 400-frame lunar `.mp4` into
+`incoming/<T>_video/`, and ran list → grade → stack (sharpen + crop) → crop / uncrop / sharpen / sharpen 0, then
+**cancelled** a lunar stack mid-stream. Result: every incoming path reaches ffmpeg only after `-i` and ffprobe
+only as its last positional; the cancel left **no** ffmpeg process and no half-written stills folder; the
+hostile cwd writes land in the app's cwd, never `incoming/`; `incoming/` byte/mtime/mode-identical. **Then the
+step before the binaries — where the stills go — found one:** `nested_incoming_conflict` did not cover the data
+root's own folders, and a capture's stills folder is `<data>/video/<folder name>`. Via the real Settings PUT,
+`incoming_dir = <data>/video` saved (200) and a Sun stack wrote `meta.json`/`stack.png`/`stack.tiff` beside the
+raw `.avi`; `<data>/state` saved too (config.json + jobs.sqlite then rewritten inside it). Severity: §10, but
+needs an unusual layout the Settings page lets him type; confidence: reproduced. Scout-fixed (save-time refusal,
+mirrors the library-subtree loop, boot unchanged): `DATA_ROOT_MANAGED_SUBDIRS`. (3) done → **next sweep is (4)**.*
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-jjqmic`) — QA rotation sweep (2), on the two per-panel/per-run gates added since the morning sweep: one bug, Scout-fixed (v0.501.11)
 
 Baseline: setup clean, full suite with the fix **8031 passed / 7 skipped** (xdist, BLAS capped, 24m48s) on
