@@ -534,6 +534,23 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   stale `astrostack-solve-*`/`astrostack-bootstrap-*` dirs older than the solve timeout at app start. Pin with
   a worker that `os._exit`s on one arg.
 
+- **🟡 (Scout 2026-10-20, QA rotation sweep (4)) — a target that fails inside *Reprocess all* never reaches
+  "this target stopped producing pictures" (`/api/stack-failures`).** *(Pillar: autonomy/friendliness —
+  PRIORITY 2; size **S**; severity low — the old picture stays on the wall and the batch's own Jobs card names
+  the failure; nothing is lost. Confidence: **reproduced** end-to-end, and the class is measured on his
+  install: v0.473.0 counted 7 `MemoryError` refusals across 3 of his batches.)* `webapp.stackfailure.
+  latest_stack_failures` reads two recording sites — a failed `stack`/`process_target` job and a scan job's
+  `result["stack_errors"]` — but `pipeline.submit_reprocess_all` isolates each target's failure into a third,
+  `result["failed"] = [{target, name, error, error_kind}]`, which nothing reads. Scratch repro through the
+  real client (`solved_library`, `run_stack` raising the memory refusal): `POST /api/reprocess-all` →
+  job `done`, `failed` 2 of 2 → `GET /api/stack-failures` **`[]`**; the same refusal through
+  `POST /api/targets/M_42/stack` → `["M_42"]`. So the batch that walks his library for days, unattended, is the
+  one stack path whose refusal the Dashboard and Target page never mention. **Fix direction:** a third branch in
+  `latest_stack_failures` for `kind == "reprocess_all"` reading `result["failed"]` (`error_kind` is already
+  stamped; `unattended=True`; stamp = the job's `finished_utc`, as the scan branch does — a yielded slice is its
+  own job row and carries its own rows). `superseded_by_success` already retires it on a later genuine stack.
+  Pin with the repro above, plus a yielded two-slice batch.
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
@@ -3612,6 +3629,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+
+- ✅ v0.502.9 **"Some of your pictures were trimmed too far" judges the picture on the wall — a pinned cover — not the newest run in History** (`overtrim.scan_over_trimmed` → `finishedpicture.displayed_picture_run`, Scout rotation sweep (4))
 - ✅ v0.502.8 **Re-opening an editor export in the editor sized every "From your stars" suggestion and Auto's sharpen radius as if its source had not drizzled (⅔ of the star on an export of a ×1.5 drizzle) — an export is now read on its source's grid, walked down the export chain, times its own recipe's resize** (`editor.run_grid_supersampling`, `master_fwhm_for_run(…, runs)`; full text in SHIPPED.md)
 - ✅ v0.502.7 **Every "From your stars" editor suggestion (star size, sharpen radius, PSF σ) and Auto's sharpen radius was about half the star it aimed at — QC's half-res `fwhm_px` fed to master-pixel ops; it is now put on the edited run's master grid (×2 green decimation × the run's drizzle)** (`metrics.frame_fwhm_to_master_px`, `editor.master_fwhm_for_run`, suggestion endpoints' optional `run_id`; full text in SHIPPED.md)
 - ✅ v0.502.6 **"My life list" judged a mosaic by one frame's circle at its middle — M20 grey on his Lagoon 2×2, M87/M99 on a Markarian 3×3, M110 on an M31 2×2, and an object in an L-shaped mosaic's never-shot quadrant ticked — it now tests each object against the panels themselves** (registry `panel_footprint`, `library._panel_footprint`, `lifelist.footprint_covers`; full text in SHIPPED.md)
