@@ -366,6 +366,58 @@ def test_from_your_stars_suggestions_follow_the_edited_runs_drizzle(
     ).json()["size"] == 4
 
 
+def test_from_your_stars_on_an_export_reads_its_sources_drizzle(
+        client, built_library, data_root):
+    """An editor export stores its recipe, not stack knobs, so it used to read
+    as undrizzled: on an export of a ×1.5 drizzle every star-derived number was
+    ⅔ of the star (Scout 2026-10-20, sweep (2)). The export's grid is its
+    source's — walked down a chain of exports — times any resize its recipe did."""
+    import json
+
+    _set_fwhm(data_root, "M_42", [2.0, 2.0, 2.0])
+    src = _make_run(data_root, "M_42", basename="drz", ts="2026-05-01T00:00:00Z",
+                    options_json='{"drizzle": true, "drizzle_scale": 1.5}')
+    export = _make_run(data_root, "M_42", basename="drz_edit",
+                       ts="2026-05-02T00:00:00Z",
+                       options_json=json.dumps({
+                           "editor_recipe": {"ops": [{"id": "tone.white_balance"}]},
+                           "derived_from": src, "display_space": True}))
+    halved = _make_run(data_root, "M_42", basename="drz_edit_edit",
+                       ts="2026-05-03T00:00:00Z",
+                       options_json=json.dumps({
+                           "editor_recipe": {"ops": [
+                               {"id": "geometry.resize", "params": {"scale": 0.5}},
+                               {"id": "geometry.resize", "params": {"scale": 2.0},
+                                "enabled": False}]},
+                           "derived_from": export, "display_space": True}))
+    base = "/api/targets/M_42/editor/star-size-suggestion"
+    assert client.get(f"{base}?run_id={src}").json()["master_fwhm_px"] == 6.0
+    assert client.get(f"{base}?run_id={export}").json()["master_fwhm_px"] == 6.0
+    assert client.get(f"{base}?run_id={halved}").json()["master_fwhm_px"] == 3.0
+    # The newest run (no run_id) is the halved export, and Auto agrees with it.
+    assert client.get(base).json()["master_fwhm_px"] == 3.0
+    a = client.post(
+        f"/api/targets/M_42/stack-runs/{export}/editor/auto-analysis").json()
+    assert a["median_fwhm"] == 6.0
+
+
+def test_run_grid_supersampling_survives_a_pruned_source_and_a_cycle():
+    from webapp.routers.editor import run_grid_supersampling
+
+    class _Run:
+        def __init__(self, rid, options_json):
+            self.id, self.options_json = rid, options_json
+
+    orphan = _Run(2, '{"editor_recipe": {"ops": [{"id": "geometry.resize", '
+                     '"params": {"scale": 0.5}}]}, "derived_from": 1}')
+    assert run_grid_supersampling(orphan, [orphan]) == 0.5
+    assert run_grid_supersampling(orphan) == 0.5
+    a = _Run(3, '{"editor_recipe": {"ops": []}, "derived_from": 4}')
+    b = _Run(4, '{"editor_recipe": {"ops": []}, "derived_from": 3}')
+    assert run_grid_supersampling(a, [a, b]) == 1.0
+    assert run_grid_supersampling(None) == 1.0
+
+
 def test_auto_analysis_star_size_is_on_the_runs_master_grid(
         client, built_library, data_root):
     """Auto's sharpen radius — and the star size it reports beside it — read

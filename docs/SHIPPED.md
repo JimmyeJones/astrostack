@@ -2,7 +2,7 @@
 
 ## 2026-10-20 (Scout, branch `claude/zen-curie-jwnetb`) — Moon & Sun sharpening sized to a drizzled still
 
-### v0.502.8 — the Moon/Sun unsharp mask's radius follows the still's `drizzle_scale`
+### v0.502.9 — the Moon/Sun unsharp mask's radius follows the still's `drizzle_scale`
 
 **What.** `seestack/video/detail.py::sharpen_still` blurs at `SHARPEN_SIGMA_PX = 1.1`, tuned on camera-sized stills
 ("lunar and solar detail lives at the scale of a pixel or two"). v0.502.0 made the stack drizzle onto a ×1.5 grid
@@ -21,6 +21,39 @@ reached `stable` yet, so no picture on the owner's box was sharpened the old way
 strengths, camera scale unchanged, nonsense scales, the re-sharpen route and the stack-time sharpen on a drizzled
 still. **Fail-before** with only the webapp wiring reverted (engine param kept): the route test 28 DN off, the
 stack-time spy `[1.0] != [1.5]`.
+## 2026-10-20 (Builder, branch `claude/festive-knuth-8z9s8u`) — an export's stars read on its source's grid
+
+### v0.502.8 — "From your stars" and Auto's sharpen radius on a re-opened editor export
+
+**What.** An editor export's run row stores `{"editor_recipe", "derived_from", "display_space"}` — no drizzle — so
+v0.502.7's `master_fwhm_for_run` read it at 1.0 and every star-derived number on an export of a ×1.5 drizzle was ⅔
+of the star (Scout sweep (2), reproduced). New `webapp.routers.editor.run_grid_supersampling(run, runs)` walks the
+`derived_from` chain (cycle- and prune-safe, the walk `derived_light.root_stack` does) down to the stack at its
+bottom, takes that stack's `canvas_supersampling`, and multiplies in every enabled `geometry.resize` scale on the
+way (`_export_resize_factor`, recipe validated on load). `master_fwhm_for_run` and `build_auto_recipe_for_run` /
+`build_auto_analysis_for_run` take an optional `runs`; the three suggestion endpoints, both Auto endpoints and the
+pipeline's unattended auto-edit pass the target's runs. Without `runs` (or with the source pruned) an export is
+taken at its own resize alone. Pinned in `tests/webapp/test_editor.py` (export of a ×1.5 drizzle → 6.0 master px,
+was 4.0; an export of it halved → 3.0; Auto's analysis agrees; orphan + cycle cases). No API shape change.
+
+<details><summary>The Bugs entry as filed</summary>
+
+- **🟡 (Scout 2026-10-20, QA rotation sweep (2) on v0.502.7) — re-opening an editor *export* in the editor
+  sizes every "From your stars" suggestion and Auto's sharpen radius as if its source had not drizzled.**
+  *(Pillar: editor — PRIORITY 1; size **S**; severity low — on an export of a ×1.5 drizzle each star-derived
+  number is ⅔ of the star, the class v0.502.7 closed for stacking runs; nothing is lost. Confidence:
+  **reproduced** through the real `webapp.routers.editor.master_fwhm_for_run`.)* An export's run row stores
+  `{"editor_recipe", "derived_from", "display_space"}` (`pipeline.py`, the editor-export `add_stack_run`) — no
+  `drizzle`/`drizzle_scale` — so `canvas_supersampling` reads 1.0. Scratch repro, QC median 2.0 px: source run
+  (`drizzle_scale` 1.5) → **6.0** master px; its export → **4.0**. `auto_drizzle` is on for unattended stacks, so
+  the source is often drizzled. A `geometry.resize` in the export's recipe moves the grid again (×`scale`).
+  **Fix direction:** in `_suggestion_fwhm` / `build_auto_*_for_run` resolve a derived run to its source
+  (`webapp.run_options.derived_from_run_id`, the walk `derived_light` already does for chained exports) for the
+  drizzle, and multiply by the export recipe's `geometry.resize` scale. Pin with an export-of-a-drizzle case.
+  The mosaic side of v0.502.7 holds: a mosaic canvas is native scale and a memory step-down's lowered
+  `drizzle_scale` is the one persisted (`asdict(eff)`), so no per-panel divergence.
+
+</details>
 
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-pk1oo0`) — "From your stars" sized to the master it edits
 
