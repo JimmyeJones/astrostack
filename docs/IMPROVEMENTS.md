@@ -2483,6 +2483,28 @@ problems. Dogfood it every big-picture run and fix root causes.
 
 ### Features that serve real workflows
 
+- **⭐ OWNER-ASKED (2026-10-20) — the Moon/Sun stacker drizzles when it is worth it ("use drizzles when
+  possible").** He reports the solar stacker is now fixed (v0.493.17: colour, alignment, frame choice) and wants
+  the same resolution gain the deep-sky side got in v0.494.0. Today `seestack/video/lucky.py::stack_video`
+  shifts each keeper with `_shift_frame` onto a sensor-sized `WeightedSumAccumulator` — the module docstring
+  says "no drizzle" outright. **Why it is worth more here than on deep-sky:** a lucky-imaging run keeps
+  hundreds of frames (30 % of up to 1,500), and seeing jitters every one sub-pixel, so the two "worth it" tests
+  in `seestack/stack/autodrizzle.py` (depth per output pixel, sub-pixel spread on both axes) are normally met;
+  and his captures are **raw CFA streams** (`ffmpeg.source_is_cfa_mosaic`), so a Bayer drizzle — dropping
+  each kept frame's R/G/B sites straight onto a finer RGB grid at the measured disk shift instead of
+  debayering first — recovers the resolution the debayer interpolates away.
+  **Spec:** (1) the same answer as deep-sky — **"Auto, when worth it"** — reusing `autodrizzle`'s ideas, not a
+  new knob: drizzle ×1.5 when the kept count and the measured shift spread (from the per-frame shifts pass 2
+  already measures) clear the bar; otherwise stack as today; (2) the Moon/Sun result says which it did in one
+  plain sentence ("Sharpened ×1.5 using 412 frames" / "Kept at camera resolution — too few frames moved"),
+  and the stack form keeps a way to force it off; (3) the owner's 2026-10-13 answer applies: say how long
+  it will take, then run it (lucky stacks are minutes, so one line on the running job is enough);
+  (4) stays two-pass streaming and memory-flat — the finer canvas is one ×1.5² accumulator plus weights,
+  never held frames. **Tests on owner-shaped data:** the lossless CFA fixture in
+  `tests/test_video_cfa_mosaic.py` with known sub-pixel jitter must come back measurably sharper (spot depth
+  / MTF on a resolution edge) than the plain path, and the frame-count and no-motion cases must decline.
+  Size **M–L**. Priority 4 (image quality) on a direct owner ask, hence ⭐.
+
 - ~~**⭐ OWNER-APPROVED (2026-10-14, "Yes go") — the Settings page redesign.**~~ — **✅ ALL FIVE SLICES SHIPPED
   (v0.496.0–v0.500.0).** Spec stays at [`docs/design/settings-redesign.md`](design/settings-redesign.md); each
   slice's record, including every spec-vs-code correction, is in [`SHIPPED.md`](SHIPPED.md). Do not re-pick it.
