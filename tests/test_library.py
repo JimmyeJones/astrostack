@@ -500,3 +500,109 @@ def test_old_library_without_legacy_mixed_drop_column_is_migrated(tmp_path):
         assert lib.flag_legacy_mixed_drop("MyWorks").legacy_mixed_drop == 1
     finally:
         lib.close()
+
+
+# ---- registry centre of a mosaic ------------------------------------------
+#
+# A 2x2 Seestar S30 mosaic of M31 (1.20° x 2.13° panels, 15 % overlap). The
+# per-axis median over the subs lands on a *panel* as soon as one panel holds one
+# more sub than the others — 1.04° from the mosaic's middle, outside the life
+# list's match radius — so the registry centre has to come from the panels.
+
+_M31 = (10.6847, 41.2690)
+
+
+def _add_mosaic(proj: Project, centre: tuple[float, float],
+                counts: list[int], *, cols: int = 2) -> None:
+    import math
+    ra0, dec0 = centre
+    step_dec = 2.13 * 0.85
+    step_ra = 1.20 * 0.85 / math.cos(math.radians(dec0))
+    rows = math.ceil(len(counts) / cols)
+    for p, n in enumerate(counts):
+        c, r = p % cols, p // cols
+        ra = ra0 + (c - (cols - 1) / 2) * step_ra
+        dec = dec0 + (r - (rows - 1) / 2) * step_dec
+        for k in range(n):
+            # A dither of a few arc-minutes around the panel's pointing.
+            _add_frame(proj, exposure_s=10.0,
+                       ra=(ra + 0.02 * ((k % 5) - 2)) % 360.0,
+                       dec=dec + 0.02 * ((k % 3) - 1))
+
+
+@pytest.mark.parametrize("counts", [[25, 25, 25, 26], [30, 28, 27, 25], [25, 25, 25, 25]])
+def test_mosaic_registry_centre_is_the_panels_middle_not_one_panel(tmp_path, counts):
+    from seestack.lifelist import catalog_capture_status
+    from seestack.nightplan import CatalogObject
+
+    lib = Library.create(tmp_path / "lib")
+    try:
+        _entry, proj = lib.create_target("M 31")
+        try:
+            _add_mosaic(proj, _M31, counts)
+        finally:
+            proj.close()
+        refreshed = lib.refresh_target_stats("M_31")
+        assert refreshed is not None
+        off = _angular_separation_deg(float(refreshed.ra_deg), float(refreshed.dec_deg), *_M31)
+        assert off < 0.1, f"registry centre {off:.2f}° from the mosaic's middle"
+        m31 = CatalogObject(id="M31", name="Andromeda Galaxy", ra_deg=_M31[0],
+                            dec_deg=_M31[1], type="Galaxy", con="And")
+        [status] = catalog_capture_status([m31], lib.list_targets())
+        assert status.captured
+    finally:
+        lib.close()
+
+
+def test_single_field_registry_centre_is_unchanged_median(tmp_path):
+    lib = Library.create(tmp_path / "lib")
+    try:
+        _entry, proj = lib.create_target("M 42")
+        try:
+            for k in range(40):
+                _add_frame(proj, exposure_s=10.0, ra=83.82 + 0.013 * (k % 7),
+                           dec=-5.39 + 0.011 * (k % 4))
+        finally:
+            proj.close()
+        refreshed = lib.refresh_target_stats("M_42")
+        import numpy as np
+        ras = [83.82 + 0.013 * (k % 7) for k in range(40)]
+        decs = [-5.39 + 0.011 * (k % 4) for k in range(40)]
+        assert float(refreshed.ra_deg) == pytest.approx(float(np.median(ras)), abs=1e-9)
+        assert float(refreshed.dec_deg) == pytest.approx(float(np.median(decs)), abs=1e-9)
+    finally:
+        lib.close()
+
+
+def test_mixed_objects_keep_the_centre_on_the_majority_object(tmp_path):
+    """Two different objects ~10° apart in one target: the centre stays on the
+    bigger one, not in the empty sky between them."""
+    lib = Library.create(tmp_path / "lib")
+    try:
+        _entry, proj = lib.create_target("M 31")
+        try:
+            _add_mosaic(proj, _M31, [25, 25, 25, 26])
+            _add_mosaic(proj, (23.46, 30.66), [40], cols=1)  # M33
+        finally:
+            proj.close()
+        refreshed = lib.refresh_target_stats("M_31")
+        off = _angular_separation_deg(float(refreshed.ra_deg), float(refreshed.dec_deg), *_M31)
+        assert off < 0.1
+    finally:
+        lib.close()
+
+
+def test_mosaic_centre_across_ra_zero(tmp_path):
+    lib = Library.create(tmp_path / "lib")
+    try:
+        _entry, proj = lib.create_target("Seam")
+        try:
+            _add_mosaic(proj, (0.2, 20.0), [26, 25, 25, 25])
+        finally:
+            proj.close()
+        refreshed = lib.refresh_target_stats("Seam")
+        assert 0.0 <= float(refreshed.ra_deg) < 360.0
+        off = _angular_separation_deg(float(refreshed.ra_deg), float(refreshed.dec_deg), 0.2, 20.0)
+        assert off < 0.1
+    finally:
+        lib.close()

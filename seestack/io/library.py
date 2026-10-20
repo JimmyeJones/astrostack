@@ -1443,7 +1443,100 @@ def _median_radec(proj: Project) -> tuple[float | None, float | None]:
     # find_target_within matching. circular_median_ra_deg unwraps into a continuous
     # range before the median (shared with compute_mosaic_canvas / pick_reference_frame),
     # then folds back to [0, 360). A no-op when nothing straddles the wrap.
-    return circular_median_ra_deg(ras), float(np.median(decs))
+    ra_med, dec_med = circular_median_ra_deg(ras), float(np.median(decs))
+    centre = _panel_extent_centre(ras, decs)
+    return centre if centre is not None else (ra_med, dec_med)
+
+
+# A pointing counts as a mosaic *panel* for the registry centre only if it holds at
+# least this many accepted subs, and at least this share of them: a handful of subs
+# on a stray pointing (a re-framed first minute, a sub that solved somewhere odd)
+# must not stretch the extent the centre is the middle of. 1 % is ~360 subs on the
+# owner's 35,894-sub target, while a 6x6 mosaic of it still holds ~1,000 a panel.
+_CENTRE_PANEL_MIN_FRAMES = 5
+_CENTRE_PANEL_MIN_SHARE = 0.01
+_CENTRE_FOLD_DEG = 0.05
+
+
+def _panel_extent_centre(ras: list[float],
+                         decs: list[float]) -> tuple[float, float] | None:
+    """The middle of a mosaic's **panels**, or ``None`` for a single field.
+
+    A plain per-axis median over the subs is right for one field, but on a mosaic
+    with an even number of columns or rows both medians fall on whichever side
+    holds one more sub — i.e. on a panel's centre, a full panel step from the
+    mosaic's middle (a 2x2 S30 mosaic at 25/25/25/26 subs lands 1.04° off, outside
+    the life list's match radius). So split the subs into panels with the same
+    :func:`~seestack.stack.pointings.pointing_groups` gate QC uses, take each
+    panel's own median, and return the midpoint of the panels' RA/Dec extent —
+    which does not care how many subs each panel holds.
+
+    Only the largest connected *object* is used: panels are linked at
+    :data:`~seestack.stack.pointings.LINK_DIST_DEG` (adjacent mosaic panels sit
+    well inside it), so a target that mixes two different objects keeps its centre
+    on the majority object instead of the empty sky between them. ``None`` — the
+    caller keeps today's median — when there is no sound panel split.
+    """
+    import math
+
+    import numpy as np
+
+    from seestack.coords import circular_median_ra_deg, unwrap_ra_deg
+    from seestack.stack.pointings import (
+        LINK_DIST_DEG,
+        cluster_pointings,
+        pointing_groups,
+    )
+
+    n = len(ras)
+    min_members = max(_CENTRE_PANEL_MIN_FRAMES,
+                      math.ceil(_CENTRE_PANEL_MIN_SHARE * n))
+    # Fold onto a coarse grid before the (O(n²)) panel clustering: this runs on
+    # every stats refresh, and the owner's dithers spread a panel over hundreds of
+    # :data:`~seestack.stack.pointings.FOLD_GRID_DEG` cells (~1 s for 36 panels x
+    # 1,000 subs). 0.05° is 5x below the panel link distance and panels step ~1°,
+    # so it cannot move a panel boundary; each panel's centre below is still the
+    # median of its own subs, not of the cells.
+    cell_of: dict[tuple[int, int], int] = {}
+    cell_idx: list[int] = []
+    for ra, dec in zip(ras, decs):
+        key = (round(ra / _CENTRE_FOLD_DEG), round(dec / _CENTRE_FOLD_DEG))
+        cell_idx.append(cell_of.setdefault(key, len(cell_of)))
+    cells: list[tuple[float | None, float | None]] = [
+        ((kr * _CENTRE_FOLD_DEG) % 360.0, kd * _CENTRE_FOLD_DEG) for kr, kd in cell_of
+    ]
+    weights = [0] * len(cells)
+    for c in cell_idx:
+        weights[c] += 1
+    cell_labels = pointing_groups(cells, min_members=min_members, weights=weights)
+    if cell_labels is None:
+        return None
+    members: dict[int, list[int]] = {}
+    for i, c in enumerate(cell_idx):
+        label = cell_labels[c]
+        if label >= 0:
+            members.setdefault(label, []).append(i)
+    keys = sorted(members)
+    centres = [
+        (circular_median_ra_deg([ras[i] for i in members[k]]),
+         float(np.median([decs[i] for i in members[k]])))
+        for k in keys
+    ]
+    sizes = [len(members[k]) for k in keys]
+    objects = cluster_pointings(centres, link_dist_deg=LINK_DIST_DEG)
+    weight: dict[int, int] = {}
+    for obj, size in zip(objects, sizes):
+        weight[obj] = weight.get(obj, 0) + size
+    main = max(weight, key=lambda o: weight[o])
+    kept = [c for c, obj in zip(centres, objects) if obj == main]
+    if len(kept) < 2:
+        return None
+    # Unwrap the panel RAs together so a mosaic straddling RA 0° has one extent.
+    kept_ra = unwrap_ra_deg([c[0] for c in kept])
+    kept_dec = [c[1] for c in kept]
+    ra_mid = (float(np.min(kept_ra)) + float(np.max(kept_ra))) / 2.0 % 360.0
+    dec_mid = (min(kept_dec) + max(kept_dec)) / 2.0
+    return (0.0 if ra_mid >= 360.0 else ra_mid), dec_mid
 
 
 def _angular_separation_deg(ra1: float, dec1: float,
