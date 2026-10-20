@@ -2282,3 +2282,42 @@ def test_a_healthy_folder_names_nothing(tmp_path):
         assert tsr.unreadable_examples == []
     finally:
         lib.close()
+
+
+def _record_start_then_sleep(log_path: str, seconds: float) -> None:
+    """Pool job for the cancel test: note when it started, then take a while."""
+    import time
+
+    with open(log_path, "a") as fh:
+        fh.write(f"{time.time()}\n")
+    time.sleep(seconds)
+
+
+def test_map_jobs_cancel_drops_the_queued_pool_jobs(tmp_path):
+    """Cancelling a pool pass stops its *queued* jobs, not just the caller's loop.
+
+    ``ex.shutdown(wait=False, cancel_futures=True)`` cancels nothing on CPython
+    3.11–3.13: a scan cancelled 3 solves into 40 returned at once, said
+    "cancelled" — and 36 ASTAP runs then started in the background, their results
+    thrown away, competing with whatever job ran next. Only the jobs a worker
+    already holds (plus the executor's one-slot prefetch) may still start.
+    """
+    import time
+
+    from seestack.io.scanner import _map_jobs
+
+    log_path = tmp_path / "starts.log"
+    log_path.write_text("")
+    workers = 2
+    seen: list[int] = []
+    for done, _value in _map_jobs(
+        _record_start_then_sleep, [(str(log_path), 0.3)] * 30,
+        serial=False, max_workers=workers, phase="Solving", progress=None,
+        should_stop=lambda: len(seen) >= 2,
+    ):
+        seen.append(done)
+    returned = time.time()
+    time.sleep(3.0)  # the unfixed pool starts ~20 more in this window
+    starts = [float(x) for x in log_path.read_text().split()]
+    after = sum(1 for t in starts if t > returned)
+    assert after <= 2 * workers + 2, f"{after} of {len(starts)} jobs started after the cancel"
