@@ -22,6 +22,26 @@ container restart gets `[]` until the counter passes N (ran: 5 records, restart,
 nothing). No in-repo caller passes `since` (the Logs page polls `limit` only); filed nowhere unless the observer
 turns out to poll incrementally — a one-line `since > self._seq → 0` would fix it. Not yet read for answers:
 `seestar` (thin pass-through, gated 409s hold), `glossary`, `auth`, `targets`, `plan`. (4) done → **next sweep is (1)**.*
+## 2026-10-20 (Scout, branch `claude/zen-curie-d5n9db`) — QA rotation sweep (3), new angle — ASTAP under the scan job's process pool (twinned basenames in parallel, then a cancel): one bug, Scout-fixed (v0.502.4). Inbox unchanged.
+
+*(**Baseline:** 8072 passed / 7 skipped on `032b4dcb` (xdist `-n 4`, BLAS capped, 18m12s); with the fix 8073 passed / 7 skipped (17m29s). **Inbox**
+(`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none updated since
+2026-10-12 — nothing owed. **Open PR:** #1217 (Builder, v0.502.3, highlights) — live, so this run takes v0.502.4.)*
+
+*__Sweep (3), new angle.__ Every earlier (3) sweep drove ASTAP one sub at a time. This one ran it the way the scan
+job does — many at once in a pool — with a logging stub ASTAP that reads the scratch copy's own header and answers
+with that pointing. **(a) Twinned basenames in parallel: CLEAN.** 18 subs whose basenames repeat across `M_42/`,
+`M_42_mosaic_sub/` and a `M 42 (copy)/` folder (space + parentheses), 8 solves at once through the real
+`solve_one`: 18/18 solved, every result carries its *own* file's pointing, 18 distinct scratch dirs, none left in
+`/tmp`, `incoming/` byte/mtime/mode-identical. **(b) Cancel: one bug.** Through the real `run_qc_and_solve` (4
+workers, the scan job's `should_stop`), a solve pass cancelled 3 into 40 returned in 2.7 s — and 36 ASTAP runs then
+started *after* it. `_map_jobs`' `shutdown(wait=False, cancel_futures=True)` cancels nothing; reproduced with a
+bare `ProcessPoolExecutor` on CPython 3.11.17, 3.12.3, 3.12.13 (the image's line) and 3.13.16 (32–36 of 40 started
+after), while explicit `future.cancel()` + `shutdown(wait=False)` leaves only the prefetch. Not a §10 issue
+(nothing written, scratch dirs cleaned) but a cancel that does not cancel: hours of hidden ASTAP load on a big first
+scan, overlapping the next job (a stack — OOM history), results discarded. Severity moderate, confidence
+reproduced; Scout-fixed (one call site, fail-before shown 19/24 → pass). **Same call left in**
+`seestack/core/jobs.py::JobRunner.cancel` — desktop GUI only, not built on. (3) done → **next sweep is (4)**. **Dogfood `--mosaic`: CLEAN** — trim 7.9 %, nothing overflowing, no console errors.*
 
 ## 2026-10-20 (Scout, branch `claude/zen-curie-45367f`) — QA rotation sweep (2) **collided** with `claude/zen-curie-diowga` on the same surface; the extra finding (an L-shaped mosaic's false ✓) folded into its entry. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
