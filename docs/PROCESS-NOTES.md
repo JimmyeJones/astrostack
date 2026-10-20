@@ -1,5 +1,25 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-diowga`) — QA rotation sweep (2), on the one per-panel/whole-target number added since the last sweep (2): one bug, filed reproduced (the life list judges a mosaic by one panel's field). Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
+
+*(**Suite:** **8072 passed / 7 skipped** on `f7c8028e` + this docs change (xdist `-n 4`, BLAS capped, 27m07s). **Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all
+previously acted-on and owner-gated, none updated since 2026-10-12 — nothing owed. No open PRs. **Dogfood
+`--mosaic --editor`:** page sweep CLEAN — Auto trim 7.9 %, nothing overflowing, no console errors, editor drive
+clean on both targets. The first attempt was killed by this run's own 10-minute background timeout mid-drive, the
+same harness trap the previous Scout hit: **give the dogfood a background timeout of an hour**, it takes ~25 min
+with `--editor`.)*
+
+Following the carry-forward ("a new per-panel number added since"), the sweep read the non-docs commits since the
+last sweep (2): v0.501.12 (config refusal), v0.501.13/v0.502.0 (Moon/Sun — no panels), v0.502.1 (last-night
+twins — not a panel question) and **v0.502.2 `lifelist.match_radius_deg`**, which answers a whole-target question
+("is this object in his picture?") with a per-panel number (one sub's `frame_short_deg`, centred on the mosaic's
+middle). Its note calls that a deliberate lower bound; run on S30-shaped mosaics through the real
+`Library.refresh_target_stats` + `catalog_capture_status` it leaves M20 grey on a 2×2 Lagoon mosaic, M87/M99 on a
+3×3 Markarian one and M110 on a 2×2 M31 — all inside a panel by a 10 % margin. Filed in Bugs, reproduced, low
+severity, with a per-panel-footprint fix direction that keeps "never claims sky no panel covered". A per-panel
+*circle* is not enough (M20 sits 0.51° from its panel's centre along the long axis), so the fix needs the panel
+rotation. **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-m3p3kh`) — QA rotation sweep (1), scale-dependent preview↔export parity, on the "Hold back highlights" solver: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
 
 *(**Suite:** 8059 passed / 7 skipped on `b77ee2e1` + this docs change (xdist `-n 4`, BLAS capped, 14m34s). **Inbox**
