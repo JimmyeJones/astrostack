@@ -1,5 +1,26 @@
 # Shipped — the record
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-jwnetb`) — Moon & Sun sharpening sized to a drizzled still
+
+### v0.502.9 — the Moon/Sun unsharp mask's radius follows the still's `drizzle_scale`
+
+**What.** `seestack/video/detail.py::sharpen_still` blurs at `SHARPEN_SIGMA_PX = 1.1`, tuned on camera-sized stills
+("lunar and solar detail lives at the scale of a pixel or two"). v0.502.0 made the stack drizzle onto a ×1.5 grid
+(on by default on the Moon & Sun page), and nothing scaled the radius: both the stack-time sharpen
+(`_video_stack_body`) and every later re-render from the kept original (`_rebuild_still`, behind *sharpen*, *crop*
+and *uncrop*) blurred 1.1 *output* pixels = 0.73 camera pixels. **Measured** (Scout rotation sweep (4), the
+`video` router's answers): the same scene sampled at ×1.0 and ×1.5, a surface ripple of 0.08 / 0.15 / 0.25
+cycles per camera pixel — every preset's boost on the drizzled still was **46 % / 51 % / 63 %** of the camera
+still's ("Strong" on a drizzle ≈ "Medium" without), and the rest of its effect landed above the camera's own
+resolution, where a drizzle holds mostly noise. `sharpen_still` gains a keyword `scale` (still pixels per camera
+pixel; anything not positive and finite reads as 1); the stack passes `result.drizzle_scale`, the rebuild paths
+`webapp.video._drizzle_scale(meta)` (1 for a `meta.json` written before drizzle). A camera-sized still is
+byte-identical to before (pinned). No config, schema, on-disk, API-shape or default change; v0.502.0 has not
+reached `stable` yet, so no picture on the owner's box was sharpened the old way at ×1.5.
+**Tests.** `tests/webapp/test_video_sharpen_drizzle_scale.py` (+16): preset parity at three scales × three
+strengths, camera scale unchanged, nonsense scales, the re-sharpen route and the stack-time sharpen on a drizzled
+still. **Fail-before** with only the webapp wiring reverted (engine param kept): the route test 28 DN off, the
+stack-time spy `[1.0] != [1.5]`.
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-8z9s8u`) — an export's stars read on its source's grid
 
 ### v0.502.8 — "From your stars" and Auto's sharpen radius on a re-opened editor export
