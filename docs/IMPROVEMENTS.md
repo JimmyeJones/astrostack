@@ -128,6 +128,25 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   has ≥ `_UNSOLVED_MIN_ACCEPTED` tried and none located, (b) gate the rescue per hint-panel. Don't lower the
   whole-target thresholds instead — that makes a single field cry wolf.
 
+- **🟡 (Scout 2026-10-20, QA rotation sweep (2)) — "My life list" judges a mosaic against one panel's field: an
+  object his mosaic plainly holds stays grey because the match radius is one sub's inscribed circle around the
+  mosaic's middle (`seestack/lifelist.py::match_radius_deg`, `library._frame_short_deg`).** *(Pillar: trust /
+  enjoy — PRIORITY 3; size **S–M**; severity low — a grey tile on a page he is proud of, never a false claim.
+  Confidence: **reproduced** through the real `Library.refresh_target_stats` + `catalog_capture_status`; ungated.)*
+  v0.502.2 matches within `0.8 × frame_short_deg / 2` (≈0.48° on his S30) of the registry centre, and its own
+  note calls that "a lower bound on what the mosaic holds". It is a per-panel number answering a whole-target
+  question. Scratch repro, S30 portrait subs (3.99″/px, 1080×1920), 15 % panel overlap, 40 subs a panel, centre
+  exact (v0.501.10): **2×2 on M8 → M20 grey** (1.38° off, inside a panel by a 10 % margin) — the classic
+  Lagoon + Trifid mosaic; **3×3 on M84 → M87 (1.49°) and M99 (2.15°) grey**; **2×2 on M31 → M110 grey** (0.61°).
+  M32, M43, M81+M82, M86 do light up. **Fix direction:** keep "never claims sky no panel covered", but test the
+  object against each *panel's* footprint rather than one circle at the middle — stamp the panel centres
+  `_panel_extent_centre` already computes (additive registry column, JSON, reconciled on open like
+  `frame_short_deg`) and count an object inside a panel's rectangle shrunk by the dither margin, oriented by
+  `Project.solved_frame_scale_rotation` (a circle per panel is not enough: M20 sits 0.51° from its panel's
+  centre along the long axis). Single field / unknown rotation / no panel split → today's radius, byte-for-byte.
+  Regression: the three mosaics above light their neighbour; an object just outside every panel, and the missing
+  corner of an L-shaped 3-panel mosaic, stay grey; M110 on a single S30 field stays grey.
+
 - **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
   v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
   (`/api/library/summary` + the share recap) count a sub registered in two targets (#878) twice, in exactly
