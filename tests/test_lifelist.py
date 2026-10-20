@@ -365,6 +365,9 @@ def test_the_margin_is_the_panels_measured_spread_within_bounds():
     assert loose.margin_deg == pytest.approx(0.05)
     # Never asks more than the single field's own circle leaves of the half-field.
     assert wild.margin_deg == pytest.approx((1 - FIELD_MATCH_FRACTION) * 1.197 / 2)
+    # …and each panel carries its own, so a wobbly one cannot widen a tight one.
+    assert [p.margin_deg for p in loose.panels] == pytest.approx([0.05, 0.02])
+    assert tight.panels[0].margin_deg == MIN_PANEL_MARGIN_DEG
 
 
 def test_a_wide_rotation_spread_shrinks_a_panel_to_what_every_angle_holds():
