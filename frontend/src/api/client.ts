@@ -3095,6 +3095,10 @@ export interface AutoColorCal {
 export interface PsfSuggestion {
   fwhm_px: number | null;
   psf_sigma: number | null;
+  /** The same star on the edited run's master grid — what the value was
+   *  derived from. `fwhm_px` stays in the frames' own QC units. Absent on an
+   *  older backend. */
+  master_fwhm_px?: number | null;
 }
 
 export interface DenoiseSuggestion {
@@ -3105,11 +3109,15 @@ export interface DenoiseSuggestion {
 export interface SharpenSuggestion {
   fwhm_px: number | null;
   radius: number | null;
+  /** As on `PsfSuggestion`. */
+  master_fwhm_px?: number | null;
 }
 
 export interface StarSizeSuggestion {
   fwhm_px: number | null;
   size: number | null;
+  /** As on `PsfSuggestion`. */
+  master_fwhm_px?: number | null;
 }
 
 export interface LevelsSuggestion {
@@ -3617,6 +3625,12 @@ function encodeRecipe(recipe: Recipe): string {
   let bin = "";
   bytes.forEach((b) => (bin += String.fromCharCode(b)));
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+/** `?run_id=N` for a finite positive run id, else nothing (server default). */
+function runQuery(runId?: number): string {
+  return typeof runId === "number" && Number.isFinite(runId) && runId > 0
+    ? `?run_id=${runId}` : "";
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -4554,12 +4568,14 @@ export const api = {
 
   // editor
   editorOps: () => req<EditOp[]>("/api/editor/ops/schema"),
-  psfSuggestion: (safe: string) =>
-    req<PsfSuggestion>(`/api/targets/${safe}/editor/psf-suggestion`),
-  sharpenSuggestion: (safe: string) =>
-    req<SharpenSuggestion>(`/api/targets/${safe}/editor/sharpen-suggestion`),
-  starSizeSuggestion: (safe: string) =>
-    req<StarSizeSuggestion>(`/api/targets/${safe}/editor/star-size-suggestion`),
+  // `runId` puts the suggestion on that run's master grid (a drizzled run's
+  // pixels are finer); omitted, the server uses the target's newest run.
+  psfSuggestion: (safe: string, runId?: number) =>
+    req<PsfSuggestion>(`/api/targets/${safe}/editor/psf-suggestion${runQuery(runId)}`),
+  sharpenSuggestion: (safe: string, runId?: number) =>
+    req<SharpenSuggestion>(`/api/targets/${safe}/editor/sharpen-suggestion${runQuery(runId)}`),
+  starSizeSuggestion: (safe: string, runId?: number) =>
+    req<StarSizeSuggestion>(`/api/targets/${safe}/editor/star-size-suggestion${runQuery(runId)}`),
   // With no recipe/uid the bare proxy is measured (the stack's inherent noise —
   // used by the "Your data" chip + bulk apply). Passing the selected denoise op's
   // recipe+uid measures the *linear image entering that op* (any prior linear ops

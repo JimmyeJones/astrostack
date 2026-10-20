@@ -49,10 +49,12 @@ from seestack.edit.registry import EditContext, get_op, snap_to_param
 from seestack.stack.output import pack_unit
 from seestack.edit import auto_prefs as auto_prefs_mod
 from seestack.edit import presets as presets_mod
+from seestack.qc.metrics import frame_fwhm_to_master_px
 from webapp import deps
 from webapp import edit_fit_cache
 from webapp import edit_resume_cache
 from webapp import stale_crop
+from webapp.field_fulls import canvas_supersampling
 from webapp.schemas import EditOpOut, editor_ops_schema
 
 router = APIRouter(tags=["editor"])
@@ -387,12 +389,16 @@ def build_auto_recipe_for_run(project_dir: Path, run, median_fwhm: float | None,
 
     ``auto_crop`` is the owner's "let Auto trim the ragged border" preference
     (``auto_crop_border``, default on = today's behaviour); off keeps the full
-    frame."""
+    frame.
+
+    ``median_fwhm`` is the target's per-frame QC median (``Project.median_fwhm``,
+    half-resolution green pixels); it is put on this run's master grid here
+    (:func:`master_fwhm_for_run`) before it sizes the sharpen radius."""
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     is_mosaic = _run_is_mosaic(run, load=True)
     trim = _trim_rect_for_run(run) if is_mosaic else None
     return presets_mod.auto_recipe(
-        rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
+        rgb, median_fwhm=master_fwhm_for_run(median_fwhm, run), is_mosaic=is_mosaic, trim_crop=trim,
         prefs=prefs, auto_crop=auto_crop,
         coverage=_auto_measure_coverage(run, scale, is_mosaic),
         proxy_scale=scale,
@@ -406,12 +412,15 @@ def build_auto_analysis_for_run(project_dir: Path, run, median_fwhm: float | Non
     Mirrors ``build_auto_recipe_for_run`` exactly (same proxy, same mosaic verdict,
     same trim rect) so the reported numbers match the recipe it would build, but
     returns only the analysis so the ``…/editor/auto`` Recipe response shape stays
-    unchanged (a separate, additive sibling endpoint serves this)."""
+    unchanged (a separate, additive sibling endpoint serves this).
+
+    The reported star size is on the run's master grid, like the radius it
+    explains — see :func:`master_fwhm_for_run`."""
     rgb, scale = get_proxy(project_dir, run.id, run.fits_path)
     is_mosaic = _run_is_mosaic(run, load=True)
     trim = _trim_rect_for_run(run) if is_mosaic else None
     return presets_mod.analyze_auto_inputs(
-        rgb, median_fwhm=median_fwhm, is_mosaic=is_mosaic, trim_crop=trim,
+        rgb, median_fwhm=master_fwhm_for_run(median_fwhm, run), is_mosaic=is_mosaic, trim_crop=trim,
         auto_crop=auto_crop,
         coverage=_auto_measure_coverage(run, scale, is_mosaic),
         grain_ratio=_auto_measure_grain_ratio(project_dir, run, scale))
@@ -1329,8 +1338,51 @@ def previous_recipe(safe: str, run_id: int, request: Request) -> PreviousRecipeO
 _FWHM_TO_SIGMA = 1.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))  # ≈ 0.4247
 
 
+def master_fwhm_for_run(frame_fwhm: float | None, run) -> float | None:
+    """The target's per-frame median star FWHM on ``run``'s own master grid.
+
+    Every frame ``fwhm_px`` is measured by QC on the half-resolution green
+    plane, but the ops it seeds (sharpen radius, PSF σ, star size) read the
+    master's full-resolution pixels — drizzled finer still when the run
+    drizzled. Feeding the raw number straight across offered about half the
+    star the user was aiming at (×1.8 measured on a plain master, ×2.1 on a
+    ×1.5 drizzle). ``None`` when nothing was measured; a run whose stored
+    options don't say it drizzled (or no run at all) is taken at 1.0."""
+    if frame_fwhm is None or not frame_fwhm > 0:
+        return None
+    supersampling = (canvas_supersampling(getattr(run, "options_json", None))
+                     if run is not None else 1.0)
+    return frame_fwhm_to_master_px(frame_fwhm, supersampling)
+
+
+def _suggestion_fwhm(request: Request, safe: str,
+                     run_id: int | None) -> tuple[float | None, float | None]:
+    """``(frame_fwhm, master_fwhm)`` for the "From your stars" endpoints.
+
+    ``run_id`` names the run being edited; absent ⇒ the target's newest run
+    (older clients, which never sent one). An unknown ``run_id`` is a 404, as
+    on every run-scoped editor route."""
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        fwhm = proj.median_fwhm()
+        runs = proj.iter_stack_runs()
+        if run_id is None:
+            run = next(runs, None)
+        else:
+            run = next((r for r in runs if r.id == run_id), None)
+            if run is None:
+                raise HTTPException(status_code=404, detail="No such stack run")
+    finally:
+        proj.close()
+        lib.close()
+    if fwhm is None or fwhm <= 0:
+        return None, None
+    return fwhm, master_fwhm_for_run(fwhm, run)
+
+
 def psf_sigma_for_fwhm(fwhm: float) -> float:
-    """The deconvolution PSF σ to offer for a measured median star ``fwhm``.
+    """The deconvolution PSF σ to offer for a measured median star ``fwhm``
+    (in the master's own pixels — see :func:`master_fwhm_for_run`).
 
     σ = FWHM / (2·√(2·ln2)), landed on the ``psf_sigma`` slider's own stops
     (:func:`seestack.edit.registry.snap_to_param`) rather than on a pair of
@@ -1348,32 +1400,35 @@ def psf_sigma_for_fwhm(fwhm: float) -> float:
 
 class PsfSuggestionOut(BaseModel):
     """A data-driven default PSF width for editor deconvolution, derived from
-    the target's measured star sizes. ``None`` when no frame carries an FWHM."""
+    the target's measured star sizes. ``None`` when no frame carries an FWHM.
+
+    ``fwhm_px`` stays in the frames' own QC units (comparable with the Frames
+    table); ``master_fwhm_px`` is the same star on the edited run's master grid,
+    which is what ``psf_sigma`` was derived from (additive)."""
 
     fwhm_px: float | None
     psf_sigma: float | None
+    master_fwhm_px: float | None = None
 
 
 @router.get("/api/targets/{safe}/editor/psf-suggestion", response_model=PsfSuggestionOut)
-def psf_suggestion(safe: str, request: Request) -> PsfSuggestionOut:
+def psf_suggestion(safe: str, request: Request,
+                   run_id: int | None = None) -> PsfSuggestionOut:
     """Suggest a deconvolution PSF σ from the target's median star FWHM, so the
     user doesn't have to hand-guess a Gaussian width — the QC layer already
     measured it. σ = FWHM / (2·√(2·ln2)), landed on the op's own slider stops —
     see :func:`psf_sigma_for_fwhm`."""
-    lib, proj = deps.open_target_project(request, safe)
-    try:
-        fwhm = proj.median_fwhm()
-    finally:
-        proj.close()
-        lib.close()
-    if fwhm is None or fwhm <= 0:
+    fwhm, master = _suggestion_fwhm(request, safe, run_id)
+    if fwhm is None or master is None:
         return PsfSuggestionOut(fwhm_px=None, psf_sigma=None)
     return PsfSuggestionOut(fwhm_px=round(fwhm, 3),
-                            psf_sigma=psf_sigma_for_fwhm(fwhm))
+                            psf_sigma=psf_sigma_for_fwhm(master),
+                            master_fwhm_px=round(master, 3))
 
 
 def sharpen_radius_for_fwhm(fwhm: float) -> float:
-    """The unsharp-mask radius to offer for a measured median star ``fwhm``.
+    """The unsharp-mask radius to offer for a measured median star ``fwhm``
+    (in the master's own pixels — see :func:`master_fwhm_for_run`).
 
     A good radius is on the scale of the star's own blur, so this reuses the
     FWHM→σ conversion the PSF suggestion uses and lands the result on the
@@ -1387,32 +1442,32 @@ def sharpen_radius_for_fwhm(fwhm: float) -> float:
 class SharpenSuggestionOut(BaseModel):
     """A data-driven sharpen radius derived from the target's median star FWHM
     (radius ≈ the star's Gaussian σ), so the user doesn't hand-guess a radius.
-    ``None`` when no frame carries an FWHM."""
+    ``None`` when no frame carries an FWHM. ``master_fwhm_px`` as on
+    :class:`PsfSuggestionOut`."""
 
     fwhm_px: float | None
     radius: float | None
+    master_fwhm_px: float | None = None
 
 
 @router.get("/api/targets/{safe}/editor/sharpen-suggestion", response_model=SharpenSuggestionOut)
-def sharpen_suggestion(safe: str, request: Request) -> SharpenSuggestionOut:
+def sharpen_suggestion(safe: str, request: Request,
+                       run_id: int | None = None) -> SharpenSuggestionOut:
     """Suggest an unsharp-mask radius from the target's median star FWHM, so the
     user doesn't hand-guess — mirrors the PSF-from-stars button. The star's
     Gaussian σ (= FWHM / 2·√(2·ln2)) is the natural detail scale to enhance,
     landed on the op's own slider stops — see :func:`sharpen_radius_for_fwhm`."""
-    lib, proj = deps.open_target_project(request, safe)
-    try:
-        fwhm = proj.median_fwhm()
-    finally:
-        proj.close()
-        lib.close()
-    if fwhm is None or fwhm <= 0:
+    fwhm, master = _suggestion_fwhm(request, safe, run_id)
+    if fwhm is None or master is None:
         return SharpenSuggestionOut(fwhm_px=None, radius=None)
     return SharpenSuggestionOut(fwhm_px=round(fwhm, 3),
-                                radius=sharpen_radius_for_fwhm(fwhm))
+                                radius=sharpen_radius_for_fwhm(master),
+                                master_fwhm_px=round(master, 3))
 
 
 def star_size_for_fwhm(fwhm: float) -> int:
-    """The star-reduction ``size`` to offer for a measured median star ``fwhm``.
+    """The star-reduction ``size`` to offer for a measured median star ``fwhm``
+    (in the master's own pixels — see :func:`master_fwhm_for_run`).
 
     ``size`` is a star-scale in pixels — the same physical quantity the FWHM
     measures — so the median FWHM maps straight across, landed on the ``size``
@@ -1425,29 +1480,28 @@ def star_size_for_fwhm(fwhm: float) -> int:
 class StarSizeSuggestionOut(BaseModel):
     """A data-driven star size for the star-reduction op, derived from the
     target's median star FWHM (``size`` ≈ the star's diameter in px), so the user
-    doesn't hand-guess. ``None`` when no frame carries an FWHM."""
+    doesn't hand-guess. ``None`` when no frame carries an FWHM.
+    ``master_fwhm_px`` as on :class:`PsfSuggestionOut`."""
 
     fwhm_px: float | None
     size: int | None
+    master_fwhm_px: float | None = None
 
 
 @router.get("/api/targets/{safe}/editor/star-size-suggestion",
             response_model=StarSizeSuggestionOut)
-def star_size_suggestion(safe: str, request: Request) -> StarSizeSuggestionOut:
+def star_size_suggestion(safe: str, request: Request,
+                         run_id: int | None = None) -> StarSizeSuggestionOut:
     """Suggest a star-reduction ``size`` from the target's median star FWHM, so the
     user doesn't hand-guess how big their stars are — mirrors the sharpen/PSF
     from-stars buttons. ``size`` is a star-scale in px, so the FWHM maps directly
     onto the op's own integer stops — see :func:`star_size_for_fwhm`."""
-    lib, proj = deps.open_target_project(request, safe)
-    try:
-        fwhm = proj.median_fwhm()
-    finally:
-        proj.close()
-        lib.close()
-    if fwhm is None or fwhm <= 0:
+    fwhm, master = _suggestion_fwhm(request, safe, run_id)
+    if fwhm is None or master is None:
         return StarSizeSuggestionOut(fwhm_px=None, size=None)
     return StarSizeSuggestionOut(fwhm_px=round(fwhm, 3),
-                                 size=star_size_for_fwhm(fwhm))
+                                 size=star_size_for_fwhm(master),
+                                 master_fwhm_px=round(master, 3))
 
 
 class DenoiseSuggestionOut(BaseModel):

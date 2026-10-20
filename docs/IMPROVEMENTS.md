@@ -82,28 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟠 (Scout 2026-10-20, QA rotation sweep (1), branch `claude/zen-curie-wncymw`) — every "From your stars" number
-  the editor offers, and Auto's sharpen radius, is about half the star it is aimed at: the frame FWHM is in QC's
-  half-resolution green pixels, the ops read master pixels** (`Project.median_fwhm` → `editor.star_size_for_fwhm` /
-  `sharpen_radius_for_fwhm` / `psf_sigma_for_fwhm`, `presets._sharpen_radius_from_fwhm`). *(Pillar: the editor —
-  PRIORITY 1; size **S–M**; severity moderate — Auto's sharpen and the "Use data-driven defaults" button work at
-  the wrong detail scale on every stack, most on a drizzled one; nothing lost. Confidence: **reproduced** through
-  real `compute_frame_metrics` + `run_stack`; ungated.)* `qc.metrics.compute_frame_metrics` measures `fwhm_px` on
-  `green_channel` — one pixel per 2×2 Bayer cell — and `stacker._compute_stack_fwhm` says so ("block-average to the
-  half-res sampling QC's green_channel uses … then divide out the drizzle"). `detail.sharpen.radius`,
-  `detail.deconvolve.psf_sigma` and `stars.reduce.size` are full-resolution master pixels (`ctx.scaled_px`). Nothing
-  converts between them. Scratch repro, 6 synth subs 960×640 with 4.0 px (sensor) stars: QC median **2.09**, star
-  FWHM on the master grid **3.82** (×1.83); on a ×1.5 drizzle (`auto_drizzle` is on by default) **4.36** (×2.09). Offered:
-  star size **2** vs 4, sharpen radius **1.0** vs 1.5 (2.0 drizzled), PSF σ **0.9** vs 1.6 (1.9). Mosaics are
-  native-scale, so they carry the ×2 the same way. **Fix direction:** one helper turning a frame `fwhm_px` into the
-  run's master pixels — ×2 for the green decimation (a named constant beside `green_channel`), × the run's
-  drizzle scale from its stored options — used by Auto (`build_auto_recipe_for_run` / `build_auto_analysis_for_run`
-  and the pipeline's auto-edit) and by the three suggestion endpoints, which are target-level today and need an
-  optional `run_id` (additive; absent ⇒ the target's newest run). Keep the reported `fwhm_px` in its own units for the
-  labels that compare it with frames. Regression: on a real `run_stack` master, each offered value lands within
-  one slider step of the value computed from the FWHM measured on the master itself, plain and drizzled. No stored
-  recipe changes; an Auto run after the fix sharpens at a coarser radius — say so in the release note.
-
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
@@ -3617,6 +3595,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.7 **Every "From your stars" editor suggestion (star size, sharpen radius, PSF σ) and Auto's sharpen radius was about half the star it aimed at — QC's half-res `fwhm_px` fed to master-pixel ops; it is now put on the edited run's master grid (×2 green decimation × the run's drizzle)** (`metrics.frame_fwhm_to_master_px`, `editor.master_fwhm_for_run`, suggestion endpoints' optional `run_id`; full text in SHIPPED.md)
 - ✅ v0.502.6 **"My life list" judged a mosaic by one frame's circle at its middle — M20 grey on his Lagoon 2×2, M87/M99 on a Markarian 3×3, M110 on an M31 2×2, and an object in an L-shaped mosaic's never-shot quadrant ticked — it now tests each object against the panels themselves** (registry `panel_footprint`, `library._panel_footprint`, `lifelist.footprint_covers`; full text in SHIPPED.md)
 - ✅ v0.502.5 **One target's unreadable preview (a stale mount, EIO, EACCES) 500'd "My best pictures" and its slideshow for every target — it now drops just that target, as the other gallery surfaces already did** (`gallery._file_answers`, `_run_has_preview`, Scout rotation sweep (4)).
 - ✅ v0.502.4 **Cancelling a scan left every queued plate-solve (and QC read) running in the process pool after the job said "cancelled" — `shutdown(wait=False, cancel_futures=True)` cancels nothing; each pending future is now cancelled by hand** (`scanner._map_jobs`, Scout sweep (3); full text in SHIPPED.md)

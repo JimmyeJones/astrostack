@@ -213,8 +213,8 @@ export function EditorView() {
   // Data-driven default for the deconvolution PSF width: the target's median
   // star FWHM converted to a Gaussian σ, offered as a one-click button.
   const psf = useQuery({
-    queryKey: ["psf-suggestion", safe],
-    queryFn: () => api.psfSuggestion(safe),
+    queryKey: ["psf-suggestion", safe, rid],
+    queryFn: () => api.psfSuggestion(safe, rid),
     staleTime: 60_000,
   });
   // Data-driven default for noise reduction: the run's measured background
@@ -227,15 +227,15 @@ export function EditorView() {
   // Data-driven default for the sharpen radius: the target's median star FWHM
   // converted to a Gaussian σ (the natural detail scale), offered as a button.
   const sharpen = useQuery({
-    queryKey: ["sharpen-suggestion", safe],
-    queryFn: () => api.sharpenSuggestion(safe),
+    queryKey: ["sharpen-suggestion", safe, rid],
+    queryFn: () => api.sharpenSuggestion(safe, rid),
     staleTime: 60_000,
   });
   // Data-driven default for star reduction: the target's median star FWHM is the
   // star's own scale in px, offered as a one-click button for the `size` param.
   const starSize = useQuery({
-    queryKey: ["star-size-suggestion", safe],
-    queryFn: () => api.starSizeSuggestion(safe),
+    queryKey: ["star-size-suggestion", safe, rid],
+    queryFn: () => api.starSizeSuggestion(safe, rid),
     staleTime: 60_000,
   });
   // The target's catalog identity — the same query the Target/Stack pages already
@@ -283,7 +283,11 @@ export function EditorView() {
   // fetched suggestion queries; shown only when at least one measure is available.
   const measuredText = useMemo(
     () => measuredContextText({
+      // The star on *this* stack's own pixels (what the buttons were sized
+      // from); an older backend sends only the frames' QC value.
       fwhm_px: coalesceFwhm(
+        psf.data?.master_fwhm_px, sharpen.data?.master_fwhm_px,
+        starSize.data?.master_fwhm_px,
         psf.data?.fwhm_px, sharpen.data?.fwhm_px, starSize.data?.fwhm_px),
       noise_sigma: denoise.data?.noise_sigma,
     }),
@@ -2939,7 +2943,7 @@ export function EditorView() {
                       ? {
                         psf_sigma: {
                           value: psf.data.psf_sigma,
-                          label: `From your stars (σ≈${psf.data.psf_sigma}, FWHM ${psf.data.fwhm_px}px)`,
+                          label: `From your stars (σ≈${psf.data.psf_sigma}, FWHM ${psf.data.master_fwhm_px ?? psf.data.fwhm_px}px)`,
                         },
                       }
                       : selectedOp.id === "detail.denoise" &&
@@ -2954,14 +2958,14 @@ export function EditorView() {
                           ? {
                             radius: {
                               value: sharpen.data.radius,
-                              label: `From your stars (radius ${sharpen.data.radius}, FWHM ${sharpen.data.fwhm_px}px)`,
+                              label: `From your stars (radius ${sharpen.data.radius}, FWHM ${sharpen.data.master_fwhm_px ?? sharpen.data.fwhm_px}px)`,
                             },
                           }
                           : selectedOp.id === "stars.reduce" && starSize.data?.size != null
                             ? {
                               size: {
                                 value: starSize.data.size,
-                                label: `From your stars (size ${starSize.data.size}, FWHM ${starSize.data.fwhm_px}px)`,
+                                label: `From your stars (size ${starSize.data.size}, FWHM ${starSize.data.master_fwhm_px ?? starSize.data.fwhm_px}px)`,
                               },
                             }
                             : selectedOp.id === "tone.stretch"

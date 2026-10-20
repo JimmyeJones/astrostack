@@ -253,8 +253,11 @@ def test_psf_suggestion_from_median_fwhm(client, built_library, data_root):
     r = client.get("/api/targets/M_42/editor/psf-suggestion")
     assert r.status_code == 200
     body = r.json()
-    assert body["fwhm_px"] == 3.0  # median of 2, 3, 4
-    expected_sigma = 3.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
+    assert body["fwhm_px"] == 3.0  # median of 2, 3, 4, in the frames' QC units
+    # … and the σ is sized to that star on the master: ×2 for QC's half-res
+    # green plane (this target has no drizzled run).
+    assert body["master_fwhm_px"] == 6.0
+    expected_sigma = 6.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
     step = param_spec("detail.deconvolve", "psf_sigma").step
     assert body["psf_sigma"] in param_grid("detail.deconvolve", "psf_sigma")
     # The nearest stop to the real σ, not merely a nearby one.
@@ -265,7 +268,7 @@ def test_psf_suggestion_none_without_fwhm(client, built_library):
     # No frame carries an FWHM → both fields null (button won't be offered).
     r = client.get("/api/targets/M_42/editor/psf-suggestion")
     assert r.status_code == 200
-    assert r.json() == {"fwhm_px": None, "psf_sigma": None}
+    assert r.json() == {"fwhm_px": None, "psf_sigma": None, "master_fwhm_px": None}
 
 
 def test_psf_suggestion_clamps_to_op_range(client, built_library, data_root):
@@ -283,12 +286,13 @@ def test_sharpen_suggestion_from_median_fwhm(client, built_library, data_root):
     assert r.status_code == 200
     body = r.json()
     assert body["fwhm_px"] == 3.0  # median of 2, 3, 4
+    assert body["master_fwhm_px"] == 6.0  # the same star on the master grid
     # radius ≈ the star's Gaussian σ, on the op's own stops — read off the
     # ``EditParam`` rather than re-implementing its step here, which is the copy
     # this change removed from three modules.
     from seestack.edit.registry import param_grid, param_spec
 
-    expected = 3.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
+    expected = 6.0 / (2.0 * math.sqrt(2.0 * math.log(2.0)))
     assert body["radius"] in param_grid("detail.sharpen", "radius")
     assert abs(body["radius"] - expected) <= param_spec(
         "detail.sharpen", "radius").step / 2 + 1e-9
@@ -297,7 +301,7 @@ def test_sharpen_suggestion_from_median_fwhm(client, built_library, data_root):
 def test_sharpen_suggestion_none_without_fwhm(client, built_library):
     r = client.get("/api/targets/M_42/editor/sharpen-suggestion")
     assert r.status_code == 200
-    assert r.json() == {"fwhm_px": None, "radius": None}
+    assert r.json() == {"fwhm_px": None, "radius": None, "master_fwhm_px": None}
 
 
 def test_sharpen_suggestion_clamps_to_op_range(client, built_library, data_root):
@@ -314,13 +318,14 @@ def test_star_size_suggestion_from_median_fwhm(client, built_library, data_root)
     assert r.status_code == 200
     body = r.json()
     assert body["fwhm_px"] == 3.0  # median of 2, 3, 4
-    assert body["size"] == 3  # round(3.0), an int in [1, 8]
+    assert body["master_fwhm_px"] == 6.0
+    assert body["size"] == 6  # round(6.0) master px, an int in [1, 8]
 
 
 def test_star_size_suggestion_none_without_fwhm(client, built_library):
     r = client.get("/api/targets/M_42/editor/star-size-suggestion")
     assert r.status_code == 200
-    assert r.json() == {"fwhm_px": None, "size": None}
+    assert r.json() == {"fwhm_px": None, "size": None, "master_fwhm_px": None}
 
 
 def test_star_size_suggestion_clamps_to_op_range(client, built_library, data_root):
@@ -329,6 +334,51 @@ def test_star_size_suggestion_clamps_to_op_range(client, built_library, data_roo
     assert client.get("/api/targets/M_42/editor/star-size-suggestion").json()["size"] == 1
     _set_fwhm(data_root, "M_42", [40.0, 40.0, 40.0])
     assert client.get("/api/targets/M_42/editor/star-size-suggestion").json()["size"] == 8
+
+
+def test_from_your_stars_suggestions_follow_the_edited_runs_drizzle(
+        client, built_library, data_root):
+    """A drizzled run's master pixels are finer, so the same frames' star is
+    bigger on it: ``run_id`` picks the run, and without one the target's newest
+    run decides (an older client never sends it). An unknown run is a 404."""
+    _set_fwhm(data_root, "M_42", [2.0, 2.0, 2.0])
+    plain = _make_run(data_root, "M_42", basename="plain",
+                      ts="2026-05-01T00:00:00Z",
+                      options_json='{"drizzle": false}')
+    drizzled = _make_run(data_root, "M_42", basename="drz",
+                         ts="2026-05-02T00:00:00Z",
+                         options_json='{"drizzle": true, "drizzle_scale": 1.5}')
+    for path in ("psf-suggestion", "sharpen-suggestion", "star-size-suggestion"):
+        base = f"/api/targets/M_42/editor/{path}"
+        newest = client.get(base).json()
+        assert newest["fwhm_px"] == 2.0
+        assert newest["master_fwhm_px"] == 6.0  # 2 × 2 (QC half-res) × 1.5
+        assert client.get(f"{base}?run_id={drizzled}").json() == newest
+        on_plain = client.get(f"{base}?run_id={plain}").json()
+        assert on_plain["fwhm_px"] == 2.0
+        assert on_plain["master_fwhm_px"] == 4.0
+        assert client.get(f"{base}?run_id=99999").status_code == 404
+    assert client.get(
+        f"/api/targets/M_42/editor/star-size-suggestion?run_id={drizzled}"
+    ).json()["size"] == 6
+    assert client.get(
+        f"/api/targets/M_42/editor/star-size-suggestion?run_id={plain}"
+    ).json()["size"] == 4
+
+
+def test_auto_analysis_star_size_is_on_the_runs_master_grid(
+        client, built_library, data_root):
+    """Auto's sharpen radius — and the star size it reports beside it — read
+    the frames' QC FWHM converted onto this run's master (×2 half-res, × its
+    drizzle), not the raw QC number."""
+    _set_fwhm(data_root, "M_42", [2.0, 2.0, 2.0])
+    rid = _make_run(data_root, "M_42", is_mosaic=False,
+                    options_json='{"drizzle": true, "drizzle_scale": 1.5}')
+    a = client.post(f"/api/targets/M_42/stack-runs/{rid}/editor/auto-analysis").json()
+    assert a["median_fwhm"] == 6.0
+    sharpen = client.get(
+        f"/api/targets/M_42/editor/sharpen-suggestion?run_id={rid}").json()
+    assert a["sharpen_radius"] == sharpen["radius"]
 
 
 def test_denoise_suggestion_from_image_noise(client, solved_library):
