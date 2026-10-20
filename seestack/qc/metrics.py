@@ -57,9 +57,30 @@ class FrameMetrics:
     streak_cy: float | None = None
 
 
+#: How many sensor pixels one :func:`green_channel` pixel spans along each axis —
+#: it keeps one (averaged) green value per 2×2 Bayer cell. So every per-frame
+#: ``fwhm_px`` is in these half-resolution pixels, and a debayered master is
+#: this many times finer before any drizzle (see :func:`frame_fwhm_to_master_px`).
+GREEN_CHANNEL_DECIMATION = 2
+
+
+def frame_fwhm_to_master_px(fwhm_px: float, supersampling: float = 1.0) -> float:
+    """A per-frame QC ``fwhm_px`` expressed in a stacked master's own pixels.
+
+    QC measures on :func:`green_channel`'s half-resolution plane, while the
+    editor's ops (sharpen radius, PSF σ, star size) read the full-resolution
+    master — finer again by the run's drizzle ``supersampling`` (1.0 when it
+    did not drizzle). A star measured at 2 px in QC is ~4 px on a plain master
+    and ~6 px on a ×1.5 drizzle. A non-positive ``supersampling`` is treated
+    as 1.0 (change nothing beyond the decimation)."""
+    scale = float(supersampling) if supersampling and supersampling > 0 else 1.0
+    return float(fwhm_px) * GREEN_CHANNEL_DECIMATION * scale
+
+
 def green_channel(mosaic: np.ndarray, pattern: str = "RGGB") -> np.ndarray:
     """
-    Pull the green pixels out of a raw Bayer mosaic into a half-resolution image.
+    Pull the green pixels out of a raw Bayer mosaic into a half-resolution image
+    (:data:`GREEN_CHANNEL_DECIMATION` sensor pixels per pixel).
 
     Cheaper than debayer and good enough for star detection / FWHM / sky stats.
     """

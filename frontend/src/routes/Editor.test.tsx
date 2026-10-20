@@ -701,6 +701,25 @@ describe("EditorView", () => {
       "Measured: stars ≈ 3.2 px FWHM · background noise σ 0.021")).toBeInTheDocument();
   });
 
+  it("sizes 'From your stars' to the edited run's master grid, not QC's half-res frames", async () => {
+    mockEditorQueries();
+    const psf = vi.spyOn(client.api, "psfSuggestion").mockResolvedValue(
+      { fwhm_px: 2.1, psf_sigma: 1.8, master_fwhm_px: 4.2 });
+    vi.spyOn(client.api, "denoiseSuggestion")
+      .mockResolvedValue({ noise_sigma: 0.021, strength: 0.4 });
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true, blob: async () => new Blob([new Uint8Array([1])], { type: "image/png" }),
+    })));
+
+    renderEditor();
+
+    await screen.findByText("Stretch");
+    expect(await screen.findByText(
+      "Measured: stars ≈ 4.2 px FWHM · background noise σ 0.021")).toBeInTheDocument();
+    // The run being edited is named, so a drizzled run's finer pixels count.
+    expect(psf).toHaveBeenCalledWith("M_42", 3);
+  });
+
   it("keeps the old preview with an 'Updating…' badge while a fresh render is in flight", async () => {
     mockEditorQueries();
     // Start with a fetch that resolves so the editor settles to a shown image and

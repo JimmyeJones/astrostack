@@ -1,5 +1,32 @@
 # Shipped — the record
 
+## 2026-10-20 (Builder, branch `claude/festive-knuth-pk1oo0`) — "From your stars" sized to the master it edits
+
+### v0.502.7 — the editor's star-derived suggestions and Auto's sharpen radius read the star on the run's own master
+
+**What.** `qc.metrics.compute_frame_metrics` measures `fwhm_px` on `green_channel` (one pixel per 2×2 Bayer cell);
+`detail.sharpen.radius`, `detail.deconvolve.psf_sigma` and `stars.reduce.size` are master pixels, finer again on
+a drizzle (`auto_drizzle` is on by default). Nothing converted, so every "From your stars" button and Auto's
+sharpen radius was ~half the star (Scout sweep (1), reproduced: QC 2.09 vs 3.82 on the master, 4.36 on ×1.5).
+New `seestack.qc.metrics.GREEN_CHANNEL_DECIMATION` (= 2, beside `green_channel`) and `frame_fwhm_to_master_px`;
+`webapp.routers.editor.master_fwhm_for_run` multiplies in the run's stored drizzle (`field_fulls.canvas_supersampling`,
+1.0 when the options don't say it drizzled). `build_auto_recipe_for_run` / `build_auto_analysis_for_run` convert
+inside, so the Auto endpoint, its analysis and the pipeline's unattended auto-edit all move together; the analysis'
+reported `median_fwhm` ("… px stars" in "What Auto did") is now on the master grid like the radius it explains.
+The three suggestion endpoints take an optional `run_id` (absent ⇒ the target's newest run; unknown ⇒ 404) and add
+`master_fwhm_px`; `fwhm_px` keeps the frames' QC units. The editor passes its run id and its "Measured: stars ≈ …"
+chip and button labels print the master value (falling back to `fwhm_px` on an older backend).
+**Release note:** an Auto run after this sharpens at a coarser radius (about 1.5–2× the old one); stored recipes
+are untouched.
+
+**Tests.** `tests/test_fwhm_master_units.py`: real subs → real QC → real `run_stack`, plain and ×1.5 drizzle; each
+offered value lands within one slider step of the value from the FWHM measured on the master itself — fails before
+(size 2 vs 4 plain, 2 vs 6 drizzled), plus the helper's unit cases. `tests/webapp/test_editor.py`: `run_id`
+selection, newest-run default, 404, and Auto analysis on a drizzled run; the three existing suggestion tests now
+expect the master-grid value. `Editor.test.tsx`: the chip prints the master value and the run id is sent.
+
+**Upgrade-safe (§9):** additive query parameter and response field; no config, schema, layout or default change.
+
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-d6vvuv`) — the life list judges a mosaic by its panels
 
 ### v0.502.6 — "My life list" tests an object against each mosaic panel, not one frame's circle at the middle
