@@ -76,35 +76,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- `claude/festive-knuth-1t0fcu` (Builder 2026-10-20) — the "Hold back highlights" proxy-step bug (`highlights._local_gradient`, `solve_highlight_protect`).
+*No live claims.*
 
 ---
 
 ## Bugs (fix these first)
-
-- **🟡 (Scout 2026-10-20, QA rotation sweep (1)) — the editor's "Hold back highlights" suggestion
-  (`seestack/edit/highlights.py`, `editor.solve_highlight_protect`) shrinks with the proxy step, so the same
-  blown core gets a weaker button on his mosaic than on a single field — and none on a big canvas.**
-  *(Pillar: editor — PRIORITY 1; size **S**; severity moderate — the suggested strength leaves the saved
-  picture's core still blown, and the v0.382.0 passive record that is meant to decide the gated automatic
-  highlight cue reads low/`null` on exactly his mosaics. Confidence: **reproduced** through the real
-  `tone.stretch` op and `suggest_highlight_protect`; ungated.)*
-  Both per-pixel tests in `measure_blown_core` / `_recoverable_flat_fraction` compare a **one-proxy-pixel**
-  gradient (`_local_gradient`) against fixed thresholds — `_FLAT_EPS` (1e-3, "flat in display") and
-  `_LINEAR_STRUCTURE_SIGMA * σ` ("structure in linear"). On a strided proxy one pixel spans `step` native
-  pixels, so a core's gradient reads ~`step`× steeper: fewer pixels count as flat, severity falls, and the
-  bisection stops at a lower stop. Scratch repro: one synthetic 3600×2400 canvas (exponential core, sky 0.05,
-  σ 0.004), the identical ~18 k native-px blown core measured at strides 1–6 (`canvas[::s, ::s]`, the
-  `build_proxy` decimation), default asinh stretch → suggested strength **1.00 / 0.70 / 0.40 / 0.25 / 0.10 /
-  0.05** (severity 0.69 → 0.12); a tighter core (scale 12 px) → 0.75 / 0.45 / 0.30 / 0.20 / 0.05 / **None**.
-  An S30 single field decimates to step 2 and his 2×2 mosaic to step 3. **Effect on the export:** rendered at
-  native resolution, the step-3 answer (0.40) still leaves **5,079 of 18,004** core px at display ≥ 0.98, vs
-  1,484 at the step-2 answer and 170 at 1.00. **Fix direction:** measure the gradient per *native* pixel —
-  divide `_local_gradient` by `ctx.proxy_scale` (thread it in from `solve_highlight_protect`, which already
-  has `scale`) or scale both thresholds by it; `proxy_scale == 1` must stay byte-for-byte. Regression test:
-  the same core strided at 1/2/3/4 returns strengths within one slider stop of each other (fails today: 1.00
-  vs 0.40 vs 0.25). Re-check `_MIN_CORE_AREA_FRAC * n_covered` while there — a mosaic's bigger covered area
-  raises the core floor for the same galaxy (not measured as biting here).
 
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
@@ -3633,6 +3609,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.3 **The "Hold back highlights" suggestion weakened with the editor proxy's step — 1.00 native, 0.40 on his 2×2 mosaic, silent on a big canvas — because its flatness tests read one-proxy-pixel gradients; they are now judged per native pixel** (`highlights._per_native_px`, `suggest_highlight_protect(proxy_scale=…)`, Scout rotation sweep (1)).
 - ✅ v0.502.2 **The life list matched with an S50-sized 0.35° radius, so M32 (0.40° from M31) stayed grey though it is in every frame of his S30 M31 field — each target now matches inside 80 % of its own measured half-field (registry `frame_short_deg`), never below the old floor** (`lifelist.match_radius_deg`, `library._frame_short_deg`).
 - ✅ v0.502.1 **The Dashboard's "Last night" card counted a sub two targets registered (#878's twins) twice — one night on a twinned mosaic read as two targets and twice the hours; it now counts each sub once** (`stats._collect_last_night`).
 - ✅ v0.502.0 **⭐ Owner ask: the Moon/Sun stacker drizzles when it is worth it — a ×1.5 Bayer drizzle runs beside the plain stack and is kept when ≥ 200 frames were stacked and their measured shifts spread sub-pixel on both axes; the result says which it did in one sentence, and the Moon & Sun page has a checkbox to turn it off** (`seestack/video/drizzle.py`, `lucky.stack_video`, `LuckyOptions.drizzle`, `VideoStackRequest.drizzle`).

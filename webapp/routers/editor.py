@@ -1727,7 +1727,7 @@ def solve_highlight_protect(project_dir: Path, run: Any, rec: Recipe,
     def restretch(protect: float) -> np.ndarray:
         return spec.apply(linear, {**stretch_params, "highlights": protect}, ctx)
 
-    return suggest_highlight_protect(linear, restretch)
+    return suggest_highlight_protect(linear, restretch, proxy_scale=scale)
 
 
 class CurveSuggestionOut(BaseModel):
