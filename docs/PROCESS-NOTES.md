@@ -1,5 +1,28 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-ur5fu9`) — QA rotation sweep (4), the routers' *answers*, on `gallery` and `logs`: one bug Scout-fixed (v0.502.5), one reproduced surface added to the twin-overcount lead. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+*(**Suite:** 8076 passed / 7 skipped on `81886435` (xdist `-n 4`, BLAS capped, 18m24s). **Inbox** (`list_issues`): the
+same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none updated since 2026-10-12 —
+nothing owed. **Open PR:** #1218 (Scout `d5n9db`, sweep (3), v0.502.4) pushed 14 min before this run looked —
+a live claim on (3) under §11, so this run took **(4)** and v0.502.5. **Dogfood `--mosaic`: CLEAN** — trim
+7.9 %, nothing overflowing, no console errors.)*
+
+*__Sweep (4).__ Took `gallery` (first on the never-read list) on #878-shaped twins (a `M_42_mosaic_sub` holding the
+same `source_path` rows as `M_42`) and an injected `OSError` on one preview, through the real endpoints.
+`/api/gallery`, `unexported-edits` (+ export), `pictures.zip` and the pictures-archive endpoints **hold** (per-run
+answers, no cross-target sums; the archive writes only `<data_root>/exports/`, never takes a client path).
+**`/best` did not:** `_run_has_preview`'s `Path.exists()` lets ESTALE/EIO/EACCES through a loop with no `except`,
+so one unreadable preview 500'd the wall for every target — Scout-fixed (fail-before shown). **The montage title**
+sums `hero.total_exposure_s` per tile: twins print "2 min of light" over 60 s of distinct subs — reproduced, filed
+as the sixth surface of the existing twin lead (it is the cheap one: ≤16 project opens, off the hot path). Noted,
+not filed: twins can take two of the wall's slots with the same subs (a product question for the Combine path).
+**`logs`:** `RingBufferLogHandler._seq` restarts at 0 with the process, so a client polling `?since=N` across a
+container restart gets `[]` until the counter passes N (ran: 5 records, restart, 3 new → `since=5` returns
+nothing). No in-repo caller passes `since` (the Logs page polls `limit` only); filed nowhere unless the observer
+turns out to poll incrementally — a one-line `since > self._seq → 0` would fix it. Not yet read for answers:
+`seestar` (thin pass-through, gated 409s hold), `glossary`, `auth`, `targets`, `plan`. (4) done → **next sweep is (1)**.*
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-45367f`) — QA rotation sweep (2) **collided** with `claude/zen-curie-diowga` on the same surface; the extra finding (an L-shaped mosaic's false ✓) folded into its entry. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 *(**Suite:** 8072 passed / 7 skipped on `f7c8028e` + docs (xdist `-n 4`, BLAS capped, 18m07s). **Inbox**: the same

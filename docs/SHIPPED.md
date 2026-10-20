@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-ur5fu9`) — one unreadable preview no longer blanks "My best pictures"
+
+### v0.502.5 — `/api/gallery/best` treats a preview the filesystem can't answer about as "not this one"
+
+**What.** `gallery._run_has_preview` (and the wall's `has_fits` / `has_tiff`) called `Path.exists()`, which in
+Python 3.12 swallows only "not there" errors — a stale network-mount handle, an EIO or an EACCES on **one** target's
+preview raised out of the per-target loop (whose `try/finally` has no `except`) and 500'd the whole wall and the
+"Show and tell" slideshow built on it, while `/api/gallery`, the pictures zip and the montage all degraded to the
+remaining targets. New `gallery._file_answers(raw)` returns False on `OSError`, the same rule
+`targets._readable_file` already applies to the current picture; the montage's `preview_exists` uses it too.
+Healthy libraries are byte-for-byte unchanged.
+
+**Found by** Scout QA rotation sweep (4), the routers' *answers*, on `gallery` (never read for answers before).
+Reproduced with `Path.stat` raising `ESTALE` for one of three targets' previews: `/best` raised
+`OSError [Errno 116]`, the other three gallery surfaces answered 200.
+
+**Tests.** `tests/webapp/test_gallery_best.py::test_one_unreadable_preview_does_not_take_down_the_wall` — fails
+before (the `OSError` escapes), passes after with the two healthy targets on the wall and the unreadable one off it.
+
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-1t0fcu`) — "Hold back highlights" no longer weakens on a mosaic
 
 ### v0.502.3 — the highlight suggestion is measured per native pixel, not per proxy pixel
