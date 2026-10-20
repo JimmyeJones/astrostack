@@ -11,11 +11,13 @@ from dataclasses import dataclass
 import pytest
 
 from seestack.lifelist import (
+    FIELD_MATCH_FRACTION,
     MATCH_RADIUS_DEG,
     LifeListEntry,
     catalog_capture_status,
     is_messier,
     life_list_summary,
+    match_radius_deg,
     nearly_complete_constellations,
 )
 from seestack.nightplan import CatalogObject, load_catalog
@@ -28,6 +30,7 @@ class FakeTarget:
     ra_deg: float | None
     dec_deg: float | None
     n_frames: int = 12
+    frame_short_deg: float | None = None
 
 
 def _obj(cid: str, ra: float, dec: float, name: str = "") -> CatalogObject:
@@ -244,3 +247,47 @@ def test_ties_break_on_most_captured_then_alphabetically():
 def test_entries_without_a_constellation_are_skipped():
     entries = [_entry("X1", "", captured=True), _entry("X2", "", captured=False)]
     assert nearly_complete_constellations(entries) == []
+
+
+# ---- the target's own field -------------------------------------------------
+
+
+def test_a_wide_field_target_holds_a_neighbour_the_floor_would_leave_grey():
+    """The owner's S30 field is ~2.1° x 1.2°, so M32 (0.40° from M31) is in every
+    M31 frame he takes — the S50-sized floor alone left it grey."""
+    cat = [_obj("M31", 10.685, 41.269), _obj("M32", 10.674, 40.866)]
+    s30 = [FakeTarget("M 31", "M_31", 10.685, 41.269, frame_short_deg=1.197)]
+    unknown = [FakeTarget("M 31", "M_31", 10.685, 41.269)]
+
+    by_id = {e.catalog_id: e for e in catalog_capture_status(cat, s30)}
+    assert by_id["M32"].captured and by_id["M32"].safe_name == "M_31"
+    assert by_id["M32"].sep_deg == pytest.approx(0.403, abs=0.002)
+    assert not {e.catalog_id: e for e in catalog_capture_status(cat, unknown)}["M32"].captured
+
+
+@pytest.mark.parametrize("short", [None, 0.0, -1.0, float("nan"), float("inf"), "junk"])
+def test_an_unknown_or_nonsense_field_keeps_the_floor(short):
+    assert match_radius_deg(FakeTarget("A", "A", 0.0, 0.0, frame_short_deg=short)) == MATCH_RADIUS_DEG
+
+
+def test_the_field_radius_stays_inside_the_frame_and_never_below_the_floor():
+    s30 = FakeTarget("A", "A", 0.0, 0.0, frame_short_deg=1.2)
+    s50 = FakeTarget("B", "B", 0.0, 0.0, frame_short_deg=0.717)
+    assert match_radius_deg(s30) == pytest.approx(FIELD_MATCH_FRACTION * 0.6)
+    assert match_radius_deg(s30) < 0.6  # strictly inside the inscribed circle
+    assert match_radius_deg(s50) == MATCH_RADIUS_DEG
+
+    cat = [_obj("X", 10.0, 40.0)]
+    inside = FakeTarget("A", "A", 10.0, 40.0 + 0.47, frame_short_deg=1.2)
+    outside = FakeTarget("A", "A", 10.0, 40.0 + 0.49, frame_short_deg=1.2)
+    assert catalog_capture_status(cat, [inside])[0].captured is True
+    assert catalog_capture_status(cat, [outside])[0].captured is False
+
+
+def test_the_closest_target_still_wins_across_different_fields():
+    """A wide target farther away does not beat a narrow one sitting on it."""
+    cat = [_obj("M32", 10.674, 40.866)]
+    wide = FakeTarget("M 31", "M_31", 10.685, 41.269, frame_short_deg=1.197)
+    on_it = FakeTarget("M 32", "M_32", 10.674, 40.870)
+    (entry,) = catalog_capture_status(cat, [wide, on_it])
+    assert entry.safe_name == "M_32"

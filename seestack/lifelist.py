@@ -17,6 +17,7 @@ Read-only and side-effect free, so it is safe to call on every page load.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -25,15 +26,48 @@ from seestack.io.library import _angular_separation_deg
 from seestack.nightplan import CatalogObject
 
 #: How close a target's plate-solved centre must sit to a catalog object's
-#: coordinates before we claim the owner has captured it.
+#: coordinates before we claim the owner has captured it — the **floor**, used
+#: when the target's own field is not known (see :func:`match_radius_deg`).
 #:
-#: One Seestar frame is roughly 1.3° × 0.7°, so 0.35° is comfortably *inside* a
-#: single frame: an object that matches is genuinely in the picture, while a
-#: different object a frame's width away cannot be falsely claimed. Erring small
-#: is the right way round — telling someone they have M65 when they pointed at
-#: M66 next door would make the whole list untrustworthy, whereas a miss just
-#: leaves one tile grey until they solve that target.
+#: Sized for the *smallest* Seestar field — an S50 frame is roughly 1.3° × 0.7°,
+#: so 0.35° is comfortably inside it: an object that matches is genuinely in the
+#: picture, while a different object a frame's width away cannot be falsely
+#: claimed. Erring small is the right way round — telling someone they have M65
+#: when they pointed at M66 next door would make the whole list untrustworthy,
+#: whereas a miss just leaves one tile grey until they solve that target.
 MATCH_RADIUS_DEG = 0.35
+
+#: The share of a target's own half-field (half its measured short side) inside
+#: which an object counts as captured.
+#:
+#: The registry centre is a median over dithered, drifting subs, not the exact
+#: middle of any one of them, so the radius stays well inside the frame's
+#: inscribed circle rather than on its edge. On the owner's S30 (≈2.1° × 1.2°)
+#: that is ≈0.48° — enough for M32, 0.40° from M31 and plainly in his M31 field,
+#: which the S50-sized floor left grey. On an S50 it is ≈0.29°, under the floor,
+#: so an S50 library matches exactly as before. On a mosaic the centre is the
+#: middle of its panels (``library._panel_extent_centre``) and one frame's
+#: inscribed circle around it is covered by the panels meeting there, so this is
+#: a lower bound on what the mosaic holds — it never claims sky no panel covered.
+FIELD_MATCH_FRACTION = 0.8
+
+
+def match_radius_deg(target: Any, floor_deg: float = MATCH_RADIUS_DEG) -> float:
+    """How far from ``target``'s centre an object may sit and still be in its picture.
+
+    The target's own measured field (``frame_short_deg``, stamped on the registry
+    from its plate solve) when known — :data:`FIELD_MATCH_FRACTION` of half its
+    short side — and never less than ``floor_deg``, so a target whose field is
+    unknown, or an S50's, matches exactly as it always has.
+    """
+    short = getattr(target, "frame_short_deg", None)
+    try:
+        short_f = float(short) if short is not None else None
+    except (TypeError, ValueError):
+        short_f = None
+    if short_f is None or not math.isfinite(short_f) or short_f <= 0:
+        return float(floor_deg)
+    return max(float(floor_deg), FIELD_MATCH_FRACTION * short_f / 2.0)
 
 
 @dataclass(frozen=True)
@@ -101,7 +135,9 @@ def catalog_capture_status(
     When several targets sit near one object — the Seestar writes a new folder
     per night, so three nights on M31 is three targets until they are merged —
     the **closest** wins, so the list shows one capture rather than an arbitrary
-    one. Returned in display order: Messier numerically, then the rest.
+    one. Each target is judged against its own field (:func:`match_radius_deg`),
+    so a wide-field target can hold a neighbour a narrow one could not.
+    Returned in display order: Messier numerically, then the rest.
     """
     solved = [
         t for t in targets
@@ -110,15 +146,16 @@ def catalog_capture_status(
         and int(getattr(t, "n_frames", 0) or 0) > 0
     ]
 
+    radii = [match_radius_deg(t, radius_deg) for t in solved]
     entries: list[LifeListEntry] = []
     for obj in catalog:
         best = None
-        best_sep = float(radius_deg)
-        for t in solved:
+        best_sep = 0.0
+        for t, r in zip(solved, radii, strict=True):
             sep = _angular_separation_deg(
                 obj.ra_deg, obj.dec_deg, float(t.ra_deg), float(t.dec_deg),
             )
-            if sep <= best_sep:
+            if sep <= r and (best is None or sep <= best_sep):
                 best_sep, best = sep, t
         entries.append(LifeListEntry(
             catalog_id=obj.id,
