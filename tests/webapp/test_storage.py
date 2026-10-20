@@ -399,3 +399,61 @@ def test_a_dedupe_that_cannot_complete_keeps_the_old_sum(
     r = client.get("/api/storage")
     assert r.status_code == 200
     assert r.json()["incoming_frames"] == 9
+
+
+def test_prune_keep_never_deletes_the_pinned_cover(client, solved_library, tmp_path):
+    """"Keep the N newest" spares the pinned cover — the picture on the wall.
+
+    The cover is pinned *because* it is not the newest run (a hand-finished
+    export kept over fresh linear restacks, #903's shape), so it is exactly the
+    run "the rest" used to include: its row and files were deleted and the wall
+    fell back to a flat linear stack.
+    """
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    out = tmp_path / "out"
+    out.mkdir()
+
+    def add(ts, basename, options=None):
+        lib = Library.open_or_create(solved_library / "library")
+        try:
+            proj = lib.open_target(safe)
+            try:
+                fits = out / f"{basename}.fits"
+                prev = out / f"{basename}_preview.png"
+                fits.write_bytes(b"F")
+                prev.write_bytes(b"P")
+                return proj.add_stack_run(StackRunRow(
+                    id=None, timestamp_utc=ts, output_basename=basename,
+                    fits_path=str(fits), tiff_path=None, preview_path=str(prev),
+                    n_frames_used=1, canvas_h=10, canvas_w=10,
+                    coverage_min=1, coverage_max=1,
+                    options_json=json.dumps(options or {}),
+                ))
+            finally:
+                proj.close()
+        finally:
+            lib.close()
+
+    finished = add("2026-01-01T00:00:00Z", "finished",
+                   {"editor_recipe": {"ops": []}, "display_space": "display"})
+    add("2026-01-02T00:00:00Z", "old_linear")
+    for i in range(3):
+        add(f"2026-02-0{i + 1}T00:00:00Z", f"linear{i}")
+    assert client.put(f"/api/targets/{safe}/cover",
+                      json={"run_id": finished}).status_code == 200
+
+    r = client.post(f"/api/targets/{safe}/stack-runs/prune", json={"keep": 3})
+    assert r.status_code == 200
+    assert finished not in r.json()["deleted"]
+    assert len(r.json()["deleted"]) == 1  # only the unpinned old linear stack
+
+    names = {x["output_basename"]
+             for x in client.get(f"/api/targets/{safe}/stack-runs").json()}
+    assert names == {"finished", "linear0", "linear1", "linear2"}
+    assert (out / "finished.fits").exists()
+    assert (out / "finished_preview.png").exists()
+    assert not (out / "old_linear.fits").exists()
+
+    # An explicit id list is the caller naming the run, and is honoured.
+    r = client.post(f"/api/targets/{safe}/stack-runs/prune", json={"ids": [finished]})
+    assert r.json()["deleted"] == [finished]

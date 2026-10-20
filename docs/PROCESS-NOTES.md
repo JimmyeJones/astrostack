@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-pvo4tr`) — QA rotation sweep (4), the `storage` router's prune answer against the pin: one bug, Scout-fixed (v0.502.16). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8138 passed / 7 skipped on `b7be90a0` (xdist `-n 4`, BLAS capped, 15m48s). **Inbox:** the same four (#878, #880,
+  #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs. **Dogfood `--mosaic`:** CLEAN
+  (trim 7.9 %, nothing overflowing, no console errors).
+- **Sweep (4).** Routers least read for answers: `system` (its ASTAP probe was sweep (3)'s), `incominglag`, `upload`,
+  `storage`. `incominglag` read against #878 double registration and calibration skips: CLEAN (distinct-path de-dup,
+  exact-match skips, floor at zero). `astap_fov_deg`'s S50 default: already settled as a fallback (v0.495.14) — not
+  re-litigated. **`storage.prune_stack_runs`:** the 2026-09-27 sweep cleared "prune the cover" because a dangling
+  `cover_stack_run_id` degrades gracefully — but never asked whether the cover *should* be deleted. With `keep`, it was:
+  `runs[keep:]` includes the pinned cover, which is pinned precisely because it is older (owner's "Set as cover", or the
+  app's `kept_finished` pin from #903's protection). Real-client repro: pinned export + 1 older + 3 newer linear runs,
+  *Keep 3* (the page default) → the export's row, FITS and preview deleted, the wall back to a linear stack. Fixed: `keep`
+  skips the cover; explicit `ids` honoured. +1 test, fail-before by scratch revert. Lever for next time: **a "safe because
+  it degrades gracefully" verdict answers the reader's question, not the owner's — ask what the action destroys.**
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-y0olqb`) — QA rotation sweep (3), new angle — the sibling-hint retry and the stack-then-solve rescue's *deep-image* solve under a hostile stub ASTAP: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8138 passed / 7 skipped on `f4b6c96c` (xdist `-n 4`, BLAS capped, 14m56s). **Inbox:** the same four (#878, #880, #903, #1015), none updated
