@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-y0olqb`) — QA rotation sweep (3), new angle — the sibling-hint retry and the stack-then-solve rescue's *deep-image* solve under a hostile stub ASTAP: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8138 passed / 7 skipped on `f4b6c96c` (xdist `-n 4`, BLAS capped, 14m56s). **Inbox:** the same four (#878, #880, #903, #1015), none updated
+  since 2026-10-12, all owner-gated — nothing owed. No open PRs. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing
+  overflowing, no console errors). (The setup script's first `pip install` hung ~25 min with nothing installed; killing it
+  let its `--timeout 120 --retries 5` fallback finish in ~1 min.)
+- **Sweep (3).** No earlier (3) sweep drove the two ASTAP calls a *failed* pass makes: `scanner.run_qc_and_solve`'s
+  sibling-hint retry and `bootstrap._default_deep_solver` (a `TemporaryDirectory` + `deep.fits`). Real `scan_and_organize`
+  (`copy_to_cache=False`) + `run_qc_and_solve(bootstrap_solve=True)` in its process pool, a `M 42_mosaic_sub/` of 12 subs
+  with spaces/parentheses in the names, `TMPDIR`/`HOME`/cwd redirected so every write is visible. The stub logs argv+cwd,
+  litters its cwd, `$HOME` and beside every absolute argument, and scribbles over its own `-f` file. Three behaviours:
+  **partial** (2 solve → 10-sub sibling retry, then the anchored rescue: 62 calls), **none** (every sub fails, the deep
+  image solves: 37 calls, 12 propagated), **hang** (the deep solve sleeps past a 3 s timeout: 3 deep attempts, rescue
+  reports "deep image did not solve"). Every run: no `-f` inside `incoming/`, `incoming/` byte/mtime/mode-identical, the
+  temp dir empty afterwards (no `astrostack-bootstrap-*`/`-solve-*` left), no stub process alive, litter only in the app's
+  cwd/`$HOME`.
+- **Side read, not filed (already in Bugs):** a two-panel S30 mosaic (1080×1920, shared catalog, panels 600–1300 px apart,
+  8 subs each, all unsolved): the rescue places one panel (the other stays honestly unsolved — no cross-panel lock at owner
+  scale; a 320×240 toy *did* lock an unrelated sky, because `DEFAULT_MAX_SHIFT_PX` 200 exceeds that frame's half-size),
+  and a second "try harder" pass then answers "enough subs already solved" — the per-panel rescue gate of the 2026-10-19
+  un-located-panel entry, reproduced through the real rescue rather than its gate function. Also noted: the rescue writes
+  a WCS only to its ≤ `DEFAULT_MAX_FRAMES` (16) members and then stands down; on a single faint field the rest rely on
+  the stack-time `star_match_unsolved` placement. **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-ijzhxo`) — QA rotation sweep (2) on v0.502.5's mosaic life-list footprint: one bug filed reproduced (the margin is the worst panel's spread). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8138 passed / 7 skipped on `400537b3` (xdist `-n 4`, BLAS capped, 15m04s). **Inbox:** the same four (#878, #880,
