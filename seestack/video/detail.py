@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import numpy as np
 
-#: Radius of the blur the detail is measured against, in pixels. Lunar and solar
+#: Radius of the blur the detail is measured against, in camera pixels (a
+#: drizzled still scales it — see :func:`sharpen_still`'s ``scale``). Lunar and solar
 #: detail — crater rims, the terminator, granulation — lives at the scale of a
 #: pixel or two, so a tight radius lifts *that* rather than the disk's overall
 #: shading. It is also what keeps the limb honest: a wide radius on a
@@ -46,7 +47,7 @@ SHARPEN_PRESETS: tuple[tuple[str, float], ...] = (
 SHARPEN_MAX = 2.0
 
 
-def sharpen_still(rgb: np.ndarray, amount: float) -> np.ndarray:
+def sharpen_still(rgb: np.ndarray, amount: float, *, scale: float = 1.0) -> np.ndarray:
     """Unsharp-mask an already display-rendered still (values 0–1).
 
     ``amount`` is how much of the fine detail to add back: 0 returns the input
@@ -58,12 +59,21 @@ def sharpen_still(rgb: np.ndarray, amount: float) -> np.ndarray:
     still be written as an ordinary 8- or 16-bit picture. Uncovered pixels
     (NaN, from an alignment shift) stay NaN rather than smearing a hole's edge
     into the picture around it.
+
+    ``scale`` is how many of this still's pixels span one camera pixel — the
+    result's ``drizzle_scale``. :data:`SHARPEN_SIGMA_PX` is tuned in camera
+    pixels, so a drizzled still's radius grows with it; otherwise every preset
+    would measure a ×1.5 still's crater rims against a blur ⅔ the size, and lift
+    them about half as much as on the camera-sized still of the same capture.
+    Anything but a positive finite number reads as 1 (camera pixels).
     """
     arr = np.asarray(rgb, dtype=np.float32)
     a = float(amount)
     if not np.isfinite(a) or a <= 0.0:
         return arr
     a = min(a, SHARPEN_MAX)
+    k = float(scale)
+    sigma = SHARPEN_SIGMA_PX * (k if np.isfinite(k) and k > 0.0 else 1.0)
 
     from scipy.ndimage import gaussian_filter
 
@@ -73,7 +83,7 @@ def sharpen_still(rgb: np.ndarray, amount: float) -> np.ndarray:
     filled = np.where(holes, 0.0, arr).astype(np.float32)
     blurred = np.empty_like(filled)
     for c in range(filled.shape[2]):
-        blurred[..., c] = gaussian_filter(filled[..., c], sigma=SHARPEN_SIGMA_PX)
+        blurred[..., c] = gaussian_filter(filled[..., c], sigma=sigma)
 
     out = np.clip(filled + a * (filled - blurred), 0.0, 1.0).astype(np.float32)
     if holes.any():

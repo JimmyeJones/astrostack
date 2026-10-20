@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-10-20 (Scout, branch `claude/zen-curie-uic6x9`) — QA rotation sweep (4), the routers' *answers*, on the never-swept `wishlist`, `sample`, `updates`, `stackfailures` and `overtrim`: one bug Scout-fixed (v0.502.9), one filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+## 2026-10-20 (Scout, branch `claude/zen-curie-uic6x9`) — QA rotation sweep (4), the routers' *answers*, on the never-swept `wishlist`, `sample`, `updates`, `stackfailures` and `overtrim`: one bug Scout-fixed (v0.502.10), one filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8114 passed / 7 skipped on `6724173b` (xdist `-n 4`, BLAS capped, 20m34s). **Inbox:** the same four (#878, #880,
   #903, #1015), no activity since 2026-10-12, all owner-gated — nothing new owed. **Dogfood** `--mosaic`: CLEAN, trim 7.9 %.
@@ -12,9 +12,22 @@
   but #878 says both twins carry stack runs — not filed. **`sample` — CLEAN:** `remove_sample` deletes only its
   reserved `Sample: …` names through `delete_target(remove_files=True)`, which refuses `incoming/`. **`updates` —
   CLEAN:** every POST takes a JSON body (the CSRF guard), `apply` re-checks the offered version.
-- **`overtrim` — BUG, Scout-fixed (v0.502.9):** judged the newest run while a pinned cover is what the wall shows.
+- **`overtrim` — BUG, Scout-fixed (v0.502.10):** judged the newest run while a pinned cover is what the wall shows.
 - **`stackfailures` — BUG, filed reproduced:** Reprocess-all's `result["failed"]` is a third recording site
   `latest_stack_failures` never reads (entry at the end of Bugs).
+
+## 2026-10-20 (Scout, branch `claude/zen-curie-jwnetb`) — QA rotation sweep (4), the `wishlist` and `video` routers' answers: wishlist CLEAN; one Moon/Sun bug Scout-fixed (v0.502.9). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8112 passed / 7 skipped on `7f60ccfc` (xdist `-n 4`, BLAS capped, 17m17s). **Inbox:** the same four (#878, #880, #903,
+  #1015), none updated since 2026-10-12 — nothing owed. No open PRs. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors).
+- **Picked by count:** `wishlist` and `sample` had never been named in a sweep record; `video` twice, and it took v0.502.0's drizzle today.
+- **`wishlist`: CLEAN.** "Captured" is `lifelist.catalog_capture_status` judged per object (closest inside each target's own
+  field or panel footprint), so passing only the saved subset cannot disagree with the life list's whole-catalog pass; the
+  0.35° `radius_deg` it passes is the same floor the life list uses. Stale ids keep their snapshot row; `/tonight` drops them
+  before the ephemeris, as documented.
+- **`video`: one bug, Scout-fixed.** Crop framing is all fractions of the disk (scale-free), but the sharpen radius was a fixed
+  1.1 output pixels, so a ×1.5 drizzled still got 46–63 % of each preset's boost at crater scale. Fixed (v0.502.9,
+  `sharpen_still(scale=)`), fail-before shown by reverting only the wiring. **Rotation: (4) done → next sweep is (1).**
 
 ## 2026-10-20 (Scout, branch `claude/zen-curie-myk6ia`) — QA rotation sweep (3), new angles — the `/api/system` ASTAP probe and *Test ASTAP* button under a hostile stub, then a SIGKILLed solve worker: one low-severity lead filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
