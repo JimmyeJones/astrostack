@@ -718,8 +718,168 @@ def test_v5_registry_without_frame_short_deg_upgrades_in_place(tmp_path):
     try:
         cols = {r["name"] for r in lib._conn.execute("PRAGMA table_info(targets)")}
         assert "frame_short_deg" in cols
+        assert "panel_footprint" in cols
         entry = lib.find_target("M_31")
         assert entry is not None and entry.frame_short_deg is None
+        assert entry.panel_footprint is None
         assert entry.n_frames == 5 and entry.ra_deg == pytest.approx(10.685)
+    finally:
+        lib.close()
+
+
+# ---- a mosaic is judged against its own panels (life list) -----------------
+#
+# One frame's circle around a mosaic's middle answers a whole-target question
+# with a per-panel number: the Lagoon + Trifid 2x2 left M20 grey, and a 2x2 with
+# one panel never shot claimed sky in that missing quadrant. The registry now
+# stamps the panels themselves and the life list asks "is it inside a panel?".
+
+
+def _add_s30_mosaic(proj: Project, centre: tuple[float, float], cols: int, rows: int,
+                    *, overlap: float = 0.15, n: int = 40, skip: tuple = (),
+                    rotation: float | None = 0.0) -> None:
+    """S30 portrait subs (3.99″/px, 1080 x 1920 — 1.197° E-W x 2.128° N-S at
+    rotation 0) on a ``cols`` x ``rows`` grid, with a small dither and a ±1°
+    spread of solved rotation; ``skip`` lists ``(col, row)`` panels never shot
+    (col grows east, row north)."""
+    import math
+    ra0, dec0 = centre
+    step_ra = 1.197 * (1 - overlap) / math.cos(math.radians(dec0))
+    step_dec = 2.128 * (1 - overlap)
+    for r in range(rows):
+        for c in range(cols):
+            if (c, r) in skip:
+                continue
+            ra = ra0 + (c - (cols - 1) / 2) * step_ra
+            dec = dec0 + (r - (rows - 1) / 2) * step_dec
+            for k in range(n):
+                _counter[0] += 1
+                proj.add_frame(FrameRow(
+                    source_path=f"f_{_counter[0]}.fit", exposure_s=10.0,
+                    ra_center_deg=(ra + 0.02 * ((k % 5) - 2)) % 360.0,
+                    dec_center_deg=dec + 0.02 * ((k % 3) - 1),
+                    pixscale_arcsec=3.99, width_px=1080, height_px=1920,
+                    rotation_deg=(None if rotation is None
+                                  else rotation + ((k % 7) - 3) / 3.0),
+                    accept=True,
+                ))
+
+
+def _life_list_for(tmp_path, centre, cols, rows, ids, **kw):
+    from seestack.lifelist import catalog_capture_status
+    from seestack.nightplan import load_catalog
+
+    by_id = {o.id: o for o in load_catalog()}
+    lib = Library.create(tmp_path / "lib")
+    try:
+        _entry, proj = lib.create_target("Mosaic")
+        try:
+            _add_s30_mosaic(proj, centre, cols, rows, **kw)
+        finally:
+            proj.close()
+        entry = lib.refresh_target_stats("Mosaic")
+        status = catalog_capture_status([by_id[i] for i in ids], lib.list_targets())
+        return entry, {e.catalog_id: e.captured for e in status}
+    finally:
+        lib.close()
+
+
+def _catalog_centre(cid: str) -> tuple[float, float]:
+    from seestack.nightplan import load_catalog
+    obj = next(o for o in load_catalog() if o.id == cid)
+    return obj.ra_deg, obj.dec_deg
+
+
+@pytest.mark.parametrize("centre_id, cols, rows, lit, grey", [
+    # The classic Lagoon + Trifid 2x2: M20 is 1.38° off the middle, in a panel.
+    ("M8", 2, 2, ["M8", "M20"], ["M28"]),
+    # Markarian's Chain 3x3: M87 (1.49°) and M99 (2.15°) are in its outer panels.
+    ("M84", 3, 3, ["M84", "M86", "M87", "M99"], ["M88", "M100"]),
+    # M31 2x2: M110 (0.61°) is in a panel; M33 is 15° away.
+    ("M31", 2, 2, ["M31", "M32", "M110"], ["M33"]),
+])
+def test_life_list_lights_what_any_mosaic_panel_holds(tmp_path, centre_id, cols, rows,
+                                                       lit, grey):
+    entry, captured = _life_list_for(tmp_path, _catalog_centre(centre_id), cols, rows,
+                                     lit + grey)
+    assert entry.panel_footprint is not None
+    assert [i for i in lit if not captured[i]] == []
+    assert [i for i in grey if captured[i]] == []
+
+
+def test_life_list_never_claims_the_quadrant_an_l_shaped_mosaic_never_shot(tmp_path):
+    """A 2x2 at 10 % overlap with its north-east panel absent keeps its centre at
+    the 2x2 middle; one frame's circle there reached 0.40° into the missing
+    quadrant and called an object there captured."""
+    import math
+
+    from seestack.lifelist import catalog_capture_status
+    from seestack.nightplan import CatalogObject
+
+    centre = (150.0, 30.0)
+    lib = Library.create(tmp_path / "lib")
+    try:
+        _entry, proj = lib.create_target("L")
+        try:
+            _add_s30_mosaic(proj, centre, 2, 2, overlap=0.10, skip=((1, 1),))
+        finally:
+            proj.close()
+        entry = lib.refresh_target_stats("L")
+        assert _angular_separation_deg(float(entry.ra_deg), float(entry.dec_deg),
+                                       *centre) < 0.05
+        d = 0.40 / math.sqrt(2)
+        cos_dec = math.cos(math.radians(centre[1]))
+        objs = [
+            # 0.40° into the never-shot north-east quadrant.
+            CatalogObject(id="NE", name="", ra_deg=centre[0] + d / cos_dec,
+                          dec_deg=centre[1] + d, type="Galaxy", con="Leo"),
+            # The same distance into the shot south-west one.
+            CatalogObject(id="SW", name="", ra_deg=centre[0] - d / cos_dec,
+                          dec_deg=centre[1] - d, type="Galaxy", con="Leo"),
+            # Just past the west edge of the western panels.
+            CatalogObject(id="W", name="", type="Galaxy", con="Leo",
+                          ra_deg=centre[0] - (1.197 * 0.9 / 2 + 1.197 / 2 + 0.05) / cos_dec,
+                          dec_deg=centre[1] - 0.5),
+        ]
+        captured = {e.catalog_id: e.captured
+                    for e in catalog_capture_status(objs, lib.list_targets())}
+        assert captured == {"NE": False, "SW": True, "W": False}
+    finally:
+        lib.close()
+
+
+def test_a_single_field_and_an_unknown_rotation_keep_the_one_circle(tmp_path):
+    """No panel split, or panels whose rotation was never solved: no footprint,
+    so the life list matches exactly as v0.502.2 did — M110 stays grey beside a
+    single S30 M31 field."""
+    entry, captured = _life_list_for(tmp_path / "a", _M31, 1, 1, ["M31", "M32", "M110"])
+    assert entry.panel_footprint is None
+    assert captured == {"M31": True, "M32": True, "M110": False}
+
+    entry, captured = _life_list_for(tmp_path / "b", _M31, 2, 2, ["M31", "M110"],
+                                     rotation=None)
+    assert entry.panel_footprint is None
+    assert captured == {"M31": True, "M110": False}
+
+
+def test_panel_footprint_is_restamped_on_every_refresh(tmp_path):
+    """Unlike the field size it is not COALESCEd: frames dropped down to one
+    panel must not leave the old mosaic's footprint claiming its sky."""
+    lib = Library.create(tmp_path / "lib")
+    try:
+        _entry, proj = lib.create_target("M 31")
+        try:
+            _add_s30_mosaic(proj, _M31, 2, 1)
+        finally:
+            proj.close()
+        assert lib.refresh_target_stats("M_31").panel_footprint is not None
+        proj = lib.open_target("M_31")
+        try:
+            for f in list(proj.iter_frames()):
+                if f.ra_center_deg > _M31[0]:
+                    proj.update_frame(f.id, accept=False)
+        finally:
+            proj.close()
+        assert lib.refresh_target_stats("M_31").panel_footprint is None
     finally:
         lib.close()

@@ -104,30 +104,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   has ≥ `_UNSOLVED_MIN_ACCEPTED` tried and none located, (b) gate the rescue per hint-panel. Don't lower the
   whole-target thresholds instead — that makes a single field cry wolf.
 
-- **🟡 (Scout 2026-10-20, QA rotation sweep (2)) — "My life list" judges a mosaic against one panel's field: an
-  object his mosaic plainly holds stays grey because the match radius is one sub's inscribed circle around the
-  mosaic's middle (`seestack/lifelist.py::match_radius_deg`, `library._frame_short_deg`).** *(Pillar: trust /
-  enjoy — PRIORITY 3; size **S–M**; severity low — a grey tile on a page he is proud of — **and one false ✓ (added below)**.
-  Confidence: **reproduced** through the real `Library.refresh_target_stats` + `catalog_capture_status`; ungated.)*
-  v0.502.2 matches within `0.8 × frame_short_deg / 2` (≈0.48° on his S30) of the registry centre, and its own
-  note calls that "a lower bound on what the mosaic holds". It is a per-panel number answering a whole-target
-  question. Scratch repro, S30 portrait subs (3.99″/px, 1080×1920), 15 % panel overlap, 40 subs a panel, centre
-  exact (v0.501.10): **2×2 on M8 → M20 grey** (1.38° off, inside a panel by a 10 % margin) — the classic
-  Lagoon + Trifid mosaic; **3×3 on M84 → M87 (1.49°) and M99 (2.15°) grey**; **2×2 on M31 → M110 grey** (0.61°).
-  M32, M43, M81+M82, M86 do light up. **Fix direction:** keep "never claims sky no panel covered", but test the
-  object against each *panel's* footprint rather than one circle at the middle — stamp the panel centres
-  `_panel_extent_centre` already computes (additive registry column, JSON, reconciled on open like
-  `frame_short_deg`) and count an object inside a panel's rectangle shrunk by the dither margin, oriented by
-  `Project.solved_frame_scale_rotation` (a circle per panel is not enough: M20 sits 0.51° from its panel's
-  centre along the long axis). Single field / unknown rotation / no panel split → today's radius, byte-for-byte.
-  Regression: the three mosaics above light their neighbour; an object just outside every panel, and the missing
-  corner of an L-shaped 3-panel mosaic, stay grey; M110 on a single S30 field stays grey.
-  **Today it is also a false claim** (Scout `claude/zen-curie-45367f`, same day, reproduced through the same two
-  functions): a 2×2 S30 at 10 % overlap with the NE panel absent keeps its centre and 0.479° disc at the 2×2
-  middle, **14.8 % of the disc is sky no panel covered** (11.6 % at the old 0.35° floor — v0.501.10 made it
-  possible, v0.502.2 widened it), and an object 0.40° into the missing quadrant reads `captured=True`. The
-  per-panel-footprint fix closes both; the L-shaped regression above is therefore fail-before today.
-
 - **LEAD (Scout 2026-10-18, QA rotation sweep (4) — the webapp routers' *answers* — the continuation the
   v0.500.3 note asked for) — the Dashboard's whole-library headline (`/api/stats`) and "Your sky, so far"
   (`/api/library/summary` + the share recap) count a sub registered in two targets (#878) twice, in exactly
@@ -3614,6 +3590,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.5 **"My life list" judged a mosaic by one frame's circle at its middle — M20 grey on his Lagoon 2×2, M87/M99 on a Markarian 3×3, M110 on an M31 2×2, and an object in an L-shaped mosaic's never-shot quadrant ticked — it now tests each object against the panels themselves** (registry `panel_footprint`, `library._panel_footprint`, `lifelist.footprint_covers`; full text in SHIPPED.md)
 - ✅ v0.502.4 **Cancelling a scan left every queued plate-solve (and QC read) running in the process pool after the job said "cancelled" — `shutdown(wait=False, cancel_futures=True)` cancels nothing; each pending future is now cancelled by hand** (`scanner._map_jobs`, Scout sweep (3); full text in SHIPPED.md)
 - ✅ v0.502.3 **The "Hold back highlights" suggestion weakened with the editor proxy's step — 1.00 native, 0.40 on his 2×2 mosaic, silent on a big canvas — because its flatness tests read one-proxy-pixel gradients; they are now judged per native pixel** (`highlights._per_native_px`, `suggest_highlight_protect(proxy_scale=…)`, Scout rotation sweep (1)).
 - ✅ v0.502.2 **The life list matched with an S50-sized 0.35° radius, so M32 (0.40° from M31) stayed grey though it is in every frame of his S30 M31 field — each target now matches inside 80 % of its own measured half-field (registry `frame_short_deg`), never below the old floor** (`lifelist.match_radius_deg`, `library._frame_short_deg`).

@@ -1,5 +1,62 @@
 # Shipped — the record
 
+## 2026-10-20 (Builder, branch `claude/festive-knuth-d6vvuv`) — the life list judges a mosaic by its panels
+
+### v0.502.5 — "My life list" tests an object against each mosaic panel, not one frame's circle at the middle
+
+**What.** v0.502.2 matched within `0.8 × frame_short_deg / 2` (≈0.48° on his S30) of the registry centre — a
+per-panel number answering a whole-target question. On S30 mosaics it left neighbours the mosaic plainly holds
+grey (M20 on the Lagoon 2×2, M87 and M99 on a Markarian 3×3, M110 on an M31 2×2), and on a 2×2 with its NE panel
+never shot it ticked an object 0.40° into that missing quadrant. The registry now carries a `panel_footprint`
+(additive TEXT column, reconciled on open, no schema-version bump, re-stamped — not COALESCEd — on every stats
+refresh): one sub's field (the representative solved frame `_frame_short_deg` already reads) and, per panel of
+the main object (`_main_object_panels`, the split `_panel_extent_centre` already made), its median centre, the
+p10–p90 range of its subs' `rotation_deg` (folded onto a half-turn) and the p90 spread of its subs around the
+centre. `lifelist.footprint_covers` counts an object when it and 16 points on a circle of that spread
+(1′ floor, capped at the single field's own 20 % of the half-field) each fall inside some panel's frame at every
+angle of its range — so objects where panels meet count, a missing quadrant and the sky past the outer edge do
+not, and alt-az field rotation across a night shrinks a panel instead of being guessed. The rotation sense is
+pinned against astropy (`CDELT1 < 0`, `CROTA2`). A single field, a panel whose rotation is mostly unsolved, or a
+malformed value keeps v0.502.2's circle byte-for-byte. Measured: 0 claims with no covering sub over 16,000 random
+points on 40 random mosaics (rotations, dithers, L-shapes, dec −60…75°); 157 objects × 120 3×3 targets in 0.1 s.
+
+**Tests.** `tests/test_library.py`: the three mosaics light their neighbours and leave M28 / M88 / M100 / M33
+grey; the L-shaped quadrant and a point just past the west edge stay grey while the shot quadrant lights; single
+field and unknown rotation keep the circle (M110 grey beside a single S30 M31); the footprint clears when the
+mosaic drops to one panel; the v5-registry upgrade test gains the column. All four mosaic cases fail before
+(M20; M87+M99; M110; the L-shape claim). `tests/test_lifelist.py`: the astropy convention pin at five angles,
+15 malformed values fall back, the margin bounds, a wide rotation range drops a corner.
+
+**Upgrade-safe (§9):** one additive nullable registry column; no config, default, layout or API change.
+
+<details><summary>The Bugs entry as filed</summary>
+
+- **🟡 (Scout 2026-10-20, QA rotation sweep (2)) — "My life list" judges a mosaic against one panel's field: an
+  object his mosaic plainly holds stays grey because the match radius is one sub's inscribed circle around the
+  mosaic's middle (`seestack/lifelist.py::match_radius_deg`, `library._frame_short_deg`).** *(Pillar: trust /
+  enjoy — PRIORITY 3; size **S–M**; severity low — a grey tile on a page he is proud of — **and one false ✓ (added below)**.
+  Confidence: **reproduced** through the real `Library.refresh_target_stats` + `catalog_capture_status`; ungated.)*
+  v0.502.2 matches within `0.8 × frame_short_deg / 2` (≈0.48° on his S30) of the registry centre, and its own
+  note calls that "a lower bound on what the mosaic holds". It is a per-panel number answering a whole-target
+  question. Scratch repro, S30 portrait subs (3.99″/px, 1080×1920), 15 % panel overlap, 40 subs a panel, centre
+  exact (v0.501.10): **2×2 on M8 → M20 grey** (1.38° off, inside a panel by a 10 % margin) — the classic
+  Lagoon + Trifid mosaic; **3×3 on M84 → M87 (1.49°) and M99 (2.15°) grey**; **2×2 on M31 → M110 grey** (0.61°).
+  M32, M43, M81+M82, M86 do light up. **Fix direction:** keep "never claims sky no panel covered", but test the
+  object against each *panel's* footprint rather than one circle at the middle — stamp the panel centres
+  `_panel_extent_centre` already computes (additive registry column, JSON, reconciled on open like
+  `frame_short_deg`) and count an object inside a panel's rectangle shrunk by the dither margin, oriented by
+  `Project.solved_frame_scale_rotation` (a circle per panel is not enough: M20 sits 0.51° from its panel's
+  centre along the long axis). Single field / unknown rotation / no panel split → today's radius, byte-for-byte.
+  Regression: the three mosaics above light their neighbour; an object just outside every panel, and the missing
+  corner of an L-shaped 3-panel mosaic, stay grey; M110 on a single S30 field stays grey.
+  **Today it is also a false claim** (Scout `claude/zen-curie-45367f`, same day, reproduced through the same two
+  functions): a 2×2 S30 at 10 % overlap with the NE panel absent keeps its centre and 0.479° disc at the 2×2
+  middle, **14.8 % of the disc is sky no panel covered** (11.6 % at the old 0.35° floor — v0.501.10 made it
+  possible, v0.502.2 widened it), and an object 0.40° into the missing quadrant reads `captured=True`. The
+  per-panel-footprint fix closes both; the L-shaped regression above is therefore fail-before today.
+
+</details>
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-d5n9db`) — a cancelled scan stops its queued solves
 
 ### v0.502.4 — Cancelling a scan no longer leaves every queued plate-solve running in the background
