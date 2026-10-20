@@ -517,23 +517,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
   scratchpad (`wcs_repro.py`).)_
 
-- **🟡 (Scout 2026-10-20, QA rotation sweep (4)) — a target that fails inside *Reprocess all* never reaches
-  "this target stopped producing pictures" (`/api/stack-failures`).** *(Pillar: autonomy/friendliness —
-  PRIORITY 2; size **S**; severity low — the old picture stays on the wall and the batch's own Jobs card names
-  the failure; nothing is lost. Confidence: **reproduced** end-to-end, and the class is measured on his
-  install: v0.473.0 counted 7 `MemoryError` refusals across 3 of his batches.)* `webapp.stackfailure.
-  latest_stack_failures` reads two recording sites — a failed `stack`/`process_target` job and a scan job's
-  `result["stack_errors"]` — but `pipeline.submit_reprocess_all` isolates each target's failure into a third,
-  `result["failed"] = [{target, name, error, error_kind}]`, which nothing reads. Scratch repro through the
-  real client (`solved_library`, `run_stack` raising the memory refusal): `POST /api/reprocess-all` →
-  job `done`, `failed` 2 of 2 → `GET /api/stack-failures` **`[]`**; the same refusal through
-  `POST /api/targets/M_42/stack` → `["M_42"]`. So the batch that walks his library for days, unattended, is the
-  one stack path whose refusal the Dashboard and Target page never mention. **Fix direction:** a third branch in
-  `latest_stack_failures` for `kind == "reprocess_all"` reading `result["failed"]` (`error_kind` is already
-  stamped; `unattended=True`; stamp = the job's `finished_utc`, as the scan branch does — a yielded slice is its
-  own job row and carries its own rows). `superseded_by_success` already retires it on a later genuine stack.
-  Pin with the repro above, plus a yielded two-slice batch.
-
 - **🟡 (Scout 2026-10-20, QA rotation sweep (1)) — *Add → Resize* lands ahead of Auto's sharpen, so the full-size
   check shows sharpening at the wrong scale and the export sharpens 1/scale wider than the radius Auto chose.**
   *(Pillar: editor — PRIORITY 1; size **S**; severity low–moderate — the loupe is the control the sharpen
@@ -3630,6 +3613,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.13 **A target refused inside *Reprocess all* now reaches "this target stopped producing pictures" on the Dashboard and Target page — the batch's `result["failed"]` rows are the third recording site `latest_stack_failures` reads, each row stamped with its own `failed_utc` so a yielded slice's carried rows keep their time** (`stackfailure.latest_stack_failures`, `pipeline.submit_reprocess_all`, Scout sweep (4))
 - ✅ v0.502.12 **"Some of your pictures were trimmed too far" judges the picture on the wall — a pinned cover — not the newest run in History** (`overtrim.scan_over_trimmed` → `finishedpicture.displayed_picture_run`, Scout rotation sweep (4))
 - ✅ v0.502.11 **One killed QC/solve pool worker no longer throws away the rest of the pass — the jobs the broken pool took down are re-run once in a fresh pool of half the workers; and the orphaned `astrostack-solve-*`/`astrostack-bootstrap-*` scratch copies a killed worker leaves in `/tmp` are swept at app start** (`scanner._map_jobs`, `astap.sweep_stale_solve_scratch`; full text in SHIPPED.md)
 - ✅ v0.502.9 **Moon & Sun sharpening was about half as strong on a drizzled still — `SHARPEN_SIGMA_PX` counted the ×1.5 still's pixels, so every preset lifted crater-scale detail 46–63 % as much as on the camera-sized still; the radius now follows the still's `drizzle_scale`, at stack time and on every re-sharpen/crop/uncrop** (`detail.sharpen_still(scale=)`, `webapp.video._drizzle_scale`, Scout rotation sweep (4); full text in SHIPPED.md)

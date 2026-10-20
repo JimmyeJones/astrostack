@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## 2026-10-20 (Builder, branch `claude/festive-knuth-fsp4dq`) — Reprocess-all refusals reach the stack-failures note
+
+### v0.502.13 — `stackfailure.latest_stack_failures` reads the batch's `result["failed"]`
+
+**What.** `GET /api/stack-failures` ("this target stopped producing pictures") read two recording sites — a failed
+`stack`/`process_target` job and a scan job's `result["stack_errors"]` — but *Reprocess all* isolates each target
+into a third, `result["failed"] = [{target, name, error, error_kind}]`, and finishes `done`. Scout sweep (4) repro
+through the real client: every target refusing with the memory refusal → job `done`, 2 of 2 failed →
+`/api/stack-failures` **`[]`**. So the batch that walks his library for days, unattended, was the one stack path
+whose refusal no screen mentioned (v0.473.0 counted 7 such `MemoryError` refusals across 3 of his batches).
+`latest_stack_failures` now has a `reprocess_all` branch: `unattended=True`, the stamped `error_kind` (falling back
+to `classify_error_message` when empty), and a stamp per row. **Per row, not per job:** a yielded slice carries the
+earlier slices' rows forward, so stamped with the later slice's finish a stack that succeeded *between* the slices
+would look older than the failure and the note would return for a fixed target — `submit_reprocess_all` now adds
+an additive `failed_utc` to each row; rows an older build wrote fall back to the job's `finished_utc`.
+`superseded_by_success` retires the note on a later genuine stack, unchanged. Pinned in
+`tests/webapp/test_stack_failures.py` (+4: the pure read, the carried-row stamp, malformed results, and the
+end-to-end repro; 3 fail before). Additive key only — no config, schema, on-disk or API-shape change.
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-uic6x9`) — the over-trim note reads the displayed picture
 
 ### v0.502.12 — "Trimmed too far" judges a pinned cover, not the newest run in History

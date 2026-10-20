@@ -247,3 +247,102 @@ def test_an_editor_export_after_the_failure_does_not_retire_it(client, solved_li
 
     body = client.get("/api/stack-failures").json()
     assert [f["safe"] for f in body["failures"]] == [safe]
+
+
+# ------------------------------------------------- the Reprocess-all batch ---
+
+def _failed_row(safe: str, error: str = f"MemoryError: {MEMORY_MSG}", *,
+                error_kind: str = "memory_budget", failed_utc: str | None = None) -> dict:
+    row = {"target": safe, "name": safe.replace("_", " "), "error": error,
+           "error_kind": error_kind}
+    if failed_utc is not None:
+        row["failed_utc"] = failed_utc
+    return row
+
+
+def test_a_refusal_inside_a_DONE_reprocess_all_batch_is_reported():
+    """The third recording site: the batch isolates each target into
+    ``result["failed"]`` and finishes ``done`` — the walk that runs for days,
+    unattended, used to be the one path whose refusal no screen mentioned."""
+    found = latest_stack_failures([
+        _job("reprocess_all", state="done", when="2026-08-29T05:00:00Z", result={
+            "total": 3, "stacked": 1,
+            "failed": [_failed_row("M_31"),
+                       _failed_row("NGC_7000", "ValueError: no accepted, plate-solved "
+                                   "frames to stack", error_kind="")],
+        }),
+    ])
+    assert set(found) == {"M_31", "NGC_7000"}
+    assert found["M_31"].kind == "memory_budget"
+    assert found["M_31"].unattended is True
+    assert "9.4 GB" in found["M_31"].message
+    # An empty stamped kind (older rows, unclassified types) falls back to the
+    # message classifier rather than reporting "".
+    assert found["NGC_7000"].kind == classify_error_message("no accepted, plate-solved "
+                                                            "frames to stack")
+    # A row an older build wrote has no stamp of its own: the job's finish.
+    assert found["M_31"].when_utc == "2026-08-29T05:00:00Z"
+
+
+def test_a_row_carried_into_a_later_slice_keeps_its_own_failure_time():
+    """A yielded slice re-reports the earlier slices' rows. Stamped with the
+    later slice's finish, a stack that succeeded *between* the slices would look
+    older than the failure and the note would come back for a fixed target."""
+    first = _job("reprocess_all", when="2026-08-29T02:10:00Z", result={
+        "failed": [_failed_row("M_31", failed_utc="2026-08-29T02:05:00Z")],
+        "yielded": True})
+    second = _job("reprocess_all", when="2026-08-29T09:00:00Z", result={
+        "failed": [_failed_row("M_31", failed_utc="2026-08-29T02:05:00Z"),
+                   _failed_row("M_42", failed_utc="2026-08-29T08:55:00Z")],
+        "yielded": False})
+    found = latest_stack_failures([second, first])
+    assert set(found) == {"M_31", "M_42"}
+    assert found["M_31"].when_utc == "2026-08-29T02:05:00Z"
+    # His manual stack of M 31 between the slices retires it; M 42 stays.
+    assert superseded_by_success(found["M_31"], "2026-08-29T04:00:00Z")
+    assert not superseded_by_success(found["M_42"], "2026-08-29T04:00:00Z")
+
+
+def test_a_malformed_reprocess_result_never_raises():
+    assert latest_stack_failures([
+        _job("reprocess_all", result=None),
+        _job("reprocess_all", result={"failed": "oops"}),
+        _job("reprocess_all", result={"failed": [None, 3, {}, {"target": "M_31"},
+                                                 {"error": "no target"}]}),
+        _job("reprocess_all", state="error", error="whole batch died"),
+    ]) == {}
+
+
+def test_endpoint_surfaces_a_reprocess_all_refusal_end_to_end(
+        client, solved_library, monkeypatch):
+    """The Scout's repro, through the real client: a batch whose every target
+    hits the memory refusal finishes ``done`` with two ``failed`` rows — and
+    ``/api/stack-failures`` used to answer ``[]``."""
+    import time
+
+    def refuse(proj, opts, **_kw):  # noqa: ANN001, ARG001
+        raise MemoryError(MEMORY_MSG)
+    monkeypatch.setattr("seestack.stack.stacker.run_stack", refuse)
+
+    r = client.post("/api/reprocess-all")
+    assert r.status_code == 200
+    deadline = time.monotonic() + 90
+    while True:
+        body = client.get(f"/api/jobs/{r.json()['job_id']}").json()
+        if body["state"] in ("done", "error", "cancelled", "interrupted"):
+            break
+        assert time.monotonic() < deadline, "reprocess-all did not finish"
+        time.sleep(0.2)
+    assert body["state"] == "done"
+    assert len(body["result"]["failed"]) == 2
+    # Each row carries its own failure time, so a later slice can carry it on.
+    assert all(row.get("failed_utc") for row in body["result"]["failed"])
+
+    targets = {t["safe_name"] for t in client.get("/api/targets").json()}
+    failures = client.get("/api/stack-failures").json()["failures"]
+    assert {f["safe"] for f in failures} == targets
+    for f in failures:
+        assert f["kind"] == "memory_budget"
+        assert f["unattended"] is True
+        assert "9.4 GB" in f["message"]
+        assert f["when_utc"]
