@@ -535,6 +535,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   helper), and have `_loupe_geometry_problem` refuse a reshaping `geometry.resize` ahead of an op that reads
   `ctx.scaled_px` for hand-ordered recipes. Pin both with the repro above.
 
+- **🟢 (Scout 2026-10-20, QA rotation sweep (2)) — the life list keeps *every* panel of a mosaic clear of its
+  edges by the *worst* panel's dither, so one re-pointed panel greys an object another, tight panel plainly
+  holds.** *(Pillar: trust — PRIORITY 3; size **S**; severity low — a false "not captured" near a mosaic's outer
+  edge, never a false "captured", nothing on disk. Confidence: **reproduced** through the real
+  `Library.refresh_target_stats` + `catalog_capture_status`; occurrence on the owner's library **unmeasured**.)*
+  `seestack/lifelist.py::parse_footprint` sets one `Footprint.margin_deg = min(cap, max(1′, max(spread)))` over
+  **all** panels (`spread` is each panel's own 90th-percentile sub offset, `library._panel_footprint`), and
+  `footprint_covers` asks every point of that circle to be inside some panel. A per-panel question answered with
+  a peak number. Scratch repro: S30 2×2 at 15 % overlap, 60 subs/panel, ±0.04° dither; an object 0.07° inside
+  the **south-west** panel's west edge. All panels tight → spreads 0.045° → **captured**. Re-point half of the
+  **north-east** panel's subs 0.15° (a second night) → its spread 0.116°, margin 0.116° for all four →
+  **grey**; at 0.25° the margin hits the 0.12° cap, still grey. The SW panel's subs never moved: the object is
+  in every one of them. **Fix direction:** carry each panel's own margin (`_Panel.margin_deg` from its own
+  `spread`, same 1′ floor and cap) and ask the margin circle of the panel(s) that hold the object itself —
+  e.g. try each panel containing the object and accept if the circle at *that* panel's margin lies inside the
+  union. Keeps "never claims sky no panel covered". Regression test: the repro above in
+  `tests/test_library.py`'s `_add_s30_mosaic` shape (needs a per-panel offset knob).
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)

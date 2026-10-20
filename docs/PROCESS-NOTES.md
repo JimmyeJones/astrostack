@@ -1,5 +1,17 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-ijzhxo`) — QA rotation sweep (2) on v0.502.5's mosaic life-list footprint: one bug filed reproduced (the margin is the worst panel's spread). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8138 passed / 7 skipped on `400537b3` (xdist `-n 4`, BLAS capped, 15m04s). **Inbox:** the same four (#878, #880,
+  #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start; `q3d8cd`'s sweep (1)
+  merged mid-run (#1232, docs union). **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors).
+- **Sweep (2):** the non-docs commits since the last (2) (`94fta6`) are v0.502.8–13. The one per-panel number among them
+  not yet read for a *peak* is v0.502.5's footprint margin (`94fta6` re-read `_panel_footprint` only for a stray panel).
+  `lifelist.parse_footprint` keeps **every** panel clear of its edges by `max(spread)` over all panels. Real `Library` +
+  `refresh_target_stats`, S30 2×2, an object 0.07° inside the tight SW panel's west edge: captured while all panels are
+  tight; grey once half of the NE panel's subs re-point 0.15° (margin 0.045 → 0.116°). Filed at the end of Bugs, low, S.
+  v0.502.9 (`overtrim`, a whole-canvas share) and v0.502.10/13 carry no per-panel number. **Rotation: (2) done → next is (3).**
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-q3d8cd`) — QA rotation sweep (1), scale-dependent parity, on the angle the 10-20 `huttjh` (1) left open — a `geometry.resize` ahead of the detail ops through the loupe: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
 
 - **Suite:** 8134 passed / 7 skipped on `a3038e5f` (xdist `-n 4`, BLAS capped, 16m45s). **Inbox:** the same four (#878, #880, #903, #1015), no activity since 2026-10-12, all
