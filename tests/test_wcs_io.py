@@ -897,3 +897,65 @@ def test_nothing_changes_for_a_blob_that_was_already_ascii_and_already_failed():
     """An ASCII blob with no solution reads as unusable, exactly as before."""
     assert wcs_from_text("END" + " " * 2877) is not None  # a bare header parses…
     assert wcs_text_is_usable("END" + " " * 2877) is False  # …but says nothing
+
+
+# --- crop_reprojected_between_fits: a crop re-aimed onto a re-shaped canvas ---
+
+
+def _tan_fits(path, *, w, h, crpix, rot_deg=0.0):
+    from astropy.io import fits
+
+    hdr = fits.Header()
+    hdr["CTYPE1"], hdr["CTYPE2"] = "RA---TAN", "DEC--TAN"
+    hdr["CRVAL1"], hdr["CRVAL2"] = 83.6, -5.4
+    hdr["CRPIX1"], hdr["CRPIX2"] = crpix
+    s, c = np.sin(np.radians(rot_deg)), np.cos(np.radians(rot_deg))
+    scale = 1e-3
+    hdr["CD1_1"], hdr["CD1_2"] = -scale * c, scale * s
+    hdr["CD2_1"], hdr["CD2_2"] = scale * s, scale * c
+    fits.writeto(path, np.zeros((h, w), dtype=np.float32), hdr, overwrite=True)
+    return path
+
+
+def test_crop_reprojection_is_the_identity_on_the_same_canvas(tmp_path):
+    from seestack.io.wcs_io import crop_reprojected_between_fits
+    from seestack.previewcrop import PreviewCrop
+
+    f = _tan_fits(tmp_path / "a.fits", w=200, h=240, crpix=(100.5, 120.5))
+    got = crop_reprojected_between_fits(f, f, PreviewCrop(0.1, 0.2, 0.7, 0.9))
+    assert got.as_tuple() == pytest.approx((0.1, 0.2, 0.7, 0.9), abs=1e-9)
+
+
+def test_crop_reprojection_follows_a_shifted_and_rotated_canvas(tmp_path):
+    from seestack.io.wcs_io import crop_reprojected_between_fits
+    from seestack.previewcrop import PreviewCrop
+
+    src = _tan_fits(tmp_path / "a.fits", w=200, h=200, crpix=(100.5, 100.5))
+    # Twice the width, the source's sky in the left half.
+    wide = _tan_fits(tmp_path / "b.fits", w=400, h=200, crpix=(100.5, 100.5))
+    got = crop_reprojected_between_fits(src, wide, PreviewCrop(0.25, 0.25, 0.75, 0.75))
+    assert got.as_tuple() == pytest.approx((0.125, 0.25, 0.375, 0.75), abs=1e-6)
+    # A 90° turn between the grids still lands on the framed sky's bounding box.
+    turned = _tan_fits(tmp_path / "c.fits", w=200, h=200, crpix=(100.5, 100.5),
+                       rot_deg=90.0)
+    got = crop_reprojected_between_fits(src, turned, PreviewCrop(0.0, 0.0, 0.5, 1.0))
+    assert got.w_frac == pytest.approx(1.0, abs=1e-6)
+    assert got.h_frac == pytest.approx(0.5, abs=1e-6)
+
+
+def test_crop_reprojection_says_nothing_when_it_cannot(tmp_path):
+    from astropy.io import fits
+
+    from seestack.io.wcs_io import crop_reprojected_between_fits
+    from seestack.previewcrop import PreviewCrop
+
+    src = _tan_fits(tmp_path / "a.fits", w=200, h=200, crpix=(100.5, 100.5))
+    bare = tmp_path / "bare.fits"
+    fits.writeto(bare, np.zeros((200, 200), dtype=np.float32))
+    crop = PreviewCrop(0.1, 0.1, 0.9, 0.9)
+    assert crop_reprojected_between_fits(src, bare, crop) is None
+    assert crop_reprojected_between_fits(None, src, crop) is None
+    assert crop_reprojected_between_fits(src, tmp_path / "missing.fits", crop) is None
+    # The framed sky is nowhere on the new canvas.
+    far = _tan_fits(tmp_path / "far.fits", w=200, h=200, crpix=(1100.5, 100.5))
+    assert crop_reprojected_between_fits(src, far, crop) is None

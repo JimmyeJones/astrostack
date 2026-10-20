@@ -21,6 +21,8 @@ from webapp import pipeline
 from webapp.config import Settings
 from webapp.jobs import Job, JobManager
 
+from .conftest import FRAME_H, FRAME_W
+
 
 class _FakeJM:
     def maybe_flush(self, job) -> None:  # noqa: ANN001
@@ -2713,7 +2715,7 @@ _HAND_OPS = [
 
 
 def _seed_hand_saved_recipe(proj, *, ops=None, baked_look_of=None,
-                            options=None) -> int:
+                            options=None, canvas=(10, 10)) -> int:
     """A previewed run carrying a recipe the owner pressed Save on — no bake, so
     its preview is still the plain autostretch. ``baked_look_of`` stamps the
     ``editor_auto_baked_look`` an unattended Auto pass writes, for the cases
@@ -2725,7 +2727,7 @@ def _seed_hand_saved_recipe(proj, *, ops=None, baked_look_of=None,
         id=None, timestamp_utc="2026-05-01T00:00:00Z",
         output_basename="master", fits_path=None, tiff_path=None,
         preview_path="/tmp/does-not-need-to-exist/preview.png",
-        n_frames_used=3, canvas_h=10, canvas_w=10,
+        n_frames_used=3, canvas_h=canvas[0], canvas_w=canvas[1],
         coverage_min=1, coverage_max=3,
         options_json=json.dumps(options or {"method": "sigma", "sigma_kappa": 4.25}),
         engine_version="0.0.1",
@@ -2926,7 +2928,9 @@ def test_reprocess_all_endpoint_carries_the_edit_without_baking_it(
         safe = next(e.safe_name for e in lib.list_targets())
         proj = lib.open_target(safe)
         try:
-            _seed_hand_saved_recipe(proj, ops=sliver)
+            # The single field restacks onto the same canvas shape, so the
+            # crop carries as drawn (a changed shape re-aims it — below).
+            _seed_hand_saved_recipe(proj, ops=sliver, canvas=(FRAME_H, FRAME_W))
         finally:
             proj.close()
     finally:
@@ -2962,3 +2966,120 @@ def test_reprocess_all_endpoint_carries_the_edit_without_baking_it(
         f"/api/targets/{safe}/stack-runs/{rid}/editor/crop-health").json()
     assert health["stored_keep_fraction"] is not None
     assert health["stale"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Scout 2026-10-20, sweep (2): the carried crop is fractions of the *source*
+# canvas, and a mosaic's union canvas grows when a night adds a column — so the
+# same fractions on the restack framed different sky. It is now re-aimed through
+# the two masters' WCS, or dropped when it can't be.
+# --------------------------------------------------------------------------- #
+
+_SCALE_DEG = 1e-3
+
+
+def _write_tan_master(path: Path, *, w: int, h: int, crpix: tuple[float, float]) -> str:
+    """A tiny master FITS with a plain TAN WCS — the shape of a stack output's
+    celestial header, nothing else."""
+    import numpy as np
+    from astropy.io import fits
+
+    hdr = fits.Header()
+    hdr["CTYPE1"], hdr["CTYPE2"] = "RA---TAN", "DEC--TAN"
+    hdr["CRVAL1"], hdr["CRVAL2"] = 83.6, -5.4
+    hdr["CRPIX1"], hdr["CRPIX2"] = crpix
+    hdr["CDELT1"], hdr["CDELT2"] = -_SCALE_DEG, _SCALE_DEG
+    fits.writeto(path, np.zeros((h, w), dtype=np.float32), hdr, overwrite=True)
+    return str(path)
+
+
+def _add_run(proj, *, w: int, h: int, fits_path: str | None) -> int:
+    return proj.add_stack_run(StackRunRow(
+        id=None, timestamp_utc="2026-05-02T00:00:00Z",
+        output_basename="master", fits_path=fits_path, tiff_path=None,
+        preview_path="/tmp/does-not-need-to-exist/preview.png",
+        n_frames_used=3, canvas_h=h, canvas_w=w,
+        coverage_min=1, coverage_max=3,
+        options_json=json.dumps({"method": "sigma"}), engine_version="0.0.1",
+    ))
+
+
+def _carried_ops(solved_library, tmp_path, *, ops, src_fits=True, dst_fits=True,
+                 dst_shape=(360, 250)):
+    """Seed a hand-saved look on a 200×240 run, restack onto ``dst_shape`` (the
+    canvas grown by a west column and 5 rows below), carry, and return the new
+    run's ops."""
+    from webapp.routers.editor import RECIPE_META_PREFIX
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = next(e.safe_name for e in lib.list_targets())
+        proj = lib.open_target(safe)
+        try:
+            src = _add_run(proj, w=200, h=240, fits_path=_write_tan_master(
+                tmp_path / "src.fits", w=200, h=240, crpix=(100.5, 120.5))
+                if src_fits else None)
+            proj.set_meta(f"{RECIPE_META_PREFIX}{src}", json.dumps({"ops": ops}))
+            dw, dh = dst_shape
+            new = _add_run(proj, w=dw, h=dh, fits_path=_write_tan_master(
+                tmp_path / "dst.fits", w=dw, h=dh, crpix=(100.5, 125.5))
+                if dst_fits else None)
+        finally:
+            proj.close()
+        assert pipeline._carry_hand_saved_recipe(lib, safe, new) == src
+        return _saved_recipe(lib, safe, new)["ops"]
+    finally:
+        lib.close()
+
+
+def _crop_params(ops):
+    crops = [op["params"] for op in ops if op["id"] == "geometry.crop"]
+    return crops
+
+
+def test_carry_reaims_the_crop_onto_a_grown_mosaic_canvas(solved_library, tmp_path):
+    """The crop frames the same sky on the bigger canvas. Fails before: the
+    fractions were copied as-is (0.1–0.9), which on the 360 px canvas spans
+    288 px of sky against the 160 px he framed."""
+    ops = _carried_ops(solved_library, tmp_path, ops=_HAND_OPS)
+    (crop,) = _crop_params(ops)
+    # Source pixels x 20..180, y 24..216 → same pixels in x, +5 rows in y.
+    assert crop["x0"] == pytest.approx(20 / 360, abs=1e-4)
+    assert crop["x1"] == pytest.approx(180 / 360, abs=1e-4)
+    assert crop["y0"] == pytest.approx(29 / 250, abs=1e-4)
+    assert crop["y1"] == pytest.approx(221 / 250, abs=1e-4)
+    # The rest of the look carries untouched.
+    assert [op["id"] for op in ops] == ["tone.stretch", "geometry.crop"]
+
+
+def test_carry_drops_a_crop_it_cannot_place_and_keeps_the_rest(solved_library, tmp_path):
+    """No WCS on the source master → the crop can't be aimed, so it is left off
+    (the editor's own trim frames the new canvas); the tone look still carries."""
+    ops = _carried_ops(solved_library, tmp_path, ops=_HAND_OPS, src_fits=False)
+    assert [op["id"] for op in ops] == ["tone.stretch"]
+
+
+def test_carry_drops_a_crop_drawn_on_a_rotated_grid(solved_library, tmp_path):
+    rotated = [
+        {"id": "geometry.rotate", "enabled": True, "params": {"angle": 30.0}},
+        *_HAND_OPS,
+    ]
+    ops = _carried_ops(solved_library, tmp_path, ops=rotated)
+    assert [op["id"] for op in ops] == ["geometry.rotate", "tone.stretch"]
+
+
+def test_carry_reaims_only_the_first_crop_of_a_chain(solved_library, tmp_path):
+    """A second crop is fractions of the first one's output, which now covers
+    the same sky — so it carries as he drew it."""
+    inner = {"x0": 0.25, "y0": 0.25, "x1": 0.75, "y1": 0.75}
+    chain = [*_HAND_OPS, {"id": "geometry.crop", "enabled": True, "params": inner}]
+    first, second = _crop_params(_carried_ops(solved_library, tmp_path, ops=chain))
+    assert first["x0"] == pytest.approx(20 / 360, abs=1e-4)
+    assert second == pytest.approx(inner)
+
+
+def test_carry_copies_the_crop_as_is_on_a_same_shape_canvas(solved_library, tmp_path):
+    """Same canvas shape → nothing to re-aim, even with no WCS to hand."""
+    ops = _carried_ops(solved_library, tmp_path, ops=_HAND_OPS, src_fits=False,
+                       dst_fits=False, dst_shape=(200, 240))
+    assert _crop_params(ops) == [_HAND_OPS[1]["params"]]

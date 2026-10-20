@@ -1,5 +1,59 @@
 # Shipped — the record
 
+## 2026-10-20 (Builder, branch `claude/festive-knuth-mmcc3c`) — the carried crop on a grown mosaic canvas
+
+### v0.501.8 — a restack re-aims the owner's saved crop at the sky he framed
+
+**What.** v0.501.0's restack carry (`webapp/pipeline.py::_carry_hand_saved_recipe`) copied the source run's
+`geometry.crop` `x0/y0/x1/y1` onto the new run unchanged. Those are fractions of the *source* canvas; a mosaic's
+union canvas changes shape whenever a night adds a row or column, so the same fractions framed a different and
+wider piece of sky (the Scout's repro: centre 203 px off, 726 px of sky against the 401 px he framed), and
+`crop_health_for_run` — which measures how much a crop keeps, never where it sits — called it fine. Now, when the
+two runs' canvas shapes differ, `_recrop_for_new_canvas` re-aims the **first crop that really reshapes** through
+the two masters' FITS WCS (`seestack/io/wcs_io.py::crop_reprojected_between_fits`: the crop's outline, corners and
+edge points at pixel edges, pixel → sky → pixel, bounding box clamped to the new canvas). Later crops in a chain
+are fractions of the first one's output, which now covers the same sky, so they carry as drawn. When the crop
+can't be placed — either master without a usable WCS, the framed sky not on the new canvas, or a real rotate
+*before* the crop (its fractions are of a rotated grid) — every reshaping crop is **left off**, so the editor's
+own trim frames the new canvas; the rest of the look still carries. A same-shape restack is byte-identical to
+before.
+
+**Tests.** `tests/webapp/test_reprocess_all.py` — re-aimed on a canvas grown by a column and 5 rows (fails
+before: 0.1–0.9 copied as-is), dropped with no source WCS, dropped behind a rotate, only the first crop of a chain
+re-aimed, same-shape copied as-is; the end-to-end restack test now seeds its source on the single field's real
+canvas shape (it had a dummy 10×10). `tests/test_wcs_io.py` — identity on one canvas, a widened and a 90°-turned
+canvas, and `None` for no WCS / missing file / sky off the canvas.
+
+**Upgrade-safe (§9):** no config, schema, layout, default or API change; only the content of a recipe the batch
+writes onto a run that had none.
+
+<details><summary>The Bugs entry, as filed</summary>
+
+- **🟡 (Scout 2026-10-20, QA rotation sweep (2)) — a restack batch copies the owner's hand-saved crop onto a
+  mosaic whose canvas has grown, unchanged as *fractions*, so it frames a different and wider piece of sky, and
+  crop-health calls it fine.** *(Pillar: editor — PRIORITY 1 / walk-away; size **S–M**; severity moderate —
+  the copy is saved, not rendered, so the wall is unchanged, but the editor opens his look on the wrong framing
+  and one Export ships it; nothing is lost on disk. Confidence: **reproduced** end to end.)*
+  `webapp/pipeline.py::_carry_hand_saved_recipe` (v0.501.0) writes the source run's `geometry.crop`
+  `x0/y0/x1/y1` onto the new run as-is. Those are fractions of the **source** canvas. A mosaic's union canvas
+  changes whenever a night adds a row or column, so the same fractions point somewhere else. The withdrawn
+  v0.449.0 version had a **same-canvas-shape gate** (`SHIPPED.md`, "the hand-edited reprocess
+  carry-forward"), and v0.501.0 dropped it. The docstring leans on `routers.editor.crop_health_for_run`, but
+  that only flags a crop keeping < `STALE_CROP_KEEP_RATIO` (¼) of the trim rule's area. It never looks at
+  *where* the crop sits. Scratch repro on the real 2×2 mosaic sample with the real `run_stack`: night 1 holds
+  the east column (canvas 501×599), the owner saves a crop of 0.1–0.9, then night 2 adds the west column and
+  the batch restacks (907×615). The carried crop's centre moved **203 px (17′)**, its far corner 365 px, and it
+  now spans 726 px of sky against the 401 px he framed. `crop_health_for_run` → `stale=False` (keeps 0.64 vs the
+  rule's 0.92). The existing tests can't see this: `_seed_hand_saved_recipe` and `_patch_run_stack_new_run`
+  give both runs the same (dummy) canvas. **Fix sketch:** when the new run's `canvas_w/h` differs from the
+  source's, re-project the crop's corners pixel→sky→pixel through the two runs' FITS WCS (both masters carry
+  one) and clamp to 0..1. If either WCS is unreadable, carry the look **without** the crop op, so the editor's
+  own trim takes over, rather than a crop that frames the wrong sky. Same-shape runs stay byte-identical, as
+  now. Regression test: two runs with different canvases and a seeded WCS each; assert the carried crop
+  frames the same sky (fails today).
+
+</details>
+
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-atn1ry`) — "error messages on long-running jobs", the NAS half
 
 ### v0.501.7 — a job that fills the disk or is refused a file says so in plain words
