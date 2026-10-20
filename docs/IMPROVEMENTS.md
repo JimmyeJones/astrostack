@@ -82,6 +82,30 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 (Scout 2026-10-20, QA rotation sweep (1)) — the editor's "Hold back highlights" suggestion
+  (`seestack/edit/highlights.py`, `editor.solve_highlight_protect`) shrinks with the proxy step, so the same
+  blown core gets a weaker button on his mosaic than on a single field — and none on a big canvas.**
+  *(Pillar: editor — PRIORITY 1; size **S**; severity moderate — the suggested strength leaves the saved
+  picture's core still blown, and the v0.382.0 passive record that is meant to decide the gated automatic
+  highlight cue reads low/`null` on exactly his mosaics. Confidence: **reproduced** through the real
+  `tone.stretch` op and `suggest_highlight_protect`; ungated.)*
+  Both per-pixel tests in `measure_blown_core` / `_recoverable_flat_fraction` compare a **one-proxy-pixel**
+  gradient (`_local_gradient`) against fixed thresholds — `_FLAT_EPS` (1e-3, "flat in display") and
+  `_LINEAR_STRUCTURE_SIGMA * σ` ("structure in linear"). On a strided proxy one pixel spans `step` native
+  pixels, so a core's gradient reads ~`step`× steeper: fewer pixels count as flat, severity falls, and the
+  bisection stops at a lower stop. Scratch repro: one synthetic 3600×2400 canvas (exponential core, sky 0.05,
+  σ 0.004), the identical ~18 k native-px blown core measured at strides 1–6 (`canvas[::s, ::s]`, the
+  `build_proxy` decimation), default asinh stretch → suggested strength **1.00 / 0.70 / 0.40 / 0.25 / 0.10 /
+  0.05** (severity 0.69 → 0.12); a tighter core (scale 12 px) → 0.75 / 0.45 / 0.30 / 0.20 / 0.05 / **None**.
+  An S30 single field decimates to step 2 and his 2×2 mosaic to step 3. **Effect on the export:** rendered at
+  native resolution, the step-3 answer (0.40) still leaves **5,079 of 18,004** core px at display ≥ 0.98, vs
+  1,484 at the step-2 answer and 170 at 1.00. **Fix direction:** measure the gradient per *native* pixel —
+  divide `_local_gradient` by `ctx.proxy_scale` (thread it in from `solve_highlight_protect`, which already
+  has `scale`) or scale both thresholds by it; `proxy_scale == 1` must stay byte-for-byte. Regression test:
+  the same core strided at 1/2/3/4 returns strengths within one slider stop of each other (fails today: 1.00
+  vs 0.40 vs 0.25). Re-check `_MIN_CORE_AREA_FRAC * n_covered` while there — a mosaic's bigger covered area
+  raises the core floor for the same galaxy (not measured as biting here).
+
 - **LEAD (split off the v0.501.10 mosaic-centre entry, traced not reproduced) — `seestack/lifelist.py::MATCH_RADIUS_DEG`
   (0.35°) is sized in its comment for an S50 frame (1.3°x0.7°); the owner's S30 field is 2.1°, so M32 (0.40° from
   M31) stays grey on "My life list" even when his single M31 field plainly contains it.** *(PRIORITY 3; size S;
