@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- `lifelist.MATCH_RADIUS_DEG` → match inside the target's own measured field (registry `frame_short_deg`) — branch `claude/festive-knuth-1bmxdk`
 
 ---
 
