@@ -2,7 +2,7 @@
 
 ## 2026-10-20 (Scout, branch `claude/zen-curie-d5n9db`) — QA rotation sweep (3), new angle — ASTAP under the scan job's process pool (twinned basenames in parallel, then a cancel): one bug, Scout-fixed (v0.502.4). Inbox unchanged.
 
-*(**Baseline:** 8072 passed / 7 skipped on `032b4dcb` (xdist `-n 4`, BLAS capped, 18m12s). **Inbox**
+*(**Baseline:** 8072 passed / 7 skipped on `032b4dcb` (xdist `-n 4`, BLAS capped, 18m12s); with the fix 8073 passed / 7 skipped (17m29s). **Inbox**
 (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none updated since
 2026-10-12 — nothing owed. **Open PR:** #1217 (Builder, v0.502.3, highlights) — live, so this run takes v0.502.4.)*
 
@@ -19,7 +19,7 @@ after), while explicit `future.cancel()` + `shutdown(wait=False)` leaves only th
 (nothing written, scratch dirs cleaned) but a cancel that does not cancel: hours of hidden ASTAP load on a big first
 scan, overlapping the next job (a stack — OOM history), results discarded. Severity moderate, confidence
 reproduced; Scout-fixed (one call site, fail-before shown 19/24 → pass). **Same call left in**
-`seestack/core/jobs.py::JobRunner.cancel` — desktop GUI only, not built on. (3) done → **next sweep is (4)**.*
+`seestack/core/jobs.py::JobRunner.cancel` — desktop GUI only, not built on. (3) done → **next sweep is (4)**. **Dogfood `--mosaic`: CLEAN** — trim 7.9 %, nothing overflowing, no console errors.*
 
 ## 2026-10-20 (Scout, branch `claude/zen-curie-45367f`) — QA rotation sweep (2) **collided** with `claude/zen-curie-diowga` on the same surface; the extra finding (an L-shaped mosaic's false ✓) folded into its entry. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
