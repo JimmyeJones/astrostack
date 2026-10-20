@@ -82,29 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟡 (Scout 2026-10-20, QA rotation sweep (2)) — a restack batch copies the owner's hand-saved crop onto a
-  mosaic whose canvas has grown, unchanged as *fractions*, so it frames a different and wider piece of sky, and
-  crop-health calls it fine.** *(Pillar: editor — PRIORITY 1 / walk-away; size **S–M**; severity moderate —
-  the copy is saved, not rendered, so the wall is unchanged, but the editor opens his look on the wrong framing
-  and one Export ships it; nothing is lost on disk. Confidence: **reproduced** end to end.)*
-  `webapp/pipeline.py::_carry_hand_saved_recipe` (v0.501.0) writes the source run's `geometry.crop`
-  `x0/y0/x1/y1` onto the new run as-is. Those are fractions of the **source** canvas. A mosaic's union canvas
-  changes whenever a night adds a row or column, so the same fractions point somewhere else. The withdrawn
-  v0.449.0 version had a **same-canvas-shape gate** (`SHIPPED.md`, "the hand-edited reprocess
-  carry-forward"), and v0.501.0 dropped it. The docstring leans on `routers.editor.crop_health_for_run`, but
-  that only flags a crop keeping < `STALE_CROP_KEEP_RATIO` (¼) of the trim rule's area. It never looks at
-  *where* the crop sits. Scratch repro on the real 2×2 mosaic sample with the real `run_stack`: night 1 holds
-  the east column (canvas 501×599), the owner saves a crop of 0.1–0.9, then night 2 adds the west column and
-  the batch restacks (907×615). The carried crop's centre moved **203 px (17′)**, its far corner 365 px, and it
-  now spans 726 px of sky against the 401 px he framed. `crop_health_for_run` → `stale=False` (keeps 0.64 vs the
-  rule's 0.92). The existing tests can't see this: `_seed_hand_saved_recipe` and `_patch_run_stack_new_run`
-  give both runs the same (dummy) canvas. **Fix sketch:** when the new run's `canvas_w/h` differs from the
-  source's, re-project the crop's corners pixel→sky→pixel through the two runs' FITS WCS (both masters carry
-  one) and clamp to 0..1. If either WCS is unreadable, carry the look **without** the crop op, so the editor's
-  own trim takes over, rather than a crop that frames the wrong sky. Same-shape runs stay byte-identical, as
-  now. Regression test: two runs with different canvases and a seeded WCS each; assert the carried crop
-  frames the same sky (fails today).
-
 - **🟡 (Scout 2026-10-20, QA rotation sweep (4)) — a mosaic's registry centre lands on one *panel*, not the
   mosaic's middle, so his M31 mosaic is not on his life list.** *(Pillar: trust / beginner delight — PRIORITY 3;
   size **S–M**; severity moderate — a famous object he shot sits grey on "My life list"; nothing lost on disk.
@@ -3631,6 +3608,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.501.8 **A restack batch copied his hand-saved crop onto a mosaic whose canvas had grown as raw fractions, framing different sky — the crop is now re-aimed through the two masters' WCS, or left off when it can't be placed** (`pipeline._recrop_for_new_canvas`, `wcs_io.crop_reprojected_between_fits`, Scout rotation sweep (2))
 - ✅ v0.501.7 **A job that hit a full disk (or a dataset quota) or a permission refusal said only `[Errno 28] No space left on device: …` — it now says what happened in plain words, and a full disk links to Storage** (`jobs.classify_job_error` → `disk_full` / `no_permission`, `Jobs.friendlyJobError`)
 - ✅ v0.501.6 **Exporting the old picture (or a channel combine) after a stack refused silently withdrew "this target stopped producing pictures" while the target still could not stack — only a genuine stack run retires the note now** (`stackfailures._last_stack_utc`, Scout rotation sweep (4))
 - ✅ v0.501.5 **A malformed recipe body (`{"ops": 5}`, `"version": Infinity`) 500'd recipe save/preview, and a `NaN` stretch in History's Adjust save silently re-baked the picture at full stretch — both now handled** (`recipe.recipe_from_dict`, `stack.save_stack_preview`)

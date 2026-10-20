@@ -932,6 +932,50 @@ def cropped_center_radec_from_fits(fits_path: str | Path, crop
     return (ra, dec)
 
 
+def crop_reprojected_between_fits(src_fits: str | Path | None,
+                                  dst_fits: str | Path | None, crop):  # noqa: ANN001,ANN201
+    """The same piece of sky as ``crop`` on ``src_fits``'s canvas, as a crop of
+    ``dst_fits``'s canvas — or ``None`` when that can't be said.
+
+    A ``geometry.crop`` is fractions of the canvas it was drawn on, and a mosaic's
+    union canvas changes shape whenever a night adds a row or column, so the same
+    fractions on a restack frame a different piece of sky. This walks the crop's
+    outline (corners and edge points, at the pixel *edges*) through the source
+    canvas's WCS to the sky and back through the destination's, and takes the
+    bounding box as fractions of the destination, clamped to it. ``None`` — the
+    caller must not guess — when either FITS has no usable celestial WCS, a point
+    projects to NaN, or none of the framed sky is on the new canvas.
+    """
+    import numpy as np
+
+    from seestack.previewcrop import PreviewCrop, make_crop
+
+    if not isinstance(crop, PreviewCrop) or src_fits is None or dst_fits is None:
+        return None
+    src, sw, sh = celestial_wcs_from_fits(src_fits)
+    dst, dw, dh = celestial_wcs_from_fits(dst_fits)
+    if src is None or dst is None or min(sw, sh, dw, dh) <= 0:
+        return None
+    try:
+        t = np.linspace(0.0, 1.0, 9)
+        fx = np.concatenate([t, np.ones_like(t), t[::-1], np.zeros_like(t)])
+        fy = np.concatenate([np.zeros_like(t), t, np.ones_like(t), t[::-1]])
+        # Fraction f of the canvas sits at pixel-edge coordinate f*N - 0.5 in
+        # the 0-based convention ``crop_pixel_box`` / ``all_pix2world(..., 0)`` use.
+        px = (crop.x0 + fx * crop.w_frac) * sw - 0.5
+        py = (crop.y0 + fy * crop.h_frac) * sh - 0.5
+        ra, dec = src.all_pix2world(px, py, 0)
+        qx, qy = dst.all_world2pix(ra, dec, 0)
+        qx, qy = np.asarray(qx, dtype=float), np.asarray(qy, dtype=float)
+    except Exception as exc:  # noqa: BLE001 — a malformed WCS just means "can't say"
+        log.warning("Crop re-projection failed (%s → %s): %s", src_fits, dst_fits, exc)
+        return None
+    if not (np.all(np.isfinite(qx)) and np.all(np.isfinite(qy))):
+        return None
+    return make_crop((qx.min() + 0.5) / dw, (qy.min() + 0.5) / dh,
+                     (qx.max() + 0.5) / dw, (qy.max() + 0.5) / dh)
+
+
 def _is_plain_radec(wcs) -> bool:
     """True for a 2-axis WCS whose world axes are plainly RA then Dec.
 
