@@ -2297,9 +2297,16 @@ def submit_reprocess_all(settings: Settings, jm: JobManager, *,
                     # exception *type* is still in hand — a batch that walks the
                     # whole library over days ends on one red line, and until now
                     # that line held nothing but safe names.
+                    # ``failed_utc`` stamps the row itself: a yielded slice
+                    # carries earlier slices' rows forward, so the job's own
+                    # finish time is not when *they* failed
+                    # (``stackfailure.latest_stack_failures`` reads it).
+                    from datetime import UTC, datetime
                     failed.append({"target": safe, "name": name,
                                    "error": f"{type(exc).__name__}: {exc}",
-                                   "error_kind": classify_job_error(exc) or ""})
+                                   "error_kind": classify_job_error(exc) or "",
+                                   "failed_utc": datetime.now(UTC).strftime(
+                                       "%Y-%m-%dT%H:%M:%SZ")})
                 else:
                     if res.get("cancelled"):
                         cancelled = True
