@@ -384,6 +384,47 @@ def test_an_install_already_inside_the_targets_tree_still_loads(tmp_path):
     assert s.cpu_workers == 6
 
 
+def test_settings_store_refuses_incoming_inside_the_data_roots_own_folders(tmp_path):
+    """Sweep (3), 2026-10-20, reproduced: ``incoming_dir`` at ``<data>/video``
+    saved fine, and a Moon/Sun stack then wrote ``meta.json``/``stack.png``/
+    ``stack.tiff`` into the raw clip's own folder (the capture id is the folder
+    name, so the stills folder *is* the capture folder); at ``<data>/state``
+    every save rewrote ``config.json`` and the jobs database inside it."""
+    import pytest
+
+    from webapp.config import SettingsStore
+
+    store = SettingsStore(str(tmp_path))
+    for bad in (tmp_path / "video", tmp_path / "video" / "Solar_video",
+                tmp_path / "state", tmp_path / "exports"):
+        with pytest.raises(ValueError, match="app's own"):
+            store.update({"incoming_dir": str(bad)})
+        assert store.get().incoming_dir == ""
+    # A look-alike sibling and the standard layout are still fine.
+    store.update({"incoming_dir": str(tmp_path / "videos")})
+    store.update({"incoming_dir": str(tmp_path / "incoming")})
+
+
+def test_an_install_already_inside_the_video_store_still_loads(tmp_path):
+    """§9: refuse to *enter* the layout, never refuse to boot an install in it."""
+    _write_cfg(tmp_path, {"incoming_dir": str(tmp_path / "video"), "cpu_workers": 6})
+    s = SettingsStore(str(tmp_path)).get()
+    assert s.incoming_dir == str(tmp_path / "video")
+    assert s.cpu_workers == 6
+
+
+def test_data_root_managed_subdirs_match_their_owners(tmp_path):
+    """The guard names these folders literally; pin them to the paths the state
+    store, the stills store and the pictures archive actually use."""
+    from webapp import picturesarchive, video
+    from webapp.config import DATA_ROOT_MANAGED_SUBDIRS, Settings
+
+    s = Settings(data_root=str(tmp_path))
+    for owned in (s.state_dir, video.video_root(s), picturesarchive.archive_dir(s)):
+        assert owned.parent == tmp_path
+        assert owned.name in DATA_ROOT_MANAGED_SUBDIRS
+
+
 def test_library_managed_subdirs_match_their_owners():
     """The guard names these folders literally; pin them to the constants the
     library and the calibration registry actually use."""

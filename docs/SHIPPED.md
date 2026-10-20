@@ -1,5 +1,26 @@
 # Shipped — the record
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-ba36k9`) — the folder guard and the data root's own folders
+
+### v0.501.12 — `incoming/` can no longer be set to the app's own stills, state or archive folder
+
+**What.** `config.nested_incoming_conflict` refused a library or data root inside `incoming/`, and `incoming/`
+inside the library's `targets/`/`calibration/` — but not `incoming/` inside the data root's own managed
+folders. Reproduced through the real Settings PUT and the real Moon & Sun API: `incoming_dir` =
+`<data>/video` saved with a 200, and because a capture's id is its folder name, the stills folder
+(`video.result_dir`) *is* the capture folder — the stack wrote `meta.json`, `stack.png` and `stack.tiff` beside
+the raw `.avi`, and a later re-stack, crop or sharpen replaces/unlinks them there. `<data>/state` saved too, and
+every save then rewrites `config.json` and `jobs.sqlite` inside it. Now `DATA_ROOT_MANAGED_SUBDIRS`
+(`state`, `video`, `exports`) is refused on save like the library subtrees; an install already in that layout
+still boots (warned once per boot, as before). The Settings page's live check stays silent on these (two
+`server` rows in `tests/fixtures/folder_conflict.json`) — the server is the authority.
+
+**Tests.** `tests/webapp/test_config_upgrade.py` — the store refuses `video`, `video/Solar_video`, `state`,
+`exports` (fails before: saved) and still accepts `videos`; an install already at `<data>/video` loads; the
+three names are pinned to `Settings.state_dir`, `video.video_root` and `picturesarchive.archive_dir`.
+
+**Upgrade-safe (§9):** a save-time refusal only; no config field, schema, layout, default or API shape change.
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-jjqmic`) — the carried crop on a single field
 
 ### v0.501.11 — a restack that kept the canvas size but moved the sky re-aims the carried crop too

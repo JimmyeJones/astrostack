@@ -46,6 +46,11 @@ def _is_within(child: Path, parent: Path) -> bool:
 
 
 LIBRARY_MANAGED_SUBDIRS = ("targets", "calibration")
+# The data-root folders the app writes, rewrites and unlinks files in:
+# ``state/`` (config.json, jobs.sqlite), the Moon & Sun stills store
+# (``webapp.video.video_root``) and the pictures archive
+# (``webapp.picturesarchive.ARCHIVE_DIRNAME``) — a test pins that they agree.
+DATA_ROOT_MANAGED_SUBDIRS = ("state", "video", "exports")
 
 
 def nested_incoming_conflict(incoming: Path, library: Path, data_root: Path) -> str | None:
@@ -91,6 +96,21 @@ def nested_incoming_conflict(incoming: Path, library: Path, data_root: Path) -> 
                 f"deletes folders in there, and your incoming folder holds the "
                 f"only copy of your raw frames — it must never be written to or "
                 f"cleaned up. Pick a folder outside it."
+            )
+    # The same the other way round for the data root: ``incoming/`` at
+    # ``<data>/video`` makes each capture's own folder its stills folder, so a
+    # Moon/Sun stack writes ``stack.png``/``meta.json`` beside the raw clip and a
+    # later re-stack overwrites them; at ``<data>/state`` every save rewrites
+    # ``config.json`` and the jobs database inside it.
+    for sub in DATA_ROOT_MANAGED_SUBDIRS:
+        managed = Path(data_root) / sub
+        if _is_within(incoming, managed):
+            return (
+                f"Your incoming folder would sit inside the app's own "
+                f"\"{sub}\" folder ({_abs(managed)}). The app writes and replaces "
+                f"files in there, and your incoming folder holds the only copy "
+                f"of your raw frames — it must never be written to or cleaned "
+                f"up. Pick a folder outside it."
             )
     return None
 
