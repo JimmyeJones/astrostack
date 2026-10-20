@@ -2,7 +2,7 @@
 
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-8a2fmo`) — a killed solve worker no longer sinks the pass
 
-### v0.502.10 — `scanner._map_jobs` re-runs what a broken pool took down; stale solve scratch swept at start
+### v0.502.11 — `scanner._map_jobs` re-runs what a broken pool took down; stale solve scratch swept at start
 
 **What.** One dead `ProcessPoolExecutor` worker (the OOM killer) breaks the whole pool: every running *and queued*
 future raises `BrokenProcessPool` at once. Scout sweep (3) reproduced it with a stub ASTAP — 16 subs, 4 workers, one
