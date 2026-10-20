@@ -534,6 +534,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   own job row and carries its own rows). `superseded_by_success` already retires it on a later genuine stack.
   Pin with the repro above, plus a yielded two-slice batch.
 
+- **🟡 (Scout 2026-10-20, QA rotation sweep (1)) — *Add → Resize* lands ahead of Auto's sharpen, so the full-size
+  check shows sharpening at the wrong scale and the export sharpens 1/scale wider than the radius Auto chose.**
+  *(Pillar: editor — PRIORITY 1; size **S**; severity low–moderate — the loupe is the control the sharpen
+  advisory sends a beginner to; nothing is lost. Confidence: **reproduced** through the real `apply_recipe` and
+  the router's `_without_geometry` / `_loupe_geometry_problem`.)* `geometry.*` ops are `stage="nonlinear"`, so
+  `stageConflicts.ts::insertOnCorrectSide` splices a new Resize **directly after the stretch** — on Auto's recipe
+  (`… tone.stretch, scnr, saturation, curves, detail.sharpen`) that is ahead of `detail.sharpen`. The export then
+  runs the sharpen radius on the resized grid (radius 3 at scale 0.5 = 6 native px; Auto sized it in master px),
+  and the loupe, which disables geometry and renders at 1:1, runs it at 3 native px; `_loupe_geometry_problem`
+  only refuses geometry ahead of an *additive-field* op, so it vouches for this. Scratch repro (1200² star field,
+  `[stretch, resize 0.5, sharpen r=3]`): the loupe radius that best reproduces the export window is **6.0**
+  (mean |Δ| 0.00117 vs 0.00185 at the true 3.0); control with Resize last → best **3.0**. The decimated preview
+  agrees with the export (radius ratios cancel), so only the loupe and the *intent* are wrong. Same shape for
+  `stars.reduce` / `detail.chroma_denoise` after a Resize. **Fix direction:** append geometry ops at the end in
+  `insertOnCorrectSide` (Auto already puts `geometry.crop` last; `mosaicTrim.applyTrimCrop` uses the same
+  helper), and have `_loupe_geometry_problem` refuse a reshaping `geometry.resize` ahead of an op that reads
+  `ctx.scaled_px` for hand-ordered recipes. Pin both with the repro above.
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)

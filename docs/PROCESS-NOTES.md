@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-q3d8cd`) — QA rotation sweep (1), scale-dependent parity, on the angle the 10-20 `huttjh` (1) left open — a `geometry.resize` ahead of the detail ops through the loupe: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
+
+- **Suite:** 8134 passed / 7 skipped on `a3038e5f` (xdist `-n 4`, BLAS capped, 16m45s). **Inbox:** the same four (#878, #880, #903, #1015), no activity since 2026-10-12, all
+  owner-gated — nothing new owed. No open PRs. **Dogfood** `--mosaic --editor`: CLEAN — trim 7.9 %, nothing
+  overflowing, no console errors, editor drive clean.
+- **Sweep (1).** The loupe disables every geometry op and renders at 1:1; `_loupe_geometry_problem` refuses only
+  geometry ahead of an *additive-field* op. A Resize ahead of a `ctx.scaled_px` op is not refused, and the Add menu
+  builds exactly that recipe: `geometry.*` are `stage="nonlinear"`, so `insertOnCorrectSide` puts them right after
+  the stretch, ahead of Auto's `detail.sharpen`. Real `apply_recipe` + `_without_geometry`, 1200² star field,
+  `[stretch, resize 0.5, sharpen r=3]`: best-matching loupe radius **6.0** (export sharpens on the half grid);
+  control with Resize last → **3.0**. The decimated preview agrees with the export (radius ratio cancels: export
+  r on W·s, proxy r/p on W·s/p) — algebra, not run at stride. Filed at the end of Bugs, size S.
+- Not yet run in a sweep (1): `trim-suggestion` / `crop-health` on a strided coverage map (0 mentions here).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-uic6x9`) — QA rotation sweep (4), the routers' *answers*, on the never-swept `wishlist`, `sample`, `updates`, `stackfailures` and `overtrim`: one bug Scout-fixed (v0.502.12), one filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8114 passed / 7 skipped on `6724173b` (xdist `-n 4`, BLAS capped, 20m34s). **Inbox:** the same four (#878, #880,
