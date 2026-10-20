@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-0y9ec1`) — QA rotation sweep (2), on the one per-panel surface added since the last sweep: one bug, filed (a carried crop on a grown mosaic canvas)
+
+Baseline **8005 passed / 7 skipped** on `7e039637` (xdist, BLAS capped, 17m42s); no open PRs. Inbox: #878, #880,
+#903, #1015, all previously acted-on and owner-gated, none updated since the last Scout run. Nothing owed.
+Following the 2026-10-16 carry-forward ("a new per-panel number added since"), the sweep listed every non-docs
+commit since 2026-10-12 and took the one walk-away path that writes per-run geometry:
+`pipeline._carry_hand_saved_recipe` (v0.501.0). Its copied `geometry.crop` is a fraction of the *source* run's
+canvas, and a mosaic's union canvas grows with each row or column a night adds. The withdrawn v0.449.0 had a
+same-canvas gate; v0.501.0 has none. The Builder's 2026-10-19 re-read cleared it on "crop is fractional", which
+holds for the same canvas only. Ran the real 2×2 mosaic sample through the real `run_stack` twice. First run:
+4th panel added inside the bounding box (canvas 907×613 → 907×615), shift 1 px, harmless. Second run: west
+column added (501×599 → 907×615), carried-crop centre moved 203 px / 17′. `crop_health_for_run` → `stale=False`
+for a 0.1–0.9 crop. Filed in "Bugs". Also read and **cleared**: `thinpicture.samples_on_one_patch` (a
+whole-canvas average by design; per-panel unevenness is `grain_uneven`'s job), and `STALE_CROP_KEEP_RATIO`
+(an area rule, correct for what it claims). Dogfood `--mosaic` CLEAN: trim 7.9 %, nothing overflowing, no
+console errors.
+
 ## 2026-10-19 (Scout, branch `claude/zen-curie-uq5tak`) — QA rotation sweep (1), scale-dependent preview↔export parity, on the three **geometry** ops no earlier sweep (1) ran: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 *(Docs only — the honest outcome. **Baseline:** local suite **8012 passed / 7 skipped** on `d2f146fd` (xdist `-n 4`, BLAS capped, 17m58s); no open PRs. **Inbox**
