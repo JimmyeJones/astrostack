@@ -1,5 +1,18 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-a2csji`) — QA rotation sweep (1) **collided** with `claude/zen-curie-wncymw` (#1221) on the same finding; folded in, nothing new filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8106 passed / 7 skipped on `f337fbd0` (xdist `-n 4`, BLAS capped, 17m16s). **Inbox:** the same four (#878, #880, #903,
+  #1015), none updated since 2026-10-12 — nothing owed. No open PRs when this run started. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %).
+- **Collision:** both runs started from `f337fbd0` and independently found the half-res `fwhm_px` → master-px bug; #1221 merged while this
+  run's suite was running, so its entry stands and this run dropped its duplicate. Same-day Scout runs on one rotation slot have no claim
+  to see — a cheap guard would be pushing the PROCESS-NOTES sweep header as soon as the angle is chosen.
+- **Two facts #1221 does not carry, for the Builder:** (a) the QC-side ratio holds across star widths on a full-size 1920×1080 raw —
+  native σ 1.5/2.0/3.0 px → QC `fwhm_px` 1.87/2.43/3.49 against 3.53/4.70/6.80 measured at native res (×1.89–1.95), so the ×2 constant
+  is right and need not scale with seeing. (b) `levels-`, `curve-` and `stretch-suggestion` are CLEAN by construction for sweep (1):
+  they are percentile/MAD statistics of the pixel distribution, and `build_proxy` strides rather than block-averages, so the proxy
+  sample is unbiased — no per-pixel gradient term like the one `highlights.py` had. **Rotation stays: (1) done → next is (2).**
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-wncymw`) — QA rotation sweep (1), scale-dependent parity, taken one grid further out — frame-QC pixels vs master pixels — on the editor's FWHM-driven numbers: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Inbox:** the same four open (#878, #880, #903, #1015), none updated since the last Scout run; all owner-gated, nothing owed. No open PRs.
