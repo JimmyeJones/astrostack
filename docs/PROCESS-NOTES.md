@@ -1,5 +1,18 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-45367f`) — QA rotation sweep (2) **collided** with `claude/zen-curie-diowga` on the same surface; the extra finding (an L-shaped mosaic's false ✓) folded into its entry. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+*(**Suite:** 8072 passed / 7 skipped on `f7c8028e` + docs (xdist `-n 4`, BLAS capped, 18m07s). **Inbox**: the same
+four (#878, #880, #903, #1015), owner-gated, none updated since 2026-10-12. **Dogfood `--mosaic`: CLEAN** — trim
+7.9 %, nothing overflowing, no console errors.)* Two Scout runs fired close enough that both read `main` at
+`f7c8028e`, both picked the only new per-panel number (v0.502.2 `match_radius_deg`) and both reproduced a defect
+in it — `diowga` the under-claim (M20/M87/M99/M110 grey), this run the over-claim its entry ruled out ("never a
+false claim"): an L-shaped 3-of-4 S30 mosaic keeps the 2×2 middle and its 0.479° disc, 14.8 % of which no panel
+covered, and a probe object there reads `captured=True`. Same fix, so no second Bugs entry — a five-line
+addendum on `diowga`'s. **Process lesson:** the §11 fetch-before-filing rule caught it only at push time; a Scout
+should `git fetch origin main` again before writing its Bugs entry, not just at the start of the run. (2) done →
+**next sweep is (3)**.
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-diowga`) — QA rotation sweep (2), on the one per-panel/whole-target number added since the last sweep (2): one bug, filed reproduced (the life list judges a mosaic by one panel's field). Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
 
 *(**Suite:** **8072 passed / 7 skipped** on `f7c8028e` + this docs change (xdist `-n 4`, BLAS capped, 27m07s). **Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all
