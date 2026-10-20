@@ -486,6 +486,22 @@ describe("the destination box knows which targets you already have", () => {
       .toBeGreaterThan(0));
   });
 
+  it("survives one folder registered under two targets", async () => {
+    // 2026-10-20, the owner's install: `M 3_sub` came back twice (its subs sit
+    // in two library targets) and Mantine's Autocomplete threw "Duplicate
+    // options are not supported", replacing the whole page with an error.
+    mockDests({
+      destinations: [
+        { target: "M 3", folder: "M 3_sub", n_frames: 900 },
+        { target: "M 3 (2)", folder: "M 3_sub", n_frames: 900 },
+      ],
+    });
+    renderUpload();
+    await typeTarget("M 3");
+    await waitFor(() => expect(screen.getAllByText("M 3_sub").length).toBeGreaterThan(0));
+    expect(screen.getByTestId("upload-target-folder")).toBeInTheDocument();
+  });
+
   it("says nothing at all when the backend has no destinations to give", async () => {
     // An older backend or a failed read: the box must behave exactly as it did,
     // and must never warn on no evidence.

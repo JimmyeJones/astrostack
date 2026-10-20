@@ -1,5 +1,28 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-huttjh`) — QA rotation sweep (1), scale-dependent preview↔export parity: the full-size loupe on a recipe whose crop sits *after* its background passes, on a gapped mosaic: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+*(Docs only — the honest outcome. **Baseline:** local suite **8022 passed / 7 skipped** on `8ef5e708` (xdist `-n 4`, BLAS capped, 15m56s); no open PRs. **Inbox** (`list_issues`): the same four
+(#878, #880, #903, #1015), all previously acted-on and owner-gated, none updated since 2026-10-12 — nothing owed.
+**Dogfood `--mosaic`: CLEAN** — Auto trim 7.9 %, nothing overflowing, no console errors.)*
+
+*__Sweep (1), the angle the last (1) left open.__ `_loupe_geometry_problem` refuses a geometry op *before* an additive
+background pass; the allowed order — background first, crop after, then more tone ops — was never run. The window
+render disables the crop (`_without_geometry`), replays the background fields at canvas coordinates
+(`EditContext.replay_field`, `source_origin`), and freezes the fits the whole render measured on the *cropped*
+proxy; the export measures them on the cropped full canvas. Scratch probe (not committed): a 3600×4800 2×2-mosaic
+canvas (25/25/25/26-sub panels with a +0.01 step on the deep one, two ragged NaN corners and a missing-panel notch,
+gradient sky, nebula, 2,500 stars), proxy stride **4**, real `apply_recipe` both ways and the router's own
+`_loupe_window` / `_without_geometry`. Recipe: `level_coverage` → `background.subtract` → stretch (STF) →
+neutralize → **crop (0.12, 0.08)–(0.83, 0.91)** → saturation → curves; control: the same recipe without the crop.
+Five 512 px windows (centre, both corners, off-axis, the panel seam), each compared with the export cut at the
+crop-shifted position. **With crop: median |Δ| 0.0032–0.0051, p99 0.015–0.084, median signed Δ ≤ 0.0019; without:
+median 0.0025–0.0035, p99 0.013–0.071 — the same proxy-measured-fit class, not a crop interaction. NaN masks agree
+cell for cell (0 mismatches)** on every window. Sensitivity: the same comparison with the export cut 3 px off
+reads median 0.132 / p99 0.488, so a mis-aimed window could not hide in these numbers. Not yet run in a sweep (1):
+a `geometry.resize` after the background passes through the loupe (the window ignores it by design, so the check
+is the click→window mapping, not the pixels).*
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-pfee2z`) — QA rotation sweep (4), the routers' *answers*, on `jobs` and `lifelist`: one finding, filed (a mosaic's registry centre lands on a panel). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 *Baseline: local suite **8014 passed / 7 skipped** on `cb2f7c08` (xdist `-n 4`, BLAS capped, 22m48s); no open PRs.

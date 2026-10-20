@@ -49,6 +49,19 @@ in the entry (M32 at 0.40° from M31) — a separate question.
 
 </details>
 
+## 2026-10-20 (owner-reported crash, branch `claude/busy-pascal-2HNTL`)
+
+### v0.501.9 — the upload card no longer crashes on a folder registered under two targets
+
+**What.** `GET /api/upload-destinations` returns one row per (target, folder), so a folder whose subs are
+registered in two library targets (issue #878's duplicate targets) comes back twice. `UploadFits.tsx` passed
+`dests.map((d) => d.folder)` straight to Mantine's `Autocomplete`, which throws on a repeated option value, and
+the router's error boundary replaced the page with "Unexpected Application Error! [@mantine/core] Duplicate
+options are not supported. Option with value "M 3_sub" was provided more than once". New
+`uploadDestination.destinationFolders` lists each folder once in the server's busiest-first order; the endpoint
+and the advice line are unchanged. **Tests:** a vitest render with the owner's shape (one folder, two targets)
+that throws the exact owner error with the fix reverted, plus a unit test of the helper. Frontend only.
+
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-mmcc3c`) — the carried crop on a grown mosaic canvas
 
 ### v0.501.8 — a restack re-aims the owner's saved crop at the sky he framed
