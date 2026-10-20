@@ -532,6 +532,23 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
   scratchpad (`wcs_repro.py`).)_
 
+- **🟡 (Scout 2026-10-20, QA rotation sweep (3)) — one killed QC/solve pool worker throws away the rest of the
+  pass for that target, and leaks a scratch copy of each in-flight sub into the container's `/tmp`.**
+  *(Pillar: autonomy — PRIORITY 2; size **S**; severity low — nothing is lost or mis-marked; the frames stay
+  "never tried" and a later pass solves them. Confidence: **reproduced** with a stub ASTAP and a SIGKILLed
+  worker; occurrence on the owner's box **unmeasured** — gate: an observer `/api/logs` line reading
+  "process pool was terminated abruptly".)* `scanner._map_jobs` catches the `BrokenProcessPool` per future,
+  so once any worker dies (the OOM killer, given this app's OOM history) **every** remaining future fails at
+  once: real `run_qc_and_solve`, 16 subs, 4 workers, one worker killed 2 s in → `solve_ok` **4 of 16**, 12 logged
+  "Solving job failed". Those 12 get no DB write (correct), but the scan only re-runs `touched_names`, so they
+  wait for the next new sub on that target or a manual re-solve — and a walk-away auto-stack in between would
+  stack 4. The executor also terminates the healthy workers, so **all four** `astrostack-solve-*` dirs stayed in
+  `/tmp`, each a full copy of a raw sub plus sidecars (`TemporaryDirectory` cleanup never ran); `/tmp` is the
+  container layer, cleared only on recreate. `incoming/` untouched. **Fix direction:** in `_map_jobs`, on
+  `BrokenProcessPool` re-submit the not-yet-finished args once to a fresh pool (then give up as now); sweep
+  stale `astrostack-solve-*`/`astrostack-bootstrap-*` dirs older than the solve timeout at app start. Pin with
+  a worker that `os._exit`s on one arg.
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
