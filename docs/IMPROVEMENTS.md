@@ -3618,6 +3618,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.501.11 **On a single field a restack after a re-pointed night kept the canvas size, so "Reprocess everything" copied his saved crop unchanged and it framed sky 40–90 px off — the crop is re-aimed whenever the sky moved, not only when the canvas changed size** (`pipeline._recrop_for_new_canvas(same_shape=…)`, Scout rotation sweep (2))
 - ✅ v0.501.10 **A mosaic's registry centre landed on one panel (per-axis median over subs), so his M31 mosaic was missing from the life list — it is now the midpoint of the panels' extent** (`library._panel_extent_centre`).
 - ✅ v0.501.9 **The upload card's "Target folder" box crashed the whole page ("Duplicate options are not supported") when one incoming folder's subs sit in two library targets — each folder is now suggested once** (`uploadDestination.destinationFolders`, owner-reported 2026-10-20; the duplicate registration itself is issue #878)
 - ✅ v0.501.8 **A restack batch copied his hand-saved crop onto a mosaic whose canvas had grown as raw fractions, framing different sky — the crop is now re-aimed through the two masters' WCS, or left off when it can't be placed** (`pipeline._recrop_for_new_canvas`, `wcs_io.crop_reprojected_between_fits`, Scout rotation sweep (2))

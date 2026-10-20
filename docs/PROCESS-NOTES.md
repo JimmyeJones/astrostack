@@ -1,5 +1,24 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-jjqmic`) — QA rotation sweep (2), on the two per-panel/per-run gates added since the morning sweep: one bug, Scout-fixed (v0.501.11)
+
+Baseline: setup clean, full suite with the fix **8031 passed / 7 skipped** (xdist, BLAS capped, 24m48s) on
+`4e75fbc2` + this change; no open PRs. Inbox: #878, #880, #903, #1015, all previously acted-on and owner-gated,
+none updated since 2026-10-12 — nothing owed. Following the carry-forward ("a new per-panel number added since"),
+the sweep read the two non-docs commits since the last sweep (2): **(a)** v0.501.10 `library._panel_extent_centre`
+— per-panel medians through `pointing_groups`, panels linked into objects at `LINK_DIST_DEG` (3°, well above an
+S30 panel step), a ≥1 % share floor so a stray pointing can't stretch the extent; falls back to the old median
+whenever the `PANEL_LINK_DIST_DEG` collapse lead fires — **cleared**. **(b)** v0.501.8's carried-crop re-aim is
+gated on `(canvas_h, canvas_w)` changing — a whole-canvas number standing in for "same sky". On a single field
+the canvas is the reference sub's footprint (`run_stack` §1b, union only above `AUTO_UNION_AREA_RATIO` 1.3), and
+`pick_reference_frame` takes the sub nearest the median, so a night from a re-pointed GoTo swaps the reference.
+Real `Library`/`Project`/`run_stack`, 480×320, 5 subs then 7 re-pointed east, a hand-saved 0.3–0.7 crop: shapes
+identical, crop copied as drawn, framed sky **40 px / 90 px** off for a 40 / 90 px re-point (192 px crop). Fixed
+(`same_shape=True` path: re-aim, keep byte-for-byte under half a pixel, keep as drawn if unplaceable); the same
+repro then moves 0.0 px. How far the owner's nights re-point is unmeasured (same unknown as the
+`PANEL_LINK_DIST_DEG` lead), but the fix is a no-op when they don't. Dogfood `--mosaic` CLEAN: trim 7.9 %,
+nothing overflowing, no console errors.
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-huttjh`) — QA rotation sweep (1), scale-dependent preview↔export parity: the full-size loupe on a recipe whose crop sits *after* its background passes, on a gapped mosaic: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 *(Docs only — the honest outcome. **Baseline:** local suite **8022 passed / 7 skipped** on `8ef5e708` (xdist `-n 4`, BLAS capped, 15m56s); no open PRs. **Inbox** (`list_issues`): the same four

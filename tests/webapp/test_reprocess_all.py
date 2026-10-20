@@ -3005,7 +3005,7 @@ def _add_run(proj, *, w: int, h: int, fits_path: str | None) -> int:
 
 
 def _carried_ops(solved_library, tmp_path, *, ops, src_fits=True, dst_fits=True,
-                 dst_shape=(360, 250)):
+                 dst_shape=(360, 250), dst_crpix=(100.5, 125.5)):
     """Seed a hand-saved look on a 200×240 run, restack onto ``dst_shape`` (the
     canvas grown by a west column and 5 rows below), carry, and return the new
     run's ops."""
@@ -3022,7 +3022,7 @@ def _carried_ops(solved_library, tmp_path, *, ops, src_fits=True, dst_fits=True,
             proj.set_meta(f"{RECIPE_META_PREFIX}{src}", json.dumps({"ops": ops}))
             dw, dh = dst_shape
             new = _add_run(proj, w=dw, h=dh, fits_path=_write_tan_master(
-                tmp_path / "dst.fits", w=dw, h=dh, crpix=(100.5, 125.5))
+                tmp_path / "dst.fits", w=dw, h=dh, crpix=dst_crpix)
                 if dst_fits else None)
         finally:
             proj.close()
@@ -3082,4 +3082,40 @@ def test_carry_copies_the_crop_as_is_on_a_same_shape_canvas(solved_library, tmp_
     """Same canvas shape → nothing to re-aim, even with no WCS to hand."""
     ops = _carried_ops(solved_library, tmp_path, ops=_HAND_OPS, src_fits=False,
                        dst_fits=False, dst_shape=(200, 240))
+    assert _crop_params(ops) == [_HAND_OPS[1]["params"]]
+
+
+# --------------------------------------------------------------------------- #
+# Scout 2026-10-20, sweep (2), follow-up: a single field's canvas is its
+# *reference sub's* footprint, so a restack after a re-pointed night keeps the
+# pixel size while the sky moves under it — the shape gate skipped the re-aim
+# and the carried crop framed sky 40–90 px off (real run_stack, 480×320).
+# --------------------------------------------------------------------------- #
+
+
+def test_carry_reaims_the_crop_when_a_same_shape_canvas_moved_on_the_sky(
+        solved_library, tmp_path):
+    """Same 200×240 canvas, reference moved 5 rows. Fails before: the shape
+    matched, so the fractions were copied as drawn (y 0.1–0.9)."""
+    ops = _carried_ops(solved_library, tmp_path, ops=_HAND_OPS,
+                       dst_shape=(200, 240), dst_crpix=(100.5, 125.5))
+    (crop,) = _crop_params(ops)
+    assert crop["x0"] == pytest.approx(0.1, abs=1e-4)
+    assert crop["x1"] == pytest.approx(0.9, abs=1e-4)
+    assert crop["y0"] == pytest.approx(29 / 240, abs=1e-4)
+    assert crop["y1"] == pytest.approx(221 / 240, abs=1e-4)
+
+
+def test_carry_keeps_a_same_shape_crop_exactly_when_the_sky_did_not_move(
+        solved_library, tmp_path):
+    ops = _carried_ops(solved_library, tmp_path, ops=_HAND_OPS,
+                       dst_shape=(200, 240), dst_crpix=(100.5, 120.5))
+    assert _crop_params(ops) == [_HAND_OPS[1]["params"]]
+
+
+def test_carry_keeps_a_same_shape_crop_it_cannot_place(solved_library, tmp_path):
+    """No WCS to re-aim through on an unchanged canvas → today's behaviour,
+    the crop as drawn — not dropped, as it is on a canvas that changed size."""
+    ops = _carried_ops(solved_library, tmp_path, ops=_HAND_OPS, src_fits=False,
+                       dst_shape=(200, 240))
     assert _crop_params(ops) == [_HAND_OPS[1]["params"]]

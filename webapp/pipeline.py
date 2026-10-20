@@ -1890,11 +1890,14 @@ def _carry_hand_saved_recipe(lib: Library, safe: str,
                 recipe = recipe_from_json(raw)
                 if not any(op.enabled for op in recipe.ops):
                     continue
-                if new_run is not None and (
-                        (run.canvas_h, run.canvas_w)
-                        != (new_run.canvas_h, new_run.canvas_w)):
-                    recipe = _recrop_for_new_canvas(recipe, run.fits_path,
-                                                    new_run.fits_path)
+                if new_run is not None:
+                    # A same-shape canvas is not the same sky: a single field's
+                    # canvas is its *reference sub's* footprint, and a night shot
+                    # from a re-pointed GoTo moves the median and so the reference.
+                    recipe = _recrop_for_new_canvas(
+                        recipe, run.fits_path, new_run.fits_path,
+                        same_shape=((run.canvas_h, run.canvas_w)
+                                    == (new_run.canvas_h, new_run.canvas_w)))
                 recipe.base_run_id = new_run_id
                 recipe.updated_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 proj.set_meta(f"{RECIPE_META_PREFIX}{new_run_id}", recipe.to_json())
@@ -1907,7 +1910,7 @@ def _carry_hand_saved_recipe(lib: Library, safe: str,
 
 
 def _recrop_for_new_canvas(recipe, src_fits: str | None,  # noqa: ANN001,ANN201
-                           dst_fits: str | None):
+                           dst_fits: str | None, *, same_shape: bool = False):
     """``recipe`` with its crop moved onto a restack whose canvas changed shape,
     so it frames the same sky the owner framed.
 
@@ -1920,6 +1923,13 @@ def _recrop_for_new_canvas(recipe, src_fits: str | None,  # noqa: ANN001,ANN201
     fractions are of a rotated grid) — every reshaping crop is **dropped**, so the
     editor's own trim frames the new canvas instead of a crop aimed at the wrong
     sky; the rest of the look still carries. Mutates and returns ``recipe``.
+
+    ``same_shape`` — the restack kept the canvas's pixel size. That is still
+    re-aimed (a single field's canvas is whichever sub is the reference, and a
+    re-pointed night changes which one — Scout 2026-10-20 measured the crop
+    framing sky 40–90 px off), but a crop that can't be placed there is kept as
+    drawn, as it was before re-aiming existed, and one that moves by under half
+    a pixel is left byte-for-byte alone.
     """
     from seestack.edit.ops.geometry import reshapes_frame
     from seestack.io.wcs_io import crop_reprojected_between_fits
@@ -1944,8 +1954,12 @@ def _recrop_for_new_canvas(recipe, src_fits: str | None,  # noqa: ANN001,ANN201
                          p.get("x1", 1.0), p.get("y1", 1.0))
         moved = crop_reprojected_between_fits(src_fits, dst_fits, crop)
     if moved is not None:
+        if same_shape and _crop_moved_under_half_px(crop, moved, dst_fits):
+            return recipe
         first.params = {**first.params, "x0": moved.x0, "y0": moved.y0,
                         "x1": moved.x1, "y1": moved.y1}
+        return recipe
+    if same_shape:
         return recipe
     log.info("reprocess-all: the saved crop can't be placed on the new canvas; "
              "carrying the look without it")
@@ -1953,6 +1967,18 @@ def _recrop_for_new_canvas(recipe, src_fits: str | None,  # noqa: ANN001,ANN201
                   if not (op.id == "geometry.crop" and op.enabled
                           and reshapes_frame(op.id, op.params))]
     return recipe
+
+
+def _crop_moved_under_half_px(crop, moved, fits_path: str | None) -> bool:  # noqa: ANN001
+    """True when every edge of ``moved`` is within half a pixel of ``crop`` on
+    ``fits_path``'s canvas — the same sky, so the drawn fractions stand."""
+    from seestack.io.wcs_io import celestial_wcs_from_fits
+
+    _, w, h = celestial_wcs_from_fits(fits_path)
+    if not w or not h:
+        return False
+    return (max(abs(moved.x0 - crop.x0), abs(moved.x1 - crop.x1)) * w < 0.5
+            and max(abs(moved.y0 - crop.y0), abs(moved.y1 - crop.y1)) * h < 0.5)
 
 
 def _reprocess_yield(settings: Settings, jm: JobManager, job: Job, waiting_kind: str, *,
