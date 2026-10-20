@@ -1,5 +1,58 @@
 # Shipped — the record
 
+## 2026-10-20 (Builder, branch `claude/festive-knuth-1t0fcu`) — "Hold back highlights" no longer weakens on a mosaic
+
+### v0.502.3 — the highlight suggestion is measured per native pixel, not per proxy pixel
+
+**What.** `seestack/edit/highlights.py`'s two flatness tests ("flat in display" ≤ `_FLAT_EPS`, "structured in
+linear" > `_LINEAR_STRUCTURE_SIGMA × σ`) compared a one-*proxy*-pixel difference against fixed thresholds. On the
+strided editor proxy one pixel spans `proxy_scale` native ones, so a smooth core read `step`× steeper, fewer core
+pixels counted as flat, and the bisection stopped low or the severity gate went silent. New
+`_per_native_px(gradient, proxy_scale)` divides both gradients by the step; `measure_blown_core`,
+`_recoverable_flat_fraction` and `suggest_highlight_protect` take `proxy_scale` (default 1.0 — the export and an
+undecimated proxy are byte-for-byte unchanged), and `editor.solve_highlight_protect` — the button and the
+unattended passive record — passes the proxy's own `scale`.
+
+**Measured** (scratch, real `tone.stretch` defaults, exponential core on a soft disk, `canvas[::s, ::s]`): a
+3600×2400 low-grain core went 1.00 / 0.60 / 0.35 / 0.20 / 0.10 / None at steps 1–6 → **1.00 at every step**; the
+grainy (σ 0.004) case 0.40 / 0.30 / 0.15 / 0.05 / None / None → 0.40 / 0.75 / 0.85 / 0.95 / 0.95 / 0.95. The
+grainy case now over-reads the native answer, and that is the *export's* side of the error: rendered at native,
+0.40 still leaves 28 % of the core at display ≥ 0.98 while 0.75 leaves 7 % and 0.95 ~2 % — per-pixel grain breaks
+"flat" at native, while the strided proxy's grain is shared over `step` pixels. Native measurement itself is
+unchanged (out of scope; noted here as the remaining bias, toward a *weaker* button on a grainy small stack).
+
+**Tests.** `tests/test_highlight_suggestion.py`: the same core at steps 2–4 within two slider stops of native
+(0.35 / 0.35 / 0.30 vs 0.40; was 0.05 / None / None), a grainy core still suggested at every step and at least the
+native strength (was None), `proxy_scale=1` identical; `tests/webapp/test_editor.py::
+test_highlight_suggestion_measures_per_native_pixel` pins that the endpoint passes the proxy's scale. Fail-before
+shown for all three with the fix reverted.
+
+**The Bugs entry, as filed:**
+
+- **🟡 (Scout 2026-10-20, QA rotation sweep (1)) — the editor's "Hold back highlights" suggestion
+  (`seestack/edit/highlights.py`, `editor.solve_highlight_protect`) shrinks with the proxy step, so the same
+  blown core gets a weaker button on his mosaic than on a single field — and none on a big canvas.**
+  *(Pillar: editor — PRIORITY 1; size **S**; severity moderate — the suggested strength leaves the saved
+  picture's core still blown, and the v0.382.0 passive record that is meant to decide the gated automatic
+  highlight cue reads low/`null` on exactly his mosaics. Confidence: **reproduced** through the real
+  `tone.stretch` op and `suggest_highlight_protect`; ungated.)*
+  Both per-pixel tests in `measure_blown_core` / `_recoverable_flat_fraction` compare a **one-proxy-pixel**
+  gradient (`_local_gradient`) against fixed thresholds — `_FLAT_EPS` (1e-3, "flat in display") and
+  `_LINEAR_STRUCTURE_SIGMA * σ` ("structure in linear"). On a strided proxy one pixel spans `step` native
+  pixels, so a core's gradient reads ~`step`× steeper: fewer pixels count as flat, severity falls, and the
+  bisection stops at a lower stop. Scratch repro: one synthetic 3600×2400 canvas (exponential core, sky 0.05,
+  σ 0.004), the identical ~18 k native-px blown core measured at strides 1–6 (`canvas[::s, ::s]`, the
+  `build_proxy` decimation), default asinh stretch → suggested strength **1.00 / 0.70 / 0.40 / 0.25 / 0.10 /
+  0.05** (severity 0.69 → 0.12); a tighter core (scale 12 px) → 0.75 / 0.45 / 0.30 / 0.20 / 0.05 / **None**.
+  An S30 single field decimates to step 2 and his 2×2 mosaic to step 3. **Effect on the export:** rendered at
+  native resolution, the step-3 answer (0.40) still leaves **5,079 of 18,004** core px at display ≥ 0.98, vs
+  1,484 at the step-2 answer and 170 at 1.00. **Fix direction:** measure the gradient per *native* pixel —
+  divide `_local_gradient` by `ctx.proxy_scale` (thread it in from `solve_highlight_protect`, which already
+  has `scale`) or scale both thresholds by it; `proxy_scale == 1` must stay byte-for-byte. Regression test:
+  the same core strided at 1/2/3/4 returns strengths within one slider stop of each other (fails today: 1.00
+  vs 0.40 vs 0.25). Re-check `_MIN_CORE_AREA_FRAC * n_covered` while there — a mosaic's bigger covered area
+  raises the core floor for the same galaxy (not measured as biting here).
+
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-1bmxdk`) — the life list matches inside his own field
 
 ### v0.502.2 — "My life list" judges a capture against the target's own measured field, not an S50's

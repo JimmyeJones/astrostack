@@ -87,6 +87,25 @@ _TARGET_FLAT = 0.10
 _MIN_IMPROVEMENT = 0.05
 
 
+def _per_native_px(gradient: np.ndarray, proxy_scale: float) -> np.ndarray:
+    """A proxy-pixel gradient expressed per *native* (export) pixel.
+
+    The two flatness tests above are thresholds on a one-pixel difference, but
+    on the strided editor proxy one pixel spans ``proxy_scale`` native pixels,
+    so the same smooth core reads ``proxy_scale``× steeper there. Measured raw,
+    fewer core pixels counted as flat, the severity fell with the step and the
+    solver stopped lower: one blown core got 1.00 on a native render, 0.70 on a
+    single S30 field's step-2 proxy, 0.40 on his 2×2 mosaic's step-3 one — and
+    the step-3 answer left the exported core still blown. Dividing by the step
+    puts every proxy on the export's scale. ``proxy_scale <= 1`` (the export,
+    and any proxy that needed no decimation) is returned untouched.
+    """
+    scale = float(proxy_scale)
+    if not np.isfinite(scale) or scale <= 1.0:
+        return gradient
+    return gradient / np.float32(scale)
+
+
 @dataclass(frozen=True)
 class BlownCore:
     """A measured, *recoverable* blown-out core and the strength that reopens it.
@@ -155,14 +174,17 @@ def _strength_grid() -> list[float]:
     return [v for v in param_grid("tone.stretch", "highlights") if v > 0.0]
 
 
-def measure_blown_core(display: np.ndarray,
-                       linear: np.ndarray) -> tuple[np.ndarray, np.ndarray, int] | None:
+def measure_blown_core(display: np.ndarray, linear: np.ndarray,
+                       proxy_scale: float = 1.0,
+                       ) -> tuple[np.ndarray, np.ndarray, int] | None:
     """``(core_mask, linear_has_structure, core_px)`` for the largest blown core.
 
     ``display`` is the image as the user sees it (post-stretch, 0..1 with NaN for
     uncovered pixels); ``linear`` is the image the stretch received, at the same
-    shape. ``None`` means there is nothing to work with — no bright core at all,
-    or one too small to be anything but a star.
+    shape. ``proxy_scale`` is the native pixels one input pixel spans (the
+    editor proxy's step), so gradients are judged per native pixel. ``None``
+    means there is nothing to work with — no bright core at all, or one too
+    small to be anything but a star.
     """
     disp = as_rgb(np.asarray(display, dtype=np.float32))
     lin = as_rgb(np.asarray(linear, dtype=np.float32))
@@ -193,26 +215,30 @@ def measure_blown_core(display: np.ndarray,
     norm_l = (lum_l - lo) / (hi - lo)
     sigma = estimate_noise_sigma(lin)
     tol = max(_FLAT_EPS, _LINEAR_STRUCTURE_SIGMA * sigma) if sigma else _FLAT_EPS
-    return core, _local_gradient(norm_l) > tol, area
+    return core, _per_native_px(_local_gradient(norm_l), proxy_scale) > tol, area
 
 
 def _recoverable_flat_fraction(display: np.ndarray, core: np.ndarray,
-                               linear_has_structure: np.ndarray, area: int) -> float:
+                               linear_has_structure: np.ndarray, area: int,
+                               proxy_scale: float = 1.0) -> float:
     """Share of ``core`` that is flat in ``display`` yet structured in linear."""
     lum_d = luminance(as_rgb(np.asarray(display, dtype=np.float32)))
-    flat = _local_gradient(lum_d) <= _FLAT_EPS
+    flat = _per_native_px(_local_gradient(lum_d), proxy_scale) <= _FLAT_EPS
     return float(np.count_nonzero(core & flat & linear_has_structure)) / float(area)
 
 
 def suggest_highlight_protect(
     linear: np.ndarray,
     restretch: Callable[[float], np.ndarray],
+    proxy_scale: float = 1.0,
 ) -> BlownCore | None:
     """Solve the "Hold back highlights" strength for the caller's own stretch.
 
     ``restretch(p)`` must render ``linear`` through the stretch the user has
     configured with ``highlights=p`` — so the value returned is solved against
-    the very op that will draw it. Returns ``None`` when there is no recoverable
+    the very op that will draw it. ``proxy_scale`` is the editor proxy's step
+    (``EditContext.proxy_scale``): pass it so a decimated proxy is judged on
+    the export's scale and the same core gets the same answer at any step. Returns ``None`` when there is no recoverable
     blown core: no bright core at all, one too small to be anything but a star,
     one barely clipped, one already saturated in the linear data, or one the
     knob can't meaningfully reopen even at full strength.
@@ -222,16 +248,17 @@ def suggest_highlight_protect(
     share is monotone non-increasing in the strength.
     """
     base = restretch(0.0)
-    measured = measure_blown_core(base, linear)
+    measured = measure_blown_core(base, linear, proxy_scale)
     if measured is None:
         return None
     core, linear_has_structure, area = measured
 
     def flat_at(p: float) -> float:
         return _recoverable_flat_fraction(
-            restretch(p), core, linear_has_structure, area)
+            restretch(p), core, linear_has_structure, area, proxy_scale)
 
-    severity = _recoverable_flat_fraction(base, core, linear_has_structure, area)
+    severity = _recoverable_flat_fraction(
+        base, core, linear_has_structure, area, proxy_scale)
     if severity < _MIN_SEVERITY:
         return None
 
