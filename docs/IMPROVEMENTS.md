@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- `claude/festive-knuth-1t0fcu` (Builder 2026-10-20) — the "Hold back highlights" proxy-step bug (`highlights._local_gradient`, `solve_highlight_protect`).
 
 ---
 
