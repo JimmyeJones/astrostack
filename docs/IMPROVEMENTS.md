@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- ⭐ Moon/Sun stacker drizzles when worth it (`lucky.stack_video`) — Builder, branch `claude/festive-knuth-9xjd2t`, 2026-10-20.
 
 ---
 
