@@ -3,7 +3,7 @@
 ## 2026-10-20 (Scout, branch `claude/zen-curie-94fta6`) — QA rotation sweep (2) on v0.502.7's `master_fwhm_for_run`: mosaic side CLEAN; one bug filed reproduced (an editor export loses its source's drizzle). Inbox unchanged.
 
 - **Suite:** 8112 passed / 7 skipped on `374b7d0b` (xdist `-n 4`, BLAS capped, 20m56s). **Inbox:** the same four (#878, #880, #903,
-  #1015), none updated since 2026-10-12 — nothing owed. No open PRs. **Dogfood `--mosaic`:** DOGFOOD_RESULT
+  #1015), none updated since 2026-10-12 — nothing owed. No open PRs. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors).
 - **Sweep (2):** the only per-panel/per-run number added since the last sweep (2) that the life-list runs had not already read is
   v0.502.7's run-grid conversion (QC FWHM × 2 × the run's stored drizzle). On a mosaic it holds: the union canvas is built at the
   frames' median native scale (`compute_mosaic_canvas`), no step-down bins it, and an unattended memory step-down's lowered
