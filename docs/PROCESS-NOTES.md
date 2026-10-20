@@ -1,5 +1,24 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-m3p3kh`) — QA rotation sweep (1), scale-dependent preview↔export parity, on the "Hold back highlights" solver: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
+
+*(**Suite:** 8059 passed / 7 skipped on `b77ee2e1` + this docs change (xdist `-n 4`, BLAS capped, 14m34s). **Inbox**
+(`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none updated since
+2026-10-12 — nothing owed. No open PRs. **Dogfood `--mosaic --editor`:** page sweep CLEAN — Auto trim 7.9 %, nothing
+overflowing, no console errors; the editor drive re-rendered all 21 ops, then its browser was closed by this run's
+own 10-minute tool timeout mid-settle (harness, not the app).)*
+
+**Sweep (1).** Every editor *op* is already pinned by the per-op and composed-Auto parity suites, and the stretch
+was re-read and holds: `_asinh_norm_bounds`' `lo = nanmin` cancels algebraically out of the shadows/shoulder
+mapping, and the 99.5th percentile is unbiased under `build_proxy`'s stride. So this sweep took the
+proxy-measured **suggestions** instead and found `seestack/edit/highlights.py` per-pixel: `_local_gradient`
+against fixed `_FLAT_EPS` / `_LINEAR_STRUCTURE_SIGMA` reads a core ~`step`× steeper on a strided proxy. One
+synthetic 3600×2400 canvas, the identical ~18 k native-px core at strides 1–6 → suggested strength
+1.00/0.70/0.40/0.25/0.10/0.05 (a tighter core → None at 6); the step-3 answer exported at native res still
+leaves 5,079 of 18,004 core px ≥ 0.98. Filed at the top of Bugs, ungated, size S. Not re-swept and still
+open for a later (1): the other proxy-measured suggestion endpoints (`levels-`, `curve-`, `stretch-`,
+`denoise-suggestion`) for the same per-pixel-gradient shape.
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-v7lnvp`) — QA rotation sweep (4), the routers' *answers*, on `stats`: one bug, Scout-fixed (v0.502.1). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 *(**Suite:** 8059 passed / 7 skipped on the merged branch (xdist `-n 4`, BLAS capped, 15m02s). **Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none
