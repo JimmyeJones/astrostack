@@ -132,7 +132,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `total_integration_s = sum(total_exposure_s)`) is the second confirmed surface. The activity calendar's
   per-night fold (`stats._collect_night_acc`) was a third and is done (see `SHIPPED.md`, "the night fold counts
   each sub once" — it already opened every project, so de-duplicating there cost nothing extra);
-  `/api/library/missing-files` was a fourth and is done too (v0.500.5, `SHIPPED.md`). `storage.get_storage`'s
+  `/api/library/missing-files` was a fourth and is done too (v0.500.5), the "Last night" card a fifth (v0.502.1). `storage.get_storage`'s
   nightly-growth estimate was checked and **holds** (Builder 2026-10-18): it is `median(recent registered
   subs/night) × library_bytes / registered subs`, so a twin scales both by one factor and cancels — and each
   twin keeps its own caches, so bytes per *registered* sub is the right unit for disk growth. Nothing to fix.
@@ -3596,6 +3596,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.1 **The Dashboard's "Last night" card counted a sub two targets registered (#878's twins) twice — one night on a twinned mosaic read as two targets and twice the hours; it now counts each sub once** (`stats._collect_last_night`).
 - ✅ v0.502.0 **⭐ Owner ask: the Moon/Sun stacker drizzles when it is worth it — a ×1.5 Bayer drizzle runs beside the plain stack and is kept when ≥ 200 frames were stacked and their measured shifts spread sub-pixel on both axes; the result says which it did in one sentence, and the Moon & Sun page has a checkbox to turn it off** (`seestack/video/drizzle.py`, `lucky.stack_video`, `LuckyOptions.drizzle`, `VideoStackRequest.drizzle`).
 - ✅ v0.501.13 **The Moon/Sun disk aligner's refinement was phase-only, so on a debayered raw capture it locked onto the sensor's stationary pattern and every shift came back on a whole pixel — it is now a plain correlation of lightly smoothed windows (median error 0.5 → 0.1 px)** (`lucky._measure_disk_shift`, `_REFINE_SMOOTH_SIGMA`).
 - ✅ v0.501.12 **The folder guard let `incoming/` be set to the app's own `<data>/video` or `<data>/state` folder; a Moon/Sun stack then wrote `meta.json`/`stack.png`/`stack.tiff` beside the raw clip — the save is now refused** (`config.nested_incoming_conflict`, `DATA_ROOT_MANAGED_SUBDIRS`, Scout rotation sweep (3))

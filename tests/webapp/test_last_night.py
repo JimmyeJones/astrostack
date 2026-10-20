@@ -413,3 +413,33 @@ def test_the_card_builds_no_frame_row_for_the_whole_library(
     # zero work rather than cheap work).
     assert body is not None and body["n_frames"] == 7
     assert built() == 0, f"built {built()} FrameRow objects for the Last-night card"
+
+
+def test_last_night_counts_a_sub_two_targets_registered_once(client, built_library):
+    """#878's mosaic twins: one night's subs registered under two targets are one
+    night on one target, not two targets and twice the hours."""
+    from seestack.io.library import Library
+
+    night = dt.datetime(2026, 7, 8, 21, 0, 0, tzinfo=dt.UTC)
+    rows = [FrameRow(source_path=f"/x/M_31_mosaic_sub/Light_{i:04d}.fit",
+                     timestamp_utc=(night + dt.timedelta(seconds=30 * i)).isoformat(),
+                     exposure_s=10.0, accept=True)
+            for i in range(6)]
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        for name in ("M 31", "M 31 mosaic"):
+            _, proj = lib.create_target(name)
+            try:
+                proj.add_frames(rows)
+            finally:
+                proj.close()
+    finally:
+        lib.close()
+
+    body = client.get("/api/last-night").json()
+    assert body is not None
+    assert body["n_targets"] == 1
+    assert body["n_frames"] == 6
+    assert body["session_exposure_s"] == 60.0
+    assert len(body["targets"]) == 1
+    assert body["targets"][0]["n_frames"] == 6

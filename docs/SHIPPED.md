@@ -1,5 +1,21 @@
 # Shipped — the record
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-v7lnvp`) — the "Last night" card and #878's twins
+
+### v0.502.1 — the Dashboard's "Last night" card counts a sub two targets registered once
+
+**What.** `stats._collect_last_night` walked every target's subs into `library_session_recap` with no regard to
+a sub another target also holds, so #878's mosaic twins (the same `source_path` registered under two targets)
+reached the card twice. Reproduced through the real `Library`/`Project`: 360 subs × 10 s under two twin targets
+→ `n_targets` 2, `n_frames` 720, 2.0 h for a one-hour night. Now the walk reads the sub's file alongside the five
+night columns (one `iter_frame_columns` pass) and, inside each target's recent-night window, skips a file an
+earlier target already counted — the activity calendar's rule (`_collect_night_acc`). The `seen` set holds only
+window subs, never a whole library. Per-target early-stop stamps are unchanged.
+
+**Tests.** `tests/webapp/test_last_night.py::test_last_night_counts_a_sub_two_targets_registered_once` — fails
+before (`n_targets` 2 ≠ 1), passes after; the existing last-night/stats/recap tests stay green.
+
+**Upgrade-safe (§9):** a read-side count only; no config, schema, layout, default or API shape change.
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-9xjd2t`) — the Moon/Sun stacker: sub-pixel alignment, then drizzle
 
 ### v0.502.0 — ⭐ owner ask: the Moon/Sun stacker drizzles when it is worth it
