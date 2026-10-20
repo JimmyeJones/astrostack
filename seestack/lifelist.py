@@ -93,6 +93,9 @@ class _Panel:
     dec_deg: float
     #: The position angles (radians) the panel's rectangle must hold the point at.
     angles: tuple[float, ...]
+    #: How far inside the mosaic an object this panel holds must sit (degrees):
+    #: this panel's *own* sub spread, floored and capped (see :func:`parse_footprint`).
+    margin_deg: float = MIN_PANEL_MARGIN_DEG
 
 
 @dataclass(frozen=True)
@@ -102,7 +105,8 @@ class Footprint:
     half_w_deg: float
     half_h_deg: float
     panels: tuple[_Panel, ...]
-    #: How far inside the panels an object must sit (degrees).
+    #: The widest panel's margin (degrees). :func:`footprint_covers` asks each
+    #: panel's own :attr:`_Panel.margin_deg`; this is the summary.
     margin_deg: float
 
 
@@ -121,31 +125,33 @@ def parse_footprint(raw: Any) -> Footprint | None:
         rows = data["panels"]
         if not isinstance(rows, list) or not rows:
             return None
-        panels = []
-        spread = 0.0
+        rows_ok = []
         for row in rows:
             ra, dec, lo, hi, sp = (float(v) for v in row)
             if not all(math.isfinite(v) for v in (ra, dec, lo, hi, sp)):
                 return None
             if not -90.0 <= dec <= 90.0 or hi < lo or sp < 0:
                 return None
-            spread = max(spread, sp)
             n = max(1, math.ceil(min(hi - lo, 180.0) / _ROTATION_STEP_DEG))
             angles = tuple(math.radians(lo + (min(hi - lo, 180.0)) * k / n)
                            for k in range(n + 1))
-            panels.append(_Panel(ra % 360.0, dec, angles))
+            rows_ok.append((ra % 360.0, dec, angles, sp))
     except (ValueError, TypeError, KeyError, IndexError):
         return None
     if not (math.isfinite(w) and math.isfinite(h)) or not (0 < w <= 20 and 0 < h <= 20):
         return None
-    # Clear of the edges by as far as the widest panel's subs spread around its
+    # Clear of the edges by as far as the panel's own subs spread around its
     # centre — so the object is in (nearly) every sub of the panel holding it,
     # the same ask the single field's circle makes — and never by more than that
-    # circle leaves of the half-field.
+    # circle leaves of the half-field. **Per panel:** one re-pointed panel's
+    # spread is no reason to doubt an object a tight panel holds in every sub
+    # (a single mosaic-wide peak greyed exactly that, Scout 2026-10-20).
     cap = (1.0 - FIELD_MATCH_FRACTION) * min(w, h) / 2.0
+    panels = tuple(_Panel(ra, dec, angles, min(cap, max(MIN_PANEL_MARGIN_DEG, sp)))
+                   for ra, dec, angles, sp in rows_ok)
     return Footprint(
-        half_w_deg=w / 2.0, half_h_deg=h / 2.0, panels=tuple(panels),
-        margin_deg=min(cap, max(MIN_PANEL_MARGIN_DEG, spread)),
+        half_w_deg=w / 2.0, half_h_deg=h / 2.0, panels=panels,
+        margin_deg=max(p.margin_deg for p in panels),
     )
 
 
@@ -192,19 +198,26 @@ def _offset_point(ra: float, dec: float, dist_deg: float,
 def footprint_covers(fp: Footprint, ra: float, dec: float) -> bool:
     """Is ``(ra, dec)`` inside the mosaic, by at least the footprint's margin?
 
-    The object and :data:`_MARGIN_POINTS` points on a circle of
-    ``fp.margin_deg`` around it must each fall inside *some* panel — so an object
-    near where panels meet counts (the overlap covers it), while one in the
-    quadrant an L-shaped mosaic never shot, or just past the outer edge, does not.
-    The margin is the dither and drift a panel's subs spread over around its
-    median centre (see :func:`parse_footprint`).
+    The object must sit in some panel, and :data:`_MARGIN_POINTS` points on a
+    circle of *that panel's* :attr:`_Panel.margin_deg` around it must each fall
+    inside *some* panel — so an object near where panels meet counts (the overlap
+    covers it), while one in the quadrant an L-shaped mosaic never shot, or just
+    past the outer edge, does not. The margin is the dither and drift the holding
+    panel's subs spread over around its median centre (see
+    :func:`parse_footprint`); any panel that holds the object at its own margin
+    is enough.
     """
-    points = [(ra, dec)] + [
-        _offset_point(ra, dec, fp.margin_deg, 2.0 * math.pi * k / _MARGIN_POINTS)
-        for k in range(_MARGIN_POINTS)
-    ]
-    return all(any(_in_panel(pra, pdec, p, fp) for p in fp.panels)
-               for pra, pdec in points)
+    for holder in fp.panels:
+        if not _in_panel(ra, dec, holder, fp):
+            continue
+        points = [
+            _offset_point(ra, dec, holder.margin_deg, 2.0 * math.pi * k / _MARGIN_POINTS)
+            for k in range(_MARGIN_POINTS)
+        ]
+        if all(any(_in_panel(pra, pdec, p, fp) for p in fp.panels)
+               for pra, pdec in points):
+            return True
+    return False
 
 
 @dataclass(frozen=True)
