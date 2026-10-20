@@ -566,6 +566,7 @@ def _ensure_orig_backup(out_dir: Path) -> None:
 
 def _rebuild_still(
     out_dir: Path, *, sharpen: float, box: tuple[int, int, int, int] | None,
+    scale: float = 1.0,
 ) -> tuple[int, int]:
     """Re-derive ``stack.*`` from the kept original. Returns ``(height, width)``.
 
@@ -619,7 +620,7 @@ def _rebuild_still(
         return int(y1 - y0), int(x1 - x0)
 
     def derive(arr):
-        out = sharpen_still(arr, sharpen)
+        out = sharpen_still(arr, sharpen, scale=scale)
         if box is not None:
             y0, x0, y1, x1 = box
             out = out[y0:y1, x0:x1]
@@ -811,7 +812,9 @@ def crop_saved_still(settings: Settings, capture_id: str) -> VideoStackMeta:
     # one has, the sharpen doesn't move the disk it was measured from.
     _ensure_orig_backup(out_dir)
     box = tuple(int(v) for v in framing.box)
-    height, width = _rebuild_still(out_dir, sharpen=_applied_sharpen(meta), box=box)
+    height, width = _rebuild_still(
+        out_dir, sharpen=_applied_sharpen(meta), box=box, scale=_drizzle_scale(meta),
+    )
     updated = replace(
         meta,
         width=int(width),
@@ -828,6 +831,12 @@ def crop_saved_still(settings: Settings, capture_id: str) -> VideoStackMeta:
     )
     _write_meta(out_dir, updated)
     return updated
+
+
+def _drizzle_scale(meta: VideoStackMeta) -> float:
+    """Still pixels per camera pixel, so a re-sharpen sizes its radius as the
+    stack's own sharpen did (1 for a still made before the stack could drizzle)."""
+    return float(meta.drizzle_scale or 1.0)
 
 
 def _applied_sharpen(meta: VideoStackMeta) -> float:
@@ -884,7 +893,9 @@ def sharpen_saved_still(
             "sharpening would lose it — stack the capture again instead."
         )
     _ensure_orig_backup(out_dir)
-    height, width = _rebuild_still(out_dir, sharpen=a, box=box)
+    height, width = _rebuild_still(
+        out_dir, sharpen=a, box=box, scale=_drizzle_scale(meta),
+    )
     updated = replace(
         meta,
         width=int(width),
@@ -928,7 +939,9 @@ def restore_full_still(settings: Settings, capture_id: str) -> VideoStackMeta:
             "back."
         )
 
-    height, width = _rebuild_still(out_dir, sharpen=_applied_sharpen(meta), box=None)
+    height, width = _rebuild_still(
+        out_dir, sharpen=_applied_sharpen(meta), box=None, scale=_drizzle_scale(meta),
+    )
     display = _read_display(out_dir, PNG_NAME, TIFF_NAME)
     framing = measure_framing(display) if display is not None else None
     worthwhile = framing is not None and framing.worthwhile
@@ -1199,7 +1212,7 @@ def _video_stack_body(
     # before any crop, so every pixel is sharpened against its real neighbours
     # rather than against a reflected crop edge. A zero amount returns the array
     # untouched, so the default path is byte-for-byte the render it always was.
-    display = sharpen_still(soft, sharpen)
+    display = sharpen_still(soft, sharpen, scale=float(result.drizzle_scale))
     # Framing is measured on the *display-rendered* picture and applied after it,
     # so the tone mapping still sees the whole frame: cropping changes what is in
     # the picture, never how bright it is. Measuring the sharpened picture is
