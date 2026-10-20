@@ -1,5 +1,45 @@
 # Shipped — the record
 
+## 2026-10-20 (Builder, branch `claude/festive-knuth-1bmxdk`) — the life list matches inside his own field
+
+### v0.502.2 — "My life list" judges a capture against the target's own measured field, not an S50's
+
+**What.** `seestack/lifelist.py::MATCH_RADIUS_DEG` (0.35°) was sized for an S50 frame (≈1.3° × 0.7°). The owner
+shoots an S30 (≈2.1° × 1.2°), so M32 — 0.40° from M31 and plainly in every M31 frame he takes — stayed grey.
+**The lead's "centre vs footprint" question, decided:** match inside the target's *own* footprint, approximated
+by the circle a single solved sub's field is sure to contain. The registry gains `targets.frame_short_deg` — the
+short side of the field from `Project.solved_frame_geometry` through `framing.frame_field_from_solve` (the same
+representative frame and the same mis-solve refusal the framing advice uses), stamped by
+`_refresh_target_stats_locked` with `COALESCE` like the centre. `lifelist.match_radius_deg` is then
+`max(MATCH_RADIUS_DEG, FIELD_MATCH_FRACTION (0.8) × short / 2)`: ≈0.48° on an S30, ≈0.29° → the 0.35° floor on an
+S50, so an S50 library and any target not yet refreshed match exactly as before. The 0.8 keeps the circle inside
+the frame against dither and drift of the median centre; M110 (0.61°) is still not claimed. On a mosaic the
+centre is the panels' middle (v0.501.10) and one frame's inscribed circle there is covered by the panels meeting
+at it, so the radius is a lower bound on the mosaic's footprint and never reaches sky no panel covered. The
+closest target still wins on ties across different fields.
+
+**Tests.** `tests/test_library.py` — a real `Library`/`Project` M31 field at S30 geometry stamps
+`frame_short_deg` ≈1.197° and captures M32 (fails before: `assert False is True` with the old matcher), at S50
+geometry stamps ≈0.717° and leaves M32 grey; M110 never claimed; an unsolved target stamps `None` and a later
+solved refresh fills it; a v5 registry without the column opens, gains it as NULL and keeps its rows.
+`tests/test_lifelist.py` — `match_radius_deg` floor for `None`/0/negative/NaN/inf/junk, the radius sits inside
+the inscribed circle, the 0.47°/0.49° boundary on a 1.2° field, closest-wins across fields.
+
+**Upgrade-safe (§9):** one additive registry column reconciled by `_ensure_columns` on open (no
+`LIBRARY_SCHEMA_VERSION` bump, so a rolled-back image still opens the registry); NULL until a target's next stats
+refresh, which keeps the old 0.35° floor. No config, layout, default or API-shape change (`/api/life-list`
+responses carry the same fields; `sep_deg` still reports the matched distance).
+
+<details><summary>The Bugs entry, as filed</summary>
+
+- **LEAD (split off the v0.501.10 mosaic-centre entry, traced not reproduced) — `seestack/lifelist.py::MATCH_RADIUS_DEG`
+  (0.35°) is sized in its comment for an S50 frame (1.3°x0.7°); the owner's S30 field is 2.1°, so M32 (0.40° from
+  M31) stays grey on "My life list" even when his single M31 field plainly contains it.** *(PRIORITY 3; size S;
+  severity low.)* Decide whether a capture should mean "centre within r" or "inside the stack's footprint" before
+  widening the constant — a wider radius alone also claims neighbours a mosaic panel never covered.
+
+</details>
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-v7lnvp`) — the "Last night" card and #878's twins
 
 ### v0.502.1 — the Dashboard's "Last night" card counts a sub two targets registered once

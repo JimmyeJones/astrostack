@@ -606,3 +606,120 @@ def test_mosaic_centre_across_ra_zero(tmp_path):
         assert off < 0.1
     finally:
         lib.close()
+
+
+# ---- the target's own field on the registry (life list match radius) -------
+#
+# The life list's 0.35° match radius was sized for an S50 frame; the owner shoots
+# an S30, whose ~2.1° x 1.2° field holds M32 (0.40° from M31) in every M31 frame.
+# The registry now carries the short side of the field the target's own solved
+# subs measured, and the life list matches inside it.
+
+
+def _add_solved_field(proj: Project, centre: tuple[float, float], *, n: int,
+                      pixscale: float, width: int, height: int) -> None:
+    for k in range(n):
+        _counter[0] += 1
+        proj.add_frame(FrameRow(
+            source_path=f"f_{_counter[0]}.fit", exposure_s=10.0,
+            ra_center_deg=centre[0] + 0.01 * ((k % 5) - 2),
+            dec_center_deg=centre[1] + 0.01 * ((k % 3) - 1),
+            pixscale_arcsec=pixscale, width_px=width, height_px=height,
+            accept=True,
+        ))
+
+
+@pytest.mark.parametrize(
+    "scope, pixscale, width, height, short_deg, m32_captured",
+    [
+        # Seestar S30: 150 mm, 2.9 µm, 1920 x 1080 — the owner's scope.
+        ("S30", 3.99, 1920, 1080, 1.197, True),
+        # Seestar S50: 250 mm, 2.9 µm, 1080 x 1920 portrait — unchanged behaviour.
+        ("S50", 2.39, 1080, 1920, 0.717, False),
+    ],
+)
+def test_life_list_matches_inside_the_targets_own_field(
+        tmp_path, scope, pixscale, width, height, short_deg, m32_captured):
+    from seestack.lifelist import catalog_capture_status
+    from seestack.nightplan import load_catalog
+
+    cat = [o for o in load_catalog() if o.id in ("M31", "M32", "M110")]
+    m31 = next(o for o in cat if o.id == "M31")
+    lib = Library.create(tmp_path / "lib")
+    try:
+        _entry, proj = lib.create_target("M 31")
+        try:
+            _add_solved_field(proj, (m31.ra_deg, m31.dec_deg), n=30,
+                              pixscale=pixscale, width=width, height=height)
+        finally:
+            proj.close()
+        refreshed = lib.refresh_target_stats("M_31")
+        assert refreshed.frame_short_deg == pytest.approx(short_deg, abs=0.005)
+        assert lib.find_target("M_31").frame_short_deg == refreshed.frame_short_deg
+        status = {e.catalog_id: e for e in catalog_capture_status(cat, lib.list_targets())}
+        assert status["M31"].captured
+        assert status["M32"].captured is m32_captured, scope
+        # M110 sits 0.61° off — past even the S30's inscribed margin, so a
+        # neighbour that may be outside a rotated frame is still never claimed.
+        assert not status["M110"].captured
+    finally:
+        lib.close()
+
+
+def test_unsolved_target_has_no_field_and_a_refresh_keeps_a_known_one(tmp_path):
+    lib = Library.create(tmp_path / "lib")
+    try:
+        _entry, proj = lib.create_target("M 31")
+        try:
+            _add_frame(proj, exposure_s=10.0, ra=_M31[0], dec=_M31[1])
+        finally:
+            proj.close()
+        assert lib.refresh_target_stats("M_31").frame_short_deg is None
+        proj = lib.open_target("M_31")
+        try:
+            _add_solved_field(proj, _M31, n=3, pixscale=3.99, width=1920, height=1080)
+        finally:
+            proj.close()
+        assert lib.refresh_target_stats("M_31").frame_short_deg == pytest.approx(1.197, abs=0.005)
+    finally:
+        lib.close()
+
+
+def test_v5_registry_without_frame_short_deg_upgrades_in_place(tmp_path):
+    """A registry written before the column existed opens, gains it as NULL and
+    keeps every row — the life list then falls back to the old floor."""
+    import sqlite3
+
+    root = tmp_path / "lib"
+    root.mkdir()
+    con = sqlite3.connect(root / "library.sqlite")
+    con.executescript(
+        """
+        PRAGMA user_version = 5;
+        CREATE TABLE library_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE targets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE, safe_name TEXT NOT NULL UNIQUE,
+            ra_deg REAL, dec_deg REAL, created_utc TEXT NOT NULL,
+            last_activity_utc TEXT, n_frames INTEGER NOT NULL DEFAULT 0,
+            n_frames_accepted INTEGER NOT NULL DEFAULT 0,
+            total_exposure_s REAL NOT NULL DEFAULT 0,
+            last_stack_preview TEXT, notes TEXT, tags TEXT, cover_stack_run_id INTEGER,
+            legacy_mixed_drop INTEGER, folder_name TEXT
+        );
+        INSERT INTO targets(name, safe_name, ra_deg, dec_deg, created_utc, n_frames)
+            VALUES('M 31','M_31',10.685,41.269,'2026-01-01T00:00:00Z',5);
+        """
+    )
+    con.commit()
+    con.close()
+
+    lib = Library.open(root)
+    try:
+        cols = {r["name"] for r in lib._conn.execute("PRAGMA table_info(targets)")}
+        assert "frame_short_deg" in cols
+        entry = lib.find_target("M_31")
+        assert entry is not None and entry.frame_short_deg is None
+        assert entry.n_frames == 5 and entry.ra_deg == pytest.approx(10.685)
+    finally:
+        lib.close()

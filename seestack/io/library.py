@@ -82,7 +82,8 @@ CREATE TABLE IF NOT EXISTS targets (
     tags                  TEXT,                      -- JSON array of tag strings
     cover_stack_run_id    INTEGER,                   -- pinned "cover" run id (in this target's project.sqlite); NULL = use newest
     legacy_mixed_drop     INTEGER,                   -- 1 = legacy whole-device/mixed-folder drop the container-expansion scan superseded; NULL = normal
-    folder_name           TEXT                       -- the name this target was first created from (the scanner's folder-derived one); NULL = never renamed, so `name` is still it
+    folder_name           TEXT,                      -- the name this target was first created from (the scanner's folder-derived one); NULL = never renamed, so `name` is still it
+    frame_short_deg       REAL                       -- short side of one solved sub's field, in degrees (Project.solved_frame_geometry); NULL = not solved / not refreshed since the column existed
 );
 
 CREATE INDEX IF NOT EXISTS idx_targets_radec ON targets(ra_deg, dec_deg);
@@ -201,6 +202,13 @@ class TargetEntry:
     # later scan of the same folder still resolves to this target. ``None`` means
     # "never renamed": ``name`` is still the folder name.
     folder_name: str | None = None
+    # The short side, in degrees, of the field one of this target's solved subs
+    # actually covered — its own plate scale times its own pixel size
+    # (:meth:`seestack.io.project.Project.solved_frame_geometry`). Lets "is this
+    # object in the picture?" (the life list) be judged against the owner's real
+    # field rather than an assumed Seestar model. ``None`` until the target is
+    # solved and its stats are refreshed.
+    frame_short_deg: float | None = None
 
 
 @dataclass(frozen=True)
@@ -1318,6 +1326,7 @@ class Library:
         n_accept = proj.count(accepted_only=True)
         total_exp = 0.0
         ra_med, dec_med = _median_radec(proj)
+        frame_short = _frame_short_deg(proj)
         for f in proj.iter_frames(accepted_only=True):
             if f.exposure_s is not None and f.exposure_s > 0:
                 total_exp += float(f.exposure_s)
@@ -1341,10 +1350,11 @@ class Library:
             "  last_activity_utc = ?,"
             "  last_stack_preview = COALESCE(?, last_stack_preview),"
             "  ra_deg = COALESCE(?, ra_deg),"
-            "  dec_deg = COALESCE(?, dec_deg) "
+            "  dec_deg = COALESCE(?, dec_deg),"
+            "  frame_short_deg = COALESCE(?, frame_short_deg) "
             "WHERE safe_name = ?",
             (n_total, n_accept, total_exp, _utc_iso(), last_preview,
-             ra_med, dec_med, safe_name),
+             ra_med, dec_med, frame_short, safe_name),
         )
 
     def campaign_stats(self) -> dict:
@@ -1397,6 +1407,9 @@ def _row_to_target(row: sqlite3.Row) -> TargetEntry:
         folder_name=(
             row["folder_name"] if "folder_name" in row.keys() else None
         ),
+        frame_short_deg=(
+            row["frame_short_deg"] if "frame_short_deg" in row.keys() else None
+        ),
     )
 
 
@@ -1418,6 +1431,26 @@ def _parse_tags(raw: str | None) -> list[str]:
     except (ValueError, TypeError):
         return []
     return [str(t) for t in val] if isinstance(val, list) else []
+
+
+def _frame_short_deg(proj: Project) -> float | None:
+    """Short side, in degrees, of the field one of ``proj``'s solved subs had.
+
+    The same representative frame every other "what field does this telescope
+    have?" answer uses (:meth:`Project.solved_frame_geometry` and
+    :func:`seestack.framing.frame_field_from_solve`, which also refuses an absurd
+    mis-solved field), so the life list cannot disagree with the framing advice
+    about the owner's optics. ``None`` when nothing is solved; never raises — a
+    stats refresh must not fail on it.
+    """
+    from seestack.framing import frame_field_from_solve
+
+    try:
+        geom = proj.solved_frame_geometry()
+    except Exception:  # noqa: BLE001
+        return None
+    field = frame_field_from_solve(*geom) if geom is not None else None
+    return None if field is None else field.short_arcmin / 60.0
 
 
 def _median_radec(proj: Project) -> tuple[float | None, float | None]:

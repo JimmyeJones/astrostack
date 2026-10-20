@@ -76,17 +76,11 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- `lifelist.MATCH_RADIUS_DEG` → match inside the target's own measured field (registry `frame_short_deg`) — branch `claude/festive-knuth-1bmxdk`
+*No live claims.*
 
 ---
 
 ## Bugs (fix these first)
-
-- **LEAD (split off the v0.501.10 mosaic-centre entry, traced not reproduced) — `seestack/lifelist.py::MATCH_RADIUS_DEG`
-  (0.35°) is sized in its comment for an S50 frame (1.3°x0.7°); the owner's S30 field is 2.1°, so M32 (0.40° from
-  M31) stays grey on "My life list" even when his single M31 field plainly contains it.** *(PRIORITY 3; size S;
-  severity low.)* Decide whether a capture should mean "centre within r" or "inside the stack's footprint" before
-  widening the constant — a wider radius alone also claims neighbours a mosaic panel never covered.
 
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
@@ -3596,6 +3590,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.2 **The life list matched with an S50-sized 0.35° radius, so M32 (0.40° from M31) stayed grey though it is in every frame of his S30 M31 field — each target now matches inside 80 % of its own measured half-field (registry `frame_short_deg`), never below the old floor** (`lifelist.match_radius_deg`, `library._frame_short_deg`).
 - ✅ v0.502.1 **The Dashboard's "Last night" card counted a sub two targets registered (#878's twins) twice — one night on a twinned mosaic read as two targets and twice the hours; it now counts each sub once** (`stats._collect_last_night`).
 - ✅ v0.502.0 **⭐ Owner ask: the Moon/Sun stacker drizzles when it is worth it — a ×1.5 Bayer drizzle runs beside the plain stack and is kept when ≥ 200 frames were stacked and their measured shifts spread sub-pixel on both axes; the result says which it did in one sentence, and the Moon & Sun page has a checkbox to turn it off** (`seestack/video/drizzle.py`, `lucky.stack_video`, `LuckyOptions.drizzle`, `VideoStackRequest.drizzle`).
 - ✅ v0.501.13 **The Moon/Sun disk aligner's refinement was phase-only, so on a debayered raw capture it locked onto the sensor's stationary pattern and every shift came back on a whole pixel — it is now a plain correlation of lightly smoothed windows (median error 0.5 → 0.1 px)** (`lucky._measure_disk_shift`, `_REFINE_SMOOTH_SIGMA`).
