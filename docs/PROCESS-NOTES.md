@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-uic6x9`) — QA rotation sweep (4), the routers' *answers*, on the never-swept `wishlist`, `sample`, `updates`, `stackfailures` and `overtrim`: one bug Scout-fixed (v0.502.12), one filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8114 passed / 7 skipped on `6724173b` (xdist `-n 4`, BLAS capped, 20m34s). **Inbox:** the same four (#878, #880,
+  #903, #1015), no activity since 2026-10-12, all owner-gated — nothing new owed. **Dogfood** `--mosaic`: CLEAN, trim 7.9 %.
+- **Picked by count:** `grep -c` of each router's name in this file — `wishlist` and `sample` had 0, `updates` 1,
+  `stackfailures` 2. Read each for *what it answers* against the owner's shapes (#878 twins, pinned covers, a
+  days-long `reprocess_all`).
+- **`wishlist` — CLEAN.** Capture status is delegated to `lifelist.catalog_capture_status`, so v0.502.6's mosaic
+  footprints reach it unchanged; a twin tie (`sep <= best_sep`, last wins) could pick the twin without a preview,
+  but #878 says both twins carry stack runs — not filed. **`sample` — CLEAN:** `remove_sample` deletes only its
+  reserved `Sample: …` names through `delete_target(remove_files=True)`, which refuses `incoming/`. **`updates` —
+  CLEAN:** every POST takes a JSON body (the CSRF guard), `apply` re-checks the offered version.
+- **`overtrim` — BUG, Scout-fixed (v0.502.12):** judged the newest run while a pinned cover is what the wall shows.
+- **`stackfailures` — BUG, filed reproduced:** Reprocess-all's `result["failed"]` is a third recording site
+  `latest_stack_failures` never reads (entry at the end of Bugs).
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-jwnetb`) — QA rotation sweep (4), the `wishlist` and `video` routers' answers: wishlist CLEAN; one Moon/Sun bug Scout-fixed (v0.502.9). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8112 passed / 7 skipped on `7f60ccfc` (xdist `-n 4`, BLAS capped, 17m17s). **Inbox:** the same four (#878, #880, #903,

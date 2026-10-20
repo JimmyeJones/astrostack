@@ -1,5 +1,21 @@
 # Shipped — the record
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-uic6x9`) — the over-trim note reads the displayed picture
+
+### v0.502.12 — "Trimmed too far" judges a pinned cover, not the newest run in History
+
+**What.** `GET /api/over-trimmed-pictures` (the Dashboard's "Some of your pictures were trimmed too far by an older
+version" note) judged each target's **newest** run, on the stated ground that it is "the picture every other surface
+shows". It is not when a cover is pinned — by the owner, or by Reprocess-all keeping a hand-finished picture on the
+wall (`_settle_cover_after_restack`, `COVER_KEPT`) — and the Library card, hero, thumbnail and share sheet then show
+the cover. Scout repro through the real client: two runs, the older carrying the 2026-09-10 audit's 3.4 % sliver,
+pinned as cover → the editor's `crop-health` on it **stale: true**, the Dashboard scan **count 0**.
+`overtrim.scan_over_trimmed` now picks the run with `webapp.finishedpicture.displayed_picture_run(runs,
+cover_stack_run_id)` — the precedence `Library._displayed_run_id` and `targets.current_picture_path` already use —
+falling back to the newest run when none has a picture. Unpinned libraries answer exactly as before. Pinned in
+`tests/webapp/test_over_trimmed.py::test_it_judges_the_pinned_cover_not_a_newer_run_in_history` (fails before:
+count 0; passes after, and goes silent again on unpin). No API shape change.
+
 ## 2026-10-20 (Builder, branch `claude/festive-knuth-8a2fmo`) — a killed solve worker no longer sinks the pass
 
 ### v0.502.11 — `scanner._map_jobs` re-runs what a broken pool took down; stale solve scratch swept at start
