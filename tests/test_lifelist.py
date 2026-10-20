@@ -6,6 +6,7 @@ on the four target fields it reads.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import pytest
@@ -31,6 +32,7 @@ class FakeTarget:
     dec_deg: float | None
     n_frames: int = 12
     frame_short_deg: float | None = None
+    panel_footprint: object = None
 
 
 def _obj(cid: str, ra: float, dec: float, name: str = "") -> CatalogObject:
@@ -291,3 +293,88 @@ def test_the_closest_target_still_wins_across_different_fields():
     on_it = FakeTarget("M 32", "M_32", 10.674, 40.870)
     (entry,) = catalog_capture_status(cat, [wide, on_it])
     assert entry.safe_name == "M_32"
+
+
+# ---- a mosaic's own panels --------------------------------------------------
+
+
+def _footprint_json(panels, *, w=1.197, h=2.128) -> str:
+    import json
+    return json.dumps({"w_deg": w, "h_deg": h, "panels": panels})
+
+
+@pytest.mark.parametrize("rot", [0.0, 17.0, -63.0, 90.0, 151.0])
+def test_a_panel_is_the_frame_a_solved_sub_with_that_crota2_covers(rot):
+    """Pin the rotation sense against astropy: a point is in the panel exactly
+    when it lands on the pixel grid of a Seestar-style header (``CDELT1 < 0``)
+    carrying that ``CROTA2``."""
+    import random
+
+    from astropy.wcs import WCS
+
+    from seestack.lifelist import _in_panel, parse_footprint
+
+    scale = 3.99 / 3600.0
+    width, height = 1080, 1920
+    ra0, dec0 = 200.0, 48.0
+    fp = parse_footprint(_footprint_json([[ra0, dec0, rot, rot, 0.0]],
+                                         w=width * scale, h=height * scale))
+    wcs = WCS(naxis=2)
+    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    wcs.wcs.crval = [ra0, dec0]
+    wcs.wcs.crpix = [(width + 1) / 2, (height + 1) / 2]
+    wcs.wcs.cdelt = [-scale, scale]
+    wcs.wcs.crota = [rot, rot]
+    rng = random.Random(3)
+    for _ in range(400):
+        px, py = rng.uniform(-400, width + 400), rng.uniform(-400, height + 400)
+        ra, dec = wcs.wcs_pix2world([[px, py]], 1)[0]
+        on_grid = 0.5 <= px <= width + 0.5 and 0.5 <= py <= height + 0.5
+        assert _in_panel(float(ra), float(dec), fp.panels[0], fp) is on_grid
+
+
+@pytest.mark.parametrize("raw", [
+    None, "", "{", "[]", 5, '{"w_deg": 1, "h_deg": 2}',
+    _footprint_json([]),
+    _footprint_json([[10.0, 40.0, 0.0, 0.0]]),                 # no spread
+    _footprint_json([[10.0, 40.0, 0.0, 0.0, "x"]]),
+    _footprint_json([[10.0, 95.0, 0.0, 0.0, 0.0]]),            # off the sky
+    _footprint_json([[10.0, 40.0, 5.0, 1.0, 0.0]]),            # range backwards
+    _footprint_json([[10.0, 40.0, 0.0, 0.0, -1.0]]),
+    _footprint_json([[10.0, 40.0, 0.0, 0.0, 0.0]], w=0.0),
+    _footprint_json([[10.0, 40.0, 0.0, 0.0, 0.0]], w=float("nan")),
+    _footprint_json([[float("inf"), 40.0, 0.0, 0.0, 0.0]]),
+])
+def test_a_malformed_footprint_falls_back_to_the_circle(raw):
+    from seestack.lifelist import parse_footprint
+
+    assert parse_footprint(raw) is None
+    cat = [_obj("X", 10.0, 40.0)]
+    t = FakeTarget("A", "A", 10.0, 40.0, frame_short_deg=1.2, panel_footprint=raw)
+    assert catalog_capture_status(cat, [t])[0].captured is True
+
+
+def test_the_margin_is_the_panels_measured_spread_within_bounds():
+    from seestack.lifelist import MIN_PANEL_MARGIN_DEG, parse_footprint
+
+    tight = parse_footprint(_footprint_json([[10.0, 40.0, 0.0, 0.0, 0.001]]))
+    loose = parse_footprint(_footprint_json([[10.0, 40.0, 0.0, 0.0, 0.05],
+                                             [11.0, 40.0, 0.0, 0.0, 0.02]]))
+    wild = parse_footprint(_footprint_json([[10.0, 40.0, 0.0, 0.0, 0.9]]))
+    assert tight.margin_deg == MIN_PANEL_MARGIN_DEG
+    assert loose.margin_deg == pytest.approx(0.05)
+    # Never asks more than the single field's own circle leaves of the half-field.
+    assert wild.margin_deg == pytest.approx((1 - FIELD_MATCH_FRACTION) * 1.197 / 2)
+
+
+def test_a_wide_rotation_spread_shrinks_a_panel_to_what_every_angle_holds():
+    """Alt-az field rotation across a night turns a panel's subs: a point near a
+    corner at one angle is outside at another, so it is not claimed."""
+    from seestack.lifelist import footprint_covers, parse_footprint
+
+    corner = (10.0 + 0.5 / math.cos(math.radians(40.0)), 40.9)
+    steady = parse_footprint(_footprint_json([[10.0, 40.0, 0.0, 0.0, 0.0]]))
+    turning = parse_footprint(_footprint_json([[10.0, 40.0, -40.0, 40.0, 0.0]]))
+    assert footprint_covers(steady, *corner)
+    assert not footprint_covers(turning, *corner)
+    assert footprint_covers(turning, 10.0, 40.0)

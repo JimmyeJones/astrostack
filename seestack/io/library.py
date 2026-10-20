@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS targets (
     cover_stack_run_id    INTEGER,                   -- pinned "cover" run id (in this target's project.sqlite); NULL = use newest
     legacy_mixed_drop     INTEGER,                   -- 1 = legacy whole-device/mixed-folder drop the container-expansion scan superseded; NULL = normal
     folder_name           TEXT,                      -- the name this target was first created from (the scanner's folder-derived one); NULL = never renamed, so `name` is still it
-    frame_short_deg       REAL                       -- short side of one solved sub's field, in degrees (Project.solved_frame_geometry); NULL = not solved / not refreshed since the column existed
+    frame_short_deg       REAL,                      -- short side of one solved sub's field, in degrees (Project.solved_frame_geometry); NULL = not solved / not refreshed since the column existed
+    panel_footprint       TEXT                       -- JSON: a mosaic's panels on the sky (_panel_footprint) for the life list; NULL = single field / unknown rotation / not refreshed since the column existed
 );
 
 CREATE INDEX IF NOT EXISTS idx_targets_radec ON targets(ra_deg, dec_deg);
@@ -209,6 +210,12 @@ class TargetEntry:
     # field rather than an assumed Seestar model. ``None`` until the target is
     # solved and its stats are refreshed.
     frame_short_deg: float | None = None
+    # A mosaic's panels on the sky, as the JSON :func:`_panel_footprint` writes —
+    # each panel's own centre and the rotation range its subs were taken at, plus
+    # one sub's field. Lets the life list ask "is this object inside a panel?"
+    # instead of judging a whole mosaic by one frame's circle at its middle.
+    # ``None`` for a single field, an unknown rotation, or until stats refresh.
+    panel_footprint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1325,7 +1332,7 @@ class Library:
         n_total = proj.count(accepted_only=False)
         n_accept = proj.count(accepted_only=True)
         total_exp = 0.0
-        ra_med, dec_med = _median_radec(proj)
+        ra_med, dec_med, footprint = _centre_and_footprint(proj)
         frame_short = _frame_short_deg(proj)
         for f in proj.iter_frames(accepted_only=True):
             if f.exposure_s is not None and f.exposure_s > 0:
@@ -1351,10 +1358,11 @@ class Library:
             "  last_stack_preview = COALESCE(?, last_stack_preview),"
             "  ra_deg = COALESCE(?, ra_deg),"
             "  dec_deg = COALESCE(?, dec_deg),"
-            "  frame_short_deg = COALESCE(?, frame_short_deg) "
+            "  frame_short_deg = COALESCE(?, frame_short_deg),"
+            "  panel_footprint = ? "
             "WHERE safe_name = ?",
             (n_total, n_accept, total_exp, _utc_iso(), last_preview,
-             ra_med, dec_med, frame_short, safe_name),
+             ra_med, dec_med, frame_short, footprint, safe_name),
         )
 
     def campaign_stats(self) -> dict:
@@ -1410,6 +1418,9 @@ def _row_to_target(row: sqlite3.Row) -> TargetEntry:
         frame_short_deg=(
             row["frame_short_deg"] if "frame_short_deg" in row.keys() else None
         ),
+        panel_footprint=(
+            row["panel_footprint"] if "panel_footprint" in row.keys() else None
+        ),
     )
 
 
@@ -1456,15 +1467,27 @@ def _frame_short_deg(proj: Project) -> float | None:
 def _median_radec(proj: Project) -> tuple[float | None, float | None]:
     """Median RA/Dec across accepted, plate-solved frames. None/None if no
     solved frames are present yet."""
+    ra, dec, _footprint = _centre_and_footprint(proj)
+    return ra, dec
+
+
+def _centre_and_footprint(
+    proj: Project,
+) -> tuple[float | None, float | None, str | None]:
+    """The registry centre (:func:`_median_radec`'s answer) and, for a mosaic,
+    its panels on the sky (:func:`_panel_footprint`) — read in one pass over the
+    accepted frames, since both come from the same panel split."""
     ras: list[float] = []
     decs: list[float] = []
+    rots: list[float | None] = []
     for f in proj.iter_frames(accepted_only=True):
         if f.ra_center_deg is None or f.dec_center_deg is None:
             continue
         ras.append(float(f.ra_center_deg))
         decs.append(float(f.dec_center_deg))
+        rots.append(f.rotation_deg)
     if not ras:
-        return None, None
+        return None, None, None
     import numpy as np
 
     from seestack.coords import circular_median_ra_deg
@@ -1477,8 +1500,11 @@ def _median_radec(proj: Project) -> tuple[float | None, float | None]:
     # range before the median (shared with compute_mosaic_canvas / pick_reference_frame),
     # then folds back to [0, 360). A no-op when nothing straddles the wrap.
     ra_med, dec_med = circular_median_ra_deg(ras), float(np.median(decs))
-    centre = _panel_extent_centre(ras, decs)
-    return centre if centre is not None else (ra_med, dec_med)
+    panels = _main_object_panels(ras, decs)
+    if panels is None:
+        return ra_med, dec_med, None
+    ra_mid, dec_mid = _panel_extent_mid(panels[0])
+    return ra_mid, dec_mid, _panel_footprint(proj, panels, ras, decs, rots)
 
 
 # A pointing counts as a mosaic *panel* for the registry centre only if it holds at
@@ -1493,7 +1519,17 @@ _CENTRE_FOLD_DEG = 0.05
 
 def _panel_extent_centre(ras: list[float],
                          decs: list[float]) -> tuple[float, float] | None:
-    """The middle of a mosaic's **panels**, or ``None`` for a single field.
+    """The middle of a mosaic's **panels**, or ``None`` for a single field
+    (the split is :func:`_main_object_panels`)."""
+    panels = _main_object_panels(ras, decs)
+    return None if panels is None else _panel_extent_mid(panels[0])
+
+
+def _main_object_panels(
+    ras: list[float], decs: list[float],
+) -> tuple[list[tuple[float, float]], list[list[int]]] | None:
+    """A mosaic's **panels** — each one's median centre and the indices of its
+    subs — or ``None`` for a single field.
 
     A plain per-axis median over the subs is right for one field, but on a mosaic
     with an even number of columns or rows both medians fall on whichever side
@@ -1501,8 +1537,8 @@ def _panel_extent_centre(ras: list[float],
     mosaic's middle (a 2x2 S30 mosaic at 25/25/25/26 subs lands 1.04° off, outside
     the life list's match radius). So split the subs into panels with the same
     :func:`~seestack.stack.pointings.pointing_groups` gate QC uses, take each
-    panel's own median, and return the midpoint of the panels' RA/Dec extent —
-    which does not care how many subs each panel holds.
+    panel's own median; the midpoint of the panels' RA/Dec extent
+    (:func:`_panel_extent_mid`) does not care how many subs each panel holds.
 
     Only the largest connected *object* is used: panels are linked at
     :data:`~seestack.stack.pointings.LINK_DIST_DEG` (adjacent mosaic panels sit
@@ -1514,7 +1550,7 @@ def _panel_extent_centre(ras: list[float],
 
     import numpy as np
 
-    from seestack.coords import circular_median_ra_deg, unwrap_ra_deg
+    from seestack.coords import circular_median_ra_deg
     from seestack.stack.pointings import (
         LINK_DIST_DEG,
         cluster_pointings,
@@ -1561,15 +1597,104 @@ def _panel_extent_centre(ras: list[float],
     for obj, size in zip(objects, sizes):
         weight[obj] = weight.get(obj, 0) + size
     main = max(weight, key=lambda o: weight[o])
-    kept = [c for c, obj in zip(centres, objects) if obj == main]
+    kept = [(c, members[k])
+            for c, obj, k in zip(centres, objects, keys, strict=True) if obj == main]
     if len(kept) < 2:
         return None
+    return [c for c, _m in kept], [m for _c, m in kept]
+
+
+def _panel_extent_mid(centres: list[tuple[float, float]]) -> tuple[float, float]:
+    """The midpoint of the panel centres' RA/Dec extent."""
+    import numpy as np
+
+    from seestack.coords import unwrap_ra_deg
+
     # Unwrap the panel RAs together so a mosaic straddling RA 0° has one extent.
-    kept_ra = unwrap_ra_deg([c[0] for c in kept])
-    kept_dec = [c[1] for c in kept]
+    kept_ra = unwrap_ra_deg([c[0] for c in centres])
+    kept_dec = [c[1] for c in centres]
     ra_mid = (float(np.min(kept_ra)) + float(np.max(kept_ra))) / 2.0 % 360.0
     dec_mid = (min(kept_dec) + max(kept_dec)) / 2.0
     return (0.0 if ra_mid >= 360.0 else ra_mid), dec_mid
+
+
+# A panel's footprint is placed only when at least this share of its subs carry a
+# solved rotation; below it the target keeps the life list's single-circle match.
+_FOOTPRINT_MIN_ROTATED_SHARE = 0.5
+# The span of a panel's sub rotations its footprint must hold at every angle of:
+# the middle 80 %, so one sub solved at an odd angle cannot shrink the panel,
+# while the Seestar's alt-az field rotation across a night still does.
+_FOOTPRINT_ROT_PERCENTILES = (10.0, 90.0)
+
+
+def _panel_footprint(
+    proj: Project,
+    panels: tuple[list[tuple[float, float]], list[list[int]]],
+    ras: list[float],
+    decs: list[float],
+    rots: list[float | None],
+) -> str | None:
+    """A mosaic's panels on the sky, as JSON for the registry, or ``None``.
+
+    ``{"w_deg", "h_deg", "panels": [[ra, dec, rot_lo, rot_hi, spread], ...]}`` —
+    one sub's field along its own x and y axes (the representative solved frame
+    :func:`_frame_short_deg` reads, so the two cannot disagree about the optics),
+    and per panel its median centre, the range of position angles its subs were
+    taken at (``rotation_deg``, ASTAP's ``CROTA2`` sense, folded onto one
+    half-turn because a frame turned by 180° covers the same sky) and how far its
+    subs' centres spread around that centre (dither and drift, the 90th
+    percentile, degrees) — what the life list keeps an object clear of the
+    panels' edges by, so an edge only some subs reached does not count. The life list
+    (:func:`seestack.lifelist.catalog_capture_status`) tests an object against
+    these rectangles instead of one frame's circle at the mosaic's middle, which
+    left a neighbour the mosaic plainly holds grey and could claim the sky of a
+    panel that was never shot.
+
+    ``None`` — the life list keeps that circle — when the field is unknown or
+    absurd, or any panel's rotation is mostly unknown: a rectangle at a guessed
+    angle could claim sky no sub covered. Never raises; a stats refresh must not
+    fail on it.
+    """
+    import json
+    import math
+
+    import numpy as np
+
+    from seestack.framing import frame_field_from_solve
+
+    try:
+        geom = proj.solved_frame_geometry()
+    except Exception:  # noqa: BLE001
+        return None
+    if geom is None or frame_field_from_solve(*geom) is None:
+        return None
+    scale, width_px, height_px = geom
+    out: list[list[float]] = []
+    for (ra, dec), members in zip(*panels, strict=True):
+        angles: list[float] = []
+        for i in members:
+            r = rots[i]
+            if r is not None and math.isfinite(float(r)):
+                angles.append(float(r))
+        if not angles or len(angles) < _FOOTPRINT_MIN_ROTATED_SHARE * len(members):
+            return None
+        ref = angles[0]
+        mid = ref + float(np.median([(a - ref + 90.0) % 180.0 - 90.0 for a in angles]))
+        lo, hi = np.percentile(
+            [(a - mid + 90.0) % 180.0 - 90.0 for a in angles],
+            _FOOTPRINT_ROT_PERCENTILES,
+        )
+        spread = float(np.percentile(
+            [_angular_separation_deg(ras[i], decs[i], ra, dec) for i in members], 90.0,
+        ))
+        out.append([round(ra, 5), round(dec, 5),
+                    round(mid + float(lo), 2), round(mid + float(hi), 2),
+                    round(spread, 4)])
+    return json.dumps({
+        "w_deg": round(float(scale) * float(width_px) / 3600.0, 5),
+        "h_deg": round(float(scale) * float(height_px) / 3600.0, 5),
+        "panels": out,
+    })
 
 
 def _angular_separation_deg(ra1: float, dec1: float,
