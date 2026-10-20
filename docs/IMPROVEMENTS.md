@@ -82,6 +82,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 (Scout 2026-10-20, QA rotation sweep (4)) — a mosaic's registry centre lands on one *panel*, not the
+  mosaic's middle, so his M31 mosaic is not on his life list.** *(Pillar: trust / beginner delight — PRIORITY 3;
+  size **S–M**; severity moderate — a famous object he shot sits grey on "My life list"; nothing lost on disk.
+  Confidence: **reproduced** through the real `Library.refresh_target_stats` + `catalog_capture_status`.)*
+  `seestack/io/library.py::_median_radec` takes the RA and the Dec median **separately** over every accepted
+  sub. On a mosaic with an even number of columns/rows, both medians fall on the side holding one more sub —
+  i.e. on a panel centre. Scratch repro, 2×2 S30 mosaic of M31 (1.20°×2.13° panels, 15 % overlap): panels
+  25/25/25/25 → centre 0.00° off, M31 captured; **25/25/25/26 → 1.04° off; 30/28/27/25 → 1.04° off; life list
+  captured: nothing** (`seestack/lifelist.py::MATCH_RADIUS_DEG` is 0.35°). The dogfood's own 2×2 mosaic sample
+  already lands 0.32° off (small panels), and its centre no longer covers M43. Same centre, **traced not
+  reproduced**: the sky map places an un-cropped tile there (`routers/sky.py` `centre = … or (t.ra_deg, t.dec_deg)`),
+  plan/wishlist altitude, and `find_target_within`. Side note on the same constant: its comment sizes a frame
+  at 1.3°×0.7° (an **S50**); the owner's S30 is 2.1°, so M32 (0.40° from M31) stays grey even on a single field.
+  **Fix sketch:** centre on the panels, not the subs — `seestack/stack/pointings.py::pointing_groups` the accepted centres at
+  `PANEL_LINK_DIST_DEG` and take the midpoint of the groups' extent (one group → today's median, so a single
+  field is byte-identical). Upgrade note: the registry value moves on the next refresh; check
+  `find_target_within` callers still match. Regression test: unbalanced 2×2 → centre within 0.1° of the middle.
+
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict

@@ -1,5 +1,25 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-pfee2z`) — QA rotation sweep (4), the routers' *answers*, on `jobs` and `lifelist`: one finding, filed (a mosaic's registry centre lands on a panel). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+*Baseline: local suite **8014 passed / 7 skipped** on `cb2f7c08` (xdist `-n 4`, BLAS capped, 22m48s); no open PRs.
+**Inbox** (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none
+updated since 2026-10-12 — nothing owed. **Dogfood `--mosaic`: CLEAN** (Auto trim 7.9 %, nothing overflowing, no
+console errors).*
+
+*__Sweep (4).__ Took two of the routers the 2026-10-19 record listed as never read for answers. **`jobs`** holds:
+`list()` keeps active jobs ahead of the `limit`, `get()` falls back to the DB for an evicted job, `cancel` is
+lock-safe against the worker's claim, `queue-health` reads only live jobs and skips unparseable stamps. (Noted,
+not filed: `_evict_old` prunes the DB by `created_utc` without regard to state, so a queue deeper than 2,000
+would lose a queued row's history — no caller enqueues anywhere near that.) **`lifelist`** did not hold, on
+mosaic-shaped data: it matches catalog objects to the registry centre within 0.35°, and that centre
+(`library._median_radec`, per-axis median over subs) lands on a **panel** of any even-sided mosaic as soon as
+one side has one more sub. Reproduced through the real `refresh_target_stats` — 2×2 S30 mosaic of M31 at
+25/25/25/26 subs → centre 1.04° off, life list empty — and seen on the dogfood's own 2×2 sample (0.32° off,
+M43 lost). Filed **reproduced** in Bugs (size S–M, not a small Scout fix: the value feeds the sky map, the
+planner and `find_target_within`). Not yet read for answers: `logs`, `seestar`, `glossary`, `auth`, `stats`,
+`gallery`, `targets`, `plan`. (4) done → **next sweep is (1)**.*
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-6t1j5s`) — QA rotation sweep (3), ASTAP/ffmpeg filesystem side effects, new angle — the *scratch copy itself* failing: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 *(Docs only. **Baseline:** local suite **8014 passed / 7 skipped** (xdist `-n 4`, BLAS capped, 13m18s) on `a112689b`; no open PRs. **Inbox** (`list_issues`): the same four (#878,
