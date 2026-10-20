@@ -1,5 +1,19 @@
 # Process notes & QA sweep records
 
+## 2026-10-20 (Scout, branch `claude/zen-curie-myk6ia`) — QA rotation sweep (3), new angles — the `/api/system` ASTAP probe and *Test ASTAP* button under a hostile stub, then a SIGKILLed solve worker: one low-severity lead filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8112 passed / 7 skipped on `71d0e01a` (xdist `-n 4`, BLAS capped, 28m31s). **Inbox:** the same four (#878, #880, #903,
+  #1015), none updated since 2026-10-12 — nothing owed. No open PRs. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors).
+- **Sweep (3), (a) the two ASTAP calls no earlier (3) sweep drove: CLEAN.** A logging stub that also litters its cwd and `$HOME` and
+  scribbles over its own `-f` file, through the real app (`copy_to_cache` off; twinned basenames with spaces across `M_42/`,
+  `M_42_mosaic_sub/`, `M 42 (copy)/`): scan solve (9), `GET /api/system`'s `-h` probe, `POST /api/system/astap-test` — 11 ASTAP calls,
+  none with a `-f` inside `incoming/`, `incoming/` byte/mtime/mode-identical, no scratch dir left. ASTAP's own cwd is the app process's
+  (`/app` in the image), never a data folder.
+- **(b) a pool worker killed mid-solve: one lead.** Real `run_qc_and_solve`, 16 subs, 4 workers, one SIGKILLed 2 s in: the broken pool
+  fails *every* remaining future (`solve_ok` 4 of 16; the 12 get no DB write and a second pass solves them), and all four in-flight
+  `astrostack-solve-*` scratch dirs (a raw-sub copy + sidecars each) stay in `/tmp`. Filed at the end of Bugs, low, gated on an observer
+  log line. GUI-only `seestack/plan.py` has its own pool and was not read further. **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-94fta6`) — QA rotation sweep (2) on v0.502.7's `master_fwhm_for_run`: mosaic side CLEAN; one bug filed reproduced (an editor export loses its source's drizzle). Inbox unchanged.
 
 - **Suite:** 8112 passed / 7 skipped on `374b7d0b` (xdist `-n 4`, BLAS capped, 20m56s). **Inbox:** the same four (#878, #880, #903,
