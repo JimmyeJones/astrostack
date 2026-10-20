@@ -22,6 +22,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from seestack.solve.astap import sweep_stale_solve_scratch
 from webapp import logbuffer, pipeline
 from webapp.config import SettingsStore
 from webapp.jobs import JobManager
@@ -117,6 +118,13 @@ async def lifespan(app: FastAPI):
     # spawn keeps ProcessPoolExecutor behavior consistent across base images.
     with contextlib.suppress(RuntimeError):
         multiprocessing.set_start_method("spawn", force=True)
+
+    # A solve worker killed mid-run (the OOM killer) leaves its scratch copy of
+    # a sub in /tmp, which only a container recreate would otherwise clear.
+    try:
+        sweep_stale_solve_scratch()
+    except Exception:  # noqa: BLE001 — housekeeping must never block startup
+        log.warning("Could not sweep stale solve scratch dirs", exc_info=True)
 
     store = SettingsStore()
     app.state.settings_store = store

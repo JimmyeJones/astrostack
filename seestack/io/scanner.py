@@ -50,6 +50,7 @@ import logging
 import os
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1811,6 +1812,11 @@ def _stopped(should_stop: ShouldStopFn | None) -> bool:
     return should_stop is not None and should_stop()
 
 
+# How many times ``_map_jobs`` re-submits the jobs a dead pool worker took down
+# with it before giving up on them for this pass.
+_BROKEN_POOL_RETRIES = 1
+
+
 def _map_jobs(
     func,
     arg_tuples: list[tuple],
@@ -1825,7 +1831,9 @@ def _map_jobs(
     Yield ``(done_count, result)`` for each completed job.
 
     ``result`` is whatever ``func`` returned, or None if that job raised.
-    Honours cancellation via ``should_stop`` between completions.
+    Honours cancellation via ``should_stop`` between completions. Jobs lost to
+    a pool worker dying are re-run once in a fresh, smaller pool, so every job
+    is still reported exactly once.
     """
     total = len(arg_tuples)
     if total == 0:
@@ -1845,25 +1853,52 @@ def _map_jobs(
             yield i, value
         return
 
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
-        futures = {ex.submit(func, *args): args for args in arg_tuples}
-        done = 0
-        for fut in as_completed(futures):
-            if _stopped(should_stop):
-                # Drop everything still queued and bail out promptly. Cancel each
-                # future by hand: ``shutdown(wait=False, cancel_futures=True)``
-                # cancels nothing on CPython 3.11–3.13, so every queued solve still
-                # ran in the background after the job said "cancelled".
-                for pending in futures:
-                    pending.cancel()
-                ex.shutdown(wait=False)
-                return
-            try:
-                value = fut.result()
-            except Exception as exc:  # noqa: BLE001
-                log.warning("%s job failed: %s", phase, exc)
-                value = None
-            done += 1
-            if progress is not None:
-                progress(phase, done, total)
-            yield done, value
+    pending = list(arg_tuples)
+    workers = max_workers
+    done = 0
+    for attempt in range(1 + _BROKEN_POOL_RETRIES):
+        # Jobs a dead worker took down with it. One killed worker (the OOM
+        # killer, a segfaulting library) breaks the whole pool: every future
+        # still running *or queued* raises ``BrokenProcessPool`` at once, so
+        # without this one in-flight crash threw away the rest of the pass and
+        # those subs waited for some later scan to be tried at all.
+        broken: list[tuple] = []
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            futures = {ex.submit(func, *args): args for args in pending}
+            for fut in as_completed(futures):
+                if _stopped(should_stop):
+                    # Drop everything still queued and bail out promptly. Cancel each
+                    # future by hand: ``shutdown(wait=False, cancel_futures=True)``
+                    # cancels nothing on CPython 3.11–3.13, so every queued solve still
+                    # ran in the background after the job said "cancelled".
+                    for queued in futures:
+                        queued.cancel()
+                    ex.shutdown(wait=False)
+                    return
+                try:
+                    value = fut.result()
+                except BrokenProcessPool as exc:
+                    if attempt < _BROKEN_POOL_RETRIES:
+                        broken.append(futures[fut])
+                        continue
+                    log.warning("%s job failed: %s", phase, exc)
+                    value = None
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("%s job failed: %s", phase, exc)
+                    value = None
+                done += 1
+                if progress is not None:
+                    progress(phase, done, total)
+                yield done, value
+        if not broken:
+            return
+        # Retry what the crash took down, once, in a fresh pool of half the
+        # workers — a worker killed for memory is the likeliest cause, and a
+        # smaller pool is the cheapest way not to hit the same wall twice. If
+        # it breaks again the remaining jobs fail as before (the job that
+        # kills its worker every time can't hold the pass hostage forever).
+        workers = max(1, (workers or os.cpu_count() or 2) // 2)
+        log.warning(
+            "%s: a worker process died; retrying %d job(s) in a fresh pool "
+            "of %d worker(s)", phase, len(broken), workers)
+        pending = broken

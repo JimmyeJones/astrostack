@@ -4,6 +4,7 @@ Folder scanner: organise a tree of Seestar sub-folders into library targets.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -2321,3 +2322,98 @@ def test_map_jobs_cancel_drops_the_queued_pool_jobs(tmp_path):
     starts = [float(x) for x in log_path.read_text().split()]
     after = sum(1 for t in starts if t > returned)
     assert after <= 2 * workers + 2, f"{after} of {len(starts)} jobs started after the cancel"
+
+
+def _die_once_on(marker: str, value: int, poison: int) -> int:
+    """Pool job for the broken-pool test: kill its own worker the first time
+    it is handed ``poison`` (what the OOM killer does), succeed otherwise."""
+    import time
+
+    if value == poison and not os.path.exists(marker):
+        open(marker, "w").close()
+        os._exit(1)
+    time.sleep(0.05)
+    return value
+
+
+def test_map_jobs_retries_the_jobs_a_killed_worker_took_down(tmp_path):
+    """One worker dying mid-pass must not throw away the rest of the pass.
+
+    A dead worker breaks the whole ``ProcessPoolExecutor``: every future still
+    running or queued raises ``BrokenProcessPool``. Unfixed, a scan with one
+    OOM-killed solve worker located 4 of 16 subs and logged the other 12 as
+    failed; they were not tried again until some later scan.
+    """
+    from seestack.io.scanner import _map_jobs
+
+    marker = str(tmp_path / "died")
+    values = list(range(16))
+    results = []
+    dones = []
+    for done, value in _map_jobs(
+        _die_once_on, [(marker, v, 2) for v in values],
+        serial=False, max_workers=4, phase="Solving", progress=None,
+        should_stop=None,
+    ):
+        dones.append(done)
+        results.append(value)
+    assert os.path.exists(marker), "the poison job never killed its worker"
+    assert sorted(r for r in results if r is not None) == values
+    assert dones == list(range(1, 17))
+
+
+def _always_die_on(value: int, poison: int) -> int:
+    if value == poison:
+        os._exit(1)
+    return value
+
+
+def test_map_jobs_gives_up_on_a_job_that_kills_every_pool(tmp_path):
+    """The retry is bounded: a job that kills its worker every time can't hold
+    the pass hostage — the pass still ends, every job reports exactly once."""
+    from seestack.io.scanner import _map_jobs
+
+    dones = []
+    results = []
+    for done, value in _map_jobs(
+        _always_die_on, [(v, 0) for v in range(8)],
+        serial=False, max_workers=2, phase="Solving", progress=None,
+        should_stop=None,
+    ):
+        dones.append(done)
+        results.append(value)
+    assert dones == list(range(1, 9))
+    assert 0 not in results
+
+
+def test_sweep_stale_solve_scratch_removes_only_old_orphans(tmp_path):
+    """A worker killed mid-solve never cleans its ``TemporaryDirectory``, so its
+    copy of the sub stays in the container's /tmp; startup sweeps those — and
+    only those: a live (recent) solve dir, a foreign dir and a symlink stay."""
+    import time
+
+    from seestack.solve.astap import (
+        STALE_SOLVE_SCRATCH_AGE_S,
+        sweep_stale_solve_scratch,
+    )
+
+    old = time.time() - STALE_SOLVE_SCRATCH_AGE_S - 60
+    stale_solve = tmp_path / "astrostack-solve-abc"
+    stale_boot = tmp_path / "astrostack-bootstrap-def"
+    live = tmp_path / "astrostack-solve-live"
+    foreign = tmp_path / "somebody-else-xyz"
+    for d in (stale_solve, stale_boot, live, foreign):
+        d.mkdir()
+        (d / "Light_0001.fit").write_bytes(b"x" * 10)
+    for d in (stale_solve, stale_boot, foreign):
+        os.utime(d, (old, old))
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    link = tmp_path / "astrostack-solve-link"
+    link.symlink_to(target)
+    os.utime(target, (old, old))
+
+    assert sweep_stale_solve_scratch(tmp_path) == 2
+    assert not stale_solve.exists() and not stale_boot.exists()
+    assert live.exists() and foreign.exists()
+    assert link.is_symlink() and target.exists()

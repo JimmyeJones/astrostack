@@ -1,5 +1,45 @@
 # Shipped — the record
 
+## 2026-10-20 (Builder, branch `claude/festive-knuth-8a2fmo`) — a killed solve worker no longer sinks the pass
+
+### v0.502.11 — `scanner._map_jobs` re-runs what a broken pool took down; stale solve scratch swept at start
+
+**What.** One dead `ProcessPoolExecutor` worker (the OOM killer) breaks the whole pool: every running *and queued*
+future raises `BrokenProcessPool` at once. Scout sweep (3) reproduced it with a stub ASTAP — 16 subs, 4 workers, one
+worker SIGKILLed → 4 located, 12 "Solving job failed", untried until a later scan touched that target, and all four
+`astrostack-solve-*` scratch dirs (each a full copy of a raw sub) left in the container's `/tmp`. `_map_jobs` now
+collects the jobs that failed with `BrokenProcessPool` and re-submits them **once** to a fresh pool of half the
+workers (a memory kill is the likeliest cause); a second break fails the rest as before, so a job that kills every
+worker can't hold the pass hostage, and every job is still reported exactly once (progress counts unchanged).
+New `seestack.solve.astap.sweep_stale_solve_scratch()` — called from the app's `lifespan` before anything else
+starts, failures logged and ignored — removes only our own prefixed, non-symlink directories directly under the
+temp dir that are older than `STALE_SOLVE_SCRATCH_AGE_S` (6 h; the longest settable ASTAP timeout is 30 min).
+Nothing under `incoming/` is touched (the scratch dirs hold copies). Taken although the entry was gated on an
+observer log line: the gate was on *occurrence*, and the fix is inert unless a worker dies. No config, schema,
+on-disk, API-shape or default change.
+**Tests.** `tests/test_scanner.py` (+3): a worker that `os._exit`s on one job once → all 16 results come back,
+`done` counts 1..16 (**fail-before**: `[] == [0, 1, …]`, every job lost); a job that kills every pool → the pass
+still ends with each job reported once; the sweep removes only the old prefixed dirs (a live one, a foreign one and
+a symlink stay).
+The filed entry, verbatim:
+
+- **🟡 (Scout 2026-10-20, QA rotation sweep (3)) — one killed QC/solve pool worker throws away the rest of the
+  pass for that target, and leaks a scratch copy of each in-flight sub into the container's `/tmp`.**
+  *(Pillar: autonomy — PRIORITY 2; size **S**; severity low — nothing is lost or mis-marked; the frames stay
+  "never tried" and a later pass solves them. Confidence: **reproduced** with a stub ASTAP and a SIGKILLed
+  worker; occurrence on the owner's box **unmeasured** — gate: an observer `/api/logs` line reading
+  "process pool was terminated abruptly".)* `scanner._map_jobs` catches the `BrokenProcessPool` per future,
+  so once any worker dies (the OOM killer, given this app's OOM history) **every** remaining future fails at
+  once: real `run_qc_and_solve`, 16 subs, 4 workers, one worker killed 2 s in → `solve_ok` **4 of 16**, 12 logged
+  "Solving job failed". Those 12 get no DB write (correct), but the scan only re-runs `touched_names`, so they
+  wait for the next new sub on that target or a manual re-solve — and a walk-away auto-stack in between would
+  stack 4. The executor also terminates the healthy workers, so **all four** `astrostack-solve-*` dirs stayed in
+  `/tmp`, each a full copy of a raw sub plus sidecars (`TemporaryDirectory` cleanup never ran); `/tmp` is the
+  container layer, cleared only on recreate. `incoming/` untouched. **Fix direction:** in `_map_jobs`, on
+  `BrokenProcessPool` re-submit the not-yet-finished args once to a fresh pool (then give up as now); sweep
+  stale `astrostack-solve-*`/`astrostack-bootstrap-*` dirs older than the solve timeout at app start. Pin with
+  a worker that `os._exit`s on one arg.
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-jwnetb`) — Moon & Sun sharpening sized to a drizzled still
 
 ### v0.502.9 — the Moon/Sun unsharp mask's radius follows the still's `drizzle_scale`
