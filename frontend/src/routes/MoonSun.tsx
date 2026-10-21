@@ -191,7 +191,9 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
           <CaptureIcon kind={capture.kind} />
           <div style={{ minWidth: 0 }}>
-            <Text fw={600} truncate>{capture.label}</Text>
+            <Text fw={600} truncate>
+              {capture.night ? `${capture.label} · ${capture.night}` : capture.label}
+            </Text>
             <Text size="xs" c="dimmed" truncate>
               {sourceGone
                 ? `${capture.folder_name} · video no longer in your incoming folder`

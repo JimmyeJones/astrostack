@@ -266,3 +266,46 @@ def test_every_readonly_path_is_a_real_get_route_and_reads_nothing_else(client):
     assert _AUTH_OPEN_PATHS <= _READONLY_GET_PATHS
     # Nothing that writes crept onto it.
     assert not any("settings" in p or "stack" in p for p in _READONLY_GET_PATHS)
+
+
+def test_disabling_the_password_removes_the_token_for_good(client):
+    """Scout 2026-10-21 sweep (4): a disable kept ``readonly_token_hash``, Settings
+    hid it ("active" with no Remove button while open), and a later new password
+    silently revived the old token."""
+    client.post("/api/auth/password", json={"password": "secret1"})
+    old = client.post("/api/auth/readonly-token", auth=("admin", "secret1")).json()["token"]
+    assert client.get("/api/logs", auth=("readonly", old)).status_code == 200
+
+    client.post("/api/auth/password", json={"password": ""}, auth=("admin", "secret1"))
+    status = client.get("/api/auth/status").json()
+    assert status["enabled"] is False and status["readonly_enabled"] is False
+
+    client.post("/api/auth/password", json={"password": "another2"})
+    assert client.get("/api/auth/status", auth=("admin", "another2")).json()["readonly_enabled"] is False
+    assert client.get("/api/logs", auth=("readonly", old)).status_code == 401
+    assert client.get("/api/targets", auth=("readonly", old)).status_code == 401
+
+    client.post("/api/auth/password", json={"password": ""}, auth=("admin", "another2"))
+
+
+def test_changing_the_password_keeps_the_token(client):
+    # "Update" while protected is not a reset: the observer's token survives it.
+    client.post("/api/auth/password", json={"password": "secret1"})
+    token = client.post("/api/auth/readonly-token", auth=("admin", "secret1")).json()["token"]
+    client.post("/api/auth/password", json={"password": "secret2"}, auth=("admin", "secret1"))
+    assert client.get("/api/logs", auth=("readonly", token)).status_code == 200
+
+    client.post("/api/auth/password", json={"password": ""}, auth=("admin", "secret2"))
+
+
+def test_a_stale_token_left_by_an_older_disable_is_not_revived(client):
+    # The upgrade case: an install already open whose config still holds a hash
+    # an older version's disable left behind. Enabling must not bring it back.
+    token = auth.make_readonly_token()
+    h, salt = auth.hash_readonly_token(token)
+    client.app.state.settings_store.update(
+        {"readonly_token_hash": h, "readonly_token_salt": salt})
+    client.post("/api/auth/password", json={"password": "secret1"})
+    assert client.get("/api/logs", auth=("readonly", token)).status_code == 401
+
+    client.post("/api/auth/password", json={"password": ""}, auth=("admin", "secret1"))

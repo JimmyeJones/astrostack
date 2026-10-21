@@ -3405,6 +3405,9 @@ export interface VideoCapture {
   label: string;
   kind: "lunar" | "solar" | "other";
   folder_name: string;
+  // The night folder, set only when another capture shares this folder name
+  // (a per-night layout repeats `Lunar_video`). Optional: older backends omit it.
+  night?: string;
   files: VideoFile[];
   total_bytes: number;
   result: VideoResult | null;

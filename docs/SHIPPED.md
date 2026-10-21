@@ -1,5 +1,83 @@
 # Shipped — the record
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-zbfod0`) — per-night Moon/Sun folders all listed
+
+### v0.502.26 — `video.discover.find_video_captures` ids per path, `_bare_id_holder`
+
+**What.** Discovery now collects every `*_video/` folder before naming any. A folder whose name is unique keeps
+the bare `video_capture_id` (every existing result stays attached). Folders sharing a name are all listed: the bare
+id goes to the folder holding the clip a stored still or check under that id was made from (`claimed_by`, supplied
+by the web layer as `webapp.video.stored_source_name` from `meta.json`/`grade.json`), else to the one shallowest
+folder (the Seestar's top-level drop); the others get `<night>_<folder>` (path-derived, stable as nights are
+added), numbered `-2`, `-3` only if even that is taken. Every web-layer lookup goes through
+`webapp.video.discover_captures`/`discover_capture`, so the list, the stack/grade routes and the jobs agree. The
+scan's "you also have a video" sentence (`pipeline._unstacked_video_captures`) discovers from `incoming/` and keeps
+the captures under the scanned folder, so a one-night scan asks about *that* night's capture. `VideoCapture.night` /
+`VideoCaptureOut.night` (additive, `""` unless disambiguating) labels the card "Moon · 2026-10-05".
+
+**Tests** (+8): `tests/test_video_discover.py` — three nights all listed with distinct, sanitiser-stable ids; a
+single nested folder keeps its bare id; an earlier-sorting night does not take a stacked capture's id; a stored
+clip keeps the bare id with its folder; two spellings side by side both listed. `tests/webapp/test_video_per_night.py`
+— through `/api/videos`; a stacked still stays with its own night; a one-night scan reports that night's capture.
+All **fail before**. No config, schema or on-disk change; the API change is one additive field.
+
+**The Bugs entry, as filed:**
+- **🟡 (Scout 2026-10-21, QA rotation sweep (3)) — a Moon/Sun capture filed under a per-night folder is silently
+  hidden whenever another night's folder has the same name (`video.discover.find_video_captures`).** *(Pillar:
+  "just works" — PRIORITY 2; size **S–M**; severity moderate — a whole capture never appears on the Moon & Sun page or
+  in the scan's "you also have a video" sentence, with no message; no data is touched. Confidence: **reproduced**
+  through the real `/api/videos` with real ffmpeg; whether his `incoming/` nests videos by night is unmeasured.)*
+  `_MAX_DEPTH = 2` exists, per its own comment, for "a user who filed their captures under a per-night folder" — and
+  that layout repeats the Seestar's folder name every night. Discovery keys each capture on
+  `video_capture_id(folder_name)` (the folder's *basename*) and, on a repeat, "keep[s] the first, deterministically".
+  Repro: `incoming/2026-10-01/Lunar_video/`, `incoming/2026-10-05/Lunar_video/`, `incoming/Lunar video/`, one clip
+  each → `/api/videos` lists **one** Moon capture (the first night's); the other two are unreachable by id, so they can
+  be neither checked nor stacked. A second hazard of the same key: a new night folder that sorts *earlier* takes over
+  the id — and digits sort before letters, so `incoming/<night>/Lunar_video/` added beside an already-stacked
+  top-level `incoming/Lunar_video/` does — and the stored result under `<data>/video/Lunar_video/` is then attached
+  to the new folder while the stacked one drops off the list (reproduced on `find_video_captures`; how the page words
+  the mismatch via the `source_name` stamp, not checked).
+  **Fix shape:** keep the bare id for a capture whose basename is unique (every existing result keeps its folder —
+  upgrade-safe), and give a colliding one an id that includes its parent folder (`2026-10-05_Lunar_video`), chosen
+  by *path*, not sort position, so it is stable as nights are added; on a collision the bare id should stay with the
+  folder whose stored `meta.source_name` matches, if any. Label the duplicates by night in the list. Test: the three
+  folders above all listed, each stacks into its own results folder, a single-folder library's id unchanged. Ungated.
+
+## 2026-10-21 (Builder, branch `claude/festive-knuth-zbfod0`) — Disable access control removes the read-only token
+
+### v0.502.25 — `routers/auth.set_password` clears `readonly_token_hash`
+
+**What.** Clearing the password (Settings → Access control → Disable) now clears `readonly_token_hash` /
+`readonly_token_salt` in the same `store.update`, and the Disable confirm says so (the observer's token stops
+working; mint a new one after turning the password back on). Setting a password on an install that is currently
+*open* also clears any stored token: one can't be minted while open, so a hash present then is stale — this covers
+the upgrade case (an install already disabled under an older version, still holding the hash) without a migration.
+Changing the password while protected ("Update") keeps the token.
+
+**Tests** (+3, `tests/webapp/test_auth.py`): the Scout's repro (set → mint → disable → `readonly_enabled: false` →
+new password → old token 401 on `/api/logs` and `/api/targets`) — **fails before**; a stale hash on an open
+install is not revived by enabling — **fails before**; Update keeps the token. No config, schema, on-disk or
+API-shape change.
+
+**The Bugs entry, as filed:**
+- **🟡 (Scout 2026-10-21, QA rotation sweep (4)) — turning the access password off leaves the read-only token
+  stored, and setting a password again silently brings the old token back (`routers/auth.set_password`).**
+  *(Pillar: security posture, AGENTS.md §10; size **S**; severity low–moderate — a credential the owner can no longer
+  see or remove keeps working after he believes access control was reset; no data touched. Confidence:
+  **reproduced** through the real HTTP routes.)* `set_password` with an empty password clears only
+  `auth_password_hash`/`auth_salt`; `readonly_token_hash` survives. Repro: set password → mint token (`/api/logs`
+  200) → "Disable" → `/api/auth/status` says `enabled: false, readonly_enabled: true` → set a *new* password → the
+  **old** token reads `/api/logs` and `/api/targets` with 200. Meanwhile Settings → Access control shows the token
+  badge **"active"** beside "Turn on the password above first … a read-only token wouldn't add anything", with no
+  Remove button (it lives inside the `enabled` branch of `AccessControl`), and `POST /readonly-token` is refused
+  while open — so the one state where the token is invisible is the one that keeps it.
+  **Fix shape:** clear `readonly_token_hash`/`readonly_token_salt` in the same `store.update` that clears the
+  password (the mint route already says a token "would guard nothing" on an open install), and say so in the
+  Disable confirm ("…and removes the read-only token"). Upgrade-safe: an install that is already open with a stale
+  hash is the state this fixes; leave it until the next disable rather than migrating. Test: the repro above ends
+  401 for the old token and `readonly_enabled: false`. Note the observer's token dies on a disable — intended, and
+  worth one line in the confirm. Ungated.
+
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-ywpmqo`) — "Use my previous edit" re-aims its crop
 
 ### v0.502.24 — `editor.previous_recipe` → `pipeline._recrop_for_new_canvas`
