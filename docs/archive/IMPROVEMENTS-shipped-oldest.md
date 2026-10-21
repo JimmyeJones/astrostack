@@ -4,6 +4,12 @@ Moved verbatim and in order from the foot of the `## Shipped` list in [`../IMPRO
 oldest last, so the working list stays no longer than a run found it (AGENTS.md §2). Newer moves are appended
 above older ones.
 
+## Moved 2026-10-21 (Scout, branch `claude/zen-curie-t3nyff`)
+
+- **Reuse stack settings from a previous run** — new
+
+- **Warn on a mismatched calibration master pick** — the Stack form now shows an
+
 ## Moved 2026-10-20 (Scout, branch `claude/zen-curie-ur5fu9`)
 
 - **Auto-suggest a matching flat-dark** — `recommend_masters` now also returns

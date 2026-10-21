@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-t3nyff`) — QA rotation sweep (2), new angle — the whole-canvas σ behind `/compare`'s "it's the cleaner stack" on a grown mosaic: one bug, Scout-fixed (v0.502.33). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8214 passed / 7 skipped on `9048925e` (xdist `-n 4`, BLAS capped, 14m24s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (nothing overflowing, no console errors; Target page's five notes agree).
+- **Sweep (2).** Per-panel code since the last (2) (`uixyf4`): v0.502.30–32 (saved-look crop, reveal crop, noise-delta
+  WCS crop) — all placement, not thresholds. The noise-delta strip's verdict is local ("the grain *here*"), so it
+  holds. Then followed its card's promise — "the page also says which is cleaner" — to `/compare`: `noiseComparison`
+  compares each run's stored `noise_sigma`, a **whole-canvas** estimate, gated only on `sameTarget`, while
+  `covernudge.MIN_SKY_SHARE` and `integrationTrend.ts` already refuse the same comparison across canvases.
+  Probe (scratch `TestClient` test, deleted): real `run_stack` + `GET /api/gallery` on the bundled 2×2 sample —
+  p0 × 6 → σ 0.00074 / 1.0 field-fulls; p0 × 6 + p1 × 1 → σ 0.00089 / 1.82 → "B … 17% lower … the cleaner stack" for
+  the half-size picture. Second pair p0 × 4 vs p0 × 6 + p1, p2 × 1: 0.00092 vs 0.00095, same wrong verdict.
+  Fixed frontend-only with the cover nudge's 0.9 (figure kept, verdict dropped, one clause why); both new tests fail
+  with the fix reverted. Side observation not filed: on that second pair `noise-delta/info` answered
+  `available: false` — plausibly no faint-band patch covered in both, not chased.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-66kbiz`) — QA rotation sweep (1), new angle — the "one frame vs your stack" reveal on an auto-edited mosaic: one bug, Scout-fixed (v0.502.31). Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
 
 - **Suite:** 8207 passed / 7 skipped on `75034530` + this run's change (xdist `-n 4`, BLAS capped, 15m26s). **Inbox:** the

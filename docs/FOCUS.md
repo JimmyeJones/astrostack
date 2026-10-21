@@ -32,12 +32,17 @@ and owner-gated, none updated since 2026-10-12.
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (1), 2026-10-21
-→ next sweep is (2).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (2), 2026-10-21
+→ next sweep is (3).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-10-21 (Scout, branch `claude/zen-curie-t3nyff`) — **QA rotation sweep (2), new angle: `/compare`'s "it's the
+cleaner stack" read the whole-canvas σ, so on a grown mosaic the older, half-size picture won ("B … 17% lower" at
+identical depth on the shared sky) — Scout-fixed v0.502.33 (`Compare.noiseComparison` `widerSky`, the cover nudge's
+`MIN_SKY_SHARE` 0.9).** Inbox: the same four, all owner-gated. Suite 8214 passed / 7 skipped; dogfood `--mosaic`
+CLEAN. **START HERE NEXT RUN:** Builder: item 3 (S30 outlier floor), 4 or 1. **Rotation: (2) done → next sweep is (3).***
 *2026-10-21 (Builder, branch `claude/festive-knuth-ykn52w`) — **v0.502.32: the "did it get better?" matched-crop picture carries its patch through both masters' WCS on a grown mosaic** (`noisedelta._sky_mapper`; same sky, same native box, σ ratio honest; unsolved different-shaped pair self-hides). **START HERE NEXT RUN:** Builder: item 3 (S30 outlier floor), 4 or 1.*
 *2026-10-21 (Scout, branch `claude/zen-curie-66kbiz`) — **QA rotation sweep (1), new angle: the one-frame reveal on an
 auto-edited mosaic cut the raw sub by the canvas's Auto trim fractions (480×320 → 298×320 on a missing-panel trim) —
@@ -79,13 +84,6 @@ share/nameplate sibling filed (item 3). Inbox: the same four, all owner-gated. S
 with no Stretch op shows the picture's own curve — the fallback stretch's stats go through `ctx.fit`
 (`pipeline.apply_recipe`, `FALLBACK_STRETCH_UID`); preview/export byte-identical.** **START HERE NEXT RUN:** Builder:
 item 1 above (planner depth).*
-*2026-10-21 (Scout, branch `claude/zen-curie-g7aybm`) — **QA rotation sweep (3), new angle: the whole app run as an
-unprivileged account against a read-only `incoming/` (dirs 0555, files 0444, owned by another account), with a
-hostile stub ASTAP and real ffmpeg — scan → QC/solve → stack → re-solve → rescue → editor Auto/export/share →
-master dark and flat builds from `incoming/` → Moon & Sun grade and stack: CLEAN** (`incoming/` byte-, mtime-,
-mode- and owner-identical; zero permission errors, so nothing even *attempted* a write there). Inbox: the same
-four, all owner-gated. Suite 8193 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). FOCUS.md rewritten short (old page archived whole). **START HERE NEXT RUN:** Builder: the loupe
-item (shipped v0.502.27). **Rotation: (3) done → next sweep is (4).***
 
 ## Standing frontier
 
