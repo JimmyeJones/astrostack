@@ -553,6 +553,31 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   editor exports / channel combines as the carry does, or note why not. Test: the probe above through the endpoint (crop
   re-aimed; unplaceable → crop dropped, look kept; same-shape unmoved → byte-for-byte). Ungated.
 
+- **🟡 (Scout 2026-10-21, QA rotation sweep (1)) — the "did it get better?" matched-crop picture
+  (`/api/targets/{safe}/noise-delta`) shows two *different* patches of sky at two *different* scales once a
+  mosaic's canvas grew, and the scale mismatch makes the newer half look cleaner than it is.** *(Pillar: trust —
+  PRIORITY 3; size **M**; severity moderate — the card's words say "the same patch of sky from both, at full
+  resolution", the picture is the claim, and it errs in the flattering direction; no data is touched. Confidence:
+  **reproduced** through the real `build_noise_delta` on FITS of S30-mosaic shape; occurrence on his library
+  unmeasured. The deepening-reel and previous-edit entries above are the same grown-canvas class, found the same day.)*
+  `seestack/render/noisedelta.py` maps the crop between the two masters by **canvas fraction** (`_rect_for(shape, cx,
+  cy, patch_frac)`) and sizes the box as a fraction of each canvas's *shorter side* — it never reads the WCS. Same
+  shape → same pixels, right. Grown canvas (older = top-left of the newer, same sky, **same noise σ both sides**):
+  **single panel 1080×1920 → 2×2 2000×3600** — old crop 173 px native, new 320 px native, centres **683 px apart in
+  sky**, both drawn at 173 px, so the newer half is downsampled 1.85× and its displayed grain (row-diff σ) reads
+  **15.5 against 25.4 at identical depth**; **2×1 → 2×2** — 307 vs 320 px, **504 px apart**, grain 21.0 vs 25.9.
+  Same-shape control: offset 0, grain 25.6 vs 25.6, ratio 0.996. `noise_ratio` is correctly withheld
+  (`pixel_exact=False`), so `noiseDeltaVerdict` prints no number — but `NOISE_DELTA_BLURB` still says "same patch …
+  at full resolution … the only difference you can see is the grain".
+  **Fix shape:** take the crop's rectangle through both masters' WCS — `seestack.io.wcs_io.crop_reprojected_between_fits`
+  is the engine helper the reprocess carry already uses for exactly this — and take
+  the **same native box size** from both when their pixel scales agree (a grown, non-drizzled mosaic — then no resize
+  is needed and `pixel_exact` can honestly be true); resample only when the scales differ (drizzle), at the coarser
+  scale. A master without a usable WCS and a different shape → `None` (self-hide) rather than a fraction guess. `choose_patch_centre`'s
+  `also_covered` check reads the same fraction and needs the same mapping. Test: the three probe shapes (same sky centre within 1 px, equal native box, displayed grain equal within ~5 % at
+  equal depth), the same-shape case byte-for-byte (`noise_delta_cache` is in-memory, so an
+  upgrade's restart clears it). Ungated. Repro shape in PROCESS-NOTES.
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
