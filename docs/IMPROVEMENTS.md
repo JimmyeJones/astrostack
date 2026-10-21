@@ -559,6 +559,24 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   folder whose stored `meta.source_name` matches, if any. Label the duplicates by night in the list. Test: the three
   folders above all listed, each stacks into its own results folder, a single-folder library's id unchanged. Ungated.
 
+- **🟡 (Scout 2026-10-21, QA rotation sweep (4)) — turning the access password off leaves the read-only token
+  stored, and setting a password again silently brings the old token back (`routers/auth.set_password`).**
+  *(Pillar: security posture, AGENTS.md §10; size **S**; severity low–moderate — a credential the owner can no longer
+  see or remove keeps working after he believes access control was reset; no data touched. Confidence:
+  **reproduced** through the real HTTP routes.)* `set_password` with an empty password clears only
+  `auth_password_hash`/`auth_salt`; `readonly_token_hash` survives. Repro: set password → mint token (`/api/logs`
+  200) → "Disable" → `/api/auth/status` says `enabled: false, readonly_enabled: true` → set a *new* password → the
+  **old** token reads `/api/logs` and `/api/targets` with 200. Meanwhile Settings → Access control shows the token
+  badge **"active"** beside "Turn on the password above first … a read-only token wouldn't add anything", with no
+  Remove button (it lives inside the `enabled` branch of `AccessControl`), and `POST /readonly-token` is refused
+  while open — so the one state where the token is invisible is the one that keeps it.
+  **Fix shape:** clear `readonly_token_hash`/`readonly_token_salt` in the same `store.update` that clears the
+  password (the mint route already says a token "would guard nothing" on an open install), and say so in the
+  Disable confirm ("…and removes the read-only token"). Upgrade-safe: an install that is already open with a stale
+  hash is the state this fixes; leave it until the next disable rather than migrating. Test: the repro above ends
+  401 for the old token and `readonly_enabled: false`. Note the observer's token dies on a disable — intended, and
+  worth one line in the confirm. Ungated.
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
