@@ -159,18 +159,41 @@ def _unstacked_video_captures(
     that here rather than on the client keeps the "am I confident?" test in one
     place instead of a magic-string check in TypeScript.
     """
-    from seestack.video.discover import find_video_captures
-    from webapp.video import has_quicklook, has_result
+    from webapp.video import discover_captures, has_quicklook, has_result
 
     out: list[dict[str, Any]] = []
     with contextlib.suppress(Exception):
-        for cap in find_video_captures(scan_root):
+        for cap in _captures_under(settings, scan_root, discover_captures):
             if has_result(settings, cap.id) or has_quicklook(settings, cap.id):
                 continue
             out.append({
                 "name": cap.folder_name,
                 "label": cap.label if cap.kind in ("lunar", "solar") else None,
             })
+    return out
+
+
+def _captures_under(settings: Settings, scan_root: Path, discover) -> list:
+    """The captures inside ``scan_root``, with the ids the Moon & Sun page uses.
+
+    A scan of one night folder must not discover from that folder alone: there
+    its ``Lunar_video`` is unique and would get the bare id, which can belong to
+    another night's still — so the "already dealt with" check would ask about
+    the wrong capture. Discover from ``incoming/`` and keep the ones inside.
+    """
+    incoming = Path(settings.resolved_incoming_dir)
+    try:
+        root = scan_root.resolve()
+        inc = incoming.resolve()
+    except OSError:
+        return discover(settings, scan_root)
+    if root != inc and inc not in root.parents:
+        return discover(settings, scan_root)
+    out = []
+    for cap in discover(settings):
+        with contextlib.suppress(OSError):
+            if root == inc or root in Path(cap.folder).resolve().parents:
+                out.append(cap)
     return out
 
 

@@ -38,6 +38,7 @@ def set_password(body: dict[str, Any], request: Request) -> dict[str, Any]:
     password = str(body.get("password", "") or "")
     username = str(body.get("username", "") or "").strip()
 
+    was_enabled = auth.is_enabled(deps.get_settings(request))
     patch: dict[str, Any] = {}
     if username:
         patch["auth_username"] = username
@@ -47,10 +48,20 @@ def set_password(body: dict[str, Any], request: Request) -> dict[str, Any]:
         h, salt = auth.hash_password(password)
         patch["auth_password_hash"] = h
         patch["auth_salt"] = salt
+        if not was_enabled:
+            # Turning protection on from open: any token still stored is stale
+            # (one can't be minted while open), left by a disable on a version
+            # that kept it. Don't let the new password silently revive it.
+            patch["readonly_token_hash"] = ""
+            patch["readonly_token_salt"] = ""
     else:
-        # Clear → disable auth.
+        # Clear → disable auth, and the read-only token with it: on an open
+        # install it guards nothing, Settings hides its Remove button, and a
+        # later password would otherwise bring the old token back to life.
         patch["auth_password_hash"] = ""
         patch["auth_salt"] = ""
+        patch["readonly_token_hash"] = ""
+        patch["readonly_token_salt"] = ""
 
     s = store.update(patch)
     return {"enabled": auth.is_enabled(s), "username": s.auth_username}
