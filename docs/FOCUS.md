@@ -23,6 +23,10 @@ reproduced and **ungated** — a Builder can start any of them without the owner
 4. 🟡 **Size S (editor, priority 1) — a saved look (my default / my presets) replays its crop's canvas fractions on
    every other picture, and the Gallery batch writes them** (`batch_apply`, `applyDefaultRecipe`); drop the crop
    when a saved look is applied.
+5. 🟠 **Size M (stack hot path) — on an S30 strip ≥ 3 panels long with one end holding the median, the stacker
+   rejects a whole real panel as "bad plate-solve"; the mixed-pointing guard calls a gapped strip two targets**
+   (`mosaic._footprint_outlier_indices` `OUTLIER_FLOOR_DEG`, `pointings.LINK_DIST_DEG` — both 3°, sized for a 1.3° field);
+   scale both from the solved footprints. Measured change, not a blind flip — read the entry's test list first.
 
 **Gated, do not start:** the un-located-panel entry (top of Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
@@ -32,12 +36,17 @@ and owner-gated, none updated since 2026-10-12.
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (1), 2026-10-21
-→ next sweep is (2).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (2), 2026-10-21
+→ next sweep is (3).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-10-21 (Scout, branch `claude/zen-curie-uixyf4`) — **QA rotation sweep (2), new angle: the two fixed 3° distances
+sized for a 1.3° field, on the S30's 2.13° field — `run_stack` rejected a whole real panel of an uneven 3×1 strip as
+"bad plate-solve" (38 of 52 used, 14 flagged rejected; S50 control clean); filed reproduced (item 5).** Inbox: the
+same four, all owner-gated. Suite 8197 passed / 7 skipped; dogfood `--mosaic` CLEAN. **START HERE NEXT RUN:** Builder: item 4 (editor) or item 5. **Rotation: (2) done → next
+sweep is (3).***
 *2026-10-21 (Builder, branch `claude/festive-knuth-8nw2pa`) — **v0.502.29: the planner ("Best use of your scope",
 "Worth more time") reads an uneven mosaic's depth and gain at the median pixel** (`target_depth_fulls` =
 `n_frames_used ÷ coverage_median_depth`; grown 2×2→3×3 now 13 min / 21 %, was 55 min / 6 %). **START HERE NEXT RUN:**

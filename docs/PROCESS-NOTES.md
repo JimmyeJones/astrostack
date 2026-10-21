@@ -1,5 +1,26 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-uixyf4`) — QA rotation sweep (2), new angle — the fixed-degree distances that assume a ~1.3° field, on the owner's S30 (2.13°): one bug, filed reproduced (with a guard sibling). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8197 passed / 7 skipped on `7d6edf22` (xdist `-n 4`, BLAS capped, 17m20s). **Inbox:** the same four (#878, #880, #903,
+  #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start. **Dogfood `--mosaic`:**
+  CLEAN (nothing overflowing, no console errors; the Target page's five notes agree with each other).
+- **Sweep (2).** No per-panel code since the last (2) (`faezje`): v0.502.25–28 are auth, Moon/Sun discovery, the loupe
+  fallback and night bucketing. So the sweep read the module docstrings that still say "a Seestar's field is ~1.3°"
+  (`seestack/stack/pointings.py`, `frontend/.../mixedPointings.ts`) and every fixed-degree distance measured from a
+  *whole-target* centre or chain: `pointings.LINK_DIST_DEG` (3°, the mixed-pointing guard the owner wants on) and
+  `mosaic.OUTLIER_FLOOR_DEG` (3°, from the median centre of all subs). `PANEL_LINK_DIST_DEG` (0.25°) is fine on
+  both scopes (dither ≲0.1°, step ≥0.5°). Probes in the session scratchpad (`mp/probe.py` pure functions,
+  `mp/e2e.py` real `run_stack` on S30-headered FITS scaled 4× down, `mp/e2e50.py` the S50 control) — not landed.
+  **Finding:** a 3×1 S30 strip along the long axis at 15 % overlap with 30/8/14 subs loses all 14 far-panel subs —
+  dropped before canvas sizing *and* flagged `bad plate-solve (footprint far from the group)` in the DB, a reason
+  `reconcile_bad_solve_frames` never retries; the S50 control keeps 52/52. **Sibling:** the same strip with its
+  middle panel absent reads as "2 different targets" (3.4–3.8° apart) to the guard. Even 3×1 and 3×3 layouts are
+  clean. Filed at the end of Bugs (🟠, M) with both, and as FOCUS item 5; how uneven his own strips are is
+  unmeasured and said so. This is *in* `seestack/stack`, reached from the per-panel angle — a new bug there, so
+  AGENTS.md's "do not re-sweep `seestack/stack`" does not forbid it; it is not a re-sweep of the engine core.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-n1e74f`) — QA rotation sweep (1), the lead the `j1f6lp` (1) recorded: a saved look's `geometry.crop` on other canvases — one bug, filed reproduced. Inbox unchanged.
 
 - **Env:** `agent-setup.sh` stalled again on the `gui` extras (PySide6 wheels); killed it after the identity/hook

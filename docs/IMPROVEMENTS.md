@@ -586,6 +586,37 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   trim offer then frames this canvas. Test: the batch repro above writes 100×80; the editor seed drops the crop;
   a crop-free look unchanged byte-for-byte. Ungated.
 
+- **🟠 (Scout 2026-10-21, QA rotation sweep (2)) — on an S30 mosaic three panels long, the stacker throws away a
+  whole real panel as "bad plate-solve (footprint far from the group)" and flags every one of its subs rejected in
+  the DB, whenever one end row/column holds just over half the subs** (`seestack/stack/mosaic._footprint_outlier_indices`:
+  `OUTLIER_FLOOR_DEG = 3.0` from the *median centre of all subs*, a whole-target number; `run_stack` then
+  `update_frame(accept=False, reject_reason=REJECT_REASON_BAD_SOLVE_FOOTPRINT)`, which `reconcile_bad_solve_frames`
+  deliberately never retries). The 3° floor was sized for a ~1.3° field (the S50); the owner's S30 long side is
+  2.13°, so a panel two steps from the median sits 3.4–3.8° away.
+  *(Pillar: image quality + trust, PRIORITY 2/4; size **M** (engine hot path — measured change, not a blind flip);
+  severity **moderate**: a panel silently missing from the picture *and* good subs persistently rejected under a
+  false reason; reversible by hand in the Frames table. Confidence: **reproduced** end-to-end through the real
+  `run_stack` on synthetic S30-headered FITS (scratchpad `mp/e2e.py`): a 3×1 strip along the long axis, 15 %
+  overlap, 30 / 8 / 14 subs → **38 of 52 used, all 14 far-panel subs rejected in the DB**; the identical layout at
+  S50 scale → 52 of 52, nothing rejected. Pure-function grid (`mp/probe.py`, `compute_mosaic_canvas`): 51/25/24 drops
+  the 24 at 10 % and 20 % overlap; even 40/40/40 and an even 3×3 are clean (corner ≤ 2.2° from the centre). How often
+  his mosaics are this uneven is unmeasured — it takes a strip ≥ 3 panels long, or an edge row holding the median
+  (re-framed or grown nights).)*
+  **Sibling, same root, same file family:** `pointings.LINK_DIST_DEG = 3.0` (and the frontend's
+  `mixedPointings.ts` copy) say "two different targets" when an S30 strip's middle panel has no accepted, solved
+  sub (clouds / failed solves): the ends are 3.4–3.8° apart → `detect_mixed_pointings` returns 2 pointings, so with
+  `mixed_pointing_guard` on (the owner wants it on, AGENTS.md §1) Process-target and auto-stack **refuse** with "This
+  batch looks like 2 different targets" and offer the one-click "Reject the odd-target frames" — which would reject
+  a real panel. S50 control at the same layout: no verdict. Without the guard the stacker would union both ends
+  correctly when they are even (40/40 → 5402×1119 canvas, nothing dropped).
+  **Fix shape:** take both distances from the solved footprints, not a fixed degree count — e.g. the outlier test
+  only drops frames whose *single-linkage cluster* (link ≈ one footprint diagonal, `cluster_pointings`) is small
+  (< `MIN_POINTING_FRAMES` or a few % of the set) and far from the main chain, and the guard's link becomes
+  `max(3.0, ~2 × median footprint long side)`. Must still drop the M_13 scattered-bad-solve case
+  (`tests/test_mosaic.py`, ~20° span) and keep every existing `test_pointings.py` verdict. Test: the 30/8/14 S30 strip
+  through `run_stack` keeps 52 and rejects nothing; the gapped strip gets no mixed verdict; the S50 controls unchanged.
+  Ungated.
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
