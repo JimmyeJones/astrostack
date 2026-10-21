@@ -599,6 +599,35 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `tests/webapp/test_editor_loupe.py`, `_overlap` of preview vs loupe for `[]` and `[detail.sharpen]` on a fixture
   with a bright off-centre object is ≤1 level (today ~100). Ungated.
 
+- **🟡 (Scout 2026-10-21, QA rotation sweep (2)) — on an *uneven* mosaic the planner's "about N on a typical part"
+  and its "another hour would cut its noise about X %" are the canvas **mean**, which a grown raster or a deep
+  panel lifts far above what a typical part holds (`nightplan._have_phrase` / `noise_gain_from_more_time` via
+  `webapp.field_fulls.target_field_fulls`).**
+  *(Pillar: friendliness / trust, PRIORITY 3; size **M** for every surface, **S** for the planner alone; severity
+  low–moderate — the flattering direction on the two cards shown unasked ("Worth more time", "Best use of your scope
+  right now"); nothing is written. Confidence: **reproduced** with the real `_depth_only_picks`,
+  `field_fulls_of_sky` (with `uncovered_frac`) and `stacker.coverage_median_depth` on S30 footprints, 1080×1920,
+  12 % overlap, 10 s subs — scratchpad probe, shapes only.)* The depth is `total ÷ field_fulls`, an area ratio, and
+  the ranking is `1 − √(t/(t+1 h))` on the total — both exact only for an evenly shot raster (where F cancels, as
+  `_depth_sentence` says). Measured:
+  - **even 3×3, 6 h:** "about 47 min on a typical part … about 7 %"; median pixel 40 min, an hour of the raster
+    cuts it 7 % — right.
+  - **2×2 for 6 h, then the mosaic grew to 3×3 for 1 h** (the grown-canvas shape the noise-delta entry above already
+    treats as the owner's): "**about 55 min** on a typical part … about **6 %**", score 43; the median pixel holds
+    **13 min** and another hour of the 3×3 cuts it **18 %** (saturated score 100).
+  - **a deep single field (20 h) merged with a 3×3 (2 h):** "about **2.9 h** … about **2 %**", score 14.7 — the
+    target sinks to the bottom of "Worth more time" while 5/9 of its picture holds 13 min.
+  `perPixel.ts` calls the mean "the conservative one" — true against the peak it replaced, but on these shapes it
+  errs *deep*, and its stated reason for not using a measured depth ("only populated on a mosaic uneven enough",
+  i.e. `grain_deep_frames`) no longer holds: every stack run now carries `coverage_median_depth` (backfilled by
+  `coverage_backfill`). **Fix shape:** serve a depth scale beside `field_fulls` — `n_used ÷ coverage_median_depth`
+  of the same newest stacking run, falling back to `field_fulls` where the column is null — and divide by it
+  wherever a *depth* is quoted (`_have_phrase`, the gain/rank on the planner, `perPixel`'s consumers); keep
+  `field_fulls` itself for "how much sky" (`canvas_is_mosaic`, framing advice, the "spread over N fields" clause).
+  Note the even 3×3 then reads 40 min instead of 47 (overlaps are counted honestly) — say so in the commit. Test: the
+  three shapes above through `_depth_only_picks`, the grown one ending at 13 min / 18 %; a single field unchanged
+  byte-for-byte. Ungated (display only; no default, no hot path).
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
