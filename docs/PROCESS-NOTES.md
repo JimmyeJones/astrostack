@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-ae6xhx`) — QA rotation sweep (1), scale-dependent parity, on the full-size loupe over a mosaic with the crop *after* the background passes (the gap the 2026-10-19 sweep (1) named): crop-after-background CLEAN; one bug, filed reproduced (the no-Stretch fallback in `pipeline.apply_recipe`).
+
+*__Inbox__ (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none
+updated since 2026-10-12 — nothing new owed, nothing re-posted.*
+
+*__Sweep (1), new angle.__ Scratch probe (not committed) through the real `/editor/preview`, `/editor/loupe` and
+`/editor/auto` routes on a 3600×2400 2×2-mosaic run (overlapping panels at 250–900 subs with distinct sky offsets,
+NaN where no panel reaches, coverage + frame-count siblings, `is_mosaic` set), proxy stride 3, 512 px windows,
+the shared source samples compared as `_overlap` does. **`level_coverage → final_gradient → stretch → crop`:
+0/255 at all four windows, with or without the crop** — the replayed sky fields and the click→window mapping
+both hold through a crop placed after the background passes. Auto's own recipe on the run (level_coverage,
+final_gradient, color_calibrate, stretch, scnr, saturation, curves, sharpen, crop): mean 0.4–2.4, max 23, all of
+it from the two *spatial* ops — `tone.scnr` (`protect_noise`'s Gaussian at `scnr_noise_sigma(proxy_scale)`; isolated
+max 9) and `detail.sharpen` — i.e. the window showing the 1:1 export where the decimated preview approximates it,
+which is the loupe's job, not a fault. Every per-pixel and whole-image op isolated at exactly 0.*
+
+*__The bug.__ A *prefix* of Auto's chain with no Stretch differed by up to 77/255, which led to the fallback:
+with no enabled `tone.stretch`, `apply_recipe` runs `autostretch(out)` on whatever it is handed, outside
+`EditContext.fit`, so the loupe's window is stretched by its own medians. The editor *opens* with an empty recipe,
+so this is the first-open state. Measured vs a full-res export render of the same canvas: nebula-core window
+median 51/51/51 against 181/165/131, mean |Δ| 97.5. Filed at the end of Bugs, size S, ungated.*
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-cocyik`) — QA rotation sweep (4), the routers no earlier sweep had named (`auth`, `jobs`, `logs`, `seestar`, `glossary`, `stackfailures`, `wishlist`, `overtrim`, `unstretched`): one bug, filed reproduced (`routers/auth.set_password`).
 
 - **Suite:** 8175 passed / 7 skipped on `746d34b0` (Qt-skip fallback — PySide6 not installed in this container; xdist `-n 4`,
