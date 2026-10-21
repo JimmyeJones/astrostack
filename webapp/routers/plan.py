@@ -246,7 +246,7 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
     Dashboard quote (see :func:`webapp.routers.stats._collect_progress`)."""
     from seestack.objectinfo import identify_object
     from seestack.session_recap import recent_night_pace_s
-    from webapp.field_fulls import target_field_fulls
+    from webapp.field_fulls import target_depth_fulls, target_field_fulls
     from webapp.framing_advice import newest_picture_nudge
 
     catalog = load_catalog()
@@ -259,6 +259,7 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
         goal_s: float | None = None
         pace_s: float | None = None
         field_fulls: float | None = None
+        depth_fulls: float | None = None
         nudge = None
         proj = None
         try:
@@ -266,6 +267,9 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
             goal_s = read_goal_s(proj)
             pace_s = recent_night_pace_s(proj, night_of=night_of)
             field_fulls = target_field_fulls(proj)
+            # What a typical part holds, measured — the area ratio above is a
+            # canvas mean that an uneven mosaic lifts far above it.
+            depth_fulls = target_depth_fulls(proj)
             # "Nudge a little south before you start" — the framing advice from
             # this target's newest picture, brought forward from the morning-after
             # card to the screen someone reads while pointing the scope. One more
@@ -287,6 +291,7 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
             goal_s=goal_s,
             recent_pace_s=pace_s,
             field_fulls=field_fulls,
+            depth_fulls=depth_fulls,
             recentre_nudge=nudge,
             # The same verdict a *catalog* row of this object already carries.
             # `identify_object` above computed it either way; only the library

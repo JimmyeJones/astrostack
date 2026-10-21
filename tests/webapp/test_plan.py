@@ -1148,6 +1148,62 @@ def test_a_best_tonight_mosaic_pick_speaks_its_depth_per_panel(
     assert f"about {round(pick['noise_gain'] * 100)}%" in pick["reason"]
 
 
+def test_a_best_tonight_mosaic_pick_ranks_by_its_measured_median_depth(
+        client, solved_library):
+    """End-to-end: the newest stack run's ``coverage_median_depth`` reaches the
+    planner as ``depth_fulls`` (``n_frames_used ÷ median``), so an uneven
+    raster's typical part — not its canvas mean — is what the row's gain and
+    sentence describe. 1200 subs over a median pixel of 30 is 40 "typical
+    parts" on a canvas of 4 fields of sky: the thin majority of the picture."""
+    from seestack import nightplan as np_plan
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    _attach_mosaic_stack(solved_library, "M_42", fields_across=2,
+                         total_exposure_s=36000.0, coverage_median_depth=30.0)
+
+    body = client.get("/api/plan/best-tonight",
+                      params={"when": JAN_MIDNIGHT, "min_alt": 20}).json()
+    pick = next(p for p in body["picks"] if p["safe"] == "M_42")
+    total_s = next(t["total_exposure_s"] for t in client.get("/api/targets").json()
+                   if t["safe_name"] == "M_42")
+    measured = round(np_plan._panel_noise_gain(total_s, 4.0, 40.0), 3)
+    assert pick["noise_gain"] == measured
+    assert measured != round(np_plan.noise_gain_from_more_time(total_s), 3)
+    assert f"about {round(pick['noise_gain'] * 100)}%" in pick["reason"]
+
+
+def test_target_depth_fulls_reads_the_newest_stacking_runs_median(
+        solved_library):
+    """``None`` with no stack or no median recorded (the planner then keeps the
+    area ratio), ``n_frames_used ÷ median`` once one is, clamped to ``>= 1``."""
+    from seestack.io.library import Library
+    from webapp.field_fulls import target_depth_fulls
+
+    def read() -> float | None:
+        lib = Library.open_or_create(solved_library / "library")
+        try:
+            proj = lib.open_target("M_42")
+            try:
+                return target_depth_fulls(proj)
+            finally:
+                proj.close()
+        finally:
+            lib.close()
+
+    assert read() is None
+    _attach_mosaic_stack(solved_library, "M_42", fields_across=2,
+                         total_exposure_s=36000.0)
+    assert read() is None
+    _attach_mosaic_stack(solved_library, "M_42", fields_across=2,
+                         total_exposure_s=36000.0, coverage_median_depth=30.0,
+                         when="2026-01-11T00:00:00Z")
+    assert read() == 40.0
+    _attach_mosaic_stack(solved_library, "M_42", fields_across=2,
+                         total_exposure_s=36000.0, coverage_median_depth=5000.0,
+                         when="2026-01-12T00:00:00Z")
+    assert read() == 1.0
+
+
 def test_a_best_tonight_single_field_pick_still_quotes_its_total(
         client, solved_library):
     """The ordinary case, and the one that makes the field safe to add: nothing
@@ -1743,7 +1799,9 @@ def test_closing_rejects_bad_when_and_bounds_the_horizon(client, solved_library)
 
 
 def _attach_mosaic_stack(data_root: Path, safe: str, *, fields_across: int,
-                         total_exposure_s: float) -> None:
+                         total_exposure_s: float,
+                         coverage_median_depth: float | None = None,
+                         when: str = "2026-01-10T00:00:00Z") -> None:
     """Give a fixture target a stack run whose canvas spans ``fields_across``
     native frames on each axis — the shape ``webapp.field_fulls`` reads a mosaic
     off (canvas area / one native frame's area, drizzle divided out)."""
@@ -1759,7 +1817,7 @@ def _attach_mosaic_stack(data_root: Path, safe: str, *, fields_across: int,
         try:
             proj.add_stack_run(StackRunRow(
                 id=None,
-                timestamp_utc="2026-01-10T00:00:00Z",
+                timestamp_utc=when,
                 output_basename="master",
                 fits_path=None, tiff_path=None, preview_path=None,
                 n_frames_used=1200,
@@ -1767,6 +1825,7 @@ def _attach_mosaic_stack(data_root: Path, safe: str, *, fields_across: int,
                 coverage_min=1, coverage_max=1200,
                 total_exposure_s=total_exposure_s,
                 options_json=json.dumps({"drizzle": False, "drizzle_scale": 1.0}),
+                coverage_median_depth=coverage_median_depth,
             ))
         finally:
             proj.close()

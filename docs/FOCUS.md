@@ -10,9 +10,9 @@
 Every item below is an open entry at the end of "Bugs (fix these first)" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md),
 reproduced and **ungated** — a Builder can start any of them without the owner. Take them in this order:
 
-1. 🟡 **Size S (planner) / M (every surface) — on an uneven mosaic the planner's "about N on a typical part" and
-   "another hour cuts its noise X %" are the canvas mean** (`nightplan._have_phrase`, `field_fulls.target_field_fulls`);
-   fix through each run's `coverage_median_depth`.
+1. 🟡 **Size M — on an uneven mosaic the closing-season card and `perPixel.ts`'s consumers still quote the canvas
+   mean as "a typical part"** — the planner half shipped v0.502.29 (`LibraryTarget.depth_fulls`,
+   `nightplan._panel_depth_fulls`); serve `webapp.field_fulls.target_depth_fulls` beside `field_fulls` on the rest.
 2. 🟡 **Size M — the "did it get better?" matched-crop picture maps its crop by canvas fraction on a grown mosaic**
    (`noisedelta.build_noise_delta`); place by both masters' WCS (`wcs_io.crop_reprojected_between_fits`), as
    v0.502.23/.24 did for the reel and the previous-edit crop.
@@ -47,6 +47,10 @@ sized for a 1.3° field, on the S30's 2.13° field — `run_stack` rejected a wh
 "bad plate-solve" (38 of 52 used, 14 flagged rejected; S50 control clean); filed reproduced (item 5).** Inbox: the
 same four, all owner-gated. Suite 8197 passed / 7 skipped; dogfood `--mosaic` CLEAN. **START HERE NEXT RUN:** Builder: item 4 (editor) or item 5. **Rotation: (2) done → next
 sweep is (3).***
+*2026-10-21 (Builder, branch `claude/festive-knuth-8nw2pa`) — **v0.502.29: the planner ("Best use of your scope",
+"Worth more time") reads an uneven mosaic's depth and gain at the median pixel** (`target_depth_fulls` =
+`n_frames_used ÷ coverage_median_depth`; grown 2×2→3×3 now 13 min / 21 %, was 55 min / 6 %). **START HERE NEXT RUN:**
+Builder: item 4 (editor, priority 1).*
 *2026-10-21 (Scout, branch `claude/zen-curie-n1e74f`) — **QA rotation sweep (1), the angle the `j1f6lp` (1) left
 open: a saved look's `geometry.crop` is replayed by canvas fraction on other pictures — the batch cut a 100×80 run
 to 70×62; filed reproduced (item 4).** Inbox: the same four, all owner-gated. **START HERE NEXT RUN:** Builder:
