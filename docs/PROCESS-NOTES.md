@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-9z8k1c`) — QA rotation sweep (2), on v0.502.21's new panel-depth check at the owner's sub counts (`autodrizzle.footprint_coverage_plane`'s `max_subs` stride): CLEAN, one observation not filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8179 passed / 7 skipped on `68809902` (xdist `-n 4`, BLAS capped, 17m02s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the panel-map, grain and seam
+  sentences agree — top-right panel 3 subs against 6, "about 1.4× grainier", seams flat).
+- **Sweep (2).** The only per-panel number added since the last (2) is v0.502.21's typical-panel depth for "Auto, when
+  worth it". Its tests run at most 2,000 subs, and its one sampled-plane test orders the subs panel by panel — so the
+  `AUTO_DRIZZLE_COVERAGE_MAX_SUBS = 4000` stride (`frames[::ceil(n/4000)]`, each drawn sub weighted `n/drawn`) had
+  never run at the owner's counts (5,477 → stride 2; 35,894 → stride 9) or on a capture order that cycles panels.
+  Real `footprint_coverage_plane` → `coverage_panel_depth` → `decide_auto_drizzle`, S30 footprints (1080×1920, 12 %
+  overlap, ±8 px), a deep panel from contiguous single-field nights plus mosaic nights cycling the panels
+  (scratchpad `ad/probe.py`, `probe2.py`):
+  - 2×2, 12,000 deep + 60/panel at **2 or 10 subs per panel visit** (stride 4): sampled 108 / 48 vs whole 60 → no,
+    right. 3×3, 30,000 deep + 150/panel at 1 or 3 per visit (stride 8): 144 vs 150 → no, right.
+  - **Aliasing, mechanism real:** at exactly **one sub per panel visit with nothing rejected**, a stride that divides
+    the panel cycle draws one panel only — 2×2 at stride 4 reads 12,240 against a true 60, so the average (3,463)
+    decides and the ×7 drizzle v0.502.21 removed comes back; a 2×1 at stride 2 reads 4,900 against 150. **Not filed:**
+    it needs a perfectly periodic *accepted* list — 2 % or 5 % random rejections already give 51 vs 55 and 138 vs 143
+    — and a Seestar that slews between panels after every single sub, a cadence nothing here shows. If an observer
+    count ever shows a one-sub-per-visit mosaic, the fix is a seeded uniform sample in place of the stride.
+  - Cost at the owner's scale: 2–4.5 s per decision (3×3, 31,350 subs), paid only when the average clears the bar.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-4boafp`) — QA rotation sweep (1), scale-dependent parity, on the one surface that compares two masters' *pixels* across a canvas change — the "did it get better?" matched crop (`noisedelta.build_noise_delta`): one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8173 passed / 7 skipped on `e0ee8290` (xdist `-n 4`, BLAS capped, 17m09s); docs-only change on top of
