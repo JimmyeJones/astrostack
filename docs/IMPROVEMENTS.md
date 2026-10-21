@@ -538,27 +538,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   equal depth), the same-shape case byte-for-byte (`noise_delta_cache` is in-memory, so an
   upgrade's restart clears it). Ungated. Repro shape in PROCESS-NOTES.
 
-- **🟠 (Scout 2026-10-21, QA rotation sweep (1)) — "Check it at full size" on a recipe with no Stretch op — the
-  editor's first-open state — re-stretches the window by its *own* sky, so a nebula core reads as flat grey
-  (`pipeline.apply_recipe` fallback `autostretch`, reached from `routers/editor._render_loupe_png`).**
-  *(Pillar: editor, PRIORITY 1; size **S**; severity moderate — the control exists to be the authority on what the
-  export looks like, and here it is a different picture; nothing is written. Confidence: **reproduced** through the
-  real `/editor/loupe` and `/editor/preview` routes on a 3600×2400 2×2-mosaic run, proxy stride 3.)*
-  A run opens in the editor with an **empty** recipe (Auto is offered, not applied), and `FullSizeCheck` is offered
-  for any recipe without a geometry refusal. With no enabled `tone.stretch`, `apply_recipe` inserts
-  `autostretch(out)` at the end — measured on whatever array it is handed, outside `EditContext.fit`, so the loupe's
-  frozen-fit channel never carries it. Every window is therefore pinned to 20 % grey by its own medians, one channel
-  at a time. Measured (8-bit, window interior): **nebula-core window — loupe median 51/51/51 vs the export's
-  181/165/131, mean |Δ| 97.5, vs the preview 104.7**; sky windows mean 7–16, max 45–130. Same with only
-  `detail.sharpen` added (the op the loupe is most often opened for): 96.9 mean vs the export. The control: with an
-  explicit `tone.stretch` every window is byte-identical to the preview (0/255), including with a `geometry.crop`
-  after the background passes on the mosaic (also measured this sweep — CLEAN).
-  **Fix shape:** measure the fallback's stats through `ctx.fit` under a fixed key (`ctx.op_uid = "__fallback_stretch__"`;
-  `autostretch(out, stats=ctx.fit(..., lambda: measure_stretch_stats(out)))`) so the whole-proxy render's numbers
-  are frozen onto the window like every other whole-image measurement; confirm `autostretch` with self-measured
-  stats is byte-for-byte today's output so the preview and export do not move. Test: in
-  `tests/webapp/test_editor_loupe.py`, `_overlap` of preview vs loupe for `[]` and `[detail.sharpen]` on a fixture
-  with a bright off-centre object is ≤1 level (today ~100). Ungated.
 
 - **🟡 (Scout 2026-10-21, QA rotation sweep (2)) — on an *uneven* mosaic the planner's "about N on a typical part"
   and its "another hour would cut its noise about X %" are the canvas **mean**, which a grown raster or a deep
@@ -3667,6 +3646,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.27 **"Check it at full size" on a recipe with no Stretch op (the editor's first-open state) shows the picture's own curve — each 1:1 window was re-stretched by its own sky, so a nebula core read flat grey** (`pipeline.apply_recipe` fallback stretch through `ctx.fit`, `FALLBACK_STRETCH_UID`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.26 **Moon & Sun lists every night of a per-night `incoming/` layout — a repeated `Lunar_video` folder name hid all but the first, and a new earlier-sorting night took over a stacked capture's id** (`video.discover.find_video_captures`, `_bare_id_holder`).
 - ✅ v0.502.25 **"Disable" access control now removes the read-only token too, and turning a password on from open drops any stale token — a new password no longer silently revives the old one** (`routers/auth.set_password`).
 - ✅ v0.502.24 **The editor's "Use my previous edit" re-aims the copied crop onto this run's canvas through both masters' WCS — on a mosaic that grew a column it framed 288 px of sky against the 160 px he drew** (`editor.previous_recipe` → `pipeline._recrop_for_new_canvas`). Entry in [`SHIPPED.md`](SHIPPED.md).

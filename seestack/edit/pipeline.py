@@ -26,6 +26,10 @@ log = logging.getLogger(__name__)
 
 STRETCH_OP_ID = "tone.stretch"
 
+#: The ``EditContext.fit`` key prefix of the default stretch ``apply_recipe``
+#: inserts when no stretch op is enabled — it has no op instance of its own.
+FALLBACK_STRETCH_UID = "__fallback_stretch__"
+
 
 def apply_recipe(
     rgb: np.ndarray,
@@ -110,10 +114,25 @@ def apply_recipe(
         # Target thumbnail they already saw), instead of a middling one-size-fits-
         # all asinh. Like asinh it renders uncovered (NaN) pixels black, so we
         # restore NaN afterwards to keep "no coverage" out of the histogram/levels.
+        #
+        # The curve is anchored on the *whole picture's* sky, so its statistics go
+        # through ``ctx.fit`` like the explicit stretch op's do: a render of one
+        # region (the full-size loupe) is handed the whole-proxy measurement
+        # instead of pinning that window's own sky to 20 % grey — a nebula-core
+        # window otherwise came back flat grey. Self-measured, the stats are the
+        # ones ``autostretch`` derives for itself, so the preview and the export
+        # are byte-for-byte unchanged. The key is no op's uid, so the preview's
+        # fit carry (``webapp.edit_fit_cache``) never offers it to another render.
         from seestack.edit.registry import finite_mask
-        from seestack.render.thumbnail import autostretch
+        from seestack.render.thumbnail import autostretch, measure_stretch_stats
         uncovered = ~finite_mask(out)
-        out = as_rgb(autostretch(out)).copy()
+        src = out
+        ctx.op_uid = FALLBACK_STRETCH_UID
+        try:
+            stats = ctx.fit("stretch_stats", lambda: measure_stretch_stats(src))
+        finally:
+            ctx.op_uid = None
+        out = as_rgb(autostretch(out, stats=stats)).copy()
         out[uncovered] = np.nan  # keep "no coverage" out of the histogram/levels
         ctx.stage = "nonlinear"
 
