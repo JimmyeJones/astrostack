@@ -1,5 +1,28 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-89ftgk`) — QA rotation sweep (4), new angle — every GET route crawled with real ids on a running mosaic install, healthy and with a run's files gone: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8206 passed / 7 skipped on `0ba835f9` (xdist `-n 4`, BLAS capped, 16m34s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the panel map, health notes and
+  framing verdict agree on the 2×2's thin top-right panel).
+- **Sweep (4).** Earlier (4) sweeps each read a few routers for their *answers*; none had called the whole surface on
+  one install. Crawler (session scratchpad, not landed): reads `/openapi.json`, fills `{safe}` / `{run_id}` /
+  `{frame_id}` from the app's own listings, and GETs every `/api` route (165 GET paths; job, archive, `{ip}`,
+  `{year}` and SSE routes skipped) against `agent-dogfood.sh --mosaic --serve`. **Healthy:** 228 calls, 217 × 200,
+  7 × 404 and 4 × 422, 0 × 5xx, none over 5 s; each 404/422 is a deliberate answer (deepening reel and progress
+  reel with one run, no rejection map, nothing for the `.ics`, `noise-delta` without its required `a`/`b`).
+  **Damaged:** the mosaic target's `output/` files moved aside under its live `stack_runs` row (a hand-cleaned or
+  raced output folder): 194 × 200, 30 × 404, still 0 × 5xx. The surviving 200s are metadata-only or say
+  `available: false`; `editor/print-sizes` still quotes a print size from the run row, but the editor page that
+  shows it 404s on the preview first, so nothing is filed. Files restored; `incoming/` never touched.
+  Read-before-crawl: `targets` insight cards on a mosaic — `transparency_trend` already rescales per panel,
+  `nights_breakdown` judges on FWHM (panel-independent), `cleanest_shot` refuses cross-canvas σ via
+  `MIN_SKY_SHARE`: CLEAN. **Rotation: (4) done → next sweep is (1).**
+- **Tooling note (again):** `until ! pgrep -f "pytest …"` never exits, because `pgrep -f` matches the waiting
+  shell's own command line (the 2026-10-21 `idzsf4` note says the same about the dogfood). Wait on the background
+  task's own completion notification instead.
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-gkxvfm`) — QA rotation sweep (3), new angle — ffmpeg reading a Moon & Sun capture that is *cut short* (a copy still in progress): one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8205 passed / 7 skipped on `46456d85` (xdist `-n 4`, BLAS capped, 16m34s). **Inbox:** the same four (#878,
