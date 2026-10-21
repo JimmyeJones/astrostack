@@ -3,7 +3,7 @@
 ## 2026-10-21 (Scout, branch `claude/zen-curie-ae6xhx`) — QA rotation sweep (1), scale-dependent parity, on the full-size loupe over a mosaic with the crop *after* the background passes (the gap the 2026-10-19 sweep (1) named): crop-after-background CLEAN; one bug, filed reproduced (the no-Stretch fallback in `pipeline.apply_recipe`).
 
 *__Inbox__ (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none
-updated since 2026-10-12 — nothing new owed, nothing re-posted.*
+updated since 2026-10-12 — nothing new owed, nothing re-posted. **Suite** 8182 passed / 7 skipped on `455386dd` + docs (xdist `-n 4`, 17m39s); dogfood `--mosaic --big` CLEAN (Auto trim 7.9 %, scale pair 0/16 moved, nothing overflowing, no console errors).*
 
 *__Sweep (1), new angle.__ Scratch probe (not committed) through the real `/editor/preview`, `/editor/loupe` and
 `/editor/auto` routes on a 3600×2400 2×2-mosaic run (overlapping panels at 250–900 subs with distinct sky offsets,
