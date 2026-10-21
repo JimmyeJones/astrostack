@@ -1,6 +1,6 @@
 # Process notes & QA sweep records
 
-## 2026-10-21 (Builder, branch `claude/festive-knuth-2gjith`) — no task shipped: the backlog's open Bugs are all owner/observer-gated, and a full dogfood pass found nothing
+## 2026-10-21 (Builder, branch `claude/festive-knuth-2gjith`) — a full dogfood pass found nothing; then shipped the Scout's fresh auto-drizzle bug (v0.502.21)
 
 - **Suite:** 8161 passed / 7 skipped on `c652a141` (xdist `-n 4`, BLAS capped, 17m21s).
 - **Dogfood `--mosaic --editor --big`:** CLEAN. Single field, 2×2 mosaic and the full-size (decimated-preview)
@@ -10,8 +10,12 @@
 - **Tooling note:** the whole `--mosaic --editor --big` pass takes **over 30 minutes** on a 4-core box — longer than
   a background shell's default limit, which killed the first attempt mid-editor-drive. Run it in two halves (the
   probe pass, then `--editor --big --no-probe`) or give the background command the full 2 h timeout.
-- **Why nothing was built:** every Bugs entry is a lead waiting on a hint-shape answer or an observer measurement,
-  and FOCUS.md's own instruction is not to manufacture a beginner feature; this run did not.
+- **What was built:** at the start every Bugs entry was gated on the owner or the observer, and FOCUS.md says not
+  to manufacture a beginner feature. The Scout's sweep (2) then filed a reproduced, buildable auto-drizzle bug
+  (`docs:` commit ~40 min old when picked; no other run had it) — shipped as v0.502.21. Its stated gate ("the probe's
+  shapes as tests *and* the even-raster cases unchanged") is met in `tests/test_auto_drizzle.py`; the owner-frequency
+  count it also mentioned decides only priority, and the change can only turn a ×7-cost yes into a no.
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-50ebr3`) — QA rotation sweep (2), new angle — the automatic drizzle's depth bar (`autodrizzle.samples_per_output_pixel` → `decide_auto_drizzle`) on *uneven* S30 mosaics: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8161 passed / 7 skipped on `c652a141` (xdist `-n 4`, BLAS capped, 16m50s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all

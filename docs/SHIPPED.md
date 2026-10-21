@@ -1,5 +1,65 @@
 # Shipped — the record
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-2gjith`) — the automatic drizzle judges an uneven mosaic on its panels
+
+### v0.502.21 — `autodrizzle.footprint_coverage_plane`, `decide_auto_drizzle(measure_panel_depth=…)`
+
+**What.** "Auto, when worth it" (`Settings.auto_drizzle`, on by default) judged its 200-samples bar on
+`samples_per_output_pixel` — `n_frames ÷ (canvas ÷ frame area)` — which is right on an even raster and wrong on an
+uneven one. Now, on a canvas bigger than one frame whose average has *already* cleared the bar,
+`decide_auto_drizzle` asks a new `measure_panel_depth()` callable and judges the **smaller** of the two. The stacker
+answers it by summing the subs' own footprints onto a ≤512 px plane (`footprint_coverage_plane`: each sub's four
+corners off its own WCS, projected through the canvas WCS in one call, filled as the convex quad it is by a
+vectorised scanline `_fill_quads`) and reading `coverage_panel_depth` — the same level rule the trim and the health
+notes use. **Not** the thinnest pointing cluster, which #901 measured at ~0.10× the real depth on overlapping panels.
+
+**Measured (S30 1080×1920 subs, 12 % overlap, ±8 px dither), average → panel depth, verdict:** even 2×2 at 300 →
+339 → 300, yes (unchanged); even 3×3 at 300 → 354 → 300, yes (unchanged); 3×3 at 120 → 141, no (unchanged, panel
+depth never asked); **2×2 1500/60/60/60 → 475 → 60, yes → no; 3×3 centre 2000 + 8×60 → 325 → 54, yes → no; 3×3
+centre 1500 + 8×30 → 228 → 27, yes → no.** The panel depth can only *lower* the depth (a sparse raster's overlap
+reading above the average cannot talk a shallow canvas into drizzling) and `None`/NaN keeps the average, so the
+change can only turn a yes into a no — the cheap direction on a walk-away box, where a yes costs ×7 a plain sub.
+
+**Cost.** Asked only after the average clears 200, so a shallow run never pays it. 0.2–0.45 s on the probe shapes;
+past 4,000 subs the footprints are drawn at a stride and weighted back up (`AUTO_DRIZZLE_COVERAGE_MAX_SUBS`), 0.7 s
+on 36,000 subs; 4,000 distinct *rotated* footprints fill in 0.7 s (skimage's `polygon` was ~7 ms each, ~28 s —
+measured and replaced; the scanline fill is pinned pixel-for-pixel against it). The plane is 512 px rather than 256
+because at 256 an even 3×3 at 300 read 271 (the level's tolerance window catching the coarser edge ramp).
+
+**Tests** (`tests/test_auto_drizzle.py`, +12 items): the three uneven shapes (each asserted drizzled on the average
+first), the three even ones unchanged, the stacker's own `_decide_auto_drizzle` on the uneven 2×2 with real
+sub-pixel dither and solved centres — **fails before** (scratch worktree at `origin/main`: `assert True is False`) —
+the lazy-ask contract, lower-only/None/NaN, the fill against `skimage.draw.polygon` on rotated quads, the sampled
+plane, and the no-footprint cases. No config, schema, on-disk, default, header-code or API-shape change; the
+`ADRZWHY` reason for the new refusals is the existing `too_few_samples`, and `ADRZSPP` now quotes the depth that
+decided.
+
+<details><summary>The Bugs entry as filed</summary>
+
+- **🟡 (Scout 2026-10-21, QA rotation sweep (2)) — the automatic drizzle's "deep enough?" bar is a canvas
+  *average*, so one deep panel buys ×7 stacking time for a mosaic whose other panels sit below even the warn
+  bar.** *(Pillar: autonomy / image quality — PRIORITY 2/4; size **M**; severity low-to-moderate — hours of
+  extra stacking on the owner's scale for resolution most of the canvas cannot pay for; the run announces the
+  cost and nothing is lost. Confidence: **reproduced** through the real `decide_auto_drizzle`; how many of the
+  owner's mosaics are this uneven is **unmeasured**.)*
+  `seestack/stack/autodrizzle.py::samples_per_output_pixel` is `n_frames ÷ (canvas area ÷ frame area)` —
+  right for an even raster, but a centre panel deep from single-field nights lifts the mean over the 200 bar
+  while the rest of the canvas is thin. Scratch probe (S30 1080×1920 subs, 12 % overlap, ±8 px dither,
+  coverage summed from footprints): even 2×2/3×3 at 300/panel → yes, 0 % of covered canvas < 100 (correct);
+  3×3 at 120/panel → no (correct); **2×2 1500/60/60/60 → yes at "468", 66 % of the covered canvas < 100;
+  3×3 centre 2000 + 8×60 → yes at "322", 77 % < 100; centre 1500 + 8×30 → yes at "226", 87 % < 100**.
+  `AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL`'s own docstring calls < 100 the depth where recommending drizzle is
+  "actively bad advice". **Do not fix with the thinnest pointing cluster** (`panel_depth`) — observer #901
+  measured that ~0.10× the real per-pixel depth on 12 of 17 of his mosaics (overlapping panels). The honest
+  number is the canvas's own coverage, which the stacker can sum from the footprints it already has before it
+  reprojects (the probe does it at 1/10 scale in milliseconds): judge the bar on that plane's
+  `stacker.coverage_panel_depth` instead of the mean — on the probe's plane it reads 300 / 300 / 120 on the
+  even rasters (verdicts unchanged) and 60 / 60 / 28 on the three uneven ones (all → no). **Gate:** `Settings.auto_drizzle` is on by default, so this changes what a hands-off
+  run does — ship it only with the probe's shapes as tests *and* the even-raster cases unchanged; how often
+  the owner hits it is an observer count (per `_mosaic_sub` target: largest ÷ median panel count).
+
+</details>
+
 ## 2026-10-21 (Builder, branch `agent/wall-twin-dedupe`) — the deep-sky wall's title counts each sub once
 
 ### v0.502.20 — `gallery._distinct_integration_s` (`_montage_tiles`)

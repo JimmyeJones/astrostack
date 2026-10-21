@@ -24,6 +24,11 @@ weighted-mean path. So "worth it" is two measurements and a budget:
    compute for the Stack form's own drizzle caution — canvas area ÷ frame
    footprint — and :func:`samples_per_output_pixel` is this module's copy of that
    arithmetic, guarded against drift by ``tests/test_auto_drizzle_mirror.py``.
+   That average is right for an even raster and wrong for an uneven one (one
+   deep panel lifts it while the rest sit thin), so on a canvas bigger than one
+   frame a cleared average is checked once more against a typical panel's depth
+   read off the subs' own footprints (:func:`footprint_coverage_plane`), and the
+   smaller number decides.
 2. **The subs actually moved sub-pixel between frames**
    (:func:`dither_spread_px` ≥ :data:`AUTO_DRIZZLE_MIN_DITHER_PX` on **both**
    axes). Without sub-pixel variety every sample on an output pixel carries the
@@ -69,6 +74,8 @@ import logging
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+
+import numpy as np
 
 log = logging.getLogger(__name__)
 
@@ -361,6 +368,7 @@ def decide_auto_drizzle(
     measure_dither: Callable[[], DitherSpread | None],
     fits_budget: Callable[[float], bool] | None = None,
     min_samples_per_pixel: int | None = None,
+    measure_panel_depth: Callable[[], float | None] | None = None,
 ) -> AutoDrizzleDecision:
     """"Auto, when worth it", as one pure decision — see the module docstring.
 
@@ -379,12 +387,30 @@ def decide_auto_drizzle(
     pricing a canvas is the stacker's own arithmetic and this module must not
     import it. ``None`` means "don't ask", for a caller that has already decided
     the budget is not its question (the pure tests).
+
+    ``measure_panel_depth()`` answers "how deep is a *typical panel* of this
+    canvas?" from its own coverage (the stacker sums the subs' footprints,
+    :func:`footprint_coverage_plane`). It is asked only on a canvas bigger than
+    one frame whose **average** depth has already cleared the bar, and the
+    smaller of the two is what is judged — because the average is the wrong
+    number on an *uneven* mosaic: a centre panel 1,500 subs deep from
+    single-field nights lifts a 2×2's mean to "468" while the other three
+    panels hold 60 each, and two thirds of the picture would be drizzled at a
+    depth this module's own bar calls bad advice. On an even raster the two
+    agree, so the verdict there is unchanged. Like the dither it is a callable
+    because it costs a WCS read per sub, and a shallow run never pays it.
+    ``None`` from it (nothing could be measured) keeps the average.
     """
     bar = (AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL if min_samples_per_pixel is None
            else int(min_samples_per_pixel))
     per_pixel = samples_per_output_pixel(
         n_frames, dst_shape=dst_shape, ref_shape=ref_shape)
     depth = float(n_frames) if per_pixel is None else per_pixel
+    if (per_pixel is not None and measure_panel_depth is not None
+            and depth >= bar):
+        panel = measure_panel_depth()
+        if panel is not None and math.isfinite(panel) and panel > 0:
+            depth = min(depth, float(panel))
     samples = int(depth) if depth > 0 else 0
     if samples < bar:
         return AutoDrizzleDecision(
@@ -433,6 +459,156 @@ def _largest_scale_that_fits(
             return round(scale, 4)
         scale -= float(AUTO_DRIZZLE_SCALE_STEP)
     return None
+
+
+#: Longest side, in pixels, of the coarse plane :func:`footprint_coverage_plane`
+#: sums the subs' footprints on. The depth it feeds is a *level* of the
+#: coverage distribution (``coverage_trim.panel_coverage_level``), which needs a
+#: few hundred covered pixels per panel and nothing like the canvas's own
+#: resolution: on a 3×3 S30 raster 256 px puts ~5,000 plane pixels in each
+#: panel, and a dither of ±8 canvas pixels moves an edge by under one of them.
+AUTO_DRIZZLE_COVERAGE_PLANE_PX = 512
+
+#: Most subs whose footprints are drawn onto that plane. Above it the subs are
+#: taken at an even stride and each drawn one counts for ``n / drawn`` — the
+#: level is read from the *shape* of the distribution, which a uniform sample of
+#: thousands of footprints reproduces, and drawing all 35,894 of the owner's
+#: deepest target would cost more than the question is worth.
+AUTO_DRIZZLE_COVERAGE_MAX_SUBS = 4000
+
+
+def footprint_coverage_plane(
+    frames: Sequence[object],
+    *,
+    canvas_wcs_text: str | None,
+    dst_shape: tuple[int, int],
+    max_side: int = AUTO_DRIZZLE_COVERAGE_PLANE_PX,
+    max_subs: int = AUTO_DRIZZLE_COVERAGE_MAX_SUBS,
+) -> np.ndarray | None:
+    """How many subs cover each part of a ``dst_shape`` canvas — summed from the
+    subs' own footprints on a coarse plane, **before** anything is reprojected.
+
+    The honest per-pixel depth of an uneven mosaic, which the bounding-box
+    average (:func:`samples_per_output_pixel`) cannot see and the thinnest
+    pointing cluster gets wrong the other way (observer #901: ~0.10× the real
+    depth on 12 of 17 of the owner's mosaics, because overlapping panels share
+    pixels). Each sub's four corners come off its **own** WCS
+    (``footprint_radec_deg``) and are projected through the canvas WCS in one
+    vectorised call; each footprint is then filled as the quadrilateral it is
+    (:func:`_fill_quads`), so a rotated alt-az sub covers what it really covers.
+
+    ``None`` when nothing could be drawn — no usable canvas WCS, a degenerate
+    shape, or no sub with a readable footprint — which the caller reads as "keep
+    the average". Values are frame counts (weighted by ``n / drawn`` once the
+    subs are sampled), ``0`` where no footprint lands.
+    """
+    from seestack.io.wcs_io import footprint_radec_deg, wcs_from_text
+
+    h, w = int(dst_shape[0]), int(dst_shape[1])
+    if h <= 0 or w <= 0 or not frames:
+        return None
+    canvas = wcs_from_text(canvas_wcs_text)
+    if canvas is None:
+        return None
+    try:
+        cel = canvas.celestial
+        if not cel.has_celestial:
+            return None
+    except Exception as exc:  # noqa: BLE001 — a degenerate canvas WCS measures nothing
+        log.warning("Auto-drizzle: canvas WCS unusable (%s)", exc)
+        return None
+    step = max(1, math.ceil(len(frames) / max(1, int(max_subs))))
+    drawn = frames[::step]
+    corners: list[tuple[float, float]] = []
+    for f in drawn:
+        fw = getattr(f, "width_px", None)
+        fh = getattr(f, "height_px", None)
+        text = getattr(f, "wcs_json", None)
+        if not text or not fw or not fh:
+            continue
+        fp = footprint_radec_deg(wcs_from_text(text), int(fw), int(fh))
+        if fp is None or len(fp) != 4 or not all(
+                math.isfinite(a) and math.isfinite(d) for a, d in fp):
+            continue
+        corners.extend(fp)
+    if not corners:
+        return None
+    try:
+        xy = np.asarray(cel.all_world2pix(corners, 0), dtype=np.float64)
+    except Exception as exc:  # noqa: BLE001 — an unprojectable footprint measures nothing
+        log.warning("Auto-drizzle: could not project sub footprints (%s)", exc)
+        return None
+    scale = min(1.0, float(max_side) / float(max(h, w)))
+    ph, pw = max(1, math.ceil(h * scale)), max(1, math.ceil(w * scale))
+    quads = xy.reshape(-1, 4, 2) * scale
+    # Snap to half a plane pixel so the subs a dither barely moved fill one
+    # quad between them rather than one each.
+    keys, counts = np.unique(np.round(quads * 2.0).reshape(-1, 8),
+                             axis=0, return_counts=True)
+    weight = len(frames) / float(len(drawn))
+    plane = _fill_quads((ph, pw), keys.reshape(-1, 4, 2) / 2.0,
+                        counts.astype(np.float64) * weight)
+    if not np.any(plane > 0):
+        return None
+    return plane
+
+
+def _fill_quads(
+    shape: tuple[int, int], quads: np.ndarray, weights: np.ndarray,
+) -> np.ndarray:
+    """Sum ``weights`` over the pixels whose centres fall inside each convex
+    quad (``(n, 4, 2)`` x/y vertices), as a ``shape`` float32 plane.
+
+    A scanline fill: each quad's row span is intersected with its four edges in
+    one vectorised step, and the resulting runs are written as +w/−w steps into
+    a difference array that one cumulative sum along x turns into coverage. A
+    projected sub footprint is a convex quadrilateral, which is what makes two
+    crossings per row the whole story — and it keeps a few thousand footprints
+    to a fraction of a second, where a per-polygon point test was ~7 ms each.
+    """
+    ph, pw = shape
+    diff = np.zeros((ph, pw + 1), dtype=np.float64)
+    all_rows: list[np.ndarray] = []
+    all_lo: list[np.ndarray] = []
+    all_hi: list[np.ndarray] = []
+    all_w: list[np.ndarray] = []
+    for quad, wgt in zip(quads, weights, strict=True):
+        if not np.all(np.isfinite(quad)):
+            continue
+        ys = quad[:, 1]
+        r0 = max(0, math.ceil(float(ys.min())))
+        r1 = min(ph - 1, math.floor(float(ys.max())))
+        if r1 < r0:
+            continue
+        rows = np.arange(r0, r1 + 1, dtype=np.float64)
+        x0, y0 = quad[:, 0], quad[:, 1]
+        x1, y1 = np.roll(x0, -1), np.roll(y0, -1)
+        lo_y = np.minimum(y0, y1)[:, None]
+        hi_y = np.maximum(y0, y1)[:, None]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t = (rows[None, :] - y0[:, None]) / (y1 - y0)[:, None]
+            xs = x0[:, None] + t * (x1 - x0)[:, None]
+        inside = (rows[None, :] >= lo_y) & (rows[None, :] <= hi_y) & (hi_y > lo_y)
+        xs = np.where(inside, xs, np.nan)
+        hit = np.any(inside, axis=0)
+        if not hit.any():
+            continue
+        with np.errstate(invalid="ignore"):
+            lo = np.ceil(np.nanmin(xs[:, hit], axis=0))
+            hi = np.floor(np.nanmax(xs[:, hit], axis=0)) + 1
+        lo = np.clip(lo, 0, pw).astype(np.int64)
+        hi = np.clip(hi, 0, pw).astype(np.int64)
+        keep = hi > lo
+        all_rows.append(rows[hit][keep].astype(np.int64))
+        all_lo.append(lo[keep])
+        all_hi.append(hi[keep])
+        all_w.append(np.full(int(keep.sum()), float(wgt)))
+    if all_rows:
+        r = np.concatenate(all_rows)
+        w = np.concatenate(all_w)
+        np.add.at(diff, (r, np.concatenate(all_lo)), w)
+        np.add.at(diff, (r, np.concatenate(all_hi)), -w)
+    return np.cumsum(diff, axis=1)[:, :pw].astype(np.float32)
 
 
 #: Subs a mosaic panel must hold before its own phase spread is believed. A

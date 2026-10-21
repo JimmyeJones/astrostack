@@ -33,6 +33,7 @@ from seestack.stack.autodrizzle import (
     canvas_pixel_positions,
     decide_auto_drizzle,
     dither_spread_px,
+    footprint_coverage_plane,
     samples_per_output_pixel,
 )
 
@@ -320,3 +321,229 @@ def test_the_dither_is_not_measured_when_the_depth_bar_already_answered():
     decide_auto_drizzle(n_frames=400, ref_shape=FRAME, dst_shape=FRAME,
                         measure_dither=measure)
     assert calls == [1]
+
+
+# --------------------------------------------------------------------------
+# An UNEVEN mosaic: the canvas average is not the depth of a typical pixel.
+# Scout 2026-10-21, QA sweep (2): one deep panel (single-field nights on a
+# mosaic target) lifted the bounding-box average over the 200 bar while two
+# thirds or more of the picture sat under even the 100 warn bar. The shapes
+# below are that probe's, at the S30's own frame size and overlap.
+# --------------------------------------------------------------------------
+
+S30 = (1920, 1080)          # (h, w) — a Seestar S30 sub, portrait
+
+
+class _Sub:
+    def __init__(self, text: str) -> None:
+        self.wcs_json = text
+        self.height_px, self.width_px = S30
+
+
+def _raster(nx: int, ny: int, counts: list[int], *, seed: int = 0,
+            subpixel: bool = False):
+    """An ``nx``×``ny`` S30 raster at 12 % overlap, ``counts[i]`` subs on panel
+    ``i`` (row-major), each dithered ±8 px — as (subs, canvas WCS, canvas shape).
+    ``subpixel`` dithers by fractional pixels and gives each sub its solved
+    centre, which is what the stacker's own dither measurement needs."""
+    pytest.importorskip("astropy")
+    import random
+
+    from tests.synth import make_synth_wcs_text
+
+    rng = random.Random(seed)
+    fh, fw = S30
+    sx, sy = round(fw * 0.88), round(fh * 0.88)
+    w, h = fw + sx * (nx - 1), fh + sy * (ny - 1)
+    canvas = make_synth_wcs_text(width=w, height=h, pixscale_arcsec=3.9)
+    texts: dict[tuple[int, int], str] = {}
+    subs = []
+    for j in range(ny):
+        for i in range(nx):
+            for _ in range(counts[j * nx + i]):
+                if subpixel:
+                    ox = i * sx + rng.uniform(-8, 8)
+                    oy = j * sy + rng.uniform(-8, 8)
+                else:
+                    ox = i * sx + rng.randint(-8, 8)
+                    oy = j * sy + rng.randint(-8, 8)
+                if (ox, oy) not in texts:
+                    texts[(ox, oy)] = make_synth_wcs_text(
+                        width=fw, height=fh, pixscale_arcsec=3.9,
+                        crpix_shift=(w / 2 - ox - fw / 2, h / 2 - oy - fh / 2))
+                subs.append(_Sub(texts[(ox, oy)]))
+    if subpixel:
+        from seestack.io.wcs_io import wcs_image_center_deg_from_text
+
+        for sub in subs:
+            sub.ra_center_deg, sub.dec_center_deg = wcs_image_center_deg_from_text(
+                sub.wcs_json, width=fw, height=fh)
+    return subs, canvas, (h, w)
+
+
+def _decide_on(subs, canvas, shape, *, with_panel_depth: bool = True):
+    from seestack.stack.stacker import coverage_panel_depth
+
+    def panel_depth():
+        plane = footprint_coverage_plane(subs, canvas_wcs_text=canvas,
+                                         dst_shape=shape)
+        return None if plane is None else coverage_panel_depth(plane)
+
+    return decide_auto_drizzle(
+        n_frames=len(subs), ref_shape=S30, dst_shape=shape,
+        measure_dither=lambda: dither_spread_px(_dithered()),
+        measure_panel_depth=panel_depth if with_panel_depth else None)
+
+
+@pytest.mark.parametrize("nx, ny, counts, average", [
+    (2, 2, [1500, 60, 60, 60], 475),
+    (3, 3, [60, 60, 60, 60, 2000, 60, 60, 60, 60], 325),
+    (3, 3, [30, 30, 30, 30, 1500, 30, 30, 30, 30], 228),
+])
+def test_one_deep_panel_does_not_drizzle_a_mosaic_whose_other_panels_are_thin(
+        nx, ny, counts, average):
+    """The bug: each of these clears the 200 bar on its canvas *average* and
+    was drizzled — ×7 the stacking time — though most of the picture holds
+    under a third of that. Judged on a typical panel's depth, none is."""
+    subs, canvas, shape = _raster(nx, ny, counts)
+    before = _decide_on(subs, canvas, shape, with_panel_depth=False)
+    assert before.drizzle is True and before.samples_per_pixel == average
+    out = _decide_on(subs, canvas, shape)
+    assert out.drizzle is False
+    assert out.reason == REASON_TOO_FEW_SAMPLES
+    assert out.samples_per_pixel < 100      # under even the warn bar
+    assert out.samples_per_pixel <= min(counts) * 1.0 + 1
+
+
+@pytest.mark.parametrize("nx, ny, per_panel, drizzles", [
+    (2, 2, 300, True),
+    (3, 3, 300, True),
+    (3, 3, 120, False),
+])
+def test_an_even_raster_keeps_its_verdict(nx, ny, per_panel, drizzles):
+    """Where the average was right, the panel depth agrees with it — and the
+    depth quoted on a yes is the panel's own, which is what a pixel holds."""
+    subs, canvas, shape = _raster(nx, ny, [per_panel] * (nx * ny))
+    before = _decide_on(subs, canvas, shape, with_panel_depth=False)
+    out = _decide_on(subs, canvas, shape)
+    assert before.drizzle is drizzles
+    assert out.drizzle is drizzles
+    if drizzles:
+        assert out.samples_per_pixel == per_panel
+
+
+def test_the_panel_depth_is_only_asked_once_the_average_clears_the_bar():
+    """It costs a WCS read per sub, like the dither: a shallow canvas, and a
+    single field (where the frame count already is the depth), never pay it."""
+    calls = []
+
+    def panel():
+        calls.append(1)
+        return 999.0
+
+    dst = (FRAME[0] * 3, FRAME[1] * 3)
+    decide_auto_drizzle(n_frames=900, ref_shape=FRAME, dst_shape=dst,
+                        measure_dither=lambda: dither_spread_px(_dithered()),
+                        measure_panel_depth=panel)
+    decide_auto_drizzle(n_frames=400, ref_shape=FRAME, dst_shape=FRAME,
+                        measure_dither=lambda: dither_spread_px(_dithered()),
+                        measure_panel_depth=panel)
+    assert calls == []
+    decide_auto_drizzle(n_frames=2700, ref_shape=FRAME, dst_shape=dst,
+                        measure_dither=lambda: dither_spread_px(_dithered()),
+                        measure_panel_depth=panel)
+    assert calls == [1]
+
+
+def test_the_panel_depth_can_only_lower_the_depth_and_none_keeps_the_average():
+    """A panel reading *above* the average (the overlap of a sparse raster)
+    must not talk a shallow canvas into drizzling, and an unmeasurable plane
+    leaves the decision exactly where the average put it."""
+    dst = (FRAME[0] * 2, FRAME[1] * 2)
+    kw = dict(n_frames=1000, ref_shape=FRAME, dst_shape=dst,
+              measure_dither=lambda: dither_spread_px(_dithered()))
+    assert decide_auto_drizzle(**kw).samples_per_pixel == 250
+    assert decide_auto_drizzle(
+        **kw, measure_panel_depth=lambda: 900.0).samples_per_pixel == 250
+    assert decide_auto_drizzle(
+        **kw, measure_panel_depth=lambda: None).samples_per_pixel == 250
+    assert decide_auto_drizzle(
+        **kw, measure_panel_depth=lambda: float("nan")).samples_per_pixel == 250
+
+
+def test_the_footprint_fill_covers_exactly_the_pixels_inside_each_quad():
+    """The scanline fill against an independent point-in-polygon test, on
+    rotated quads (an alt-az sub's footprint turns through the night)."""
+    from skimage.draw import polygon
+
+    from seestack.stack.autodrizzle import _fill_quads
+
+    rng = np.random.default_rng(7)
+    quads = []
+    for _ in range(60):
+        cx, cy = rng.uniform(20, 110, 2)
+        a = rng.uniform(0, math.pi)
+        rot = np.array([[math.cos(a), -math.sin(a)], [math.sin(a), math.cos(a)]])
+        quads.append(np.array([[-25, -40], [25, -40], [25, 40], [-25, 40]]) @ rot.T
+                     + (cx, cy))
+    quads_arr = np.array(quads)
+    weights = rng.uniform(0.5, 3.0, len(quads))
+    ref = np.zeros((96, 128))
+    for q, wt in zip(quads_arr, weights, strict=True):
+        rr, cc = polygon(q[:, 1], q[:, 0], shape=ref.shape)
+        ref[rr, cc] += wt
+    got = _fill_quads(ref.shape, quads_arr, weights)
+    assert np.allclose(got, ref, atol=1e-4)
+
+
+def test_a_sampled_plane_keeps_the_depth_of_the_whole_set():
+    """Past ``max_subs`` the footprints are drawn at a stride and weighted back
+    up, so the deepest targets read their real depth at a bounded cost."""
+    from seestack.stack.stacker import coverage_panel_depth
+
+    subs, canvas, shape = _raster(2, 2, [500] * 4, seed=3)
+    whole = coverage_panel_depth(footprint_coverage_plane(
+        subs, canvas_wcs_text=canvas, dst_shape=shape))
+    sampled = coverage_panel_depth(footprint_coverage_plane(
+        subs, canvas_wcs_text=canvas, dst_shape=shape, max_subs=200))
+    assert whole == pytest.approx(500, rel=0.02)
+    assert sampled == pytest.approx(whole, rel=0.1)
+
+
+def test_no_readable_footprint_draws_no_plane():
+    pytest.importorskip("astropy")
+    from tests.synth import make_synth_wcs_text
+
+    class _Bad:
+        wcs_json = "END"
+        width_px, height_px = FRAME[1], FRAME[0]
+
+    canvas = make_synth_wcs_text()
+    assert footprint_coverage_plane([_Bad()], canvas_wcs_text=canvas,
+                                    dst_shape=FRAME) is None
+    assert footprint_coverage_plane([_Bad()], canvas_wcs_text=None,
+                                    dst_shape=FRAME) is None
+    assert footprint_coverage_plane([], canvas_wcs_text=canvas,
+                                    dst_shape=FRAME) is None
+
+
+def test_the_stacker_judges_an_uneven_mosaic_on_its_panels():
+    """The same uneven 2×2 through the stacker's own wiring — the dither is
+    real and sub-pixel, the panels separate, the budget is the default — so
+    the only thing standing between it and a ×7 drizzle is the depth."""
+    from seestack.stack.stacker import _decide_auto_drizzle
+
+    subs, canvas, shape = _raster(2, 2, [1500, 60, 60, 60], subpixel=True)
+    out = _decide_auto_drizzle(
+        subs, len(subs), ref_shape=S30, dst_shape=shape,
+        dst_wcs_text=canvas, is_mosaic=True, memory_budget_gb=64.0)
+    assert out.drizzle is False
+    assert out.reason == REASON_TOO_FEW_SAMPLES
+    assert out.samples_per_pixel == 60
+
+    even, canvas, shape = _raster(2, 2, [300] * 4, subpixel=True)
+    out = _decide_auto_drizzle(
+        even, len(even), ref_shape=S30, dst_shape=shape,
+        dst_wcs_text=canvas, is_mosaic=True, memory_budget_gb=64.0)
+    assert out.drizzle is True
+    assert out.samples_per_pixel == 300

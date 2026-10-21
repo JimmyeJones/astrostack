@@ -82,28 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟡 (Scout 2026-10-21, QA rotation sweep (2)) — the automatic drizzle's "deep enough?" bar is a canvas
-  *average*, so one deep panel buys ×7 stacking time for a mosaic whose other panels sit below even the warn
-  bar.** *(Pillar: autonomy / image quality — PRIORITY 2/4; size **M**; severity low-to-moderate — hours of
-  extra stacking on the owner's scale for resolution most of the canvas cannot pay for; the run announces the
-  cost and nothing is lost. Confidence: **reproduced** through the real `decide_auto_drizzle`; how many of the
-  owner's mosaics are this uneven is **unmeasured**.)*
-  `seestack/stack/autodrizzle.py::samples_per_output_pixel` is `n_frames ÷ (canvas area ÷ frame area)` —
-  right for an even raster, but a centre panel deep from single-field nights lifts the mean over the 200 bar
-  while the rest of the canvas is thin. Scratch probe (S30 1080×1920 subs, 12 % overlap, ±8 px dither,
-  coverage summed from footprints): even 2×2/3×3 at 300/panel → yes, 0 % of covered canvas < 100 (correct);
-  3×3 at 120/panel → no (correct); **2×2 1500/60/60/60 → yes at "468", 66 % of the covered canvas < 100;
-  3×3 centre 2000 + 8×60 → yes at "322", 77 % < 100; centre 1500 + 8×30 → yes at "226", 87 % < 100**.
-  `AUTO_DRIZZLE_MIN_SAMPLES_PER_PIXEL`'s own docstring calls < 100 the depth where recommending drizzle is
-  "actively bad advice". **Do not fix with the thinnest pointing cluster** (`panel_depth`) — observer #901
-  measured that ~0.10× the real per-pixel depth on 12 of 17 of his mosaics (overlapping panels). The honest
-  number is the canvas's own coverage, which the stacker can sum from the footprints it already has before it
-  reprojects (the probe does it at 1/10 scale in milliseconds): judge the bar on that plane's
-  `stacker.coverage_panel_depth` instead of the mean — on the probe's plane it reads 300 / 300 / 120 on the
-  even rasters (verdicts unchanged) and 60 / 60 / 28 on the three uneven ones (all → no). **Gate:** `Settings.auto_drizzle` is on by default, so this changes what a hands-off
-  run does — ship it only with the probe's shapes as tests *and* the even-raster cases unchanged; how often
-  the owner hits it is an observer count (per `_mosaic_sub` target: largest ÷ median panel count).
-
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
@@ -3613,6 +3591,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.21 **The automatic drizzle no longer says yes to an uneven mosaic on its canvas average — one deep panel lifted a 2×2's mean to "475" while three panels held 60, and the run went ×7 slower for resolution two thirds of the picture couldn't pay for; a cleared average is now checked against a typical panel's depth summed from the subs' own footprints** (`autodrizzle.footprint_coverage_plane`, `decide_auto_drizzle(measure_panel_depth=…)`, `stacker._decide_auto_drizzle` → `coverage_panel_depth`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.20 **"My deep-sky wall"'s title counts a sub two targets registered (#878's mosaic twins) once — it printed twice the light ever collected when twins shared the wall** (`gallery._distinct_integration_s`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.19 **The Sky map's built-in viewer centres an un-trimmed picture on its own canvas, not the target's registry RA/Dec — a re-framed night below the 1 % panel share widened the union canvas and drew the tile ~0.3–0.45° off its stars, while the Aladin view placed it right** (`routers/sky.get_sky`, `wcs_io.cropped_center_radec_from_fits` with a whole-canvas crop).
 - ✅ v0.502.18 **The border trim on a big mosaic no longer keeps a band of no-coverage (black) pixels along its right/bottom edge — the strided map's rectangle now ends at the last sample it saw and is walked in against the full-res map's edge strips** (`editor._full_res_trim_rect`, `coverage_trim.sampled_rect_to_full_res` / `shrink_rect_to_covered`).
