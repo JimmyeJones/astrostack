@@ -1,5 +1,57 @@
 # Shipped — the record
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-2g76hl`) — the deepening reel places earlier nights by their WCS
+
+### v0.502.23 — `deepening._sky_affine`, `_place_on_sky`, `_unify_frame`
+
+**What.** `render_deepening_frames` brought every earlier frame onto the newest one's canvas with `_fit_onto`
+(fit whole + centre), which never read the WCS every master carries. Now each earlier frame goes through
+`_unify_frame`: when both masters carry a celestial WCS, `_sky_affine` walks a 3×3 grid of the newest (decimated)
+frame pixel → sky → source pixel, least-squares fits an affine (converting between the decimated reel frame and the
+full-res WCS at both ends, in Pillow's `i + 0.5` pixel convention), and `_place_on_sky` draws the frame with
+`Image.transform(AFFINE)` on black (= no data, as before), box-shrinking first when the source is drawn at under
+~⅔ of its decimated size so stars are averaged, not point-sampled. **Fallbacks, never a guess:** either master
+without a WCS (a pre-WCS master, an editor export whose recipe rotated — `_edit_export_wcs_text` writes none), a
+point that does not project, or a frame whose sky lands nowhere on the newest canvas → `_fit_onto` exactly as
+before. A frame already on the reference grid (same size, identity within 0.5 px at every corner) is returned
+untouched, so an unchanged single-field re-stack is byte-for-byte the old reel. The router's reel signature tag
+`v2-labels` → `v3-sky` so cached reels rebuild.
+
+**Measured** (scratch, owner's panel shape 1080×1920, 1024-px reel): star centroid night 1 vs night 2 — 2×1
+(2140×1920) 33.16/61.97 vs 33.28/62.09; 2×2 (2140×3820) 33.30/62.10 vs 33.28/62.09 (was ~60 reel px apart on the
+2×1, magnified ~1.85× on the 2×2). Render time 0.5 s / 0.8 s for the pair.
+
+**Tests** (+5, `tests/test_deepening_reel.py`): the 2×1 and 2×2 probe shapes at quarter size (star within 1 reel
+px in every frame, the 2×2 panel filling its own quarter's width) — **both fail before the fix**; the unchanged
+single field byte-for-byte equal to the same masters without a WCS; a WCS-less earlier frame identical to the old
+fit-and-centre; and two non-overlapping skies falling back rather than drawing black (fails with the overlap guard
+removed). No config, schema, on-disk, default or API-shape change.
+
+**The Bugs entry, as filed:**
+
+- **🟡 (Scout 2026-10-21, QA rotation sweep (4)) — the "night after night" reel (`/api/targets/{safe}/deepening-reel`)
+  draws an earlier, smaller canvas centred and blown up instead of where it sits in the sky, so on a mosaic that grew
+  panel by panel the object jumps sideways and zooms between frames.** *(Pillar: enjoy / share — PRIORITY 3; size
+  **M**; severity low-to-moderate — the share clip that exists to show "the same object getting cleaner" shows it
+  moving and changing size instead; no data is touched. Confidence: **reproduced** through the real
+  `render_deepening_frames` on FITS of the owner's panel shape; occurrence on his library unmeasured, but a mosaic
+  whose panels came in on different nights is exactly his shooting style.)*
+  `seestack/render/deepening.py::render_deepening_frames` sizes every frame to the newest one with `_fit_onto`, which
+  scales each picture to *fit* the newest canvas and centres it — it never reads the WCS every master carries
+  (`stack/output._write_fits`). That is right only when an earlier canvas is the newest one's exact shape and place.
+  Scratch repro, a 1080×1920 S30 panel (night 1) against the mosaic it became (night 2), one star at the same sky
+  position in both: **2×1** (1080 → 2000 px wide) — the star sits at x≈489 in the night-1 frame and x≈255 in the
+  night-2 frame of a 1024-px reel (true x 256: **~23 % of the reel's width** of sideways jump); **2×2** (→ 2000×3600)
+  — night 1 is drawn at (473, 863) against the true (256, 461): the single panel is **magnified ~1.85×** to fill the
+  whole frame, because `_fit_onto`'s `min(tw/w, th/h)` scale is 1 when the canvas grew in both directions. A
+  single field with a re-framed night (the union canvas grows on one side) shifts the same way, by less.
+  **Fix shape:** place each frame on the newest frame's pixel grid through the two WCS headers (an affine from three
+  points pixel→sky→pixel is enough for a reel; `PIL.Image.transform(AFFINE)` on the already-decimated image, black =
+  no data as now), and keep `_fit_onto` as the fallback for a frame without a usable WCS. Check an editor export in
+  the series (`display_space`) — a cropped or North-up-turned export must carry a matching WCS or fall back. Test:
+  the two probe shapes above (star within ~1 reel px of its night-2 position in every frame) plus the unchanged
+  single-field case byte-for-byte. Bump `DEEPENING_SERIES_VERSION` or the signature tag so cached reels rebuild.
+  Ungated.
 ## 2026-10-21 (Scout, branch `claude/zen-curie-j1f6lp`) — the Gallery's batch "Apply preset to selected" refused every preset of his own
 
 ### v0.502.22 — `routers/editor.batch_apply` → `_user_preset_recipe`
