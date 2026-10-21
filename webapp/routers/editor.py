@@ -872,6 +872,30 @@ def create_preset(body: PresetCreate, request: Request) -> dict:
     return preset
 
 
+def _user_preset_recipe(request: Request, preset_id: str):
+    """The user's saved preset ``preset_id`` as a validated ``Recipe``, or ``None``
+    when there is no such preset (or the store is unreadable)."""
+    lib = deps.open_library(request)
+    try:
+        raw = lib.get_meta(USER_PRESETS_META_KEY)
+    finally:
+        lib.close()
+    try:
+        existing = json.loads(raw) if raw else []
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(existing, list):
+        return None
+    preset = next((p for p in existing
+                   if isinstance(p, dict) and p.get("id") == preset_id), None)
+    if preset is None:
+        return None
+    try:
+        return recipe_from_dict({"ops": preset.get("ops") or []})
+    except (ValueError, TypeError):
+        return None
+
+
 @router.delete("/api/editor/presets/{preset_id}")
 def delete_preset(preset_id: str, request: Request) -> dict:
     lib = deps.open_library(request)
@@ -3007,6 +3031,12 @@ def batch_apply(body: BatchRequest, request: Request) -> dict:
     recipe = body.recipe
     if recipe is None and body.preset_id:
         pr = presets_mod.preset_recipe(body.preset_id)
+        if pr is None:
+            # Not a built-in: the Gallery's "Apply preset to selected" menu lists
+            # the user's own saved presets too ("My presets"), stored in the
+            # library — looking only at the built-ins answered every one of them
+            # with a 404.
+            pr = _user_preset_recipe(request, body.preset_id)
         if pr is None:
             raise HTTPException(status_code=404, detail="Unknown preset")
         recipe = pr.to_dict()

@@ -2852,6 +2852,29 @@ def test_batch_apply(client, solved_library):
     assert len(job["result"]["exported"]) == 2
 
 
+def test_batch_apply_user_preset(client, solved_library):
+    """The Gallery's "Apply preset to selected" menu offers the user's own saved
+    presets ("My presets") by id; the batch must find them, not 404."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    r1 = _make_run(solved_library, safe, basename="a")
+    created = client.post("/api/editor/presets", json={
+        "label": "My Look",
+        "ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}],
+    }).json()
+    r = client.post("/api/editor/batch", json={
+        "items": [{"safe": safe, "run_id": r1}], "preset_id": created["id"],
+    })
+    assert r.status_code == 200, r.text
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job
+    assert len(job["result"]["exported"]) == 1
+    # A preset id that is neither built-in nor saved is still refused.
+    r = client.post("/api/editor/batch", json={
+        "items": [{"safe": safe, "run_id": r1}], "preset_id": "user_nope",
+    })
+    assert r.status_code == 404
+
+
 def test_export_png_full_res_download(client, solved_library):
     import io
 

@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-j1f6lp`) — QA rotation sweep (1), scale-dependent parity, taken off the editor's own ops onto the paths that put one look on *another* canvas (export resizers, batch presets, the previous-run seed): one bug filed reproduced, one Scout-fixed (v0.502.22). Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
+
+- **Suite:** 8167 passed / 7 skipped on `e0ee8290` + this run's change (xdist `-n 4`, BLAS capped, Qt-skip fallback, 16m46s). **Env:** `agent-setup.sh` hit the 30-min background limit downloading the `gui` extras
+  (~250 KB/s on the PySide6 wheels); installed `.[dev,web]` + `pytest-xdist` directly and ran the Qt-skip fallback.
+  **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No
+  open PRs at start. **Dogfood `--mosaic --editor`:** CLEAN (trim 7.9 %, every Add-menu op re-renders, undo applied,
+  Auto taste row live, nothing overflowing, no console errors).
+- **Sweep (1).** The editor-op parity angles are well mined (every `scaled_px` op, loupe, highlights, suggestions, strided
+  trim/heal), so this one asked where a look made on one grid lands on a *different* grid. **(a) Export resizers** —
+  `write_share_jpeg` (LANCZOS ≤2048), `printexport.render_print` (LANCZOS fit + letterbox) and
+  `render_run_recipe_fullres_png` (BOX ≤8000) all `nan_to_num` before resampling, so a mosaic's gaps can't spread NaN;
+  `print-sizes` sizes off the uncropped canvas, a documented optimism the export re-checks. Holds. **(b) The batch
+  preset path** — `POST /api/editor/batch` resolved `preset_id` through the built-in table only, while the Gallery menu
+  sends "My presets" ids too: every saved look 404'd. Scout-fixed as v0.502.22 (`_user_preset_recipe`), test red before.
+  **(c) The "Use my previous edit" seed** — `previous_recipe` returns the old run's crop as raw fractions; only the
+  reprocess-all carry re-aims it (`_recrop_for_new_canvas`, v0.501.8/11). On `test_reprocess_all`'s grown-canvas fixture
+  the button frames x 36–324 px against the 160 px he framed (20–180). Filed at the end of Bugs, size S, ungated.
+- **Not yet run in a sweep (1):** "Use my default" (the library-wide house style) carrying a `geometry.crop` onto every
+  target — a crop is canvas-specific, so a default saved off a cropped edit may want the crop stripped on save or seed;
+  needs a read of what `Editor.tsx` offers on save before it is a bug.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-idzsf4`) — QA rotation sweep (4), the `stack` router's deepening reel: one bug filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8173 passed / 7 skipped on `31bd9a01` (xdist `-n 4`, BLAS capped, 16m08s). **Inbox:** the same four (#878, #880,
