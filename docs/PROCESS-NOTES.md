@@ -1,5 +1,26 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-b7kb1h`) — QA rotation sweep (3), new angle — a solve pool worker SIGKILLed *by its own ASTAP child* mid-solve, through v0.502.10's broken-pool retry (`scanner._map_jobs`): CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8161 passed / 7 skipped on `aeaf21c3` (xdist `-n 4`, BLAS capped, 17m07s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+  owner-gated — nothing owed. No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing,
+  no console errors). (The setup script's first `pip install` hung again, ~10 min; killing it let the
+  `--timeout 120 --retries 5` fallback finish.)
+- **Sweep (3).** The 10-20 `myk6ia` sweep SIGKILLed a worker from *outside*; v0.502.10 then added the one-shot retry.
+  No (3) had driven the retry itself with ASTAP still running. Real `_map_jobs(solve_one, …)` (4 workers) over a
+  `M 42_mosaic_sub/` of 8 subs in an `incoming/` tree, `TMPDIR` redirected; a stub ASTAP that SIGKILLs its parent
+  worker, keeps running as an orphan for 1.5 s and then writes `.wcs`/`.ini` beside its `-f`. Three modes: **ok**
+  (8/8 solved, temp dir empty); **killonce** (each of the 4 "b"-panel names kills its worker on first sight: two pools
+  break, 6 reported solved, 2 reported failed — bounded, every job reported once); **killalways** (a "b" sub kills
+  every time: 3 solved, 5 failed, the retry pool breaks once more and stops). Every mode: `incoming/` byte-, mtime-
+  and mode-identical, no file added there, no stub left alive. The only residue is the expected one: each worker a
+  broken pool took down (the killer *and* the innocent in-flight neighbours the executor terminates) leaves its
+  `astrostack-solve-*` dir holding a scratch copy plus the orphan's sidecars — 4 and 3 dirs here — which is exactly
+  what `sweep_stale_solve_scratch` reaps at the next start once 6 h old. Not filed: on a container that is never
+  restarted those copies sit in `/tmp` until it is, but at one ~4 MB S30 sub per in-flight worker per crash the cost
+  is small next to the code a periodic sweep would add. `seestack/plan.py`'s second solve pool is reached only by the
+  desktop GUI, not the webapp. **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-50ebr3`) — QA rotation sweep (2), new angle — the automatic drizzle's depth bar (`autodrizzle.samples_per_output_pixel` → `decide_auto_drizzle`) on *uneven* S30 mosaics: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8161 passed / 7 skipped on `c652a141` (xdist `-n 4`, BLAS capped, 16m50s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
