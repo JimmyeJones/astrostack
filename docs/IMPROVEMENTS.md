@@ -539,6 +539,10 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   read. Regression test: a full-res map with a sharp right/bottom edge at a non-multiple of the step, assert no
   non-finite pixel inside `crop_bounds` of `_trim_rect_for_run`. **Observer can size it:** for each mosaic
   run with a saved `geometry.crop`, count non-finite `_framecov.fits` pixels inside the crop.
+  _(Independently re-found the same day by Scout `kzjdcj`: owner-scale S30 2×2, 1080×1920 panels, ±40 px pointing,
+  ±3° field rotation, 2330×3910 → step 8: NaN inside the crop on **8 of 10** canvases (7–1721 px; step 1 → 0 on all
+  10), confirmed in the real `apply_recipe` output. Make the regression map's edge **rotated**: a slant between
+  sampled rows can in principle reach the left/top edge too, which fix (a) alone would not cover.)_
 
 ---
 
