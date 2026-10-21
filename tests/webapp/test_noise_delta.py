@@ -21,8 +21,13 @@ from webapp import noise_delta_cache
 
 def _add_stack(root, safe: str, name: str, *, subs: int, when: str,
                noise: float, seed: int, size: int = 300,
-               display_space: bool = False, write_fits: bool = True) -> int:
-    """Write a synthetic linear master and register a stack run for it."""
+               display_space: bool = False, write_fits: bool = True,
+               sky_offset: tuple[int, int] | None = None) -> int:
+    """Write a synthetic linear master and register a stack run for it.
+
+    ``sky_offset`` gives the master a TAN WCS whose pixel ``(0, 0)`` sits at
+    ``(y, x)`` on one shared tangent plane, so masters of different sizes are
+    pieces of the same sky (a grown mosaic)."""
     lib = Library.open_or_create(root / "library")
     try:
         tdir = lib.target_dir(lib.find_target(safe))
@@ -38,6 +43,14 @@ def _add_stack(root, safe: str, name: str, *, subs: int, when: str,
             hdu = fits.PrimaryHDU(data=cube)
             if display_space:
                 hdu.header[DISPLAY_SPACE_CARD] = True
+            if sky_offset is not None:
+                oy, ox = sky_offset
+                hd = hdu.header
+                hd["CTYPE1"], hd["CTYPE2"] = "RA---TAN", "DEC--TAN"
+                hd["CRVAL1"], hd["CRVAL2"] = 83.8, 22.0
+                hd["CRPIX1"], hd["CRPIX2"] = 500.0 - ox, 500.0 - oy
+                hd["CD1_1"], hd["CD2_2"] = -3.0e-4, 3.0e-4
+                hd["CD1_2"], hd["CD2_1"] = 0.0, 0.0
             hdu.writeto(fp, overwrite=True)
         proj = lib.open_target(safe)
         try:
@@ -135,10 +148,32 @@ def test_an_unknown_run_is_a_404_on_both_endpoints(client, solved_library):
         f"/api/targets/{safe}/noise-delta?a={real}&b=999999").status_code == 404
 
 
-def test_a_grown_canvas_still_draws_but_withholds_the_number(client, solved_library):
-    # A mosaic that widened (or a drizzled restack) gives two different canvas
-    # shapes, so one crop has to be resized to sit beside the other. The picture is
-    # still fair; the sigma ratio would not be, and must be null.
+def test_a_grown_canvas_is_carried_through_the_wcs(client, solved_library):
+    # A mosaic that widened gives two different canvas shapes. With both masters
+    # solved, the older crop is the same sky at the same pixel scale — the same
+    # native box, nothing resized — so the picture is drawn and the sigma ratio's
+    # sampling rule holds.
+    noise_delta_cache.clear()
+    safe = _safe(client)
+    old = _add_stack(solved_library, safe, "s1", subs=120,
+                     when="2026-05-12T00:00:00Z", noise=0.030, seed=9, size=300,
+                     sky_offset=(60, 60))
+    new = _add_stack(solved_library, safe, "s2", subs=505,
+                     when="2026-05-20T00:00:00Z", noise=0.005, seed=10, size=420,
+                     sky_offset=(0, 0))
+
+    body = client.get(f"/api/targets/{safe}/noise-delta/info?a={new}&b={old}").json()
+    assert body["available"] is True
+    assert body["pixel_exact"] is True
+    assert body["noise_ratio"] is not None and body["noise_ratio"] > 1.0
+    assert client.get(
+        f"/api/targets/{safe}/noise-delta?a={new}&b={old}").status_code == 200
+
+
+def test_a_grown_canvas_without_a_wcs_self_hides(client, solved_library):
+    # The same two shapes unsolved: a canvas fraction of a grown mosaic is a
+    # different piece of sky, so the card is told there is no picture and the PNG
+    # agrees, rather than drawing two patches as if they were one.
     noise_delta_cache.clear()
     safe = _safe(client)
     old = _add_stack(solved_library, safe, "s1", subs=120,
@@ -147,11 +182,9 @@ def test_a_grown_canvas_still_draws_but_withholds_the_number(client, solved_libr
                      when="2026-05-20T00:00:00Z", noise=0.005, seed=10, size=420)
 
     body = client.get(f"/api/targets/{safe}/noise-delta/info?a={new}&b={old}").json()
-    assert body["available"] is True
-    assert body["pixel_exact"] is False
-    assert body["noise_ratio"] is None
+    assert body["available"] is False
     assert client.get(
-        f"/api/targets/{safe}/noise-delta?a={new}&b={old}").status_code == 200
+        f"/api/targets/{safe}/noise-delta?a={new}&b={old}").status_code == 404
 
 
 def test_the_cache_is_invalidated_when_a_master_is_rewritten(client, solved_library):

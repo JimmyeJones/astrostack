@@ -2569,12 +2569,15 @@ async def noise_delta_info(safe: str, request: Request,
     newest) and ``b`` (the one before it), plus what may be said about it.
 
     ``available`` is ``false`` — never an error — when either side is a
-    display-space editor export, a canvas is too small to yield a patch, or no
-    patch of sky is covered in both. ``noise_ratio`` (sigma of ``b`` over sigma of
-    ``a``, so >1 means the newer picture is cleaner) is ``null`` unless
-    ``pixel_exact``: when the two canvases differ, one crop has to be resized to
-    be shown beside the other, and a resize lowers the resampled side's per-pixel
-    grain for reasons that have nothing to do with stacking.
+    display-space editor export, a canvas is too small to yield a patch, no
+    patch of sky is covered in both, or the two canvases differ in shape and
+    either master has no WCS to carry the patch across (a canvas fraction of a
+    grown mosaic is a different piece of sky). ``noise_ratio`` (sigma of ``b``
+    over sigma of ``a``, so >1 means the newer picture is cleaner) is ``null``
+    unless ``pixel_exact``: when the two pixel scales differ (a drizzled
+    restack), one crop has to be resized to be shown beside the other, and a
+    resize lowers the resampled side's per-pixel grain for reasons that have
+    nothing to do with stacking.
 
     Builds the picture (cached) rather than guessing, because every one of those
     answers is a property of the pixels; the PNG beside it then costs nothing.
