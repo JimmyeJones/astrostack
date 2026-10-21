@@ -13,18 +13,14 @@ reproduced and **ungated** — a Builder can start any of them without the owner
 1. 🟡 **Size M — on an uneven mosaic the closing-season card and `perPixel.ts`'s consumers still quote the canvas
    mean as "a typical part"** — the planner half shipped v0.502.29 (`LibraryTarget.depth_fulls`,
    `nightplan._panel_depth_fulls`); serve `webapp.field_fulls.target_depth_fulls` beside `field_fulls` on the rest.
-2. 🟡 **Size M — the "did it get better?" matched-crop picture maps its crop by canvas fraction on a grown mosaic**
-   (`noisedelta.build_noise_delta`); place by both masters' WCS (`wcs_io.crop_reprojected_between_fits`), as
-   v0.502.23/.24 did for the reel and the previous-edit crop.
-
-3. 🟡 **Size S — the share/print nameplate and the share caption date a run UTC noon-to-noon when Settings has no
+2. 🟡 **Size S — the share/print nameplate and the share caption date a run UTC noon-to-noon when Settings has no
    location** (`pipeline._nameplate_fields`, `capture_night_range`); resolve the longitude the way
    `resolve_site_lon` does (v0.502.28 fixed the sky-brightness card the same way).
-4. 🟠 **Size M (stack hot path) — on an S30 strip ≥ 3 panels long with one end holding the median, the stacker
+3. 🟠 **Size M (stack hot path) — on an S30 strip ≥ 3 panels long with one end holding the median, the stacker
    rejects a whole real panel as "bad plate-solve"; the mixed-pointing guard calls a gapped strip two targets**
    (`mosaic._footprint_outlier_indices` `OUTLIER_FLOOR_DEG`, `pointings.LINK_DIST_DEG` — both 3°, sized for a 1.3° field);
    scale both from the solved footprints. Measured change, not a blind flip — read the entry's test list first.
-5. 🟡 **Size S — a Moon & Sun capture cut short (still copying) stacks silently from the frames ffmpeg could read and
+4. 🟡 **Size S — a Moon & Sun capture cut short (still copying) stacks silently from the frames ffmpeg could read and
    stays "current" after the file completes** (`lucky.grade_video` vs `probe_video`'s exact `n_frames`;
    `VideoStackMeta` has no source stamp); warn when the count falls short, stamp the result like the grade.
 
@@ -42,6 +38,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-21 (Builder, branch `claude/festive-knuth-ykn52w`) — **v0.502.32: the "did it get better?" matched-crop picture carries its patch through both masters' WCS on a grown mosaic** (`noisedelta._sky_mapper`; same sky, same native box, σ ratio honest; unsolved different-shaped pair self-hides). **START HERE NEXT RUN:** Builder: item 3 (S30 outlier floor), 4 or 1.*
 *2026-10-21 (Scout, branch `claude/zen-curie-66kbiz`) — **QA rotation sweep (1), new angle: the one-frame reveal on an
 auto-edited mosaic cut the raw sub by the canvas's Auto trim fractions (480×320 → 298×320 on a missing-panel trim) —
 Scout-fixed v0.502.31 (`routers/stack._render_sub_through_recipe` → `_without_saved_crop`).** Inbox: the same four,
@@ -96,7 +93,7 @@ item (shipped v0.502.27). **Rotation: (3) done → next sweep is (4).***
   `seestack/stack` or `seestack/calibrate` until a new bug is found there (AGENTS.md).
 - **Grown-canvas rule:** anything that puts one run's look, crop or picture onto another run's canvas places it by
   both masters' WCS and falls back (or hides itself) without one — v0.502.23 (reel) and v0.502.24 (previous-edit
-  crop) are the pattern; item 2 above is the last known surface.
+  crop) are the pattern; the noise-delta picture (v0.502.32) was the last known surface.
 
 ## How the owner gets builds now
 
