@@ -517,6 +517,33 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
   scratchpad (`wcs_repro.py`).)_
 
+- **🟡 (Scout 2026-10-21, QA rotation sweep (1)) — the border trim reads a point-sampled coverage map, so its
+  right and bottom edges can reach up to one stride past the last covered sample and keep a band of
+  no-coverage pixels on the export.** *(Pillar: editor — PRIORITY 1; size **S**; severity low — a thin black
+  band along one or two edges of a trimmed mosaic, visible at 1:1 on the export; nothing lost. Confidence:
+  **reproduced** through the real `webapp.routers.editor._trim_rect_for_run`; prevalence on the owner's maps
+  **unmeasured**.)* `_load_run_frame_counts_strided` / `_load_run_coverage_strided` read the map at
+  `_trim_step_for` = ceil(max dim / `_TRIM_MAX_DIM` 512) via `proxy._load_map`'s `cov[::step, ::step]`, and
+  `coverage_trim._rect_from_mask` returns `c1 / w` with `c1` *exclusive*: the crop ends at pixel `c1·step`,
+  while only `(c1-1)·step` was ever seen covered — up to `step-1` unseen columns (rows) on the right (bottom).
+  The left/top edges err the safe way. Repro (scratch, sharp-edged 2×2 frame-count maps, `crop_bounds` applied
+  to the full-res map, NaN counted inside the crop): **7200×4800 (step 15), ±6 px dither → 41,853 NaN px, a
+  7-row band across the whole bottom edge**; 9000×6000 (step 18) no dither → a 9-px column on the right, ±8 px
+  → 2 px, ±16 px → clean; 1° field rotation, no dither → 12,084 NaN px (16 px deep on the right) vs **23** at
+  step 2. The bundled 2×2 sample (907×615, step 2, wide ramp) is clean — the band appears only where the edge
+  ramp from no coverage to half a panel is narrower than one stride, so it grows with canvas size. Feeds Auto's
+  appended `geometry.crop`, the "Trim border" button and `crop_health_for_run` alike. **Fix shape (Builder's
+  call):** (a) bound the rectangle by what was sampled — `x1 = ((c1-1)·step + 1) / W` on the *full-res* width
+  (which also removes the `c/ceil(W/step)` vs `c·step/W` drift), trimming at most one stride more; or (b) read
+  the map block-min-pooled (NaN-propagating) instead of point-sampled, keeping more but costing a full-map
+  read. Regression test: a full-res map with a sharp right/bottom edge at a non-multiple of the step, assert no
+  non-finite pixel inside `crop_bounds` of `_trim_rect_for_run`. **Observer can size it:** for each mosaic
+  run with a saved `geometry.crop`, count non-finite `_framecov.fits` pixels inside the crop.
+  _(Independently re-found the same day by Scout `kzjdcj`: owner-scale S30 2×2, 1080×1920 panels, ±40 px pointing,
+  ±3° field rotation, 2330×3910 → step 8: NaN inside the crop on **8 of 10** canvases (7–1721 px; step 1 → 0 on all
+  10), confirmed in the real `apply_recipe` output. Make the regression map's edge **rotated**: a slant between
+  sampled rows can in principle reach the left/top edge too, which fix (a) alone would not cover.)_
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)

@@ -1,5 +1,34 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-kzjdcj`) — QA rotation sweep (1) **collided** with `claude/zen-curie-c7en94` (#1238) on the same finding (the strided border trim's high edge); folded in as a confirmation, nothing new filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8144 passed / 7 skipped on `7b6b5655` (xdist `-n 4`, BLAS capped, 15m47s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors).
+- **Sweep (1)** took the lead `q3d8cd` recorded (`trim-suggestion`/`crop-health` on a strided map) and found what
+  `c7en94` found an hour earlier: `_trim_rect_for_run` at `_TRIM_MAX_DIM` stride keeps uncovered px past the exclusive
+  `c1`. This run's added data — rotated alt-az panels at the owner's S30 2×2 scale, 8 of 10 canvases, through the real
+  `apply_recipe` — went onto #1238's entry as one note. Both runs started from the same FOCUS line naming the same lead
+  within hours: **a lead written as "not yet run in a sweep (1): X" is a claim on X for the next Scout of that rotation,
+  and two concurrent Scouts on one rotation slot will both take it — fetch `origin/main` again before filing.**
+- **Rotation: (1) done → next sweep is (2)** (unchanged from #1238).
+
+## 2026-10-21 (Scout, branch `claude/zen-curie-c7en94`) — QA rotation sweep (1), scale-dependent parity, on the lead the 10-20 `q3d8cd` (1) named — `trim-suggestion` / `crop-health` on a strided coverage map: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8144 passed / 7 skipped on `7b6b5655` (xdist `-n 4`, BLAS capped, 15m53s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+  owner-gated — nothing owed. No open PRs. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console
+  errors).
+- **Sweep (1).** The trim is measured once, on a map strided to ≤ 512 px (`_trim_step_for`, point-sampled by
+  `proxy._load_map`), and stored as fractions, so proxy and export apply the same crop (`crop_bounds` parity was the
+  10-19 `uq5tak` sweep's). What no sweep had asked: does the stride-measured rectangle hold on the *full-res* map it is
+  applied to? Not on its exclusive edges — `_rect_from_mask` reports `c1/w`, so the crop runs `step-1` unseen pixels past
+  the last covered sample on the right and bottom. Real `_trim_rect_for_run` on a written `_framecov.fits`, 7200×4800,
+  ±6 px dither: 41,853 NaN px, a 7-row band across the bottom. Clean once the edge ramp is wider than a stride (±16 px at
+  step 18; the bundled 2×2 sample). Filed at the end of Bugs, low, S, with a fix shape and an observer measurement.
+  `PANEL_LEVEL_MIN_PIXELS` (an absolute 256) checked as a second scale-dependent suspect: no caller evaluates it on both the
+  proxy grid and the export grid (trim ≤ 512 px, stack-time ≤ 2 MP), so it cannot split preview from export — CLEAN.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-pulzp7`) — backlog dry of ungated work; big-picture dogfood `--mosaic --editor` CLEAN; one XS fix (v0.502.17).
 
 - **Suite:** 8144 passed / 7 skipped on `7b6b5655` (xdist `-n 4`, BLAS capped, 16m47s). No open PRs. Every Bugs entry is
