@@ -1249,8 +1249,18 @@ class LibraryTarget:
     # each panel is a quarter done. ``None`` for a catalog row, for a target
     # with no stacked picture yet, and on an older backend — the row then
     # falls back to the un-scaled goal (today's behaviour). Purely annotation:
-    # it never affects scoring or ranking.
+    # it never affects scoring or ranking, except beside a ``depth_fulls`` that
+    # says the raster is uneven (:func:`_panel_noise_gain`).
     field_fulls: float | None = None
+    # The divisor that turns this target's total into what a *typical part* of
+    # its picture holds: the newest stacking run's ``n_frames_used ÷
+    # coverage_median_depth`` (:func:`webapp.field_fulls.target_depth_fulls`).
+    # ``field_fulls`` is an *area* ratio, i.e. a canvas mean, which on an uneven
+    # mosaic (a grown raster, a deep field merged with a thin one) sits far
+    # above the median pixel. Read only where the canvas spans more than one
+    # field (:func:`_panel_depth_fulls`); ``None`` — an older run, a single
+    # field — keeps the area ratio, which is what the planner always used.
+    depth_fulls: float | None = None
     # "Last time this landed off-centre — nudge a little south before you start."
     # The framing advice from this target's newest finished picture. It exists
     # today only on the card a beginner reads the morning after, by which point
@@ -2372,8 +2382,65 @@ def noise_gain_from_more_time(total_exposure_s: float,
 
 def _depth_component(total_exposure_s: float) -> float:
     """0..1 "would more subs clearly help?" term (see ``noise_gain_from_more_time``)."""
-    gain = noise_gain_from_more_time(total_exposure_s)
+    return _depth_component_of_gain(noise_gain_from_more_time(total_exposure_s))
+
+
+def _depth_component_of_gain(gain: float) -> float:
+    """:func:`_depth_component` for a gain already computed (per panel, on a mosaic)."""
     return float(np.clip(gain / _WORTHWHILE_NOISE_GAIN, 0.0, 1.0))
+
+
+def _panel_depth_fulls(field_fulls: float | None,
+                       depth_fulls: float | None) -> float | None:
+    """The divisor that turns a target total into what a typical part of it holds.
+
+    ``field_fulls`` (an area ratio) is a canvas **mean**: exact for an evenly
+    shot raster, but a grown mosaic (2x2 for six hours, then a 3x3 for one) or a
+    deep single field merged with a thin raster has most of its picture far
+    below it — the planner quoted "about 55 min on a typical part" over a picture
+    whose median pixel holds 13. ``depth_fulls`` is the measured counterpart
+    (``n_frames_used ÷ coverage_median_depth`` of the same run), so where the
+    canvas spans more than one field and the run carries it, it wins.
+
+    A single field, and an older run with no median recorded, return
+    ``field_fulls`` unchanged — so every sentence and score on those rows is
+    byte-for-byte what it was. A ``depth_fulls`` below one would claim a typical
+    pixel holds *more* than every sub ever taken; it is refused the same way.
+    """
+    if not _spans_more_than_one_field(field_fulls):
+        return field_fulls
+    if depth_fulls is None:
+        return field_fulls
+    try:
+        d = float(depth_fulls)
+    except (TypeError, ValueError):
+        return field_fulls
+    if not math.isfinite(d) or d < 1.0:
+        return field_fulls
+    return d
+
+
+def _panel_noise_gain(total_exposure_s: float, field_fulls: float | None,
+                      depth_fulls: float | None,
+                      extra_hours: float = _EXTRA_HOURS) -> float:
+    """:func:`noise_gain_from_more_time`, read for a typical part of a mosaic.
+
+    Another hour spread over a canvas of ``F`` fields of sky reaches each patch
+    as ``h/F``; the patch already holds ``T/D`` (``D`` from
+    :func:`_panel_depth_fulls`). On an evenly shot raster ``D ≈ F`` and the
+    ``F`` cancels — the figure is exactly the whole-target one, and with no
+    measured ``D`` it is that figure by construction. On an uneven raster it
+    does not cancel: a grown 3x3 whose typical patch holds 13 min gains far
+    more from an hour than its total says, and the total had been sinking it
+    to the bottom of "Worth more time".
+    """
+    scale = _panel_depth_fulls(field_fulls, depth_fulls)
+    # Compared by identity, not ``==``: a NaN scale is "one field" too, and NaN
+    # never equals itself.
+    if scale is None or scale is field_fulls:
+        return noise_gain_from_more_time(total_exposure_s, extra_hours)
+    have_s = max(0.0, float(total_exposure_s or 0.0)) / scale
+    return noise_gain_from_more_time(have_s, extra_hours / float(field_fulls))
 
 
 def _sky_component(altitude_now_deg: float | None, minutes_left: float,
@@ -2580,12 +2647,12 @@ def rank_targets_now(
                              1.0 if o.moon_up_fraction is None else o.moon_up_fraction)
         sky = _sky_component(alt_now, o.minutes_above_min_alt,
                              min_altitude_deg) * (1.0 - spoil)
-        depth = _depth_component(t.total_exposure_s)
+        gain = _panel_noise_gain(t.total_exposure_s, t.field_fulls, t.depth_fulls)
+        depth = _depth_component_of_gain(gain)
         score = round(100.0 * sky * depth, 1)
         if score <= 0.0:
             continue
         hours = max(0.0, float(t.total_exposure_s or 0.0)) / 3600.0
-        gain = noise_gain_from_more_time(t.total_exposure_s)
         picks.append(TonightPick(
             safe=t.safe, name=t.name, ra_deg=float(t.ra_deg), dec_deg=float(t.dec_deg),
             altitude_now_deg=round(alt_now, 1),
@@ -2596,7 +2663,8 @@ def rank_targets_now(
             score=score,
             reason=_pick_reason(t.name, alt_now, o.minutes_above_min_alt, hours,
                                 gain, placed_now=plan.dark_now, moon_spoil=spoil,
-                                field_fulls=t.field_fulls),
+                                field_fulls=t.field_fulls,
+                                depth_fulls=t.depth_fulls),
             field_fulls=t.field_fulls,
         ))
     picks.sort(key=lambda p: (-p.score, -(p.altitude_now_deg or 0.0)))
@@ -2614,11 +2682,11 @@ def _depth_only_picks(targets: list[LibraryTarget], limit: int) -> list[TonightP
     """
     picks: list[TonightPick] = []
     for t in targets:
-        depth = _depth_component(t.total_exposure_s)
+        gain = _panel_noise_gain(t.total_exposure_s, t.field_fulls, t.depth_fulls)
+        depth = _depth_component_of_gain(gain)
         if depth <= 0.0:
             continue
         hours = max(0.0, float(t.total_exposure_s or 0.0)) / 3600.0
-        gain = noise_gain_from_more_time(t.total_exposure_s)
         picks.append(TonightPick(
             safe=t.safe, name=t.name, ra_deg=float(t.ra_deg), dec_deg=float(t.dec_deg),
             altitude_now_deg=None,
@@ -2631,7 +2699,8 @@ def _depth_only_picks(targets: list[LibraryTarget], limit: int) -> list[TonightP
             # cards directly beneath the target's own name, so naming it here
             # printed a long catalogue name twice one line apart.
             reason=_depth_sentence(hours, None, gain,
-                                   field_fulls=t.field_fulls),
+                                   field_fulls=t.field_fulls,
+                                   depth_fulls=t.depth_fulls),
             field_fulls=t.field_fulls,
         ))
     # Break the tie on the *unsaturated* gain, so the order agrees with the
@@ -2660,7 +2729,8 @@ _MOON_WORTH_MENTIONING = 0.12
 def _pick_reason(name: str, altitude_deg: float, minutes_left: float,
                  hours_captured: float, gain: float, *, placed_now: bool,
                  moon_spoil: float = 0.0,
-                 field_fulls: float | None = None) -> str:
+                 field_fulls: float | None = None,
+                 depth_fulls: float | None = None) -> str:
     """The one plain-language sentence the card shows — no jargon, no numbers the
     user can't act on.
 
@@ -2671,7 +2741,7 @@ def _pick_reason(name: str, altitude_deg: float, minutes_left: float,
              else f"{name} climbs to {round(altitude_deg)}° tonight")
     window = _hours_phrase(minutes_left / 60.0)
     depth = _depth_sentence(hours_captured, "it", gain, capitalise=False,
-                            field_fulls=field_fulls)
+                            field_fulls=field_fulls, depth_fulls=depth_fulls)
     moon = (" The Moon is fairly close to it tonight, so expect a brighter sky."
             if moon_spoil >= _MOON_WORTH_MENTIONING else "")
     return (f"{where} and stays shootable for another {window}. "
@@ -2731,7 +2801,8 @@ def _fields_of_sky_phrase(field_fulls: float | None) -> str:
 
 def _have_phrase(hours: float, subject: str | None, *,
                  capitalise: bool = True,
-                 field_fulls: float | None = None) -> str:
+                 field_fulls: float | None = None,
+                 depth_fulls: float | None = None) -> str:
     """"You've got 45 min on M 31" — or, under a minute, words instead of a "0 min"
     that reads as a bug rather than a fact.
 
@@ -2772,7 +2843,11 @@ def _have_phrase(hours: float, subject: str | None, *,
                 else f"you haven't captured any of {subject} yet")
     elif _spans_more_than_one_field(field_fulls):
         total_s = hours * 3600.0
-        panel_s = per_pixel_total(total_s, field_fulls)
+        # The measured median where the run has one (:func:`_panel_depth_fulls`):
+        # the area ratio is a canvas mean, which an uneven raster lifts far
+        # above what a typical part holds.
+        panel_s = per_pixel_total(total_s,
+                                  _panel_depth_fulls(field_fulls, depth_fulls))
         # ``subject or "it"``: the mosaic clause has to name *a part of* something,
         # and where the sentence is rendered under the target's own name "of it"
         # is the pronoun the closing card uses for the same reason.
@@ -2810,7 +2885,8 @@ def _have_phrase(hours: float, subject: str | None, *,
 
 def _depth_sentence(hours: float, subject: str | None, gain: float, *,
                     capitalise: bool = True,
-                    field_fulls: float | None = None) -> str:
+                    field_fulls: float | None = None,
+                    depth_fulls: float | None = None) -> str:
     """"You've got 45 min on M 31 — another hour would cut its noise about 33%."
 
     One sentence, both halves: what the user has, and what one more hour buys.
@@ -2831,18 +2907,18 @@ def _depth_sentence(hours: float, subject: str | None, gain: float, *,
 
     Both ends now say the honest thing in words instead of a number.
 
-    ``field_fulls`` scales only the *have* half (:func:`_have_phrase`). **The
-    percentage is deliberately left alone, because it is already per panel.** An
-    extra hour on an ``F``-field mosaic reaches each patch of sky as ``h/F``, and
-    each patch already holds ``T/F``, so the fractional cut it buys is
-    ``1 - sqrt((T/F) / ((T + h)/F))`` — the ``F`` cancels and the figure is
-    exactly the one :func:`noise_gain_from_more_time` computes from the totals.
-    (The same cancellation is why :func:`season_closing` annotates its rows with
-    the scale rather than rescaling the key it ranks by.) Only the *displayed*
-    depth fails to cancel, which is the half this scales.
+    ``field_fulls`` / ``depth_fulls`` scale only the *have* half
+    (:func:`_have_phrase`); ``gain`` arrives already per panel from
+    :func:`_panel_noise_gain`. An extra hour on an ``F``-field mosaic reaches
+    each patch of sky as ``h/F``; on an *evenly* shot raster each patch already
+    holds ``T/F``, the ``F`` cancels, and the figure is exactly the one
+    :func:`noise_gain_from_more_time` computes from the totals (which is why
+    :func:`season_closing` annotates its rows with the scale rather than
+    rescaling the key it ranks by). On an uneven raster the measured median
+    ``T/D`` replaces ``T/F`` and the cancellation no longer holds.
     """
     have = _have_phrase(hours, subject, capitalise=capitalise,
-                        field_fulls=field_fulls)
+                        field_fulls=field_fulls, depth_fulls=depth_fulls)
     if hours <= 0.0:
         return f"{have} — its first hour will do more for it than any hour after."
     pct = round(gain * 100)

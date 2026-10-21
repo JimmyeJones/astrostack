@@ -331,6 +331,52 @@ def target_field_fulls(proj) -> float | None:  # noqa: ANN001 — any open Proje
     )
 
 
+def target_depth_fulls(proj) -> float | None:  # noqa: ANN001 — any open Project
+    """The divisor that turns a target's total into what a *typical part* of
+    its picture holds: the newest stacking run's ``n_frames_used ÷
+    coverage_median_depth``.
+
+    :func:`target_field_fulls` is an **area** ratio, so dividing a total by it
+    gives the canvas *mean* depth — exact on an evenly shot raster, and far too
+    deep on an uneven one: a 2x2 shot for six hours that then grew into a 3x3
+    for one, or a deep single field merged with a thin raster, has most of its
+    picture well below the mean. ``coverage_median_depth`` is the measured
+    median pixel (on every run since the engine records it, and backfilled by
+    :mod:`seestack.coverage_backfill`), so this ratio is how many "typical
+    parts" the subs were shared between. Overlaps count honestly: an even 3x3
+    with 12 % overlap reads 9, against an area ratio of about 7.6.
+
+    Same run as :func:`target_field_fulls` (the newest that actually stacked),
+    one small read. ``None`` when the run carries no median (an older row the
+    backfill has not reached), the counts are unusable, or the DB can't be read
+    — every caller then keeps the area ratio, which is what it always used.
+    Clamped to ``>= 1.0`` for the same reason the area ratio is: a figure below
+    one would claim a typical pixel holds more than every sub ever taken.
+    """
+    conn = getattr(proj, "_conn", None)
+    if conn is None:
+        return None
+    try:
+        cursor = conn.execute(
+            "SELECT n_frames_used, options_json, coverage_median_depth "
+            "FROM stack_runs "
+            "ORDER BY timestamp_utc DESC"
+        )
+        run_row = _newest_stacking_run(cursor)
+    except Exception:  # noqa: BLE001 — a broken DB must not sink a dashboard card
+        return None
+    if run_row is None:
+        return None
+    n_used = run_row["n_frames_used"]
+    median = run_row["coverage_median_depth"]
+    if not _positive(n_used) or not _positive(median):
+        return None
+    ratio = float(n_used) / float(median)
+    if not math.isfinite(ratio):
+        return None
+    return max(1.0, ratio)
+
+
 def _newest_stacking_run(rows) -> Any | None:  # noqa: ANN001 — a lazy sqlite cursor
     """The first row of ``rows`` (newest first) that is not a re-render.
 
