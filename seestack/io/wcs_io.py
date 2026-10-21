@@ -906,12 +906,13 @@ def cropped_center_radec_from_fits(fits_path: str | Path, crop
                                    ) -> tuple[float, float] | None:  # noqa: ANN001
     """Where the centre of a *cropped* stored preview sits on the sky.
 
-    A tile is placed by its centre, and the Sky map uses the library target's own
-    RA/Dec for that — fine while the picture is the whole canvas (the target is
-    what the canvas was built around), wrong once the "Process target" auto-edit
-    trims a ragged border off one side. Projects the crop rectangle's centre pixel
-    through the canvas WCS instead. ``None`` (caller keeps the target position)
-    when there's no crop or no usable celestial WCS. A rotation about the picture
+    A tile is placed by its centre, and neither the library target's own RA/Dec
+    (the middle of its panels, blind to a stray pointing the union canvas still
+    takes) nor the canvas centre is it once the "Process target" auto-edit trims a
+    ragged border off one side. Projects the crop rectangle's centre pixel through
+    the canvas WCS; the Sky map passes a whole-canvas crop for an un-trimmed
+    picture. ``None`` (caller keeps the target position) when there's no crop or
+    no usable celestial WCS. A rotation about the picture
     centre doesn't move it, so this needs no ``north_up_deg``."""
     from seestack.previewcrop import PreviewCrop, crop_pixel_box
 
