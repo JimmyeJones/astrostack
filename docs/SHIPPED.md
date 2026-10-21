@@ -1,5 +1,48 @@
 # Shipped — the record
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-zbfod0`) — per-night Moon/Sun folders all listed
+
+### v0.502.26 — `video.discover.find_video_captures` ids per path, `_bare_id_holder`
+
+**What.** Discovery now collects every `*_video/` folder before naming any. A folder whose name is unique keeps
+the bare `video_capture_id` (every existing result stays attached). Folders sharing a name are all listed: the bare
+id goes to the folder holding the clip a stored still or check under that id was made from (`claimed_by`, supplied
+by the web layer as `webapp.video.stored_source_name` from `meta.json`/`grade.json`), else to the one shallowest
+folder (the Seestar's top-level drop); the others get `<night>_<folder>` (path-derived, stable as nights are
+added), numbered `-2`, `-3` only if even that is taken. Every web-layer lookup goes through
+`webapp.video.discover_captures`/`discover_capture`, so the list, the stack/grade routes and the jobs agree. The
+scan's "you also have a video" sentence (`pipeline._unstacked_video_captures`) discovers from `incoming/` and keeps
+the captures under the scanned folder, so a one-night scan asks about *that* night's capture. `VideoCapture.night` /
+`VideoCaptureOut.night` (additive, `""` unless disambiguating) labels the card "Moon · 2026-10-05".
+
+**Tests** (+8): `tests/test_video_discover.py` — three nights all listed with distinct, sanitiser-stable ids; a
+single nested folder keeps its bare id; an earlier-sorting night does not take a stacked capture's id; a stored
+clip keeps the bare id with its folder; two spellings side by side both listed. `tests/webapp/test_video_per_night.py`
+— through `/api/videos`; a stacked still stays with its own night; a one-night scan reports that night's capture.
+All **fail before**. No config, schema or on-disk change; the API change is one additive field.
+
+**The Bugs entry, as filed:**
+- **🟡 (Scout 2026-10-21, QA rotation sweep (3)) — a Moon/Sun capture filed under a per-night folder is silently
+  hidden whenever another night's folder has the same name (`video.discover.find_video_captures`).** *(Pillar:
+  "just works" — PRIORITY 2; size **S–M**; severity moderate — a whole capture never appears on the Moon & Sun page or
+  in the scan's "you also have a video" sentence, with no message; no data is touched. Confidence: **reproduced**
+  through the real `/api/videos` with real ffmpeg; whether his `incoming/` nests videos by night is unmeasured.)*
+  `_MAX_DEPTH = 2` exists, per its own comment, for "a user who filed their captures under a per-night folder" — and
+  that layout repeats the Seestar's folder name every night. Discovery keys each capture on
+  `video_capture_id(folder_name)` (the folder's *basename*) and, on a repeat, "keep[s] the first, deterministically".
+  Repro: `incoming/2026-10-01/Lunar_video/`, `incoming/2026-10-05/Lunar_video/`, `incoming/Lunar video/`, one clip
+  each → `/api/videos` lists **one** Moon capture (the first night's); the other two are unreachable by id, so they can
+  be neither checked nor stacked. A second hazard of the same key: a new night folder that sorts *earlier* takes over
+  the id — and digits sort before letters, so `incoming/<night>/Lunar_video/` added beside an already-stacked
+  top-level `incoming/Lunar_video/` does — and the stored result under `<data>/video/Lunar_video/` is then attached
+  to the new folder while the stacked one drops off the list (reproduced on `find_video_captures`; how the page words
+  the mismatch via the `source_name` stamp, not checked).
+  **Fix shape:** keep the bare id for a capture whose basename is unique (every existing result keeps its folder —
+  upgrade-safe), and give a colliding one an id that includes its parent folder (`2026-10-05_Lunar_video`), chosen
+  by *path*, not sort position, so it is stable as nights are added; on a collision the bare id should stay with the
+  folder whose stored `meta.source_name` matches, if any. Label the duplicates by night in the list. Test: the three
+  folders above all listed, each stacks into its own results folder, a single-folder library's id unchanged. Ungated.
+
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-zbfod0`) — Disable access control removes the read-only token
 
 ### v0.502.25 — `routers/auth.set_password` clears `readonly_token_hash`

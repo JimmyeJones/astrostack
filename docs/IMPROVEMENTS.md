@@ -538,27 +538,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   equal depth), the same-shape case byte-for-byte (`noise_delta_cache` is in-memory, so an
   upgrade's restart clears it). Ungated. Repro shape in PROCESS-NOTES.
 
-- **🟡 (Scout 2026-10-21, QA rotation sweep (3)) — a Moon/Sun capture filed under a per-night folder is silently
-  hidden whenever another night's folder has the same name (`video.discover.find_video_captures`).** *(Pillar:
-  "just works" — PRIORITY 2; size **S–M**; severity moderate — a whole capture never appears on the Moon & Sun page or
-  in the scan's "you also have a video" sentence, with no message; no data is touched. Confidence: **reproduced**
-  through the real `/api/videos` with real ffmpeg; whether his `incoming/` nests videos by night is unmeasured.)*
-  `_MAX_DEPTH = 2` exists, per its own comment, for "a user who filed their captures under a per-night folder" — and
-  that layout repeats the Seestar's folder name every night. Discovery keys each capture on
-  `video_capture_id(folder_name)` (the folder's *basename*) and, on a repeat, "keep[s] the first, deterministically".
-  Repro: `incoming/2026-10-01/Lunar_video/`, `incoming/2026-10-05/Lunar_video/`, `incoming/Lunar video/`, one clip
-  each → `/api/videos` lists **one** Moon capture (the first night's); the other two are unreachable by id, so they can
-  be neither checked nor stacked. A second hazard of the same key: a new night folder that sorts *earlier* takes over
-  the id — and digits sort before letters, so `incoming/<night>/Lunar_video/` added beside an already-stacked
-  top-level `incoming/Lunar_video/` does — and the stored result under `<data>/video/Lunar_video/` is then attached
-  to the new folder while the stacked one drops off the list (reproduced on `find_video_captures`; how the page words
-  the mismatch via the `source_name` stamp, not checked).
-  **Fix shape:** keep the bare id for a capture whose basename is unique (every existing result keeps its folder —
-  upgrade-safe), and give a colliding one an id that includes its parent folder (`2026-10-05_Lunar_video`), chosen
-  by *path*, not sort position, so it is stable as nights are added; on a collision the bare id should stay with the
-  folder whose stored `meta.source_name` matches, if any. Label the duplicates by night in the list. Test: the three
-  folders above all listed, each stacks into its own results folder, a single-folder library's id unchanged. Ungated.
-
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
@@ -3637,6 +3616,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.26 **Moon & Sun lists every night of a per-night `incoming/` layout — a repeated `Lunar_video` folder name hid all but the first, and a new earlier-sorting night took over a stacked capture's id** (`video.discover.find_video_captures`, `_bare_id_holder`).
 - ✅ v0.502.25 **"Disable" access control now removes the read-only token too, and turning a password on from open drops any stale token — a new password no longer silently revives the old one** (`routers/auth.set_password`).
 - ✅ v0.502.24 **The editor's "Use my previous edit" re-aims the copied crop onto this run's canvas through both masters' WCS — on a mosaic that grew a column it framed 288 px of sky against the 160 px he drew** (`editor.previous_recipe` → `pipeline._recrop_for_new_canvas`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.23 **The "night after night" reel draws each earlier night where its sky sits on the newest frame — a mosaic that grew panel by panel no longer has its first panel centred and blown up (~23 % sideways jump on a 2×1, ~1.85× zoom on a 2×2)** (`deepening._sky_affine`, `_place_on_sky`, `_unify_frame`; `_fit_onto` stays the no-WCS fallback).

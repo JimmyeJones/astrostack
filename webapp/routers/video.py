@@ -33,7 +33,6 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from seestack.video.detail import SHARPEN_MAX
-from seestack.video.discover import find_video_capture, find_video_captures
 from seestack.video.ffmpeg import ffmpeg_available
 from seestack.video.quality import quicklook_note, sharpness_profile
 from webapp import deps, video
@@ -166,6 +165,9 @@ class VideoCaptureOut(BaseModel):
     #: ``sharpness``: a grade run by an older version has scores but no picture,
     #: and reads as ``null`` here.
     quicklook: QuickLookOut | None = None
+    #: The night folder, when another capture has the same folder name (the
+    #: per-night layout repeats ``Lunar_video``); ``""`` otherwise. Additive.
+    night: str = ""
 
 
 class VideoListOut(BaseModel):
@@ -413,6 +415,7 @@ def _capture_out(settings, cap) -> VideoCaptureOut:
         label=cap.label,
         kind=cap.kind,
         folder_name=cap.folder_name,
+        night=cap.night,
         files=[
             VideoFileOut(name=Path(f).name, size_bytes=_size_of(f)) for f in cap.files
         ],
@@ -428,7 +431,7 @@ def list_videos(request: Request) -> VideoListOut:
     settings = deps.get_settings(request)
     incoming = settings.resolved_incoming_dir
     available = ffmpeg_available()
-    captures = [_capture_out(settings, cap) for cap in find_video_captures(incoming)]
+    captures = [_capture_out(settings, cap) for cap in video.discover_captures(settings)]
     captures.extend(_orphaned_stills(settings, {c.id for c in captures}))
     return VideoListOut(
         available=available,
@@ -452,7 +455,7 @@ def grade_one_video(
     jm = deps.get_job_manager(request)
     if not ffmpeg_available():
         raise HTTPException(status_code=503, detail=FFMPEG_MISSING_HINT)
-    capture = find_video_capture(settings.resolved_incoming_dir, capture_id)
+    capture = video.discover_capture(settings, capture_id)
     if capture is None:
         raise HTTPException(status_code=404, detail="No such video capture")
     req = body or VideoGradeRequest()
@@ -472,7 +475,7 @@ def stack_one_video(
     jm = deps.get_job_manager(request)
     if not ffmpeg_available():
         raise HTTPException(status_code=503, detail=FFMPEG_MISSING_HINT)
-    capture = find_video_capture(settings.resolved_incoming_dir, capture_id)
+    capture = video.discover_capture(settings, capture_id)
     if capture is None:
         raise HTTPException(status_code=404, detail="No such video capture")
     req = body or VideoStackRequest()
@@ -612,7 +615,7 @@ def video_quicklook(capture_id: str, request: Request) -> FileResponse:
     path = _result_file(request, capture_id, video.QUICKLOOK_NAME, _NOT_CHECKED)
     grade = video.read_grade(settings, safe_id)
     if grade is not None:
-        cap = find_video_capture(settings.resolved_incoming_dir, safe_id)
+        cap = video.discover_capture(settings, safe_id)
         if not video.grade_matches_source(grade, list(cap.files) if cap else []):
             raise HTTPException(status_code=404, detail=_NOT_CHECKED)
     return FileResponse(path, media_type="image/png")

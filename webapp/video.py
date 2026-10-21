@@ -64,7 +64,7 @@ from typing import Any
 from seestack.stack.output import pack_unit, write_full_res_png
 from seestack.video import drizzle as video_drizzle
 from seestack.video.detail import SHARPEN_MAX, sharpen_still
-from seestack.video.discover import VideoCapture, find_video_capture
+from seestack.video.discover import VideoCapture, find_video_capture, find_video_captures
 from seestack.video.ffmpeg import (
     ffmpeg_available,
     probe_video,
@@ -321,6 +321,36 @@ def has_quicklook(settings: Settings, capture_id: str) -> bool:
     image beside it.
     """
     return (result_dir(settings, capture_id) / QUICKLOOK_NAME).is_file()
+
+
+def stored_source_name(settings: Settings, capture_id: str) -> str | None:
+    """The clip a stored still or check under ``capture_id`` was made from.
+
+    What discovery needs to keep an existing result attached to *its* folder when
+    a second night's folder of the same name appears (see
+    ``seestack.video.discover._bare_id_holder``).
+    """
+    for meta in (read_meta(settings, capture_id), read_grade(settings, capture_id)):
+        if meta is not None and meta.source_name:
+            return meta.source_name
+    return None
+
+
+def discover_captures(settings: Settings, root: str | Path | None = None) -> list[VideoCapture]:
+    """:func:`find_video_captures` under ``incoming/`` (or ``root``) with this
+    install's stored results deciding which same-named folder keeps the bare id.
+    Every web-layer lookup goes through here so the list and the routes agree."""
+    return find_video_captures(
+        settings.resolved_incoming_dir if root is None else root,
+        claimed_by=lambda cid: stored_source_name(settings, cid),
+    )
+
+
+def discover_capture(settings: Settings, capture_id: str) -> VideoCapture | None:
+    return find_video_capture(
+        settings.resolved_incoming_dir, capture_id,
+        claimed_by=lambda cid: stored_source_name(settings, cid),
+    )
 
 
 def has_tiff(settings: Settings, capture_id: str) -> bool:
@@ -1037,7 +1067,7 @@ def _resolve_source(settings: Settings, capture_id: str, file_name: str | None):
             "Video stacking needs ffmpeg, which isn't installed in this container. "
             "Update to a current AstroStack image (it bundles ffmpeg) and try again."
         )
-    capture = find_video_capture(settings.resolved_incoming_dir, capture_id)
+    capture = discover_capture(settings, capture_id)
     if capture is None:
         raise RuntimeError(f"No video capture called {capture_id!r} in the incoming folder.")
     return capture, pick_source_file(capture, file_name)

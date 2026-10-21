@@ -131,3 +131,76 @@ def test_files_are_listed_in_a_stable_order(tmp_path):
         _touch(tmp_path / "Lunar_video" / name, 10)
     (cap,) = find_video_captures(tmp_path)
     assert [p.rsplit("/", 1)[-1] for p in cap.files] == ["a.mp4", "b.mp4", "c.mp4"]
+
+
+# --- per-night folders that repeat the Seestar's folder name ---------------
+#
+# Scout 2026-10-21 sweep (3): discovery keyed on the folder basename and kept
+# "the first" of a repeat, so the per-night layout `_MAX_DEPTH = 2` exists for
+# listed one Moon capture out of three, and a new night folder sorting earlier
+# took over an already-stacked capture's id.
+
+
+def _three_moon_nights(root):
+    _touch(root / "2026-10-01" / "Lunar_video" / "Lunar_1001.mp4", 10)
+    _touch(root / "2026-10-05" / "Lunar_video" / "Lunar_1005.mp4", 20)
+    _touch(root / "Lunar_video" / "Lunar_top.mp4", 30)
+
+
+def test_every_night_of_a_repeated_folder_name_is_listed(tmp_path):
+    _three_moon_nights(tmp_path)
+    caps = find_video_captures(tmp_path)
+    assert len(caps) == 3
+    by_id = {c.id: c for c in caps}
+    assert len(by_id) == 3
+    # The top-level folder — the Seestar's own drop — keeps the bare id; the
+    # nested ones are named after their night, and labelled by it.
+    assert by_id["Lunar_video"].files[0].endswith("Lunar_top.mp4")
+    assert by_id["Lunar_video"].night == ""
+    assert by_id["2026-10-01_Lunar_video"].night == "2026-10-01"
+    assert by_id["2026-10-05_Lunar_video"].files[0].endswith("Lunar_1005.mp4")
+    assert {c.label for c in caps} == {"Moon"}
+    # Every id resolves back to its own folder, and survives the routes' sanitiser.
+    for cap in caps:
+        assert find_video_capture(tmp_path, cap.id) == cap
+        assert video_capture_id(cap.id) == cap.id
+
+
+def test_a_single_folder_keeps_its_bare_id_wherever_it_is_filed(tmp_path):
+    _touch(tmp_path / "2026-10-01" / "Lunar_video" / "clip.mp4", 10)
+    (cap,) = find_video_captures(tmp_path)
+    assert cap.id == "Lunar_video" and cap.night == ""
+
+
+def test_a_new_night_sorting_earlier_does_not_take_a_stacked_capture_id(tmp_path):
+    """Digits sort before letters, so ``<night>/Lunar_video`` lands before a
+    top-level ``Lunar_video`` — the old rule handed it the stacked one's id."""
+    _touch(tmp_path / "Lunar_video" / "stacked.mp4", 10)
+    _touch(tmp_path / "2026-10-05" / "Lunar_video" / "new.mp4", 20)
+    by_id = {c.id: c for c in find_video_captures(tmp_path)}
+    assert by_id["Lunar_video"].files[0].endswith("stacked.mp4")
+    assert by_id["2026-10-05_Lunar_video"].files[0].endswith("new.mp4")
+
+
+def test_a_stored_result_keeps_the_bare_id_with_its_own_clip(tmp_path):
+    # Two nested nights, nothing at the top: the stored still was made from the
+    # later night's clip, and must stay with it though the other sorts first.
+    _touch(tmp_path / "2026-09-28" / "Lunar_video" / "older.mp4", 10)
+    _touch(tmp_path / "2026-10-01" / "Lunar_video" / "stacked.mp4", 20)
+    claims = {"Lunar_video": "stacked.mp4"}
+    by_id = {c.id: c for c in find_video_captures(tmp_path, claimed_by=claims.get)}
+    assert by_id["Lunar_video"].files[0].endswith("stacked.mp4")
+    assert by_id["2026-09-28_Lunar_video"].files[0].endswith("older.mp4")
+    # Nothing stored and no unique top folder: both take their night's id, which
+    # stays the same as further nights are added.
+    unclaimed = {c.id for c in find_video_captures(tmp_path)}
+    assert unclaimed == {"2026-09-28_Lunar_video", "2026-10-01_Lunar_video"}
+    _touch(tmp_path / "2026-09-01" / "Lunar_video" / "first.mp4", 5)
+    assert unclaimed <= {c.id for c in find_video_captures(tmp_path)}
+
+
+def test_two_spellings_of_one_name_side_by_side_are_both_listed(tmp_path):
+    _touch(tmp_path / "_Lunar_video" / "a.mp4", 10)
+    _touch(tmp_path / "Lunar_video" / "b.mp4", 10)
+    ids = sorted(c.id for c in find_video_captures(tmp_path))
+    assert ids == ["Lunar_video", "Lunar_video-2"]
