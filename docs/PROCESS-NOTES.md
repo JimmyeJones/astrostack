@@ -2,7 +2,7 @@
 
 ## 2026-10-21 (Scout, branch `claude/zen-curie-pfyczx`) — QA rotation sweep (3), new angle — the startup scratch *deleter* (`astap.sweep_stale_solve_scratch`, v0.502.11) against links into `incoming/`: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
-- **Suite:** 8145 passed / 7 skipped on `01fbd7c7` (xdist `-n 4`, BLAS capped, 14m55s). **Inbox:** the same four (#878,
+- **Suite:** 8145 passed / 7 skipped on `01fbd7c7`, re-run on the merge with v0.502.18 (xdist `-n 4`, BLAS capped, 14m55s). **Inbox:** the same four (#878,
   #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
   **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors). (The setup script's first
   `pip install` hung again, ~12 min; killing it let the `--timeout 120 --retries 5` fallback finish.)

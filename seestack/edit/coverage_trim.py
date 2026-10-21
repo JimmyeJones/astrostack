@@ -615,6 +615,91 @@ def largest_covered_rect(coverage: np.ndarray,
     return border
 
 
+# How many times :func:`shrink_rect_to_covered` may re-read its edge strips before
+# it settles for what it has. Each read lets every edge walk up to one band in, so
+# this bounds both the I/O and how far a full-res pass can move a sampled answer.
+_SHRINK_MAX_READS = 8
+
+
+def sampled_rect_to_full_res(rect, sampled_shape: tuple[int, int],
+                             full_shape: tuple[int, int], step: int
+                             ) -> tuple[int, int, int, int]:
+    """The full-resolution pixel bounds ``(x0, y0, x1, y1)`` (half-open) of a
+    fractional rectangle measured on a map point-sampled ``[::step, ::step]``.
+
+    Bounded by **what was sampled**: sample ``c`` is full-res column ``c·step``,
+    so a rectangle whose last sampled column is ``c1-1`` ends at ``(c1-1)·step+1``
+    — not at ``c1·step``, which reaches up to ``step-1`` columns nobody looked at
+    (the Scout's 2026-10-21 band of no-coverage pixels along a trimmed mosaic's
+    right/bottom edge). Measured on the full-res width, so the ``c/ceil(W/step)``
+    vs ``c·step/W`` drift goes too."""
+    hs, ws = sampled_shape
+    h, w = full_shape
+    step = max(1, int(step))
+    c0, c1 = int(round(rect[0] * ws)), int(round(rect[2] * ws))
+    r0, r1 = int(round(rect[1] * hs)), int(round(rect[3] * hs))
+    x0, x1 = min(c0 * step, w), min((c1 - 1) * step + 1, w)
+    y0, y1 = min(r0 * step, h), min((r1 - 1) * step + 1, h)
+    return x0, y0, max(x0, x1), max(y0, y1)
+
+
+def shrink_rect_to_covered(coverage, bounds: tuple[int, int, int, int], *,
+                           band: int) -> tuple[int, int, int, int] | None:
+    """Walk a full-res rectangle's edges inward until no edge line holds an
+    uncovered (non-finite or ``<= 0``) pixel; ``None`` if it collapses.
+
+    ``coverage`` is the **full-resolution** map, typically a FITS memmap: only
+    strips ``band`` deep along the four edges are ever read, so this costs a few
+    rows and columns, never the canvas. It is the check a point-sampled rectangle
+    cannot make on its own — between two sampled rows a slanted (field-rotated)
+    edge, or one that falls between samples, can still put no-coverage pixels
+    inside the crop. Greedy: each step moves the edge whose line holds the most
+    uncovered pixels, so a band along the bottom costs the bottom rows, not a
+    column off each side too. Only ever keeps **less**, never more; after
+    :data:`_SHRINK_MAX_READS` reads it answers how far it got."""
+    x0, y0, x1, y1 = (int(v) for v in bounds)
+    band = max(1, int(band))
+
+    def _bad(a) -> np.ndarray:
+        a = np.asarray(a, dtype=np.float32)
+        return ~(np.isfinite(a) & (a > 0))
+
+    for _ in range(_SHRINK_MAX_READS):
+        if x1 - x0 < 2 or y1 - y0 < 2:
+            return None
+        sx0, sy0, sx1, sy1 = x0, y0, x1, y1
+        dx, dy = min(band, sx1 - sx0), min(band, sy1 - sy0)
+        top = _bad(coverage[sy0:sy0 + dy, sx0:sx1])
+        bottom = _bad(coverage[sy1 - dy:sy1, sx0:sx1])
+        left = _bad(coverage[sy0:sy1, sx0:sx0 + dx])
+        right = _bad(coverage[sy0:sy1, sx1 - dx:sx1])
+        while True:
+            if x1 - x0 < 2 or y1 - y0 < 2:
+                return None
+            ti, bi = y0 - sy0, (y1 - 1) - (sy1 - dy)
+            li, ri = x0 - sx0, (x1 - 1) - (sx1 - dx)
+            if ti >= dy or bi < 0 or li >= dx or ri < 0:
+                break  # an edge walked off its strip — read fresh ones
+            counts = (
+                int(top[ti, x0 - sx0:x1 - sx0].sum()),
+                int(bottom[bi, x0 - sx0:x1 - sx0].sum()),
+                int(left[y0 - sy0:y1 - sy0, li].sum()),
+                int(right[y0 - sy0:y1 - sy0, ri].sum()),
+            )
+            worst = max(range(4), key=counts.__getitem__)
+            if counts[worst] == 0:
+                return x0, y0, x1, y1
+            if worst == 0:
+                y0 += 1
+            elif worst == 1:
+                y1 -= 1
+            elif worst == 2:
+                x0 += 1
+            else:
+                x1 -= 1
+    return x0, y0, x1, y1
+
+
 def _thin_labels(mask: np.ndarray, labels: np.ndarray, n: int) -> np.ndarray:
     """Which of ``labels``' connected regions are **bands rather than blocks** —
     nowhere thicker than :data:`FRINGE_MAX_THICKNESS_FRAC` of their own longest
