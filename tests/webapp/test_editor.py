@@ -2956,6 +2956,39 @@ def test_batch_apply_user_preset(client, solved_library):
     assert r.status_code == 404
 
 
+def test_batch_apply_user_preset_does_not_replay_its_crop(client, solved_library):
+    """A look saved off a mosaic's Auto trim holds that canvas's crop fractions; the
+    Gallery batch must not cut every selected picture by them (it wrote 70x62 of a
+    100x80 run). The stored preset keeps its crop — only the apply drops it."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    rid = _make_run(solved_library, safe, h=80, w=100)
+    crop = {"id": "geometry.crop",
+            "params": {"x0": 0.15, "y0": 0.12, "x1": 0.85, "y1": 0.90}}
+    created = client.post("/api/editor/presets", json={
+        "label": "Mosaic look",
+        "ops": [{"id": "tone.stretch", "params": {"stretch": 0.6}}, crop],
+    }).json()
+    r = client.post("/api/editor/batch", json={
+        "items": [{"safe": safe, "run_id": rid}], "preset_id": created["id"],
+    })
+    assert r.status_code == 200, r.text
+    job = _wait_job(client, r.json()["job_id"])
+    assert job["state"] == "done", job
+    new_id = job["result"]["exported"][0]["run_id"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            run = next(r for r in proj.iter_stack_runs() if r.id == new_id)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert fits.getdata(run.fits_path).shape[-2:] == (80, 100)
+    stored = client.get("/api/editor/presets").json()["user"][0]
+    assert any(o["id"] == "geometry.crop" for o in stored["ops"])
+
+
 def test_export_png_full_res_download(client, solved_library):
     import io
 

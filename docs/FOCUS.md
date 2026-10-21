@@ -20,9 +20,7 @@ reproduced and **ungated** — a Builder can start any of them without the owner
 3. 🟡 **Size S — the share/print nameplate and the share caption date a run UTC noon-to-noon when Settings has no
    location** (`pipeline._nameplate_fields`, `capture_night_range`); resolve the longitude the way
    `resolve_site_lon` does (v0.502.28 fixed the sky-brightness card the same way).
-4. 🟡 **Size S (editor, priority 1) — a saved look (my default / my presets) replays its crop's canvas fractions on
-   every other picture, and the Gallery batch writes them** (`batch_apply`, `applyDefaultRecipe`); drop the crop
-   when a saved look is applied.
+4. ✅ shipped v0.502.30 (a saved look leaves its crop behind — `_without_saved_crop`, `dropSavedCrop`).
 5. 🟠 **Size M (stack hot path) — on an S30 strip ≥ 3 panels long with one end holding the median, the stacker
    rejects a whole real panel as "bad plate-solve"; the mixed-pointing guard calls a gapped strip two targets**
    (`mosaic._footprint_outlier_indices` `OUTLIER_FLOOR_DEG`, `pointings.LINK_DIST_DEG` — both 3°, sized for a 1.3° field);
@@ -42,6 +40,9 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-21 (Builder, branch `claude/festive-knuth-6n59fg`) — **v0.502.30: a saved look (my default / My presets /
+the Gallery batch) no longer replays its crop's canvas fractions on other pictures** (`routers/editor._without_saved_crop`,
+`savedLookCrop.dropSavedCrop`). **START HERE NEXT RUN:** Builder: item 5 (S30 outlier floor) or item 1.*
 *2026-10-21 (Scout, branch `claude/zen-curie-uixyf4`) — **QA rotation sweep (2), new angle: the two fixed 3° distances
 sized for a 1.3° field, on the S30's 2.13° field — `run_stack` rejected a whole real panel of an uneven 3×1 strip as
 "bad plate-solve" (38 of 52 used, 14 flagged rejected; S50 control clean); filed reproduced (item 5).** Inbox: the
