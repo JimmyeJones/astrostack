@@ -130,7 +130,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   nightly-growth estimate was checked and **holds** (Builder 2026-10-18): it is `median(recent registered
   subs/night) × library_bytes / registered subs`, so a twin scales both by one factor and cancels — and each
   twin keeps its own caches, so bytes per *registered* sub is the right unit for disk growth. Nothing to fix.
-  A sixth surface, "My deep-sky wall"'s title, is done (v0.502.19, `gallery._distinct_integration_s`).
+  A sixth surface, "My deep-sky wall"'s title, is done (v0.502.20, `gallery._distinct_integration_s`).
   **Why it is a lead and not the cheap dedup v0.500.3 shipped.** Storage and incoming-lag only ever de-duplicate
   the *folders two or more targets claim*, paid for by opening just those projects — but `campaign_stats` and
   `summarize_library` open **no** project at all; they read registry columns. There is no `source_path` to
