@@ -426,3 +426,30 @@ def test_an_undrizzled_run_is_sized_exactly_as_before(client, solved_library):
     img = client.get("/api/sky").json()["images"][0]
     assert img["width_deg"] == pytest.approx(1920 * 4.0 / 3600.0)
     assert img["height_deg"] == pytest.approx(1080 * 4.0 / 3600.0)
+
+
+def test_an_uncropped_tile_is_centred_on_its_own_canvas_not_the_registry_centre(
+        client, solved_library):
+    """The built-in viewer places a tile by ``ra_deg``/``dec_deg`` and sizes it
+    from the stored canvas, so the centre has to come from that same canvas.
+
+    The registry centre is the middle of the target's *panels* and deliberately
+    ignores a pointing below ``_CENTRE_PANEL_MIN_SHARE`` (1 % — ~360 subs on the
+    owner's 35,894-sub target), while the stack's union canvas
+    (``compute_mosaic_canvas``) takes every accepted sub. A night of 15 subs
+    re-framed 0.6° off a 2,000-sub field widens that canvas to one side and moves
+    its centre ~0.3° — a tile drawn at the canvas's size on the registry centre
+    sits that far off the stars under it, while the Aladin view (``wcs``) places
+    the same picture correctly. Here the master's canvas centre is 0.4° east of
+    the target's registry position (83.6, -5.4); the run has no crop."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    scale = 2.5 / 3600.0
+    _add_run_with_master_wcs(solved_library, safe,
+                             cd=[(-scale, 0.0), (0.0, scale)], crval=(84.0, -5.4))
+
+    img = client.get("/api/sky").json()["images"][0]
+    assert img["wcs"]["CRVAL1"] == pytest.approx(84.0, abs=1e-6)
+    # The tile's own centre agrees with the canvas it is sized from (and with
+    # the Aladin placement), not with the registry's 83.6.
+    assert img["ra_deg"] == pytest.approx(84.0, abs=1e-3)
+    assert img["dec_deg"] == pytest.approx(-5.4, abs=1e-3)

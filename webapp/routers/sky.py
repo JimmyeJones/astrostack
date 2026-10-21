@@ -246,14 +246,18 @@ def get_sky(request: Request) -> SkyResponse:
                             float(t.ra_deg), float(t.dec_deg), width_deg,
                             size[0], size[1], rotation or 0.0,
                         )
-                # A tile is placed by its centre, and the target's own RA/Dec is
-                # that centre only while the picture is the whole canvas. A trim
-                # off one side moves it, so read the crop's own centre off the
-                # canvas WCS; an un-cropped run keeps the target position exactly
-                # as before.
+                # A tile is placed by its centre, so read it off the same canvas
+                # WCS the tile is sized from: the crop's centre once a trim has
+                # moved it, the whole canvas's otherwise. The target's registry
+                # RA/Dec is the middle of its *panels* and ignores a pointing below
+                # 1 % of the subs, while the union canvas takes every accepted sub —
+                # a re-framed night widens it to one side and moved an un-cropped
+                # tile ~0.3° off its stars. The registry position stays the
+                # fallback when there is no usable canvas WCS.
                 centre = (
-                    cropped_center_radec_from_fits(run.fits_path, crop)
-                    if run.fits_path and crop is not None else None
+                    cropped_center_radec_from_fits(
+                        run.fits_path, crop or PreviewCrop(0.0, 0.0, 1.0, 1.0))
+                    if run.fits_path else None
                 ) or (float(t.ra_deg), float(t.dec_deg))
                 images.append(SkyImage(
                     safe=t.safe_name,
