@@ -615,6 +615,92 @@ def test_without_the_frozen_channels_the_same_window_is_a_different_picture(
         "the fixture's gradient is too kind to exhibit the problem")
 
 
+def _add_bright_object(data_root: Path, basename: str, cx: float, cy: float) -> None:
+    """Paint a bright extended object (a nebula core) off-centre into a run's FITS.
+
+    A window on it has a sky median far above the picture's, which is what the
+    default stretch must *not* re-anchor to 20 % grey on its own.
+    """
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            fp = Path(proj.project_dir) / "output" / f"{basename}.fits"
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    cube = fits.getdata(fp).astype(np.float32)
+    _, h, w = cube.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    blob = 0.25 * np.exp(-(((xx - cx * w) / 160.0) ** 2 + ((yy - cy * h) / 120.0) ** 2))
+    for c, tint in enumerate((1.3, 1.0, 0.7)):
+        cube[c] += (blob * tint).astype(np.float32)
+    fits.writeto(fp, cube, overwrite=True)
+
+
+@pytest.mark.parametrize("ops", [
+    [],
+    [{"uid": "sh", "id": "detail.sharpen", "enabled": True, "params": {}}],
+], ids=["empty-recipe", "sharpen-only"])
+def test_a_recipe_without_a_stretch_keeps_the_whole_pictures_curve(
+        client, built_library, ops):
+    """The editor opens a run on an **empty** recipe, so the fallback stretch
+    ``apply_recipe`` inserts is what a first-time user is looking at. It is
+    anchored on the whole picture's sky like the Stretch op, so the window must
+    borrow the whole-proxy measurement too — measured on its own, a nebula-core
+    window was pinned to flat 20 % grey (mean |Δ| ≈ 100 of 255 against the
+    preview)."""
+    run_id = _big(client, built_library, basename="nostretch")
+    _add_bright_object(built_library, "nostretch", 0.7, 0.4)
+    rec = _enc(ops)
+    preview = _png(client.get(
+        f"/api/targets/M_42/stack-runs/{run_id}/editor/preview", params={"recipe": rec}))
+    r = client.get(f"/api/targets/M_42/stack-runs/{run_id}/editor/loupe",
+                   params={"recipe": rec, "fx": 0.7, "fy": 0.4, "size": 256})
+    assert r.status_code == 200, r.text
+
+    a, b = _overlap(preview, _png(r), _window(r))
+    if ops:
+        # A spatial op reaches across the window's edge (see FLAT_RECIPE's note);
+        # judge the interior, where both renders saw the same neighbourhood.
+        m = 16 // STEP
+        a, b = a[m:-m, m:-m], b[m:-m, m:-m]
+    # The object really is bright here — otherwise the window's own sky would
+    # match the picture's and the test could pass for the wrong reason.
+    assert a.mean() > 90, f"window is not on the bright object ({a.mean():.1f}/255)"
+    d = np.abs(a - b)
+    # Measured before the fix: mean 122 / 120 of 255 — a different picture. After:
+    # the empty recipe is byte-identical (0/255); with the sharpen, mean 0.19 and a
+    # p99 of 2 — the sharpen itself acting at full resolution on the odd star, which
+    # is what the loupe is opened to see, not a re-stretch.
+    if not ops:
+        assert d.max() <= 1, f"max 8-bit difference {d.max()}"
+    else:
+        assert d.mean() <= 1, f"mean 8-bit difference {d.mean():.2f}"
+
+
+def test_the_default_stretch_is_unchanged_when_it_measures_for_itself():
+    """Routing the fallback stretch's statistics through ``ctx.fit`` must not move
+    the preview or the export: self-measured, they are the numbers ``autostretch``
+    derives on its own — byte-for-byte, NaN gaps included."""
+    from seestack.edit.pipeline import FALLBACK_STRETCH_UID, apply_recipe
+    from seestack.edit.recipe import recipe_from_dict
+    from seestack.edit.registry import EditContext
+    from seestack.render.thumbnail import autostretch
+
+    rng = np.random.default_rng(3)
+    img = (0.05 + rng.gamma(2.0, 0.01, size=(120, 160, 3))).astype(np.float32)
+    img[:20, :30] = np.nan
+    ctx = EditContext()
+    out = apply_recipe(img, recipe_from_dict({"version": 1, "ops": []}), ctx)
+    ref = autostretch(img)
+    ref[~np.isfinite(img).any(axis=2)] = np.nan
+    np.testing.assert_array_equal(out, ref)
+    assert f"{FALLBACK_STRETCH_UID}:stretch_stats" in ctx.fitted
+    assert ctx.op_uid is None
+
+
 # --- the window read ----------------------------------------------------------
 
 def test_a_window_read_holds_exactly_the_canvas_pixels_it_covers(tmp_path):
