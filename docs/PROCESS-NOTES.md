@@ -2,7 +2,7 @@
 
 ## 2026-10-21 (Scout, branch `claude/zen-curie-uixyf4`) — QA rotation sweep (2), new angle — the fixed-degree distances that assume a ~1.3° field, on the owner's S30 (2.13°): one bug, filed reproduced (with a guard sibling). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
-- **Suite:** SUITE_RESULT on `7d6edf22` (xdist `-n 4`, BLAS capped). **Inbox:** the same four (#878, #880, #903,
+- **Suite:** 8197 passed / 7 skipped on `7d6edf22` (xdist `-n 4`, BLAS capped, 17m20s). **Inbox:** the same four (#878, #880, #903,
   #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start. **Dogfood `--mosaic`:**
   CLEAN (nothing overflowing, no console errors; the Target page's five notes agree with each other).
 - **Sweep (2).** No per-panel code since the last (2) (`faezje`): v0.502.25–28 are auth, Moon/Sun discovery, the loupe

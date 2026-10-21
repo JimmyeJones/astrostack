@@ -45,7 +45,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-10-21 (Scout, branch `claude/zen-curie-uixyf4`) — **QA rotation sweep (2), new angle: the two fixed 3° distances
 sized for a 1.3° field, on the S30's 2.13° field — `run_stack` rejected a whole real panel of an uneven 3×1 strip as
 "bad plate-solve" (38 of 52 used, 14 flagged rejected; S50 control clean); filed reproduced (item 5).** Inbox: the
-same four, all owner-gated. **START HERE NEXT RUN:** Builder: item 4 (editor) or item 5. **Rotation: (2) done → next
+same four, all owner-gated. Suite 8197 passed / 7 skipped; dogfood `--mosaic` CLEAN. **START HERE NEXT RUN:** Builder: item 4 (editor) or item 5. **Rotation: (2) done → next
 sweep is (3).***
 *2026-10-21 (Scout, branch `claude/zen-curie-n1e74f`) — **QA rotation sweep (1), the angle the `j1f6lp` (1) left
 open: a saved look's `geometry.crop` is replayed by canvas fraction on other pictures — the batch cut a 100×80 run
