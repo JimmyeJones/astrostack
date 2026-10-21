@@ -457,3 +457,32 @@ def test_prune_keep_never_deletes_the_pinned_cover(client, solved_library, tmp_p
     # An explicit id list is the caller naming the run, and is honoured.
     r = client.post(f"/api/targets/{safe}/stack-runs/prune", json={"ids": [finished]})
     assert r.json()["deleted"] == [finished]
+
+
+def test_storage_says_which_targets_have_a_pinned_cover(client, solved_library):
+    """The Storage card's prune confirm says the cover is kept — it needs to know
+    there is one. A dangling id (its run deleted from History) pins nothing."""
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+
+    def row():
+        return next(t for t in client.get("/api/storage").json()["targets"]
+                    if t["safe"] == safe)
+
+    old = _add_run(solved_library, safe, "2026-01-01T00:00:00Z", "old")
+    _add_run(solved_library, safe, "2026-02-01T00:00:00Z", "new")
+    assert row()["cover_pinned"] is False
+
+    assert client.put(f"/api/targets/{safe}/cover",
+                      json={"run_id": old}).status_code == 200
+    assert row()["cover_pinned"] is True
+
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            proj.delete_stack_run(old)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    assert row()["cover_pinned"] is False

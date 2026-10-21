@@ -1385,6 +1385,9 @@ export interface TargetStorage {
   /** The editor's live-preview proxies. Optional: an older backend omits it. */
   proxies_bytes?: number;
   n_stack_runs: number;
+  /** One of the runs is the pinned cover, which "Prune stacks" always keeps.
+   *  Optional: an older backend omits it. */
+  cover_pinned?: boolean;
 }
 
 export interface StorageInfo {
