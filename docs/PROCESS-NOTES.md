@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-idzsf4`) — QA rotation sweep (4), the `stack` router's deepening reel: one bug filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8173 passed / 7 skipped on `31bd9a01` (xdist `-n 4`, BLAS capped, 16m08s). **Inbox:** the same four (#878, #880,
+  #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start. **Dogfood `--mosaic`:**
+  CLEAN (trim 7.9 %, nothing overflowing, no console errors).
+- **Sweep (4).** Counted router mentions in this file: `newsubs`, `unstretched`, `settings`, `calibration` are rarely named,
+  and inside `stack.py` the `deepening-reel`, `progress-info`, `zoom-clip`, `rejection-outlook` endpoints never. `newsubs`
+  re-read for a mosaic angle (frames a run drops itself — canvas outliers are flagged rejected, lucky/alignment drops are
+  deliberately "offered"): holds. `deepening-reel` did not: `render_deepening_frames` → `_fit_onto` letterboxes each earlier
+  canvas into the newest by fit-and-centre, no WCS. Probe (scratchpad `reel/probe.py`, real function, astropy FITS of a
+  1080×1920 panel vs the 2×1 / 2×2 mosaic it became, one star at a fixed sky spot): the star moves 489 → 255 px (2×1) and
+  the lone panel is drawn ~1.85× too big (2×2). Filed at the end of Bugs, reproduced, M, ungated.
+- **Tooling note:** waiting on the dogfood with `until ! pgrep -f agent-dogfood.sh` never ends — `pgrep -f` matches the
+  waiting shell's own command line. Wait on the log's last line (`-- screenshots:`) instead.
+
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-2gjith`) — a full dogfood pass found nothing; then shipped the Scout's fresh auto-drizzle bug (v0.502.21)
 
 - **Suite:** 8161 passed / 7 skipped on `c652a141` (xdist `-n 4`, BLAS capped, 17m21s).
