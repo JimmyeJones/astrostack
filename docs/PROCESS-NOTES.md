@@ -1,5 +1,24 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-50ebr3`) — QA rotation sweep (2), new angle — the automatic drizzle's depth bar (`autodrizzle.samples_per_output_pixel` → `decide_auto_drizzle`) on *uneven* S30 mosaics: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8161 passed / 7 skipped on `c652a141` (xdist `-n 4`, BLAS capped, 16m50s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+  owner-gated — nothing owed. No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing,
+  no console errors). (The setup script's first `pip install` hung again, ~11 min; killing it let the
+  `--timeout 120 --retries 5` fallback finish.)
+- **Sweep (2).** Every earlier (2) read the per-panel numbers that route through `pointing_groups` or the coverage
+  map *after* a stack; none drove the one walk-away decision taken **before** a stack from a canvas *average*:
+  "Auto, when worth it" (`Settings.auto_drizzle`, on by default). Its depth is `n_frames ÷ (canvas ÷ frame area)` —
+  deliberately not the thinnest cluster (#901). Real `decide_auto_drizzle`, coverage summed from S30 footprints
+  (1080×1920, 12 % overlap, ±8 px dither): even rasters answer right (2×2/3×3 at 300 → yes, 3×3 at 120 → no); a
+  deep centre panel (single-field nights on a mosaic target) lifts the mean over 200 while **66–87 % of the covered
+  canvas is below the 100-sample warn bar** — yes at "468" / "322" / "226". `stacker.coverage_panel_depth` on the
+  same footprint plane reads 300/300/120 and 60/60/28 — every verdict right, so the fix is cheap and #901-safe.
+  Filed in Bugs (gated: on-by-default, and the owner-frequency is an observer count). Also re-read and left as
+  documented stand-downs: `typical_panel_depth` for the walk-away thin hold (the #901 over-clustering, benign with
+  `auto_stack` off), and `thinpicture`'s typical-patch depth (the uneven-grain note covers the shallow panel).
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-th0fa7`) — QA rotation sweep (1), scale-dependent parity, on the strided *heal* of the two mosaic health numbers (`coverage_backfill.backfill_seam_residual` / `backfill_coverage_grain`) against the full-res measure a fresh stack takes: CLEAN. Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
 
 - **Suite:** 8159 passed / 7 skipped on `c4408071` (xdist `-n 4`, BLAS capped, 14m40s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
