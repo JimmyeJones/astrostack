@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-2gjith`) — a full dogfood pass found nothing; then shipped the Scout's fresh auto-drizzle bug (v0.502.21)
+
+- **Suite:** 8161 passed / 7 skipped on `c652a141` (xdist `-n 4`, BLAS capped, 17m21s).
+- **Dogfood `--mosaic --editor --big`:** CLEAN. Single field, 2×2 mosaic and the full-size (decimated-preview)
+  mosaic: all 21 Add-menu ops re-render on each, undo/redo, Auto taste row and the marked-chip sentence live, the
+  full-size check follows the navigator and its unvouched-op caveat reads (Noise reduction only, as v0.493.9 left
+  it), `[scale]` 0 of 16 answers moved, trim 7.9 %, nothing overflowing, no console errors.
+- **Tooling note:** the whole `--mosaic --editor --big` pass takes **over 30 minutes** on a 4-core box — longer than
+  a background shell's default limit, which killed the first attempt mid-editor-drive. Run it in two halves (the
+  probe pass, then `--editor --big --no-probe`) or give the background command the full 2 h timeout.
+- **What was built:** at the start every Bugs entry was gated on the owner or the observer, and FOCUS.md says not
+  to manufacture a beginner feature. The Scout's sweep (2) then filed a reproduced, buildable auto-drizzle bug
+  (`docs:` commit ~40 min old when picked; no other run had it) — shipped as v0.502.21. Its stated gate ("the probe's
+  shapes as tests *and* the even-raster cases unchanged") is met in `tests/test_auto_drizzle.py`; the owner-frequency
+  count it also mentioned decides only priority, and the change can only turn a ×7-cost yes into a no.
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-b7kb1h`) — QA rotation sweep (3), new angle — a solve pool worker SIGKILLed *by its own ASTAP child* mid-solve, through v0.502.10's broken-pool retry (`scanner._map_jobs`): CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8161 passed / 7 skipped on `aeaf21c3` (xdist `-n 4`, BLAS capped, 17m07s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all

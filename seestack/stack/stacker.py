@@ -1117,6 +1117,7 @@ def _decide_auto_drizzle(
         canvas_pixel_positions,
         decide_auto_drizzle,
         dither_spread_px,
+        footprint_coverage_plane,
     )
 
     def _measure() -> DitherSpread | None:
@@ -1129,6 +1130,15 @@ def _decide_auto_drizzle(
         return dither_spread_px(
             canvas_pixel_positions(frames, canvas_wcs_text=dst_wcs_text),
             labels=labels, min_members=AUTO_DRIZZLE_PANEL_MIN_FRAMES)
+
+    def _panel_depth() -> float | None:
+        # A typical panel's depth, read off the subs' summed footprints with the
+        # same level rule the trim and the health notes use — so one deep panel
+        # of an uneven mosaic cannot lift the canvas average over the bar while
+        # most of the picture sits far under it.
+        plane = footprint_coverage_plane(
+            frames, canvas_wcs_text=dst_wcs_text, dst_shape=dst_shape)
+        return None if plane is None else coverage_panel_depth(plane)
 
     budget = int(_stack_memory_budget_bytes(memory_budget_gb))
 
@@ -1143,7 +1153,8 @@ def _decide_auto_drizzle(
 
     return decide_auto_drizzle(
         n_frames=n, ref_shape=ref_shape, dst_shape=dst_shape,
-        measure_dither=_measure, fits_budget=_fits)
+        measure_dither=_measure, fits_budget=_fits,
+        measure_panel_depth=_panel_depth)
 
 
 def panel_frame_counts(
