@@ -1,5 +1,27 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-cocyik`) — QA rotation sweep (4), the routers no earlier sweep had named (`auth`, `jobs`, `logs`, `seestar`, `glossary`, `stackfailures`, `wishlist`, `overtrim`, `unstretched`): one bug, filed reproduced (`routers/auth.set_password`).
+
+- **Suite:** SUITE_RESULT on `746d34b0` (Qt-skip fallback — PySide6 not installed in this container; xdist `-n 4`,
+  BLAS capped). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated —
+  nothing owed. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors).
+- **How the routers were picked:** counted each `webapp/routers/*.py` basename's mentions across PROCESS-NOTES and
+  `docs/archive/`; eight had none or one. Read all of those end to end.
+- **Finding — `auth`:** "Disable" clears only the password hash; the read-only token's hash survives, invisible
+  (Settings hides the Remove button while open) and un-mintable over, and a later new password silently revives it.
+  Reproduced with a scratch `TestClient` script (no test file in the tree): old token → 200 on `/api/logs` and
+  `/api/targets` after re-enable. Filed at the end of Bugs, size S.
+- **Read CLEAN:** `stackfailures` (its 200-job window equals `JobManager.max_history`, so it loses nothing the
+  history still holds); `wishlist` (catalog-id whitelist, capture status delegated to `lifelist`, whose mosaic path
+  judges panels via `footprint_covers`); `overtrim`/`unstretched` (one definition each, shared with the editor and
+  reprocess dialog; thin depth uses `stacking_field_fulls`, the convention five other surfaces share); `jobs`,
+  `logs` (bounded `limit`s), `glossary` (static). `seestar` `connect/{ip}` takes any address, but only when the
+  integration is on and behind the same auth as everything else — not filed.
+- **Observation, not filed:** on an in-place Auto-edited mosaic run, the one-sub reveal puts the single panel sub
+  through the mosaic's recipe, so Auto's border-trim fractions crop a few percent off a sub that has no ragged
+  border. Cosmetic at the measured 7.9 % trim; worth a look only if that trim ever grows.
+- **Rotation: (4) done → next sweep is (1).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-qhoxav`) — QA rotation sweep (3), new angle — ffmpeg/ffprobe through the Moon & Sun API on a *per-night* `incoming/` layout: side effects CLEAN; one discovery bug filed reproduced (`video.discover.find_video_captures`).
 
 - **Suite:** 8179 passed / 7 skipped on `68b699f9` (xdist `-n 4`, BLAS capped, 18m09s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
