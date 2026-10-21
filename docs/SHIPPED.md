@@ -1,5 +1,46 @@
 # Shipped — the record
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-ku8muu`) — the full-size loupe keeps the default stretch's whole-picture curve
+
+### v0.502.27 — `pipeline.apply_recipe` fallback stretch through `ctx.fit` (`FALLBACK_STRETCH_UID`)
+
+**What.** With no enabled Stretch op (the editor's first-open state), `apply_recipe`'s fallback STF `autostretch` now
+takes its statistics through `EditContext.fit` under the fixed key `__fallback_stretch__:stretch_stats`, exactly as
+`tone.stretch` does. The loupe's whole-proxy render records them and the 1:1 window is stretched on the *picture's*
+sky instead of its own, so a nebula-core window is no longer pinned to flat 20 % grey. Self-measured,
+`measure_stretch_stats` is the numbers `autostretch` derives for itself, so the preview and the export are
+byte-for-byte unchanged (pinned). The key is no op's uid, so `webapp.edit_fit_cache` never carries it to another
+render. Peak memory on a native-canvas export is not raised: the measurement's temporary is freed before
+`autostretch` allocates its own two.
+
+**Tests** (+3): `tests/webapp/test_editor_loupe.py` — preview vs loupe over the shared source samples on a bright
+off-centre object, empty recipe **0/255** (before: mean 122) and `detail.sharpen` only, mean 0.19 (before: 120);
+the fallback stretch self-measured is byte-identical to `autostretch` with NaN gaps. Both route tests **fail
+before**. No config, schema, API or on-disk change.
+
+**The Bugs entry, as filed:**
+- **🟠 (Scout 2026-10-21, QA rotation sweep (1)) — "Check it at full size" on a recipe with no Stretch op — the
+  editor's first-open state — re-stretches the window by its *own* sky, so a nebula core reads as flat grey
+  (`pipeline.apply_recipe` fallback `autostretch`, reached from `routers/editor._render_loupe_png`).**
+  *(Pillar: editor, PRIORITY 1; size **S**; severity moderate — the control exists to be the authority on what the
+  export looks like, and here it is a different picture; nothing is written. Confidence: **reproduced** through the
+  real `/editor/loupe` and `/editor/preview` routes on a 3600×2400 2×2-mosaic run, proxy stride 3.)*
+  A run opens in the editor with an **empty** recipe (Auto is offered, not applied), and `FullSizeCheck` is offered
+  for any recipe without a geometry refusal. With no enabled `tone.stretch`, `apply_recipe` inserts
+  `autostretch(out)` at the end — measured on whatever array it is handed, outside `EditContext.fit`, so the loupe's
+  frozen-fit channel never carries it. Every window is therefore pinned to 20 % grey by its own medians, one channel
+  at a time. Measured (8-bit, window interior): **nebula-core window — loupe median 51/51/51 vs the export's
+  181/165/131, mean |Δ| 97.5, vs the preview 104.7**; sky windows mean 7–16, max 45–130. Same with only
+  `detail.sharpen` added (the op the loupe is most often opened for): 96.9 mean vs the export. The control: with an
+  explicit `tone.stretch` every window is byte-identical to the preview (0/255), including with a `geometry.crop`
+  after the background passes on the mosaic (also measured this sweep — CLEAN).
+  **Fix shape:** measure the fallback's stats through `ctx.fit` under a fixed key (`ctx.op_uid = "__fallback_stretch__"`;
+  `autostretch(out, stats=ctx.fit(..., lambda: measure_stretch_stats(out)))`) so the whole-proxy render's numbers
+  are frozen onto the window like every other whole-image measurement; confirm `autostretch` with self-measured
+  stats is byte-for-byte today's output so the preview and export do not move. Test: in
+  `tests/webapp/test_editor_loupe.py`, `_overlap` of preview vs loupe for `[]` and `[detail.sharpen]` on a fixture
+  with a bright off-centre object is ≤1 level (today ~100). Ungated.
+
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-zbfod0`) — per-night Moon/Sun folders all listed
 
 ### v0.502.26 — `video.discover.find_video_captures` ids per path, `_bare_id_holder`
