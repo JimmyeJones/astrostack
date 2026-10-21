@@ -1,5 +1,35 @@
 # Shipped — the record
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-8nw2pa`) — the planner reads an uneven mosaic's depth at its median pixel
+
+### v0.502.29 — `nightplan._panel_depth_fulls` / `_panel_noise_gain`, `LibraryTarget.depth_fulls`, `webapp.field_fulls.target_depth_fulls`
+
+**What.** "Best use of your scope right now" and "Worth more time" divided a mosaic's total by `field_fulls` — an
+*area* ratio, so the canvas mean — to say "about N on a typical part", and ranked on `1 − √(t/(t+1 h))` of the total.
+Both are exact only on an evenly shot raster. On a grown mosaic (2×2 for 6 h, then a 3×3 for 1 h) the card said
+"about 55 min … about 6 %" (score 43) while the median pixel holds 13 min; a deep 20 h field merged with a 2 h 3×3
+said "about 2.9 h … about 2 %" (score 14.7) and sank to the bottom of the list while five ninths of its picture
+holds 13 min. The planner now reads `depth_fulls` = the newest stacking run's `n_frames_used ÷
+coverage_median_depth` (same run `target_field_fulls` reads; on every run since the engine records it, backfilled by
+`coverage_backfill`): the *have* clause divides by it, and the gain is `1 − √((T/D) / (T/D + h/F))` — another hour
+still spreads over the `F` fields of sky the canvas spans. Grown: "about 13 min … about 21 %", score 100; deep+3×3:
+13 min / 21 %, now ranked above an even 6 h single field. **The even 3×3 moves too, honestly:** 47 → 40 min (the
+mean counted overlaps as extra sky; the median pixel holds one panel's share) and 7 → 9 % (an hour spreads over
+~7.6 fields of sky, not nine panels — slightly optimistic by the overlap, the less harmful direction for a
+"worth more time" card). **Unchanged byte-for-byte:** a single field, an older row with no scale, and a mosaic whose
+run has no median (or an unusable one: < 1, NaN, ∞) — `_panel_depth_fulls` returns `field_fulls` and the old formula
+runs. `D == F` reproduces the whole-target gain exactly (pinned). The other per-panel surfaces (`season_closing`,
+`perPixel.ts`) still use the area ratio — left as a trimmed Bugs entry.
+
+**Upgrade.** One optional dataclass field on the engine's `LibraryTarget` (not served), one read of an existing
+column; no config, schema, migration, on-disk, default or API-shape change.
+
+**Tests** (+8): `tests/test_nightplan.py` — the three shapes built as real coverage maps and measured by the engine's
+own `coverage_median_depth` / `field_fulls_of_sky` (grown, deep+raster with its ranking, even, the placed path),
+single-field/unusable-depth byte-for-byte on both planner paths, and `D == F` ≡ whole-target gain;
+`tests/webapp/test_plan.py` — `target_depth_fulls` (None / None-without-median / 40 / clamped 1.0) and
+`/api/plan/best-tonight` end to end. Fail-before shown by scratch revert of `_panel_depth_fulls` (5 fail).
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-d8yo4f`) — the sky-brightness card buckets nights by the subs' own longitude
 
 ### v0.502.28 — `frames.sky_brightness_read` through `resolve_site_lon`; `detect_site_from_library` reads two columns

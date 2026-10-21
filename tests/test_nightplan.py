@@ -1404,10 +1404,11 @@ def test_moon_interference_evaluates_during_darkness_not_page_load():
 # ---- "Best use of your scope right now" (rank_targets_now) -------------------
 
 def _lib(safe: str, name: str, ra: float, dec: float, hours: float,
-         field_fulls: float | None = None) -> LibraryTarget:
+         field_fulls: float | None = None,
+         depth_fulls: float | None = None) -> LibraryTarget:
     return LibraryTarget(safe=safe, name=name, ra_deg=ra, dec_deg=dec,
                          frames_accepted=int(hours * 120), total_exposure_s=hours * 3600.0,
-                         field_fulls=field_fulls)
+                         field_fulls=field_fulls, depth_fulls=depth_fulls)
 
 
 def test_noise_gain_follows_the_root_n_maths_and_falls_with_depth():
@@ -1820,6 +1821,161 @@ def test_the_pick_carries_the_scale_its_sentence_was_written_with():
                 _lib("t", "T", 10.7, 41.3, hours=10.0, field_fulls=ff),
             ]).picks[0]
             assert pick.field_fulls == ff or (ff is None and pick.field_fulls is None)
+
+
+# ---- an *uneven* mosaic: the area ratio is a canvas mean ----------------------
+#
+# ``field_fulls`` is an area ratio, so ``total ÷ field_fulls`` is the canvas mean
+# depth — exact on an evenly shot raster, far too deep on a grown one or a deep
+# field merged with a thin raster. ``depth_fulls`` (``n_frames_used ÷
+# coverage_median_depth`` of the same run) is the measured median. The shapes
+# below are built as real coverage maps (S30 frame proportions at 1/10 scale, 12 %
+# overlap, 10 s subs) and measured by the engine's own ``coverage_median_depth``
+# and ``field_fulls_of_sky`` — the Scout's 2026-10-21 sweep (2) repro.
+
+_SUB_S = 10.0
+_FW, _FH = 108, 192
+
+
+def _raster(nx: int, ny: int, overlap: float = 0.12) -> list[tuple[int, int]]:
+    sx, sy = int(_FW * (1 - overlap)), int(_FH * (1 - overlap))
+    return [(i * sx, j * sy) for j in range(ny) for i in range(nx)]
+
+
+def _measured_mosaic(panels: list[tuple[list[tuple[int, int]], int]]
+                     ) -> tuple[float, float, float]:
+    """``(total_exposure_s, field_fulls, depth_fulls)`` of a canvas built from
+    ``(panel offsets, subs per panel)`` groups, measured the way the app does."""
+    import numpy as np
+
+    from seestack.stack.stacker import coverage_median_depth
+    from webapp.field_fulls import field_fulls_of_sky
+
+    w = max(ox + _FW for offs, _ in panels for ox, _oy in offs)
+    h = max(oy + _FH for offs, _ in panels for _ox, oy in offs)
+    cov = np.zeros((h, w))
+    n = 0
+    for offs, k in panels:
+        for ox, oy in offs:
+            cov[oy:oy + _FH, ox:ox + _FW] += k
+            n += k
+    ff = field_fulls_of_sky(w, h, frame_w=_FW, frame_h=_FH,
+                            uncovered_frac=float((cov == 0).mean()))
+    return n * _SUB_S, ff, n / coverage_median_depth(cov)
+
+
+def _mosaic_lib(panels, *, measured: bool = True) -> LibraryTarget:
+    total_s, ff, df = _measured_mosaic(panels)
+    return LibraryTarget(safe="t", name="T", ra_deg=10.7, dec_deg=41.3,
+                         frames_accepted=int(total_s / _SUB_S),
+                         total_exposure_s=total_s, field_fulls=ff,
+                         depth_fulls=df if measured else None)
+
+
+# 2x2 for six hours, then the mosaic grew to a 3x3 for one.
+_GROWN = [(_raster(2, 2), 540), (_raster(3, 3), 40)]
+# A deep 20 h single field (the centre panel) merged with a 2 h 3x3.
+_DEEP_PLUS_RASTER = [([_raster(3, 3)[4]], 7200), (_raster(3, 3), 80)]
+# An evenly shot 3x3, six hours.
+_EVEN = [(_raster(3, 3), 240)]
+
+
+def test_a_grown_mosaic_quotes_its_median_depth_not_the_canvas_mean():
+    """The repro: the grown raster read "about 55 min on a typical part … about
+    6 %" over a picture whose median pixel holds 13 min — the flattering
+    direction, on two cards shown unasked."""
+    before = np_plan.rank_targets_now(
+        None, JAN_EVENING, [_mosaic_lib(_GROWN, measured=False)]).picks[0]
+    assert "about 55 min on a typical part" in before.reason
+    assert "about 6%" in before.reason
+
+    after = np_plan.rank_targets_now(
+        None, JAN_EVENING, [_mosaic_lib(_GROWN)]).picks[0]
+    assert after.reason == (
+        "You've got about 13 min on a typical part of it so far "
+        "(7.0 h in total, spread over about 8 fields of sky) "
+        "— another hour would cut its noise about 21%.")
+    # The figure the sentence prints is the one the row ranks by.
+    assert round(after.noise_gain * 100) == 21
+    assert after.score == 100.0 and before.score < 50.0
+
+
+def test_a_deep_field_merged_with_a_thin_raster_no_longer_sinks_the_target():
+    """"about 2.9 h … about 2 %", score 14.7 — the bottom of "Worth more time"
+    while five ninths of the picture holds 13 min."""
+    before = np_plan.rank_targets_now(
+        None, JAN_EVENING, [_mosaic_lib(_DEEP_PLUS_RASTER, measured=False)]).picks[0]
+    assert "about 2.9 h on a typical part" in before.reason
+    assert before.score == pytest.approx(14.7)
+
+    after = np_plan.rank_targets_now(
+        None, JAN_EVENING, [_mosaic_lib(_DEEP_PLUS_RASTER)]).picks[0]
+    assert "about 13 min on a typical part of it so far (22 h in total" in after.reason
+    assert "about 21%" in after.reason
+
+    # Against an evenly shot 6 h single field it now ranks first: an hour on
+    # the thin 3x3 does far more for most of its picture.
+    order = [p.safe for p in np_plan.rank_targets_now(None, JAN_EVENING, [
+        _lib("single", "Single", 12.5, 41.5, hours=6.0),
+        _mosaic_lib(_DEEP_PLUS_RASTER),
+    ]).picks]
+    assert order == ["t", "single"]
+
+
+def test_an_even_raster_counts_its_overlaps_honestly():
+    """The even 3x3: 47 min was the canvas mean (overlaps counted as extra
+    sky); the median pixel holds 40 min, one panel's share. The percentage
+    moves from 7 % to 9 % because another hour still spreads over the sky the
+    canvas spans (``h/F``) — about 7.6 fields here, not nine panels."""
+    before = np_plan.rank_targets_now(
+        None, JAN_EVENING, [_mosaic_lib(_EVEN, measured=False)]).picks[0]
+    after = np_plan.rank_targets_now(
+        None, JAN_EVENING, [_mosaic_lib(_EVEN)]).picks[0]
+    assert "about 47 min on a typical part" in before.reason
+    assert "about 40 min on a typical part" in after.reason
+    assert "about 9%" in after.reason
+
+
+def test_the_placed_path_reads_the_median_depth_too():
+    reason = np_plan.rank_targets_now(
+        LONDON, JAN_EVENING, [_mosaic_lib(_GROWN)]).picks[0].reason
+    assert ("So far you've got about 13 min on a typical part of it "
+            "(7.0 h in total") in reason
+    assert "about 21%" in reason
+
+
+def test_a_measured_depth_is_ignored_on_a_single_field_and_when_unusable():
+    """A single field (or an older row with no scale) is byte-for-byte what it
+    was whatever ``depth_fulls`` says, and a mosaic with no usable median keeps
+    the area ratio — so every row an older run serves is unchanged."""
+    for observer in (None, LONDON):
+        baseline = np_plan.rank_targets_now(observer, JAN_EVENING, [
+            _lib("t", "T", 10.7, 41.3, hours=10.0)]).picks[0]
+        for ff in (None, 1.0, 0.5):
+            for df in (None, 1.0, 1.3, 40.0):
+                pick = np_plan.rank_targets_now(observer, JAN_EVENING, [
+                    _lib("t", "T", 10.7, 41.3, hours=10.0,
+                         field_fulls=ff, depth_fulls=df)]).picks[0]
+                assert (pick.reason, pick.score, pick.noise_gain) == (
+                    baseline.reason, baseline.score, baseline.noise_gain), (ff, df)
+
+        mosaic = np_plan.rank_targets_now(observer, JAN_EVENING, [
+            _lib("t", "T", 10.7, 41.3, hours=10.0, field_fulls=4.0)]).picks[0]
+        for df in (None, 0.5, 0.0, -3.0, float("nan"), float("inf")):
+            pick = np_plan.rank_targets_now(observer, JAN_EVENING, [
+                _lib("t", "T", 10.7, 41.3, hours=10.0,
+                     field_fulls=4.0, depth_fulls=df)]).picks[0]
+            assert (pick.reason, pick.score, pick.noise_gain) == (
+                mosaic.reason, mosaic.score, mosaic.noise_gain), df
+
+
+def test_the_panel_gain_is_the_whole_target_gain_when_the_raster_is_even():
+    """``D == F`` is the evenly shot raster, where the ``F`` cancels — so the
+    per-panel figure and :func:`noise_gain_from_more_time` agree exactly."""
+    for total_h in (0.5, 3.0, 10.0, 40.0):
+        for ff in (2.0, 4.0, 96.0):
+            assert np_plan._panel_noise_gain(total_h * 3600.0, ff, ff) == (
+                pytest.approx(noise_gain_from_more_time(total_h * 3600.0), abs=1e-12))
 
 
 def test_the_fields_of_sky_phrase_is_a_rough_scale_not_a_measurement():

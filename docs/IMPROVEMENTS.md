@@ -539,34 +539,18 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   upgrade's restart clears it). Ungated. Repro shape in PROCESS-NOTES.
 
 
-- **🟡 (Scout 2026-10-21, QA rotation sweep (2)) — on an *uneven* mosaic the planner's "about N on a typical part"
-  and its "another hour would cut its noise about X %" are the canvas **mean**, which a grown raster or a deep
-  panel lifts far above what a typical part holds (`nightplan._have_phrase` / `noise_gain_from_more_time` via
-  `webapp.field_fulls.target_field_fulls`).**
-  *(Pillar: friendliness / trust, PRIORITY 3; size **M** for every surface, **S** for the planner alone; severity
-  low–moderate — the flattering direction on the two cards shown unasked ("Worth more time", "Best use of your scope
-  right now"); nothing is written. Confidence: **reproduced** with the real `_depth_only_picks`,
-  `field_fulls_of_sky` (with `uncovered_frac`) and `stacker.coverage_median_depth` on S30 footprints, 1080×1920,
-  12 % overlap, 10 s subs — scratchpad probe, shapes only.)* The depth is `total ÷ field_fulls`, an area ratio, and
-  the ranking is `1 − √(t/(t+1 h))` on the total — both exact only for an evenly shot raster (where F cancels, as
-  `_depth_sentence` says). Measured:
-  - **even 3×3, 6 h:** "about 47 min on a typical part … about 7 %"; median pixel 40 min, an hour of the raster
-    cuts it 7 % — right.
-  - **2×2 for 6 h, then the mosaic grew to 3×3 for 1 h** (the grown-canvas shape the noise-delta entry above already
-    treats as the owner's): "**about 55 min** on a typical part … about **6 %**", score 43; the median pixel holds
-    **13 min** and another hour of the 3×3 cuts it **18 %** (saturated score 100).
-  - **a deep single field (20 h) merged with a 3×3 (2 h):** "about **2.9 h** … about **2 %**", score 14.7 — the
-    target sinks to the bottom of "Worth more time" while 5/9 of its picture holds 13 min.
-  `perPixel.ts` calls the mean "the conservative one" — true against the peak it replaced, but on these shapes it
-  errs *deep*, and its stated reason for not using a measured depth ("only populated on a mosaic uneven enough",
-  i.e. `grain_deep_frames`) no longer holds: every stack run now carries `coverage_median_depth` (backfilled by
-  `coverage_backfill`). **Fix shape:** serve a depth scale beside `field_fulls` — `n_used ÷ coverage_median_depth`
-  of the same newest stacking run, falling back to `field_fulls` where the column is null — and divide by it
-  wherever a *depth* is quoted (`_have_phrase`, the gain/rank on the planner, `perPixel`'s consumers); keep
-  `field_fulls` itself for "how much sky" (`canvas_is_mosaic`, framing advice, the "spread over N fields" clause).
-  Note the even 3×3 then reads 40 min instead of 47 (overlaps are counted honestly) — say so in the commit. Test: the
-  three shapes above through `_depth_only_picks`, the grown one ending at 13 min / 18 %; a single field unchanged
-  byte-for-byte. Ungated (display only; no default, no hot path).
+- **🟡 (Scout 2026-10-21, QA rotation sweep (2); planner half shipped v0.502.29) — on an *uneven* mosaic the
+  *other* per-panel surfaces still quote the canvas **mean** (`total ÷ field_fulls`, an area ratio), which a grown
+  raster or a deep panel lifts far above what a typical part holds: `season_closing`'s card and `perPixel.ts`'s
+  consumers (readiness / "Is it enough yet?", Dashboard progress).**
+  *(Pillar: friendliness / trust, PRIORITY 3; size **M**; severity low–moderate; confidence: **reproduced** — the
+  same three shapes now pinned in `tests/test_nightplan.py` (`_measured_mosaic`): grown 2×2→3×3 is 55 min mean vs
+  13 min median; deep field + 3×3 is 2.9 h vs 13 min.)* **Fix shape:** the planner now reads
+  `LibraryTarget.depth_fulls` (`webapp.field_fulls.target_depth_fulls` = newest stacking run's `n_frames_used ÷
+  coverage_median_depth`, `None` → keep the area ratio) through `nightplan._panel_depth_fulls` /
+  `_panel_noise_gain`. Serve the same figure beside `field_fulls` on `ClosingTarget`, `TargetOut` and the progress
+  roll-up, and divide by it wherever a *depth* is quoted (`perPixel.ts`); keep `field_fulls` for "how much sky".
+  Update `tests/test_per_panel_phrase_mirror.py` with it. Ungated (display only).
 
 - **🟡 (Scout 2026-10-21, QA rotation sweep (4)) — the share/print nameplate and the share caption date a run by
   UTC noon-to-noon whenever Settings has no location, while the Nights card, the frames table and the calendar date
@@ -3660,6 +3644,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.29 **The "Best use of your scope right now" / "Worth more time" planner reads an uneven mosaic's depth at its median pixel, not the canvas mean — a grown 2×2→3×3 said "about 55 min on a typical part … 6 %" over a picture whose median pixel holds 13 min, and sank to the bottom of the list** (`nightplan._panel_depth_fulls` / `_panel_noise_gain`, `LibraryTarget.depth_fulls`, `webapp.field_fulls.target_depth_fulls`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.28 **The "was the sky brighter than usual?" card buckets nights by the subs' own longitude when Settings has no location — at a western or far-eastern site it split each session at UTC noon and called last night's dawn hour a "much brighter" night of its own** (`frames.sky_brightness_read` → `resolve_site_lon`; the site probe reads two columns, not `FrameRow`s)
 - ✅ v0.502.27 **"Check it at full size" on a recipe with no Stretch op (the editor's first-open state) shows the picture's own curve — each 1:1 window was re-stretched by its own sky, so a nebula core read flat grey** (`pipeline.apply_recipe` fallback stretch through `ctx.fit`, `FALLBACK_STRETCH_UID`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.26 **Moon & Sun lists every night of a per-night `incoming/` layout — a repeated `Lunar_video` folder name hid all but the first, and a new earlier-sorting night took over a stacked capture's id** (`video.discover.find_video_captures`, `_bare_id_holder`).

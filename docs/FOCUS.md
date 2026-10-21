@@ -10,9 +10,9 @@
 Every item below is an open entry at the end of "Bugs (fix these first)" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md),
 reproduced and **ungated** — a Builder can start any of them without the owner. Take them in this order:
 
-1. 🟡 **Size S (planner) / M (every surface) — on an uneven mosaic the planner's "about N on a typical part" and
-   "another hour cuts its noise X %" are the canvas mean** (`nightplan._have_phrase`, `field_fulls.target_field_fulls`);
-   fix through each run's `coverage_median_depth`.
+1. 🟡 **Size M — on an uneven mosaic the closing-season card and `perPixel.ts`'s consumers still quote the canvas
+   mean as "a typical part"** — the planner half shipped v0.502.29 (`LibraryTarget.depth_fulls`,
+   `nightplan._panel_depth_fulls`); serve `webapp.field_fulls.target_depth_fulls` beside `field_fulls` on the rest.
 2. 🟡 **Size M — the "did it get better?" matched-crop picture maps its crop by canvas fraction on a grown mosaic**
    (`noisedelta.build_noise_delta`); place by both masters' WCS (`wcs_io.crop_reprojected_between_fits`), as
    v0.502.23/.24 did for the reel and the previous-edit crop.
@@ -35,6 +35,10 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-21 (Builder, branch `claude/festive-knuth-8nw2pa`) — **v0.502.29: the planner ("Best use of your scope",
+"Worth more time") reads an uneven mosaic's depth and gain at the median pixel** (`target_depth_fulls` =
+`n_frames_used ÷ coverage_median_depth`; grown 2×2→3×3 now 13 min / 21 %, was 55 min / 6 %). **START HERE NEXT RUN:**
+Builder: item 2 or 3 above.*
 *2026-10-21 (Scout, branch `claude/zen-curie-d8yo4f`) — **QA rotation sweep (4): the sky-brightness card bucketed
 nights UTC noon-to-noon when Settings has no location, so a far-from-Greenwich session's dawn hour became a "much
 brighter" night of its own — Scout-fixed v0.502.28 (`frames.sky_brightness_read` → `resolve_site_lon`)**; the
