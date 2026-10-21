@@ -1,5 +1,24 @@
 # Shipped — the record
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-66kbiz`) — the reveal's "one raw frame" keeps its whole field on a mosaic
+
+### v0.502.31 — `routers/stack._render_sub_through_recipe` drops `geometry.crop` (`_without_saved_crop`)
+
+**What.** On an in-place "Process target" Auto edit the "one frame vs your stack" reveal (and its before/after
+download) puts the representative sub through the run's own recipe so both halves carry the same processing. On a
+mosaic that recipe ends with Auto's border trim — fractions of the **union canvas** — and the sub (one panel's
+field) was cut by them: an ordinary ragged-edge trim turned a 480×320 sub into 460×294, and a trim that drops a
+missing panel's third of the canvas into **298×320 (38 % of the frame gone)**. The sub render now leaves every
+`geometry.crop` out (the same helper v0.502.30 uses for saved looks); every tone op still applies. Single-field
+Auto emits no crop, so a single field is unchanged; a re-edited recipe still hides the reveal as before.
+
+**Upgrade.** No config, schema, on-disk, default or API-shape change.
+
+**Tests** (+1): `tests/webapp/test_one_sub_vs_stack.py::test_a_mosaic_auto_trim_does_not_crop_the_one_raw_frame`
+(fails before with `(298, 320) == (480, 320)`).
+
+Found by QA rotation sweep (1) — filed and fixed in the same run (Scout's one small fix), so no backlog entry.
+
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-6n59fg`) — a saved look leaves its crop behind
 
 ### v0.502.30 — `routers/editor._without_saved_crop` (`batch_apply`), `savedLookCrop.dropSavedCrop` (`Editor.applyDefaultRecipe`, `PresetMenu` user branch)
