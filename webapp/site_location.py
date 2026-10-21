@@ -131,10 +131,14 @@ def detect_site_from_library(lib, *, max_probes: int = MAX_SITE_PROBE_FRAMES,  #
         proj = None
         try:
             proj = Project.open(lib.target_dir(entry))
-            for frame in proj.iter_frames(accepted_only=True):
+            # Two columns, not rows: a ``FrameRow`` carries the sub's plate
+            # solution, and this walk runs on page loads (the Nights card, the
+            # frames table, the sky-brightness card) that must not build one.
+            for cached_path, source_path in proj.iter_frame_columns(
+                    "cached_path", "source_path", accepted_only=True):
                 if probed >= max_probes:
                     return None
-                for path in (frame.cached_path, frame.source_path):
+                for path in (cached_path, source_path):
                     if not path:
                         continue
                     probed += 1

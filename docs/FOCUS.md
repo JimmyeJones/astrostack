@@ -17,6 +17,10 @@ reproduced and **ungated** — a Builder can start any of them without the owner
    (`noisedelta.build_noise_delta`); place by both masters' WCS (`wcs_io.crop_reprojected_between_fits`), as
    v0.502.23/.24 did for the reel and the previous-edit crop.
 
+3. 🟡 **Size S — the share/print nameplate and the share caption date a run UTC noon-to-noon when Settings has no
+   location** (`pipeline._nameplate_fields`, `capture_night_range`); resolve the longitude the way
+   `resolve_site_lon` does (v0.502.28 fixed the sky-brightness card the same way).
+
 **Gated, do not start:** the un-located-panel entry (top of Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
 re-litigate a stand-down that carries numbers. **Issue inbox:** #878, #880, #903, #1015 — all previously acted-on
@@ -25,12 +29,17 @@ and owner-gated, none updated since 2026-10-12.
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (3), 2026-10-21
-→ next sweep is (4).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (4), 2026-10-21
+→ next sweep is (1).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-10-21 (Scout, branch `claude/zen-curie-d8yo4f`) — **QA rotation sweep (4): the sky-brightness card bucketed
+nights UTC noon-to-noon when Settings has no location, so a far-from-Greenwich session's dawn hour became a "much
+brighter" night of its own — Scout-fixed v0.502.28 (`frames.sky_brightness_read` → `resolve_site_lon`)**; the
+share/nameplate sibling filed (item 3). Inbox: the same four, all owner-gated. Suite 8196 passed / 7 skipped; dogfood
+`--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: item 1. **Rotation: (4) done → next sweep is (1).***
 *2026-10-21 (Builder, branch `claude/festive-knuth-ku8muu`) — **v0.502.27: "Check it at full size" on a recipe
 with no Stretch op shows the picture's own curve — the fallback stretch's stats go through `ctx.fit`
 (`pipeline.apply_recipe`, `FALLBACK_STRETCH_UID`); preview/export byte-identical.** **START HERE NEXT RUN:** Builder:
