@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-faezje`) — QA rotation sweep (2), on the planner's per-panel depth (`nightplan._have_phrase` / `noise_gain_from_more_time` via `field_fulls.target_field_fulls`) on *uneven* mosaics: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8182 passed / 7 skipped on `dbfa9953` (xdist `-n 4`, BLAS capped, 17m27s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. **Dogfood `--mosaic`:** CLEAN
+  (trim 7.9 %, nothing overflowing, no console errors).
+- **Sweep (2).** The only non-docs commit since the last (2) is v0.502.24 (`_recrop_for_new_canvas` in
+  `editor.previous_recipe`) — no per-panel threshold. So the sweep read the one per-panel figure the earlier (2)s
+  had only checked on *even* rasters: the planner's depth, `total ÷ field_fulls` (an area ratio, so a canvas mean)
+  and the rank's `1 − √(t/(t+1 h))` on the total (F cancels only when every panel is equally deep). Real
+  `_depth_only_picks` + `field_fulls_of_sky(uncovered_frac=…)` + `coverage_median_depth` on S30 footprints
+  (scratchpad `np/probe.py`): even 3×3 right (47 min mean / 40 min median, 7 % both ways); grown 2×2→3×3 says
+  55 min / 6 % against 13 min / 18 %; deep field + 3×3 says 2.9 h / 2 % (score 14.7) against 13 min / 18 %. Filed at
+  the end of Bugs. `perPixel.ts` documents the mean as a deliberate choice; its stated reason (no measured depth on
+  most runs) predates `coverage_median_depth` being on every run, so this is not re-litigating a numbered stand-down.
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-ae6xhx`) — QA rotation sweep (1), scale-dependent parity, on the full-size loupe over a mosaic with the crop *after* the background passes (the gap the 2026-10-19 sweep (1) named): crop-after-background CLEAN; one bug, filed reproduced (the no-Stretch fallback in `pipeline.apply_recipe`).
 
 *__Inbox__ (`list_issues`): the same four (#878, #880, #903, #1015), all previously acted-on and owner-gated, none
