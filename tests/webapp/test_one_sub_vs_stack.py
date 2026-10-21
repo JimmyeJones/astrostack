@@ -834,6 +834,40 @@ def test_auto_edited_run_downloads_the_before_after(client, solved_library):
     assert r.headers["content-type"] == "image/jpeg"
 
 
+def test_a_mosaic_auto_trim_does_not_crop_the_one_raw_frame(client, solved_library):
+    # Auto ends a mosaic's recipe with a `geometry.crop` in fractions of the union
+    # canvas. Fail-before: the reveal replayed it on one panel's sub — a trim that
+    # drops a missing panel's third of the canvas cut 480×320 to 298×320, and an
+    # ordinary ragged-edge trim to 460×294. The tone ops must still apply.
+    import numpy as np
+
+    from seestack.edit.presets import auto_recipe
+
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        master = Path(lib.target_dir(lib.find_target(safe))) / "autoedit_trim.fits"
+    finally:
+        lib.close()
+    run_id = _register_run_with_master_and_preview(
+        solved_library, safe, master, display_space=False)
+    plain = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/reference-sub")
+    rng = np.random.default_rng(7)
+    rgb = np.clip(rng.normal(0.05, 0.01, size=(64, 96, 3)), 0.0, 1.0).astype(np.float32)
+    recipe = auto_recipe(rgb, median_fwhm=3.0, is_mosaic=True,
+                         trim_crop=(0.0, 0.0, 0.62, 1.0))
+    assert any(op.id == "geometry.crop" for op in recipe.ops)
+    _mark_auto_edited(solved_library, safe, run_id, recipe.to_json())
+
+    through = client.get(f"/api/targets/{safe}/stack-runs/{run_id}/reference-sub")
+    assert through.status_code == 200
+    assert (Image.open(BytesIO(through.content)).size
+            == Image.open(BytesIO(plain.content)).size)
+    assert through.content != plain.content
+    assert client.get(
+        f"/api/targets/{safe}/stack-runs/{run_id}/before-after.jpg").status_code == 200
+
+
 def test_a_display_space_export_stays_hidden_even_with_a_recipe(
     client, solved_library,
 ):

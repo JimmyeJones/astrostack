@@ -3571,7 +3571,12 @@ def _display_space_without_recipe(run: Any, recipe_json: str | None) -> bool:
 
 def _render_sub_through_recipe(src_path: str, pattern: str, recipe_json: str) -> bytes:
     """PNG bytes of one raw sub put through a saved editor recipe — the "before"
-    half of the reveal on an auto-edited run. Threadpool-safe (pure inputs)."""
+    half of the reveal on an auto-edited run. Threadpool-safe (pure inputs).
+
+    The recipe's ``geometry.crop`` is left out: Auto emits one only on a mosaic, as
+    fractions of the *union canvas*, so replaying it on one panel's sub cut away
+    sky that frame really has (a missing-panel trim took 38 % of it). The "before"
+    is one whole raw frame; only the processing is shared."""
     import io
 
     import numpy as np
@@ -3579,9 +3584,9 @@ def _render_sub_through_recipe(src_path: str, pattern: str, recipe_json: str) ->
 
     from seestack.edit.recipe import recipe_from_dict
     from seestack.stack.output import pack_unit
-    from webapp.routers.editor import render_sub_display_array
+    from webapp.routers.editor import _without_saved_crop, render_sub_display_array
 
-    recipe = recipe_from_dict(json.loads(recipe_json))
+    recipe = recipe_from_dict(_without_saved_crop(json.loads(recipe_json)))
     out = render_sub_display_array(src_path, recipe, bayer_pattern=pattern,
                                    max_width=1024)
     u8 = pack_unit(np.clip(np.nan_to_num(out), 0.0, 1.0))

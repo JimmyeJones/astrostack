@@ -1,5 +1,25 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-66kbiz`) — QA rotation sweep (1), new angle — the "one frame vs your stack" reveal on an auto-edited mosaic: one bug, Scout-fixed (v0.502.31). Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
+
+- **Suite:** 8207 passed / 7 skipped on `75034530` + this run's change (xdist `-n 4`, BLAS capped, 15m26s). **Inbox:** the
+  same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at
+  start. **Dogfood `--mosaic --editor`:** CLEAN (trim 7.9 %, every Add-menu op re-renders, undo/redo, Auto taste row
+  live, nothing overflowing, no console errors).
+- **Sweep (1).** Took the lever the `4boafp` run left open — surfaces that put one picture's look on *another* grid,
+  not yet read in that light: `beforeafter` / the one-frame reveal. On a "Process target" Auto edit the reveal renders
+  the representative sub through the run's own recipe (`_render_sub_through_recipe`), and on a mosaic that recipe ends
+  with Auto's border trim in **union-canvas fractions**. Through the real `reference-sub` route with a real
+  `auto_recipe(is_mosaic=True, trim_crop=…)`: no trim 480×320; a ragged-edge trim (0.02–0.98 × 0.04–0.96) **460×294**;
+  a missing-panel trim (x ≤ 0.62) **298×320 — 38 % of the one raw frame cut away**. `before-after.jpg` carries the same
+  cut half. Fixed with v0.502.30's `_without_saved_crop` (tone ops still apply; single-field Auto emits no crop, so a
+  single field is unchanged). Test fails before with `(298, 320) == (480, 320)`.
+- **Read and holds:** the reveal's noise ratio and its √N yardstick (`_measure_noise_ratio` / `_measure_crop_depth`)
+  measure the same central crop on both sides and grade a mosaic against the crop's own median depth — no fraction
+  replayed. Not yet run in a sweep (1): `/compare`'s A/B route on a grown mosaic, and the reveal's *framing* on a
+  mosaic (one panel beside the whole canvas — a design question, not a parity bug).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-89ftgk`) — QA rotation sweep (4), new angle — every GET route crawled with real ids on a running mosaic install, healthy and with a run's files gone: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8206 passed / 7 skipped on `0ba835f9` (xdist `-n 4`, BLAS capped, 16m34s). **Inbox:** the same four (#878,

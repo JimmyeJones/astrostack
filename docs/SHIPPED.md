@@ -2,7 +2,7 @@
 
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-ykn52w`) — the matched-crop picture is the same sky on a grown mosaic
 
-### v0.502.31 — `seestack/render/noisedelta._sky_mapper`, `build_noise_delta`, `choose_patch_centre(other_rect=)`
+### v0.502.32 — `seestack/render/noisedelta._sky_mapper`, `build_noise_delta`, `choose_patch_centre(other_rect=)`
 
 **What.** The Target page's "did it get better?" matched-crop picture (`/api/targets/{safe}/noise-delta`) took
 the older crop at the same canvas *fraction* as the newer one and sized it as a fraction of each canvas, so once a
@@ -51,6 +51,25 @@ default change (`noise_delta_cache` is in-memory).
   `also_covered` check reads the same fraction and needs the same mapping. Test: the three probe shapes (same sky centre within 1 px, equal native box, displayed grain equal within ~5 % at
   equal depth), the same-shape case byte-for-byte (`noise_delta_cache` is in-memory, so an
   upgrade's restart clears it). Ungated. Repro shape in PROCESS-NOTES.
+
+## 2026-10-21 (Scout, branch `claude/zen-curie-66kbiz`) — the reveal's "one raw frame" keeps its whole field on a mosaic
+
+### v0.502.31 — `routers/stack._render_sub_through_recipe` drops `geometry.crop` (`_without_saved_crop`)
+
+**What.** On an in-place "Process target" Auto edit the "one frame vs your stack" reveal (and its before/after
+download) puts the representative sub through the run's own recipe so both halves carry the same processing. On a
+mosaic that recipe ends with Auto's border trim — fractions of the **union canvas** — and the sub (one panel's
+field) was cut by them: an ordinary ragged-edge trim turned a 480×320 sub into 460×294, and a trim that drops a
+missing panel's third of the canvas into **298×320 (38 % of the frame gone)**. The sub render now leaves every
+`geometry.crop` out (the same helper v0.502.30 uses for saved looks); every tone op still applies. Single-field
+Auto emits no crop, so a single field is unchanged; a re-edited recipe still hides the reveal as before.
+
+**Upgrade.** No config, schema, on-disk, default or API-shape change.
+
+**Tests** (+1): `tests/webapp/test_one_sub_vs_stack.py::test_a_mosaic_auto_trim_does_not_crop_the_one_raw_frame`
+(fails before with `(298, 320) == (480, 320)`).
+
+Found by QA rotation sweep (1) — filed and fixed in the same run (Scout's one small fix), so no backlog entry.
 
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-6n59fg`) — a saved look leaves its crop behind
 

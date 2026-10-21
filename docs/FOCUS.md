@@ -32,13 +32,18 @@ and owner-gated, none updated since 2026-10-12.
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (4), 2026-10-21
-→ next sweep is (1).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (1), 2026-10-21
+→ next sweep is (2).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
-*2026-10-21 (Builder, branch `claude/festive-knuth-ykn52w`) — **v0.502.31: the "did it get better?" matched-crop picture carries its patch through both masters' WCS on a grown mosaic** (`noisedelta._sky_mapper`; same sky, same native box, σ ratio honest; unsolved different-shaped pair self-hides). **START HERE NEXT RUN:** Builder: item 3 (S30 outlier floor), 4 or 1.*
+*2026-10-21 (Builder, branch `claude/festive-knuth-ykn52w`) — **v0.502.32: the "did it get better?" matched-crop picture carries its patch through both masters' WCS on a grown mosaic** (`noisedelta._sky_mapper`; same sky, same native box, σ ratio honest; unsolved different-shaped pair self-hides). **START HERE NEXT RUN:** Builder: item 3 (S30 outlier floor), 4 or 1.*
+*2026-10-21 (Scout, branch `claude/zen-curie-66kbiz`) — **QA rotation sweep (1), new angle: the one-frame reveal on an
+auto-edited mosaic cut the raw sub by the canvas's Auto trim fractions (480×320 → 298×320 on a missing-panel trim) —
+Scout-fixed v0.502.31 (`routers/stack._render_sub_through_recipe` → `_without_saved_crop`).** Inbox: the same four,
+all owner-gated. Suite 8207 passed / 7 skipped; dogfood `--mosaic --editor` CLEAN (trim 7.9 %). **START HERE NEXT
+RUN:** Builder: item 4 (S30 outlier floor), 5 or 1. **Rotation: (1) done → next sweep is (2).***
 *2026-10-21 (Scout, branch `claude/zen-curie-89ftgk`) — **QA rotation sweep (4), new angle: every GET route (165,
 228 calls with real target/run/frame ids) crawled on the running `--mosaic` app, then again with the mosaic's
 `output/` files gone under a live DB row — CLEAN (0 × 5xx both times; every 404/422 a deliberate "nothing yet").**
@@ -81,9 +86,6 @@ master dark and flat builds from `incoming/` → Moon & Sun grade and stack: CLE
 mode- and owner-identical; zero permission errors, so nothing even *attempted* a write there). Inbox: the same
 four, all owner-gated. Suite 8193 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). FOCUS.md rewritten short (old page archived whole). **START HERE NEXT RUN:** Builder: the loupe
 item (shipped v0.502.27). **Rotation: (3) done → next sweep is (4).***
-*2026-10-21 (Scout, branch `claude/zen-curie-faezje`) — QA rotation sweep (2): the planner's per-panel depth is the
-canvas mean on an uneven mosaic — filed reproduced (now item 1 above). Suite 8182 passed / 7 skipped; dogfood
-`--mosaic` CLEAN (trim 7.9 %).*
 
 ## Standing frontier
 
@@ -91,7 +93,7 @@ canvas mean on an uneven mosaic — filed reproduced (now item 1 above). Suite 8
   `seestack/stack` or `seestack/calibrate` until a new bug is found there (AGENTS.md).
 - **Grown-canvas rule:** anything that puts one run's look, crop or picture onto another run's canvas places it by
   both masters' WCS and falls back (or hides itself) without one — v0.502.23 (reel) and v0.502.24 (previous-edit
-  crop) are the pattern; the noise-delta picture (v0.502.31) was the last known surface.
+  crop) are the pattern; the noise-delta picture (v0.502.32) was the last known surface.
 
 ## How the owner gets builds now
 
