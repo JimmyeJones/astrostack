@@ -2,7 +2,7 @@
 
 ## 2026-10-21 (Scout, branch `claude/zen-curie-cocyik`) — QA rotation sweep (4), the routers no earlier sweep had named (`auth`, `jobs`, `logs`, `seestar`, `glossary`, `stackfailures`, `wishlist`, `overtrim`, `unstretched`): one bug, filed reproduced (`routers/auth.set_password`).
 
-- **Suite:** SUITE_RESULT on `746d34b0` (Qt-skip fallback — PySide6 not installed in this container; xdist `-n 4`,
+- **Suite:** 8175 passed / 7 skipped on `746d34b0` (Qt-skip fallback — PySide6 not installed in this container; xdist `-n 4`,
   BLAS capped). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated —
   nothing owed. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors).
 - **How the routers were picked:** counted each `webapp/routers/*.py` basename's mentions across PROCESS-NOTES and
