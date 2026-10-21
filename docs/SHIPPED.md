@@ -1,5 +1,43 @@
 # Shipped — the record
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-ywpmqo`) — "Use my previous edit" re-aims its crop
+
+### v0.502.24 — `editor.previous_recipe` → `pipeline._recrop_for_new_canvas`
+
+**What.** The editor's "Use my previous edit" button (`GET …/editor/previous-recipe`) returned the newest other
+run's saved ops verbatim, so a crop came across as raw fractions of the *other* canvas. It now runs the recipe
+through the same `pipeline._recrop_for_new_canvas` the reprocess-all carry uses, with this run as the target: the
+first reshaping crop is re-aimed through both masters' WCS; one that can't be placed on a different-shape canvas
+is dropped (the editor's own trim frames the new canvas; the rest of the look still comes); a same-shape canvas
+that did not move keeps the crop byte-for-byte. `count` follows the returned ops. The run search is unchanged — it
+still offers an editor export's recipe, deliberately: the button is a preview seed he sees before he Saves, unlike
+the carry, which writes a recipe nobody looks at. The helper's log line lost its "reprocess-all:" prefix, since
+two callers now share it.
+
+**Tests** (+3, `tests/webapp/test_editor.py`): the Scout's probe (200×240 TAN → 360×250 grown west column) through
+the real endpoint gives x 20/360–180/360, y 29/250–221/250 — **fails before** (0.1–0.9); no WCS on the older master
+→ crop dropped, stretch kept — **fails before**; unmoved same shape → crop unchanged. No config, schema, on-disk,
+default or API-shape change.
+
+**The Bugs entry, as filed:**
+- **🟡 (Scout 2026-10-21, QA rotation sweep (1)) — the editor's "Use my previous edit" button copies the previous run's
+  crop as raw fractions onto a canvas that changed shape, so on a mosaic that grew it frames different sky — the
+  reprocess-all carry re-aims the same crop (v0.501.8 / v0.501.11) and the button never got that fix.** *(Pillar: editor —
+  PRIORITY 1; size **S**; severity moderate — a one-click seed silently crops away or mis-centres the object; nothing is
+  saved until he presses Save. Confidence: **reproduced** through the real `previous-recipe` endpoint.)*
+  `routers/editor.previous_recipe` returns the newest other run's saved ops verbatim and `Editor.tsx::applyPreviousRecipe`
+  sets them as-is; only `pipeline._carry_hand_saved_recipe` (reprocess-all) passes the recipe through
+  `_recrop_for_new_canvas`. A plain Stack-page restack leaves the new run without a recipe, which is exactly when the
+  button is offered. Repro on `test_reprocess_all`'s fixture (a 200×240 TAN master with a hand-saved 0.1–0.9 crop, then a
+  360×250 restack grown by a west column): the button returns `x0=0.1, x1=0.9`, i.e. **x 36–324 px (288 px of sky)
+  against the 20–180 px (160 px) he framed**; the carry path on the same pair gives 20/360–180/360. **Fix shape:** in
+  `previous_recipe`, run the recipe through `pipeline._recrop_for_new_canvas(recipe, src.fits_path, cur.fits_path,
+  same_shape=…)` (move the helper somewhere both can import if the router→pipeline import is unwelcome), so the button
+  and the carry share one rule — a crop that can't be placed is dropped and the editor's own trim takes over. Skip
+  editor exports / channel combines as the carry does, or note why not. Test: the probe above through the endpoint (crop
+  re-aimed; unplaceable → crop dropped, look kept; same-shape unmoved → byte-for-byte). Ungated.
+
+
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-2g76hl`) — the deepening reel places earlier nights by their WCS
 
 ### v0.502.23 — `deepening._sky_affine`, `_place_on_sky`, `_unify_frame`

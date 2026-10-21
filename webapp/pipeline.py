@@ -1961,7 +1961,7 @@ def _recrop_for_new_canvas(recipe, src_fits: str | None,  # noqa: ANN001,ANN201
         return recipe
     if same_shape:
         return recipe
-    log.info("reprocess-all: the saved crop can't be placed on the new canvas; "
+    log.info("the saved crop can't be placed on the new canvas; "
              "carrying the look without it")
     recipe.ops = [op for op in recipe.ops
                   if not (op.id == "geometry.crop" and op.enabled

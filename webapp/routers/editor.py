@@ -1383,12 +1383,21 @@ def previous_recipe(safe: str, run_id: int, request: Request) -> PreviousRecipeO
     """Find the newest *other* run of this target that carries a non-empty saved
     recipe, so the editor can offer "use my previous run's edit" when the current
     run has none — keeping a multi-night project visually consistent across
-    re-stacks with one click. Read-only; nothing is written or seeded server-side."""
+    re-stacks with one click. Read-only; nothing is written or seeded server-side.
+
+    A crop is **re-aimed onto this run's canvas** the way the reprocess-all carry
+    re-aims it (``pipeline._recrop_for_new_canvas``, through both masters' WCS):
+    its fractions are of the *other* run's canvas, so on a mosaic that grew a
+    column they would frame different sky. One that can't be placed on a
+    different-shape canvas is dropped and the editor's own trim takes over; the
+    rest of the look still comes across."""
     from seestack.edit.recipe import recipe_from_json
+    from webapp import pipeline
 
     lib, proj = deps.open_target_project(request, safe)
     try:
         runs = list(proj.iter_stack_runs())  # newest first (timestamp DESC)
+        cur = next((r for r in runs if r.id == run_id), None)
         for run in runs:
             if run.id == run_id:
                 continue
@@ -1397,6 +1406,11 @@ def previous_recipe(safe: str, run_id: int, request: Request) -> PreviousRecipeO
                 continue
             rec = recipe_from_json(raw)
             if rec.ops:
+                if cur is not None:
+                    rec = pipeline._recrop_for_new_canvas(
+                        rec, run.fits_path, cur.fits_path,
+                        same_shape=((run.canvas_h, run.canvas_w)
+                                    == (cur.canvas_h, cur.canvas_w)))
                 return PreviousRecipeOut(
                     run_id=run.id,
                     ops=[op.to_dict() for op in rec.ops],
