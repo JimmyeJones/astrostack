@@ -1,5 +1,33 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-7sgoc9`) — QA rotation sweep (2), on the two per-panel surfaces that do not route through `pointing_groups`: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8145 passed / 7 skipped on `6321c28f` (xdist `-n 4`, BLAS capped, 16m02s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the per-panel paragraph reconciles
+  as on 2026-10-16).
+- **Sweep (2).** The only per-panel code since the last (2) (`ijzhxo`) is v0.502.15's per-panel life-list margin:
+  `footprint_covers` tries every panel that holds the object at *its own* margin, so a tight panel next to a loose one
+  is not greyed by the loose one — **holds**. Following the 2026-10-16 carry-forward, the sweep then read two surfaces
+  that bin a mosaic by something other than its panels:
+  - **`bg/coverage_leveling` + the seam verdict (`measure_seam_residual` → `stackhealth.seam_verdict`, the History
+    chip and "How's my stack?").** Both bin by *integer frame count*, not by panel, so two panels of equal depth share
+    one level. Scratch, real functions: two **undithered** equal-depth panels at ±5 ADU over grain 1 keep the whole
+    10 ADU step after leveling and the verdict reads **"flat" (ratio 0.0)** — a false all-clear. **But dithered**
+    (±6 px per sub, the dogfood's shape), a 2×2 at 6/6/6/3 or 6/6/6/6 with ±3 ADU per-panel offsets reads ratio
+    1.8 / 2.8 → **"check"**, and 6/7/8/9 reads 14.6 → "check": the ragged edges create levels that expose the step,
+    so the verdict is honest on dithered data. Not filed: the false "flat" needs undithered subs, which the owner's
+    Seestar does not produce as far as anything here shows. **Carry forward (image quality, not trust):** with
+    `smooth_across_levels` on, the leveler does **not** remove a per-panel sky offset between panels of neighbouring
+    depth (6/7/8/9 at ±3 ADU leaves a 6.8 ADU step); `stacker.py`'s comment that leveling "removes the panel-to-panel
+    sky step" overstates it — the per-frame background flatten is what zeroes each panel's sky. Whether a real stack
+    ever carries such an offset after the flatten is unmeasured; a fixture that shows one is the first step, not a fix.
+  - **`pipeline._auto_stack_readability_hold`** compares the readable count to the whole-target `prior_max`, so a
+    panel whose files are all off-line could pass when new subs elsewhere make up the count. Cleared: a Seestar mosaic
+    lands in one `<T>_mosaic_sub/` folder, so an outage takes subs from every panel, not one; and the depth check
+    beside it already reads per panel.
+- **Rotation: (2) done → next sweep is (3)** (ASTAP/ffmpeg filesystem side effects with a stub binary).
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-kzjdcj`) — QA rotation sweep (1) **collided** with `claude/zen-curie-c7en94` (#1238) on the same finding (the strided border trim's high edge); folded in as a confirmation, nothing new filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8144 passed / 7 skipped on `7b6b5655` (xdist `-n 4`, BLAS capped, 15m47s). **Inbox:** the same four (#878,
