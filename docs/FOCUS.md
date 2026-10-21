@@ -10,12 +10,10 @@
 Every item below is an open entry at the end of "Bugs (fix these first)" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md),
 reproduced and **ungated** — a Builder can start any of them without the owner. Take them in this order:
 
-1. 🟠 **Editor, size S — "Check it at full size" on a recipe with no Stretch op re-stretches each loupe window by its
-   own sky** (`pipeline.apply_recipe` fallback `autostretch`, `routers/editor._render_loupe_png`). PRIORITY 1.
-2. 🟡 **Size S (planner) / M (every surface) — on an uneven mosaic the planner's "about N on a typical part" and
+1. 🟡 **Size S (planner) / M (every surface) — on an uneven mosaic the planner's "about N on a typical part" and
    "another hour cuts its noise X %" are the canvas mean** (`nightplan._have_phrase`, `field_fulls.target_field_fulls`);
    fix through each run's `coverage_median_depth`.
-3. 🟡 **Size M — the "did it get better?" matched-crop picture maps its crop by canvas fraction on a grown mosaic**
+2. 🟡 **Size M — the "did it get better?" matched-crop picture maps its crop by canvas fraction on a grown mosaic**
    (`noisedelta.build_noise_delta`); place by both masters' WCS (`wcs_io.crop_reprojected_between_fits`), as
    v0.502.23/.24 did for the reel and the previous-edit crop.
 
@@ -33,21 +31,25 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-21 (Builder, branch `claude/festive-knuth-ku8muu`) — **v0.502.27: "Check it at full size" on a recipe
+with no Stretch op shows the picture's own curve — the fallback stretch's stats go through `ctx.fit`
+(`pipeline.apply_recipe`, `FALLBACK_STRETCH_UID`); preview/export byte-identical.** **START HERE NEXT RUN:** Builder:
+item 1 above (planner depth).*
 *2026-10-21 (Scout, branch `claude/zen-curie-g7aybm`) — **QA rotation sweep (3), new angle: the whole app run as an
 unprivileged account against a read-only `incoming/` (dirs 0555, files 0444, owned by another account), with a
 hostile stub ASTAP and real ffmpeg — scan → QC/solve → stack → re-solve → rescue → editor Auto/export/share →
 master dark and flat builds from `incoming/` → Moon & Sun grade and stack: CLEAN** (`incoming/` byte-, mtime-,
 mode- and owner-identical; zero permission errors, so nothing even *attempted* a write there). Inbox: the same
-four, all owner-gated. Suite 8193 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). FOCUS.md rewritten short (old page archived whole). **START HERE NEXT RUN:** Builder: item 1
-above. **Rotation: (3) done → next sweep is (4).***
+four, all owner-gated. Suite 8193 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). FOCUS.md rewritten short (old page archived whole). **START HERE NEXT RUN:** Builder: the loupe
+item (shipped v0.502.27). **Rotation: (3) done → next sweep is (4).***
 *2026-10-21 (Scout, branch `claude/zen-curie-faezje`) — QA rotation sweep (2): the planner's per-panel depth is the
-canvas mean on an uneven mosaic — filed reproduced (item 2 above). Suite 8182 passed / 7 skipped; dogfood
+canvas mean on an uneven mosaic — filed reproduced (now item 1 above). Suite 8182 passed / 7 skipped; dogfood
 `--mosaic` CLEAN (trim 7.9 %).*
 *2026-10-21 (Builder, branch `claude/festive-knuth-zbfod0`) — v0.502.25: "Disable" access control removes the
 read-only token (`routers/auth.set_password`); v0.502.26: Moon & Sun lists every per-night `Lunar_video` folder
 (`video.discover.find_video_captures`, `_bare_id_holder`).*
 *2026-10-21 (Scout, branch `claude/zen-curie-ae6xhx`) — QA rotation sweep (1): the full-size loupe re-stretches a
-no-Stretch recipe's window by its own sky — filed reproduced (item 1 above).*
+no-Stretch recipe's window by its own sky — filed reproduced (shipped v0.502.27).*
 
 ## Standing frontier
 
@@ -55,7 +57,7 @@ no-Stretch recipe's window by its own sky — filed reproduced (item 1 above).*
   `seestack/stack` or `seestack/calibrate` until a new bug is found there (AGENTS.md).
 - **Grown-canvas rule:** anything that puts one run's look, crop or picture onto another run's canvas places it by
   both masters' WCS and falls back (or hides itself) without one — v0.502.23 (reel) and v0.502.24 (previous-edit
-  crop) are the pattern; item 3 above is the last known surface.
+  crop) are the pattern; item 2 above is the last known surface.
 
 ## How the owner gets builds now
 
