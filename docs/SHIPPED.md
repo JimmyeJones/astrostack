@@ -2,7 +2,7 @@
 
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-2g76hl`) — the deepening reel places earlier nights by their WCS
 
-### v0.502.22 — `deepening._sky_affine`, `_place_on_sky`, `_unify_frame`
+### v0.502.23 — `deepening._sky_affine`, `_place_on_sky`, `_unify_frame`
 
 **What.** `render_deepening_frames` brought every earlier frame onto the newest one's canvas with `_fit_onto`
 (fit whole + centre), which never read the WCS every master carries. Now each earlier frame goes through
@@ -52,6 +52,21 @@ removed). No config, schema, on-disk, default or API-shape change.
   the two probe shapes above (star within ~1 reel px of its night-2 position in every frame) plus the unchanged
   single-field case byte-for-byte. Bump `DEEPENING_SERIES_VERSION` or the signature tag so cached reels rebuild.
   Ungated.
+## 2026-10-21 (Scout, branch `claude/zen-curie-j1f6lp`) — the Gallery's batch "Apply preset to selected" refused every preset of his own
+
+### v0.502.22 — `routers/editor.batch_apply` → `_user_preset_recipe`
+
+**What.** The Gallery's selection bar offers **Apply preset to selected** with two groups, *Built-in* and *My presets*
+(the looks saved from the editor's Presets menu, stored in the library under `USER_PRESETS_META_KEY`). Both send a
+`preset_id` to `POST /api/editor/batch`, which resolved it through `presets.preset_recipe` — the **built-in table
+only** — so every `user_…` id came back **404 "Unknown preset"** as a red toast, and the one batch path for "make all
+these pictures look like the one I tuned" never worked for a look he made. Now a built-in miss falls back to the
+saved presets (validated through `recipe_from_dict`, as `create_preset` stored them); an id that is neither is still
+a 404. Found reading the batch path during QA rotation sweep (1).
+
+**Upgrade-safe:** no endpoint, response shape, setting, schema or path changes; built-in presets resolve exactly as
+before. Test **+1, red before** (`test_batch_apply_user_preset`, measured by stashing the router fix alone): a saved
+preset batch-exports, an unknown `user_…` id still 404s.
 
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-2gjith`) — the automatic drizzle judges an uneven mosaic on its panels
 

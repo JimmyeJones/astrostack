@@ -513,6 +513,48 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
   scratchpad (`wcs_repro.py`).)_
 
+- **🟡 (Scout 2026-10-21, QA rotation sweep (1)) — the editor's "Use my previous edit" button copies the previous run's
+  crop as raw fractions onto a canvas that changed shape, so on a mosaic that grew it frames different sky — the
+  reprocess-all carry re-aims the same crop (v0.501.8 / v0.501.11) and the button never got that fix.** *(Pillar: editor —
+  PRIORITY 1; size **S**; severity moderate — a one-click seed silently crops away or mis-centres the object; nothing is
+  saved until he presses Save. Confidence: **reproduced** through the real `previous-recipe` endpoint.)*
+  `routers/editor.previous_recipe` returns the newest other run's saved ops verbatim and `Editor.tsx::applyPreviousRecipe`
+  sets them as-is; only `pipeline._carry_hand_saved_recipe` (reprocess-all) passes the recipe through
+  `_recrop_for_new_canvas`. A plain Stack-page restack leaves the new run without a recipe, which is exactly when the
+  button is offered. Repro on `test_reprocess_all`'s fixture (a 200×240 TAN master with a hand-saved 0.1–0.9 crop, then a
+  360×250 restack grown by a west column): the button returns `x0=0.1, x1=0.9`, i.e. **x 36–324 px (288 px of sky)
+  against the 20–180 px (160 px) he framed**; the carry path on the same pair gives 20/360–180/360. **Fix shape:** in
+  `previous_recipe`, run the recipe through `pipeline._recrop_for_new_canvas(recipe, src.fits_path, cur.fits_path,
+  same_shape=…)` (move the helper somewhere both can import if the router→pipeline import is unwelcome), so the button
+  and the carry share one rule — a crop that can't be placed is dropped and the editor's own trim takes over. Skip
+  editor exports / channel combines as the carry does, or note why not. Test: the probe above through the endpoint (crop
+  re-aimed; unplaceable → crop dropped, look kept; same-shape unmoved → byte-for-byte). Ungated.
+
+- **🟡 (Scout 2026-10-21, QA rotation sweep (1)) — the "did it get better?" matched-crop picture
+  (`/api/targets/{safe}/noise-delta`) shows two *different* patches of sky at two *different* scales once a
+  mosaic's canvas grew, and the scale mismatch makes the newer half look cleaner than it is.** *(Pillar: trust —
+  PRIORITY 3; size **M**; severity moderate — the card's words say "the same patch of sky from both, at full
+  resolution", the picture is the claim, and it errs in the flattering direction; no data is touched. Confidence:
+  **reproduced** through the real `build_noise_delta` on FITS of S30-mosaic shape; occurrence on his library
+  unmeasured. The deepening-reel and previous-edit entries above are the same grown-canvas class, found the same day.)*
+  `seestack/render/noisedelta.py` maps the crop between the two masters by **canvas fraction** (`_rect_for(shape, cx,
+  cy, patch_frac)`) and sizes the box as a fraction of each canvas's *shorter side* — it never reads the WCS. Same
+  shape → same pixels, right. Grown canvas (older = top-left of the newer, same sky, **same noise σ both sides**):
+  **single panel 1080×1920 → 2×2 2000×3600** — old crop 173 px native, new 320 px native, centres **683 px apart in
+  sky**, both drawn at 173 px, so the newer half is downsampled 1.85× and its displayed grain (row-diff σ) reads
+  **15.5 against 25.4 at identical depth**; **2×1 → 2×2** — 307 vs 320 px, **504 px apart**, grain 21.0 vs 25.9.
+  Same-shape control: offset 0, grain 25.6 vs 25.6, ratio 0.996. `noise_ratio` is correctly withheld
+  (`pixel_exact=False`), so `noiseDeltaVerdict` prints no number — but `NOISE_DELTA_BLURB` still says "same patch …
+  at full resolution … the only difference you can see is the grain".
+  **Fix shape:** take the crop's rectangle through both masters' WCS — `seestack.io.wcs_io.crop_reprojected_between_fits`
+  is the engine helper the reprocess carry already uses for exactly this — and take
+  the **same native box size** from both when their pixel scales agree (a grown, non-drizzled mosaic — then no resize
+  is needed and `pixel_exact` can honestly be true); resample only when the scales differ (drizzle), at the coarser
+  scale. A master without a usable WCS and a different shape → `None` (self-hide) rather than a fraction guess. `choose_patch_centre`'s
+  `also_covered` check reads the same fraction and needs the same mapping. Test: the three probe shapes (same sky centre within 1 px, equal native box, displayed grain equal within ~5 % at
+  equal depth), the same-shape case byte-for-byte (`noise_delta_cache` is in-memory, so an
+  upgrade's restart clears it). Ungated. Repro shape in PROCESS-NOTES.
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
@@ -3591,7 +3633,8 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
-- ✅ v0.502.22 **The "night after night" reel draws each earlier night where its sky sits on the newest frame — a mosaic that grew panel by panel no longer has its first panel centred and blown up (~23 % sideways jump on a 2×1, ~1.85× zoom on a 2×2)** (`deepening._sky_affine`, `_place_on_sky`, `_unify_frame`; `_fit_onto` stays the no-WCS fallback).
+- ✅ v0.502.23 **The "night after night" reel draws each earlier night where its sky sits on the newest frame — a mosaic that grew panel by panel no longer has its first panel centred and blown up (~23 % sideways jump on a 2×1, ~1.85× zoom on a 2×2)** (`deepening._sky_affine`, `_place_on_sky`, `_unify_frame`; `_fit_onto` stays the no-WCS fallback).
+- ✅ v0.502.22 **The Gallery's "Apply preset to selected" works for his own saved presets — every "My presets" entry answered 404 "Unknown preset" because the batch looked only at the built-ins** (`editor.batch_apply` → `_user_preset_recipe`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.21 **The automatic drizzle no longer says yes to an uneven mosaic on its canvas average — one deep panel lifted a 2×2's mean to "475" while three panels held 60, and the run went ×7 slower for resolution two thirds of the picture couldn't pay for; a cleared average is now checked against a typical panel's depth summed from the subs' own footprints** (`autodrizzle.footprint_coverage_plane`, `decide_auto_drizzle(measure_panel_depth=…)`, `stacker._decide_auto_drizzle` → `coverage_panel_depth`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.20 **"My deep-sky wall"'s title counts a sub two targets registered (#878's mosaic twins) once — it printed twice the light ever collected when twins shared the wall** (`gallery._distinct_integration_s`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.19 **The Sky map's built-in viewer centres an un-trimmed picture on its own canvas, not the target's registry RA/Dec — a re-framed night below the 1 % panel share widened the union canvas and drew the tile ~0.3–0.45° off its stars, while the Aladin view placed it right** (`routers/sky.get_sky`, `wcs_io.cropped_center_radec_from_fits` with a whole-canvas crop).
