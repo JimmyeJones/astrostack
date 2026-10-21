@@ -21,7 +21,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from seestack.colourcheck import colour_expectation
-from seestack.edit.coverage_trim import coverage_is_mosaic, largest_covered_rect
+from seestack.edit.coverage_trim import (
+    coverage_is_mosaic,
+    largest_covered_rect,
+    sampled_rect_to_full_res,
+    shrink_rect_to_covered,
+)
 from seestack.edit.histogram import (
     compute_histogram,
     measure_object_colour,
@@ -307,16 +312,60 @@ def _trim_rect_for_run(run, min_frac: float = 0.5
 
     Measured on the **frame count** where the run wrote one
     (:func:`_load_run_frame_counts_strided`), falling back to the weighted
-    coverage map for runs recorded before that sibling existed."""
+    coverage map for runs recorded before that sibling existed.
+
+    On a strided map the answer is then checked against the **full-res** map it
+    crops (:func:`_full_res_trim_rect`): a point-sampled rectangle can end up to
+    one stride past the last covered sample, which kept a band of no-coverage
+    pixels along a trimmed mosaic's right/bottom edge."""
+    cov_path = frame_coverage_path_for(run.fits_path)
     cov = _load_run_frame_counts_strided(run)
     if cov is None:
+        cov_path = coverage_path_for(run.fits_path)
         cov = _load_run_coverage_strided(run)
     if cov is None:
         return None
     rect = largest_covered_rect(cov, min_frac=min_frac)
     if rect is None:
         return None
+    step = _trim_step_for(cov_path)
+    if step > 1:
+        return _full_res_trim_rect(cov_path, rect, cov.shape, step)
     return (round(rect[0], 4), round(rect[1], 4), round(rect[2], 4), round(rect[3], 4))
+
+
+def _full_res_trim_rect(cov_path, rect, sampled_shape, step: int
+                        ) -> tuple[float, float, float, float]:
+    """A strided map's trim rectangle, made true of the full-res map it crops.
+
+    Bounded by what was sampled (:func:`sampled_rect_to_full_res`), then walked in
+    until no edge line holds an uncovered pixel (:func:`shrink_rect_to_covered`),
+    reading only strips along the four edges through a memmap — a few rows and
+    columns, never the canvas, so the library-wide crop-health scan stays cheap.
+    The fractions are rounded **inward** to four places, so ``crop_bounds``'
+    own rounding on the full-res width can never land a pixel outside again.
+    A map that can't be re-read keeps the sampled bound alone."""
+    from astropy.io import fits as _fits
+
+    full = None
+    try:
+        with _fits.open(cov_path, memmap=True) as hdul:
+            hdu = next((h for h in hdul if getattr(h, "data", None) is not None), None)
+            data = None if hdu is None else hdu.data
+            if data is not None and data.ndim == 2:
+                bounds = sampled_rect_to_full_res(rect, sampled_shape, data.shape, step)
+                full = data.shape
+                bounds = shrink_rect_to_covered(data, bounds, band=step + 1) or bounds
+    except (OSError, ValueError):
+        full = None
+    if full is None:
+        h, w = sampled_shape[0] * step, sampled_shape[1] * step
+        full = (h, w)
+        bounds = sampled_rect_to_full_res(rect, sampled_shape, full, step)
+    h, w = full
+    x0, y0, x1, y1 = bounds
+    return (math.ceil(x0 / w * 1e4 - 1e-6) / 1e4, math.ceil(y0 / h * 1e4 - 1e-6) / 1e4,
+            math.floor(x1 / w * 1e4 + 1e-6) / 1e4, math.floor(y1 / h * 1e4 + 1e-6) / 1e4)
 
 
 def _auto_measure_coverage(run, scale: float, is_mosaic: bool | None = None):

@@ -1,5 +1,56 @@
 # Shipped — the record
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-mi4p1e`) — the strided border trim is true of the full-res map
+
+### v0.502.18 — `editor._full_res_trim_rect`; `coverage_trim.sampled_rect_to_full_res` + `shrink_rect_to_covered`
+
+**What.** The Scout's 2026-10-21 sweep (1) entry: `_trim_rect_for_run` measured a mosaic's coverage point-sampled
+`[::step, ::step]` (`_TRIM_MAX_DIM` 512) and `_rect_from_mask`'s exclusive `c1/w` let the crop end up to `step-1`
+unseen columns/rows past the last covered sample — a band of no-coverage pixels on the right/bottom of a trimmed
+mosaic, and a field-rotated panel's slant could do the same between sampled rows. On a strided map the rectangle is
+now (a) bounded by what was sampled — `(c1-1)·step+1` on the **full-res** width, which also removes the
+`c/ceil(W/step)` vs `c·step/W` drift — then (b) walked in against the full-res map until no edge line holds a
+non-finite or `<= 0` pixel, greedily moving the edge with the most bad pixels (a bottom band costs bottom rows, not
+a column off each side), reading only `step+1`-deep strips along the four edges through a memmap (re-read up to 8
+times), and (c) its fractions are rounded **inward** to four places so `crop_bounds`' own rounding can't land a pixel
+outside. A step-1 map (≤ 512 px) is unchanged. Feeds Auto's appended `geometry.crop`, "Trim border" and
+`crop_health_for_run` alike. Measured: 48 owner-shaped 2×2 maps (1503×2297, step 5, ±16–40 px pointing, 0–3°
+rotation) — the old crop kept 5–3231 uncovered px on 27 of the 43 that trim, the new one **0 on all 43**, giving up ≈0.2 % of the
+canvas; 7200×4800 (step 15) ±40 px / 3°: 9220 → 0 uncovered px, 0.46 s for the whole trim. Tests:
+`tests/webapp/test_trim_strided_edge.py` (13; the 8 owner-shaped parametrisations — sharp and rotated edges — **fail
+before** by scratch revert). No config, schema, on-disk, default or API-shape change.
+
+<details><summary>The Bugs entry as filed</summary>
+
+- **🟡 (Scout 2026-10-21, QA rotation sweep (1)) — the border trim reads a point-sampled coverage map, so its
+  right and bottom edges can reach up to one stride past the last covered sample and keep a band of
+  no-coverage pixels on the export.** *(Pillar: editor — PRIORITY 1; size **S**; severity low — a thin black
+  band along one or two edges of a trimmed mosaic, visible at 1:1 on the export; nothing lost. Confidence:
+  **reproduced** through the real `webapp.routers.editor._trim_rect_for_run`; prevalence on the owner's maps
+  **unmeasured**.)* `_load_run_frame_counts_strided` / `_load_run_coverage_strided` read the map at
+  `_trim_step_for` = ceil(max dim / `_TRIM_MAX_DIM` 512) via `proxy._load_map`'s `cov[::step, ::step]`, and
+  `coverage_trim._rect_from_mask` returns `c1 / w` with `c1` *exclusive*: the crop ends at pixel `c1·step`,
+  while only `(c1-1)·step` was ever seen covered — up to `step-1` unseen columns (rows) on the right (bottom).
+  The left/top edges err the safe way. Repro (scratch, sharp-edged 2×2 frame-count maps, `crop_bounds` applied
+  to the full-res map, NaN counted inside the crop): **7200×4800 (step 15), ±6 px dither → 41,853 NaN px, a
+  7-row band across the whole bottom edge**; 9000×6000 (step 18) no dither → a 9-px column on the right, ±8 px
+  → 2 px, ±16 px → clean; 1° field rotation, no dither → 12,084 NaN px (16 px deep on the right) vs **23** at
+  step 2. The bundled 2×2 sample (907×615, step 2, wide ramp) is clean — the band appears only where the edge
+  ramp from no coverage to half a panel is narrower than one stride, so it grows with canvas size. Feeds Auto's
+  appended `geometry.crop`, the "Trim border" button and `crop_health_for_run` alike. **Fix shape (Builder's
+  call):** (a) bound the rectangle by what was sampled — `x1 = ((c1-1)·step + 1) / W` on the *full-res* width
+  (which also removes the `c/ceil(W/step)` vs `c·step/W` drift), trimming at most one stride more; or (b) read
+  the map block-min-pooled (NaN-propagating) instead of point-sampled, keeping more but costing a full-map
+  read. Regression test: a full-res map with a sharp right/bottom edge at a non-multiple of the step, assert no
+  non-finite pixel inside `crop_bounds` of `_trim_rect_for_run`. **Observer can size it:** for each mosaic
+  run with a saved `geometry.crop`, count non-finite `_framecov.fits` pixels inside the crop.
+  _(Independently re-found the same day by Scout `kzjdcj`: owner-scale S30 2×2, 1080×1920 panels, ±40 px pointing,
+  ±3° field rotation, 2330×3910 → step 8: NaN inside the crop on **8 of 10** canvases (7–1721 px; step 1 → 0 on all
+  10), confirmed in the real `apply_recipe` output. Make the regression map's edge **rotated**: a slant between
+  sampled rows can in principle reach the left/top edge too, which fix (a) alone would not cover.)_
+
+</details>
+
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-pulzp7`) — the prune confirm says the cover is kept
 
 ### v0.502.17 — `TargetStorage.cover_pinned`; Storage's *Prune stacks* confirm names the kept cover
