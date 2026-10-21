@@ -210,3 +210,86 @@ def test_montage_writes_nothing_to_the_library(client, solved_library):
 
     after = sorted(p.name for p in (solved_library / "library").rglob("*"))
     assert before == after
+
+
+def _capture_title(monkeypatch) -> list:
+    """Record what the wall's title strip is asked to say."""
+    import seestack.montage as montage
+
+    seen: list = []
+    real = montage.montage_title
+
+    def spy(n_targets, total_integration_s):
+        seen.append((n_targets, total_integration_s))
+        return real(n_targets, total_integration_s)
+
+    monkeypatch.setattr(montage, "montage_title", spy)
+    return seen
+
+
+def _accepted_exposure_s(root, safe) -> dict[str, float]:
+    lib = Library.open_or_create(root / "library")
+    try:
+        proj = lib.open_target(safe)
+        try:
+            return {f.source_path: float(f.exposure_s)
+                    for f in proj.iter_frames(accepted_only=True)
+                    if f.exposure_s and f.exposure_s > 0}
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_the_wall_title_counts_a_sub_two_targets_registered_once(
+        client, solved_library, monkeypatch):
+    """#878's mosaic twins: a second target registered over the first one's
+    subs. Each tile's caption is true of its own target, but the title strip
+    summed them and printed twice the light ever collected; it is the distinct
+    subs on the wall that count."""
+    from seestack.io.project import FrameRow
+
+    first = _safes(client)[0]
+    subs = _accepted_exposure_s(solved_library, first)
+    assert subs
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        _, twin = lib.create_target("twin")
+        try:
+            twin.add_frames([FrameRow(source_path=p, exposure_s=e, accept=True)
+                             for p, e in subs.items()])
+        finally:
+            twin.close()
+    finally:
+        lib.close()
+    for safe in _safes(client):
+        _register_picture(solved_library, safe)
+
+    seen = _capture_title(monkeypatch)
+    assert client.get("/api/gallery/montage.jpg").status_code == 200
+    distinct: dict[str, float] = {}
+    for safe in _safes(client):
+        distinct.update(_accepted_exposure_s(solved_library, safe))
+    assert seen == [(3, sum(distinct.values()))]
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        registry = sum(t.total_exposure_s for t in lib.list_targets())
+    finally:
+        lib.close()
+    assert registry > sum(distinct.values())  # the twin really is double-counted there
+
+
+def test_the_wall_title_without_twins_is_the_registry_sum(
+        client, solved_library, monkeypatch):
+    """No double registration — every other install — reads exactly as before."""
+    for safe in _safes(client):
+        _register_picture(solved_library, safe)
+    seen = _capture_title(monkeypatch)
+    assert client.get("/api/gallery/montage.jpg").status_code == 200
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        registry = sum(t.total_exposure_s for t in lib.list_targets())
+    finally:
+        lib.close()
+    assert registry > 0
+    assert seen == [(2, registry)]

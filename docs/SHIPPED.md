@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-10-21 (Builder, branch `agent/wall-twin-dedupe`) — the deep-sky wall's title counts each sub once
+
+### v0.502.20 — `gallery._distinct_integration_s` (`_montage_tiles`)
+
+**What.** The cheap sixth surface of the #878 twin-overcount lead: "My deep-sky wall"'s title strip summed each
+placed tile's registry `total_exposure_s`, so two targets registered over the same subs printed twice the light
+ever collected. It now unions the placed targets' accepted `source_path` → `exposure_s` (the rows
+`_refresh_target_stats_locked` sums: accepted, exposure > 0) and sums that — ≤ `MONTAGE_MAX_TILES` project opens
+of a three-column read, only on the one-tap download. Each tile's own caption is unchanged (true of its target).
+A target whose project won't open adds its registry total (the old answer for that tile). Tests: two in
+`tests/webapp/test_gallery_montage.py` — the twin case (**fails before** by scratch revert: 90 s vs 60 s distinct)
+and the no-twin case equal to the registry sum. The Dashboard headline / library summary half of the lead stays
+gated. No config, schema, on-disk, default or API-shape change.
+
+<details><summary>The lead's sentence as filed</summary>
+
+  **A sixth surface, and the cheap one (Scout 2026-10-20, sweep (4), reproduced):** "My deep-sky wall"
+  (`gallery._montage_tiles`, `shown_s += hero.total_exposure_s` → `montage_title`) sums the registry column per
+  tile, so twins on the wall print `3 targets, 2 min of light` over 60 s of distinct subs. Unlike the headline it
+  is a one-tap download that already resolves ≤16 tiles — unioning the placed tiles' accepted `source_path` →
+  `exposure_s` costs ≤16 project opens off the hot path, the v0.500.5 shape. Buildable without the gate above.
+
+</details>
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-2yiu9i`) — QA rotation sweep (4): the Sky map's tile centre
 
 ### v0.502.19 — `routers/sky.get_sky` centres an un-trimmed tile on its canvas WCS
