@@ -1142,6 +1142,87 @@ def test_previous_recipe_prefers_the_newest_edited_run(client, solved_library):
     assert [o["id"] for o in body["ops"]] == ["tone.curves", "tone.saturation"]
 
 
+# --------------------------------------------------------------------------- #
+# Scout 2026-10-21, sweep (1): "Use my previous edit" copied the other run's
+# crop as raw fractions, so on a mosaic that grew a column it framed different
+# sky. It now shares the reprocess carry's rule (pipeline._recrop_for_new_canvas).
+# --------------------------------------------------------------------------- #
+
+_PREV_CROP_OPS = [
+    {"id": "tone.stretch", "enabled": True, "params": {"mode": "asinh", "stretch": 0.3}},
+    {"id": "geometry.crop", "enabled": True,
+     "params": {"x0": 0.1, "y0": 0.1, "x1": 0.9, "y1": 0.9}},
+]
+
+
+def _tan_run(data_root, safe, basename, *, w, h, crpix, ts, wcs=True):
+    """A run whose master carries a plain TAN WCS (or none) on a ``w``×``h`` canvas."""
+    rid = _make_run(data_root, safe, basename=basename, h=h, w=w, ts=ts)
+    if wcs:
+        lib = Library.open_or_create(data_root / "library")
+        try:
+            proj = lib.open_target(safe)
+            try:
+                fp = Path(proj.project_dir) / "output" / f"{basename}.fits"
+            finally:
+                proj.close()
+        finally:
+            lib.close()
+        hdr = fits.Header()
+        hdr["CTYPE1"], hdr["CTYPE2"] = "RA---TAN", "DEC--TAN"
+        hdr["CRVAL1"], hdr["CRVAL2"] = 83.6, -5.4
+        hdr["CRPIX1"], hdr["CRPIX2"] = crpix
+        hdr["CDELT1"], hdr["CDELT2"] = -1e-3, 1e-3
+        fits.writeto(fp, np.zeros((3, h, w), dtype=np.float32), hdr, overwrite=True)
+    return rid
+
+
+def _previous_ops(client, solved_library, *, dst_shape, dst_crpix, src_wcs=True,
+                  dst_wcs=True):
+    safe = client.get("/api/targets").json()[0]["safe_name"]
+    old = _tan_run(solved_library, safe, "run_old", w=200, h=240, crpix=(100.5, 120.5),
+                   ts="2026-05-01T00:00:00Z", wcs=src_wcs)
+    client.put(f"/api/targets/{safe}/stack-runs/{old}/editor/recipe",
+               json={"ops": _PREV_CROP_OPS})
+    dw, dh = dst_shape
+    new = _tan_run(solved_library, safe, "run_new", w=dw, h=dh, crpix=dst_crpix,
+                   ts="2026-05-03T00:00:00Z", wcs=dst_wcs)
+    body = client.get(
+        f"/api/targets/{safe}/stack-runs/{new}/editor/previous-recipe").json()
+    assert body["run_id"] == old
+    assert body["count"] == len(body["ops"])
+    return body["ops"]
+
+
+def test_previous_recipe_reaims_the_crop_onto_a_grown_mosaic_canvas(client, solved_library):
+    """Fails before: the button returned x 0.1–0.9 on the 360 px canvas — 288 px
+    of sky against the 160 px he framed."""
+    ops = _previous_ops(client, solved_library, dst_shape=(360, 250),
+                        dst_crpix=(100.5, 125.5))
+    (crop,) = [o["params"] for o in ops if o["id"] == "geometry.crop"]
+    assert crop["x0"] == pytest.approx(20 / 360, abs=1e-4)
+    assert crop["x1"] == pytest.approx(180 / 360, abs=1e-4)
+    assert crop["y0"] == pytest.approx(29 / 250, abs=1e-4)
+    assert crop["y1"] == pytest.approx(221 / 250, abs=1e-4)
+    assert [o["id"] for o in ops] == ["tone.stretch", "geometry.crop"]
+
+
+def test_previous_recipe_drops_a_crop_it_cannot_place(client, solved_library):
+    """No WCS on the older master and a different canvas → the crop is left off
+    (the editor's own trim frames the new canvas); the tone look still comes."""
+    ops = _previous_ops(client, solved_library, dst_shape=(360, 250),
+                        dst_crpix=(100.5, 125.5), src_wcs=False)
+    assert [o["id"] for o in ops] == ["tone.stretch"]
+
+
+def test_previous_recipe_keeps_the_crop_on_an_unmoved_same_shape_canvas(
+        client, solved_library):
+    ops = _previous_ops(client, solved_library, dst_shape=(200, 240),
+                        dst_crpix=(100.5, 120.5))
+    assert [o["params"] for o in ops if o["id"] == "geometry.crop"] == [
+        _PREV_CROP_OPS[1]["params"]]
+
+
 def test_previous_recipe_none_when_no_edits(client, solved_library):
     safe = client.get("/api/targets").json()[0]["safe_name"]
     r1 = _make_run(solved_library, safe, basename="run1", ts="2026-05-01T00:00:00Z")
