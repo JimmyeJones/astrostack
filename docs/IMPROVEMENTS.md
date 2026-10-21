@@ -536,6 +536,22 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   single-field case byte-for-byte. Bump `DEEPENING_SERIES_VERSION` or the signature tag so cached reels rebuild.
   Ungated.
 
+- **🟡 (Scout 2026-10-21, QA rotation sweep (1)) — the editor's "Use my previous edit" button copies the previous run's
+  crop as raw fractions onto a canvas that changed shape, so on a mosaic that grew it frames different sky — the
+  reprocess-all carry re-aims the same crop (v0.501.8 / v0.501.11) and the button never got that fix.** *(Pillar: editor —
+  PRIORITY 1; size **S**; severity moderate — a one-click seed silently crops away or mis-centres the object; nothing is
+  saved until he presses Save. Confidence: **reproduced** through the real `previous-recipe` endpoint.)*
+  `routers/editor.previous_recipe` returns the newest other run's saved ops verbatim and `Editor.tsx::applyPreviousRecipe`
+  sets them as-is; only `pipeline._carry_hand_saved_recipe` (reprocess-all) passes the recipe through
+  `_recrop_for_new_canvas`. A plain Stack-page restack leaves the new run without a recipe, which is exactly when the
+  button is offered. Repro on `test_reprocess_all`'s fixture (a 200×240 TAN master with a hand-saved 0.1–0.9 crop, then a
+  360×250 restack grown by a west column): the button returns `x0=0.1, x1=0.9`, i.e. **x 36–324 px (288 px of sky)
+  against the 20–180 px (160 px) he framed**; the carry path on the same pair gives 20/360–180/360. **Fix shape:** in
+  `previous_recipe`, run the recipe through `pipeline._recrop_for_new_canvas(recipe, src.fits_path, cur.fits_path,
+  same_shape=…)` (move the helper somewhere both can import if the router→pipeline import is unwelcome), so the button
+  and the carry share one rule — a crop that can't be placed is dropped and the editor's own trim takes over. Skip
+  editor exports / channel combines as the carry does, or note why not. Test: the probe above through the endpoint (crop
+  re-aimed; unplaceable → crop dropped, look kept; same-shape unmoved → byte-for-byte). Ungated.
 
 ---
 
