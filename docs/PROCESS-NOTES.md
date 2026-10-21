@@ -1,5 +1,25 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-th0fa7`) — QA rotation sweep (1), scale-dependent parity, on the strided *heal* of the two mosaic health numbers (`coverage_backfill.backfill_seam_residual` / `backfill_coverage_grain`) against the full-res measure a fresh stack takes: CLEAN. Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
+
+- **Suite:** 8159 passed / 7 skipped on `c4408071` (xdist `-n 4`, BLAS capped, 14m40s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+  owner-gated — nothing owed. No open PRs at start. **Dogfood `--mosaic --editor`:** CLEAN (trim 8 %, all 21 Add-menu
+  ops re-render, undo/redo, Auto taste row live, nothing overflowing, no console errors).
+- **Sweep (1).** A run stacked before the seam/grain columns existed gets them healed off a master read at stride
+  `ceil(long/1500)` (cap 4, `_seam_read_step`), while a fresh stack measures `run_stack`'s full-res image — so the same
+  picture can be measured on two grids. The stride table in `coverage_backfill` was taken on a 900×1200 scene; this
+  ran the real `measure_seam_residual` / `measure_coverage_grain` both ways on S30-panel-sized canvases (1080×1920
+  panels, 12 % overlap, ±8 px dither, per-panel frame counts 100–400, grain ∝ 1/√depth, stars): **2×2 (3625×2046,
+  stride 3)** seam full→heal 0.052→0.000, 1.152→1.129, 1.418→1.399, 2.313→2.300, 3.47→3.47, 6.96→6.98 — no verdict
+  crosses the 1.0/1.5 bars; grain 1.596→1.590, 1.602→1.593. **3×3 (5314×2996, stride 4)** seam 0.455→0.434,
+  0.803→0.781, 1.115→1.100, 1.966→1.952; 25/25 levels both ways. CLEAN.
+- **One observation, not filed:** on a 3×3 with near-equal panel areas `measure_coverage_grain`'s "deep" (modal) level is
+  a near-tie between plateaus of equal area, so the two reads can pick different ones (seed 1: deep 346 vs 241 frames,
+  ratio 1.63 vs 1.37; seeds 3 and 5 agree within 0.01). Both sides of the 1.25 `_GRAIN_UNEVEN_RATIO` bar agree on all
+  four seeds; only the "N× grainier" figure moves, and only on a healed (pre-column) run. Not a stride defect — the
+  modal pick is tie-sensitive at full res too — and real dithered canvases blur those plateaus.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-2yiu9i`) — QA rotation sweep (4), the `sky` router's tile placement on mosaic-shaped canvases: one bug, Scout-fixed (v0.502.19). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8158 passed / 7 skipped + the one pinned-old-centre test the fix moved (xdist `-n 4`, BLAS capped,
