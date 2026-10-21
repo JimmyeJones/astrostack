@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-qhoxav`) — QA rotation sweep (3), new angle — ffmpeg/ffprobe through the Moon & Sun API on a *per-night* `incoming/` layout: side effects CLEAN; one discovery bug filed reproduced (`video.discover.find_video_captures`).
+
+- **Suite:** 8179 passed / 7 skipped on `68b699f9` (xdist `-n 4`, BLAS capped, 18m09s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+  owner-gated — nothing owed. No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing,
+  no console errors).
+- **Sweep (3).** The 10-20 `ba36k9` sweep drove the video API through a stub on a flat `incoming/<T>_video/`. This one
+  used the layout `discover._MAX_DEPTH = 2` exists for — captures filed under per-night folders — with a logging stub
+  `ffmpeg`/`ffprobe` (argv + cwd, litters its cwd, then `exec`s the real binary): `incoming/2026-10-01/Lunar_video/`,
+  `incoming/2026-10-05/Lunar_video/`, `incoming/Lunar video/` (spaces, parentheses in a clip name) and a 200-frame
+  `Solar_video/-dash.mp4` (leading dash). list → check → stack for every listed capture, then a Sun stack cancelled
+  mid-stream. **Side effects CLEAN:** every incoming path reaches ffprobe as its last positional and ffmpeg only after
+  `-i`, always absolute (the leading-dash name is never read as a flag); no ffmpeg alive after the cancel; outputs only
+  under `<data>/video/<id>/`; cwd litter lands in the app's cwd; `incoming/` byte/mtime/mode-identical. **Found:** two of
+  the three Moon folders were never listed — discovery keys on the folder *basename* and keeps the first; and a new
+  night folder (`2026-…` sorts before `Lunar_video`) takes an already-stacked top-level capture's id. Filed reproduced at
+  the end of Bugs (S–M, ungated). (3) done → **next sweep is (4)**.
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-9z8k1c`) — QA rotation sweep (2), on v0.502.21's new panel-depth check at the owner's sub counts (`autodrizzle.footprint_coverage_plane`'s `max_subs` stride): CLEAN, one observation not filed. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8179 passed / 7 skipped on `68809902` (xdist `-n 4`, BLAS capped, 17m02s). **Inbox:** the same four (#878,
