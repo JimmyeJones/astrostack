@@ -1,5 +1,18 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-2gjith`) — no task shipped: the backlog's open Bugs are all owner/observer-gated, and a full dogfood pass found nothing
+
+- **Suite:** 8161 passed / 7 skipped on `c652a141` (xdist `-n 4`, BLAS capped, 17m21s).
+- **Dogfood `--mosaic --editor --big`:** CLEAN. Single field, 2×2 mosaic and the full-size (decimated-preview)
+  mosaic: all 21 Add-menu ops re-render on each, undo/redo, Auto taste row and the marked-chip sentence live, the
+  full-size check follows the navigator and its unvouched-op caveat reads (Noise reduction only, as v0.493.9 left
+  it), `[scale]` 0 of 16 answers moved, trim 7.9 %, nothing overflowing, no console errors.
+- **Tooling note:** the whole `--mosaic --editor --big` pass takes **over 30 minutes** on a 4-core box — longer than
+  a background shell's default limit, which killed the first attempt mid-editor-drive. Run it in two halves (the
+  probe pass, then `--editor --big --no-probe`) or give the background command the full 2 h timeout.
+- **Why nothing was built:** every Bugs entry is a lead waiting on a hint-shape answer or an observer measurement,
+  and FOCUS.md's own instruction is not to manufacture a beginner feature; this run did not.
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-th0fa7`) — QA rotation sweep (1), scale-dependent parity, on the strided *heal* of the two mosaic health numbers (`coverage_backfill.backfill_seam_residual` / `backfill_coverage_grain`) against the full-res measure a fresh stack takes: CLEAN. Inbox unchanged. Dogfood `--mosaic --editor` CLEAN.
 
 - **Suite:** 8159 passed / 7 skipped on `c4408071` (xdist `-n 4`, BLAS capped, 14m40s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
