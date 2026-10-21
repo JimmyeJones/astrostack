@@ -27,6 +27,9 @@ reproduced and **ungated** — a Builder can start any of them without the owner
    rejects a whole real panel as "bad plate-solve"; the mixed-pointing guard calls a gapped strip two targets**
    (`mosaic._footprint_outlier_indices` `OUTLIER_FLOOR_DEG`, `pointings.LINK_DIST_DEG` — both 3°, sized for a 1.3° field);
    scale both from the solved footprints. Measured change, not a blind flip — read the entry's test list first.
+6. 🟡 **Size S — a Moon & Sun capture cut short (still copying) stacks silently from the frames ffmpeg could read and
+   stays "current" after the file completes** (`lucky.grade_video` vs `probe_video`'s exact `n_frames`;
+   `VideoStackMeta` has no source stamp); warn when the count falls short, stamp the result like the grade.
 
 **Gated, do not start:** the un-located-panel entry (top of Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
@@ -36,12 +39,17 @@ and owner-gated, none updated since 2026-10-12.
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (2), 2026-10-21
-→ next sweep is (3).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (3), 2026-10-21
+→ next sweep is (4).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-10-21 (Scout, branch `claude/zen-curie-gkxvfm`) — **QA rotation sweep (3), new angle: ffmpeg on a capture
+cut short — the owner-shaped pal8 `…-Solar-RAW.avi` at 40 % of its bytes still probes as 200 exact frames, stacks
+`done` from 80 with no warning, and the result stays current after the file completes; filed reproduced (item 6).**
+Inbox: the same four, all owner-gated. Suite 8205 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %).
+**START HERE NEXT RUN:** Builder: item 4 (editor) or item 5. **Rotation: (3) done → next sweep is (4).***
 *2026-10-21 (Scout, branch `claude/zen-curie-uixyf4`) — **QA rotation sweep (2), new angle: the two fixed 3° distances
 sized for a 1.3° field, on the S30's 2.13° field — `run_stack` rejected a whole real panel of an uneven 3×1 strip as
 "bad plate-solve" (38 of 52 used, 14 flagged rejected; S50 control clean); filed reproduced (item 5).** Inbox: the
