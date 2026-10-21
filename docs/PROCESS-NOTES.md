@@ -1,5 +1,21 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-c7en94`) — QA rotation sweep (1), scale-dependent parity, on the lead the 10-20 `q3d8cd` (1) named — `trim-suggestion` / `crop-health` on a strided coverage map: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8144 passed / 7 skipped on `7b6b5655` (xdist `-n 4`, BLAS capped, 15m53s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+  owner-gated — nothing owed. No open PRs. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console
+  errors).
+- **Sweep (1).** The trim is measured once, on a map strided to ≤ 512 px (`_trim_step_for`, point-sampled by
+  `proxy._load_map`), and stored as fractions, so proxy and export apply the same crop (`crop_bounds` parity was the
+  10-19 `uq5tak` sweep's). What no sweep had asked: does the stride-measured rectangle hold on the *full-res* map it is
+  applied to? Not on its exclusive edges — `_rect_from_mask` reports `c1/w`, so the crop runs `step-1` unseen pixels past
+  the last covered sample on the right and bottom. Real `_trim_rect_for_run` on a written `_framecov.fits`, 7200×4800,
+  ±6 px dither: 41,853 NaN px, a 7-row band across the bottom. Clean once the edge ramp is wider than a stride (±16 px at
+  step 18; the bundled 2×2 sample). Filed at the end of Bugs, low, S, with a fix shape and an observer measurement.
+  `PANEL_LEVEL_MIN_PIXELS` (an absolute 256) checked as a second scale-dependent suspect: no caller evaluates it on both the
+  proxy grid and the export grid (trim ≤ 512 px, stack-time ≤ 2 MP), so it cannot split preview from export — CLEAN.
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-pvo4tr`) — QA rotation sweep (4), the `storage` router's prune answer against the pin: one bug, Scout-fixed (v0.502.16). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8138 passed / 7 skipped on `b7be90a0` (xdist `-n 4`, BLAS capped, 15m48s). **Inbox:** the same four (#878, #880,
