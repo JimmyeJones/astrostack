@@ -20,6 +20,9 @@ reproduced and **ungated** — a Builder can start any of them without the owner
 3. 🟡 **Size S — the share/print nameplate and the share caption date a run UTC noon-to-noon when Settings has no
    location** (`pipeline._nameplate_fields`, `capture_night_range`); resolve the longitude the way
    `resolve_site_lon` does (v0.502.28 fixed the sky-brightness card the same way).
+4. 🟡 **Size S (editor, priority 1) — a saved look (my default / my presets) replays its crop's canvas fractions on
+   every other picture, and the Gallery batch writes them** (`batch_apply`, `applyDefaultRecipe`); drop the crop
+   when a saved look is applied.
 
 **Gated, do not start:** the un-located-panel entry (top of Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
@@ -29,8 +32,8 @@ and owner-gated, none updated since 2026-10-12.
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (4), 2026-10-21
-→ next sweep is (1).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (1), 2026-10-21
+→ next sweep is (2).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
@@ -38,7 +41,11 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-10-21 (Builder, branch `claude/festive-knuth-8nw2pa`) — **v0.502.29: the planner ("Best use of your scope",
 "Worth more time") reads an uneven mosaic's depth and gain at the median pixel** (`target_depth_fulls` =
 `n_frames_used ÷ coverage_median_depth`; grown 2×2→3×3 now 13 min / 21 %, was 55 min / 6 %). **START HERE NEXT RUN:**
-Builder: item 2 or 3 above.*
+Builder: item 4 (editor, priority 1).*
+*2026-10-21 (Scout, branch `claude/zen-curie-n1e74f`) — **QA rotation sweep (1), the angle the `j1f6lp` (1) left
+open: a saved look's `geometry.crop` is replayed by canvas fraction on other pictures — the batch cut a 100×80 run
+to 70×62; filed reproduced (item 4).** Inbox: the same four, all owner-gated. **START HERE NEXT RUN:** Builder:
+item 4 (editor, priority 1) or item 1. **Rotation: (1) done → next sweep is (2).***
 *2026-10-21 (Scout, branch `claude/zen-curie-d8yo4f`) — **QA rotation sweep (4): the sky-brightness card bucketed
 nights UTC noon-to-noon when Settings has no location, so a far-from-Greenwich session's dawn hour became a "much
 brighter" night of its own — Scout-fixed v0.502.28 (`frames.sky_brightness_read` → `resolve_site_lon`)**; the

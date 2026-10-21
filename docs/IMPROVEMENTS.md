@@ -566,6 +566,26 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   library) and pass the longitude into the job, or to call `detect_site_from_library(lib)` there — not to mirror a
   different bucketing. Test: the three-session shape through the share caption and the nameplate. Ungated.
 
+- **🟡 (Scout 2026-10-21, QA rotation sweep (1)) — a saved look ("Save as my default" / "Save current as preset")
+  keeps its `geometry.crop` as raw canvas fractions and replays them on every other picture: "Use my default", a
+  "My presets" pick in the editor, and the Gallery's "Apply preset to selected" batch all crop a different canvas by
+  the fractions of the one it was framed on** (`routers/editor.put_default_recipe` / `create_preset` store the ops
+  verbatim; `Editor.tsx` `applyDefaultRecipe` and `PresetMenu`'s user branch seed them as-is; `batch_apply` →
+  `pipeline._apply_editor_to_run` renders them).
+  *(Pillar: editor, PRIORITY 1; size **S**; severity moderate on the batch (a cropped picture written for every
+  selected target, unseen until opened), low in the editor (visible, undoable). Confidence: **reproduced** with a
+  scratch `TestClient` test through the real routes: a look saved with a mosaic-trim-shaped crop (x 0.15–0.85,
+  y 0.12–0.90), batch-applied as a "My presets" id to a 100×80 single-field run → the written master is **70×62,
+  46 % of the picture gone**; `GET /api/editor/default-recipe` returns the same crop intact. Built-in presets carry no
+  crop, so they are unaffected. How often his saved looks hold a crop is unmeasured — Auto appends one whenever
+  `auto_crop_border` (on by default) finds a border, so a look saved off an Auto edit of a mosaic usually does.)* A crop is the one op that belongs to one canvas (the
+  grown-canvas rule in FOCUS); the previous-edit seed re-aims it by WCS (v0.502.24), but a saved look has no source
+  canvas to re-aim from. **Fix shape:** drop enabled `geometry.crop` ops when a saved look is *applied* (both editor
+  seeds and `batch_apply`'s `preset_id`/`_user_preset_recipe` path), leaving the stored ops untouched (upgrade-safe),
+  and say so in the seed's notification ("your crop wasn't carried — framing belongs to one picture"); the mosaic
+  trim offer then frames this canvas. Test: the batch repro above writes 100×80; the editor seed drops the crop;
+  a crop-free look unchanged byte-for-byte. Ungated.
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
