@@ -617,6 +617,29 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   through `run_stack` keeps 52 and rejects nothing; the gapped strip gets no mixed verdict; the S50 controls unchanged.
   Ungated.
 
+- **🟡 (Scout 2026-10-21, QA rotation sweep (3)) — a Moon & Sun capture that is still copying (or otherwise cut short)
+  stacks silently from only the frames ffmpeg could read, says nothing, and keeps that result as current after the
+  file completes** (`seestack/video/lucky.grade_video` / `stack_video` never compare the frames read against
+  `probe_video`'s exact `n_frames`; `ffmpeg.iter_frames` ends cleanly at a truncated tail and never reads the
+  decoder's exit status; `webapp.video._video_stack_body` records no source stamp on `VideoStackMeta`, unlike the
+  grade's `source_size`/`source_mtime` + `grade_matches_source`).
+  *(Pillar: trust / image quality, PRIORITY 2/4; size **S**; severity low–moderate — a worse Sun/Moon picture with
+  a reassuring "Stacked the sharpest 24 of 80 frames", and the sharp moments of the missing part never considered;
+  nothing lost on disk, a re-stack fixes it once he knows to. Confidence: **reproduced** through the real
+  `POST /api/videos/Solar_video/stack` on the owner's file shape (undebayered pal8 rawvideo `…-Solar-RAW.avi`, 200
+  frames, sharp frames 150–199) cut to 40 % of its bytes: ffprobe still reports **200 frames, exact** (AVI header),
+  the job ends `done` with **n_graded 80, warnings `[]`**; after the file is completed (557,564 → 1,393,910 bytes)
+  `GET /api/videos` serves the same result with no staleness flag. A 40 % `.mp4` fails cleanly at ffprobe
+  ("Invalid data found"). How often he stacks a capture mid-copy is unmeasured — the Moon & Sun page lists a file
+  the moment it appears in `incoming/`.)*
+  **Fix shape:** when `vinfo` is exact and the frames read fall short of `n_frames // stride` by more than a small
+  slack (a few frames, for ffprobe/decoder off-by-ones), add a plain warning — "Only the first 80 of this capture's
+  200 frames could be read — the file looks cut short (still copying?). Stack it again once it has finished." —
+  and record `source_size`/`source_mtime` on `VideoStackMeta` (additive, default 0 = unknown, so old `meta.json`
+  loads unchanged) so the list can mark a result whose clip has since changed, as `grade_matches_source` does for
+  the grade. Never touch the source (read-only `incoming/`). Test: the 40 % AVI above warns and the completed file
+  marks the result stale; the full file and an inexact-count capture warn nothing. Ungated.
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)

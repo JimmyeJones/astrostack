@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-gkxvfm`) — QA rotation sweep (3), new angle — ffmpeg reading a Moon & Sun capture that is *cut short* (a copy still in progress): one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8205 passed / 7 skipped on `46456d85` (xdist `-n 4`, BLAS capped, 16m34s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors).
+- **Sweep (3).** Every earlier (3) sweep varied what the binaries *do* or what they may *write*; none fed ffmpeg a
+  source that is incomplete while the app's own outputs depend on it. `iter_frames` stops cleanly at a truncated
+  tail and never reads ffmpeg's exit status, and nothing compares the frames read with `probe_video`'s count.
+  Probe (session scratchpad, not landed): `videosynth.solar_raw_video` — the owner's pal8 rawvideo AVI shape — 200
+  frames with the sharp ones at 150–199, cut to 40 % of its bytes. Engine: ffprobe still reports 200 frames,
+  *exact* (the AVI header), and `stack_video` grades 80 / stacks 24 with `warnings []`; the same cut on an `.mp4`
+  fails at ffprobe with a clear message. Then through the real `TestClient` routes (scratch test, deleted): the
+  job ends `done`, `n_graded 80`; completing the file (557,564 → 1,393,910 bytes) leaves `GET /api/videos` serving
+  that result with no stale flag — `VideoStackMeta` stores no source stamp, unlike the grade. `incoming/`
+  untouched throughout. Filed at the end of Bugs (🟡, S) and as FOCUS item 6. ASTAP: no new surface since the
+  `g7aybm` sweep. **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-uixyf4`) — QA rotation sweep (2), new angle — the fixed-degree distances that assume a ~1.3° field, on the owner's S30 (2.13°): one bug, filed reproduced (with a guard sibling). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8197 passed / 7 skipped on `7d6edf22` (xdist `-n 4`, BLAS capped, 17m20s). **Inbox:** the same four (#878, #880, #903,
