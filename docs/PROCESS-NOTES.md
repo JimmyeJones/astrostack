@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-n1e74f`) — QA rotation sweep (1), the lead the `j1f6lp` (1) recorded: a saved look's `geometry.crop` on other canvases — one bug, filed reproduced. Inbox unchanged.
+
+- **Env:** `agent-setup.sh` stalled again on the `gui` extras (PySide6 wheels); killed it after the identity/hook
+  steps had run and installed `.[dev,web]` + `pytest-xdist` into `.venv` (Qt-skip fallback). **Suite:** 8190 passed /
+  7 skipped on `d18246c2` + docs (xdist `-n 4`, BLAS capped, 16m42s). **Dogfood `--mosaic`:** CLEAN (trim 7.9 %,
+  nothing overflowing, no console errors). **Inbox:** the same four
+  (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+- **Sweep (1).** Read what the editor offers on save: "Save as my default" (`PresetMenu` → `PUT
+  /api/editor/default-recipe`) and "Save current as preset…" (`POST /api/editor/presets`) both store the current ops
+  through `recipe_from_dict` only — nothing strips or re-aims `geometry.crop`. Apply side: `applyDefaultRecipe` and
+  `PresetMenu`'s user branch `setOps` verbatim ("User presets are applied exactly as the user tuned them"); the
+  Gallery batch resolves `preset_id` through `_user_preset_recipe` and renders it. Only the previous-edit seed and
+  the reprocess carry re-aim a crop (`_recrop_for_new_canvas`). Scratch `TestClient` test (deleted, not committed):
+  look with `tone.stretch` + crop x 0.15–0.85 / y 0.12–0.90 → default GET returns the crop intact; batch as a "My
+  presets" id on a 100×80 single-field run writes a **70×62** master. Built-ins carry no crop. Filed at the end of
+  Bugs, size S, ungated; fix shape there (drop the crop at apply, leave the store as is).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-d8yo4f`) — QA rotation sweep (4), the routers' *night bucketing*: who passes the raw `settings.site_lon` where every neighbour resolves it — one bug Scout-fixed (v0.502.28), one sibling filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8196 passed / 7 skipped on `f1f47da1` (xdist `-n 4`, BLAS capped, 16m10s). **Inbox:** the same four (#878,
