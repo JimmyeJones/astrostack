@@ -1,5 +1,34 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-g7aybm`) — QA rotation sweep (3), new angle — the whole app as an *unprivileged account* against a *read-only* `incoming/` owned by another account, stub ASTAP + real ffmpeg: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN. FOCUS.md rewritten short.
+
+- **Suite:** SUITE_RESULT. **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+  owner-gated — nothing owed. No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing,
+  no console errors).
+- **Sweep (3).** Every earlier (3) sweep proved "no write reached `incoming/`" by diffing it afterwards, which cannot
+  see a write that was attempted and failed, or one rewritten to identical bytes. This one made any attempt *fail
+  loudly*: the real app (`python -m webapp.main`) run under `setpriv` as uid/gid 65534 with `TMPDIR`/`HOME`/cwd
+  redirected, its data root owned by that account, and `incoming/` owned by a *different* account (uid 1000) with
+  dirs 0555 and files 0444 — the shape of a NAS share the app may read but not write. Content: a 2-panel
+  `M 42_mosaic_sub/` (16 S30-header subs, spaces in the names), a `NGC 7000_sub/` (8), a `Darks_10s/` and a `Flats/`
+  (6 each, declared by `IMAGETYP`), and a `Lunar_video/` mp4. The stub ASTAP logs argv/cwd, writes `.wcs`/`.ini`
+  beside its `-f`, tries an `r+b` open of its `-f` (what `-update` would do) and litters its cwd. Driven over HTTP:
+  `PUT /api/settings` (astap_path) → `POST /api/scan` → `/process` per target (QC + solve + auto-grade + stack) →
+  frame preview → `/qc-solve` again → `/rescue-unsolved` → editor `auto` / `export` / `export-png` / `share` →
+  `GET /api/calibration/incoming` → `/build` for both folders → Moon & Sun `grade` and `stack`. Every job `done`;
+  16/16 and 8/8 solved; both masters built. **`incoming/` byte-, mtime-, mode- and owner-identical (43 entries);
+  zero `PermissionError`/`EACCES`/`Traceback` in the server log** — so no code path even tried to write there; 24
+  stub calls, none with `-f` inside `incoming/`; the stub's `r+b` failed on all 24 because `shutil.copy2` carries
+  the 0444 mode onto the scratch copy (a second wall, not a problem); temp dir empty afterwards; litter only in
+  the app's own cwd. Probe: a ~150-line driver kept in the session scratchpad, not landed — the guard tests in
+  `tests/webapp/test_incoming_readonly_guard.py` already pin the stub-binary half, and a setpriv-based test would
+  need root in CI. **Rotation: (3) done → next sweep is (4).**
+- **Curation.** `docs/FOCUS.md` had grown to 2,559 lines of run lines with a "Front of the queue" section last
+  rewritten 2026-10-09 that still said "the queue is dry" while three ungated bugs sat at the end of Bugs. Moved
+  verbatim to `docs/archive/FOCUS-to-2026-10-21.md` (`git mv`, nothing deleted) and rewritten at 64 lines: the
+  three ungated Bugs in order, the gated ones named as gated, the rotation state, the last four run lines, and a
+  note to keep the run log to ~10 lines.
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-faezje`) — QA rotation sweep (2), on the planner's per-panel depth (`nightplan._have_phrase` / `noise_gain_from_more_time` via `field_fulls.target_field_fulls`) on *uneven* mosaics: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8182 passed / 7 skipped on `dbfa9953` (xdist `-n 4`, BLAS capped, 17m27s). **Inbox:** the same four (#878,
