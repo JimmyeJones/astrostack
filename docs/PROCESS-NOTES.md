@@ -1,5 +1,30 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-d8yo4f`) — QA rotation sweep (4), the routers' *night bucketing*: who passes the raw `settings.site_lon` where every neighbour resolves it — one bug Scout-fixed (v0.502.28), one sibling filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8196 passed / 7 skipped on `f1f47da1` (xdist `-n 4`, BLAS capped, 16m10s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start. **Dogfood
+  `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors).
+- **Sweep (4).** Re-read `settings` (PUT / export / import: auth and host keys stripped both ways, nested calibration
+  paths stripped in and out, the nested-`incoming/` guard unreachable from import because host keys are skipped) and
+  `calibration` (delete, coverage, incoming offer/build, saved-master fail-soft binding): CLEAN. `frames` auto-grade
+  splits flux metrics per panel already (`_pointing_groups`): CLEAN. **New angle:** `grep settings.site_lon` across
+  `webapp/` for night bucketing that skips `resolve_site_lon`. Two hits: `frames.sky_brightness_read`, and the
+  share/print/nameplate call sites in `pipeline.py`. Real-client repro (three sessions at a synthetic lon −120°, local
+  22:00 → 04:50, last hour 2.5× brighter, real FITS carrying `SITELONG`, Settings without a site): the frames table
+  says 20–22 Jul, the card said **23 Jul, "much brighter than usual"**. Fixed by resolving the longitude in the
+  router; the existing no-`FrameRow` guard then caught the site probe building 6 rows, so `detect_site_from_library`
+  now reads two columns (guard kept as is). The pipeline sibling reproduced through `capture_night_range` (20–23 vs
+  20–22 Jul) and is filed at the end of Bugs (S): no `request` in the job worker, so it wants a design choice.
+- **Pre-merge suite:** 8196 passed / 1 failed / 7 skipped — the failure is the recorded gallery-zip flake
+  `test_current_picture_fallback.py::test_a_healthy_library_never_opens_a_project_for_the_fallback`
+  (`assert ['NGC_7000'] == []`, the same assertion as the 2026-10-04 and 2026-10-13 entries), untouched by this
+  diff; passed 3/3 in isolation. **It recurs after the 2026-10-13 watcher-ordering fix**, so that fix did not close
+  the window — worth a Builder look.
+- **Lever for next time:** `resolve_site_lon` / `resolve_night_key` are the one bucketing; any `lon_deg=settings.site_lon`
+  outside the planner (which needs lat *and* lon, and is right to) is a candidate. The only remaining ones are the
+  filed sibling.
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-g7aybm`) — QA rotation sweep (3), new angle — the whole app as an *unprivileged account* against a *read-only* `incoming/` owned by another account, stub ASTAP + real ffmpeg: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN. FOCUS.md rewritten short.
 
 - **Suite:** 8193 passed / 7 skipped on `a97b918e` (xdist `-n 4`, BLAS capped, 15m46s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all

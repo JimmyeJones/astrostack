@@ -499,6 +499,67 @@ def test_sky_brightness_calls_out_a_much_brighter_night(client, built_library, d
     assert "darker night" in read["text"]
 
 
+def test_sky_brightness_buckets_nights_by_the_frames_own_site_longitude(
+        client, built_library, data_root):
+    """With no location in Settings, every other night surface (the frames
+    table's ``night_date``, the Nights card, the calendar) buckets nights by the
+    longitude the Seestar writes into each sub (``resolve_site_lon``). This card
+    passed the raw Settings value, so it fell back to UTC noon-to-noon — and for
+    an observer far enough west (or east) of Greenwich that boundary lands
+    inside the session.
+
+    Fail-before: three sessions at a synthetic longitude of −120° (local
+    22:00 → 04:50, the last hour lit by dawn). The frames table says three
+    nights, 20–22 Jul; the card split each session at 04:00 local, invented a
+    fourth night (23 Jul) out of the last session's dawn hour alone, and told
+    the owner it was "much brighter than usual — save this target for a darker
+    night".
+    """
+    from datetime import datetime, timedelta
+
+    from seestack.io.library import Library
+    from seestack.io.project import FrameRow
+    from synth import write_seestar_fits
+
+    assert client.get("/api/settings").json()["site_lon"] is None
+    fits_dir = data_root / "sky_fits"
+    fits_dir.mkdir()
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            n = 0
+            for day in (20, 21, 22):
+                for k in range(42):  # one sub every 10 min, 22:00 → 04:50 local
+                    t_local = datetime(2026, 7, day, 22, 0) + timedelta(minutes=10 * k)
+                    t_utc = t_local + timedelta(hours=8)
+                    path = write_seestar_fits(
+                        fits_dir / f"sky_{n}.fit", width=64, height=48, n_stars=3,
+                        site_lat=35.0, site_lon=-120.0,
+                        date_obs=t_utc.strftime("%Y-%m-%dT%H:%M:%S"))
+                    proj.add_frame(FrameRow(
+                        source_path=str(path),
+                        timestamp_utc=t_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        exposure_s=10.0, gain=80.0,
+                        sky_adu_median=2500.0 if t_local.hour == 4 else 1000.0,
+                    ))
+                    n += 1
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+    rows = client.get("/api/targets/M_42/frames", params={"limit": 5000}).json()
+    table_nights = {r["night_date"] for r in rows if r["name"].startswith("sky_")}
+    assert table_nights == {"2026-07-20", "2026-07-21", "2026-07-22"}
+
+    read = client.get("/api/targets/M_42/frames/sky-brightness").json()["read"]
+    assert read is not None
+    assert read["night"] == "2026-07-22"
+    assert read["nights"] == 2
+    assert read["level"] == "typical"
+
+
 def test_sky_brightness_404s_for_an_unknown_target(client, built_library):
     assert client.get("/api/targets/nope/frames/sky-brightness").status_code == 404
 

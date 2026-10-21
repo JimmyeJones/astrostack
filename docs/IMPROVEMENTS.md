@@ -568,6 +568,20 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   three shapes above through `_depth_only_picks`, the grown one ending at 13 min / 18 %; a single field unchanged
   byte-for-byte. Ungated (display only; no default, no hot path).
 
+- **🟡 (Scout 2026-10-21, QA rotation sweep (4)) — the share/print nameplate and the share caption date a run by
+  UTC noon-to-noon whenever Settings has no location, while the Nights card, the frames table and the calendar date
+  the same subs by the longitude in their own `SITELONG` (`pipeline._nameplate_fields`, `capture_night_range` /
+  `capture_night_count` fed the raw `settings.site_lon` at the share, print and nameplate call sites).**
+  *(Pillar: trust, PRIORITY 3; size **S**; severity low — a wrong date range baked into a shared JPEG for an observer
+  far enough from Greenwich that UTC noon falls inside a session (|lon| ≳ 105°); nothing on disk is touched.
+  Confidence: **reproduced** through the real `capture_night_range`: capture window 2026-07-21T06:00Z →
+  2026-07-23T12:50Z (three sessions at a synthetic lon −120°, local 22:00 → 04:50) reads **20–23 Jul** with
+  `lon=None` and **20–22 Jul** with `lon=−120`; whether his own install has a Settings location is unknown.)*
+  The sibling on `frames/sky-brightness` was Scout-fixed in v0.502.28 by `resolve_site_lon`; these call sites run in
+  the job worker with no `request`, so the fix is to resolve once at submit time (the router has the request and the
+  library) and pass the longitude into the job, or to call `detect_site_from_library(lib)` there — not to mirror a
+  different bucketing. Test: the three-session shape through the share caption and the nameplate. Ungated.
+
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
@@ -3646,6 +3660,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.28 **The "was the sky brighter than usual?" card buckets nights by the subs' own longitude when Settings has no location — at a western or far-eastern site it split each session at UTC noon and called last night's dawn hour a "much brighter" night of its own** (`frames.sky_brightness_read` → `resolve_site_lon`; the site probe reads two columns, not `FrameRow`s)
 - ✅ v0.502.27 **"Check it at full size" on a recipe with no Stretch op (the editor's first-open state) shows the picture's own curve — each 1:1 window was re-stretched by its own sky, so a nebula core read flat grey** (`pipeline.apply_recipe` fallback stretch through `ctx.fit`, `FALLBACK_STRETCH_UID`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.26 **Moon & Sun lists every night of a per-night `incoming/` layout — a repeated `Lunar_video` folder name hid all but the first, and a new earlier-sorting night took over a stacked capture's id** (`video.discover.find_video_captures`, `_bare_id_holder`).
 - ✅ v0.502.25 **"Disable" access control now removes the read-only token too, and turning a password on from open drops any stale token — a new password no longer silently revives the old one** (`routers/auth.set_password`).

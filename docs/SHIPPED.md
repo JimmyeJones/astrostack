@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-d8yo4f`) — the sky-brightness card buckets nights by the subs' own longitude
+
+### v0.502.28 — `frames.sky_brightness_read` through `resolve_site_lon`; `detect_site_from_library` reads two columns
+
+**What.** `GET /api/targets/{safe}/frames/sky-brightness` passed the raw `Settings.site_lon` to
+`qc.sky_quality.sky_brightness`, so on an install with no location in Settings (the common case — the Seestar writes
+`SITELONG` into every sub, and `resolve_site_lon` exists so nobody has to type one) it bucketed nights UTC
+noon-to-noon while the frames table, the Nights card and the calendar used the subs' own longitude. For an observer
+far enough west or east of Greenwich that UTC noon falls inside a session, each session was split in two: the dawn
+hour of one session joined the next evening's, and the last session's dawn hour became a "night" of its own — the
+card's *latest* night. It now resolves the longitude the same way as its neighbours, inside the library handle.
+`detect_site_from_library` (the walk behind `resolve_site_lon`) now reads `cached_path`/`source_path` through
+`Project.iter_frame_columns` instead of building `FrameRow`s, so the card's existing "builds no `FrameRow`" guard
+holds and every page that resolves a site skips the plate-solution column; same id order, same answer.
+
+**Tests** (+1): `tests/webapp/test_api.py::test_sky_brightness_buckets_nights_by_the_frames_own_site_longitude` —
+three sessions at a synthetic lon −120° (local 22:00 → 04:50, the last hour dawn-bright), Settings without a site,
+real FITS carrying `SITELONG`: the frames table says 20–22 Jul and the card now reports 22 Jul, "typical", against 2
+others. **Fails before** (scratch revert): the card reported **23 Jul, "much brighter than usual — save this target
+for a darker night"** (ratio 2.5). No config, schema, API-shape or on-disk change. The share/nameplate sibling is
+filed in Bugs.
+
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-ku8muu`) — the full-size loupe keeps the default stretch's whole-picture curve
 
 ### v0.502.27 — `pipeline.apply_recipe` fallback stretch through `ctx.fit` (`FALLBACK_STRETCH_UID`)

@@ -350,13 +350,17 @@ def sky_brightness_read(safe: str, request: Request) -> dict:
             for ts, sky, exposure_s, gain in proj.iter_frame_columns(
                 "timestamp_utc", "sky_adu_median", "exposure_s", "gain")
         ]
+        # Nights are bucketed local-noon-to-noon so one midnight-spanning
+        # session is one night — by the same longitude the frames table and the
+        # Nights card use (Settings, else the subs' own ``SITELONG``). The raw
+        # Settings value alone is unset on most installs, and its UTC fallback
+        # splits a session in two for an observer far from Greenwich, so this
+        # card compared a session's dawn hour against whole nights.
+        lon = resolve_site_lon(request, lib, settings.site_lon)
     finally:
         proj.close()
         lib.close()
-    # Nights are bucketed local-noon-to-noon so one midnight-spanning session is
-    # one night; with no configured location that degrades to UTC noon-to-noon,
-    # which still groups a night correctly for most observers.
-    read = sky_brightness(samples, lon_deg=settings.site_lon)
+    read = sky_brightness(samples, lon_deg=lon)
     return {"read": read.as_dict() if read is not None else None}
 
 
