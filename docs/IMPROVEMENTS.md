@@ -3622,6 +3622,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.17 **Storage's *Prune stacks* confirm says the pinned cover is kept instead of promising to delete "the rest"** (`TargetStorage.cover_pinned`, `Storage.tsx` `confirmPrune`).
 - ✅ v0.502.16 **Storage's "Keep the N newest" no longer deletes the target's pinned cover — a hand-finished picture kept over newer linear restacks lost its row and files on the page's default *Keep 3*** (`storage.prune_stack_runs` skips `cover_stack_run_id`, Scout rotation sweep (4))
 - ✅ v0.502.15 **The life list keeps each mosaic panel clear of its edges by its *own* subs' spread — one re-pointed panel no longer greys an object a tight panel holds in every sub** (`lifelist._Panel.margin_deg`, `footprint_covers` asks the holding panel's margin). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.14 **Add → Resize now lands last, behind Auto's sharpen — spliced in after the stretch it made the export sharpen 1/scale wider than Auto chose and the full-size check vouched for it** (`stageConflicts.insertOnCorrectSide`/`moveToCorrectSide` put geometry last; `_loupe_geometry_problem` declines a real Resize ahead of any op). Entry in [`SHIPPED.md`](SHIPPED.md).

@@ -67,9 +67,14 @@ function TargetRow({ row, total }: { row: TargetStorage; total: number }) {
       });
       return;
     }
+    // The server never prunes the pinned cover, however old (v0.502.16), so
+    // say so rather than promise to delete "the rest".
+    const coverNote = row.cover_pinned
+      ? `\n\nThe picture pinned as this target's cover is always kept, even if it is older.`
+      : "";
     if (window.confirm(
       `Keep the ${k} newest stack(s) for ${row.name} and permanently delete the rest `
-      + `(including their FITS/TIFF/preview files)?\n\nThis cannot be undone.`)) {
+      + `(including their FITS/TIFF/preview files)?${coverNote}\n\nThis cannot be undone.`)) {
       prune.mutate(k);
     }
   };

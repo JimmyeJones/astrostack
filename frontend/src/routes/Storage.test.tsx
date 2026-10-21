@@ -127,6 +127,34 @@ describe("StorageView", () => {
     await waitFor(() => expect(clear).toHaveBeenCalledWith("m_42", "proxies"));
   });
 
+  it("says the pinned cover survives a prune, and only when there is one", async () => {
+    // "Keep the N newest" never deletes the cover (v0.502.16); the confirm
+    // used to promise to delete "the rest" regardless.
+    const base = {
+      safe: "m_42", name: "M 42", total_bytes: 200, output_bytes: 40,
+      cache_bytes: 160, stage1_bytes: 10, stage2_bytes: 20, thumbs_bytes: 30,
+      proxies_bytes: 0, n_stack_runs: 5,
+    };
+    const prune = vi.spyOn(client.api, "pruneStackRuns").mockResolvedValue({ deleted: [] });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    for (const cover_pinned of [true, false]) {
+      confirm.mockClear();
+      vi.spyOn(client.api, "getStorage").mockResolvedValue(
+        mkStorage({ targets: [{ ...base, cover_pinned }], total_bytes: 200 }),
+      );
+      const { unmount } = renderStorage();
+      fireEvent.click(await screen.findByRole("button", { name: /prune stacks/i }));
+      expect(confirm).toHaveBeenCalledTimes(1);
+      const said = confirm.mock.calls[0][0] as string;
+      expect(said).toMatch(/delete the rest/);
+      if (cover_pinned) expect(said).toMatch(/pinned as this target's cover is always kept/);
+      else expect(said).not.toMatch(/cover/);
+      unmount();
+    }
+    expect(prune).not.toHaveBeenCalled();
+  });
+
   it("keeps the share-of-disk badge's label intact beside a long figures line",
     async () => {
       // Phone width. The card headline is a `<Group wrap="nowrap">` holding the

@@ -244,6 +244,11 @@ class TargetStorage(BaseModel):
     # send it) both keep working.
     proxies_bytes: int = 0
     n_stack_runs: int
+    #: Whether one of those runs is pinned as the target's cover — the run
+    #: "Keep the N newest" never deletes (:func:`prune_stack_runs`), so the
+    #: page's confirm can say so instead of promising to delete "the rest".
+    #: Additive with a default, like ``proxies_bytes``.
+    cover_pinned: bool = False
 
 
 class StorageResponse(BaseModel):
@@ -313,10 +318,15 @@ def get_storage(request: Request) -> StorageResponse:
             output = _dir_bytes(tdir / "output")
             total = _dir_bytes(tdir)
             n_runs = 0
+            cover_pinned = False
             proj = None
             try:
                 proj = Project.open(tdir)
-                n_runs = sum(1 for _ in proj.iter_stack_runs())
+                run_ids = [r.id for r in proj.iter_stack_runs()]
+                n_runs = len(run_ids)
+                # A dangling id (its run deleted from History) pins nothing.
+                cover_pinned = (t.cover_stack_run_id is not None
+                                and t.cover_stack_run_id in run_ids)
                 for night, n in proj.frame_night_counts().items():
                     night_counts[night] = night_counts.get(night, 0) + n
                     total_frames += n
@@ -338,7 +348,7 @@ def get_storage(request: Request) -> StorageResponse:
                 cache_bytes=stage1 + stage2 + thumbs + proxies,
                 stage1_bytes=stage1, stage2_bytes=stage2, thumbs_bytes=thumbs,
                 proxies_bytes=proxies,
-                n_stack_runs=n_runs,
+                n_stack_runs=n_runs, cover_pinned=cover_pinned,
             ))
         over_n, over_b, over_u = _incoming_overcount(lib, incoming_prefix,
                                                      claimed_by)

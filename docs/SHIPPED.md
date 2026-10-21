@@ -1,5 +1,20 @@
 # Shipped — the record
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-pulzp7`) — the prune confirm says the cover is kept
+
+### v0.502.17 — `TargetStorage.cover_pinned`; Storage's *Prune stacks* confirm names the kept cover
+
+**What.** v0.502.16 made "Keep the N newest" spare the pinned cover, but the Storage card's confirm — the page's one
+irreversible dialog — still said *"Keep the 3 newest stack(s) … and permanently delete the rest … This cannot be
+undone."*, i.e. promised to delete the picture on the wall when the owner's whole reason to hesitate is exactly that
+picture. `/api/storage` now carries an additive `cover_pinned` per target (true only when `cover_stack_run_id` names
+a run that still exists — a dangling id pins nothing), and the confirm adds *"The picture pinned as this target's
+cover is always kept, even if it is older."* only then; with no cover the text is byte-for-byte as before. Found by
+reading the v0.502.16 fix's user-facing half after a clean `--mosaic --editor` dogfood. Tests: `test_storage.py` +1
+(false → pinned → dangling), `Storage.test.tsx` +1 (sentence present only with a cover; nothing pruned on cancel) —
+**both fail before** by scratch revert. No config, schema, on-disk or default change; additive response field, the
+frontend types it optional.
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-pvo4tr`) — Storage's "Keep the N newest" spares the pinned cover
 
 ### v0.502.16 — `storage.prune_stack_runs` never deletes `cover_stack_run_id`

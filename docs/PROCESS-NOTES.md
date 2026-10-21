@@ -29,6 +29,16 @@
   proxy grid and the export grid (trim ≤ 512 px, stack-time ≤ 2 MP), so it cannot split preview from export — CLEAN.
 - **Rotation: (1) done → next sweep is (2).**
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-pulzp7`) — backlog dry of ungated work; big-picture dogfood `--mosaic --editor` CLEAN; one XS fix (v0.502.17).
+
+- **Suite:** 8144 passed / 7 skipped on `7b6b5655` (xdist `-n 4`, BLAS capped, 16m47s). No open PRs. Every Bugs entry is
+  gated on an owner/observer measurement or carries a stand-down; no open un-gated beginner feature in the Features list.
+- **Dogfood `--build --mosaic --editor`:** CLEAN — trim 7.9 %, all 21 Add-menu ops re-render on both runs, undo/redo,
+  Auto + taste chips behave, nothing overflowing, no console errors; page heights at the standing baseline (`/life-list
+  [Still to shoot]` 14,513 px phone — the documented non-bug). The Target/Dashboard/Tonight paragraphs read consistently.
+- **Fix:** v0.502.16's user-facing half — the prune confirm still promised to delete "the rest" though the server now keeps
+  the cover. Lever: **when a fix changes what a destructive action does, re-read the dialog that describes it.**
+
 ## 2026-10-20 (Scout, branch `claude/zen-curie-pvo4tr`) — QA rotation sweep (4), the `storage` router's prune answer against the pin: one bug, Scout-fixed (v0.502.16). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8138 passed / 7 skipped on `b7be90a0` (xdist `-n 4`, BLAS capped, 15m48s). **Inbox:** the same four (#878, #880,
