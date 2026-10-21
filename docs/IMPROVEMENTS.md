@@ -512,29 +512,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   `−scale·sinθ`, and pin the sign with a known-orientation regression test. This is the same underlying bug as
   Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
   scratchpad (`wcs_repro.py`).)_
-- **🟡 (Scout 2026-10-21, QA rotation sweep (4)) — the "night after night" reel (`/api/targets/{safe}/deepening-reel`)
-  draws an earlier, smaller canvas centred and blown up instead of where it sits in the sky, so on a mosaic that grew
-  panel by panel the object jumps sideways and zooms between frames.** *(Pillar: enjoy / share — PRIORITY 3; size
-  **M**; severity low-to-moderate — the share clip that exists to show "the same object getting cleaner" shows it
-  moving and changing size instead; no data is touched. Confidence: **reproduced** through the real
-  `render_deepening_frames` on FITS of the owner's panel shape; occurrence on his library unmeasured, but a mosaic
-  whose panels came in on different nights is exactly his shooting style.)*
-  `seestack/render/deepening.py::render_deepening_frames` sizes every frame to the newest one with `_fit_onto`, which
-  scales each picture to *fit* the newest canvas and centres it — it never reads the WCS every master carries
-  (`stack/output._write_fits`). That is right only when an earlier canvas is the newest one's exact shape and place.
-  Scratch repro, a 1080×1920 S30 panel (night 1) against the mosaic it became (night 2), one star at the same sky
-  position in both: **2×1** (1080 → 2000 px wide) — the star sits at x≈489 in the night-1 frame and x≈255 in the
-  night-2 frame of a 1024-px reel (true x 256: **~23 % of the reel's width** of sideways jump); **2×2** (→ 2000×3600)
-  — night 1 is drawn at (473, 863) against the true (256, 461): the single panel is **magnified ~1.85×** to fill the
-  whole frame, because `_fit_onto`'s `min(tw/w, th/h)` scale is 1 when the canvas grew in both directions. A
-  single field with a re-framed night (the union canvas grows on one side) shifts the same way, by less.
-  **Fix shape:** place each frame on the newest frame's pixel grid through the two WCS headers (an affine from three
-  points pixel→sky→pixel is enough for a reel; `PIL.Image.transform(AFFINE)` on the already-decimated image, black =
-  no data as now), and keep `_fit_onto` as the fallback for a frame without a usable WCS. Check an editor export in
-  the series (`display_space`) — a cropped or North-up-turned export must carry a matching WCS or fall back. Test:
-  the two probe shapes above (star within ~1 reel px of its night-2 position in every frame) plus the unchanged
-  single-field case byte-for-byte. Bump `DEEPENING_SERIES_VERSION` or the signature tag so cached reels rebuild.
-  Ungated.
 
 ---
 
@@ -3614,6 +3591,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.22 **The "night after night" reel draws each earlier night where its sky sits on the newest frame — a mosaic that grew panel by panel no longer has its first panel centred and blown up (~23 % sideways jump on a 2×1, ~1.85× zoom on a 2×2)** (`deepening._sky_affine`, `_place_on_sky`, `_unify_frame`; `_fit_onto` stays the no-WCS fallback).
 - ✅ v0.502.21 **The automatic drizzle no longer says yes to an uneven mosaic on its canvas average — one deep panel lifted a 2×2's mean to "475" while three panels held 60, and the run went ×7 slower for resolution two thirds of the picture couldn't pay for; a cleared average is now checked against a typical panel's depth summed from the subs' own footprints** (`autodrizzle.footprint_coverage_plane`, `decide_auto_drizzle(measure_panel_depth=…)`, `stacker._decide_auto_drizzle` → `coverage_panel_depth`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.20 **"My deep-sky wall"'s title counts a sub two targets registered (#878's mosaic twins) once — it printed twice the light ever collected when twins shared the wall** (`gallery._distinct_integration_s`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.19 **The Sky map's built-in viewer centres an un-trimmed picture on its own canvas, not the target's registry RA/Dec — a re-framed night below the 1 % panel share widened the union canvas and drew the tile ~0.3–0.45° off its stars, while the Aladin view placed it right** (`routers/sky.get_sky`, `wcs_io.cropped_center_radec_from_fits` with a whole-canvas crop).

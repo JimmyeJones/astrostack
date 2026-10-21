@@ -417,6 +417,125 @@ def _fit_onto(img, target_size: tuple[int, int]):
     return canvas
 
 
+#: How far (in reel pixels, at any corner of the frame) a sky placement may sit
+#: from "draw it exactly where it is" and still be drawn exactly where it is. Two
+#: stacks of one unchanged field differ by a fraction of a pixel of solve jitter;
+#: resampling those through a sub-pixel affine would only soften the frame.
+_SKY_IDENTITY_TOL_PX = 0.5
+
+
+def _sky_affine(src_fits: str | Path, src_size: tuple[int, int],
+                ref_fits: str | Path, ref_size: tuple[int, int],
+                ) -> tuple[float, float, float, float, float, float] | None:
+    """The affine that takes a pixel of the **reference** reel frame to the pixel
+    of the **source** frame showing the same piece of sky — the coefficient order
+    :meth:`PIL.Image.Image.transform` expects for ``Image.AFFINE``.
+
+    Both sizes are the *decimated* reel frames (``load_stack_rgb`` scales every
+    master to ``max_width`` by its own factor); the WCS headers describe the
+    full-resolution masters, so each end converts between the two. Pillow's
+    affine samples pixel ``i`` at continuous coordinate ``i + 0.5``, and a box
+    decimation maps continuous ``u`` on the small frame to 0-based full-res
+    ``u · W/w − 0.5`` — so that is the conversion used at both ends.
+
+    A 3×3 grid across the reference frame goes pixel → sky → pixel and an affine
+    is least-squares fitted through it: two TAN projections a degree or two
+    apart differ from an affine by far less than a reel pixel. ``None`` — the
+    caller falls back to fit-and-centre — when either master has no usable
+    celestial WCS or a point does not project.
+    """
+    from seestack.io.wcs_io import celestial_wcs_from_fits
+
+    src, sw, sh = celestial_wcs_from_fits(src_fits)
+    ref, rw, rh = celestial_wcs_from_fits(ref_fits)
+    if src is None or ref is None or min(sw, sh, rw, rh) <= 0:
+        return None
+    (sdw, sdh), (rdw, rdh) = src_size, ref_size
+    t = np.array([0.0, 0.5, 1.0])
+    u, v = np.meshgrid(t * rdw, t * rdh)
+    u, v = u.ravel(), v.ravel()
+    try:
+        ra, dec = ref.all_pix2world(u * rw / rdw - 0.5, v * rh / rdh - 0.5, 0)
+        sx, sy = src.all_world2pix(ra, dec, 0)
+    except Exception as exc:  # noqa: BLE001 — a malformed WCS just means "can't place"
+        log.warning("deepening reel: sky placement failed (%s → %s): %s",
+                    src_fits, ref_fits, exc)
+        return None
+    su = (np.asarray(sx, dtype=float) + 0.5) * sdw / sw
+    sv = (np.asarray(sy, dtype=float) + 0.5) * sdh / sh
+    if not (np.all(np.isfinite(su)) and np.all(np.isfinite(sv))):
+        return None
+    design = np.column_stack([u, v, np.ones_like(u)])
+    (a, b, c), *_ = np.linalg.lstsq(design, su, rcond=None)
+    (d, e, f), *_ = np.linalg.lstsq(design, sv, rcond=None)
+    coeffs = (float(a), float(b), float(c), float(d), float(e), float(f))
+    if not all(np.isfinite(coeffs)) or abs(a * e - b * d) < 1e-9:
+        return None
+    return coeffs
+
+
+def _place_on_sky(img, coeffs: tuple[float, float, float, float, float, float],
+                  target_size: tuple[int, int]):
+    """Draw ``img`` on a ``target_size`` black canvas **where its sky is** on the
+    reference frame (``coeffs`` from :func:`_sky_affine`), or return ``None``
+    when none of it lands there — the caller then falls back to
+    :func:`_fit_onto` rather than showing an all-black frame.
+
+    A frame that already sits exactly on the reference grid (same size, an
+    identity mapping to within :data:`_SKY_IDENTITY_TOL_PX`) comes back
+    untouched, so the ordinary single-field re-stack is byte-for-byte what the
+    reel always drew. A source drawn smaller than it was decimated is first
+    box-shrunk to roughly the drawn scale, so stars are averaged rather than
+    point-sampled away (the same reason ``load_stack_rgb`` box-averages)."""
+    from PIL import Image
+
+    a, b, c, d, e, f = coeffs
+    tw, th = target_size
+    corners = [(0.0, 0.0), (tw, 0.0), (0.0, th), (tw, th)]
+    if img.size == (tw, th) and all(
+            abs(a * x + b * y + c - x) <= _SKY_IDENTITY_TOL_PX
+            and abs(d * x + e * y + f - y) <= _SKY_IDENTITY_TOL_PX
+            for x, y in corners):
+        return img
+
+    # Does any of the source land on the target? Map the source's corners into
+    # target coordinates through the inverse and intersect the bounding boxes.
+    w, h = img.size
+    det = a * e - b * d
+    inv = ((e, -b, b * f - c * e), (-d, a, c * d - a * f))
+    xs, ys = [], []
+    for x, y in [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)]:
+        xs.append((inv[0][0] * x + inv[0][1] * y + inv[0][2]) / det)
+        ys.append((inv[1][0] * x + inv[1][1] * y + inv[1][2]) / det)
+    if max(xs) <= 0 or min(xs) >= tw or max(ys) <= 0 or min(ys) >= th:
+        return None
+
+    # Source pixels per target pixel; above ~1.5 pre-shrink with a box filter.
+    scale = abs(det) ** 0.5
+    if scale > 1.5:
+        nw, nh = max(1, round(w / scale)), max(1, round(h / scale))
+        sx, sy = nw / w, nh / h
+        img = img.resize((nw, nh), Image.BOX)
+        a, b, c, d, e, f = a * sx, b * sx, c * sx, d * sy, e * sy, f * sy
+    return img.transform((tw, th), Image.AFFINE, (a, b, c, d, e, f),
+                         resample=Image.BILINEAR, fillcolor=(0, 0, 0))
+
+
+def _unify_frame(img, src_fits: str | Path, ref_fits: str | Path,
+                 ref_size: tuple[int, int]):
+    """One reel frame on the reference frame's canvas: placed by the sky when
+    both masters carry a celestial WCS (:func:`_place_on_sky`), otherwise —
+    or when the placement finds no shared sky — fitted and centred as the reel
+    always did (:func:`_fit_onto`)."""
+    if str(src_fits) != str(ref_fits):
+        coeffs = _sky_affine(src_fits, img.size, ref_fits, ref_size)
+        if coeffs is not None:
+            placed = _place_on_sky(img, coeffs, ref_size)
+            if placed is not None:
+                return placed
+    return _fit_onto(img, ref_size)
+
+
 def render_deepening_frames(fits_paths: list[str | Path], *,
                             labels: list[str] | None = None,
                             max_width: int = 1024) -> list:
@@ -426,9 +545,12 @@ def render_deepening_frames(fits_paths: list[str | Path], *,
     A display-space (editor-export) run is already a tone-mapped ``[0, 1]``
     image, so it's shown verbatim (a second stretch would double-process it);
     the common stretch is solved from the deepest **linear** master, which is
-    the normal re-stack output. Frames are resized to the last (deepest) frame's
-    size so the encoder gets a uniform series even as the canvas grows across
-    nights. Frames that can't be loaded are skipped (best-effort).
+    the normal re-stack output. Frames are brought onto the last (deepest)
+    frame's canvas so the encoder gets a uniform series even as the canvas grows
+    across nights — placed by their WCS where both masters carry one, so the
+    object stays put while a mosaic grows around it, else fitted and centred
+    (see :func:`_unify_frame`). Frames that can't be loaded are skipped
+    (best-effort).
 
     ``labels`` (optional, parallel to ``fits_paths``) burns a small provenance
     caption into each frame's bottom-left corner — see
@@ -440,7 +562,7 @@ def render_deepening_frames(fits_paths: list[str | Path], *,
     """
     from PIL import Image
 
-    loaded: list[tuple[np.ndarray, bool, str]] = []
+    loaded: list[tuple[np.ndarray, bool, str, str | Path]] = []
     for i, fp in enumerate(fits_paths):
         label = labels[i] if (labels is not None and i < len(labels)) else ""
         try:
@@ -448,14 +570,14 @@ def render_deepening_frames(fits_paths: list[str | Path], *,
         except Exception as exc:  # noqa: BLE001 — a bad master just drops out
             log.warning("deepening reel: could not load %s: %s", fp, exc)
             continue
-        loaded.append((rgb, display_space, label))
+        loaded.append((rgb, display_space, label, fp))
     if len(loaded) < 2:
         return []
 
     # Solve the shared stretch from the deepest *linear* frame (prefer the last),
     # so the whole reel is tone-mapped identically and only the noise changes.
     params: _StfParams | None = None
-    for rgb, display_space, _label in reversed(loaded):
+    for rgb, display_space, _label, _fp in reversed(loaded):
         if not display_space:
             params = _solve_stf_params(rgb)
             if params is not None:
@@ -463,7 +585,8 @@ def render_deepening_frames(fits_paths: list[str | Path], *,
 
     images: list = []
     frame_labels: list[str] = []
-    for rgb, display_space, label in loaded:
+    sources: list[str | Path] = []
+    for rgb, display_space, label, fp in loaded:
         if display_space:
             disp = np.clip(np.nan_to_num(rgb), 0.0, 1.0)
         elif params is not None:
@@ -475,11 +598,18 @@ def render_deepening_frames(fits_paths: list[str | Path], *,
         u8 = pack_unit(disp)
         images.append(Image.fromarray(u8, mode="RGB"))
         frame_labels.append(label)
+        sources.append(fp)
 
     target_size = images[-1].size
+    ref_fits = sources[-1]
     # Unify size first (so the label is drawn crisp at the final output
     # resolution, not up/down-scaled with the frame), then burn each label in.
-    resized = [_fit_onto(im, target_size) for im in images]
+    # Each earlier night is drawn where its sky sits on the newest frame — a
+    # mosaic that grew panel by panel would otherwise have its first panel
+    # centred and blown up to fill the frame, the object jumping and zooming
+    # between nights (see `_unify_frame`; no WCS ⇒ the old fit-and-centre).
+    resized = [_unify_frame(im, src, ref_fits, target_size)
+               for im, src in zip(images, sources, strict=True)]
     return [_draw_corner_label(im, lbl)
             for im, lbl in zip(resized, frame_labels, strict=True)]
 

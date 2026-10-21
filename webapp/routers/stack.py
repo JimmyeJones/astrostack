@@ -2326,7 +2326,8 @@ def _deepening_signature(runs: list, dated_by: str,
     from seestack.render.deepening import DEEPENING_SERIES_VERSION
 
     # Version tag: bump when the *render output* changes for an unchanged series
-    # (e.g. burned-in per-frame date/sub labels, v2) so existing cached reels are
+    # (e.g. burned-in per-frame date/sub labels, v2; earlier nights placed by
+    # their WCS instead of fitted and centred, v3) so existing cached reels are
     # rebuilt in place rather than serving a stale label-less animation. The
     # series tag does the same for a change in *which* runs appear and in what
     # order, and `dated_by` is folded in so a library that gains a capture window
@@ -2335,7 +2336,7 @@ def _deepening_signature(runs: list, dated_by: str,
     # reason one step lower: the cumulative "Nights 1-3" prefixes are a function
     # of the observer's longitude, so setting a site has to rebuild the reel
     # rather than leave it labelled from the old noon-to-noon buckets.
-    parts = ["v2-labels", DEEPENING_SERIES_VERSION, dated_by,
+    parts = ["v3-sky", DEEPENING_SERIES_VERSION, dated_by,
              ",".join(str(n) for n in night_steps) if night_steps else "-"]
     for r in runs:
         try:

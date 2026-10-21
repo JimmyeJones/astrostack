@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import pytest
 from astropy.io import fits
 
 from seestack.render.deepening import (
@@ -472,3 +473,146 @@ def test_the_night_prefix_stands_alone_when_nothing_else_is_known():
     """A step whose date and sub count are both unreadable still has a true
     thing to say about where it sits in the series."""
     assert deepening_frame_label(None, None, None, 3) == "Nights 1-3"
+
+
+# ── Sky placement: a mosaic that grew panel by panel ─────────────────────────
+#
+# Regression (Scout 2026-10-21, sweep 4): every earlier frame was fitted and
+# centred onto the newest canvas, never placed by its WCS — so a single S30
+# panel (night 1) against the 2×1 mosaic it became (night 2) jumped ~23 % of the
+# reel's width sideways, and against a 2×2 it was magnified ~1.85× to fill the
+# frame. The shapes below are the owner's panel at quarter size (1080×1920 →
+# 270×480, at four times the pixel scale), the same ratios the probe used.
+
+_PANEL_W, _PANEL_H = 270, 480
+_SCALE_DEG = 4 * 3.9 / 3600.0  # S30 ~3.9"/px, at quarter size
+
+
+def _tan_wcs(width: int, height: int, ra: float, dec: float):
+    from astropy.wcs import WCS
+
+    w = WCS(naxis=2)
+    w.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    w.wcs.crval = [ra, dec]
+    w.wcs.crpix = [(width + 1) / 2.0, (height + 1) / 2.0]
+    w.wcs.cd = [[-_SCALE_DEG, 0.0], [0.0, _SCALE_DEG]]
+    return w
+
+
+def _star_field(width: int, height: int, wcs, stars_radec, *, seed: int) -> np.ndarray:
+    """A (3, H, W) linear field with a faint noisy sky and a gaussian star at each
+    sky position that falls on this canvas."""
+    rng = np.random.default_rng(seed)
+    plane = (0.10 + 0.004 * rng.standard_normal((height, width))).astype(np.float32)
+    yy, xx = np.mgrid[0:height, 0:width]
+    for ra, dec in stars_radec:
+        sx, sy = wcs.all_world2pix([[ra, dec]], 0)[0]
+        plane += (2.0 * np.exp(-((xx - sx) ** 2 + (yy - sy) ** 2) / (2 * 2.0 ** 2))
+                  ).astype(np.float32)
+    return np.stack([plane, plane, plane])
+
+
+def _write_solved(path, cube, wcs) -> str:
+    hdu = fits.PrimaryHDU(data=cube)
+    hdu.header.update(wcs.to_header())
+    hdu.writeto(path, overwrite=True)
+    return str(path)
+
+
+def _star_xy(img) -> tuple[float, float]:
+    """Intensity-weighted centroid of the brightest blob in a reel frame."""
+    arr = np.asarray(img).astype(np.float64).sum(axis=2)
+    y0, x0 = np.unravel_index(int(np.argmax(arr)), arr.shape)
+    ys, xs = slice(max(0, y0 - 4), y0 + 5), slice(max(0, x0 - 4), x0 + 5)
+    win = arr[ys, xs] - np.median(arr)
+    win = np.clip(win, 0.0, None)
+    gy, gx = np.mgrid[ys, xs]
+    return float((gx * win).sum() / win.sum()), float((gy * win).sum() / win.sum())
+
+
+def _grown_mosaic(tmp_path, cols: int, rows: int):
+    """Night 1: one panel (the mosaic's top-left). Night 2: the cols×rows mosaic
+    it became. One star at the same sky position, inside the first panel."""
+    overlap = 20
+    mw = cols * _PANEL_W - (cols - 1) * overlap
+    mh = rows * _PANEL_H - (rows - 1) * overlap
+    mosaic = _tan_wcs(mw, mh, 180.0, 30.0)
+    p_ra, p_dec = mosaic.all_pix2world([[(_PANEL_W - 1) / 2.0, (_PANEL_H - 1) / 2.0]], 0)[0]
+    panel = _tan_wcs(_PANEL_W, _PANEL_H, float(p_ra), float(p_dec))
+    star = tuple(mosaic.all_pix2world([[70.0, 130.0]], 0)[0])
+    n1 = _write_solved(tmp_path / "night1.fits",
+                       _star_field(_PANEL_W, _PANEL_H, panel, [star], seed=31), panel)
+    n2 = _write_solved(tmp_path / "night2.fits",
+                       _star_field(mw, mh, mosaic, [star], seed=32), mosaic)
+    return n1, n2, (mw, mh)
+
+
+def test_a_grown_2x1_mosaic_keeps_the_object_in_place(tmp_path):
+    n1, n2, (mw, _mh) = _grown_mosaic(tmp_path, 2, 1)
+    frames = render_deepening_frames([n1, n2], max_width=256)
+    assert len(frames) == 2 and frames[0].size == frames[1].size
+    (x1, y1), (x2, y2) = _star_xy(frames[0]), _star_xy(frames[1])
+    # Where the star truly sits on the night-2 reel frame.
+    k = frames[1].size[0] / mw
+    assert abs(x2 - (70.5 * k - 0.5)) < 1.0 and abs(y2 - (130.5 * k - 0.5)) < 1.0
+    # Fail-before: night 1 was centred and drawn at x≈ +60 reel px from here.
+    assert abs(x1 - x2) < 1.0 and abs(y1 - y2) < 1.0
+    # The panel covers only its own part of the canvas; the rest is "no data".
+    arr = np.asarray(frames[0])
+    assert arr[:, -10:].max() == 0
+
+
+def test_a_grown_2x2_mosaic_is_not_magnified_to_fill_the_frame(tmp_path):
+    n1, n2, (mw, _mh) = _grown_mosaic(tmp_path, 2, 2)
+    frames = render_deepening_frames([n1, n2], max_width=256)
+    (x1, y1), (x2, y2) = _star_xy(frames[0]), _star_xy(frames[1])
+    assert abs(x1 - x2) < 1.0 and abs(y1 - y2) < 1.0
+    # The single panel fills about its own quarter, not the whole frame (the
+    # fit-and-centre scale was 1 here: the panel was blown up ~1.85×).
+    arr = np.asarray(frames[0]).max(axis=2)
+    lit_cols = np.flatnonzero(arr.max(axis=0) > 0)
+    w = frames[0].size[0]
+    assert lit_cols.size == pytest.approx(w * _PANEL_W / mw, abs=2)
+
+
+def test_an_unchanged_single_field_is_byte_for_byte_the_old_reel(tmp_path):
+    """Two stacks of one field on one grid: the sky placement is the identity,
+    so the frames are exactly what fit-and-centre produced (what an unsolved
+    pair of the same masters still produces)."""
+    wcs = _tan_wcs(_PANEL_W, _PANEL_H, 83.8, -5.4)
+    star = tuple(wcs.all_pix2world([[100.0, 200.0]], 0)[0])
+    a = _star_field(_PANEL_W, _PANEL_H, wcs, [star], seed=41)
+    b = _star_field(_PANEL_W, _PANEL_H, wcs, [star], seed=42)
+    solved = render_deepening_frames(
+        [_write_solved(tmp_path / "a.fits", a, wcs), _write_solved(tmp_path / "b.fits", b, wcs)],
+        max_width=128)
+    plain = render_deepening_frames(
+        [_write_cube(tmp_path / "pa.fits", a), _write_cube(tmp_path / "pb.fits", b)],
+        max_width=128)
+    for s, p in zip(solved, plain, strict=True):
+        assert np.array_equal(np.asarray(s), np.asarray(p))
+
+
+def test_a_frame_without_a_wcs_falls_back_to_fit_and_centre(tmp_path):
+    """An editor export whose recipe rotated (written with no WCS), or a pre-WCS
+    master, keeps the old placement — never a guessed one."""
+    n1, n2, _ = _grown_mosaic(tmp_path, 2, 1)
+    stripped = _write_cube(tmp_path / "night1_nowcs.fits", fits.getdata(n1))
+    solved_ref = render_deepening_frames([stripped, n2], max_width=256)
+    unsolved = render_deepening_frames(
+        [stripped, _write_cube(tmp_path / "night2_nowcs.fits", fits.getdata(n2))],
+        max_width=256)
+    assert np.array_equal(np.asarray(solved_ref[0]), np.asarray(unsolved[0]))
+
+
+def test_a_frame_of_other_sky_falls_back_rather_than_going_black(tmp_path):
+    """Two masters whose skies do not overlap at all (a mislabelled run): drawing
+    one on the other's grid would be an all-black frame, so it is fitted instead."""
+    here = _tan_wcs(_PANEL_W, _PANEL_H, 10.0, 41.0)
+    there = _tan_wcs(_PANEL_W, _PANEL_H, 83.8, -5.4)
+    a = _star_field(_PANEL_W, _PANEL_H, there, [], seed=51)
+    b = _star_field(_PANEL_W, _PANEL_H, here, [], seed=52)
+    frames = render_deepening_frames(
+        [_write_solved(tmp_path / "a.fits", a, there), _write_solved(tmp_path / "b.fits", b, here)],
+        max_width=128)
+    assert np.asarray(frames[0]).max() > 0
