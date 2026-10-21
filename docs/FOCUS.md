@@ -38,7 +38,7 @@ unprivileged account against a read-only `incoming/` (dirs 0555, files 0444, own
 hostile stub ASTAP and real ffmpeg — scan → QC/solve → stack → re-solve → rescue → editor Auto/export/share →
 master dark and flat builds from `incoming/` → Moon & Sun grade and stack: CLEAN** (`incoming/` byte-, mtime-,
 mode- and owner-identical; zero permission errors, so nothing even *attempted* a write there). Inbox: the same
-four, all owner-gated. FOCUS.md rewritten short (old page archived whole). **START HERE NEXT RUN:** Builder: item 1
+four, all owner-gated. Suite 8193 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). FOCUS.md rewritten short (old page archived whole). **START HERE NEXT RUN:** Builder: item 1
 above. **Rotation: (3) done → next sweep is (4).***
 *2026-10-21 (Scout, branch `claude/zen-curie-faezje`) — QA rotation sweep (2): the planner's per-panel depth is the
 canvas mean on an uneven mosaic — filed reproduced (item 2 above). Suite 8182 passed / 7 skipped; dogfood

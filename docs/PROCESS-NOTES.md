@@ -2,7 +2,7 @@
 
 ## 2026-10-21 (Scout, branch `claude/zen-curie-g7aybm`) — QA rotation sweep (3), new angle — the whole app as an *unprivileged account* against a *read-only* `incoming/` owned by another account, stub ASTAP + real ffmpeg: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN. FOCUS.md rewritten short.
 
-- **Suite:** SUITE_RESULT. **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
+- **Suite:** 8193 passed / 7 skipped on `a97b918e` (xdist `-n 4`, BLAS capped, 15m46s). **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all
   owner-gated — nothing owed. No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing,
   no console errors).
 - **Sweep (3).** Every earlier (3) sweep proved "no write reached `incoming/`" by diffing it afterwards, which cannot
