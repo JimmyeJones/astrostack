@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-pfyczx`) — QA rotation sweep (3), new angle — the startup scratch *deleter* (`astap.sweep_stale_solve_scratch`, v0.502.11) against links into `incoming/`: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8145 passed / 7 skipped on `01fbd7c7` (xdist `-n 4`, BLAS capped, 14m55s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors). (The setup script's first
+  `pip install` hung again, ~12 min; killing it let the `--timeout 120 --retries 5` fallback finish.)
+- **Sweep (3).** Every earlier (3) sweep drove what ASTAP/ffmpeg *write*; none drove the one function that *deletes*
+  — the `lifespan` startup sweep that `rmtree`s orphaned `astrostack-solve-*`/`astrostack-bootstrap-*` dirs older than
+  `STALE_SOLVE_SCRATCH_AGE_S`. Its unit test covers only the top-level filter, so the probe planted, inside stale
+  scratch dirs, what a hostile ASTAP could leave: a symlink to a `M 42_mosaic_sub/` raw folder, a symlink to a raw sub,
+  a **hardlink** to a raw sub, a nested dir with a symlink to `incoming/` itself, a read-only file; beside them a
+  top-level `astrostack-solve-*` *symlink* to the raw folder, a fresh scratch dir and an old unprefixed dir. Result:
+  the three stale real dirs removed (count 3), the symlink entry, fresh and foreign dirs kept, every raw byte- and
+  mtime-identical (the hardlinked one only drops `st_nlink` 2→1 — `rmtree` unlinks links, never follows them). Then
+  the same through the real app (`TestClient(create_app())`, `TMPDIR`/`HOME`/data root redirected): the stale dir is
+  gone at startup, `/api/health` 200, `incoming/` unchanged. `TMPDIR` is unset in the image (`docker/`), so the sweep
+  root is the container's own `/tmp`, never a data folder. **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-7sgoc9`) — QA rotation sweep (2), on the two per-panel surfaces that do not route through `pointing_groups`: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8145 passed / 7 skipped on `6321c28f` (xdist `-n 4`, BLAS capped, 16m02s). **Inbox:** the same four (#878,
