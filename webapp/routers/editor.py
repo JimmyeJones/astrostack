@@ -896,6 +896,19 @@ def _user_preset_recipe(request: Request, preset_id: str):
         return None
 
 
+def _without_saved_crop(recipe: dict) -> dict:
+    """A saved look's ops minus every ``geometry.crop``.
+
+    A crop is stored as fractions of the canvas it was framed on, so replaying it on
+    another picture cuts that picture by the wrong rectangle (a look saved off a
+    mosaic's Auto trim took 46 % off a single field). Framing belongs to one picture;
+    everything else in a saved look carries over. The stored look is left untouched —
+    this only shapes what is *applied*."""
+    ops = [o for o in recipe.get("ops") or []
+           if not (isinstance(o, dict) and o.get("id") == "geometry.crop")]
+    return {**recipe, "ops": ops}
+
+
 @router.delete("/api/editor/presets/{preset_id}")
 def delete_preset(preset_id: str, request: Request) -> dict:
     lib = deps.open_library(request)
@@ -3053,7 +3066,8 @@ def batch_apply(body: BatchRequest, request: Request) -> dict:
             pr = _user_preset_recipe(request, body.preset_id)
         if pr is None:
             raise HTTPException(status_code=404, detail="Unknown preset")
-        recipe = pr.to_dict()
+        # A saved look's crop is fractions of another canvas — never batch-write it.
+        recipe = _without_saved_crop(pr.to_dict())
     if recipe is None:
         raise HTTPException(status_code=400, detail="Provide a recipe or preset_id")
 

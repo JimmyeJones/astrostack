@@ -1,5 +1,46 @@
 # Shipped — the record
 
+## 2026-10-21 (Builder, branch `claude/festive-knuth-6n59fg`) — a saved look leaves its crop behind
+
+### v0.502.30 — `routers/editor._without_saved_crop` (`batch_apply`), `savedLookCrop.dropSavedCrop` (`Editor.applyDefaultRecipe`, `PresetMenu` user branch)
+
+**What.** A crop is stored as fractions of the canvas it was framed on, and a saved look kept it verbatim, so "Use
+my default", a "My presets" pick in the editor and the Gallery's "Apply preset to selected" all cut a *different*
+picture by those fractions — a look saved off a mosaic's Auto trim (x 0.15–0.85, y 0.12–0.90) batch-wrote a
+100×80 single field as **70×62**, unseen until opened. Applying a saved look now drops every `geometry.crop` op
+(enabled or not — enabling a disabled one would replay the same foreign rectangle) and keeps every other op in
+order; the editor's notification adds "Your saved crop wasn't carried — framing belongs to one picture.", and the
+mosaic trim offer frames this canvas instead. Built-in presets carry no crop and are unchanged; a raw `recipe`
+posted to the batch (not a saved look) is unchanged. The stored look keeps its crop — only what is applied changes.
+
+**Upgrade.** No config, schema, on-disk, default or API-shape change; stored presets/default untouched.
+
+**Tests** (+4): `tests/webapp/test_editor.py::test_batch_apply_user_preset_does_not_replay_its_crop` (fails before
+with `(62, 70) == (80, 100)`; the stored preset still holds its crop); `savedLookCrop.test.ts` — drops an enabled and
+a disabled crop, keeps order, a crop-free look unchanged.
+
+### Original backlog entry
+
+- **🟡 (Scout 2026-10-21, QA rotation sweep (1)) — a saved look ("Save as my default" / "Save current as preset")
+  keeps its `geometry.crop` as raw canvas fractions and replays them on every other picture: "Use my default", a
+  "My presets" pick in the editor, and the Gallery's "Apply preset to selected" batch all crop a different canvas by
+  the fractions of the one it was framed on** (`routers/editor.put_default_recipe` / `create_preset` store the ops
+  verbatim; `Editor.tsx` `applyDefaultRecipe` and `PresetMenu`'s user branch seed them as-is; `batch_apply` →
+  `pipeline._apply_editor_to_run` renders them).
+  *(Pillar: editor, PRIORITY 1; size **S**; severity moderate on the batch (a cropped picture written for every
+  selected target, unseen until opened), low in the editor (visible, undoable). Confidence: **reproduced** with a
+  scratch `TestClient` test through the real routes: a look saved with a mosaic-trim-shaped crop (x 0.15–0.85,
+  y 0.12–0.90), batch-applied as a "My presets" id to a 100×80 single-field run → the written master is **70×62,
+  46 % of the picture gone**; `GET /api/editor/default-recipe` returns the same crop intact. Built-in presets carry no
+  crop, so they are unaffected. How often his saved looks hold a crop is unmeasured — Auto appends one whenever
+  `auto_crop_border` (on by default) finds a border, so a look saved off an Auto edit of a mosaic usually does.)* A crop is the one op that belongs to one canvas (the
+  grown-canvas rule in FOCUS); the previous-edit seed re-aims it by WCS (v0.502.24), but a saved look has no source
+  canvas to re-aim from. **Fix shape:** drop enabled `geometry.crop` ops when a saved look is *applied* (both editor
+  seeds and `batch_apply`'s `preset_id`/`_user_preset_recipe` path), leaving the stored ops untouched (upgrade-safe),
+  and say so in the seed's notification ("your crop wasn't carried — framing belongs to one picture"); the mosaic
+  trim offer then frames this canvas. Test: the batch repro above writes 100×80; the editor seed drops the crop;
+  a crop-free look unchanged byte-for-byte. Ungated.
+
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-8nw2pa`) — the planner reads an uneven mosaic's depth at its median pixel
 
 ### v0.502.29 — `nightplan._panel_depth_fulls` / `_panel_noise_gain`, `LibraryTarget.depth_fulls`, `webapp.field_fulls.target_depth_fulls`

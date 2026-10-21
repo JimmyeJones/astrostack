@@ -566,26 +566,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   library) and pass the longitude into the job, or to call `detect_site_from_library(lib)` there — not to mirror a
   different bucketing. Test: the three-session shape through the share caption and the nameplate. Ungated.
 
-- **🟡 (Scout 2026-10-21, QA rotation sweep (1)) — a saved look ("Save as my default" / "Save current as preset")
-  keeps its `geometry.crop` as raw canvas fractions and replays them on every other picture: "Use my default", a
-  "My presets" pick in the editor, and the Gallery's "Apply preset to selected" batch all crop a different canvas by
-  the fractions of the one it was framed on** (`routers/editor.put_default_recipe` / `create_preset` store the ops
-  verbatim; `Editor.tsx` `applyDefaultRecipe` and `PresetMenu`'s user branch seed them as-is; `batch_apply` →
-  `pipeline._apply_editor_to_run` renders them).
-  *(Pillar: editor, PRIORITY 1; size **S**; severity moderate on the batch (a cropped picture written for every
-  selected target, unseen until opened), low in the editor (visible, undoable). Confidence: **reproduced** with a
-  scratch `TestClient` test through the real routes: a look saved with a mosaic-trim-shaped crop (x 0.15–0.85,
-  y 0.12–0.90), batch-applied as a "My presets" id to a 100×80 single-field run → the written master is **70×62,
-  46 % of the picture gone**; `GET /api/editor/default-recipe` returns the same crop intact. Built-in presets carry no
-  crop, so they are unaffected. How often his saved looks hold a crop is unmeasured — Auto appends one whenever
-  `auto_crop_border` (on by default) finds a border, so a look saved off an Auto edit of a mosaic usually does.)* A crop is the one op that belongs to one canvas (the
-  grown-canvas rule in FOCUS); the previous-edit seed re-aims it by WCS (v0.502.24), but a saved look has no source
-  canvas to re-aim from. **Fix shape:** drop enabled `geometry.crop` ops when a saved look is *applied* (both editor
-  seeds and `batch_apply`'s `preset_id`/`_user_preset_recipe` path), leaving the stored ops untouched (upgrade-safe),
-  and say so in the seed's notification ("your crop wasn't carried — framing belongs to one picture"); the mosaic
-  trim offer then frames this canvas. Test: the batch repro above writes 100×80; the editor seed drops the crop;
-  a crop-free look unchanged byte-for-byte. Ungated.
-
 - **🟠 (Scout 2026-10-21, QA rotation sweep (2)) — on an S30 mosaic three panels long, the stacker throws away a
   whole real panel as "bad plate-solve (footprint far from the group)" and flags every one of its subs rejected in
   the DB, whenever one end row/column holds just over half the subs** (`seestack/stack/mosaic._footprint_outlier_indices`:
@@ -3718,6 +3698,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.30 **A saved look ("my default" / "My presets") no longer replays its crop on other pictures — the Gallery batch cut a 100×80 run to 70×62; the editor seeds and `batch_apply` now leave `geometry.crop` behind and say so** (`routers/editor._without_saved_crop`, `savedLookCrop.dropSavedCrop`)
 - ✅ v0.502.29 **The "Best use of your scope right now" / "Worth more time" planner reads an uneven mosaic's depth at its median pixel, not the canvas mean — a grown 2×2→3×3 said "about 55 min on a typical part … 6 %" over a picture whose median pixel holds 13 min, and sank to the bottom of the list** (`nightplan._panel_depth_fulls` / `_panel_noise_gain`, `LibraryTarget.depth_fulls`, `webapp.field_fulls.target_depth_fulls`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.28 **The "was the sky brighter than usual?" card buckets nights by the subs' own longitude when Settings has no location — at a western or far-eastern site it split each session at UTC noon and called last night's dawn hour a "much brighter" night of its own** (`frames.sky_brightness_read` → `resolve_site_lon`; the site probe reads two columns, not `FrameRow`s)
 - ✅ v0.502.27 **"Check it at full size" on a recipe with no Stretch op (the editor's first-open state) shows the picture's own curve — each 1:1 window was re-stretched by its own sky, so a nebula core read flat grey** (`pipeline.apply_recipe` fallback stretch through `ctx.fit`, `FALLBACK_STRETCH_UID`). Entry in [`SHIPPED.md`](SHIPPED.md).

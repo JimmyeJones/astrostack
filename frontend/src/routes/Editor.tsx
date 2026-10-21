@@ -85,6 +85,7 @@ import {
   backgroundModeAdvice, backgroundModeOptionLabel,
 } from "../components/editor/backgroundModeAdvice";
 import { PresetMenu } from "../components/editor/PresetMenu";
+import { dropSavedCrop, SAVED_CROP_DROPPED_NOTE } from "../components/editor/savedLookCrop";
 import { HintLabel } from "../components/StackOptionControl";
 
 const GROUP_LABELS: Record<string, string> = {
@@ -1604,11 +1605,14 @@ export function EditorView() {
     const def = defaultRecipe.data;
     if (!def?.ops?.length) return;
     // Seed the (empty) working recipe from the user's saved default as a single
-    // undoable step. Not persisted until the user Saves.
-    setOps(() => def.ops);
+    // undoable step. Not persisted until the user Saves. Its crop (fractions of the
+    // canvas it was saved on) is left behind — the trim offer frames this one.
+    const { ops: seeded, dropped } = dropSavedCrop(def.ops);
+    setOps(() => seeded);
     notifications.show({
-      message: `Started from your default edit (${def.count} step`
-        + `${def.count === 1 ? "" : "s"}) — Undo to revert, Save to keep`,
+      message: `Started from your default edit (${seeded.length} step`
+        + `${seeded.length === 1 ? "" : "s"}) — Undo to revert, Save to keep.`
+        + (dropped ? SAVED_CROP_DROPPED_NOTE : ""),
       color: "violet",
     });
   };
@@ -1779,14 +1783,22 @@ export function EditorView() {
               stars, and on a mosaic prepend a Coverage-leveling pass to flatten the
               panel steps (the same pass Auto-process adds) — so a built-in preset
               lands both sized to your data and mosaic-aware. User presets are
-              applied exactly as the user tuned them. */}
+              applied as the user tuned them, minus their crop: it is fractions of
+              the picture they were saved on, not this one. */}
           <PresetMenu currentOps={ops}
-            onApply={(o, source) =>
-              setOps(source === "builtin"
-                ? prependCoverageLeveling(
-                    applyDataDrivenDefaults(o, dataDrivenSuggestions),
-                    hist.data?.is_mosaic === true, specs, uid)
-                : o)} />
+            onApply={(o, source) => {
+              if (source === "builtin") {
+                setOps(prependCoverageLeveling(
+                  applyDataDrivenDefaults(o, dataDrivenSuggestions),
+                  hist.data?.is_mosaic === true, specs, uid));
+                return;
+              }
+              const { ops: kept, dropped } = dropSavedCrop(o);
+              setOps(kept);
+              if (dropped) {
+                notifications.show({ message: SAVED_CROP_DROPPED_NOTE.trim(), color: "violet" });
+              }
+            }} />
           <Button variant="default" leftSection={<IconDeviceFloppy size={16} />}
             loading={saveRecipe.isPending} onClick={() => saveRecipe.mutate()}>Save</Button>
         </Group>
