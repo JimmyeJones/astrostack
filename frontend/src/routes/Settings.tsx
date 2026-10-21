@@ -790,7 +790,7 @@ function AccessControl() {
           {enabled ? (
             <Button color="red" variant="light" loading={disable.isPending}
               onClick={() => {
-                if (window.confirm("Disable access control? The app will be open to anyone who can reach it.")) {
+                if (window.confirm("Disable access control? The app will be open to anyone who can reach it, and the read-only token is removed too (anything signing in with it, such as a monitoring helper, stops working; create a new one after turning the password back on).")) {
                   disable.mutate();
                 }
               }}>

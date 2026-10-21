@@ -559,24 +559,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   folder whose stored `meta.source_name` matches, if any. Label the duplicates by night in the list. Test: the three
   folders above all listed, each stacks into its own results folder, a single-folder library's id unchanged. Ungated.
 
-- **🟡 (Scout 2026-10-21, QA rotation sweep (4)) — turning the access password off leaves the read-only token
-  stored, and setting a password again silently brings the old token back (`routers/auth.set_password`).**
-  *(Pillar: security posture, AGENTS.md §10; size **S**; severity low–moderate — a credential the owner can no longer
-  see or remove keeps working after he believes access control was reset; no data touched. Confidence:
-  **reproduced** through the real HTTP routes.)* `set_password` with an empty password clears only
-  `auth_password_hash`/`auth_salt`; `readonly_token_hash` survives. Repro: set password → mint token (`/api/logs`
-  200) → "Disable" → `/api/auth/status` says `enabled: false, readonly_enabled: true` → set a *new* password → the
-  **old** token reads `/api/logs` and `/api/targets` with 200. Meanwhile Settings → Access control shows the token
-  badge **"active"** beside "Turn on the password above first … a read-only token wouldn't add anything", with no
-  Remove button (it lives inside the `enabled` branch of `AccessControl`), and `POST /readonly-token` is refused
-  while open — so the one state where the token is invisible is the one that keeps it.
-  **Fix shape:** clear `readonly_token_hash`/`readonly_token_salt` in the same `store.update` that clears the
-  password (the mint route already says a token "would guard nothing" on an open install), and say so in the
-  Disable confirm ("…and removes the read-only token"). Upgrade-safe: an install that is already open with a stale
-  hash is the state this fixes; leave it until the next disable rather than migrating. Test: the repro above ends
-  401 for the old token and `readonly_enabled: false`. Note the observer's token dies on a disable — intended, and
-  worth one line in the confirm. Ungated.
-
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
@@ -3655,6 +3637,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.25 **"Disable" access control now removes the read-only token too, and turning a password on from open drops any stale token — a new password no longer silently revives the old one** (`routers/auth.set_password`).
 - ✅ v0.502.24 **The editor's "Use my previous edit" re-aims the copied crop onto this run's canvas through both masters' WCS — on a mosaic that grew a column it framed 288 px of sky against the 160 px he drew** (`editor.previous_recipe` → `pipeline._recrop_for_new_canvas`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.23 **The "night after night" reel draws each earlier night where its sky sits on the newest frame — a mosaic that grew panel by panel no longer has its first panel centred and blown up (~23 % sideways jump on a 2×1, ~1.85× zoom on a 2×2)** (`deepening._sky_affine`, `_place_on_sky`, `_unify_frame`; `_fit_onto` stays the no-WCS fallback).
 - ✅ v0.502.22 **The Gallery's "Apply preset to selected" works for his own saved presets — every "My presets" entry answered 404 "Unknown preset" because the batch looked only at the built-ins** (`editor.batch_apply` → `_user_preset_recipe`). Entry in [`SHIPPED.md`](SHIPPED.md).
