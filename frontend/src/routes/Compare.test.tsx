@@ -147,6 +147,32 @@ describe("noiseComparison", () => {
     const v = noiseComparison(withNoise(1, 0.05), withNoise(2, 0.04, "NGC_7000"));
     expect(v).toEqual({ winner: "B", loser: "A", pct: 20, sameTarget: false });
   });
+  it("flags a grown mosaic, where the whole-canvas σ is not like-for-like", () => {
+    // Measured through the real run_stack + /api/gallery on the bundled 2×2
+    // mosaic sample: one panel × 6 subs (σ 0.00074, 1.0 field-fulls) against
+    // the same 6 + one sub of a second panel (σ 0.00089, 1.82). The newer one
+    // is no worse anywhere — it just has a new, one-sub-deep panel.
+    const newer = withNoise(2, 0.00089);
+    newer.field_fulls = 1.8157;
+    const older = withNoise(1, 0.00074);
+    older.field_fulls = 1.0;
+    const v = noiseComparison(newer, older);
+    expect(v?.winner).toBe("B");
+    expect(v?.pct).toBe(17);
+    expect(v?.widerSky?.side).toBe("A");
+    expect(v?.widerSky?.ratio).toBeCloseTo(1.8157, 3);
+  });
+  it("still judges a same-sky restack, and a run without field_fulls", () => {
+    // A restack of the same sky moves field_fulls by under 1 % (3.63 → 3.62).
+    const a = withNoise(1, 0.04);
+    a.field_fulls = 3.63;
+    const b = withNoise(2, 0.05);
+    b.field_fulls = 3.62;
+    expect(noiseComparison(a, b)?.widerSky).toBeUndefined();
+    const c = withNoise(3, 0.04);
+    c.field_fulls = 2.0; // an older backend leaves the other side's absent
+    expect(noiseComparison(c, withNoise(4, 0.05))?.widerSky).toBeUndefined();
+  });
 });
 
 describe("panelComparison", () => {
@@ -309,6 +335,26 @@ describe("CompareView", () => {
     renderCompare("?a=M_42:3&b=M_42:7");
     await waitFor(() => expect(screen.getByText(/20% lower/)).toBeInTheDocument());
     expect(screen.getByText(/it's the cleaner stack/)).toBeInTheDocument();
+  });
+
+  it("never calls the smaller picture of a grown mosaic the cleaner stack", async () => {
+    // "Did it get better?" sends the owner here with a = newest, b = previous.
+    // The night a new panel opens, the whole canvas reads grainier — the old,
+    // half-size picture was being called "the cleaner stack".
+    const a = item(2, "M_42", "Orion");
+    const b = item(1, "M_42", "Orion");
+    a.noise_sigma = 0.00089;
+    a.field_fulls = 1.8157;
+    b.noise_sigma = 0.00074;
+    b.field_fulls = 1.0;
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    renderCompare("?a=M_42:2&b=M_42:1");
+    await waitFor(() => expect(screen.getByTestId("noise-verdict")).toBeInTheDocument());
+    const line = screen.getByTestId("noise-verdict").textContent ?? "";
+    expect(line).toContain("17% lower");
+    expect(line).not.toContain("cleaner stack");
+    expect(line).toContain("1.8× as much sky");
+    expect(screen.getAllByTestId("noise-verdict")).toHaveLength(1);
   });
 
   it("never calls one stack cleaner when the two are different objects", async () => {

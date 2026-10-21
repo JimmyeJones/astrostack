@@ -1,5 +1,32 @@
 # Shipped — the record
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-t3nyff`) — a grown mosaic's older picture is no longer "the cleaner stack"
+
+### v0.502.33 — `frontend/src/routes/Compare.tsx` `noiseComparison` (`widerSky`)
+
+**What.** `/compare`'s "**B** has **N% lower** background noise — it's the cleaner stack" compared each run's
+stored `noise_sigma`, which `stacker._compute_noise_sigma` measures over the **whole canvas**. On a growing mosaic
+the night a new panel opens (one sub deep) the whole picture reads grainier, so the older, *smaller* picture won —
+and the Target page's "Did it get better?" card sends the owner exactly there ("the page also says which is
+cleaner"). `seestack/covernudge.MIN_SKY_SHARE` (0.9) already refused this pair for the cover nudge, and
+`integrationTrend.ts` for the trend; `/compare` never got the gate. Now, when both runs carry `field_fulls` (already
+served on `GalleryItem`, off the same `derived_light.stacking_field_fulls`) and the smaller canvas covers < 0.9 of
+the larger, the measured figure stays and the verdict goes: *"B reads 17% lower background noise — but A covers
+about 1.8× as much sky, and a newly added panel reads grainy until it has caught up, so this isn't a like-for-like
+read of which stack came out better."* Same-sky restacks (field_fulls within 1 %) and runs without `field_fulls`
+(older backend) keep today's sentence.
+
+**Measured** through the real `run_stack` and `GET /api/gallery` on the bundled 2×2 mosaic sample (scratch
+`TestClient` probe, not landed): panel p0 × 6 → σ 0.00074, 1.0 field-fulls; the same 6 + one sub of p1 → σ 0.00089,
+1.82 field-fulls → "B … 17% lower … the cleaner stack" about the half-size picture at identical depth on the shared
+sky. A second pair (p0 × 4 vs p0 × 6 + one sub each of p1, p2; 2.65 field-fulls) read σ 0.00092 vs 0.00095 —
+"B is the cleaner stack" although B's sky is 1.5× deeper in A.
+
+**Tests.** `Compare.test.tsx`: `noiseComparison` flags the measured pair (`widerSky` A, ratio 1.82) and leaves a
+3.63-vs-3.62 restack and a one-sided `field_fulls` alone; a `CompareView` render of the measured pair keeps
+"17% lower", drops "cleaner stack", says "1.8× as much sky" and shows one verdict line. Both fail with the fix
+reverted. Frontend only; no API, config or schema change.
+
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-ykn52w`) — the matched-crop picture is the same sky on a grown mosaic
 
 ### v0.502.32 — `seestack/render/noisedelta._sky_mapper`, `build_noise_delta`, `choose_patch_centre(other_rect=)`

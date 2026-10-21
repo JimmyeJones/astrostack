@@ -3672,6 +3672,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.33 **`/compare` no longer calls the older, smaller picture of a grown mosaic "the cleaner stack" — one panel × 6 (σ 0.00074) against the same 6 + one sub of a new panel (σ 0.00089, 1.82× the sky) read "B has 17% lower background noise — it's the cleaner stack"; the figure stays, the verdict goes when one canvas covers < 0.9 of the other** (`Compare.noiseComparison` `widerSky`, the cover nudge's `MIN_SKY_SHARE`)
 - ✅ v0.502.32 **The "did it get better?" matched-crop picture carries its patch through both masters' WCS on a grown mosaic — a single panel → 2×2 showed two patches ~680 px of sky apart, the newer one downsampled 1.85× so its grain read 15.5 against 25.4 at equal depth; now the same sky, the same native box, no resize, and an unsolved different-shaped pair self-hides** (`noisedelta._sky_mapper`, `build_noise_delta`).
 - ✅ v0.502.31 **The reveal's "one raw frame" on an auto-edited mosaic is no longer cut by the canvas's Auto trim (298×320 of 480×320 on a missing-panel trim)** (`routers/stack._render_sub_through_recipe` → `_without_saved_crop`)
 - ✅ v0.502.30 **A saved look ("my default" / "My presets") no longer replays its crop on other pictures — the Gallery batch cut a 100×80 run to 70×62; the editor seeds and `batch_apply` now leave `geometry.crop` behind and say so** (`routers/editor._without_saved_crop`, `savedLookCrop.dropSavedCrop`)
@@ -4987,8 +4988,4 @@ _Newest first. One line each: what + commit/PR. Entries that had grown to paragr
 - **Fix red CI (pytest-qt import crash)** — CI had been failing on every merge:
 
 - **Integration time on Gallery cards** — stack runs now record their effective
-
-- **Reuse stack settings from a previous run** — new
-
-- **Warn on a mismatched calibration master pick** — the Stack form now shows an
 
