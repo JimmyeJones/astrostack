@@ -16,6 +16,11 @@
   router; the existing no-`FrameRow` guard then caught the site probe building 6 rows, so `detect_site_from_library`
   now reads two columns (guard kept as is). The pipeline sibling reproduced through `capture_night_range` (20–23 vs
   20–22 Jul) and is filed at the end of Bugs (S): no `request` in the job worker, so it wants a design choice.
+- **Pre-merge suite:** 8196 passed / 1 failed / 7 skipped — the failure is the recorded gallery-zip flake
+  `test_current_picture_fallback.py::test_a_healthy_library_never_opens_a_project_for_the_fallback`
+  (`assert ['NGC_7000'] == []`, the same assertion as the 2026-10-04 and 2026-10-13 entries), untouched by this
+  diff; passed 3/3 in isolation. **It recurs after the 2026-10-13 watcher-ordering fix**, so that fix did not close
+  the window — worth a Builder look.
 - **Lever for next time:** `resolve_site_lon` / `resolve_night_key` are the one bucketing; any `lon_deg=settings.site_lon`
   outside the planner (which needs lat *and* lon, and is right to) is a candidate. The only remaining ones are the
   filed sibling.
