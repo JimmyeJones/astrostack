@@ -130,11 +130,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   nightly-growth estimate was checked and **holds** (Builder 2026-10-18): it is `median(recent registered
   subs/night) × library_bytes / registered subs`, so a twin scales both by one factor and cancels — and each
   twin keeps its own caches, so bytes per *registered* sub is the right unit for disk growth. Nothing to fix.
-  **A sixth surface, and the cheap one (Scout 2026-10-20, sweep (4), reproduced):** "My deep-sky wall"
-  (`gallery._montage_tiles`, `shown_s += hero.total_exposure_s` → `montage_title`) sums the registry column per
-  tile, so twins on the wall print `3 targets, 2 min of light` over 60 s of distinct subs. Unlike the headline it
-  is a one-tap download that already resolves ≤16 tiles — unioning the placed tiles' accepted `source_path` →
-  `exposure_s` costs ≤16 project opens off the hot path, the v0.500.5 shape. Buildable without the gate above.
+  A sixth surface, "My deep-sky wall"'s title, is done (v0.502.20, `gallery._distinct_integration_s`).
   **Why it is a lead and not the cheap dedup v0.500.3 shipped.** Storage and incoming-lag only ever de-duplicate
   the *folders two or more targets claim*, paid for by opening just those projects — but `campaign_stats` and
   `summarize_library` open **no** project at all; they read registry columns. There is no `source_path` to
@@ -3595,6 +3591,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.20 **"My deep-sky wall"'s title counts a sub two targets registered (#878's mosaic twins) once — it printed twice the light ever collected when twins shared the wall** (`gallery._distinct_integration_s`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.19 **The Sky map's built-in viewer centres an un-trimmed picture on its own canvas, not the target's registry RA/Dec — a re-framed night below the 1 % panel share widened the union canvas and drew the tile ~0.3–0.45° off its stars, while the Aladin view placed it right** (`routers/sky.get_sky`, `wcs_io.cropped_center_radec_from_fits` with a whole-canvas crop).
 - ✅ v0.502.18 **The border trim on a big mosaic no longer keeps a band of no-coverage (black) pixels along its right/bottom edge — the strided map's rectangle now ends at the last sample it saw and is walked in against the full-res map's edge strips** (`editor._full_res_trim_rect`, `coverage_trim.sampled_rect_to_full_res` / `shrink_rect_to_covered`).
 - ✅ v0.502.17 **Storage's *Prune stacks* confirm says the pinned cover is kept instead of promising to delete "the rest"** (`TargetStorage.cover_pinned`, `Storage.tsx` `confirmPrune`).

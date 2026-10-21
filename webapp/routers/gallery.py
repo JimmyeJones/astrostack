@@ -990,7 +990,8 @@ def _montage_tiles(request: Request, limit: int) -> tuple[list, float]:
         summary = summarize_library(
             targets, preview_exists=_file_answers)
         tiles: list[MontageTile] = []
-        shown_s = 0.0
+        placed: list[tuple[Any, float]] = []
+        by_safe = {t.safe_name: t for t in raw}
         for hero in summary.heroes:
             if len(tiles) >= limit:
                 break
@@ -1005,10 +1006,50 @@ def _montage_tiles(request: Request, limit: int) -> tuple[list, float]:
             tiles.append(MontageTile(
                 image=loaded,
                 caption=montage_caption(hero.name, hero.total_exposure_s)))
-            shown_s += float(hero.total_exposure_s or 0.0)
+            placed.append((by_safe[hero.safe], float(hero.total_exposure_s or 0.0)))
+        shown_s = _distinct_integration_s(lib, placed)
     finally:
         lib.close()
     return tiles, shown_s
+
+
+def _distinct_integration_s(lib, placed: list[tuple[Any, float]]) -> float:  # noqa: ANN001
+    """The integration behind the pictures on the wall, each sub counted once.
+
+    Each tile's own caption is its target's registry total and is true of that
+    target. The *title* sums them, and a sub two targets registered (#878's
+    mosaic twins — ~76 % of the owner's frames) is in both totals, so two twins
+    on the wall printed twice the light that was ever collected. So the title
+    unions the placed targets' accepted ``source_path`` → ``exposure_s`` and
+    sums that — at most :data:`MONTAGE_MAX_TILES` project opens of three-column
+    reads, paid only on this deliberate one-tap download, never on a page render.
+
+    Accepted subs with a positive exposure, exactly the rows
+    ``Library._refresh_target_stats_locked`` sums, so a library with no twins
+    gets the same number as before. A target whose project won't open adds its
+    registry total instead — the old answer for that tile, rather than none.
+    """
+    from seestack.io.project import Project
+
+    exposure_by_sub: dict[str, float] = {}
+    fallback_s = 0.0
+    for entry, registry_s in placed:
+        proj = None
+        try:
+            proj = Project.open(lib.target_dir(entry))
+            mine: dict[str, float] = {}
+            for source, exposure_s in proj.iter_frame_columns(
+                    "source_path", "exposure_s", accepted_only=True):
+                if exposure_s is not None and exposure_s > 0:
+                    mine[source] = float(exposure_s)
+        except Exception:  # noqa: BLE001 — a broken project must not sink the wall
+            fallback_s += registry_s
+            continue
+        finally:
+            if proj is not None:
+                proj.close()
+        exposure_by_sub.update(mine)
+    return sum(exposure_by_sub.values()) + fallback_s
 
 
 @router.get("/api/gallery/montage.jpg")
