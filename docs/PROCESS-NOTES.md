@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-10-21 (Scout, branch `claude/zen-curie-2yiu9i`) — QA rotation sweep (4), the `sky` router's tile placement on mosaic-shaped canvases: one bug, Scout-fixed (v0.502.19). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8158 passed / 7 skipped + the one pinned-old-centre test the fix moved (xdist `-n 4`, BLAS capped,
+  15m48s), re-run on the merged head before merge. **Inbox:** the same four (#878, #880, #903, #1015), none updated
+  since 2026-10-12, all owner-gated — nothing owed. No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %,
+  nothing overflowing, no console errors).
+- **Sweep (4).** `sky` was the least-read router for answers (2 mentions). Asked of `get_sky`: is the tile's centre
+  the centre of the canvas it is sized from? Only for a trimmed picture. Ran the real `compute_mosaic_canvas` and the
+  registry's `_main_object_panels`/`_panel_extent_mid` on S30-sized synthetic footprints: balanced 2×2, a Dec-65°
+  2×2 and an L-shaped 3-panel agree within 0.015°; **a sub-threshold re-framed night (below the 1 % / 5-sub panel
+  gate, inside the 3° outlier floor) widens the canvas but not the registry centre — 0.30° off on a single field,
+  0.42° on a 2×2** — so the built-in viewer drew every un-trimmed (linear) picture off its stars while Aladin's `wcs`
+  placed it right. Fixed by always reading the centre off the canvas WCS (whole-canvas crop). Not read this run:
+  `/api/sky/universe`, `my-map.png`, `/api/sky/coverage`. Still never read for answers: `seestar`, `glossary`,
+  `auth`, `frames`, `settings`, `upload`. Lever: **a fix that moves a shared number (v0.501.10's registry centre) is
+  a reason to re-ask every surface that borrowed it for a different job** — the registry is "where is the object", a
+  tile needs "where is this picture".
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-pfyczx`) — QA rotation sweep (3), new angle — the startup scratch *deleter* (`astap.sweep_stale_solve_scratch`, v0.502.11) against links into `incoming/`: CLEAN. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8145 passed / 7 skipped on `01fbd7c7`, re-run on the merge with v0.502.18: 8158 passed / 7 skipped (xdist `-n 4`, BLAS capped, 14m55s). **Inbox:** the same four (#878,

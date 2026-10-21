@@ -413,19 +413,21 @@ def test_sky_places_a_cropped_tile_on_the_grid_it_actually_has(client, solved_li
 
 def test_sky_tile_is_unchanged_for_an_ordinary_run(client, solved_library):
     """No recorded crop → the tile is sized, centred and placed off the full
-    canvas exactly as it always was."""
+    canvas. The centre is the canvas WCS's own (150, 20), the same place the
+    tile's ``wcs`` puts it — not the target's registry RA/Dec (83.6, -5.4), which
+    a re-framed night can leave off the union canvas's middle (v0.502.19)."""
     safe = client.get("/api/targets").json()[0]["safe_name"]
     run_id, _fits_path, _preview = _make_trimmable_mosaic_run(solved_library, safe)
 
-    target = next(t for t in client.get("/api/targets").json()
-                  if t["safe_name"] == safe)
     img = next(i for i in client.get("/api/sky").json()["images"]
                if i["run_id"] == run_id)
     assert img["width_deg"] == pytest.approx(_W * 0.001, rel=1e-6)
     assert img["height_deg"] == pytest.approx(_H * 0.001, rel=1e-6)
-    assert img["ra_deg"] == pytest.approx(target["ra_deg"], abs=1e-9)
-    assert img["dec_deg"] == pytest.approx(target["dec_deg"], abs=1e-9)
+    assert img["ra_deg"] == pytest.approx(150.0, abs=1e-6)
+    assert img["dec_deg"] == pytest.approx(20.0, abs=1e-6)
     assert img["wcs"] is not None
+    assert img["wcs"]["CRVAL1"] == pytest.approx(img["ra_deg"], abs=1e-6)
+    assert img["wcs"]["CRVAL2"] == pytest.approx(img["dec_deg"], abs=1e-6)
 
 
 def test_sky_declines_to_place_unreconcilable_geometry(client, solved_library):

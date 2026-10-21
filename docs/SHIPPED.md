@@ -2,7 +2,7 @@
 
 ## 2026-10-21 (Builder, branch `agent/wall-twin-dedupe`) — the deep-sky wall's title counts each sub once
 
-### v0.502.19 — `gallery._distinct_integration_s` (`_montage_tiles`)
+### v0.502.20 — `gallery._distinct_integration_s` (`_montage_tiles`)
 
 **What.** The cheap sixth surface of the #878 twin-overcount lead: "My deep-sky wall"'s title strip summed each
 placed tile's registry `total_exposure_s`, so two targets registered over the same subs printed twice the light
@@ -23,6 +23,30 @@ gated. No config, schema, on-disk, default or API-shape change.
   `exposure_s` costs ≤16 project opens off the hot path, the v0.500.5 shape. Buildable without the gate above.
 
 </details>
+
+## 2026-10-21 (Scout, branch `claude/zen-curie-2yiu9i`) — QA rotation sweep (4): the Sky map's tile centre
+
+### v0.502.19 — `routers/sky.get_sky` centres an un-trimmed tile on its canvas WCS
+
+**What.** The built-in 3D Sky viewer places a picture by `ra_deg`/`dec_deg` and sizes it from the run's stored
+canvas WCS (`canvas_extent_from_fits`); only a *trimmed* picture took its centre from that WCS
+(`cropped_center_radec_from_fits`). An un-trimmed one — every linear stack, i.e. the owner's walk-away result with
+`auto_edit_on_autostack` off — was centred on the target's registry RA/Dec. Since v0.501.10 that is the middle of
+the target's *panels* (`library._main_object_panels`), which deliberately ignores a pointing holding fewer than
+`_CENTRE_PANEL_MIN_SHARE` (1 %, ~360 subs on his 35,894-sub target) or 5 subs, while the stack's union canvas
+(`mosaic.compute_mosaic_canvas`) takes every accepted sub the outlier passes keep (`OUTLIER_FLOOR_DEG` is 3°). Measured
+through the real `compute_mosaic_canvas` + the registry split on S30-sized synthetic footprints: 2,000 subs + a
+15-sub night 0.6° off → canvas centre **0.30°** from the registry centre; a 4×500 2×2 mosaic + an 18-sub night 1.3°
+off → **0.42°**; balanced 2×2 and an L-shaped 3-panel at Dec 65° agree within 0.015°. So the tile was drawn at the
+canvas's size ~a sixth of its own width off the stars under it, while the Aladin view (`wcs`, from the same FITS)
+placed the same picture correctly — the two viewers disagreed. **Fix:** the centre is always read off the canvas WCS,
+passing a whole-canvas `PreviewCrop(0, 0, 1, 1)` when there is no trim (also for an `UNKNOWN` crop, whose tile already
+falls back to the canvas footprint); the registry position stays the fallback with no usable WCS. **Tests:**
+`tests/webapp/test_sky.py::test_an_uncropped_tile_is_centred_on_its_own_canvas_not_the_registry_centre` (fails
+before: `83.6 == 84.0`); `test_preview_crop_geometry.py::test_sky_tile_is_unchanged_for_an_ordinary_run` pinned the
+old registry centre on a fixture whose canvas sits at (150, 20) — it now asserts the canvas centre and that it agrees
+with the tile's own `wcs` CRVAL (no weaker). **Upgrade-safe (§9):** no config, schema, layout, default or response
+shape change; one more FITS header read per target, already opened twice on the same request.
 
 ## 2026-10-21 (Builder, branch `claude/festive-knuth-mi4p1e`) — the strided border trim is true of the full-res map
 
