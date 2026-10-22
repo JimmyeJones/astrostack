@@ -1,5 +1,49 @@
 # Shipped — the record
 
+## 2026-10-22 (Builder, branch `claude/nice-carson-8a9f4w`) — the mixed-pointing guard keeps a gapped S30 strip one target
+
+### v0.502.35 — `seestack/stack/pointings.link_dist_for_field` (`LINK_FOOTPRINTS`), `webapp/pipeline._detect_mixed_pointings`, `frontend/…/mixedPointings.linkDistForField`
+
+**What.** The guard single-linkage-clustered the accepted, solved pointings at a fixed `LINK_DIST_DEG = 3.0`, sized for
+the S50's 1.27° field. On the owner's S30 (2.13°) a 3-panel strip whose middle panel had no accepted, solved sub had
+its ends 3.62° apart, so with `mixed_pointing_guard` on, Process-target / auto-stack refused with "This batch looks like
+2 different targets" and the Target/Stack pages offered to reject a real panel.
+
+**Fix.** The link is `max(3.0, 2 × field long side)` — the same 2 long sides v0.502.34 gave the stacker's outlier floor.
+Server: the long side is `Project.solved_frame_geometry()`'s representative (median-scale, bad-solves excluded) scale ×
+the longer dimension. Frontend: `FrameOut` now carries `pixscale_arcsec` (additive, nullable) and `detectMixedPointings`
+takes the median of the frames' own scale × size; the spatial grid's `CELL` derives from the link (a larger cube only
+shrinks the key range). No scale (an older backend, nothing solved) keeps 3°. S50: unchanged.
+
+**Tests.** `tests/test_pointings.py` (the link rule; gapped 30/0/14 S30 strip splits at 3°, is one target at its own
+link; two targets 10° apart still split); `tests/webapp/test_pipeline.py` (`_mixed_pointing_check` on a real target:
+S30 gapped strip → no verdict, **failed before**; the same pointings on an S50 field still split 30/14);
+`tests/webapp/test_frames_paging.py` (the row carries its scale); `mixedPointings.test.ts` (S30 strip null — **failed
+before**; S50 / no-scale still split; the grid linkage matches an all-pairs oracle at the S30 link over 150 random skies).
+
+**Not changed:** `io/library._panel_extent_mid` links *panel centres* into objects at the fixed 3° to place a target's
+centre; on a gapped S30 strip that keeps the centre on the majority end (a centre, not a refusal — unverified whether it
+moves the life-list match; noted for a Scout).
+
+**The original Bugs entry, verbatim:**
+
+- **🟠 (Scout 2026-10-21, QA rotation sweep (2); the stacker half shipped v0.502.34) — the mixed-pointing guard
+  calls a gapped S30 strip two targets** (`seestack/stack/pointings.LINK_DIST_DEG = 3.0`, and the frontend's
+  `mixedPointings.ts` copy, sized for the S50's 1.3° field): when an S30 strip's middle panel has no accepted, solved
+  sub (clouds / failed solves) the ends are 3.4–3.8° apart → `detect_mixed_pointings` returns 2 pointings, so with
+  `mixed_pointing_guard` on (the owner wants it on, AGENTS.md §1) Process-target and auto-stack **refuse** with "This
+  batch looks like 2 different targets" and offer the one-click "Reject the odd-target frames" — which would reject a
+  real panel. S50 control at the same layout: no verdict. The stacker itself now keeps such a strip whole (v0.502.34,
+  `mosaic.OUTLIER_FLOOR_FOOTPRINTS` / `_chained_to_main_group`), so only the guard is left.
+  *(Pillar: trust, PRIORITY 2; size **S–M**; severity moderate when it fires; confidence: **reproduced** by the Scout
+  through `detect_mixed_pointings` — full original entry in `SHIPPED.md` under v0.502.34.)*
+  **Fix shape:** make the link `max(3.0, ~2 × median footprint long side)` — the server side can read it from the
+  subs' `wcs_json` + `width_px` the way `mosaic._median_footprint_long_side_deg` does (`pipeline._detect_mixed_pointings`);
+  the frontend's spatial grid derives `CELL` from the link, so pass the link in rather than hard-coding it (its
+  cell-key packing bound assumes the 3° cell — re-derive it for a larger one; a larger link only shrinks the index
+  range). Keep every `test_pointings.py` / `mixedPointings.test.ts` verdict; the gapped 30/0/14 S30 strip gets no
+  verdict; two targets 10° apart still do. Ungated.
+
 ## 2026-10-22 (Builder, branch `claude/nice-carson-7gckm1`) — an uneven S30 strip keeps its far panel
 
 ### v0.502.34 — `seestack/stack/mosaic._footprint_outlier_indices` (`OUTLIER_FLOOR_FOOTPRINTS`, `_chained_to_main_group`)

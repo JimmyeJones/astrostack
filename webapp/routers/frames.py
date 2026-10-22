@@ -127,6 +127,7 @@ def _to_out(f: FrameRow, lon_deg: float | None = None) -> FrameOut:
         gain=f.gain,
         width_px=f.width_px,
         height_px=f.height_px,
+        pixscale_arcsec=f.pixscale_arcsec,
         bayer_pattern=f.bayer_pattern,
         solved=f.wcs_json is not None,
         ra_center_deg=f.ra_center_deg,

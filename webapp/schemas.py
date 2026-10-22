@@ -711,6 +711,10 @@ class FrameOut(BaseModel):
     gain: float | None = None
     width_px: int | None = None
     height_px: int | None = None
+    # The plate solve's measured scale (″/px), so a client can tell the field a
+    # sub covers (scale × size) without assuming a scope model — the
+    # mixed-pointing guard scales its link from it. Additive/nullable.
+    pixscale_arcsec: float | None = None
     bayer_pattern: str | None = None
     solved: bool = False
     ra_center_deg: float | None = None

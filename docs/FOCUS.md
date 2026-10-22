@@ -16,10 +16,7 @@ reproduced and **ungated** — a Builder can start any of them without the owner
 2. 🟡 **Size S — the share/print nameplate and the share caption date a run UTC noon-to-noon when Settings has no
    location** (`pipeline._nameplate_fields`, `capture_night_range`); resolve the longitude the way
    `resolve_site_lon` does (v0.502.28 fixed the sky-brightness card the same way).
-3. 🟠 **Size S–M — the mixed-pointing guard calls a gapped S30 strip two targets** (`pointings.LINK_DIST_DEG` and
-   `mixedPointings.ts`, 3° sized for a 1.3° field); the stacker half shipped v0.502.34 — scale the link from the
-   solved footprints the same way.
-4. 🟡 **Size S — a Moon & Sun capture cut short (still copying) stacks silently from the frames ffmpeg could read and
+3. 🟡 **Size S — a Moon & Sun capture cut short (still copying) stacks silently from the frames ffmpeg could read and
    stays "current" after the file completes** (`lucky.grade_video` vs `probe_video`'s exact `n_frames`;
    `VideoStackMeta` has no source stamp); warn when the count falls short, stamp the result like the grade.
 
@@ -37,6 +34,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-22 (Builder, branch `claude/nice-carson-8a9f4w`) — **v0.502.35: the mixed-pointing guard keeps a gapped S30 strip one target — the link scales to 2 solved-field long sides** (`pointings.link_dist_for_field`, `mixedPointings.linkDistForField`, `FrameOut.pixscale_arcsec`). **START HERE NEXT RUN:** Builder: item 3 (Moon & Sun cut short), 2 or 1.*
 *2026-10-22 (Builder, branch `claude/nice-carson-7gckm1`) — **v0.502.34: an uneven S30 strip keeps its far panel —
 the plate-solve outlier floor scales with the solved footprint and a frame chained to the group is never an outlier**
 (`mosaic._footprint_outlier_indices`, `OUTLIER_FLOOR_FOOTPRINTS`, `_chained_to_main_group`). **START HERE NEXT RUN:**

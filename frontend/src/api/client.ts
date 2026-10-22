@@ -1472,6 +1472,9 @@ export interface Frame {
   gain: number | null;
   width_px: number | null;
   height_px: number | null;
+  /** The plate solve's measured scale (″/px); optional — an older backend
+   *  omits it. */
+  pixscale_arcsec?: number | null;
   bayer_pattern: string | null;
   solved: boolean;
   ra_center_deg: number | null;
