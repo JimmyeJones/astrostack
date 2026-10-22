@@ -396,7 +396,12 @@ def iter_frames(
     pattern = CFA_PATTERN  # ditto — the sensor's phase cannot change mid-stream
 
     stride = max(1, int(stride))
-    cmd = [exe, "-v", "error", "-nostdin", "-i", str(path)]
+    # ``-noautorotate``: a clip carrying a rotation tag (a phone recording, or one
+    # re-saved through a phone's gallery) would otherwise come off the wire
+    # rotated, ``height × width``, while the probe still says ``width × height``
+    # — the same byte count, so every frame below reshaped into streaks with no
+    # error. The coded orientation is the one the probe and the CFA phase assume.
+    cmd = [exe, "-v", "error", "-nostdin", "-noautorotate", "-i", str(path)]
     if stride > 1:
         cmd += ["-vf", f"select=not(mod(n\\,{stride}))", "-vsync", "0"]
     cmd += ["-f", "rawvideo", "-pix_fmt", "rgb24", "-"]

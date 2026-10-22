@@ -5,7 +5,7 @@
 > belongs in `docs/PROCESS-NOTES.md`, never here. The 2,559-line page this replaced is kept verbatim in
 > [`archive/FOCUS-to-2026-10-21.md`](archive/FOCUS-to-2026-10-21.md) — nothing was deleted.
 
-## Front of the queue (2026-10-21)
+## Front of the queue (2026-10-22)
 
 Every item below is an open entry at the end of "Bugs (fix these first)" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md),
 reproduced and **ungated** — a Builder can start any of them without the owner. Take them in this order:
@@ -20,17 +20,18 @@ reproduced and **ungated** — a Builder can start any of them without the owner
 **Gated, do not start:** the un-located-panel entry (top of Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
 re-litigate a stand-down that carries numbers. **Issue inbox:** #878, #880, #903, #1015 — all previously acted-on
-and owner-gated, none updated since 2026-10-12.
+and owner-gated, none updated since 2026-10-12 (re-checked 2026-10-22).
 
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (2), 2026-10-21
-→ next sweep is (3).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (3), 2026-10-22
+→ next sweep is (4).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-10-22 (Scout, branch `claude/beautiful-newton-jbziyg`) — **QA rotation sweep (3), new angle: ffmpeg auto-rotates a rotation-tagged clip to h×w while the probe says w×h, so `iter_frames` reshaped every frame into streaks with no error — Scout-fixed v0.502.37 (`-noautorotate`).** Inbox: the same four, all owner-gated. Suite 8241 passed / 7 skipped. **START HERE NEXT RUN:** Builder: item 2 or 1. **Rotation: (3) done → next sweep is (4).***
 *2026-10-22 (Builder, branch `claude/nice-carson-ywmwk2`) — **v0.502.36: a Moon & Sun capture stacked while still copying in warns ("Only the first N of … frames could be read") and its still is marked changed once the file completes** (`lucky.cut_short_warning`, `VideoStackMeta.source_size`, `VideoResultOut.source_changed`). **START HERE NEXT RUN:** Builder: item 2 or 1.*
 *2026-10-22 (Builder, branch `claude/nice-carson-8a9f4w`) — **v0.502.35: the mixed-pointing guard keeps a gapped S30 strip one target — the link scales to 2 solved-field long sides** (`pointings.link_dist_for_field`, `mixedPointings.linkDistForField`, `FrameOut.pixscale_arcsec`). **START HERE NEXT RUN:** Builder: item 3 (Moon & Sun cut short), 2 or 1.*
 *2026-10-22 (Builder, branch `claude/nice-carson-7gckm1`) — **v0.502.34: an uneven S30 strip keeps its far panel —
@@ -61,11 +62,6 @@ cut short — the owner-shaped pal8 `…-Solar-RAW.avi` at 40 % of its bytes sti
 `done` from 80 with no warning, and the result stays current after the file completes; filed reproduced (item 6).**
 Inbox: the same four, all owner-gated. Suite 8205 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %).
 **START HERE NEXT RUN:** Builder: item 4 (editor) or item 5. **Rotation: (3) done → next sweep is (4).***
-*2026-10-21 (Scout, branch `claude/zen-curie-uixyf4`) — **QA rotation sweep (2), new angle: the two fixed 3° distances
-sized for a 1.3° field, on the S30's 2.13° field — `run_stack` rejected a whole real panel of an uneven 3×1 strip as
-"bad plate-solve" (38 of 52 used, 14 flagged rejected; S50 control clean); filed reproduced (item 5).** Inbox: the
-same four, all owner-gated. Suite 8197 passed / 7 skipped; dogfood `--mosaic` CLEAN. **START HERE NEXT RUN:** Builder: item 4 (editor) or item 5. **Rotation: (2) done → next
-sweep is (3).***
 
 ## Standing frontier
 

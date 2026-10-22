@@ -1,5 +1,23 @@
 # Shipped — the record
 
+## 2026-10-22 (Scout, branch `claude/beautiful-newton-jbziyg`) — a rotation-tagged clip no longer stacks into streaks
+
+### v0.502.37 — `seestack/video/ffmpeg.iter_frames` passes `-noautorotate`
+
+**What.** ffmpeg auto-rotates on decode by default. A clip carrying a 90° display-matrix tag (a phone recording, or a
+capture re-saved through a phone's gallery) came off the pipe `height × width` while `probe_video` still reported the
+coded `width × height`; the byte count is identical, so `iter_frames` reshaped every frame into horizontal streaks with
+no error. Through `stack_video` a 160×120 lunar clip tagged 90° gave a striped still and the misleading warning
+"8 of the sharpest frames moved too far to line up". A 180° tag keeps the shape but flips the pixels, which would put a
+raw mosaic's CFA phase off by one site. The Seestar's own raw AVIs carry no tag; whether any clip in the owner's
+`_video/` folders does is unknown, so severity is low.
+
+**Fix.** `-noautorotate` before `-i`: the decode stays in the coded orientation that the probe, the reshape and the
+CFA phase already assume. A clip with no tag decodes byte-for-byte as before.
+
+**Tests.** `tests/test_video_rotation_metadata.py` — a `lunar_video` re-muxed with a 90° tag (no re-encode) probes
+96×64 and decodes the same pixels as the untagged clip; **failed before** (streaked frames, `array_equal` false).
+
 ## 2026-10-22 (Builder, branch `claude/nice-carson-ywmwk2`) — a Moon & Sun capture cut short says so
 
 ### v0.502.36 — `seestack/video/lucky.cut_short_warning` (in `grade_video`), `webapp/video.VideoStackMeta.source_size`/`source_mtime` + `result_matches_source`, `routers/video.VideoResultOut.source_changed`, `MoonSun.tsx`

@@ -1,5 +1,24 @@
 # Process notes & QA sweep records
 
+## 2026-10-22 (Scout, branch `claude/beautiful-newton-jbziyg`) — QA rotation sweep (3), new angle — ffmpeg's *default auto-rotate* against `iter_frames`' probe-sized reshape: one bug, Scout-fixed (v0.502.37). Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8241 passed / 7 skipped on `370a7198` (xdist `-n 4`, BLAS capped, 17m30s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (nothing overflowing, no console errors; the Target page's five notes agree on the
+  2×2's thin top-right panel).
+- **Sweep (3).** Every earlier (3) sweep varied what the binaries do, may write, or are fed (cut short, per-night
+  layout, read-only share); none asked what ffmpeg does *by default* to a well-formed clip. It auto-rotates: a stream
+  with a display-matrix tag decodes rotated. Probe (session scratchpad, not landed): a `testsrc` 320×180 mp4 re-muxed
+  with `-display_rotation 90` (no re-encode) still probes 320×180, decodes 172,800 bytes a frame (180×320), and
+  `iter_frames` reshapes it into horizontal streaks — mean |Δ| 126 against the untagged frame. Through `stack_video`
+  on a 160×120 `lunar_video`: a striped still plus "8 of the sharpest frames moved too far to line up". Fixed with
+  `-noautorotate` (coded orientation, the one the probe and CFA phase assume; an untagged clip is byte-identical); the
+  new test fails before. Severity low: the Seestar's raw AVIs carry no tag and whether any of the owner's clips do is
+  unknown. Side observation, not filed: `upload._stream_to_disk`'s `os.replace` checks `dest.exists()` only before
+  the stream, so a same-named file arriving in `incoming/` during a long upload is replaced — earlier audits judged
+  this the sanctioned create-new; it needs two writers with one name, which the Seestar's timestamped names make
+  implausible. **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-10-21 (Scout, branch `claude/zen-curie-t3nyff`) — QA rotation sweep (2), new angle — the whole-canvas σ behind `/compare`'s "it's the cleaner stack" on a grown mosaic: one bug, Scout-fixed (v0.502.33). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8214 passed / 7 skipped on `9048925e` (xdist `-n 4`, BLAS capped, 14m24s). **Inbox:** the same four (#878,
