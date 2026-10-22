@@ -57,6 +57,26 @@ OUTLIER_FLOOR_DEG = 3.0   # never flag a frame closer than this to the group cen
 OUTLIER_SIGMA = 5.0       # MAD-sigmas beyond the median separation to flag
 OUTLIER_MIN_FRAMES = 5    # need at least this many frames for robust statistics
 
+# The floor above is a fixed degree count sized for a ~1.3° field (the S50), where
+# it is ~2.4 field-lengths. The S30's field is 2.13° along its long side, so a panel
+# two steps along a strip from the median sits 3.4–3.8° away and a fixed 3° floor
+# threw a whole real panel away as "bad plate-solve" — and flagged every one of its
+# subs rejected, which ``reconcile_bad_solve_frames`` deliberately never retries.
+# So the floor also scales with the frames' own solved footprint: never flag a
+# frame closer than this many median footprint long sides. S50: 2 × 1.27° = 2.5°,
+# under the fixed 3°, so nothing changes there; S30: 4.3°, past the 3.8° far end
+# of a 3-panel strip even when its middle panel has no solved sub to chain through
+# (the test below). Kept at 2, not more: a false solve inside the floor stays on
+# the canvas, so every degree of floor is a degree of possible empty canvas.
+OUTLIER_FLOOR_FOOTPRINTS = 2.0
+# …and no distance alone can cover a strip four or more panels long with its
+# median at one end. What tells a mosaic panel from a bad solve is that a panel is
+# *chained* to the rest through overlapping neighbours, while a false solve lands
+# alone, far from everything. Frames single-linkage-chained to the largest group
+# at a link of this many footprint long sides are never flagged: adjacent panels
+# overlap, so their centres are less than one long side apart along either axis.
+OUTLIER_CHAIN_LINK_FOOTPRINTS = 1.0
+
 # The *other* axis of the same question, which the test above is blind to by
 # construction. ``_footprint_outlier_indices`` asks **where** a frame landed;
 # nothing asked **at what scale**, and a false solve that happens to land on the
@@ -143,6 +163,53 @@ def _circ_mean_ra_deg(ra: np.ndarray) -> float:
     return float(np.degrees(np.arctan2(np.sin(r).mean(), np.cos(r).mean())) % 360.0)
 
 
+def _median_footprint_long_side_deg(
+    foot: list[tuple[object, np.ndarray, np.ndarray]],
+) -> float:
+    """Median over frames of each footprint's longer side, in degrees (0 if none).
+
+    Corners come in image order (TL, TR, BR, BL), so sides 0→1 and 1→2 are the
+    frame's width and height on the sky.
+    """
+    rows = [(r[:3], d[:3]) for _, r, d in foot if len(r) >= 3]
+    if not rows:
+        return 0.0
+    # Vectorised over every sub (one call per target, thousands of rows).
+    ra = np.radians(np.array([r for r, _ in rows], dtype=np.float64))
+    dec = np.radians(np.array([d for _, d in rows], dtype=np.float64))
+
+    def _sep(i: int, j: int) -> np.ndarray:
+        h = (np.sin((dec[:, j] - dec[:, i]) / 2) ** 2
+             + np.cos(dec[:, i]) * np.cos(dec[:, j])
+             * np.sin((ra[:, j] - ra[:, i]) / 2) ** 2)
+        return np.degrees(2 * np.arcsin(np.sqrt(np.clip(h, 0.0, 1.0))))
+
+    sides = np.maximum(_sep(0, 1), _sep(1, 2))
+    sides = sides[np.isfinite(sides)]
+    return float(np.median(sides)) if sides.size else 0.0
+
+
+def _chained_to_main_group(
+    centres: list[tuple[float, float]], link_deg: float,
+) -> set[int]:
+    """Indices single-linkage-chained (at ``link_deg``) to the largest group.
+
+    Clustered over the distinct pointings (``pointing_groups``' fold), so a
+    target with thousands of subs on a handful of panels costs milliseconds.
+    """
+    from seestack.stack.pointings import _cluster_distinct
+
+    labels = _cluster_distinct(centres, link_deg)  # type: ignore[arg-type]
+    counts: dict[int, int] = {}
+    for label in labels:
+        if label >= 0:
+            counts[label] = counts.get(label, 0) + 1
+    if not counts:
+        return set()
+    main = max(counts, key=counts.get)  # type: ignore[arg-type]
+    return {i for i, label in enumerate(labels) if label == main}
+
+
 def _footprint_outlier_indices(
     foot: list[tuple[object, np.ndarray, np.ndarray]],
 ) -> tuple[set[int], list[float]]:
@@ -150,7 +217,9 @@ def _footprint_outlier_indices(
 
     Robust (median + MAD) so a tight cluster of good frames with a handful of
     badly-solved ones flags only the bad ones, while a genuinely spread-out
-    mosaic (large, consistent MAD) keeps all its panels. Returns the outlier
+    mosaic (large, consistent MAD) keeps all its panels — and so does an uneven
+    one, through the footprint-scaled floor and the chain test (see
+    ``OUTLIER_FLOOR_FOOTPRINTS``). Returns the outlier
     index set and each frame's separation from the group centre (for logging).
     """
     n = len(foot)
@@ -170,8 +239,15 @@ def _footprint_outlier_indices(
     arr = np.array(seps)
     med_sep = float(np.median(arr))
     mad = float(np.median(np.abs(arr - med_sep)))
-    threshold = max(OUTLIER_FLOOR_DEG, med_sep + OUTLIER_SIGMA * 1.4826 * mad)
+    side = _median_footprint_long_side_deg(foot)
+    floor = max(OUTLIER_FLOOR_DEG, OUTLIER_FLOOR_FOOTPRINTS * side)
+    threshold = max(floor, med_sep + OUTLIER_SIGMA * 1.4826 * mad)
     outliers = {i for i, s in enumerate(seps) if s > threshold}
+    if outliers and side > 0:
+        outliers -= _chained_to_main_group(
+            [(float(cr[i]) % 360.0, float(centers_dec[i])) for i in range(n)],
+            OUTLIER_CHAIN_LINK_FOOTPRINTS * side,
+        )
     # Never drop more than half the frames this way — if that many are "outliers"
     # the data is something else (a real wide mosaic); leave it to the size caps.
     if len(outliers) > n // 2:

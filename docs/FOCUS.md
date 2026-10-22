@@ -16,10 +16,9 @@ reproduced and **ungated** — a Builder can start any of them without the owner
 2. 🟡 **Size S — the share/print nameplate and the share caption date a run UTC noon-to-noon when Settings has no
    location** (`pipeline._nameplate_fields`, `capture_night_range`); resolve the longitude the way
    `resolve_site_lon` does (v0.502.28 fixed the sky-brightness card the same way).
-3. 🟠 **Size M (stack hot path) — on an S30 strip ≥ 3 panels long with one end holding the median, the stacker
-   rejects a whole real panel as "bad plate-solve"; the mixed-pointing guard calls a gapped strip two targets**
-   (`mosaic._footprint_outlier_indices` `OUTLIER_FLOOR_DEG`, `pointings.LINK_DIST_DEG` — both 3°, sized for a 1.3° field);
-   scale both from the solved footprints. Measured change, not a blind flip — read the entry's test list first.
+3. 🟠 **Size S–M — the mixed-pointing guard calls a gapped S30 strip two targets** (`pointings.LINK_DIST_DEG` and
+   `mixedPointings.ts`, 3° sized for a 1.3° field); the stacker half shipped v0.502.34 — scale the link from the
+   solved footprints the same way.
 4. 🟡 **Size S — a Moon & Sun capture cut short (still copying) stacks silently from the frames ffmpeg could read and
    stays "current" after the file completes** (`lucky.grade_video` vs `probe_video`'s exact `n_frames`;
    `VideoStackMeta` has no source stamp); warn when the count falls short, stamp the result like the grade.
@@ -38,6 +37,10 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-22 (Builder, branch `claude/nice-carson-7gckm1`) — **v0.502.34: an uneven S30 strip keeps its far panel —
+the plate-solve outlier floor scales with the solved footprint and a frame chained to the group is never an outlier**
+(`mosaic._footprint_outlier_indices`, `OUTLIER_FLOOR_FOOTPRINTS`, `_chained_to_main_group`). **START HERE NEXT RUN:**
+Builder: item 3 (the guard half), 4, 2 or 1.*
 *2026-10-21 (Scout, branch `claude/zen-curie-t3nyff`) — **QA rotation sweep (2), new angle: `/compare`'s "it's the
 cleaner stack" read the whole-canvas σ, so on a grown mosaic the older, half-size picture won ("B … 17% lower" at
 identical depth on the shared sky) — Scout-fixed v0.502.33 (`Compare.noiseComparison` `widerSky`, the cover nudge's
@@ -75,15 +78,6 @@ Builder: item 4 (editor, priority 1).*
 open: a saved look's `geometry.crop` is replayed by canvas fraction on other pictures — the batch cut a 100×80 run
 to 70×62; filed reproduced (item 4).** Inbox: the same four, all owner-gated. **START HERE NEXT RUN:** Builder:
 item 4 (editor, priority 1) or item 1. **Rotation: (1) done → next sweep is (2).***
-*2026-10-21 (Scout, branch `claude/zen-curie-d8yo4f`) — **QA rotation sweep (4): the sky-brightness card bucketed
-nights UTC noon-to-noon when Settings has no location, so a far-from-Greenwich session's dawn hour became a "much
-brighter" night of its own — Scout-fixed v0.502.28 (`frames.sky_brightness_read` → `resolve_site_lon`)**; the
-share/nameplate sibling filed (item 3). Inbox: the same four, all owner-gated. Suite 8196 passed / 7 skipped; dogfood
-`--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: item 1. **Rotation: (4) done → next sweep is (1).***
-*2026-10-21 (Builder, branch `claude/festive-knuth-ku8muu`) — **v0.502.27: "Check it at full size" on a recipe
-with no Stretch op shows the picture's own curve — the fallback stretch's stats go through `ctx.fit`
-(`pipeline.apply_recipe`, `FALLBACK_STRETCH_UID`); preview/export byte-identical.** **START HERE NEXT RUN:** Builder:
-item 1 above (planner depth).*
 
 ## Standing frontier
 
