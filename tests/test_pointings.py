@@ -259,3 +259,49 @@ def test_the_fold_does_not_move_the_mixed_pointing_verdict():
         assert (got is None) == (exact is None), sep
         if got is not None and exact is not None:
             assert got.pointings == exact.pointings, sep
+
+
+# ── The link scales with the field: an S30 strip with a gap is one target ──────
+# The S30's field is 2.13° along its long side; a 3-panel strip at 15 % overlap
+# steps 1.81° a panel, so with no solved sub on the middle panel the two ends sit
+# 3.62° apart — past the fixed 3° link sized for the S50's 1.27° field.
+_S30_SIDE = 2.128
+_S50_SIDE = 1.27
+
+
+def _strip(counts, side, overlap=0.15):
+    step = side * (1.0 - overlap)
+    frames: list[tuple[float, float]] = []
+    for k, n in enumerate(counts):
+        frames += _pointing(100.0 + k * step, 0.0, n)
+    return frames
+
+
+def test_link_dist_for_field_scales_only_past_the_fixed_link():
+    from seestack.stack.pointings import LINK_DIST_DEG, link_dist_for_field
+
+    assert link_dist_for_field(None) == LINK_DIST_DEG
+    assert link_dist_for_field(0.0) == LINK_DIST_DEG
+    assert link_dist_for_field(float("nan")) == LINK_DIST_DEG
+    assert link_dist_for_field(_S50_SIDE) == LINK_DIST_DEG     # 2.54° < 3°
+    assert abs(link_dist_for_field(_S30_SIDE) - 4.256) < 1e-9
+
+
+def test_a_gapped_s30_strip_is_one_target_at_its_own_link():
+    from seestack.stack.pointings import link_dist_for_field
+
+    frames = _strip((30, 0, 14), _S30_SIDE)
+    # The fixed 3° link is what the guard used before: two "targets".
+    before = detect_mixed_pointings(frames)
+    assert before is not None and before.pointings == 2
+    assert detect_mixed_pointings(
+        frames, link_dist_deg=link_dist_for_field(_S30_SIDE)) is None
+
+
+def test_two_targets_still_split_at_the_s30_link():
+    from seestack.stack.pointings import link_dist_for_field
+
+    frames = _pointing(100.0, 0.0, 20) + _pointing(110.0, 0.0, 12)
+    res = detect_mixed_pointings(
+        frames, link_dist_deg=link_dist_for_field(_S30_SIDE))
+    assert res is not None and res.pointings == 2

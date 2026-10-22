@@ -31,11 +31,42 @@
  * that renders the Target page and the Stack form, i.e. a frozen tab on the
  * page he opens every session, from a phone. The grid below is **the same
  * partition**, exhaustively pinned against the all-pairs version, at 3.2 ms.
+ *
+ * The 3° link is sized for the S50's ~1.3° field. On the S30's 2.13° field a
+ * 3-panel strip whose middle panel has no solved sub has its ends 3.4–3.8°
+ * apart, so the link also scales with the subs' own solved field — 2 long
+ * sides, the server's `pointings.link_dist_for_field` (see `linkDistForField`).
  */
 import type { Frame } from "../../api/client";
 
 const LINK_DIST_DEG = 3.0;
+const LINK_FOOTPRINTS = 2.0;
 const MIN_POINTING_FRAMES = 5;
+
+/** The link distance for a field `longSideDeg` across: `max(3°, 2 × side)`,
+ *  the fixed 3° when the side is unknown. Mirrors the server's
+ *  `seestack.stack.pointings.link_dist_for_field`. */
+export function linkDistForField(longSideDeg: number | null | undefined): number {
+  if (longSideDeg == null || !Number.isFinite(longSideDeg) || longSideDeg <= 0) {
+    return LINK_DIST_DEG;
+  }
+  return Math.max(LINK_DIST_DEG, LINK_FOOTPRINTS * longSideDeg);
+}
+
+/** Median long side (degrees) of the frames' solved fields — plate scale ×
+ *  the longer dimension — or `null` when no frame carries a scale. */
+export function medianLongSideDeg(frames: Frame[]): number | null {
+  const sides: number[] = [];
+  for (const f of frames) {
+    const scale = f.pixscale_arcsec;
+    if (scale == null || !Number.isFinite(scale) || scale <= 0) continue;
+    if (f.width_px == null || f.height_px == null) continue;
+    sides.push((scale * Math.max(f.width_px, f.height_px)) / 3600);
+  }
+  if (sides.length === 0) return null;
+  sides.sort((a, b) => a - b);
+  return sides[(sides.length - 1) >> 1];
+}
 
 export interface PointingCluster {
   count: number;
@@ -75,7 +106,8 @@ function angularSepDeg(
 }
 
 // The cube grid the linkage scan below runs on. A unit vector's components are
-// in [-1, 1] and CELL is ~0.0302, so an axis index lives in [-34, 33]; packing
+// in [-1, 1] and CELL is at least ~0.0302 (the 3° link; a wider field's longer
+// link only makes it larger), so an axis index lives in [-34, 33]; packing
 // three of them into one integer key with a 512-wide field per axis leaves room
 // for the ±CELL_REACH neighbour offsets without one axis ever carrying into the
 // next, and a numeric key keeps the Map lookups cheap.
@@ -109,9 +141,10 @@ export function detectMixedPointings(frames: Frame[]): MixedPointings | null {
   const vecs = pts.map((f) =>
     raDecToVec(f.ra_center_deg as number, f.dec_center_deg as number),
   );
-  const cosThresh = Math.cos((LINK_DIST_DEG * Math.PI) / 180);
+  const linkDeg = linkDistForField(medianLongSideDeg(pts));
+  const cosThresh = Math.cos((linkDeg * Math.PI) / 180);
 
-  // Single-linkage clustering via union-find: two frames within LINK_DIST_DEG
+  // Single-linkage clustering via union-find: two frames within linkDeg
   // (dot ≥ cos(threshold)) share a cluster.
   const parent = pts.map((_, i) => i);
   const find = (i: number): number => {
@@ -129,7 +162,7 @@ export function detectMixedPointings(frames: Frame[]): MixedPointings | null {
   // make this the *same* partition as testing every pair, not an approximation:
   //
   //  1. CELL is chosen so a cube's body diagonal is exactly the chord of
-  //     LINK_DIST_DEG, so any two points sharing a cube are within the link
+  //     linkDeg, so any two points sharing a cube are within the link
   //     distance **by construction** — they are unioned with no test at all.
   //     That is the case this exists for: a dithered pointing is arc-minutes
   //     wide, so all 35,894 of its subs fall in one cube.
@@ -143,7 +176,7 @@ export function detectMixedPointings(frames: Frame[]): MixedPointings | null {
   //
   // Worst case is still every pair of two neighbouring cubes that do not link;
   // best and typical case is linear. Measured above: 15.3 s → 3.2 ms.
-  const CELL = (2 * Math.sin((LINK_DIST_DEG * Math.PI) / 360)) / Math.sqrt(3);
+  const CELL = (2 * Math.sin((linkDeg * Math.PI) / 360)) / Math.sqrt(3);
   const cells = new Map<number, number[]>();
   for (let i = 0; i < vecs.length; i++) {
     const key = cellKey(

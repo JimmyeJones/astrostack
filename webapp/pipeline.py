@@ -25,7 +25,11 @@ from seestack.io.project import (
 )
 from seestack.io.scanner import ScanResult, run_qc_and_solve, scan_and_organize
 from seestack.render.thumbnail import invalidate_frame_thumbs
-from seestack.stack.pointings import MixedPointings, detect_mixed_pointings
+from seestack.stack.pointings import (
+    MixedPointings,
+    detect_mixed_pointings,
+    link_dist_for_field,
+)
 from seestack.stackhealth import readable_transparency_ratio
 from webapp import __version__ as APP_VERSION
 from webapp import jobqueue
@@ -3428,7 +3432,10 @@ def _detect_mixed_pointings(proj: Any) -> MixedPointings | None:
     """The mixed-pointing verdict over a target's accepted+solved subs, or ``None``.
 
     Reads exactly the frames the stacker would combine (accepted, plate-solved)
-    and clusters their pointings — see :mod:`seestack.stack.pointings`.
+    and clusters their pointings — see :mod:`seestack.stack.pointings`. The link
+    distance scales with this target's own solved field
+    (:meth:`~seestack.io.project.Project.solved_frame_geometry`, :func:`link_dist_for_field`),
+    so a gapped S30 strip stays one target.
     """
     radecs = [
         (ra, dec)
@@ -3436,7 +3443,10 @@ def _detect_mixed_pointings(proj: Any) -> MixedPointings | None:
             "ra_center_deg", "dec_center_deg", "wcs_json", accepted_only=True)
         if wcs
     ]
-    return detect_mixed_pointings(radecs)
+    geometry = proj.solved_frame_geometry()
+    long_side = (None if geometry is None
+                 else geometry[0] * max(geometry[1], geometry[2]) / 3600.0)
+    return detect_mixed_pointings(radecs, link_dist_deg=link_dist_for_field(long_side))
 
 
 def _auto_stack_panel_depth(

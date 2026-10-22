@@ -78,3 +78,24 @@ def test_an_unknown_sort_still_falls_back_to_id_rather_than_erroring(
     ids = [f["id"] for f in rows]
     assert ids == sorted(ids)
     assert len(client.get("/api/targets/M_42/frames").json()) == 3
+
+
+def test_a_frame_row_carries_its_plate_scale(client, built_library):
+    # The Target page's mixed-pointing guard scales its link from the subs' own
+    # solved field (scale × size), so the row has to carry the scale. Additive:
+    # an unsolved sub sends null.
+    from seestack.io.library import Library
+
+    rows = client.get("/api/targets/M_42/frames").json()
+    assert all(r["pixscale_arcsec"] is None for r in rows)
+    lib = Library.open_or_create(built_library / "library")
+    try:
+        proj = lib.open_target("M_42")
+        try:
+            proj.update_frame(rows[0]["id"], pixscale_arcsec=3.99)
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+    rows = client.get("/api/targets/M_42/frames").json()
+    assert rows[0]["pixscale_arcsec"] == 3.99

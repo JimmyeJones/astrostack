@@ -540,23 +540,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   library) and pass the longitude into the job, or to call `detect_site_from_library(lib)` there — not to mirror a
   different bucketing. Test: the three-session shape through the share caption and the nameplate. Ungated.
 
-- **🟠 (Scout 2026-10-21, QA rotation sweep (2); the stacker half shipped v0.502.34) — the mixed-pointing guard
-  calls a gapped S30 strip two targets** (`seestack/stack/pointings.LINK_DIST_DEG = 3.0`, and the frontend's
-  `mixedPointings.ts` copy, sized for the S50's 1.3° field): when an S30 strip's middle panel has no accepted, solved
-  sub (clouds / failed solves) the ends are 3.4–3.8° apart → `detect_mixed_pointings` returns 2 pointings, so with
-  `mixed_pointing_guard` on (the owner wants it on, AGENTS.md §1) Process-target and auto-stack **refuse** with "This
-  batch looks like 2 different targets" and offer the one-click "Reject the odd-target frames" — which would reject a
-  real panel. S50 control at the same layout: no verdict. The stacker itself now keeps such a strip whole (v0.502.34,
-  `mosaic.OUTLIER_FLOOR_FOOTPRINTS` / `_chained_to_main_group`), so only the guard is left.
-  *(Pillar: trust, PRIORITY 2; size **S–M**; severity moderate when it fires; confidence: **reproduced** by the Scout
-  through `detect_mixed_pointings` — full original entry in `SHIPPED.md` under v0.502.34.)*
-  **Fix shape:** make the link `max(3.0, ~2 × median footprint long side)` — the server side can read it from the
-  subs' `wcs_json` + `width_px` the way `mosaic._median_footprint_long_side_deg` does (`pipeline._detect_mixed_pointings`);
-  the frontend's spatial grid derives `CELL` from the link, so pass the link in rather than hard-coding it (its
-  cell-key packing bound assumes the 3° cell — re-derive it for a larger one; a larger link only shrinks the index
-  range). Keep every `test_pointings.py` / `mixedPointings.test.ts` verdict; the gapped 30/0/14 S30 strip gets no
-  verdict; two targets 10° apart still do. Ungated.
-
 - **🟡 (Scout 2026-10-21, QA rotation sweep (3)) — a Moon & Sun capture that is still copying (or otherwise cut short)
   stacks silently from only the frames ffmpeg could read, says nothing, and keeps that result as current after the
   file completes** (`seestack/video/lucky.grade_video` / `stack_video` never compare the frames read against
@@ -3658,6 +3641,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.35 **The mixed-pointing guard no longer calls a gapped S30 strip two targets — its 3° link now scales to 2 long sides of the subs' own solved field (4.3° on the S30, unchanged 3° on the S50), on the server and on the Target/Stack pages** (`pointings.link_dist_for_field`, `pipeline._detect_mixed_pointings`, `mixedPointings.linkDistForField`, `FrameOut.pixscale_arcsec`)
 - ✅ v0.502.34 **The stacker keeps a whole real panel of an uneven S30 strip — a 3-panel strip with one end holding the median lost every sub of its far panel (3.6° out, past the fixed 3° floor sized for the S50) as "bad plate-solve", flagged rejected for good; the floor now scales with the solved footprint and a frame chained to the group through overlapping neighbours is never an outlier** (`mosaic._footprint_outlier_indices`, `OUTLIER_FLOOR_FOOTPRINTS`, `_chained_to_main_group`). Entry in [`SHIPPED.md`](SHIPPED.md); the guard half stays in Bugs.
 - ✅ v0.502.33 **`/compare` no longer calls the older, smaller picture of a grown mosaic "the cleaner stack" — one panel × 6 (σ 0.00074) against the same 6 + one sub of a new panel (σ 0.00089, 1.82× the sky) read "B has 17% lower background noise — it's the cleaner stack"; the figure stays, the verdict goes when one canvas covers < 0.9 of the other** (`Compare.noiseComparison` `widerSky`, the cover nudge's `MIN_SKY_SHARE`)
 - ✅ v0.502.32 **The "did it get better?" matched-crop picture carries its patch through both masters' WCS on a grown mosaic — a single panel → 2×2 showed two patches ~680 px of sky apart, the newer one downsampled 1.85× so its grain read 15.5 against 25.4 at equal depth; now the same sky, the same native box, no resize, and an unsolved different-shaped pair self-hides** (`noisedelta._sky_mapper`, `build_noise_delta`).

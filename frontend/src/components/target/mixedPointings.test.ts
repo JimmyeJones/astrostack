@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectMixedPointings } from "./mixedPointings";
+import { detectMixedPointings, linkDistForField, medianLongSideDeg } from "./mixedPointings";
 import type { Frame } from "../../api/client";
 
 function mkFrame(id: number, overrides: Partial<Frame> = {}): Frame {
@@ -150,7 +150,7 @@ describe("detectMixedPointings", () => {
 // It is the oracle for the equivalence test, and it is deliberately a *copy*
 // rather than an export — an oracle that shares code with the thing it checks
 // checks nothing.
-function exhaustivePartition(frames: Frame[]): number[] | null {
+function exhaustivePartition(frames: Frame[], linkDeg = 3.0): number[] | null {
   const pts = frames.filter(
     (f) =>
       f.accept && f.solved &&
@@ -165,7 +165,7 @@ function exhaustivePartition(frames: Frame[]): number[] | null {
     const cd = Math.cos(dec);
     return [cd * Math.cos(ra), cd * Math.sin(ra), Math.sin(dec)];
   });
-  const cosThresh = Math.cos((3.0 * Math.PI) / 180);
+  const cosThresh = Math.cos((linkDeg * Math.PI) / 180);
   const parent = pts.map((_, i) => i);
   const find = (i: number): number => {
     let r = i;
@@ -188,8 +188,8 @@ function exhaustivePartition(frames: Frame[]): number[] | null {
 // linkage puts outside the largest component, and how many components clear the
 // substantial floor. Anything else the function returns (counts, centroids, the
 // separation) is a pure function of that same partition.
-function exhaustiveVerdict(frames: Frame[]) {
-  const roots = exhaustivePartition(frames);
+function exhaustiveVerdict(frames: Frame[], linkDeg = 3.0) {
+  const roots = exhaustivePartition(frames, linkDeg);
   if (roots === null) return null;
   const solved = frames.filter(
     (f) => f.accept && f.solved && Number.isFinite(f.ra_center_deg ?? NaN)
@@ -245,6 +245,43 @@ describe("detectMixedPointings — the grid linkage is the all-pairs linkage", (
       }
       const got = detectMixedPointings(frames);
       const want = exhaustiveVerdict(frames);
+      if (want === null) {
+        expect(got, `trial ${trial}`).toBeNull();
+      } else {
+        expect(got, `trial ${trial}`).not.toBeNull();
+        expect(got!.pointings, `trial ${trial}`).toBe(want.pointings);
+        expect(got!.majority, `trial ${trial}`).toBe(want.majority);
+        expect(got!.others, `trial ${trial}`).toBe(want.others);
+        expect(got!.minorityIds, `trial ${trial}`).toEqual(want.minorityIds);
+      }
+    }
+  });
+
+  it("agrees with the oracle at an S30 field's wider link too", () => {
+    // 2.128° long side on 480 px → a 4.256° link and a larger grid cube.
+    const s30 = { width_px: 480, height_px: 270, pixscale_arcsec: (2.128 * 3600) / 480 };
+    const rand = rng(20261022);
+    for (let trial = 0; trial < 150; trial++) {
+      const frames: Frame[] = [];
+      let id = 1;
+      const blobs = 1 + Math.floor(rand() * 4);
+      for (let b = 0; b < blobs; b++) {
+        const ra = rand() * 360;
+        const dec = (rand() * 2 - 1) * 89;
+        const spread = [0.02, 2.0, 3.6, 4.1, 4.4, 8, 25][Math.floor(rand() * 7)];
+        const k = 5 + Math.floor(rand() * 25);
+        for (let i = 0; i < k; i++) {
+          const d = Math.max(-90, Math.min(90, dec + (rand() - 0.5) * spread));
+          const cosd = Math.max(1e-6, Math.cos((d * Math.PI) / 180));
+          frames.push(mkFrame(id++, {
+            ...s30,
+            ra_center_deg: ra + ((rand() - 0.5) * spread) / cosd,
+            dec_center_deg: d,
+          }));
+        }
+      }
+      const got = detectMixedPointings(frames);
+      const want = exhaustiveVerdict(frames, 2 * 2.128);
       if (want === null) {
         expect(got, `trial ${trial}`).toBeNull();
       } else {
@@ -319,4 +356,52 @@ describe("detectMixedPointings — the grid linkage is the all-pairs linkage", (
     expect(res).toBeNull();
     expect(ms, `24-panel mosaic, 30,000 subs took ${ms.toFixed(0)} ms`).toBeLessThan(BUDGET_MS);
   }, 60000);
+});
+
+// The S30's field is 2.13° along its long side; a 3-panel strip at 15 % overlap
+// steps 1.81° a panel, so with no solved sub on the middle panel the two ends sit
+// 3.62° apart — past the fixed 3° link sized for the S50's 1.27° field.
+describe("detectMixedPointings — the link scales with the solved field", () => {
+  const S30 = { width_px: 480, height_px: 270, pixscale_arcsec: (2.128 * 3600) / 480 };
+  const S50 = { width_px: 480, height_px: 270, pixscale_arcsec: (1.27 * 3600) / 480 };
+  const gappedStrip = (over: Partial<Frame>) => [
+    ...cluster(30, 100, 0, 1, 0.02, over),
+    ...cluster(14, 100 + 2 * 2.128 * 0.85, 0, 100, 0.02, over),
+  ];
+
+  it("linkDistForField keeps 3° up to a 1.5° field and scales past it", () => {
+    expect(linkDistForField(null)).toBe(3);
+    expect(linkDistForField(0)).toBe(3);
+    expect(linkDistForField(Number.NaN)).toBe(3);
+    expect(linkDistForField(1.27)).toBe(3);
+    expect(linkDistForField(2.128)).toBeCloseTo(4.256, 9);
+  });
+
+  it("medianLongSideDeg reads scale × the longer side, null without a scale", () => {
+    expect(medianLongSideDeg(cluster(5, 10, 20, 1))).toBeNull();
+    expect(medianLongSideDeg(cluster(5, 10, 20, 1, 0.3, S30))).toBeCloseTo(2.128, 9);
+  });
+
+  it("is null for a gapped S30 strip", () => {
+    expect(detectMixedPointings(gappedStrip(S30))).toBeNull();
+  });
+
+  it("still splits the same pointings on an S50 field, or with no scale (older backend)", () => {
+    for (const over of [S50, {}]) {
+      const res = detectMixedPointings(gappedStrip(over));
+      expect(res).not.toBeNull();
+      expect(res!.pointings).toBe(2);
+      expect(res!.majority).toBe(30);
+      expect(res!.others).toBe(14);
+    }
+  });
+
+  it("still flags two S30 targets 10° apart", () => {
+    const res = detectMixedPointings([
+      ...cluster(20, 100, 0, 1, 0.02, S30),
+      ...cluster(12, 110, 0, 100, 0.02, S30),
+    ]);
+    expect(res).not.toBeNull();
+    expect(res!.pointings).toBe(2);
+  });
 });

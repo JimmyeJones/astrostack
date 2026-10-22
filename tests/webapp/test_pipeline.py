@@ -824,3 +824,74 @@ def test_a_half_copied_sub_is_not_reported_as_unreadable(client, data_root):
     body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
     assert body["state"] == "done", body
     assert "unreadable" not in body["result"]
+
+
+def _build_s30_strip_target(
+    data_root: Path, counts, *, side_deg: float, step_deg: float = 2.128 * 0.85,
+) -> None:
+    """One target whose accepted, solved subs sit on a strip of panels
+    ``step_deg`` apart — an S30 strip at 15 % overlap by default — on frames
+    ``side_deg`` across (480 px wide)."""
+    from synth import make_synth_wcs_text, write_seestar_fits
+
+    from seestack.io.library import Library
+    from seestack.io.scanner import scan_and_organize
+
+    incoming = data_root / "incoming"
+    d = incoming / "M_STRIP"
+    d.mkdir(parents=True, exist_ok=True)
+    ras = [100.0 + k * step_deg for k, n in enumerate(counts) for _ in range(n)]
+    for i in range(len(ras)):
+        write_seestar_fits(
+            d / f"frame_{i:03d}.fit", n_stars=10, seed=300 + i,
+            add_wcs=True, ra_center_deg=100.0, dec_center_deg=0.0,
+        )
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        scan_and_organize(lib, incoming, copy_to_cache=False)
+        proj = lib.open_target("M_STRIP")
+        try:
+            for f, ra in zip(proj.iter_frames(), ras, strict=True):
+                proj.update_frame(
+                    f.id, wcs_json=make_synth_wcs_text(ra_center_deg=ra),
+                    ra_center_deg=ra, dec_center_deg=0.0,
+                    pixscale_arcsec=side_deg * 3600.0 / 480,
+                    width_px=480, height_px=270, bayer_pattern="RGGB",
+                )
+        finally:
+            proj.close()
+    finally:
+        lib.close()
+
+
+def test_mixed_pointing_guard_reads_a_gapped_s30_strip_as_one_target(data_root):
+    # The S30's 2.13° field: with the strip's middle panel unsolved, its two ends
+    # sit 3.6° apart — past the fixed 3° link sized for the S50 — and the guard
+    # refused the walk-away stack as "2 different targets". The link now scales
+    # with the target's own solved field, so the strip is one target…
+    from seestack.io.library import Library
+    from webapp.pipeline import _mixed_pointing_check
+
+    _build_s30_strip_target(data_root, (30, 0, 14), side_deg=2.128)
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        assert _mixed_pointing_check(lib, "M_STRIP") is None
+    finally:
+        lib.close()
+
+
+def test_mixed_pointing_guard_s50_link_is_unchanged(data_root):
+    # …while an S50-sized field keeps the fixed 3° link: the same two pointings
+    # 3.6° apart on a 1.27° field cannot be one strip (nothing overlaps) and
+    # still split, exactly as before.
+    from seestack.io.library import Library
+    from webapp.pipeline import _mixed_pointing_check
+
+    _build_s30_strip_target(data_root, (30, 0, 14), side_deg=1.27)
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        mixed = _mixed_pointing_check(lib, "M_STRIP")
+        assert mixed is not None and mixed.pointings == 2
+        assert (mixed.majority, mixed.others) == (30, 14)
+    finally:
+        lib.close()

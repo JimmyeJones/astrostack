@@ -33,6 +33,30 @@ from dataclasses import dataclass
 LINK_DIST_DEG = 3.0
 MIN_POINTING_FRAMES = 5
 
+# ``LINK_DIST_DEG`` is a fixed degree count sized for a ~1.3° field (the S50),
+# where it is ~2.4 field-lengths. The S30's field is 2.13° along its long side, so
+# when the middle panel of a 3-panel strip has no accepted, solved sub (clouds,
+# failed solves) its two ends sit 3.4–3.8° apart, fall into two clusters, and the
+# guard refused the walk-away stack as "2 different targets" — offering to reject
+# a real panel. So the link also scales with the frames' own solved footprint,
+# the same 2 long sides ``stack.mosaic.OUTLIER_FLOOR_FOOTPRINTS`` gives the
+# stacker's outlier floor for the same strip: S50 2 × 1.27° = 2.5°, under the
+# fixed 3°, so nothing changes there; S30 4.3°, past the far end of that strip.
+# Two different targets are many fields apart, so they still split.
+LINK_FOOTPRINTS = 2.0
+
+
+def link_dist_for_field(long_side_deg: float | None) -> float:
+    """The mixed-pointing link distance for a field ``long_side_deg`` across.
+
+    ``max(LINK_DIST_DEG, LINK_FOOTPRINTS × long side)``; an unknown or
+    non-positive side keeps the fixed :data:`LINK_DIST_DEG`. Mirrored by
+    ``linkDistForField`` in ``frontend/src/components/target/mixedPointings.ts``.
+    """
+    if long_side_deg is None or not math.isfinite(long_side_deg) or long_side_deg <= 0:
+        return LINK_DIST_DEG
+    return max(LINK_DIST_DEG, LINK_FOOTPRINTS * float(long_side_deg))
+
 # Link distance for telling one *mosaic panel* from the next, as opposed to one
 # target from another (``LINK_DIST_DEG`` above). The two live at very different
 # scales: a dither nudges a pointing by arc-minutes (≲0.1°), while even the
@@ -63,7 +87,7 @@ FOLD_GRID_DEG = 0.01
 # that ever asks for a link distance near the grid itself gets the exact
 # clustering instead of an approximation that would be the same size as the
 # question. Every caller today uses ``PANEL_LINK_DIST_DEG`` (25 cells) or
-# ``LINK_DIST_DEG`` (300), so this rail never fires; it exists so a future one
+# ``LINK_DIST_DEG`` (300, more for a wider field), so this rail never fires; it exists so a future one
 # can't quietly fall off the argument above.
 _MIN_FOLD_CELLS_PER_LINK = 10.0
 
