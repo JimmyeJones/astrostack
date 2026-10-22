@@ -147,6 +147,12 @@ class VideoResultOut(BaseModel):
     #: neutral defaults: a still from an older version reads as not drizzled.
     drizzle_scale: float = 1.0
     drizzle_note: str = ""
+    #: True when the clip this picture was stacked from has changed on disk since
+    #: — most often a capture stacked while it was still copying in, which then
+    #: finished. The picture is kept (it is still one he made); the page says a
+    #: re-stack would use the whole clip. Additive with a neutral default: a still
+    #: stacked before the stamp existed, or whose clip is gone, reads ``false``.
+    source_changed: bool = False
 
 
 class VideoCaptureOut(BaseModel):
@@ -299,7 +305,9 @@ def _grade_panels_from(
     return _adapt_profile(profile), quicklook
 
 
-def _result_out(settings, capture_id: str) -> VideoResultOut | None:
+def _result_out(
+    settings, capture_id: str, files: list[str] | None = None,
+) -> VideoResultOut | None:
     """One capture's finished-picture panel, or ``None`` when there isn't a usable one.
 
     ``read_meta``'s contract is that a damaged ``meta.json`` reads as "no result"
@@ -310,12 +318,16 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
     the dataclass and only blows up here, in the Pydantic build, taking the whole
     ``/api/videos`` list with it. Honour the contract at this boundary instead:
     one bad capture reads as "never stacked", the rest of the page is fine.
+
+    ``files`` is the capture's current video files, so the result can say when
+    the clip it came from has changed since (see ``result_matches_source``);
+    none — an orphaned still — is nothing to disagree with.
     """
     meta = video.read_meta(settings, capture_id)
     if meta is None or not video.has_result(settings, capture_id):
         return None
     try:
-        return _build_result_out(settings, capture_id, meta)
+        return _build_result_out(settings, capture_id, meta, files)
     except Exception:  # noqa: BLE001 — one unusable result must not fail the page
         log.warning(
             "video result metadata for %s is unusable; reporting no result",
@@ -324,7 +336,9 @@ def _result_out(settings, capture_id: str) -> VideoResultOut | None:
         return None
 
 
-def _build_result_out(settings, capture_id: str, meta) -> VideoResultOut:  # noqa: ANN001
+def _build_result_out(
+    settings, capture_id: str, meta, files: list[str] | None = None,  # noqa: ANN001
+) -> VideoResultOut:
     # A still stacked before framing existed has never been looked at, which is
     # not the same as "nothing to trim" — measure it once, from the picture, so
     # pictures the owner already has get the same offer a new one does.
@@ -360,7 +374,15 @@ def _build_result_out(settings, capture_id: str, meta) -> VideoResultOut:  # noq
         colour_stale=colour_stale,
         drizzle_scale=meta.drizzle_scale,
         drizzle_note=meta.drizzle_note,
+        source_changed=not video.result_matches_source(meta, list(files or [])),
     )
+
+
+def _capture_files(settings, capture_id: str) -> list[str]:  # noqa: ANN001
+    """A capture's current video files (``[]`` when its folder is gone), for the
+    edit routes' response — the same answer the list gives for the same still."""
+    cap = video.discover_capture(settings, capture_id)
+    return list(cap.files) if cap else []
 
 
 def _orphaned_stills(settings, listed: set[str]) -> list[VideoCaptureOut]:
@@ -420,7 +442,7 @@ def _capture_out(settings, cap) -> VideoCaptureOut:
             VideoFileOut(name=Path(f).name, size_bytes=_size_of(f)) for f in cap.files
         ],
         total_bytes=cap.total_bytes,
-        result=_result_out(settings, cap.id),
+        result=_result_out(settings, cap.id, cap.files),
         sharpness=profile,
         quicklook=quicklook,
     )
@@ -518,7 +540,7 @@ def crop_one_still(capture_id: str, request: Request) -> VideoResultOut:
         video.crop_saved_still(settings, safe_id)
     except video.StillCropError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    result = _result_out(settings, safe_id)
+    result = _result_out(settings, safe_id, _capture_files(settings, safe_id))
     if result is None:  # pragma: no cover - the crop just wrote it
         raise HTTPException(status_code=404, detail="No stacked picture for this capture")
     return result
@@ -533,7 +555,7 @@ def restore_one_still(capture_id: str, request: Request) -> VideoResultOut:
         video.restore_full_still(settings, safe_id)
     except video.StillCropError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    result = _result_out(settings, safe_id)
+    result = _result_out(settings, safe_id, _capture_files(settings, safe_id))
     if result is None:  # pragma: no cover - the restore just wrote it
         raise HTTPException(status_code=404, detail="No stacked picture for this capture")
     return result
@@ -564,7 +586,7 @@ def sharpen_one_still(
         video.sharpen_saved_still(settings, safe_id, req.amount)
     except video.StillCropError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    result = _result_out(settings, safe_id)
+    result = _result_out(settings, safe_id, _capture_files(settings, safe_id))
     if result is None:  # pragma: no cover - the sharpen just wrote it
         raise HTTPException(status_code=404, detail="No stacked picture for this capture")
     return result

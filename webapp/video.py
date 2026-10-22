@@ -195,6 +195,15 @@ class VideoStackMeta:
     #: before the Moon/Sun stack could drizzle reads as what it was: not drizzled.
     drizzle_scale: float = 1.0
     drizzle_note: str = ""
+    #: Size and modification time of the clip this still was stacked from — the
+    #: same stamp, with the same "0 = unknown, trusted" meaning, as
+    #: :attr:`VideoGradeMeta.source_size`. A capture stacked while it was still
+    #: copying into ``incoming/`` is the case it exists for: the file completes
+    #: under an unchanged name, and without the stamp the page went on serving
+    #: the picture made from its first part as current. See
+    #: :func:`result_matches_source`.
+    source_size: int = 0
+    source_mtime: float = 0.0
 
 
 def read_meta(settings: Settings, capture_id: str) -> VideoStackMeta | None:
@@ -287,7 +296,28 @@ def source_stamp(path: str | Path) -> tuple[int, float]:
 def grade_matches_source(meta: VideoGradeMeta, files: list[str]) -> bool:
     """Does a saved check still describe the clip that is on disk?
 
-    Only ever returns ``False`` on a *positive* mismatch — the graded file is
+    The stamp test itself is :func:`_stamp_matches_source`, shared with the
+    finished still's :func:`result_matches_source`.
+    """
+    return _stamp_matches_source(meta, files)
+
+
+def result_matches_source(meta: VideoStackMeta, files: list[str]) -> bool:
+    """Does a finished still still come from the clip that is on disk?
+
+    Same rule as :func:`grade_matches_source` — only a *positive* mismatch is
+    ``False``, so every still stacked before the stamp existed (and an orphaned
+    still whose clip is gone) reads as current. Unlike a stale check, a
+    mismatched still is not hidden: it is still a picture he made, so the page
+    keeps it and says a re-stack would use the clip as it is now.
+    """
+    return _stamp_matches_source(meta, files)
+
+
+def _stamp_matches_source(meta: VideoGradeMeta | VideoStackMeta, files: list[str]) -> bool:
+    """Does ``meta``'s ``source_size``/``source_mtime`` stamp match its file in ``files``?
+
+    Only ever returns ``False`` on a *positive* mismatch — the stamped file is
     among ``files``, both stamps are readable, and they disagree. Everything
     else ("unknown" stamp from an older version, the named file not in this
     folder, an unreadable stat) counts as a match, because the cost of the two
@@ -1208,6 +1238,11 @@ def _video_stack_body(
     drizzle: bool = False,
 ) -> dict[str, Any]:
     capture, source = _resolve_source(settings, capture_id, file_name)
+    # Stamped *before* the decode, unlike the check's: a file still growing while
+    # ffmpeg reads it must not get a stamp from after the read, which could match
+    # a copy that finishes in the meantime and hide that this still was made from
+    # only its first part. A clip that does not change reads the same either way.
+    source_size, source_mtime = source_stamp(source)
     job.set_progress("probe", 0, 0, f"Reading {Path(source).name}")
     info = probe_video(source)
 
@@ -1312,6 +1347,8 @@ def _video_stack_body(
         colour_build=_COLOUR_PIPELINE_BUILD,
         drizzle_scale=float(result.drizzle_scale),
         drizzle_note=result.drizzle_note,
+        source_size=source_size,
+        source_mtime=source_mtime,
     )
     _write_meta(out_dir, meta)
     return {

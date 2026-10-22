@@ -3401,6 +3401,10 @@ export interface VideoResult {
   // backend sends neither and nothing is claimed.
   drizzle_scale?: number;
   drizzle_note?: string;
+  // True when the clip this picture was stacked from has changed on disk since
+  // (most often: stacked while it was still copying in). Optional: an older
+  // backend, or a still stacked before the stamp existed, claims nothing.
+  source_changed?: boolean;
 }
 
 export interface VideoCapture {

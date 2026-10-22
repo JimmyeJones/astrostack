@@ -1,5 +1,52 @@
 # Shipped — the record
 
+## 2026-10-22 (Builder, branch `claude/nice-carson-ywmwk2`) — a Moon & Sun capture cut short says so
+
+### v0.502.36 — `seestack/video/lucky.cut_short_warning` (in `grade_video`), `webapp/video.VideoStackMeta.source_size`/`source_mtime` + `result_matches_source`, `routers/video.VideoResultOut.source_changed`, `MoonSun.tsx`
+
+**What.** A raw `…-Solar-RAW.avi` still copying into `incoming/` keeps its full AVI-header frame count, so ffprobe reports
+it *exact* while ffmpeg reads only the frames that have arrived and ends cleanly: the stack finished `done`, `warnings: []`,
+and kept that picture as current after the file completed.
+
+**Fix.** `grade_video` (the one decode loop the check and the stack share) compares the frames read with
+`ceil(n_frames / stride)` when the count is exact and, short by more than max(3 frames, 2 %), adds a plain warning
+naming how much was read and saying to stack again once it has finished. The stack stamps the clip's size/mtime
+**before** the decode (a file growing during the read must not get a post-read stamp); `result_matches_source` shares the
+grade's rule (only a positive mismatch counts; no stamp / no files = current), and the result carries `source_changed`.
+The page keeps the picture and shows a "this video has changed … Stack it again" notice (hidden beside the colour notice,
+which offers the same button). The crop/uncrop/sharpen responses answer it the same as the list.
+
+**Tests.** `tests/test_video_cut_short.py` (the pure rule incl. stride/slack/inexact; the owner-shaped pal8 AVI at 40 %
+still probes exact, grade and stack warn; whole file and an mp4 don't); `tests/webapp/test_video_cut_short_api.py`
+(the real route: warns, `source_changed` false then true after the copy completes, re-stack clears it; sharpen route
+agrees; stamp-less `meta.json` and a gone clip read false — **all failed before**); `MoonSun.test.tsx` (the notice and
+its button; one re-stack offer beside the colour notice).
+
+**The original Bugs entry, verbatim:**
+
+- **🟡 (Scout 2026-10-21, QA rotation sweep (3)) — a Moon & Sun capture that is still copying (or otherwise cut short)
+  stacks silently from only the frames ffmpeg could read, says nothing, and keeps that result as current after the
+  file completes** (`seestack/video/lucky.grade_video` / `stack_video` never compare the frames read against
+  `probe_video`'s exact `n_frames`; `ffmpeg.iter_frames` ends cleanly at a truncated tail and never reads the
+  decoder's exit status; `webapp.video._video_stack_body` records no source stamp on `VideoStackMeta`, unlike the
+  grade's `source_size`/`source_mtime` + `grade_matches_source`).
+  *(Pillar: trust / image quality, PRIORITY 2/4; size **S**; severity low–moderate — a worse Sun/Moon picture with
+  a reassuring "Stacked the sharpest 24 of 80 frames", and the sharp moments of the missing part never considered;
+  nothing lost on disk, a re-stack fixes it once he knows to. Confidence: **reproduced** through the real
+  `POST /api/videos/Solar_video/stack` on the owner's file shape (undebayered pal8 rawvideo `…-Solar-RAW.avi`, 200
+  frames, sharp frames 150–199) cut to 40 % of its bytes: ffprobe still reports **200 frames, exact** (AVI header),
+  the job ends `done` with **n_graded 80, warnings `[]`**; after the file is completed (557,564 → 1,393,910 bytes)
+  `GET /api/videos` serves the same result with no staleness flag. A 40 % `.mp4` fails cleanly at ffprobe
+  ("Invalid data found"). How often he stacks a capture mid-copy is unmeasured — the Moon & Sun page lists a file
+  the moment it appears in `incoming/`.)*
+  **Fix shape:** when `vinfo` is exact and the frames read fall short of `n_frames // stride` by more than a small
+  slack (a few frames, for ffprobe/decoder off-by-ones), add a plain warning — "Only the first 80 of this capture's
+  200 frames could be read — the file looks cut short (still copying?). Stack it again once it has finished." —
+  and record `source_size`/`source_mtime` on `VideoStackMeta` (additive, default 0 = unknown, so old `meta.json`
+  loads unchanged) so the list can mark a result whose clip has since changed, as `grade_matches_source` does for
+  the grade. Never touch the source (read-only `incoming/`). Test: the 40 % AVI above warns and the completed file
+  marks the result stale; the full file and an inexact-count capture warn nothing. Ungated.
+
 ## 2026-10-22 (Builder, branch `claude/nice-carson-8a9f4w`) — the mixed-pointing guard keeps a gapped S30 strip one target
 
 ### v0.502.35 — `seestack/stack/pointings.link_dist_for_field` (`LINK_FOOTPRINTS`), `webapp/pipeline._detect_mixed_pointings`, `frontend/…/mixedPointings.linkDistForField`

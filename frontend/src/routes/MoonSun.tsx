@@ -289,6 +289,37 @@ function CaptureCard({ capture, disabled }: { capture: VideoCapture; disabled: b
               </Button>
             </Alert>
           ) : null}
+          {/* The clip changed after this picture was made — most often it was
+              stacked while still copying in from the Seestar, so the picture
+              was made from only its first part. Kept (it is still his picture),
+              but nothing re-stacks a video on its own, so the page says so and
+              offers the button. Hidden beside the colour notice, which already
+              offers the same re-stack. */}
+          {result.source_changed && !result.colour_stale ? (
+            <Alert
+              color="violet"
+              variant="light"
+              icon={<IconRefresh size={18} />}
+              p="xs"
+              mt={4}
+            >
+              <Text size="xs">
+                This video has changed since this picture was made — it may
+                still have been copying in. Stacking it again uses the whole
+                clip as it is now.
+              </Text>
+              <Button
+                size="compact-xs"
+                variant="light"
+                mt={6}
+                leftSection={<IconRefresh size={12} />}
+                onClick={() => stack.mutate({})}
+                loading={stack.isPending}
+              >
+                Stack it again
+              </Button>
+            </Alert>
+          ) : null}
           {/* Most people won't think to ask for a crop before they've seen how
               much sky their Seestar left around the Moon — so the offer waits
               until the picture itself can make the case. */}

@@ -318,6 +318,46 @@ def _sampling_stride(n_frames: int, max_frames: int) -> int:
     return int(math.ceil(n_frames / max_frames))
 
 
+#: How many sampled frames a decode may come up short of the container's exact
+#: count before the capture is called cut short — ffprobe and the decoder can
+#: disagree by a frame or two at the tail of a perfectly good file. The larger of
+#: a few frames and 2 % of the expected count, so a long capture's tail rounding
+#: never trips it while a file read at 40 % of its bytes always does.
+_CUT_SHORT_SLACK_FRAMES = 3
+_CUT_SHORT_SLACK_FRACTION = 0.02
+
+
+def cut_short_warning(n_read: int, n_frames: int, stride: int, *, exact: bool) -> str | None:
+    """The plain warning for a capture the decoder could only partly read, or ``None``.
+
+    A Moon/Sun file still being copied into ``incoming/`` (or cut short any
+    other way) keeps the AVI header's full frame count, so ``probe_video``
+    reports it **exactly** while ffmpeg reads only the frames that have
+    arrived and then ends cleanly. Without this the stack said "Stacked the
+    sharpest 24 of 80 frames" of a 200-frame capture and never mentioned the
+    other 120 — whose sharp moments were never even considered.
+
+    Only an *exact* count is trusted: an estimate from duration × fps can be off
+    by more than any slack worth having, and a false "cut short" on a good file
+    would be worse than the silence it replaces. Pure, so the arithmetic and the
+    wording are testable without a decode.
+    """
+    if not exact or n_frames <= 0:
+        return None
+    stride = max(1, int(stride))
+    expected = -(-n_frames // stride)  # frames ``iter_frames`` yields at this stride
+    slack = max(_CUT_SHORT_SLACK_FRAMES, int(math.ceil(expected * _CUT_SHORT_SLACK_FRACTION)))
+    if n_read >= expected - slack:
+        return None
+    first = n_read * stride
+    about = "about " if stride > 1 else ""
+    return (
+        f"Only {about}the first {first} of this capture's {n_frames} frames could be "
+        f"read — the file looks cut short (still copying?). Stack it again once it "
+        f"has finished."
+    )
+
+
 def ordinal(n: int) -> str:
     """``2`` → ``"2nd"``, ``13`` → ``"13th"`` — English's own irregularity, once.
 
@@ -504,6 +544,12 @@ def grade_video(
             f"{src.name} only has {len(scores)} readable frame(s) — a video stack "
             f"needs at least {MIN_FRAMES}."
         )
+    # Here rather than in ``stack_video`` so the "check this capture" pass says
+    # it too: both read the file through this one loop.
+    short = cut_short_warning(len(scores), vinfo.n_frames, stride, exact=vinfo.n_frames_exact)
+    if short is not None:
+        log.warning("%s: %s", src.name, short)
+        warnings.append(short)
     return GradeResult(
         scores=tuple(float(s) for s in scores),
         n_graded=len(scores),
