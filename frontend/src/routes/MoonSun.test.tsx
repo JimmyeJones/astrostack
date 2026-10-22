@@ -403,6 +403,35 @@ describe("cropping the empty sky", () => {
       .not.toBeInTheDocument();
   });
 
+  it("offers a re-stack when the clip changed after the picture was made", async () => {
+    // A capture stacked while still copying in: the picture came from its first
+    // part and the file then finished under the same name. Fails before: the
+    // page served the partial picture as current with nothing said.
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({ result: result({ source_changed: true }) })],
+    }));
+    const stack = vi.spyOn(client.api, "stackVideoCapture")
+      .mockResolvedValue({ job_id: "j9" });
+    renderView();
+    await waitFor(() => expect(
+      screen.getByText(/has changed since this picture was made/),
+    ).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^Stack it again$/i }));
+    await waitFor(() => expect(stack).toHaveBeenCalled());
+  });
+
+  it("shows one re-stack offer, not two, when the colour notice is up too", async () => {
+    vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
+      captures: [capture({ result: result({ source_changed: true, colour_stale: true }) })],
+    }));
+    renderView();
+    await waitFor(() => expect(
+      screen.getByText(/its colours came out wrong/),
+    ).toBeInTheDocument());
+    expect(screen.getAllByRole("button", { name: /^Stack it again$/i })).toHaveLength(1);
+    expect(screen.queryByText(/has changed since this picture was made/)).not.toBeInTheDocument();
+  });
+
   it("crops a finished still in place — no second stack of the capture", async () => {
     vi.spyOn(client.api, "listVideoCaptures").mockResolvedValue(list({
       captures: [capture({

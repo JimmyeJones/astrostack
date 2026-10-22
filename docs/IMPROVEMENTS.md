@@ -540,29 +540,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   library) and pass the longitude into the job, or to call `detect_site_from_library(lib)` there — not to mirror a
   different bucketing. Test: the three-session shape through the share caption and the nameplate. Ungated.
 
-- **🟡 (Scout 2026-10-21, QA rotation sweep (3)) — a Moon & Sun capture that is still copying (or otherwise cut short)
-  stacks silently from only the frames ffmpeg could read, says nothing, and keeps that result as current after the
-  file completes** (`seestack/video/lucky.grade_video` / `stack_video` never compare the frames read against
-  `probe_video`'s exact `n_frames`; `ffmpeg.iter_frames` ends cleanly at a truncated tail and never reads the
-  decoder's exit status; `webapp.video._video_stack_body` records no source stamp on `VideoStackMeta`, unlike the
-  grade's `source_size`/`source_mtime` + `grade_matches_source`).
-  *(Pillar: trust / image quality, PRIORITY 2/4; size **S**; severity low–moderate — a worse Sun/Moon picture with
-  a reassuring "Stacked the sharpest 24 of 80 frames", and the sharp moments of the missing part never considered;
-  nothing lost on disk, a re-stack fixes it once he knows to. Confidence: **reproduced** through the real
-  `POST /api/videos/Solar_video/stack` on the owner's file shape (undebayered pal8 rawvideo `…-Solar-RAW.avi`, 200
-  frames, sharp frames 150–199) cut to 40 % of its bytes: ffprobe still reports **200 frames, exact** (AVI header),
-  the job ends `done` with **n_graded 80, warnings `[]`**; after the file is completed (557,564 → 1,393,910 bytes)
-  `GET /api/videos` serves the same result with no staleness flag. A 40 % `.mp4` fails cleanly at ffprobe
-  ("Invalid data found"). How often he stacks a capture mid-copy is unmeasured — the Moon & Sun page lists a file
-  the moment it appears in `incoming/`.)*
-  **Fix shape:** when `vinfo` is exact and the frames read fall short of `n_frames // stride` by more than a small
-  slack (a few frames, for ffprobe/decoder off-by-ones), add a plain warning — "Only the first 80 of this capture's
-  200 frames could be read — the file looks cut short (still copying?). Stack it again once it has finished." —
-  and record `source_size`/`source_mtime` on `VideoStackMeta` (additive, default 0 = unknown, so old `meta.json`
-  loads unchanged) so the list can mark a result whose clip has since changed, as `grade_matches_source` does for
-  the grade. Never touch the source (read-only `incoming/`). Test: the 40 % AVI above warns and the completed file
-  marks the result stale; the full file and an inexact-count capture warn nothing. Ungated.
-
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
@@ -3641,6 +3618,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.36 **A Moon & Sun capture stacked while still copying in says so ("Only the first 19 of this capture's 50 frames could be read — … still copying?") and its still is marked "this video has changed" with a one-click re-stack once the file completes** (`lucky.cut_short_warning` in `grade_video`, `VideoStackMeta.source_size`/`source_mtime`, `video.result_matches_source`, `VideoResultOut.source_changed`).
 - ✅ v0.502.35 **The mixed-pointing guard no longer calls a gapped S30 strip two targets — its 3° link now scales to 2 long sides of the subs' own solved field (4.3° on the S30, unchanged 3° on the S50), on the server and on the Target/Stack pages** (`pointings.link_dist_for_field`, `pipeline._detect_mixed_pointings`, `mixedPointings.linkDistForField`, `FrameOut.pixscale_arcsec`)
 - ✅ v0.502.34 **The stacker keeps a whole real panel of an uneven S30 strip — a 3-panel strip with one end holding the median lost every sub of its far panel (3.6° out, past the fixed 3° floor sized for the S50) as "bad plate-solve", flagged rejected for good; the floor now scales with the solved footprint and a frame chained to the group through overlapping neighbours is never an outlier** (`mosaic._footprint_outlier_indices`, `OUTLIER_FLOOR_FOOTPRINTS`, `_chained_to_main_group`). Entry in [`SHIPPED.md`](SHIPPED.md); the guard half stays in Bugs.
 - ✅ v0.502.33 **`/compare` no longer calls the older, smaller picture of a grown mosaic "the cleaner stack" — one panel × 6 (σ 0.00074) against the same 6 + one sub of a new panel (σ 0.00089, 1.82× the sky) read "B has 17% lower background noise — it's the cleaner stack"; the figure stays, the verdict goes when one canvas covers < 0.9 of the other** (`Compare.noiseComparison` `widerSky`, the cover nudge's `MIN_SKY_SHARE`)
