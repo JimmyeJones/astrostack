@@ -13,9 +13,6 @@ reproduced and **ungated** — a Builder can start any of them without the owner
 1. 🟡 **Size M — on an uneven mosaic the closing-season card and `perPixel.ts`'s consumers still quote the canvas
    mean as "a typical part"** — the planner half shipped v0.502.29 (`LibraryTarget.depth_fulls`,
    `nightplan._panel_depth_fulls`); serve `webapp.field_fulls.target_depth_fulls` beside `field_fulls` on the rest.
-2. 🟡 **Size S — the share/print nameplate and the share caption date a run UTC noon-to-noon when Settings has no
-   location** (`pipeline._nameplate_fields`, `capture_night_range`); resolve the longitude the way
-   `resolve_site_lon` does (v0.502.28 fixed the sky-brightness card the same way).
 
 **Gated, do not start:** the un-located-panel entry (top of Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
@@ -31,6 +28,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-22 (Builder, branch `claude/nice-carson-ront7e`) — **v0.502.38: the share caption, the baked nameplate (share, print, JPEG download) and the Sky map tile date a run by the subs' own `SITELONG` when Settings has no location** (`editor._observer_lon`, `submit_editor_share`/`submit_editor_print` `site_lon`, `resolve_site_lon`). **START HERE NEXT RUN:** Builder: item 1.*
 *2026-10-22 (Scout, branch `claude/beautiful-newton-jbziyg`) — **QA rotation sweep (3), new angle: ffmpeg auto-rotates a rotation-tagged clip to h×w while the probe says w×h, so `iter_frames` reshaped every frame into streaks with no error — Scout-fixed v0.502.37 (`-noautorotate`).** Inbox: the same four, all owner-gated. Suite 8241 passed / 7 skipped. **START HERE NEXT RUN:** Builder: item 2 or 1. **Rotation: (3) done → next sweep is (4).***
 *2026-10-22 (Builder, branch `claude/nice-carson-ywmwk2`) — **v0.502.36: a Moon & Sun capture stacked while still copying in warns ("Only the first N of … frames could be read") and its still is marked changed once the file completes** (`lucky.cut_short_warning`, `VideoStackMeta.source_size`, `VideoResultOut.source_changed`). **START HERE NEXT RUN:** Builder: item 2 or 1.*
 *2026-10-22 (Builder, branch `claude/nice-carson-8a9f4w`) — **v0.502.35: the mixed-pointing guard keeps a gapped S30 strip one target — the link scales to 2 solved-field long sides** (`pointings.link_dist_for_field`, `mixedPointings.linkDistForField`, `FrameOut.pixscale_arcsec`). **START HERE NEXT RUN:** Builder: item 3 (Moon & Sun cut short), 2 or 1.*
@@ -57,11 +55,6 @@ Inbox: the same four, all owner-gated. Suite 8206 passed / 7 skipped; dogfood `-
 *2026-10-21 (Builder, branch `claude/festive-knuth-6n59fg`) — **v0.502.30: a saved look (my default / My presets /
 the Gallery batch) no longer replays its crop's canvas fractions on other pictures** (`routers/editor._without_saved_crop`,
 `savedLookCrop.dropSavedCrop`). **START HERE NEXT RUN:** Builder: item 5 (S30 outlier floor), item 6 or item 1.*
-*2026-10-21 (Scout, branch `claude/zen-curie-gkxvfm`) — **QA rotation sweep (3), new angle: ffmpeg on a capture
-cut short — the owner-shaped pal8 `…-Solar-RAW.avi` at 40 % of its bytes still probes as 200 exact frames, stacks
-`done` from 80 with no warning, and the result stays current after the file completes; filed reproduced (item 6).**
-Inbox: the same four, all owner-gated. Suite 8205 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %).
-**START HERE NEXT RUN:** Builder: item 4 (editor) or item 5. **Rotation: (3) done → next sweep is (4).***
 
 ## Standing frontier
 

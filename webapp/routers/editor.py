@@ -2904,6 +2904,25 @@ def download_png(safe: str, run_id: int, job_id: str, request: Request) -> FileR
     return FileResponse(png_path, media_type="image/png", filename=filename)
 
 
+def _observer_lon(request: Request) -> float | None:
+    """The longitude a share/print export dates its run's night by — the same
+    :func:`~webapp.site_location.resolve_site_lon` answer the Nights card uses
+    (Settings, else the frames' own ``SITELONG``). Resolved here because the job
+    body has no request to reach the app's site cache; a library that won't open
+    keeps the Settings value rather than failing the export."""
+    from webapp.site_location import resolve_site_lon
+
+    configured = deps.get_settings(request).site_lon
+    try:
+        lib = deps.open_library(request)
+    except Exception:  # noqa: BLE001 — best-effort, the export must not 500 on it
+        return configured
+    try:
+        return resolve_site_lon(request, lib, configured)
+    finally:
+        lib.close()
+
+
 class ShareRequest(PngRequest):
     # Bake a tasteful acquisition footer (target, integration, date, gear) onto
     # the shared JPEG. Off by default so an existing share is byte-for-byte
@@ -2921,7 +2940,8 @@ def export_share(safe: str, run_id: int, body: ShareRequest, request: Request) -
     settings = deps.get_settings(request)
     jm = deps.get_job_manager(request)
     job = pipeline.submit_editor_share(settings, jm, safe, run_id, body.recipe or {},
-                                       nameplate=body.nameplate)
+                                       nameplate=body.nameplate,
+                                       site_lon=_observer_lon(request))
     return {"job_id": job.id}
 
 
@@ -3022,7 +3042,9 @@ def export_print(safe: str, run_id: int, body: PrintRequest, request: Request) -
     jm = deps.get_job_manager(request)
     job = pipeline.submit_editor_print(settings, jm, safe, run_id, body.recipe or {},
                                        size_name=body.size_name,
-                                       nameplate=body.nameplate)
+                                       nameplate=body.nameplate,
+                                       site_lon=(_observer_lon(request)
+                                                 if body.nameplate else None))
     return {"job_id": job.id}
 
 

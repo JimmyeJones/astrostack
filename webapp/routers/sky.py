@@ -32,6 +32,7 @@ from webapp import deps
 from webapp.capture_nights import capture_night_range
 from webapp.field_fulls import canvas_supersampling
 from webapp.preview_orient import baked_north_up_deg, recovered_preview_crop
+from webapp.site_location import resolve_site_lon
 
 router = APIRouter(tags=["sky"])
 
@@ -137,11 +138,11 @@ def get_sky(request: Request) -> SkyResponse:
 
     images: list[SkyImage] = []
     # The observer's longitude buckets a capture window into observing nights —
-    # unset (the common case) falls back to UTC noon-to-noon, exactly as the rest
-    # of the app does.
-    lon_deg = deps.get_settings(request).site_lon
+    # Settings, else the subs' own SITELONG, the way the Nights card resolves it;
+    # unknown falls back to UTC noon-to-noon, exactly as the rest of the app does.
     lib = deps.open_library(request)
     try:
+        lon_deg = resolve_site_lon(request, lib, deps.get_settings(request).site_lon)
         for t in lib.list_targets():
             if t.ra_deg is None or t.dec_deg is None:
                 continue
