@@ -380,3 +380,58 @@ def test_a_displaced_frame_is_still_reported_as_a_displaced_frame():
     assert canvas is not None
     assert canvas.excluded_frame_ids == [11]
     assert canvas.scale_excluded_frame_ids == []
+
+
+# ── An S30 strip is a mosaic, not a bad solve ──────────────────────────────────
+# The S30's field is 2.13° along its long side (1920 px at 3.99″/px); these frames
+# keep that sky size on a small raster (480 px at 15.96″/px) so the canvas stays
+# cheap. A strip along the long axis at 15 % overlap steps 1.81° a panel, so the far
+# end of a 3-panel strip sits 3.62° from a median held by the other end — past the
+# fixed 3° floor sized for the S50's 1.27° field.
+_S30_PIX = 2.128 * 3600.0 / 480
+_S50_PIX = 1.27 * 3600.0 / 480
+
+
+def _strip(counts, *, pixscale, overlap=0.15, dec=0.0):
+    step = 480 * pixscale / 3600.0 * (1.0 - overlap)
+    frames = []
+    for k, n in enumerate(counts):
+        if n:
+            frames += [_frame(100.0 + k * step, dec, h=270, pixscale=pixscale)
+                       for _ in range(n)]
+    return frames
+
+
+@pytest.mark.parametrize("counts", [
+    (30, 8, 14),        # the Scout's reproduced shape: one end holds the median
+    (51, 25, 24),
+    (30, 0, 14),        # gapped: the middle panel has no solved sub to chain through
+    (40, 6, 6, 10),     # 4 panels: the far end is 5.4° out, past any sane floor
+])
+def test_an_uneven_s30_strip_keeps_every_panel(counts):
+    frames = _strip(counts, pixscale=_S30_PIX)
+    canvas = compute_mosaic_canvas(frames, reference_shape=(270, 480))
+    assert canvas is not None
+    assert canvas.excluded_frame_ids == []
+    assert canvas.n_footprints == len(frames)
+    assert canvas.is_mosaic is True
+
+
+@pytest.mark.parametrize("counts", [(30, 8, 14), (30, 0, 14)])
+def test_the_same_strip_at_s50_scale_is_unchanged(counts):
+    canvas = compute_mosaic_canvas(_strip(counts, pixscale=_S50_PIX),
+                                   reference_shape=(270, 480))
+    assert canvas is not None
+    assert canvas.excluded_frame_ids == []
+
+
+def test_a_lone_bad_solve_on_an_s30_target_is_still_dropped():
+    """The footprint-scaled floor and the chain test spare panels, not false
+    solves: one frame landed alone 6° off (past the 4.3° S30 floor, chained to
+    nothing) and one 15° off are both still dropped."""
+    frames = _strip((20, 6), pixscale=_S30_PIX)
+    frames.append(_frame(106.0, 0.0, h=270, pixscale=_S30_PIX))
+    frames.append(_frame(115.0, 0.0, h=270, pixscale=_S30_PIX))
+    canvas = compute_mosaic_canvas(frames, reference_shape=(270, 480))
+    assert canvas is not None
+    assert sorted(canvas.excluded_frame_ids) == [26, 27]

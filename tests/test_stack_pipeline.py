@@ -1513,6 +1513,48 @@ def test_stack_drops_and_flags_bad_plate_solve_outlier(tmp_path):
         proj.close()
 
 
+def test_an_uneven_s30_strip_keeps_its_far_panel_and_rejects_nothing(tmp_path):
+    """A 3-panel strip on the S30's 2.13° field, one end holding the median.
+
+    Regression: the far panel sits 3.62° from the median centre — past the fixed
+    3° plate-solve outlier floor sized for the S50's 1.27° field — so ``run_stack``
+    dropped every one of its subs as "bad plate-solve (footprint far from the
+    group)" and flagged them rejected in the DB, where
+    ``reconcile_bad_solve_frames`` never retries them.
+    """
+    pix = 2.128 * 3600.0 / 480          # S30 sky size on a 480-px synthetic raster
+    step = 2.128 * 0.85                  # 15 % overlap along the long axis
+    proj = Project.create(tmp_path / "p", name="s30strip")
+    raws = tmp_path / "raws"
+    raws.mkdir()
+    ids = []
+    try:
+        for k, n in enumerate((7, 2, 4)):
+            ra = 100.0 + k * step
+            wcs = make_synth_wcs_text(ra_center_deg=ra, dec_center_deg=0.0,
+                                      pixscale_arcsec=pix)
+            for j in range(n):
+                path = write_seestar_fits(raws / f"p{k}_{j}.fit", add_wcs=True,
+                                          seed=10 + 10 * k + j, n_stars=30,
+                                          ra_center_deg=ra, dec_center_deg=0.0,
+                                          pixscale_arcsec=pix)
+                ids.append(proj.add_frame(FrameRow(
+                    source_path=str(path), cached_path=str(path),
+                    width_px=480, height_px=320, bayer_pattern="RGGB",
+                    wcs_json=wcs, ra_center_deg=ra, dec_center_deg=0.0,
+                )))
+
+        result = run_stack(proj, StackOptions(
+            sigma_clip=False, max_workers=2, mosaic_canvas="union", output_name="s",
+        ))
+
+        assert result.excluded_frames == []
+        assert result.n_frames_used == 13
+        assert all(proj.get_frame(i).accept is not False for i in ids)
+    finally:
+        proj.close()
+
+
 def test_stack_progress_callback_called(tmp_path):
     proj = _build_project(tmp_path, n=3)
     calls: list[tuple[str, int, int]] = []
