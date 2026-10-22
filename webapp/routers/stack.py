@@ -5291,6 +5291,10 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         # reads it: a display-space run's picture is the recipe, not the master.
         recipe_json = (_run_recipe_json(proj, run, run_id)
                        if run is not None and kind == "jpeg" else None)
+        # …and the observer's longitude the caption dates the night by, resolved
+        # the way the Nights card resolves it (Settings, else the subs' SITELONG).
+        plate_lon = (resolve_site_lon(request, lib, deps.get_settings(request).site_lon)
+                     if entry is not None and (nameplate or keepsake) else None)
     finally:
         proj.close()
         lib.close()
@@ -5386,8 +5390,7 @@ def download_stack_run(safe: str, run_id: int, kind: str, request: Request,
         plate = None
         if nameplate or keepsake:
             plate = pipeline._nameplate_fields(
-                run.fits_path or "", entry, run,
-                deps.get_settings(request).site_lon)
+                run.fits_path or "", entry, run, plate_lon)
         # scale bakes the two marks every published astrophoto carries — a scale
         # bar and a North/East rose — along the *top* edge, from the run's own
         # solved WCS. They layer under the caption variants above (the caption

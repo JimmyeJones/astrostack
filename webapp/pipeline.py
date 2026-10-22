@@ -2542,9 +2542,10 @@ def _nameplate_fields(fits_path: str, entry: Any, run: Any,
     time, has to offer.
 
     ``lon_deg`` is the observer's longitude for that bucketing; every caller
-    passes ``Settings.site_lon`` so all three nameplate surfaces agree. Unset
-    (the common case — a beginner rarely fills a location in) falls back to UTC
-    noon-to-noon, exactly as the rest of the app does.
+    passes :func:`webapp.site_location.resolve_site_lon`'s answer (Settings, else
+    the frames' own ``SITELONG``) so all three nameplate surfaces agree with the
+    Nights card. ``None`` (no location anywhere) falls back to UTC noon-to-noon,
+    exactly as the rest of the app does.
     """
     from seestack.nameplate import NameplateFields
     from webapp.capture_nights import capture_night_count, capture_night_range
@@ -3074,7 +3075,8 @@ def submit_editor_png(settings: Settings, jm: JobManager, safe: str, run_id: int
 
 def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: int,
                         recipe_dict: dict, *, size_name: str | None = None,
-                        nameplate: bool = False) -> Job:
+                        nameplate: bool = False,
+                        site_lon: float | None = None) -> Job:
     """Render an editor recipe to a **print-ready** JPEG: fitted onto a standard
     paper size and tagged with the DPI it should be printed at, so a photo lab
     prints it at the size the app promised instead of guessing from the pixel
@@ -3085,7 +3087,14 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
     fill sharply**. A name the picture can't print sharply is refused rather than
     quietly upscaled — a soft A3 is exactly the surprise this feature exists to
     prevent. When ``nameplate`` is set, the same acquisition footer the share
-    export bakes on is drawn onto the print, at the print's own resolution."""
+    export bakes on is drawn onto the print, at the print's own resolution.
+
+    ``site_lon`` is the observer's longitude the router resolved
+    (:func:`webapp.site_location.resolve_site_lon`, which needs a request the job
+    body does not have) for dating the run by its observing night; ``None`` keeps
+    ``Settings.site_lon``."""
+    lon = site_lon if site_lon is not None else settings.site_lon
+
     def body(job: Job) -> dict[str, Any]:
         from datetime import UTC, datetime
 
@@ -3144,7 +3153,7 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
                 img = render_print(out, option)
                 if nameplate:
                     plate = _nameplate_fields(
-                        run.fits_path, entry, run, settings.site_lon)
+                        run.fits_path, entry, run, lon)
                     if plate is not None:
                         from seestack.nameplate import draw_nameplate
                         img = draw_nameplate(img, plate)
@@ -3172,7 +3181,8 @@ def submit_editor_print(settings: Settings, jm: JobManager, safe: str, run_id: i
 
 
 def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: int,
-                        recipe_dict: dict, *, nameplate: bool = False) -> Job:
+                        recipe_dict: dict, *, nameplate: bool = False,
+                        site_lon: float | None = None) -> Job:
     """Render an editor recipe to a social-ready JPEG (long edge ≤ 2048 px) of the
     image exactly as shown — for posting/sharing rather than re-processing. The
     JPEG path + a copy-friendly caption blurb are returned in the job result.
@@ -3180,7 +3190,14 @@ def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: i
     When ``nameplate`` is set, a tasteful acquisition footer (target, integration,
     date, gear — read from the run's own FITS provenance) is baked onto the shared
     image. Off by default, so the shared pixels are byte-for-byte as before unless
-    the user opts in."""
+    the user opts in.
+
+    ``site_lon`` is the observer's longitude the router resolved
+    (:func:`webapp.site_location.resolve_site_lon`, which needs a request the job
+    body does not have) for dating the run by its observing night; ``None`` keeps
+    ``Settings.site_lon``."""
+    lon = site_lon if site_lon is not None else settings.site_lon
+
     def body(job: Job) -> dict[str, Any]:
         from datetime import datetime, timezone
 
@@ -3208,14 +3225,14 @@ def submit_editor_share(settings: Settings, jm: JobManager, safe: str, run_id: i
                 jpeg = (Path(proj.project_dir) / "output"
                         / f"{safe_basename(run.output_basename)}_share_{ts}.jpg")
                 plate = _nameplate_fields(
-                    run.fits_path, entry, run, settings.site_lon) if nameplate else None
+                    run.fits_path, entry, run, lon) if nameplate else None
                 write_share_jpeg(jpeg, out, nameplate=plate)
                 # The night it was shot — the one fact the copyable caption was
                 # missing while Target, History, Gallery and the baked nameplate
                 # all carried it. Read off the run's capture window, never off
                 # `timestamp_utc` (which is when the *stack* ran).
                 night_start, night_end = capture_night_range(
-                    run.capture_start_utc, run.capture_end_utc, settings.site_lon)
+                    run.capture_start_utc, run.capture_end_utc, lon)
                 blurb = share_blurb(
                     entry.name, run.n_frames_used, run.total_exposure_s,
                     format_night_range(night_start, night_end))

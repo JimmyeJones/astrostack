@@ -526,20 +526,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   roll-up, and divide by it wherever a *depth* is quoted (`perPixel.ts`); keep `field_fulls` for "how much sky".
   Update `tests/test_per_panel_phrase_mirror.py` with it. Ungated (display only).
 
-- **🟡 (Scout 2026-10-21, QA rotation sweep (4)) — the share/print nameplate and the share caption date a run by
-  UTC noon-to-noon whenever Settings has no location, while the Nights card, the frames table and the calendar date
-  the same subs by the longitude in their own `SITELONG` (`pipeline._nameplate_fields`, `capture_night_range` /
-  `capture_night_count` fed the raw `settings.site_lon` at the share, print and nameplate call sites).**
-  *(Pillar: trust, PRIORITY 3; size **S**; severity low — a wrong date range baked into a shared JPEG for an observer
-  far enough from Greenwich that UTC noon falls inside a session (|lon| ≳ 105°); nothing on disk is touched.
-  Confidence: **reproduced** through the real `capture_night_range`: capture window 2026-07-21T06:00Z →
-  2026-07-23T12:50Z (three sessions at a synthetic lon −120°, local 22:00 → 04:50) reads **20–23 Jul** with
-  `lon=None` and **20–22 Jul** with `lon=−120`; whether his own install has a Settings location is unknown.)*
-  The sibling on `frames/sky-brightness` was Scout-fixed in v0.502.28 by `resolve_site_lon`; these call sites run in
-  the job worker with no `request`, so the fix is to resolve once at submit time (the router has the request and the
-  library) and pass the longitude into the job, or to call `detect_site_from_library(lib)` there — not to mirror a
-  different bucketing. Test: the three-session shape through the share caption and the nameplate. Ungated.
-
 ---
 
 ## Ideas (priority order — work top sections first; AGENTS.md §1)
@@ -3618,6 +3604,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.38 **The share caption, the baked nameplate (share, print, direct JPEG download) and the Sky map tile date a run by the subs' own `SITELONG` when Settings has no location — at −120° a three-session window read "20–23 Jul" instead of the observer's "20–22 Jul"** (`editor._observer_lon` → `submit_editor_share`/`submit_editor_print` `site_lon`, `download_stack_run`, `sky.get_sky` via `resolve_site_lon`)
 - ✅ v0.502.37 **A Moon & Sun clip carrying a rotation tag no longer decodes into streaks — ffmpeg auto-rotated it to h×w while the probe said w×h, so every frame reshaped wrong with no error; the decode now keeps the coded orientation** (`ffmpeg.iter_frames` `-noautorotate`, Scout rotation sweep (3)).
 - ✅ v0.502.36 **A Moon & Sun capture stacked while still copying in says so ("Only the first 19 of this capture's 50 frames could be read — … still copying?") and its still is marked "this video has changed" with a one-click re-stack once the file completes** (`lucky.cut_short_warning` in `grade_video`, `VideoStackMeta.source_size`/`source_mtime`, `video.result_matches_source`, `VideoResultOut.source_changed`).
 - ✅ v0.502.35 **The mixed-pointing guard no longer calls a gapped S30 strip two targets — its 3° link now scales to 2 long sides of the subs' own solved field (4.3° on the S30, unchanged 3° on the S50), on the server and on the Target/Stack pages** (`pointings.link_dist_for_field`, `pipeline._detect_mixed_pointings`, `mixedPointings.linkDistForField`, `FrameOut.pixscale_arcsec`)

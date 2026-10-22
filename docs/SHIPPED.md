@@ -1,5 +1,42 @@
 # Shipped — the record
 
+## 2026-10-22 (Builder, branch `claude/nice-carson-ront7e`) — the share and print caption date a night by the subs' own longitude
+
+### v0.502.38 — `editor._observer_lon`, `submit_editor_share`/`submit_editor_print` `site_lon`, `download_stack_run`, `sky.get_sky`
+
+**What.** Every night surface (Nights card, frames table, calendar, Gallery, History) resolves the observer's longitude
+through `webapp.site_location.resolve_site_lon` — Settings, else the subs' own `SITELONG`. Four surfaces handed the raw
+`Settings.site_lon` on instead, so on an install with no Settings location they fell back to UTC noon-to-noon: the share
+caption, the nameplate baked by the share and print exports, the nameplate/keepsake on the History JPEG download, and
+the Sky map tile's `capture_night_start`/`capture_night_end`. At −120° a three-session window (06:00Z 21 Jul → 12:50Z
+23 Jul) was baked as **20–23 Jul** while the app's Nights card says **20–22 Jul**.
+
+**Fix.** The share/print jobs run in the worker with no request, so the router resolves the longitude at submit time
+(`routers/editor._observer_lon`, best-effort — a library that won't open keeps the Settings value) and passes it as a
+new optional `site_lon` keyword; `None` keeps `Settings.site_lon`. The JPEG download and the Sky map have the request
+and call `resolve_site_lon` directly. Settings still wins whenever it is filled in.
+
+**Tests.** `tests/webapp/test_share_night_longitude.py` (+6) — the share caption and nameplate, the print nameplate,
+the JPEG-download nameplate and the Sky map tile all on the −120° three-session shape with the header sniff stubbed;
+**four failed before** (UTC "20–23 Jul"). A fixture guard pins that the two bucketings really differ, and a Settings
+location at 0° still wins. No config, schema, on-disk, API-shape or default change.
+
+**The backlog entry, as filed:**
+
+- **🟡 (Scout 2026-10-21, QA rotation sweep (4)) — the share/print nameplate and the share caption date a run by
+  UTC noon-to-noon whenever Settings has no location, while the Nights card, the frames table and the calendar date
+  the same subs by the longitude in their own `SITELONG` (`pipeline._nameplate_fields`, `capture_night_range` /
+  `capture_night_count` fed the raw `settings.site_lon` at the share, print and nameplate call sites).**
+  *(Pillar: trust, PRIORITY 3; size **S**; severity low — a wrong date range baked into a shared JPEG for an observer
+  far enough from Greenwich that UTC noon falls inside a session (|lon| ≳ 105°); nothing on disk is touched.
+  Confidence: **reproduced** through the real `capture_night_range`: capture window 2026-07-21T06:00Z →
+  2026-07-23T12:50Z (three sessions at a synthetic lon −120°, local 22:00 → 04:50) reads **20–23 Jul** with
+  `lon=None` and **20–22 Jul** with `lon=−120`; whether his own install has a Settings location is unknown.)*
+  The sibling on `frames/sky-brightness` was Scout-fixed in v0.502.28 by `resolve_site_lon`; these call sites run in
+  the job worker with no `request`, so the fix is to resolve once at submit time (the router has the request and the
+  library) and pass the longitude into the job, or to call `detect_site_from_library(lib)` there — not to mirror a
+  different bucketing. Test: the three-session shape through the share caption and the nameplate. Ungated.
+
 ## 2026-10-22 (Scout, branch `claude/beautiful-newton-jbziyg`) — a rotation-tagged clip no longer stacks into streaks
 
 ### v0.502.37 — `seestack/video/ffmpeg.iter_frames` passes `-noautorotate`
