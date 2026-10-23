@@ -1,5 +1,29 @@
 # Process notes & QA sweep records
 
+## 2026-10-23 (Builder, branch `claude/nice-carson-unkvbg`) — two big-picture dogfood passes, both CLEAN; nothing shipped
+
+- **Start:** no open PRs; suite 8259 passed / 7 skipped on `b4099ae3` (xdist `-n 4`, BLAS capped, 17m35s). Every open
+  "Bugs" entry is gated on owner/observer data or carries a measured stand-down; "Features that serve real workflows"
+  has no open beginner item (the archive-unpack job and the edited-cover idea are both conditional/deprioritised).
+- **Dogfood `--mosaic --dithered --editor --restack`:** CLEAN. All 21 Add-menu ops re-render on the field, the 2×2 and
+  the dithered run; undo/redo apply; the taste row's live/marked chips and "why Auto shifted" sentences agree. Trim
+  8 % on the 2×2; 30.7 % on the dithered canvas against its recorded 30.3 % apron (watch for a move, not the bar).
+  The Target page's notes on the 2×2 agree (next best move, readiness "4 min of ~7 h, about 3 fields", the folded
+  panel map and health card all name the thin top-right part). "Looks like a Star cluster" on the M42 samples is
+  the known, correct verdict for star-only synthetic data (v0.492.33).
+- **Dogfood `--mosaic --big --editor`:** CLEAN. Scale pair: 0 of 16 canvas-independent answers moved. On the
+  decimated full-size run the full-size check opens, follows the navigator, the black box hugs the window, and the
+  Noise-reduction caveat reads after the re-open; the hot-pixel and star-reduction preview notes show.
+- **The Scout's two unfiled (4) leads, traced (code only, no repro) — both look low-stakes, so not filed:**
+  `storage.clear_cache` under a running stack — `stage2_aligned/` is not read by the stacker today (only
+  `merge.py` names `stage2_path_for`), and a cleared stage-1 copy falls back to `source_path` through
+  `project.first_existing_frame_path`, so the worst case is one frame read failing mid-copy. `stack-runs/prune` /
+  run DELETE under an editor export — the user's own delete of the source run fails that export job; no other
+  data is touched. The Cleanup card's "remove leftover targets" (`DELETE /api/targets/{safe}`, `remove_files=false`)
+  under a running job is the same shape as the merge bug v0.502.42 fixed, but harmless: the folder is kept,
+  `refresh_target_stats` no-ops on a missing entry, and the owner asked for the record to go. If a future (4) sweep
+  wants one of these, repro the stage-1 clear with `copy_to_cache` on.
+
 ## 2026-10-23 (Scout, branch `claude/beautiful-newton-v9b2h7`) — QA rotation sweep (4), new angle — the *mutating* routes against an in-flight job: one bug, Scout-fixed (v0.502.42). Inbox unchanged.
 
 - **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
