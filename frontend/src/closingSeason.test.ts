@@ -103,6 +103,33 @@ describe("closingTargetLine", () => {
     }
   });
 
+  it("reads a grown mosaic at its median pixel, not the canvas mean", () => {
+    // The Scout's 2026-10-21 repro, measured as a coverage map in
+    // tests/test_nightplan.py (_GROWN): a 2x2 for six hours that grew into a
+    // 3x3 for one. The area ratio (7.59) gives the mean, 55 min; the median
+    // pixel holds 7 h / 31.5 = 13 min.
+    const grown = { total_exposure_s: 25200, field_fulls: 7.587962962962963 };
+    expect(closingTargetLine(row(grown)))
+      .toContain("you have about 55 min on a typical part of it");
+    const line = closingTargetLine(row({ ...grown, depth_fulls: 31.5 }));
+    expect(line).toContain("you have about 13 min on a typical part of it");
+    // The scale named is still how much sky the canvas spans.
+    expect(line).toContain("(7.0 h in total, spread over about 8 fields of sky)");
+  });
+
+  it("ignores a measured depth on a single field and when it is unusable", () => {
+    const plain = closingTargetLine(row());
+    for (const depth_fulls of [null, undefined, 31.5, 0.5, NaN]) {
+      expect(closingTargetLine(row({ depth_fulls }))).toBe(plain);
+      expect(closingTargetLine(row({ field_fulls: 1, depth_fulls }))).toBe(plain);
+    }
+    const mosaic = closingTargetLine(row({ total_exposure_s: 36000, field_fulls: 4.0 }));
+    for (const depth_fulls of [null, undefined, 0.5, NaN, -2]) {
+      expect(closingTargetLine(row({ total_exposure_s: 36000, field_fulls: 4.0, depth_fulls })))
+        .toBe(mosaic);
+    }
+  });
+
   it("still says nothing has been kept, however wide the canvas", () => {
     // A mosaic with no kept integration must not read "about 0 s on a typical
     // part of it" — the zero case is answered before any scaling.

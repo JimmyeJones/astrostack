@@ -7,6 +7,7 @@ astronomy, not a snapshot. Altitude tolerances allow for refraction and the
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -1942,6 +1943,47 @@ def test_the_placed_path_reads_the_median_depth_too():
     assert ("So far you've got about 13 min on a typical part of it "
             "(7.0 h in total") in reason
     assert "about 21%" in reason
+
+
+def test_the_closing_card_carries_the_measured_depth_and_ranks_by_it():
+    """"Shoot these before they're gone": the row carries ``depth_fulls`` so the
+    card can read the grown raster at its median (13 min, not the 55 min mean),
+    and its tie-break is the per-part cut "Worth more time" ranks by — 21 %, the
+    same figure the planner prints for the same target."""
+    when = datetime(2026, 1, 20, 21, 0, tzinfo=timezone.utc)
+
+    def at_m42(t: LibraryTarget, safe: str) -> LibraryTarget:
+        return replace(t, safe=safe, name=safe.upper(), ra_deg=_CLOSING_M42[0],
+                       dec_deg=_CLOSING_M42[1])
+
+    grown = at_m42(_mosaic_lib(_GROWN), "grown")
+    row = np_plan.season_closing(LONDON, [grown], start_utc=when)[0]
+    assert row.depth_fulls == grown.depth_fulls == 31.5
+    assert row.field_fulls == grown.field_fulls
+    assert round(row.noise_gain * 100) == 21
+    planner = np_plan.rank_targets_now(None, JAN_EVENING, [grown]).picks[0]
+    assert row.noise_gain == round(planner.noise_gain, 3)
+
+    # Unmeasured, the same raster keeps the whole-target figure (6 %)…
+    unmeasured = at_m42(_mosaic_lib(_GROWN, measured=False), "grown")
+    old = np_plan.season_closing(LONDON, [unmeasured], start_utc=when)[0]
+    assert old.depth_fulls is None
+    assert old.noise_gain == round(np_plan.noise_gain_from_more_time(25200.0), 3)
+    # …and an even raster's measured median changes nothing but its overlap count.
+    even = at_m42(_mosaic_lib(_EVEN), "even")
+    even_row = np_plan.season_closing(LONDON, [even], start_utc=when)[0]
+    assert even_row.depth_fulls == 9.0
+
+    # Leaving the same week, the grown raster — most of whose picture holds
+    # 13 min — is now named ahead of a 3 h single field, where the whole-target
+    # cut had put it behind.
+    single = LibraryTarget(safe="single", name="SINGLE", ra_deg=_CLOSING_M42[0] + 0.5,
+                           dec_deg=_CLOSING_M42[1], frames_accepted=1080,
+                           total_exposure_s=10800.0)
+    assert [c.safe for c in np_plan.season_closing(
+        LONDON, [single, grown], start_utc=when)] == ["grown", "single"]
+    assert [c.safe for c in np_plan.season_closing(
+        LONDON, [single, unmeasured], start_utc=when)] == ["single", "grown"]
 
 
 def test_a_measured_depth_is_ignored_on_a_single_field_and_when_unusable():

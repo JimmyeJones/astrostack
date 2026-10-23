@@ -513,17 +513,18 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
   Sky-map placement Bug 2 (the ⭐ owner-reported entry above) — fix them together. Repro kept in the session
   scratchpad (`wcs_repro.py`).)_
 
-- **🟡 (Scout 2026-10-21, QA rotation sweep (2); planner half shipped v0.502.29) — on an *uneven* mosaic the
-  *other* per-panel surfaces still quote the canvas **mean** (`total ÷ field_fulls`, an area ratio), which a grown
-  raster or a deep panel lifts far above what a typical part holds: `season_closing`'s card and `perPixel.ts`'s
-  consumers (readiness / "Is it enough yet?", Dashboard progress).**
+- **🟡 (Scout 2026-10-21, QA rotation sweep (2); planner half shipped v0.502.29, closing-season card v0.502.39) —
+  on an *uneven* mosaic the *other* per-panel surfaces still quote the canvas **mean** (`total ÷ field_fulls`, an
+  area ratio), which a grown raster or a deep panel lifts far above what a typical part holds: `perPixel.ts`'s
+  remaining consumers (readiness / "Is it enough yet?", Dashboard progress).**
   *(Pillar: friendliness / trust, PRIORITY 3; size **M**; severity low–moderate; confidence: **reproduced** — the
   same three shapes now pinned in `tests/test_nightplan.py` (`_measured_mosaic`): grown 2×2→3×3 is 55 min mean vs
   13 min median; deep field + 3×3 is 2.9 h vs 13 min.)* **Fix shape:** the planner now reads
   `LibraryTarget.depth_fulls` (`webapp.field_fulls.target_depth_fulls` = newest stacking run's `n_frames_used ÷
   coverage_median_depth`, `None` → keep the area ratio) through `nightplan._panel_depth_fulls` /
-  `_panel_noise_gain`. Serve the same figure beside `field_fulls` on `ClosingTarget`, `TargetOut` and the progress
-  roll-up, and divide by it wherever a *depth* is quoted (`perPixel.ts`); keep `field_fulls` for "how much sky".
+  `_panel_noise_gain`; the closing card through `ClosingTarget.depth_fulls` + `perPixel.typicalPartFulls`. Serve
+  the same figure beside `field_fulls` on `TargetOut` and the progress roll-up, and divide by it through
+  `typicalPartFulls` wherever a *depth* is quoted; keep `field_fulls` for "how much sky".
   Update `tests/test_per_panel_phrase_mirror.py` with it. Ungated (display only).
 
 ---
@@ -3604,6 +3605,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.502.39 **"Shoot these before they're gone" reads an uneven mosaic at its median pixel — a grown 2×2→3×3 said "you have about 55 min on a typical part of it" where the median pixel holds 13 min, and ranked behind a 3 h single field leaving the same week** (`ClosingTarget.depth_fulls`, `season_closing` → `_panel_noise_gain`, `perPixel.typicalPartFulls`, `closingSeason.haveClause`). Entry in [`SHIPPED.md`](SHIPPED.md); the readiness/progress half stays in Bugs.
 - ✅ v0.502.38 **The share caption, the baked nameplate (share, print, direct JPEG download) and the Sky map tile date a run by the subs' own `SITELONG` when Settings has no location — at −120° a three-session window read "20–23 Jul" instead of the observer's "20–22 Jul"** (`editor._observer_lon` → `submit_editor_share`/`submit_editor_print` `site_lon`, `download_stack_run`, `sky.get_sky` via `resolve_site_lon`)
 - ✅ v0.502.37 **A Moon & Sun clip carrying a rotation tag no longer decodes into streaks — ffmpeg auto-rotated it to h×w while the probe said w×h, so every frame reshaped wrong with no error; the decode now keeps the coded orientation** (`ffmpeg.iter_frames` `-noautorotate`, Scout rotation sweep (3)).
 - ✅ v0.502.36 **A Moon & Sun capture stacked while still copying in says so ("Only the first 19 of this capture's 50 frames could be read — … still copying?") and its still is marked "this video has changed" with a one-click re-stack once the file completes** (`lucky.cut_short_warning` in `grade_video`, `VideoStackMeta.source_size`/`source_mtime`, `video.result_matches_source`, `VideoResultOut.source_changed`).

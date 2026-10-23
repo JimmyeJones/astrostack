@@ -6,6 +6,7 @@ import {
   fieldsOfSkyLabel,
   perPixel,
   spansMoreThanOneField,
+  typicalPartFulls,
 } from "./perPixel";
 
 describe("canvasFieldFulls", () => {
@@ -44,6 +45,23 @@ describe("perPixel", () => {
   it("divides a mosaic's total by the sky its canvas covers", () => {
     expect(perPixel(3600, 4)).toBe(900);
     expect(perPixel(540, 9)).toBe(60);
+  });
+});
+
+describe("typicalPartFulls", () => {
+  it("prefers the measured median on a mosaic", () => {
+    expect(typicalPartFulls(7.59, 31.5)).toBe(31.5);
+    // An even 3x3 counts its overlaps: 9 parts, not 7.6 fields of area.
+    expect(typicalPartFulls(7.59, 9)).toBe(9);
+  });
+
+  it("keeps the area ratio on a single field and with no usable median", () => {
+    for (const ff of [null, undefined, 1, 0.5, NaN]) {
+      expect(typicalPartFulls(ff, 31.5)).toBe(ff);
+    }
+    for (const df of [null, undefined, 0.5, NaN, -1, Infinity]) {
+      expect(typicalPartFulls(4, df)).toBe(4);
+    }
   });
 });
 

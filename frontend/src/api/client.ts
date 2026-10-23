@@ -240,6 +240,13 @@ export interface ClosingTarget {
    * / null on a single field, on a target with no stacked picture, and on an
    * older backend — the line then quotes the total, as it always did. */
   field_fulls?: number | null;
+  /** The measured counterpart: the newest run's `n_frames_used ÷
+   * coverage_median_depth`, what a *typical part* of the picture holds. The
+   * line divides by it (`perPixel.typicalPartFulls`) because `field_fulls` is
+   * an area ratio — a canvas mean that a grown mosaic lifts far above its
+   * median pixel. Absent / null on a single field, an older run with no median
+   * and an older backend; `field_fulls` then stands. */
+  depth_fulls?: number | null;
 }
 
 /** `GET /api/plan/closing` — "shoot these before they're gone". An empty
