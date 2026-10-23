@@ -8,23 +8,25 @@
 ## Front of the queue (2026-10-23)
 
 **No ungated bug is open.** The Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
-progress / Tonight badge); a dogfood pass found and fixed the week plan's same-sky flip (v0.502.41). A Builder with nothing ungated should take a beginner feature from "Features that serve
+progress / Tonight badge); a dogfood pass found and fixed the week plan's same-sky flip (v0.502.41); the Scout's sweep (4) fixed a merge that
+deleted a folder a stack was still writing into (v0.502.42). A Builder with nothing ungated should take a beginner feature from "Features that serve
 real workflows" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), or dogfood (`--mosaic --editor`) and file what it finds.
 
 **Gated, do not start:** the un-located-panel entry (top of Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
 re-litigate a stand-down that carries numbers. **Issue inbox:** #878, #880, #903, #1015 — all previously acted-on
-and owner-gated, none updated since 2026-10-12 (re-checked 2026-10-22).
+and owner-gated, none updated since 2026-10-12 (re-checked 2026-10-23).
 
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (3), 2026-10-22
-→ next sweep is (4).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (4), 2026-10-23
+→ next sweep is (1).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-10-23 (Scout, branch `claude/beautiful-newton-v9b2h7`) — **QA rotation sweep (4), new angle: mutating routes vs an in-flight job — `POST /api/targets/merge` rmtree'd a source a stack was still writing into (job "done", picture orphaned); Scout-fixed v0.502.42 (409 while a source is busy).** Leads for the next (4): cache clear / run delete under a running job (`docs/PROCESS-NOTES.md`). Inbox: the same four, owner-gated. **Rotation: (4) done → next sweep is (1).***
 *2026-10-23 (Builder, branch `claude/nice-carson-ojgjii`) — **v0.502.41: "Plan my week" names one twin of a same-sky pair every night — the dogfood `--mosaic` library's single field and 2×2 mosaic of M42 swapped on a 0.1-point score wobble (six rows mosaic, Thursday the field, headline following the odd one out, with a "Needs 3×3 mosaic" badge on it)** (`plan_week` → `_same_sky_pick`, `WEEK_SAME_SKY_DEG`, `WEEK_SAME_SKY_SCORE_TOLERANCE`). Dogfood `--mosaic --editor` otherwise CLEAN. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood.*
 *2026-10-23 (Builder, branch `claude/nice-carson-gzxsm8`) — **v0.502.40: "Is it enough yet?", Dashboard progress, the Tonight row badge and the "keep going tonight" pick price an uneven mosaic's goal at its median pixel** (`depth_fulls` on `TargetOut`/`TargetProgressOut`/`PlannedTarget`, `integrationReadiness` → `typicalPartFulls`). **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood.*
 *2026-10-23 (Builder, branch `claude/nice-carson-bo9fum`) — **v0.502.39: "Shoot these before they're gone" reads an uneven mosaic at its median pixel (55 → 13 min on the grown shape) and tie-breaks by the per-part noise cut** (`ClosingTarget.depth_fulls`, `perPixel.typicalPartFulls`). **START HERE NEXT RUN:** Builder: item 1 (readiness/progress half).*
@@ -41,7 +43,6 @@ cleaner stack" read the whole-canvas σ, so on a grown mosaic the older, half-si
 identical depth on the shared sky) — Scout-fixed v0.502.33 (`Compare.noiseComparison` `widerSky`, the cover nudge's
 `MIN_SKY_SHARE` 0.9).** Inbox: the same four, all owner-gated. Suite 8214 passed / 7 skipped; dogfood `--mosaic`
 CLEAN. **START HERE NEXT RUN:** Builder: item 3 (S30 outlier floor), 4 or 1. **Rotation: (2) done → next sweep is (3).***
-*2026-10-21 (Builder, branch `claude/festive-knuth-ykn52w`) — **v0.502.32: the "did it get better?" matched-crop picture carries its patch through both masters' WCS on a grown mosaic** (`noisedelta._sky_mapper`; same sky, same native box, σ ratio honest; unsolved different-shaped pair self-hides). **START HERE NEXT RUN:** Builder: item 3 (S30 outlier floor), 4 or 1.*
 
 ## Standing frontier
 
