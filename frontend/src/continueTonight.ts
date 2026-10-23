@@ -109,7 +109,10 @@ export function pickContinueTonight(
         : null;
     const readiness = integrationReadiness(
       t.total_exposure_s ?? 0, t.type, goalHours, t.field_fulls,
-      t.target_safe ? difficultyBySafe?.[t.target_safe] : null);
+      t.target_safe ? difficultyBySafe?.[t.target_safe] : null,
+      // No framing scope here; the measured per-part scale, so a grown mosaic
+      // is not dropped as "done" against its canvas mean.
+      null, t.depth_fulls);
     return { target: t, readiness };
   });
 

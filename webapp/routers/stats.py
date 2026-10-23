@@ -275,6 +275,14 @@ class TargetProgressOut(BaseModel):
     # an older backend — the frontend then falls back to 1.0 (today's
     # behaviour). See :mod:`webapp.field_fulls`.
     field_fulls: float | None = None
+    # The measured counterpart: the newest run's ``n_frames_used ÷
+    # coverage_median_depth`` (:func:`webapp.field_fulls.target_depth_fulls`).
+    # ``field_fulls`` is an area ratio — a canvas mean — so on an uneven mosaic
+    # (a grown raster, a deep panel) the goal it scales prices far less than a
+    # typical part needs. The overview scales by this where it is measured and
+    # keeps ``field_fulls`` otherwise. ``None`` on a single field, an older run
+    # with no median, and on an older backend.
+    depth_fulls: float | None = None
     # This target's "how hard is it for a Seestar?" verdict, when the bundled
     # catalog has a vetted one. Carried for the same reason ``object_type`` is:
     # it is an input to the goal. The per-type goal cannot tell a bright compact
@@ -303,7 +311,7 @@ def _collect_progress(lib, targets, night_of=None) -> list[TargetProgressOut]:  
     from seestack.nightplan import load_catalog
     from seestack.objectinfo import identify_object
     from seestack.session_recap import recent_night_pace_s
-    from webapp.field_fulls import target_field_fulls
+    from webapp.field_fulls import target_depth_fulls, target_field_fulls
 
     catalog = load_catalog()
     rows: list[TargetProgressOut] = []
@@ -316,12 +324,14 @@ def _collect_progress(lib, targets, night_of=None) -> list[TargetProgressOut]:  
         goal_s: float | None = None
         pace_s: float | None = None
         field_fulls: float | None = None
+        depth_fulls: float | None = None
         proj = None
         try:
             proj = Project.open(lib.target_dir(t))
             goal_s = read_goal_s(proj)
             pace_s = recent_night_pace_s(proj, night_of=night_of)
             field_fulls = target_field_fulls(proj)
+            depth_fulls = target_depth_fulls(proj)
         except Exception:  # noqa: BLE001 — a broken project must not 500 the dashboard
             pass
         finally:
@@ -335,6 +345,7 @@ def _collect_progress(lib, targets, night_of=None) -> list[TargetProgressOut]:  
             goal_s=goal_s,
             recent_pace_s=pace_s,
             field_fulls=field_fulls,
+            depth_fulls=depth_fulls,
             difficulty=_difficulty_out(info),
         ))
     return rows

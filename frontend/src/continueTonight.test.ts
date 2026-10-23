@@ -127,6 +127,21 @@ describe("pickContinueTonight", () => {
     expect(out.pick.readiness?.goalHours).toBe(16);
   });
 
+  it("does NOT drop a grown mosaic as 'plenty' against its canvas mean", () => {
+    // A 2x2 for most of the time that grew into a 3x3: 7.59 fields of sky by
+    // area, but the subs were shared between 31.5 typical parts. 12 h clears a
+    // 1.5 h cluster goal priced by area (11.4 h) while a typical part holds
+    // 23 minutes of it.
+    const grown = {
+      name: "Grown", target_safe: "g", type: "Cluster",
+      total_exposure_s: 12 * 3600, score: 90, field_fulls: 7.587962962962963,
+    };
+    expect(pickContinueTonight(plan([target(grown)]))).toBeNull();
+    const out = pickContinueTonight(plan([target({ ...grown, depth_fulls: 31.5 })]))!;
+    expect(out.pick.target.target_safe).toBe("g");
+    expect(out.pick.readiness?.goalHours).toBeCloseTo(47.25, 5);
+  });
+
   it("caps the runners-up list", () => {
     const p = plan([
       target({ name: "A", target_safe: "a", total_exposure_s: 4 * 3600 }),

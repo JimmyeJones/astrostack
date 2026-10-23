@@ -112,3 +112,31 @@ def test_the_two_surfaces_build_the_same_mosaic_clause():
         "<scale>)'. The planner's sentence mirrors that idiom by hand — if the "
         "card changed on purpose, change seestack.nightplan._have_phrase with it."
     )
+
+
+def test_every_readiness_surface_takes_its_per_part_scale_from_one_function():
+    """The measured per-part divisor has one definition on each side —
+    ``perPixel.typicalPartFulls`` and :func:`seestack.nightplan._panel_depth_fulls`
+    — and both refuse the same inputs, so the planner's sentence, the closing
+    card and the "Is it enough yet?" goal cannot price one uneven mosaic three
+    ways. ``readiness.ts`` (the Target page, the Dashboard roll-up, the Tonight
+    row badge and the "keep going tonight" pick all route through it) must reach
+    the scale through that function rather than growing a copy of the guard."""
+    from seestack.nightplan import _panel_depth_fulls
+
+    src = _ts_source()
+    body = re.search(
+        r"export function typicalPartFulls\((.*?)^\}", src, re.M | re.S)
+    assert body is not None, f"Could not find `typicalPartFulls` in {PER_PIXEL_TS.name}."
+    assert "!spansMoreThanOneField(fieldFulls)) return fieldFulls" in body.group(1)
+    assert "depthFulls < 1" in body.group(1)
+    assert "!Number.isFinite(depthFulls)" in body.group(1)
+    # The same refusals on the Python side.
+    for ff, df, want in [(1.0, 31.5, 1.0), (None, 31.5, None), (7.59, None, 7.59),
+                         (7.59, 0.5, 7.59), (7.59, float("nan"), 7.59),
+                         (7.59, float("inf"), 7.59), (7.59, 31.5, 31.5)]:
+        assert _panel_depth_fulls(ff, df) == want, (ff, df)
+
+    readiness = (PER_PIXEL_TS.parents[2] / "readiness.ts").read_text(encoding="utf-8")
+    assert "typicalPartFulls(cleanFieldFulls, depthFulls)" in readiness
+    assert "depthFulls < 1" not in readiness
