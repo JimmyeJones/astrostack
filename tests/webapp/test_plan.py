@@ -1863,6 +1863,29 @@ def test_a_closing_mosaic_row_carries_the_sky_its_subs_were_spread_over(
                for safe, r in by_safe.items() if safe != "M_42")
 
 
+def test_a_closing_mosaic_row_carries_its_measured_median_depth(
+        client, solved_library):
+    """End-to-end: the newest run's ``coverage_median_depth`` reaches the
+    "Shoot these before they're gone" row as ``depth_fulls`` (1200 subs over a
+    median pixel of 30 → 40 typical parts), so the card reads the thin majority
+    of an uneven raster instead of its canvas mean — and its tie-break is the
+    per-part cut the planner's row for the same target carries."""
+    from seestack import nightplan as np_plan
+
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    _attach_mosaic_stack(solved_library, "M_42", fields_across=2,
+                         total_exposure_s=36000.0, coverage_median_depth=30.0)
+
+    rows = client.get("/api/plan/closing",
+                      params={"when": JAN_EVENING}).json()["targets"]
+    row = next(r for r in rows if r["safe"] == "M_42")
+    assert row["field_fulls"] == 4.0
+    assert row["depth_fulls"] == 40.0
+    assert row["noise_gain"] == round(
+        np_plan._panel_noise_gain(row["total_exposure_s"], 4.0, 40.0), 3)
+    assert all(r["depth_fulls"] is None for r in rows if r["safe"] != "M_42")
+
+
 def test_a_closing_row_with_no_stacked_picture_serves_no_scale(
         client, solved_library):
     """The ordinary case for a target the owner has only just started, and the
@@ -1873,6 +1896,7 @@ def test_a_closing_row_with_no_stacked_picture_serves_no_scale(
                       params={"when": JAN_EVENING}).json()["targets"]
     assert rows, "Orion in mid-January is on its way out"
     assert all("field_fulls" in r and r["field_fulls"] is None for r in rows)
+    assert all("depth_fulls" in r and r["depth_fulls"] is None for r in rows)
 
 
 # ---- "Where you observe from" (/api/plan/site) — Settings redesign slice 4 ----

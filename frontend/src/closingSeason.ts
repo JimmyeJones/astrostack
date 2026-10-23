@@ -6,6 +6,7 @@
 
 import {
   A_TYPICAL_PART, fieldsOfSkyLabel, perPixel, spansMoreThanOneField,
+  typicalPartFulls,
 } from "./components/target/perPixel";
 import type { ClosingTarget, SeasonClosing } from "./api/client";
 import { formatIntegration } from "./format";
@@ -63,6 +64,13 @@ export function lastNightLabel(date: string): string {
  * already corrected by — this is the sixth surface of that correction, not a
  * sixth definition of it.
  *
+ * **Uneven rasters read their median, not their mean.** `field_fulls` is an
+ * area ratio, so dividing by it gives the canvas *mean* — and a grown 2x2→3x3
+ * read "about 55 min on a typical part" over a picture whose median pixel holds
+ * 13. Where the run measured it, `depth_fulls` is the divisor
+ * (`typicalPartFulls`, the mirror of the planner's `_panel_depth_fulls`);
+ * `field_fulls` still names the scale.
+ *
  * Single-field targets, a target with no stacked picture, and an older backend
  * that sends no scale are **byte-for-byte** what they always were: ``perPixel``
  * and ``spansMoreThanOneField`` both read a missing or sub-unity figure as 1.0,
@@ -73,7 +81,10 @@ function haveClause(t: ClosingTarget): string {
   if (!(t.total_exposure_s > 0)) return "you haven't kept any of it yet";
   const total = formatIntegration(t.total_exposure_s);
   if (!spansMoreThanOneField(t.field_fulls)) return `you have ${total} on it`;
-  const depth = formatIntegration(perPixel(t.total_exposure_s, t.field_fulls));
+  // The measured median where the run has one: `field_fulls` alone gives the
+  // canvas mean, which a grown mosaic lifts far above a typical part.
+  const depth = formatIntegration(
+    perPixel(t.total_exposure_s, typicalPartFulls(t.field_fulls, t.depth_fulls)));
   return `you have about ${depth} on ${A_TYPICAL_PART} of it`
     + ` (${total} in total, spread over ${fieldsOfSkyLabel(t.field_fulls)})`;
 }

@@ -10,9 +10,10 @@
 Every item below is an open entry at the end of "Bugs (fix these first)" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md),
 reproduced and **ungated** — a Builder can start any of them without the owner. Take them in this order:
 
-1. 🟡 **Size M — on an uneven mosaic the closing-season card and `perPixel.ts`'s consumers still quote the canvas
-   mean as "a typical part"** — the planner half shipped v0.502.29 (`LibraryTarget.depth_fulls`,
-   `nightplan._panel_depth_fulls`); serve `webapp.field_fulls.target_depth_fulls` beside `field_fulls` on the rest.
+1. 🟡 **Size M — on an uneven mosaic readiness ("Is it enough yet?") and Dashboard progress still quote the canvas
+   mean as "a typical part"** — the planner (v0.502.29) and the closing-season card (v0.502.39,
+   `perPixel.typicalPartFulls`) are done; serve `webapp.field_fulls.target_depth_fulls` on `TargetOut` and the
+   progress roll-up and divide through `typicalPartFulls`.
 
 **Gated, do not start:** the un-located-panel entry (top of Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
@@ -28,6 +29,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-23 (Builder, branch `claude/nice-carson-bo9fum`) — **v0.502.39: "Shoot these before they're gone" reads an uneven mosaic at its median pixel (55 → 13 min on the grown shape) and tie-breaks by the per-part noise cut** (`ClosingTarget.depth_fulls`, `perPixel.typicalPartFulls`). **START HERE NEXT RUN:** Builder: item 1 (readiness/progress half).*
 *2026-10-22 (Builder, branch `claude/nice-carson-ront7e`) — **v0.502.38: the share caption, the baked nameplate (share, print, JPEG download) and the Sky map tile date a run by the subs' own `SITELONG` when Settings has no location** (`editor._observer_lon`, `submit_editor_share`/`submit_editor_print` `site_lon`, `resolve_site_lon`). **START HERE NEXT RUN:** Builder: item 1.*
 *2026-10-22 (Scout, branch `claude/beautiful-newton-jbziyg`) — **QA rotation sweep (3), new angle: ffmpeg auto-rotates a rotation-tagged clip to h×w while the probe says w×h, so `iter_frames` reshaped every frame into streaks with no error — Scout-fixed v0.502.37 (`-noautorotate`).** Inbox: the same four, all owner-gated. Suite 8241 passed / 7 skipped. **START HERE NEXT RUN:** Builder: item 2 or 1. **Rotation: (3) done → next sweep is (4).***
 *2026-10-22 (Builder, branch `claude/nice-carson-ywmwk2`) — **v0.502.36: a Moon & Sun capture stacked while still copying in warns ("Only the first N of … frames could be read") and its still is marked changed once the file completes** (`lucky.cut_short_warning`, `VideoStackMeta.source_size`, `VideoResultOut.source_changed`). **START HERE NEXT RUN:** Builder: item 2 or 1.*
@@ -52,9 +54,6 @@ RUN:** Builder: item 4 (S30 outlier floor), 5 or 1. **Rotation: (1) done → nex
 `output/` files gone under a live DB row — CLEAN (0 × 5xx both times; every 404/422 a deliberate "nothing yet").**
 Inbox: the same four, all owner-gated. Suite 8206 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %).
 **START HERE NEXT RUN:** Builder: item 4 (S30 outlier floor), 5 or 1. **Rotation: (4) done → next sweep is (1).***
-*2026-10-21 (Builder, branch `claude/festive-knuth-6n59fg`) — **v0.502.30: a saved look (my default / My presets /
-the Gallery batch) no longer replays its crop's canvas fractions on other pictures** (`routers/editor._without_saved_crop`,
-`savedLookCrop.dropSavedCrop`). **START HERE NEXT RUN:** Builder: item 5 (S30 outlier floor), item 6 or item 1.*
 
 ## Standing frontier
 

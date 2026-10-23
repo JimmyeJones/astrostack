@@ -74,6 +74,29 @@ export function perPixel(total: number, fieldFulls: number | null | undefined): 
   return total / canvasFieldFulls(fieldFulls);
 }
 
+/** The divisor that turns a total into what a *typical part* holds, preferring
+ * the run's measured `depth_fulls` (`n_frames_used ÷ coverage_median_depth`,
+ * `webapp/field_fulls.target_depth_fulls`) over the area ratio.
+ *
+ * `fieldFulls` is an area ratio, so `perPixel(total, fieldFulls)` is the canvas
+ * *mean* — exact on an evenly shot raster, far too deep on a grown one (a 2x2
+ * for six hours that became a 3x3 for one reads 55 min where the median pixel
+ * holds 13). Mirrors `seestack.nightplan._panel_depth_fulls`: a canvas that does
+ * not span more than one field, and a missing, non-finite or sub-unity
+ * `depthFulls`, return `fieldFulls` unchanged — so a single field, an older run
+ * with no median and an older backend read exactly as before. Keep `fieldFulls`
+ * for naming *how much sky* (`fieldsOfSkyLabel`). */
+export function typicalPartFulls(
+  fieldFulls: number | null | undefined,
+  depthFulls: number | null | undefined,
+): number | null | undefined {
+  if (!spansMoreThanOneField(fieldFulls)) return fieldFulls;
+  if (depthFulls == null || !Number.isFinite(depthFulls) || depthFulls < 1) {
+    return fieldFulls;
+  }
+  return depthFulls;
+}
+
 /** How to name one part of a mosaic's canvas in a sentence about its depth.
  *
  * Deliberately **"a typical part"**, never "each part". Every per-pixel figure

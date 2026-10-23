@@ -1,5 +1,28 @@
 # Shipped — the record
 
+## 2026-10-23 (Builder, branch `claude/nice-carson-bo9fum`) — the closing-season card reads an uneven mosaic at its median
+
+### v0.502.39 — `ClosingTarget.depth_fulls`, `season_closing` → `_panel_noise_gain`, `perPixel.typicalPartFulls`
+
+**What.** The second slice of the Scout's 2026-10-21 sweep (2) entry (planner half v0.502.29). The "Shoot these before
+they're gone" card divided a mosaic's total by `field_fulls`, an area ratio — the canvas *mean* — so the grown
+2×2→3×3 shape (`tests/test_nightplan.py` `_GROWN`) read "you have about 55 min on a typical part of it" over a picture
+whose median pixel holds 13 min; and its tie-break used the whole-target noise cut (6 %), so leaving in the same week
+it was named behind a 3 h single field, the flattering direction on the one card whose claim expires.
+
+**Fix.** `ClosingTarget.depth_fulls` carries `LibraryTarget.depth_fulls` (already annotated by `/plan`'s shared
+library read) to the served row; the tie-break is `_panel_noise_gain`, the figure "Worth more time" ranks by (21 % on
+the grown shape — identical to the old figure on every even raster and every row with no measured median).
+`closingSeason.haveClause` divides by the new `perPixel.typicalPartFulls` (the TS mirror of `_panel_depth_fulls`) and
+still names the sky by `field_fulls`. The `/plan/closing` cache key now includes both scales.
+
+**Tests.** +1 engine (`test_the_closing_card_carries_the_measured_depth_and_ranks_by_it` — depth carried, 21 % equals
+the planner's figure, the grown raster now named ahead of the single field; fails before), +1 webapp end-to-end
+(median 30 over 1200 subs → `depth_fulls` 40 on the served row) and the no-picture row now pins `depth_fulls: null`,
++2 vitest on the card (55 → 13 min; fails before) and +2 on `typicalPartFulls`. Single-field, unmeasured and
+older-backend rows byte-for-byte unchanged (pinned). One optional dataclass field and one added response key; no
+config, schema, on-disk or default change.
+
 ## 2026-10-22 (Builder, branch `claude/nice-carson-ront7e`) — the share and print caption date a night by the subs' own longitude
 
 ### v0.502.38 — `editor._observer_lon`, `submit_editor_share`/`submit_editor_print` `site_lon`, `download_stack_run`, `sky.get_sky`

@@ -1019,7 +1019,10 @@ def get_season_closing(
         # Depth is in the signature for the same reason it is in the week plan's:
         # the ``SEASON_MAX_TARGETS`` cap selects *by* it, so a night's capture
         # can change which targets get scanned without adding or moving one.
-        tuple((t.safe, t.ra_deg, t.dec_deg, t.total_exposure_s, t.frames_accepted)
+        # …and so is the per-part scale: a restack can change what a typical
+        # part holds (and so the line and its tie-break) at the same total.
+        tuple((t.safe, t.ra_deg, t.dec_deg, t.total_exposure_s, t.frames_accepted,
+               t.field_fulls, t.depth_fulls)
               for t in targets),
     )
     closing = cached_for_registry(

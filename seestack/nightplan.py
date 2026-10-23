@@ -1883,6 +1883,17 @@ class ClosingTarget:
     #: the order they come in (see :func:`season_closing` on why the ranking is
     #: already scale-free).
     field_fulls: float | None = None
+    #: The measured counterpart (:attr:`LibraryTarget.depth_fulls`, the newest
+    #: run's ``n_frames_used ÷ coverage_median_depth``). ``field_fulls`` is an
+    #: *area* ratio, so ``total ÷ field_fulls`` is the canvas mean — and on a
+    #: grown 2x2→3x3 that is 55 min where the median pixel holds 13, the
+    #: flattering direction on the card that asks "can I let this one go?".
+    #: The card divides by this where the canvas spans more than one field and
+    #: keeps ``field_fulls`` to name how much sky it is
+    #: (``closingSeason.haveClause``). ``None`` on a single field, an older run
+    #: with no median recorded, and an older backend — the area ratio then
+    #: stands, exactly as before.
+    depth_fulls: float | None = None
 
 
 def season_closing(
@@ -1923,7 +1934,12 @@ def season_closing(
     buys is ``1 - sqrt((T/F) / ((T + h)/F))`` — the ``F`` cancels and the figure
     is exactly the one computed from the totals. The *displayed* "what you
     already have on it" does not cancel, which is what
-    :attr:`ClosingTarget.field_fulls` is for.
+    :attr:`ClosingTarget.field_fulls` is for. On an **uneven** raster (a grown
+    mosaic, a deep field merged with a thin one) the patch holds ``T/D`` with
+    ``D`` the measured :attr:`ClosingTarget.depth_fulls`, not ``T/F``, and the
+    cancellation fails — so the key is :func:`_panel_noise_gain`, the figure
+    "Worth more time" ranks by, which reduces to the totals' figure on every
+    even raster and every row with no measured median.
 
     **Which targets are scanned, and why it is the mirror of :func:`plan_week`.**
     ``max_targets`` is :data:`SEASON_MAX_TARGETS`, a *cost* bound (see there),
@@ -2024,8 +2040,14 @@ def season_closing(
             weeks_left=samples[last_usable][0],
             last_night=samples[last_usable][1],
             total_exposure_s=exposure,
-            noise_gain=round(noise_gain_from_more_time(exposure), 3),
+            # Per typical part (:func:`_panel_noise_gain`), the figure "Worth
+            # more time" ranks by: identical to the whole-target cut on an even
+            # raster and on every row with no measured median, larger on a
+            # grown one whose typical patch holds far less than the mean.
+            noise_gain=round(_panel_noise_gain(exposure, t.field_fulls,
+                                               t.depth_fulls), 3),
             field_fulls=t.field_fulls,
+            depth_fulls=t.depth_fulls,
         ))
     out.sort(key=lambda c: (c.weeks_left, -c.noise_gain, c.safe))
     return out
