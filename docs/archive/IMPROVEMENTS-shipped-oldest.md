@@ -4,6 +4,12 @@ Moved verbatim and in order from the foot of the `## Shipped` list in [`../IMPRO
 oldest last, so the working list stays no longer than a run found it (AGENTS.md §2). Newer moves are appended
 above older ones.
 
+## Moved 2026-10-23 (Scout, branch `claude/beautiful-newton-v9b2h7`)
+
+- **Fix red CI (pytest-qt import crash)** — CI had been failing on every merge:
+
+- **Integration time on Gallery cards** — stack runs now record their effective
+
 ## Moved 2026-10-21 (Scout, branch `claude/zen-curie-t3nyff`)
 
 - **Reuse stack settings from a previous run** — new

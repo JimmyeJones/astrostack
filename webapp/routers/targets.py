@@ -130,8 +130,26 @@ def merge_targets(body: MergeRequest, request: Request) -> dict:
     change to the target, so the confirmation says it rather than leaving the owner
     to find a cover he did not pin.
     """
+    jm = deps.get_job_manager(request)
     lib = deps.open_library(request)
     try:
+        # A source folder is deleted at the end of the merge, so a job still
+        # working on one would finish into a folder that no longer belongs to any
+        # target: a stack reported "done" while its picture landed in an orphaned
+        # ``output/`` and its run row in a deleted ``project.sqlite``. Refuse
+        # rather than race; the same press works once that job has finished.
+        # Jobs carry the safe name and a source may be given by display name.
+        # The destination survives, so a job on it is no reason to refuse.
+        into = lib.find_target(body.into)
+        sources = {e.safe_name for e in map(lib.find_target, body.sources) if e}
+        sources.discard(into.safe_name if into else None)
+        busy = next((j for j in jm.active() if j.target in sources), None)
+        if busy is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(f"'{busy.target}' is still being worked on (a {busy.kind} "
+                        "job is queued or running). Combine it once that job has "
+                        "finished, or cancel it on the Jobs page."))
         try:
             result = lib.merge_targets_result(body.into, body.sources)
         except FileNotFoundError as exc:

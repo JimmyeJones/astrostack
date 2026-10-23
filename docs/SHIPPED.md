@@ -1,5 +1,26 @@
 # Shipped — the record
 
+## 2026-10-23 (Scout, branch `claude/beautiful-newton-v9b2h7`) — combining folders no longer deletes a folder a stack is still writing into
+
+### v0.502.42 — `routers/targets.merge_targets` refuses a busy source (409)
+
+**What.** QA rotation sweep (4), new angle: the *mutating* routes against in-flight jobs (every earlier (4) sweep read
+GET answers). `POST /api/targets/merge` ends in an `rmtree` of each source target's folder and never asked the job
+queue whether something was still working on that target. Real-client repro (TestClient, real `run_stack` held at its
+start, merge pressed meanwhile): the merge answered 200 with `pictures_kept: 0`; the stack then finished `done` with
+`run_id: 1`, writing `master.fits` / `.tif` / `_coverage.fits` / `_preview.png` into an orphaned `targets/<src>/output/`
+with no `project.sqlite` (the run row went into the deleted one) — the destination had no run and no screen said the
+picture was gone. Both "Combine" buttons (the same-object nudge and the duplicate-target cleanup, #878's shape) fire it.
+
+**Fix.** The route resolves the sources to safe names (a job carries the safe name; a source may be a display name),
+drops the destination, and refuses with a plain-language 409 ("… is still being worked on … Combine it once that job
+has finished, or cancel it on the Jobs page") while any queued or running job targets one. Both buttons already show
+an error's detail. A job on the destination does not block. Additive (a new error answer); nothing on disk changes.
+
+**Tests.** +2 in `tests/webapp/test_merge_refuses_busy_source.py`: merge during a held stack on the source → 409,
+the source still listed, and after the job the same press merges and carries the new picture (fails before: 200);
+a held stack on the destination does not block the merge.
+
 ## 2026-10-23 (Builder, branch `claude/nice-carson-ojgjii`) — "Plan my week" names one twin of a same-sky pair every night
 
 ### v0.502.41 — `plan_week` → `_same_sky_pick`, `WEEK_SAME_SKY_DEG`, `WEEK_SAME_SKY_SCORE_TOLERANCE`
