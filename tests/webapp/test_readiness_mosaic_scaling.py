@@ -44,6 +44,7 @@ def _add_run(
     canvas_h: int,
     drizzle: bool = False,
     drizzle_scale: float = 1.0,
+    coverage_median_depth: float | None = None,
 ) -> int:
     """Attach one stack run of the given canvas to a fixture target.
 
@@ -63,6 +64,7 @@ def _add_run(
                 n_frames_used=200,
                 canvas_h=canvas_h, canvas_w=canvas_w,
                 coverage_min=1, coverage_max=200,
+                coverage_median_depth=coverage_median_depth,
                 options_json=json.dumps({
                     "drizzle": drizzle, "drizzle_scale": drizzle_scale,
                 }),
@@ -222,3 +224,60 @@ def test_tonight_plan_catalog_rows_carry_no_field_fulls(client, solved_library):
         # Absent or null — either is a signal to fall back to the un-scaled
         # goal on the frontend, and the shape must not carry a number.
         assert t.get("field_fulls") in (None,)
+
+
+# ---------------------------------------------------------------------------
+# The measured per-part scale — ``depth_fulls`` beside ``field_fulls``
+# ---------------------------------------------------------------------------
+#
+# ``field_fulls`` is an area ratio, so a goal scaled by it prices the canvas
+# *mean*; on an uneven mosaic (a grown raster, a deep panel) a typical part holds
+# far less. The newest run's ``n_frames_used ÷ coverage_median_depth`` is the
+# measured counterpart the planner and the closing card already read; every
+# readiness surface now gets it too. 200 subs over a median pixel of 5 is 40
+# typical parts on a canvas of 4 fields of sky.
+
+
+def _uneven_2x2(data_root: Path) -> None:
+    _add_run(data_root, "M_42", canvas_w=FRAME_W * 2, canvas_h=FRAME_H * 2,
+             coverage_median_depth=5.0)
+
+
+def test_library_progress_carries_the_measured_depth_fulls(client, solved_library):
+    _uneven_2x2(solved_library)
+    by_safe = {r["safe"]: r for r in client.get("/api/library-progress").json()}
+    assert by_safe["M_42"]["field_fulls"] == 4.0
+    assert by_safe["M_42"]["depth_fulls"] == 40.0
+
+
+def test_target_detail_carries_the_measured_depth_fulls(client, solved_library):
+    _uneven_2x2(solved_library)
+    body = client.get("/api/targets/M_42").json()
+    assert body["field_fulls"] == 4.0
+    assert body["depth_fulls"] == 40.0
+    # The light list read still pays for neither.
+    rows = {r["safe_name"]: r for r in client.get("/api/targets").json()}
+    assert rows["M_42"]["depth_fulls"] is None
+
+
+def test_tonight_plan_carries_the_measured_depth_fulls(client, solved_library):
+    _uneven_2x2(solved_library)
+    client.put("/api/settings", json={"site_lat": 30.0, "site_lon": 0.0})
+    body = client.get("/api/plan/tonight",
+                      params={"when": "2026-01-15T20:00:00+00:00"}).json()
+    by_id = {t["id"]: t for t in body["targets"]}
+    assert by_id["M_42"]["field_fulls"] == 4.0
+    assert by_id["M_42"]["depth_fulls"] == 40.0
+    assert by_id["NGC_7000"]["depth_fulls"] is None
+    assert all(t.get("depth_fulls") is None
+               for t in body["targets"] if not t["already_targeted"])
+
+
+def test_an_unmeasured_run_serves_no_depth_fulls(client, solved_library):
+    """An older run with no median recorded keeps the area ratio everywhere —
+    the frontend reads ``null`` as "use ``field_fulls``", today's behaviour."""
+    _add_run(solved_library, "M_42", canvas_w=FRAME_W * 2, canvas_h=FRAME_H * 2)
+    by_safe = {r["safe"]: r for r in client.get("/api/library-progress").json()}
+    assert by_safe["M_42"]["field_fulls"] == 4.0
+    assert by_safe["M_42"]["depth_fulls"] is None
+    assert client.get("/api/targets/M_42").json()["depth_fulls"] is None

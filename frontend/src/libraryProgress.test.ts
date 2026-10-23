@@ -18,6 +18,7 @@ function row(over: Partial<TargetProgress> & { safe: string }): TargetProgress {
     goal_s: over.goal_s ?? null,
     recent_pace_s: over.recent_pace_s ?? null,
     field_fulls: over.field_fulls ?? null,
+    depth_fulls: over.depth_fulls ?? null,
     difficulty: over.difficulty ?? null,
   };
 }
@@ -98,6 +99,18 @@ describe("rankLibraryProgress", () => {
     expect(mosaic[0].readiness.level).not.toBe("plenty");
     expect(mosaic[0].readiness.goalHours).toBe(16);
     expect(mosaic[0].readiness.fieldFulls).toBe(4);
+  });
+
+  it("judges an uneven mosaic by what a typical part holds", () => {
+    // The Scout's grown 2x2 -> 3x3: 7 h over 7.59 fields of sky, but the subs
+    // were shared between 31.5 typical parts. Fails before: the Dashboard read
+    // the canvas mean and called the cluster "solid" at 13 min a part.
+    const grown = { safe: "G", object_type: "cluster", total_exposure_s: 7 * 3600,
+                    field_fulls: 7.587962962962963 };
+    expect(rankLibraryProgress([row(grown)])[0].readiness.level).toBe("solid");
+    const [r] = rankLibraryProgress([row({ ...grown, depth_fulls: 31.5 })]);
+    expect(r.readiness.level).toBe("starting");
+    expect(r.readiness.goalHours).toBeCloseTo(47.25, 5);
   });
 });
 

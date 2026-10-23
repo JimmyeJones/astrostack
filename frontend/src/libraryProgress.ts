@@ -64,6 +64,10 @@ export function rankLibraryProgress(rows: TargetProgress[]): RankedProgress[] {
       // Dashboard's "how much longer?" and that page's "is it enough yet?" are
       // two renderings of one number rather than two answers.
       row.difficulty,
+      null,
+      // What a typical part holds, where the run measured it — the area ratio
+      // above is a canvas mean that a grown mosaic lifts far above it.
+      row.depth_fulls,
     );
     // integrationReadiness only returns null at zero integration, which the
     // backend already excludes — but guard defensively so a stray row is

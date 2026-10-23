@@ -334,6 +334,13 @@ class PlannedTarget:
     # backend — the row then falls back to the un-scaled goal (today's
     # behaviour). Purely annotation: it never affects scoring or ranking.
     field_fulls: float | None = None
+    # The measured counterpart (:attr:`LibraryTarget.depth_fulls`, the newest
+    # run's ``n_frames_used ÷ coverage_median_depth``), so the row's readiness
+    # hint scales the goal by what a *typical part* holds rather than by the
+    # area ratio — a canvas mean that a grown mosaic lifts far above its median
+    # pixel. ``None`` wherever ``field_fulls`` is, and on an older run with no
+    # median; the hint then keeps ``field_fulls``. Annotation only.
+    depth_fulls: float | None = None
     # "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
     # verdict derived from it, for any row the bundled catalog has a size for;
     # ``None`` otherwise. **Library rows carry it too**, since the verdict is
@@ -1407,6 +1414,7 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 goal_s=t.goal_s,
                 recent_pace_s=t.recent_pace_s,
                 field_fulls=t.field_fulls,
+                depth_fulls=t.depth_fulls,
                 recentre_nudge=t.recentre_nudge,
                 difficulty=t.difficulty,
                 # The same two calls, with the same ``field``, that the catalog

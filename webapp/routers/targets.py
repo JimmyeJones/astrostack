@@ -461,7 +461,7 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
 
 @router.get("/{safe}", response_model=TargetOut)
 def get_target(safe: str, request: Request) -> TargetOut:
-    from webapp.field_fulls import target_field_fulls
+    from webapp.field_fulls import target_depth_fulls, target_field_fulls
 
     lib = deps.open_library(request)
     try:
@@ -478,6 +478,9 @@ def get_target(safe: str, request: Request) -> TargetOut:
             proj = lib.open_target(safe)
             try:
                 out.field_fulls = target_field_fulls(proj)
+                # What a typical part holds, measured — the area ratio above
+                # is a canvas mean that an uneven mosaic lifts far above it.
+                out.depth_fulls = target_depth_fulls(proj)
             finally:
                 proj.close()
         except Exception:  # noqa: BLE001

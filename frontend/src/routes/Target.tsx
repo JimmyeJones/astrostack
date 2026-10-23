@@ -843,6 +843,10 @@ export function TargetView() {
             // every verdict but a measured fragment, so the sentence is
             // unchanged on an ordinary target.
             readinessCanvasScope(measuredFraming),
+            // The goal is priced per *typical part* where the run measured its
+            // median pixel; the area ratio is a canvas mean that an uneven
+            // mosaic lifts far above it (`perPixel.typicalPartFulls`).
+            target.data.depth_fulls,
           )
         : null,
     [target.data, identity.data, goal.data, measuredFraming],
@@ -1593,7 +1597,16 @@ export function TargetView() {
                       <Text size="xs" c="dimmed"
                         style={{ whiteSpace: "nowrap", cursor: "pointer" }}
                         title={
-                          !readiness.customGoal && readiness.fieldFulls > 1
+                          !readiness.customGoal && readiness.goalScale !== readiness.fieldFulls
+                            // An uneven mosaic, priced by its median pixel: the
+                            // multiplier is how many typical parts the subs were
+                            // shared between, not an area, so it says so.
+                            ? `${fmtGoal(readiness.baseGoalHours)} h on a typical part of the picture, `
+                              + `and your subs are shared between about `
+                              + `${Math.round(readiness.goalScale)} such parts `
+                              + `— so ~${fmtGoal(readiness.goalHours)} h in all. `
+                              + "Click to set your own."
+                          : !readiness.customGoal && readiness.fieldFulls > 1
                             ? `${readiness.baseGoalHours} h for each frame's worth of sky, `
                               + `and this picture covers `
                               + `${readiness.fieldFulls.toFixed(2).replace(/\.?0+$/, "")}× that `

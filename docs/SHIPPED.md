@@ -1,5 +1,31 @@
 # Shipped — the record
 
+## 2026-10-23 (Builder, branch `claude/nice-carson-gzxsm8`) — "Is it enough yet?" and Dashboard progress price an uneven mosaic at its median
+
+### v0.502.40 — `TargetOut.depth_fulls`, `TargetProgressOut.depth_fulls`, `PlannedTarget.depth_fulls`, `integrationReadiness` `depthFulls` → `perPixel.typicalPartFulls`
+
+**What.** The last slice of the Scout's 2026-10-21 sweep (2) entry (planner v0.502.29, closing card v0.502.39). Every
+readiness surface — the Target page's "Is it enough yet?", the Dashboard's "Target progress" roll-up, the Tonight
+row's "Nearly there / ~N more nights / Plenty — try something new" badge and the "keep going tonight" pick — scaled the
+per-type goal (a per-pixel depth) by `field_fulls`, an area ratio, i.e. priced the canvas *mean*. On the grown
+2×2→3×3 shape (area 7.59 fields; the subs shared between 31.5 typical parts) a 1.5 h cluster goal became 11.4 h, so
+7 h read "a solid start", 9 h "Nearly there" and 12 h dropped out of the pick as done — while a typical part held 13,
+17 and 23 minutes.
+
+**Fix.** The same measured `webapp.field_fulls.target_depth_fulls` the planner reads is now served beside
+`field_fulls` on `GET /api/targets/{safe}`, `/api/library-progress` and `/api/plan/tonight` rows.
+`integrationReadiness` (and `readinessRowHint` / `readinessRowBadge`) take an optional trailing `depthFulls` and scale
+the goal by `typicalPartFulls(fieldFulls, depthFulls)`, exposed as `goalScale`; `fieldFulls` still names how much sky.
+The Target page's goal-chip hover explains a median-priced goal as "shared between about N such parts" rather than
+claiming the picture covers 31.5× a frame. A user-set goal is never re-scaled.
+
+**Tests.** +4 webapp end-to-end (`test_readiness_mosaic_scaling.py`: 200 subs over median 5 → `depth_fulls` 40 on
+all three endpoints; an unmeasured run serves `null`), +1 mirror guard (`typicalPartFulls` and `_panel_depth_fulls`
+refuse the same inputs; `readiness.ts` routes through the one function), +5 vitest (readiness level and goal on the
+grown shape, row hint and badge, Dashboard ranking, "keep going tonight" pick — each fails before). Single-field,
+unmeasured, user-goal and older-backend verdicts are byte-for-byte unchanged (pinned with `toEqual`). Additive
+response keys only; no config, schema, on-disk or default change.
+
 ## 2026-10-23 (Builder, branch `claude/nice-carson-bo9fum`) — the closing-season card reads an uneven mosaic at its median
 
 ### v0.502.39 — `ClosingTarget.depth_fulls`, `season_closing` → `_panel_noise_gain`, `perPixel.typicalPartFulls`

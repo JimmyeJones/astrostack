@@ -69,6 +69,8 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
         // enough?" and "will it fit in one frame?" cannot answer as if the
         // other had not been asked. See `readinessFramingScope`.
         readinessFramingScope(t.framing),
+        // …and scaled by what a typical part holds where that was measured.
+        t.depth_fulls,
       )
     : null;
   // "Will it fit?" nudge for a target that's bigger than (or as wide as) a

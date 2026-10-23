@@ -9,6 +9,7 @@
 import {
   clearNightsFromPace, FINISH_FIRST_MAX_NIGHTS, nightWord,
 } from "./components/clearNights";
+import { typicalPartFulls } from "./components/target/perPixel";
 import { formatIntegration } from "./format";
 import { objectTypeBucket, type TypeBucket } from "./tonight";
 
@@ -111,6 +112,13 @@ export interface IntegrationReadiness {
   // supplies no figure (older backend / target with no stack), which reproduces
   // today's behaviour bit-for-bit on single-field targets.
   fieldFulls: number;
+  // What the per-type goal was actually multiplied by: ``fieldFulls``, or — on
+  // a mosaic whose run measured its median pixel — the ``depthFulls`` the
+  // caller passed (``perPixel.typicalPartFulls``). The two differ on an
+  // *uneven* raster, where the area ratio is a canvas mean far above what a
+  // typical part holds; ``fieldFulls`` still names how much sky. 1.0 under a
+  // user-set goal, which is never re-scaled.
+  goalScale: number;
   // True when goalHours came from a user-set goal rather than the per-type
   // default — lets the card label it "your goal" instead of "goal". A
   // user-set goal is **not** re-scaled by ``fieldFulls``: the owner naming
@@ -175,6 +183,14 @@ export function fmtGoal(h: number): string {
 // which is every surface but the Target page — and the verdict is byte-for-byte
 // what it always was. See ``readinessCanvasScope``.
 //
+// ``depthFulls`` is the run's measured ``n_frames_used ÷ coverage_median_depth``
+// (``webapp/field_fulls.target_depth_fulls``). ``fieldFulls`` is an *area*
+// ratio, so scaling by it prices the canvas mean — and a 2x2 shot for six hours
+// that grew into a 3x3 for one has its median pixel at a quarter of that mean.
+// Where it is measured on a mosaic the goal is scaled by it instead
+// (``typicalPartFulls``, the mirror of the planner's ``_panel_depth_fulls``);
+// omit it — a single field, an older run, an older backend — and nothing moves.
+//
 // Returns null when there's no integration yet — nothing useful to say — so
 // the caller can simply render nothing.
 export function integrationReadiness(
@@ -184,6 +200,7 @@ export function integrationReadiness(
   fieldFulls?: number | null,
   difficulty?: GoalDifficulty,
   canvasScope?: string | null,
+  depthFulls?: number | null,
 ): IntegrationReadiness | null {
   if (!Number.isFinite(exposureSeconds) || exposureSeconds <= 0) return null;
   const bucket = objectTypeBucket(type);
@@ -204,9 +221,12 @@ export function integrationReadiness(
     fieldFulls > 1
       ? fieldFulls
       : 1;
-  const goalHours = customGoal
-    ? baseGoalHours
-    : baseGoalHours * cleanFieldFulls;
+  // `typicalPartFulls` hands back `cleanFieldFulls` itself on a single field
+  // and whenever no usable median was measured, so only a measured mosaic moves.
+  const goalScale = customGoal
+    ? 1
+    : (typicalPartFulls(cleanFieldFulls, depthFulls) ?? cleanFieldFulls);
+  const goalHours = baseGoalHours * goalScale;
   const hours = exposureSeconds / 3600;
   const ratio = hours / goalHours;
   const fraction = Math.max(0, Math.min(1, ratio));
@@ -251,6 +271,7 @@ export function integrationReadiness(
     goalHours,
     baseGoalHours,
     fieldFulls: cleanFieldFulls,
+    goalScale,
     customGoal,
     hours,
     fraction,
@@ -320,9 +341,11 @@ export function readinessRowHint(
   fieldFulls?: number | null,
   difficulty?: GoalDifficulty,
   canvasScope?: string | null,
+  depthFulls?: number | null,
 ): { label: string; color: string } | null {
   const r = integrationReadiness(
-    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty, canvasScope);
+    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty, canvasScope,
+    depthFulls);
   if (!r) return null;
   if (r.level === "plenty") {
     return {
@@ -368,9 +391,11 @@ export function readinessRowBadge(
   fieldFulls?: number | null,
   difficulty?: GoalDifficulty,
   canvasScope?: string | null,
+  depthFulls?: number | null,
 ): { label: string; color: string; tooltip: string } | null {
   const r = integrationReadiness(
-    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty, canvasScope);
+    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty, canvasScope,
+    depthFulls);
   if (r && r.level !== "plenty") {
     const est = clearNightsFromPace((r.goalHours - r.hours) * 3600, paceSeconds);
     if (est && est.nights !== null && est.nights <= FINISH_FIRST_MAX_NIGHTS) {
@@ -382,7 +407,8 @@ export function readinessRowBadge(
     }
   }
   const hint = readinessRowHint(
-    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty, canvasScope);
+    exposureSeconds, type, goalHoursOverride, fieldFulls, difficulty, canvasScope,
+    depthFulls);
   // `readinessRowHint` only returns a hint when the readiness itself exists, so
   // `r` is non-null here; the guard keeps the types honest rather than asserting.
   return hint && r ? { ...hint, tooltip: r.verdict } : null;

@@ -46,6 +46,15 @@ class TargetOut(BaseModel):
     # stack yet, and on an older backend — the card then falls back to the
     # un-scaled goal (today's behaviour). See :mod:`webapp.field_fulls`.
     field_fulls: float | None = None
+    # The measured counterpart, also set by ``get_target``: the newest run's
+    # ``n_frames_used ÷ coverage_median_depth``
+    # (:func:`webapp.field_fulls.target_depth_fulls`). ``field_fulls`` is an
+    # area ratio, so a goal scaled by it prices the canvas *mean* — which a
+    # grown mosaic lifts far above what a typical part holds. The card scales
+    # by this where it is measured (``perPixel.typicalPartFulls``) and keeps
+    # ``field_fulls`` to name how much sky. ``None`` on a single field, an older
+    # run with no median, and everywhere ``field_fulls`` is.
+    depth_fulls: float | None = None
 
 
 class TargetPatch(BaseModel):

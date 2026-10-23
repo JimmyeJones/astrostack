@@ -191,6 +191,45 @@ describe("integrationReadiness", () => {
       expect(r?.fraction).toBeCloseTo(0.5, 5);
     });
 
+    // An *uneven* mosaic: the area ratio is a canvas mean. The Scout's grown
+    // 2x2 -> 3x3 (six hours on the 2x2, one on the 3x3), measured as a coverage
+    // map in tests/test_nightplan.py (_GROWN): area 7.59 fields, but the subs
+    // were shared between 31.5 typical parts (n_frames_used / median depth).
+    it("prices a grown mosaic's goal at its median pixel, not the canvas mean", () => {
+      const GROWN_FF = 7.587962962962963;
+      const before = integrationReadiness(7 * H, "cluster", null, GROWN_FF);
+      // Fails before: 7 h of an 11.4 h goal read "a solid start" over a
+      // picture whose typical part holds 13 minutes of a 1.5 h cluster goal.
+      expect(before?.level).toBe("solid");
+      const r = integrationReadiness(
+        7 * H, "cluster", null, GROWN_FF, null, null, 31.5);
+      expect(r?.goalHours).toBeCloseTo(1.5 * 31.5, 5);
+      expect(r?.goalScale).toBe(31.5);
+      expect(r?.level).toBe("starting");
+      // `fieldFulls` still names how much sky the canvas spans.
+      expect(r?.fieldFulls).toBeCloseTo(GROWN_FF, 9);
+    });
+
+    it("ignores a measured depth on a single field, a user goal, and junk", () => {
+      const single = integrationReadiness(1.8 * H, "galaxy");
+      for (const df of [null, undefined, 31.5, 0.5, NaN]) {
+        expect(integrationReadiness(1.8 * H, "galaxy", null, 1, null, null, df))
+          .toEqual(single);
+        expect(integrationReadiness(1.8 * H, "galaxy", null, null, null, null, df))
+          .toEqual(single);
+      }
+      const mosaic = integrationReadiness(6 * H, "galaxy", null, 4);
+      expect(mosaic?.goalScale).toBe(4);
+      for (const df of [null, undefined, 0.5, NaN, -2, Infinity]) {
+        expect(integrationReadiness(6 * H, "galaxy", null, 4, null, null, df))
+          .toEqual(mosaic);
+      }
+      // A hand-set goal is a whole-target decision; nothing re-scales it.
+      const custom = integrationReadiness(6 * H, "galaxy", 12, 4, null, null, 31.5);
+      expect(custom?.goalHours).toBe(12);
+      expect(custom?.goalScale).toBe(1);
+    });
+
     it("carries fieldFulls out to the caller so the UI can label the shape", () => {
       // A card that wants to write "6 h × 4 fields = 24 h" needs the number.
       const r = integrationReadiness(1 * H, "galaxy", null, 2.25);
@@ -352,6 +391,20 @@ describe("readinessRowHint", () => {
     // "starting", which the row deliberately says nothing about (the row's
     // integration figure already implies "keep going").
     expect(readinessRowHint(4 * H, "nebula", null, 4)).toBeNull();
+  });
+
+  it("does not call a grown mosaic done against its canvas mean", () => {
+    // 2x2 for six hours that grew into a 3x3 for one: area 7.59 fields, the
+    // median pixel shared 31.5 ways. A 1.5 h cluster goal priced by area says
+    // "Nearly there" at 9 h; a typical part holds 17 minutes of it.
+    const GROWN_FF = 7.587962962962963;
+    expect(readinessRowHint(9 * H, "cluster", null, GROWN_FF)).toEqual({
+      label: "Nearly there", color: "teal",
+    });
+    expect(readinessRowHint(9 * H, "cluster", null, GROWN_FF, null, null, 31.5))
+      .toBeNull();
+    expect(readinessRowBadge(9 * H, "cluster", null, null, GROWN_FF, null, null, 31.5))
+      .toBeNull();
   });
 });
 

@@ -5,15 +5,11 @@
 > belongs in `docs/PROCESS-NOTES.md`, never here. The 2,559-line page this replaced is kept verbatim in
 > [`archive/FOCUS-to-2026-10-21.md`](archive/FOCUS-to-2026-10-21.md) — nothing was deleted.
 
-## Front of the queue (2026-10-22)
+## Front of the queue (2026-10-23)
 
-Every item below is an open entry at the end of "Bugs (fix these first)" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md),
-reproduced and **ungated** — a Builder can start any of them without the owner. Take them in this order:
-
-1. 🟡 **Size M — on an uneven mosaic readiness ("Is it enough yet?") and Dashboard progress still quote the canvas
-   mean as "a typical part"** — the planner (v0.502.29) and the closing-season card (v0.502.39,
-   `perPixel.typicalPartFulls`) are done; serve `webapp.field_fulls.target_depth_fulls` on `TargetOut` and the
-   progress roll-up and divide through `typicalPartFulls`.
+**No ungated bug is open.** The Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
+progress / Tonight badge). A Builder with nothing ungated should take a beginner feature from "Features that serve
+real workflows" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), or dogfood (`--mosaic --editor`) and file what it finds.
 
 **Gated, do not start:** the un-located-panel entry (top of Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
@@ -29,6 +25,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-23 (Builder, branch `claude/nice-carson-gzxsm8`) — **v0.502.40: "Is it enough yet?", Dashboard progress, the Tonight row badge and the "keep going tonight" pick price an uneven mosaic's goal at its median pixel** (`depth_fulls` on `TargetOut`/`TargetProgressOut`/`PlannedTarget`, `integrationReadiness` → `typicalPartFulls`). **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood.*
 *2026-10-23 (Builder, branch `claude/nice-carson-bo9fum`) — **v0.502.39: "Shoot these before they're gone" reads an uneven mosaic at its median pixel (55 → 13 min on the grown shape) and tie-breaks by the per-part noise cut** (`ClosingTarget.depth_fulls`, `perPixel.typicalPartFulls`). **START HERE NEXT RUN:** Builder: item 1 (readiness/progress half).*
 *2026-10-22 (Builder, branch `claude/nice-carson-ront7e`) — **v0.502.38: the share caption, the baked nameplate (share, print, JPEG download) and the Sky map tile date a run by the subs' own `SITELONG` when Settings has no location** (`editor._observer_lon`, `submit_editor_share`/`submit_editor_print` `site_lon`, `resolve_site_lon`). **START HERE NEXT RUN:** Builder: item 1.*
 *2026-10-22 (Scout, branch `claude/beautiful-newton-jbziyg`) — **QA rotation sweep (3), new angle: ffmpeg auto-rotates a rotation-tagged clip to h×w while the probe says w×h, so `iter_frames` reshaped every frame into streaks with no error — Scout-fixed v0.502.37 (`-noautorotate`).** Inbox: the same four, all owner-gated. Suite 8241 passed / 7 skipped. **START HERE NEXT RUN:** Builder: item 2 or 1. **Rotation: (3) done → next sweep is (4).***
@@ -49,11 +46,6 @@ auto-edited mosaic cut the raw sub by the canvas's Auto trim fractions (480×320
 Scout-fixed v0.502.31 (`routers/stack._render_sub_through_recipe` → `_without_saved_crop`).** Inbox: the same four,
 all owner-gated. Suite 8207 passed / 7 skipped; dogfood `--mosaic --editor` CLEAN (trim 7.9 %). **START HERE NEXT
 RUN:** Builder: item 4 (S30 outlier floor), 5 or 1. **Rotation: (1) done → next sweep is (2).***
-*2026-10-21 (Scout, branch `claude/zen-curie-89ftgk`) — **QA rotation sweep (4), new angle: every GET route (165,
-228 calls with real target/run/frame ids) crawled on the running `--mosaic` app, then again with the mosaic's
-`output/` files gone under a live DB row — CLEAN (0 × 5xx both times; every 404/422 a deliberate "nothing yet").**
-Inbox: the same four, all owner-gated. Suite 8206 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %).
-**START HERE NEXT RUN:** Builder: item 4 (S30 outlier floor), 5 or 1. **Rotation: (4) done → next sweep is (1).***
 
 ## Standing frontier
 

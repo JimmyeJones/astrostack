@@ -69,6 +69,13 @@ export interface PlannedTarget {
   // picture yet, and on an older backend — the readiness code then falls back
   // to the un-scaled goal (today's behaviour).
   field_fulls?: number | null;
+  /** The measured counterpart of `field_fulls`: the newest run's
+   * `n_frames_used ÷ coverage_median_depth`, what a *typical part* of the
+   * picture holds. Readiness scales its goal by it (`perPixel.typicalPartFulls`)
+   * because `field_fulls` is an area ratio — a canvas mean a grown mosaic lifts
+   * far above its median pixel. Absent / null on a single field, an older run
+   * with no median and an older backend; `field_fulls` then stands. */
+  depth_fulls?: number | null;
   // "Will it fit in one Seestar frame?" — major-axis size (arcmin) and the
   // verdict, for any row the bundled catalog has a size for. **Library rows
   // carry it too**: the verdict is about the object, not about how far along
@@ -495,6 +502,13 @@ export interface Target {
   // older backend, or on a list-shape response — the card then falls back to
   // the un-scaled goal (today's behaviour).
   field_fulls?: number | null;
+  /** The measured counterpart of `field_fulls`: the newest run's
+   * `n_frames_used ÷ coverage_median_depth`, what a *typical part* of the
+   * picture holds. Readiness scales its goal by it (`perPixel.typicalPartFulls`)
+   * because `field_fulls` is an area ratio — a canvas mean a grown mosaic lifts
+   * far above its median pixel. Absent / null on a single field, an older run
+   * with no median and an older backend; `field_fulls` then stands. */
+  depth_fulls?: number | null;
 }
 
 export interface MergeSuggestionTarget {
@@ -1155,6 +1169,13 @@ export interface TargetProgress {
   // no stacked picture yet, or on an older backend — the card then falls back
   // to the un-scaled goal (today's behaviour).
   field_fulls?: number | null;
+  /** The measured counterpart of `field_fulls`: the newest run's
+   * `n_frames_used ÷ coverage_median_depth`, what a *typical part* of the
+   * picture holds. Readiness scales its goal by it (`perPixel.typicalPartFulls`)
+   * because `field_fulls` is an area ratio — a canvas mean a grown mosaic lifts
+   * far above its median pixel. Absent / null on a single field, an older run
+   * with no median and an older backend; `field_fulls` then stands. */
+  depth_fulls?: number | null;
   // This target's vetted "how hard is it for a Seestar?" verdict, when the
   // bundled catalog has one. An input to the goal, not decoration: the per-type
   // goal cannot tell a bright compact galaxy from a large faint one, and the
