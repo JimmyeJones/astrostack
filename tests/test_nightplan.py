@@ -2324,6 +2324,53 @@ def test_under_the_cap_every_target_is_planned_whatever_its_depth():
            [n.best.safe if n.best else None for n in reversed_.nights]
 
 
+def test_the_week_names_one_twin_of_a_same_sky_pair_every_night():
+    """The owner's single field of an object and his mosaic of it are two library
+    targets on one patch of sky. Their scores differ only by rounding noise from a
+    sub-arcminute offset between the centres, so ranking by score alone named the
+    mosaic on six nights of the week table and the single field on the seventh —
+    and the headline followed the odd one out ("your best night is Thursday — M 42"
+    over six rows saying "M 42 mosaic"). Regression from a ``--mosaic`` dogfood
+    pass, at that pass's own coordinates.
+
+    The pick is now the twin the owner has put the most into, on every night —
+    whichever order the library hands them over in.
+    """
+    field = _lib("Orion_M42", "M 42", 83.82, -5.39, hours=1 / 60)
+    mosaic = _lib("M42_mosaic", "M 42 mosaic", 83.8206, -5.3934, hours=3.5 / 60)
+    eve = datetime.fromisoformat("2026-10-23T20:00:00+00:00")
+    site = Observer(lat_deg=40.0, lon_deg=-2.0)
+    for order in ([field, mosaic], [mosaic, field]):
+        plan = np_plan.plan_week(site, order, start_utc=eve)
+        picks = [n.best.safe for n in plan.nights if n.best is not None]
+        assert len(picks) == len(plan.nights) == 7
+        assert set(picks) == {"M42_mosaic"}, picks
+        # Both are still counted as usable, and each keeps its own best night.
+        assert all(n.n_usable == 2 for n in plan.nights)
+        assert {b.safe for b in plan.targets} == {"Orion_M42", "M42_mosaic"}
+
+
+def test_a_same_sky_twin_that_is_really_better_placed_still_wins(monkeypatch):
+    """The tie-break settles rounding noise, not a real difference: a target more
+    than :data:`WEEK_SAME_SKY_SCORE_TOLERANCE` ahead keeps the night, and one
+    further than :data:`WEEK_SAME_SKY_DEG` away is never anyone's twin — such a
+    library gets exactly the plain score order it always got."""
+    deep_low = _lib("deep_low", "Deep low", 83.8, -20.0, hours=30.0)
+    thin_high = _lib("thin_high", "Thin high", 83.8, 51.0, hours=0.1)
+    plan = np_plan.plan_week(LONDON, [deep_low, thin_high], start_utc=JAN_EVENING,
+                             nights=3)
+    assert [n.best.safe for n in plan.nights] == ["thin_high"] * 3
+
+    # 1.5° apart on one declination: placed nearly alike, but not one patch of sky.
+    a = _lib("a", "A", 83.8, -5.4, hours=0.1)
+    b = _lib("b", "B", 85.3, -5.4, hours=30.0)
+    assert np_plan._angular_sep_deg(83.8, -5.4, 85.3, -5.4) > np_plan.WEEK_SAME_SKY_DEG
+    got = np_plan.plan_week(LONDON, [a, b], start_utc=JAN_EVENING, nights=7)
+    monkeypatch.setattr(np_plan, "WEEK_SAME_SKY_DEG", -1.0)   # the old rule
+    plain = np_plan.plan_week(LONDON, [a, b], start_utc=JAN_EVENING, nights=7)
+    assert [n.best.safe for n in got.nights] == [n.best.safe for n in plain.nights]
+
+
 def test_plan_week_is_silent_on_a_night_nothing_clears_the_floor():
     """A night with no usable target reports ``best=None`` rather than promoting
     something that never rises — an honest "skip it"."""

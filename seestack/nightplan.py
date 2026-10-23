@@ -1588,6 +1588,21 @@ WEEK_MAX_TARGETS = 40
 #: weekend imager actually plans over.
 WEEK_NIGHTS = 7
 
+#: Two library targets whose centres are this close are **one patch of sky** to
+#: the week planner — the owner's single field of an object and his mosaic of it
+#: (``M_42`` beside ``M_42_mosaic_sub``), or two framings of one nebula. About
+#: half the S30's long side (2.1°), so the two pointings share most of a frame and
+#: rise, transit and set together to within the planner's own sampling step.
+WEEK_SAME_SKY_DEG = 1.0
+
+#: …and how far apart two same-sky targets' scores may be and still count as a
+#: tie. Scores are 0..100 rounded to 0.1, and a sub-arcminute offset between two
+#: centres moves them by about that much from night to night — so without this
+#: the week table named one twin on six nights and the other on the seventh. Big
+#: enough to absorb that rounding noise, small enough that a twin the Moon really
+#: does spoil more (a few points) still loses on its merits.
+WEEK_SAME_SKY_SCORE_TOLERANCE = 1.0
+
 
 @dataclass
 class WeekTargetPick:
@@ -1676,6 +1691,35 @@ class WeekPlan:
     #: say honestly that it looked at some but not all of a big library.
     n_targets_considered: int = 0
     n_targets_with_position: int = 0
+
+
+def _same_sky_pick(
+    usable: list[tuple[LibraryTarget, Observability]],
+    considered: list[LibraryTarget],
+) -> tuple[LibraryTarget, Observability]:
+    """The night's pick from ``usable`` (best-first), settling a same-sky tie.
+
+    Two of the owner's targets on one patch of sky (:data:`WEEK_SAME_SKY_DEG`)
+    are placed identically to within rounding, so ranking them by score alone
+    named whichever a 0.1-point wobble favoured that night — one twin on six
+    rows of the week table and the other on the seventh, with the headline
+    following the odd one out. Among the winner's twins that score within
+    :data:`WEEK_SAME_SKY_SCORE_TOLERANCE` of it, the pick is the one the owner
+    has put the most into: first in ``considered``, which :func:`plan_week`
+    already orders by integration — "finish what I've got" answered the same way
+    every night. A twin that is genuinely better placed still wins, and a night
+    with no twin is untouched.
+    """
+    best_t, best_o = usable[0]
+    rank = {id(t): i for i, t in enumerate(considered)}
+    twins = [
+        (t, o) for t, o in usable
+        if t is best_t
+        or (best_o.score - o.score <= WEEK_SAME_SKY_SCORE_TOLERANCE
+            and _angular_sep_deg(float(best_t.ra_deg), float(best_t.dec_deg),
+                                 float(t.ra_deg), float(t.dec_deg)) <= WEEK_SAME_SKY_DEG)
+    ]
+    return min(twins, key=lambda p: rank[id(p[0])])
 
 
 def plan_week(
@@ -1771,7 +1815,7 @@ def plan_week(
 
         pick = None
         if usable:
-            t, o = usable[0]
+            t, o = _same_sky_pick(usable, considered)
             pick = WeekTargetPick(
                 safe=t.safe, name=t.name,
                 usable_start_utc=o.usable_start_utc.isoformat() if o.usable_start_utc else None,
