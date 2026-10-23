@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-10-23 (Scout, branch `claude/beautiful-newton-v9b2h7`) — QA rotation sweep (4), new angle — the *mutating* routes against an in-flight job: one bug, Scout-fixed (v0.502.42). Inbox unchanged.
+
+- **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+  Suite 8259 passed / 7 skipped (xdist `-n 4`, 15m58s). No open PRs at start. **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors; the
+  Target page's five notes agree on the thin top-right panel; the week plan names the mosaic every night).
+- **Sweep (4).** Every earlier (4) sweep read GET *answers* (the 2026-10-21 crawl called all 165 GET paths); none asked
+  what a POST/PUT/DELETE does to a target a job is still working on. 77 mutating routes; the ones that delete under a
+  target (`targets` merge/delete, `storage` cache clear/prune, `stack` run delete, `gallery` archive clear) were read
+  for a job-queue check — **none has one** (`JobManager` carries `Job.target` but no route asks it). Took the one an
+  owner button fires on #878's shape: **`POST /api/targets/merge`** (both "Combine" buttons). Real-client repro, real
+  `run_stack` held at its start: merge → 200 `pictures_kept: 0`; the stack then finished `done`, `run_id: 1`, into an
+  orphaned `targets/<src>/output/` with no `project.sqlite`; the destination had no run. Fixed: 409 while a source
+  has a queued/running job (destination exempt). +2 tests, fail-before by stash revert.
+- **Leads, not filed (no repro yet):** `storage.clear_cache` (`stage1`/`stage2`) and `stack-runs/prune` / run DELETE
+  have the same missing check — a cache cleared under a running stack, or a run deleted under a running editor export.
+  The next (4) sweep should repro one of them the same way (hold the job body, press the route) before filing.
+  `DELETE /api/targets/{safe}?remove_files=true` is API-only (the UI sends `false`) — the same shape, lowest stakes.
+
 ## 2026-10-23 (Builder, branch `claude/nice-carson-ojgjii`) — big-picture dogfood `--mosaic --editor`: one finding, fixed (v0.502.41)
 
 - **Suite:** 8255 passed / 7 skipped on `3a2bed7f` (xdist `-n 4`, BLAS capped, 21m12s). No open PRs at start; the
