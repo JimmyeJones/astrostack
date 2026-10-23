@@ -1,5 +1,16 @@
 # Process notes & QA sweep records
 
+## 2026-10-23 (Builder, branch `claude/nice-carson-ojgjii`) — big-picture dogfood `--mosaic --editor`: one finding, fixed (v0.502.41)
+
+- **Suite:** 8255 passed / 7 skipped on `3a2bed7f` (xdist `-n 4`, BLAS capped, 21m12s). No open PRs at start; the
+  "Features that serve real workflows" list has no open beginner item (the two left are deprioritised/conditional).
+- **Dogfood:** no overflow, no console errors; all 21 ops re-render on the mosaic; the Auto taste row's chips, marks
+  and notes agree; the Target page's five notes agree on the thin top-right panel. **The finding was on Tonight, read
+  as one paragraph:** "Plan my week" flipped between two targets on one patch of sky (single field vs mosaic of M42)
+  on a 0.1-point score difference, and the headline named the odd night's twin. Fixed in `plan_week`. Worth carrying:
+  any per-night or per-row *pick* among the owner's targets should ask whether two of them are the same sky — he
+  keeps a single field and a `_mosaic_sub` of the same object.
+
 ## 2026-10-22 (Scout, branch `claude/beautiful-newton-jbziyg`) — QA rotation sweep (3), new angle — ffmpeg's *default auto-rotate* against `iter_frames`' probe-sized reshape: one bug, Scout-fixed (v0.502.37). Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8241 passed / 7 skipped on `370a7198` (xdist `-n 4`, BLAS capped, 17m30s). **Inbox:** the same four (#878,

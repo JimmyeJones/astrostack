@@ -8,7 +8,7 @@
 ## Front of the queue (2026-10-23)
 
 **No ungated bug is open.** The Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
-progress / Tonight badge). A Builder with nothing ungated should take a beginner feature from "Features that serve
+progress / Tonight badge); a dogfood pass found and fixed the week plan's same-sky flip (v0.502.41). A Builder with nothing ungated should take a beginner feature from "Features that serve
 real workflows" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), or dogfood (`--mosaic --editor`) and file what it finds.
 
 **Gated, do not start:** the un-located-panel entry (top of Bugs) waits on the owner's hint-shape answer; the
@@ -25,6 +25,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-23 (Builder, branch `claude/nice-carson-ojgjii`) — **v0.502.41: "Plan my week" names one twin of a same-sky pair every night — the dogfood `--mosaic` library's single field and 2×2 mosaic of M42 swapped on a 0.1-point score wobble (six rows mosaic, Thursday the field, headline following the odd one out, with a "Needs 3×3 mosaic" badge on it)** (`plan_week` → `_same_sky_pick`, `WEEK_SAME_SKY_DEG`, `WEEK_SAME_SKY_SCORE_TOLERANCE`). Dogfood `--mosaic --editor` otherwise CLEAN. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood.*
 *2026-10-23 (Builder, branch `claude/nice-carson-gzxsm8`) — **v0.502.40: "Is it enough yet?", Dashboard progress, the Tonight row badge and the "keep going tonight" pick price an uneven mosaic's goal at its median pixel** (`depth_fulls` on `TargetOut`/`TargetProgressOut`/`PlannedTarget`, `integrationReadiness` → `typicalPartFulls`). **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood.*
 *2026-10-23 (Builder, branch `claude/nice-carson-bo9fum`) — **v0.502.39: "Shoot these before they're gone" reads an uneven mosaic at its median pixel (55 → 13 min on the grown shape) and tie-breaks by the per-part noise cut** (`ClosingTarget.depth_fulls`, `perPixel.typicalPartFulls`). **START HERE NEXT RUN:** Builder: item 1 (readiness/progress half).*
 *2026-10-22 (Builder, branch `claude/nice-carson-ront7e`) — **v0.502.38: the share caption, the baked nameplate (share, print, JPEG download) and the Sky map tile date a run by the subs' own `SITELONG` when Settings has no location** (`editor._observer_lon`, `submit_editor_share`/`submit_editor_print` `site_lon`, `resolve_site_lon`). **START HERE NEXT RUN:** Builder: item 1.*
@@ -41,11 +42,6 @@ identical depth on the shared sky) — Scout-fixed v0.502.33 (`Compare.noiseComp
 `MIN_SKY_SHARE` 0.9).** Inbox: the same four, all owner-gated. Suite 8214 passed / 7 skipped; dogfood `--mosaic`
 CLEAN. **START HERE NEXT RUN:** Builder: item 3 (S30 outlier floor), 4 or 1. **Rotation: (2) done → next sweep is (3).***
 *2026-10-21 (Builder, branch `claude/festive-knuth-ykn52w`) — **v0.502.32: the "did it get better?" matched-crop picture carries its patch through both masters' WCS on a grown mosaic** (`noisedelta._sky_mapper`; same sky, same native box, σ ratio honest; unsolved different-shaped pair self-hides). **START HERE NEXT RUN:** Builder: item 3 (S30 outlier floor), 4 or 1.*
-*2026-10-21 (Scout, branch `claude/zen-curie-66kbiz`) — **QA rotation sweep (1), new angle: the one-frame reveal on an
-auto-edited mosaic cut the raw sub by the canvas's Auto trim fractions (480×320 → 298×320 on a missing-panel trim) —
-Scout-fixed v0.502.31 (`routers/stack._render_sub_through_recipe` → `_without_saved_crop`).** Inbox: the same four,
-all owner-gated. Suite 8207 passed / 7 skipped; dogfood `--mosaic --editor` CLEAN (trim 7.9 %). **START HERE NEXT
-RUN:** Builder: item 4 (S30 outlier floor), 5 or 1. **Rotation: (1) done → next sweep is (2).***
 
 ## Standing frontier
 

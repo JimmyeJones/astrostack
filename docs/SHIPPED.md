@@ -1,5 +1,29 @@
 # Shipped — the record
 
+## 2026-10-23 (Builder, branch `claude/nice-carson-ojgjii`) — "Plan my week" names one twin of a same-sky pair every night
+
+### v0.502.41 — `plan_week` → `_same_sky_pick`, `WEEK_SAME_SKY_DEG`, `WEEK_SAME_SKY_SCORE_TOLERANCE`
+
+**What.** Found on a `scripts/agent-dogfood.sh --mosaic --editor` pass that was otherwise CLEAN. The scratch library
+holds M42 twice — the single-field sample and the 2×2 mosaic sample, centres 0.0006° apart — which is the owner's own
+shape (a single field of an object beside its `<T>_mosaic_sub/` target). Tonight's "Plan my week" named the mosaic on
+six rows and the single field on Thursday, the headline said *"Your best night is Thursday — Sample: Orion Nebula
+(M42)"*, the Thursday row carried a **"Needs 3×3 mosaic"** badge for an object the owner is already shooting as a
+mosaic, and the footer said the *mosaic's* best night was also Thursday. The cause: the nightly pick was the top
+score, scores are rounded to 0.1, and the sub-arcminute offset moved them by exactly that (Thursday: 39.8 vs 39.7).
+
+**Fix.** Among the night's winner and the targets within `WEEK_SAME_SKY_DEG` (1.0°, about half the S30's long side)
+whose score is within `WEEK_SAME_SKY_SCORE_TOLERANCE` (1.0 point) of it, the pick is the one first in `plan_week`'s
+existing investment order (total exposure, then accepted frames, then `safe`) — the "finish what I've got" order the
+cap already uses. A twin genuinely better placed (more than a point ahead), and any target more than 1° away, keeps
+the plain score order. `n_usable` and each target's own best night (`plan.targets`) are unchanged. Re-run on the
+dogfood library: all seven rows name the mosaic, the headline follows, the badge is gone.
+
+**Tests.** +2 in `tests/test_nightplan.py`: the dogfood coordinates in both library orders pick the deeper twin on all
+seven nights (fails before: `{'M42_mosaic', 'Orion_M42'}`); a better-placed target still wins, and a pair 1.5° apart
+gets exactly the old rule's picks (compared against the function with the twin radius switched off). Engine-only; no
+response-shape, config, schema, on-disk or default change.
+
 ## 2026-10-23 (Builder, branch `claude/nice-carson-gzxsm8`) — "Is it enough yet?" and Dashboard progress price an uneven mosaic at its median
 
 ### v0.502.40 — `TargetOut.depth_fulls`, `TargetProgressOut.depth_fulls`, `PlannedTarget.depth_fulls`, `integrationReadiness` `depthFulls` → `perPixel.typicalPartFulls`
