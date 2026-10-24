@@ -44,6 +44,7 @@ def per_run_meta_prefixes() -> tuple[str, ...]:
         EXPORTED_RECIPE_META_PREFIX,
         RECIPE_META_PREFIX,
     )
+    from seestack.io.merge import CARRIED_FROM_META_PREFIX
     from webapp.routers.stack import NOISE_RATIO_META_PREFIX
 
     return (
@@ -65,6 +66,9 @@ def per_run_meta_prefixes() -> tuple[str, ...]:
         CALIBRATION_SKIPPED_META_PREFIX,
         CALIBRATION_WARNINGS_META_PREFIX,
         NOISE_RATIO_META_PREFIX,
+        # Owned by the engine's merge (it stamps it on a carried picture), so it
+        # is imported from there rather than re-declared here.
+        CARRIED_FROM_META_PREFIX,
     )
 
 

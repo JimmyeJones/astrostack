@@ -3155,6 +3155,34 @@ describe("TargetView thin-stack warning's next step", () => {
     expect(warn.textContent).not.toMatch(/restack to fold/);
   });
 
+  it("describes the target's own stack, not a newer picture a Combine carried in", async () => {
+    // `scripts/agent-dogfood.sh --combine` (2026-10-24): the folded-in folder's
+    // picture keeps its own, later, stacking date, so it sorted first and every
+    // "latest stack" note on the page described it — a different picture from
+    // the one the Combine pinned and the page shows. Here the carried picture is
+    // the deep one, so the fail-before is the warning about the target's own
+    // thin stack never appearing at all.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({ cover_stack_run_id: 1 }));
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 2, reusable: true, n_frames_used: 40, carried_in: true }),
+      mkRun({ id: 1, reusable: true, n_frames_used: 3 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1), mkFrame(2), mkFrame(3),
+    ]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(
+      mkNewLight({ run_id: 1, n_new_subs: 3 }));
+
+    renderTarget();
+
+    const warn = await screen.findByTestId("thin-stack-warning");
+    expect(warn.textContent).toContain("This stack combined only 3 frames");
+    // …and because the warning and the picture on show are now one stack, the
+    // measured remedy is its to quote.
+    expect(warn.textContent).toContain("restack to fold them in");
+  });
+
   it("keeps the old advice while an older cover is the picture on show", async () => {
     // `newSubsSinceStack` is measured against the DISPLAYED picture and the
     // warning describes the LATEST run. With a cover pinned to an older run the

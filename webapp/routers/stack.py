@@ -975,6 +975,7 @@ def channel_combine(safe: str, body: dict[str, Any], request: Request) -> dict[s
 
 @router.get("/api/targets/{safe}/stack-runs", response_model=list[StackRunOut])
 def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
+    from seestack.io.merge import CARRIED_FROM_META_PREFIX
     from webapp.displacedpicture import picture_owner_by_run_id
     from webapp.routers.editor import (
         AUTO_EDIT_BAKED_LOOK_PREFIX,
@@ -1018,6 +1019,11 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
         # test for "this picture was made for you".
         auto_edited = {
             r.id: bool(proj.get_meta(f"{AUTO_EDIT_NOTE_PREFIX}{r.id}"))
+            for r in runs
+        }
+        # A fifth: did a Combine bring this picture in from another folder?
+        carried_in = {
+            r.id: proj.get_meta(f"{CARRIED_FROM_META_PREFIX}{r.id}") is not None
             for r in runs
         }
         # The target's native sub shape, read **once** for the whole listing, so
@@ -1078,6 +1084,7 @@ def list_stack_runs(safe: str, request: Request) -> list[StackRunOut]:
             has_rejection_map=bool(
                 r.fits_path and rejection_map_path_for(r.fits_path).exists()),
             is_cover=(cover_id is not None and r.id == cover_id),
+            carried_in=carried_in.get(r.id, False),
             notes=r.notes,
             total_exposure_s=r.total_exposure_s,
             reusable=run_has_reusable_options(r.options_json),

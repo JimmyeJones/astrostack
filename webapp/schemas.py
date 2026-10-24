@@ -839,6 +839,13 @@ class StackRunOut(BaseModel):
     # Library/Dashboard tile shows). False when unpinned (the default) — the tile
     # then shows the newest stack. Only ever one run per target is the cover.
     is_cover: bool = False
+    # True when a Combine brought this picture in from another folder of the same
+    # object (``seestack.io.merge.CARRIED_FROM_META_PREFIX``). It keeps the date it
+    # was stacked on, so it can be the newest row here while being a picture of
+    # one folder's subs rather than a stack made of this target — the Target
+    # page's "latest stack" notes skip it for that reason. False for every run
+    # stacked here, and for a run carried in before the mark existed. Additive.
+    carried_in: bool = False
     notes: str | None = None
     # Effective integration time in seconds (None for pre-schema-4 runs), so the
     # UI can show "2.3 h · 840 subs" on a card without reading the FITS header.
