@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **Builder 2026-10-24, branch `claude/nice-carson-itbuxk`** — a single-field Target page that says "shoot it in mosaic mode" names the mosaic of the same object the library already holds (`TargetOut.mosaic_companion`, `nextBestMove` framing rung, `FramingVerdictNote`). Found by `--closing --incoming-lag --mosaic --editor` dogfood.
 
 ---
 
