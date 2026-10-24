@@ -1,5 +1,62 @@
 # Shipped — the record
 
+## 2026-10-24 (Builder, branch `claude/nice-carson-se97e8`) — Compare's Split and Blink line up a grown mosaic by sky
+
+### v0.503.1 — `seestack/render/compareplace.place_a_on_b`, `GET /api/targets/{safe}/compare-placement`, `Compare.tsx` `SkyFrame` / `needsSkyPlacement`
+
+**What.** Split laid A's preview over B's and Blink swapped them in one box, both `objectFit: "contain"`; nothing mapped
+one canvas onto the other, so on two runs of a grown mosaic the same star sat ~94 px apart at two scales. Now, when the
+two runs are of one target and their canvases differ (`needsSkyPlacement`), the page asks
+`GET …/compare-placement?a=&b=&north_up_a=&north_up_b=` where A's **displayed** preview sits on B's: `place_a_on_b`
+walks a 3×3 grid of A's displayed pixels → sky → B's displayed pixels through both masters' WCS
+(`wcs_dict_rescaled_to_preview`, so a recorded/recovered border trim — `recovered_preview_crop` — and a baked North-up
+save — `baked_north_up_deg` — are followed), plus the on-the-fly North-up view turn when that is on
+(`preview_north_up_remainder_deg` → `north_up_pixel_transform`, the same turn `…/preview?north_up=true` applies), and
+least-squares fits one affine. The frame is the bounding box of both in B's pixels, so neither is clipped. The page
+draws the pair in one SVG (`SkyFrame`): B unscaled, A through `matrix(…)`, Split's clip a frame-space rectangle under
+the same divider, Blink one at a time. **Fallbacks, never a guess:** no master/preview, a preview whose geometry is
+`UNKNOWN`, no usable WCS on either side, or < 5 % shared sky → `placeable: false`, and Split/Blink say *"These two
+pictures cover different sky, and they can't be lined up star-for-star, so they're shown side by side instead."* over
+the side-by-side cards. A same-canvas pair, or two different targets, renders exactly as before with no request.
+
+**Measured** (dogfood `--serve --mosaic`, the Scout's repro: panels on one row set aside → run 2 at 893×341 against run
+1 at 907×615, whose preview is an auto-trimmed 875×587 crop): Blink's two frames, screenshotted in Chromium and
+cross-correlated over the shared sky, agree to within **1 screen px** (was 94). Phone width (390 px): no horizontal
+scroll.
+
+**Tests.** `tests/webapp/test_compare_placement.py` (+7): one star rendered into both previews by the real renderer lands
+on one frame pixel (± 1) across a grown mosaic, the other way round (frame grows to hold the wider one), with B shown
+through the North-up view of a 30°-turned framing, and with B a recorded border trim or a saved-North-up preview; same
+canvas → identity; no WCS / no shared sky → `placeable: false`; unknown run → 404. Mutations (ignore the view turn, the
+crop, or the baked angle) each fail their test. `Compare.test.tsx` (+7): `needsSkyPlacement`, `usablePlacement`, Split
+and Blink drawing the placed SVG, the fallback sentence + side by side, and a same-canvas pair untouched with no request.
+No config, schema, on-disk or default change; one additive endpoint.
+
+**The Bugs entry, as filed:**
+
+- **🟡 (Scout 2026-10-24, QA rotation sweep (1)) — Compare's Split and Blink lay two runs of a grown mosaic over
+  each other by screen box, not by sky, so the same star sits ~94 px apart under the divider.** *(Pillar: trust /
+  friendliness — PRIORITY 3, on the grown-canvas frontier; size **M**; severity low-to-moderate — a viewing aid
+  that answers "did it get better?" with two pictures that don't line up; nothing on disk is touched.
+  Confidence: **reproduced** end to end, ungated.)*
+  `frontend/src/routes/Compare.tsx` `Split` puts A's `preview_url` absolutely over B's, both `objectFit:
+  "contain"` in one 640×420 box; `Blink` swaps them in one `<Image h={420} fit="contain">`. Nothing maps one
+  canvas onto the other — only rotation is handled (v0.359.0's North-up turn, whose entry promises "so a Split or a
+  Blink actually lines up"). Scratch repro through the real app: `POST /api/sample {"shape":"mosaic"}`, stack with
+  panels p2/p3 set aside (run 1, canvas 893×341), re-accept and stack again (run 2, 907×615); the WCS point at
+  run 1's centre lands at box (320, 210) in A and (325, 116) in B — **94 px apart, 22 % of the box height**, and
+  the two are drawn at different scales (0.717 vs 0.683 px/px). Both of the Target page's links
+  (`CompareWithLastCard`: "Compare with my last one" and "How far you've come" — first-ever vs now, which on a
+  mosaic shooter's target is almost always a grown canvas) open this page. Side by side is unaffected, and the
+  noise / panels / nights verdicts already stand down on a wider sky (`noiseComparison` `widerSky`).
+  **Fix shape (the FOCUS "grown-canvas rule"):** when the two `canvas_w×canvas_h` differ, place A on B's grid by
+  both masters' WCS — `seestack/render/noisedelta.py` already maps one master's box onto the other's
+  (`pixel_exact`) and is the pattern — accounting for a preview that is cropped or baked North-up
+  (`webapp/preview_orient.recovered_preview_crop` / `baked_north_up_deg`); without a WCS on both, Split and Blink
+  say in one plain sentence that these two pictures cover different sky and fall back to Side by side. Regression
+  test: two runs of differing canvas through the real gallery + the new placement, asserting one sky point lands
+  on one box pixel (± 1); a same-canvas pair must render exactly as today.
+
 ## 2026-10-24 (Builder, branch `claude/nice-carson-itbuxk`) — a single field's Target page names the mosaic of it he already has
 
 ### v0.503.0 — `webapp/mosaic_companion.find_mosaic_companion`, `TargetOut.mosaic_companion`, `nextBestMove` framing rung, `FramingVerdictNote`

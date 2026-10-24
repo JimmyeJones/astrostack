@@ -2378,6 +2378,17 @@ export interface PinnedStackDefaults {
   pinned: PinnedStackOption[];
 }
 
+/** `GET …/compare-placement` — A drawn over B by sky, in one frame measured in
+ *  B's displayed pixels. `a.matrix` is SVG `matrix(a b c d e f)` order, taking
+ *  A's displayed pixels into the frame; B is drawn unscaled at (`b.x`, `b.y`). */
+export interface ComparePlacement {
+  placeable: boolean;
+  frame_w?: number;
+  frame_h?: number;
+  a?: { width: number; height: number; matrix: number[] };
+  b?: { width: number; height: number; x: number; y: number };
+}
+
 export interface GalleryItem {
   safe: string;
   target_name: string;
@@ -4153,6 +4164,17 @@ export const api = {
     }>(`/api/targets/${safe}/noise-delta/info?a=${a}&b=${b}`),
   noiseDeltaUrl: (safe: string, a: number, b: number) =>
     `/api/targets/${safe}/noise-delta?a=${a}&b=${b}`,
+  // Where run `a`'s displayed preview sits on run `b`'s, by both masters' WCS —
+  // what Compare's Split and Blink need once the two canvases differ (a mosaic
+  // that grew). `northUpA`/`northUpB` say which side is showing the on-the-fly
+  // North-up view, so the placement describes the bytes actually on screen.
+  // `placeable: false` (never an error) when either side has no usable WCS, a
+  // preview's geometry can't be reconciled, or the two share no sky.
+  comparePlacement: (safe: string, a: number, b: number, northUpA = false,
+    northUpB = false) =>
+    req<ComparePlacement>(
+      `/api/targets/${safe}/compare-placement?a=${a}&b=${b}`
+      + `&north_up_a=${northUpA}&north_up_b=${northUpB}`),
   stackReferenceSubUrl: (safe: string, id: number) =>
     `/api/targets/${safe}/stack-runs/${id}/reference-sub`,
   // "Share your glow-up" — the reveal composed into one labelled, captioned

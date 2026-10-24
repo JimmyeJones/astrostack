@@ -7,9 +7,9 @@
 
 ## Front of the queue (2026-10-24)
 
-**One ungated bug is open: Compare's Split and Blink don't line up two runs of a grown mosaic** (top of Bugs in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), Scout 2026-10-24, reproduced, size M) — a Builder takes it first.
+**No ungated bug is open.** The Scout's Compare Split/Blink entry closed with v0.503.1 (A placed on B by WCS).
 
-Recently closed: the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
+Recently closed: Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
 progress / Tonight badge); a dogfood pass found and fixed the week plan's same-sky flip (v0.502.41); the Scout's sweep (4) fixed a merge that
 deleted a folder a stack was still writing into (v0.502.42). After it, a Builder with nothing ungated should take a beginner feature from "Features that serve
 real workflows" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), or dogfood (`--mosaic --editor`) and file what it finds.
@@ -28,6 +28,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-24 (Builder, branch `claude/nice-carson-se97e8`) — **v0.503.1: Compare's Split and Blink line up two runs of a grown mosaic by sky** (`compareplace.place_a_on_b`, `GET …/compare-placement`, `SkyFrame`) — the Scout's repro measured at ≤ 1 screen px (was 94) in Chromium on the dogfood `--mosaic` pair; trims and North-up (baked or viewed) followed. Baseline suite 8268 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood.*
 *2026-10-24 (Scout, branch `claude/beautiful-newton-mkp0sh`) — **QA rotation sweep (1), new angle: `/compare`'s Split and Blink on a grown mosaic overlay two canvases by screen box, not by sky — the same star 94 px apart in the 640×420 box; filed reproduced (top of Bugs).** Inbox: the same four, all owner-gated. Suite 8262 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: the Compare Split/Blink entry. **Rotation: (1) done → next sweep is (2).***
 *2026-10-24 (Builder, branch `claude/nice-carson-itbuxk`) — **v0.503.0: a single field's Target page names the mosaic of the same object he already has** instead of only prescribing "shoot it in mosaic mode" (`TargetOut.mosaic_companion`, `find_mosaic_companion`), found reading `--closing --incoming-lag --mosaic --editor`; that pass otherwise CLEAN. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--calibration --big`, `--dithered`).*
 *2026-10-24 (Builder, branch `claude/nice-carson-5q6dx6`) — **v0.502.44: after a Combine the Target page's "latest stack" notes describe the target's own stack, not the newer carried-in night** (`CARRIED_FROM_META_PREFIX`, `StackRunOut.carried_in`, `latestStackFirst`), found by `--combine --no-site`; that pass otherwise CLEAN (§10 incoming/ byte-identical). **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--closing`, `--incoming-lag`).*
@@ -37,7 +38,6 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-10-23 (Builder, branch `claude/nice-carson-ojgjii`) — **v0.502.41: "Plan my week" names one twin of a same-sky pair every night — the dogfood `--mosaic` library's single field and 2×2 mosaic of M42 swapped on a 0.1-point score wobble (six rows mosaic, Thursday the field, headline following the odd one out, with a "Needs 3×3 mosaic" badge on it)** (`plan_week` → `_same_sky_pick`, `WEEK_SAME_SKY_DEG`, `WEEK_SAME_SKY_SCORE_TOLERANCE`). Dogfood `--mosaic --editor` otherwise CLEAN. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood.*
 *2026-10-23 (Builder, branch `claude/nice-carson-gzxsm8`) — **v0.502.40: "Is it enough yet?", Dashboard progress, the Tonight row badge and the "keep going tonight" pick price an uneven mosaic's goal at its median pixel** (`depth_fulls` on `TargetOut`/`TargetProgressOut`/`PlannedTarget`, `integrationReadiness` → `typicalPartFulls`). **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood.*
 *2026-10-23 (Builder, branch `claude/nice-carson-bo9fum`) — **v0.502.39: "Shoot these before they're gone" reads an uneven mosaic at its median pixel (55 → 13 min on the grown shape) and tie-breaks by the per-part noise cut** (`ClosingTarget.depth_fulls`, `perPixel.typicalPartFulls`). **START HERE NEXT RUN:** Builder: item 1 (readiness/progress half).*
-*2026-10-22 (Builder, branch `claude/nice-carson-ront7e`) — **v0.502.38: the share caption, the baked nameplate (share, print, JPEG download) and the Sky map tile date a run by the subs' own `SITELONG` when Settings has no location** (`editor._observer_lon`, `submit_editor_share`/`submit_editor_print` `site_lon`, `resolve_site_lon`). **START HERE NEXT RUN:** Builder: item 1.*
 
 ## Standing frontier
 

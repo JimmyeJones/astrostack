@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   Alert, Badge, Box, Button, Center, Group, Image, Loader, Paper, SegmentedControl,
   SimpleGrid, Stack, Text, Title,
@@ -6,7 +6,7 @@ import {
 import { IconArrowLeft, IconGitCompare } from "@tabler/icons-react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, type GalleryItem } from "../api/client";
+import { api, type ComparePlacement, type GalleryItem } from "../api/client";
 import { formatIntegration, pictureDateLabel } from "../format";
 import { NoiseReadout, hasNoise } from "../components/NoiseBadge";
 import { HazyNightBadge } from "../components/HazyNightBadge";
@@ -190,6 +190,82 @@ export function compareNorthUpOffer(
 
 type CompareMode = "side" | "split" | "blink";
 
+/**
+ * Do Split and Blink have to place A on B **by sky** rather than by screen box?
+ *
+ * Both modes draw the two pictures in one frame, which only lines a star up with
+ * itself when the two previews are the same grid — two runs of one canvas. A
+ * mosaic that grew is the case that breaks it, and it is exactly what the Target
+ * page's "How far you've come" (first-ever against now) opens: the two canvases
+ * are different pieces of sky at different sizes, and drawing both "contain" in
+ * one box put the same star ~94 px apart. So when the canvases differ the page
+ * asks the server where A sits on B (`api.comparePlacement`, from both masters'
+ * WCS). Same canvas → exactly today's rendering. Two different targets are not a
+ * "did it get better?" pair and keep today's rendering too.
+ */
+export function needsSkyPlacement(a: GalleryItem, b: GalleryItem): boolean {
+  return a.safe === b.safe
+    && (a.canvas_w !== b.canvas_w || a.canvas_h !== b.canvas_h);
+}
+
+/** A usable placement, narrowed — `null` for "not placeable" or a malformed body. */
+export type SkyPlacement = Required<ComparePlacement>;
+
+export function usablePlacement(p: ComparePlacement | undefined | null): SkyPlacement | null {
+  if (!p?.placeable || !p.a || !p.b || !(p.frame_w! > 0) || !(p.frame_h! > 0)) return null;
+  if (p.a.matrix?.length !== 6 || !p.a.matrix.every(Number.isFinite)) return null;
+  return p as SkyPlacement;
+}
+
+// The box Split and Blink have always drawn into: at most 640 wide, 420 tall.
+const FRAME_MAX_W = 640;
+const FRAME_MAX_H = 420;
+
+/** The two pictures of a grown mosaic in one frame, each where its sky is: B
+ * unscaled on its own pixel grid (extended to hold A), A through the affine the
+ * server fitted from both WCS. An SVG so the frame scales as one piece and the
+ * Split clip is a rectangle in the same coordinates as the divider. `showA` /
+ * `showB` pick what is drawn (Blink draws one at a time); `clipA` (0–1) cuts A at
+ * that fraction of the frame's width, Split's divider. */
+function SkyFrame(
+  { placement, srcA, srcB, showA = true, showB = true, clipA }:
+  { placement: SkyPlacement; srcA: string; srcB: string;
+    showA?: boolean; showB?: boolean; clipA?: number },
+) {
+  const { frame_w: fw, frame_h: fh, a: pa, b: pb } = placement;
+  const clipId = `compare-clip-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const imageA = (
+    <image href={srcA} x={0} y={0} width={pa.width} height={pa.height}
+      preserveAspectRatio="none" transform={`matrix(${pa.matrix.join(" ")})`}
+      data-testid="sky-frame-a" />
+  );
+  return (
+    <svg viewBox={`0 0 ${fw} ${fh}`} role="img"
+      aria-label="A and B, lined up on the same sky"
+      data-testid="sky-frame"
+      style={{ display: "block", width: "100%", height: "auto",
+        maxWidth: Math.min(FRAME_MAX_W, (FRAME_MAX_H * fw) / fh) }}>
+      <rect x={0} y={0} width={fw} height={fh} fill="#000" />
+      {showB ? (
+        <image href={srcB} x={pb.x} y={pb.y} width={pb.width} height={pb.height}
+          preserveAspectRatio="none" data-testid="sky-frame-b" />
+      ) : null}
+      {showA && clipA !== undefined ? (
+        <>
+          <defs>
+            <clipPath id={clipId}>
+              <rect x={0} y={0} width={clipA * fw} height={fh} />
+            </clipPath>
+          </defs>
+          {/* The clip goes on a wrapping group: on the <image> itself it would be
+              read in A's own (transformed) coordinates, not the frame's. */}
+          <g clipPath={`url(#${clipId})`}>{imageA}</g>
+        </>
+      ) : showA ? imageA : null}
+    </svg>
+  );
+}
+
 function CardMeta({ item }: { item: GalleryItem }) {
   return (
     <Stack gap={2}>
@@ -320,8 +396,9 @@ function AbMetaStrip({ a, b }: { a: GalleryItem; b: GalleryItem }) {
 /** Blink comparator: alternates the two images in one frame on a timer so a
  * subtle difference (noise, a cleaned trail, sharper stars) pops out. */
 function Blink(
-  { a, b, srcA, srcB }:
-  { a: GalleryItem; b: GalleryItem; srcA: string; srcB: string },
+  { a, b, srcA, srcB, placement }:
+  { a: GalleryItem; b: GalleryItem; srcA: string; srcB: string;
+    placement?: SkyPlacement | null },
 ) {
   const [showA, setShowA] = useState(true);
   const [running, setRunning] = useState(true);
@@ -338,7 +415,14 @@ function Blink(
     <Stack gap="xs" align="center">
       <AbMetaStrip a={a} b={b} />
       <div style={{ position: "relative", width: "100%", maxWidth: 640 }}>
-        <Image src={showA ? srcA : srcB} fit="contain" bg="#000" h={420} radius="sm" />
+        {placement ? (
+          <Center>
+            <SkyFrame placement={placement} srcA={srcA} srcB={srcB}
+              showA={showA} showB={!showA} />
+          </Center>
+        ) : (
+          <Image src={showA ? srcA : srcB} fit="contain" bg="#000" h={420} radius="sm" />
+        )}
         <Badge
           style={{ position: "absolute", top: 8, left: 8 }}
           color={showA ? "blue" : "grape"} variant="filled"
@@ -369,8 +453,9 @@ function Blink(
  * the most direct answer to "did my new stack actually get better?". Reuses the
  * editor's tested split-divider geometry. Left of the divider is A, right is B. */
 function Split(
-  { a, b, srcA, srcB }:
-  { a: GalleryItem; b: GalleryItem; srcA: string; srcB: string },
+  { a, b, srcA, srcB, placement }:
+  { a: GalleryItem; b: GalleryItem; srcA: string; srcB: string;
+    placement?: SkyPlacement | null },
 ) {
   const [frac, setFrac] = useState(0.5);
   const dragging = useRef(false);
@@ -404,11 +489,20 @@ function Split(
         onPointerUp={() => { dragging.current = false; }}
         aria-label="Drag to reveal — left is A, right is B"
         style={{
-          position: "relative", width: "100%", maxWidth: 640, maxHeight: 420,
+          position: "relative", width: "100%",
+          // On a placed pair the box is exactly the frame the SVG draws, so the
+          // divider's fraction of the box is the same fraction of the frame.
+          maxWidth: placement
+            ? Math.min(FRAME_MAX_W, (FRAME_MAX_H * placement.frame_w) / placement.frame_h)
+            : FRAME_MAX_W,
+          maxHeight: FRAME_MAX_H,
           overflow: "hidden", borderRadius: 6, cursor: "ew-resize",
           touchAction: "none", userSelect: "none",
         }}
       >
+        {placement ? (
+          <SkyFrame placement={placement} srcA={srcA} srcB={srcB} clipA={frac} />
+        ) : (<>
         {/* Base (right of divider): B. */}
         <img src={srcB} alt={`B: ${b.output_basename}`}
           draggable={false}
@@ -421,6 +515,7 @@ function Split(
             position: "absolute", inset: 0, width: "100%", height: "100%",
             objectFit: "contain", background: "#000", clipPath: splitClipLeft(frac),
           }} />
+        </>)}
         {/* Divider. */}
         <Box style={{
           position: "absolute", top: 0, bottom: 0, left: splitLeftPct(frac),
@@ -490,6 +585,22 @@ export function CompareView() {
   const srcB = b
     ? (turned && turnB ? api.stackPreviewNorthUpUrl(b.safe, b.run_id) : b.preview_url)
     : "";
+
+  // Split and Blink on a grown mosaic: where A's sky sits on B's. Asked only in
+  // those two modes and only for a pair that needs it (`needsSkyPlacement`), and
+  // keyed on which side is showing the North-up view, because that turn changes
+  // the picture the placement has to describe.
+  const placeTurnA = turned && turnA;
+  const placeTurnB = turned && turnB;
+  const wantPlacement = mode !== "side" && !!a && !!b && needsSkyPlacement(a, b);
+  const placementQ = useQuery({
+    queryKey: ["compare-placement", a?.safe, a?.run_id, b?.run_id, placeTurnA, placeTurnB],
+    queryFn: () => api.comparePlacement(a!.safe, a!.run_id, b!.run_id,
+      placeTurnA, placeTurnB),
+    enabled: wantPlacement && !!a?.has_preview && !!b?.has_preview,
+    staleTime: Infinity,
+  });
+  const placement = usablePlacement(placementQ.data);
 
   const backToGallery = (
     <Button component={Link} to="/gallery" variant="subtle" size="xs"
@@ -619,34 +730,62 @@ export function CompareView() {
         </Alert>
       ) : null}
 
-      {mode === "side" ? (
-        <SimpleGrid cols={{ base: 1, md: 2 }}>
-          {[["A", a] as const, ["B", b] as const].map(([tag, it]) => (
-            <Paper key={tag} withBorder p="sm" radius="md">
-              <Stack gap="xs">
-                <Group gap="xs">
-                  <Badge color={tag === "A" ? "blue" : "grape"} variant="filled">{tag}</Badge>
-                  <CardMeta item={it} />
-                </Group>
-                {it.has_preview ? (
-                  <Image src={tag === "A" ? srcA : srcB} fit="contain" bg="#000"
-                    h={420} radius="sm" />
-                ) : (
-                  <Center h={420} bg="dark.6"><Text c="dimmed">No preview</Text></Center>
-                )}
-              </Stack>
-            </Paper>
-          ))}
-        </SimpleGrid>
+      {mode !== "side" && wantPlacement && a.has_preview && b.has_preview
+        && placementQ.isLoading ? (
+        <Center h={300}><Loader /></Center>
+      ) : mode !== "side" && wantPlacement && a.has_preview && b.has_preview
+        && !placement ? (
+        <Stack gap="xs">
+          {/* Drawing the two in one box anyway is the bug this replaces: the same
+              star lands in two places and the overlay "shows" a difference that
+              is only the framing. */}
+          <Alert color="gray" variant="light" py="xs" data-testid="compare-unplaced">
+            These two pictures cover different sky, and they can't be lined up
+            star-for-star, so they're shown side by side instead.
+          </Alert>
+          <SideBySide a={a} b={b} srcA={srcA} srcB={srcB} />
+        </Stack>
+      ) : mode === "side" ? (
+        <SideBySide a={a} b={b} srcA={srcA} srcB={srcB} />
       ) : mode === "split" ? (
         <Paper withBorder p="sm" radius="md">
-          <Split a={a} b={b} srcA={srcA} srcB={srcB} />
+          <Split a={a} b={b} srcA={srcA} srcB={srcB}
+            placement={wantPlacement ? placement : null} />
         </Paper>
       ) : (
         <Paper withBorder p="sm" radius="md">
-          <Blink a={a} b={b} srcA={srcA} srcB={srcB} />
+          <Blink a={a} b={b} srcA={srcA} srcB={srcB}
+            placement={wantPlacement ? placement : null} />
         </Paper>
       )}
     </Stack>
+  );
+}
+
+/** The two pictures in two cards — the default mode, and where Split and Blink
+ * fall back to when a pair can't be lined up on the sky. */
+function SideBySide(
+  { a, b, srcA, srcB }:
+  { a: GalleryItem; b: GalleryItem; srcA: string; srcB: string },
+) {
+  return (
+    <SimpleGrid cols={{ base: 1, md: 2 }}>
+      {[["A", a] as const, ["B", b] as const].map(([tag, it]) => (
+        <Paper key={tag} withBorder p="sm" radius="md">
+          <Stack gap="xs">
+            <Group gap="xs">
+              <Badge color={tag === "A" ? "blue" : "grape"} variant="filled">{tag}</Badge>
+              <CardMeta item={it} />
+            </Group>
+            {it.has_preview ? (
+              <Image src={tag === "A" ? srcA : srcB} fit="contain" bg="#000"
+                h={420} radius="sm" />
+            ) : (
+              <Center h={420} bg="dark.6"><Text c="dimmed">No preview</Text></Center>
+            )}
+          </Stack>
+        </Paper>
+      ))}
+    </SimpleGrid>
   );
 }
