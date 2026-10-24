@@ -1,5 +1,19 @@
 # Process notes & QA sweep records
 
+## 2026-10-24 (Builder, branch `claude/nice-carson-6iu76a`) — dogfood `--calibration --mosaic --editor` and `--deep`; one probe false positive fixed (v0.502.43)
+
+- **Start:** no open PRs; FOCUS: no ungated bug, no open beginner feature. Took the last run's "dogfood a flag not run lately".
+- **`--calibration --mosaic --editor`:** CLEAN as far as it ran. Both offers found the seeded darks/flats, both masters
+  built, the defect scan read 31 hot/dead px (0.020 %), auto-bind applied dark 1 + flat 2 to the run and the health card
+  says "calibrated (dark+flat)" with the calibration note correctly withdrawn; mosaic trim 7.9 %, the 2×2's panel map,
+  grain and seam notes agree on the thin top-right part. All 21 editor ops re-rendered and undo/redo applied; the pass
+  was then stopped by this session's own 10-minute command limit mid-editor-drive (the `browser closed` trace is that
+  kill, not the app) — the remaining editor steps were last run CLEAN on 2026-10-23.
+- **`--deep`:** frames table 301 of 1,200 rows, 7,538 nodes, first paint 1,241 ms, grows to 601 on scrolling the foot;
+  no console errors. Its only two findings were the `VisuallyHidden` span in the header's "1 job running" badge (1 px
+  box by design) — a probe false positive, fixed as **v0.502.43**. **Read later `--deep` passes' `/` line accordingly:**
+  before this, two findings there with a job running were expected noise.
+
 ## 2026-10-23 (Builder, branch `claude/nice-carson-unkvbg`) — two big-picture dogfood passes, both CLEAN; nothing shipped
 
 - **Start:** no open PRs; suite 8259 passed / 7 skipped on `b4099ae3` (xdist `-n 4`, BLAS capped, 17m35s). Every open

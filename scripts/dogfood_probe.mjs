@@ -323,6 +323,24 @@ function overflowingLeaves() {
   // being scrolled deliberately, and a spinner's own rotation is not an
   // overflow (see the Loader note below).
   const SKIP_TAGS = new Set(["input", "textarea", "select", "svg", "path"]);
+  // Text drawn for a screen reader only — a 1 px, `clip: rect(0 0 0 0)` box
+  // by design (Mantine's `VisuallyHidden`, the `sr-only` idiom): its content
+  // is *meant* to be wider than its box and is never painted. Earned by a
+  // false positive: since v0.465.3 the header's "N running" badge carries its
+  // full phrase in one, so every probe that caught a job running (every
+  // `--deep` pass — the 1,200-sub load is still QC-ing while the pages are
+  // swept) reported "1px box vs 87px content" on `/`, from both this probe
+  // and its sibling. Judged by the computed clip, not the class name, so a
+  // hand-rolled `sr-only` span is covered too. Nested rather than shared
+  // because `page.evaluate` serialises each probe function on its own.
+  const screenReaderOnly = (node) => {
+    for (let n = node; n && n !== document.body; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.position === "absolute"
+          && /^rect\(0(px)?,? 0(px)?,? 0(px)?,? 0(px)?\)$/.test(cs.clip)) return true;
+    }
+    return false;
+  };
   const out = [];
   for (const el of document.querySelectorAll("body *")) {
     if (el.children.length) continue;                 // leaves only
@@ -348,6 +366,7 @@ function overflowingLeaves() {
     // drawing, and the two later probes of the same page were silent because
     // the warm cache showed no spinner at all.
     if (el.closest('[class*="mantine-Loader-"]')) continue;
+    if (screenReaderOnly(el)) continue;
     if (el.scrollWidth - el.clientWidth > 1) {
       out.push({
         tag: el.tagName.toLowerCase(),
@@ -374,6 +393,15 @@ function overflowingLeaves() {
  * than a wall of noise. The cure is `min-width: max-content` on the badge — let
  * the container grow (and scroll) rather than eat the word. */
 function clippedLabels() {
+  // Same exclusion as `overflowingLeaves` — see the note there.
+  const screenReaderOnly = (node) => {
+    for (let n = node; n && n !== document.body; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.position === "absolute"
+          && /^rect\(0(px)?,? 0(px)?,? 0(px)?,? 0(px)?\)$/.test(cs.clip)) return true;
+    }
+    return false;
+  };
   const out = [];
   for (const el of document.querySelectorAll(
     '[class*="mantine-Badge-root"], [class*="mantine-Chip-"]')) {
@@ -385,6 +413,7 @@ function clippedLabels() {
       const s = getComputedStyle(p);
       if (s.overflowX !== "hidden" && s.overflowX !== "clip") continue;
       if (p.scrollWidth - p.clientWidth <= 1) continue;
+      if (screenReaderOnly(p)) continue;                // spoken, not drawn
       out.push({
         text: (el.textContent || "").trim().slice(0, 40),
         clientWidth: p.clientWidth, scrollWidth: p.scrollWidth,
