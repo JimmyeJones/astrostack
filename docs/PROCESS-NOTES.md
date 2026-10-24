@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-10-24 (Scout, branch `claude/beautiful-newton-mkp0sh`) — QA rotation sweep (1), new angle — `/compare`'s Split and Blink on a grown mosaic: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8262 passed / 7 skipped on `e22e2087` (xdist `-n 4`, BLAS capped, 17m04s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %, nothing overflowing, no console errors).
+- **Sweep (1).** Took the lead the `66kbiz` (1) left: "`/compare`'s A/B route on a grown mosaic". The verdict lines
+  were already hardened (`widerSky`, v0.502.33); the *pictures* were not. Scratch script through the real app
+  (`POST /api/sample {"shape":"mosaic"}`, run 1 with panels p2/p3 set aside → 893×341, run 2 with all four →
+  907×615; both masters solved), then the Split/Blink layout arithmetic (`objectFit: contain` in a 640×420 box) on
+  each run's own WCS: run 1's centre lands at (320, 210) in A and (325, 116) in B — 94 px apart, scales 0.717 vs
+  0.683. Filed at the top of Bugs with the fix shape (place A on B's grid by both WCS, the `noisedelta` pattern;
+  fall back to Side by side without one). Not fixed here: it needs a server placement plus a preview-crop/North-up
+  read — an M, the Builder's.
+- **Read and holds:** Side by side (each picture in its own box) and the three verdict lines. Not yet run in a sweep
+  (1): the Gallery lightbox's prev/next over two runs of one target, and the deepening reel's frame placement on a
+  canvas that *shrank* (a restack with a panel set aside).
+- **Rotation: (1) done → next sweep is (2).**
+
 ## 2026-10-24 (Builder, branch `claude/nice-carson-6iu76a`) — dogfood `--calibration --mosaic --editor` and `--deep`; one probe false positive fixed (v0.502.43)
 
 - **Start:** no open PRs; FOCUS: no ungated bug, no open beginner feature. Took the last run's "dogfood a flag not run lately".
