@@ -5,7 +5,8 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CompareView, parseRef, compareHref, noiseComparison, panelComparison,
-  nightsComparison, compareDateLabel, compareNorthUpOffer,
+  nightsComparison, compareDateLabel, compareNorthUpOffer, needsSkyPlacement,
+  usablePlacement,
 } from "./Compare";
 import { NORTH_UP_VIEW_KEY } from "../components/NorthUpViewToggle";
 import * as client from "../api/client";
@@ -659,5 +660,103 @@ describe("CompareView — the North-up view", () => {
     renderCompare("?a=M_42:3&b=M_42:7");
     await waitFor(() => expect(client.api.stackAnnotations).toHaveBeenCalledTimes(2));
     expect(screen.queryByTestId("north-up-view")).not.toBeInTheDocument();
+  });
+});
+
+// Split and Blink on a grown mosaic: the two canvases are different pieces of sky,
+// so drawing both "contain" in one box put the same star ~94 px apart (Scout
+// 2026-10-24). The page now asks where A sits on B by WCS and draws them there.
+describe("needsSkyPlacement", () => {
+  const grown = (run_id: number, w: number, h: number): GalleryItem =>
+    ({ ...item(run_id, "M_42"), canvas_w: w, canvas_h: h });
+
+  it("asks only for two runs of one target whose canvases differ", () => {
+    expect(needsSkyPlacement(grown(1, 893, 341), grown(2, 907, 615))).toBe(true);
+    expect(needsSkyPlacement(grown(1, 893, 341), grown(2, 893, 341))).toBe(false);
+    expect(needsSkyPlacement(grown(1, 893, 341),
+      { ...grown(2, 907, 615), safe: "NGC_7000" })).toBe(false);
+  });
+});
+
+describe("usablePlacement", () => {
+  const ok = {
+    placeable: true, frame_w: 900, frame_h: 620,
+    a: { width: 893, height: 341, matrix: [1, 0, 0, 1, 7, 90] },
+    b: { width: 907, height: 615, x: 0, y: 0 },
+  };
+  it("passes a complete placement through", () => {
+    expect(usablePlacement(ok)).toEqual(ok);
+  });
+  it("reads anything unplaceable, partial or malformed as 'not placed'", () => {
+    expect(usablePlacement({ placeable: false })).toBeNull();
+    expect(usablePlacement(undefined)).toBeNull();
+    expect(usablePlacement({ ...ok, frame_w: 0 })).toBeNull();
+    expect(usablePlacement({ ...ok, a: { ...ok.a, matrix: [1, 0, 0] } })).toBeNull();
+    expect(usablePlacement({ ...ok, a: { ...ok.a, matrix: [1, 0, 0, 1, NaN, 0] } }))
+      .toBeNull();
+  });
+});
+
+describe("CompareView — a grown mosaic in Split and Blink", () => {
+  const first = { ...item(3, "M_42", "Orion"), canvas_w: 893, canvas_h: 341 };
+  const now = { ...item(7, "M_42", "Orion"), canvas_w: 907, canvas_h: 615 };
+  const placed = {
+    placeable: true, frame_w: 907, frame_h: 615,
+    a: { width: 893, height: 341, matrix: [0.98, 0, 0, 0.98, 5, 94] },
+    b: { width: 907, height: 615, x: 0, y: 0 },
+  };
+
+  it("draws A where its sky is on B, under the same divider", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [first, now] });
+    const spy = vi.spyOn(client.api, "comparePlacement").mockResolvedValue(placed);
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Split")).toBeInTheDocument());
+    expect(spy).not.toHaveBeenCalled();          // Side by side never needs it
+    fireEvent.click(screen.getByText("Split"));
+    await waitFor(() => expect(screen.getByTestId("sky-frame")).toBeInTheDocument());
+    expect(spy).toHaveBeenCalledWith("M_42", 3, 7, false, false);
+    expect(screen.getByTestId("sky-frame-a").getAttribute("transform"))
+      .toBe("matrix(0.98 0 0 0.98 5 94)");
+    expect(screen.getByTestId("sky-frame").getAttribute("viewBox")).toBe("0 0 907 615");
+    // The unplaced overlay is gone, the hint is not.
+    expect(screen.queryByAltText("A: out3")).not.toBeInTheDocument();
+    expect(screen.getByText(/Drag the divider/)).toBeInTheDocument();
+  });
+
+  it("blinks the two on the same placed frame", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [first, now] });
+    vi.spyOn(client.api, "comparePlacement").mockResolvedValue(placed);
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Blink")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Blink"));
+    await waitFor(() => expect(screen.getByTestId("sky-frame")).toBeInTheDocument());
+    expect(screen.getByTestId("sky-frame-a")).toBeInTheDocument();
+    expect(screen.queryByTestId("sky-frame-b")).not.toBeInTheDocument();
+  });
+
+  it("says so in a sentence and shows them side by side when they can't be lined up", async () => {
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [first, now] });
+    vi.spyOn(client.api, "comparePlacement").mockResolvedValue({ placeable: false });
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Split")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Split"));
+    await waitFor(() => expect(screen.getByTestId("compare-unplaced")).toBeInTheDocument());
+    expect(screen.getByTestId("compare-unplaced").textContent).toMatch(/cover different sky/);
+    expect(screen.queryByAltText("A: out3")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sky-frame")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Orion").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("leaves a same-canvas pair exactly as it was, with no placement request", async () => {
+    const a = item(3, "M_42", "Orion");
+    const b = item(7, "M_42", "OrionV2");
+    vi.spyOn(client.api, "getGallery").mockResolvedValue({ items: [a, b] });
+    const spy = vi.spyOn(client.api, "comparePlacement");
+    renderCompare("?a=M_42:3&b=M_42:7");
+    await waitFor(() => expect(screen.getByText("Split")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Split"));
+    await waitFor(() => expect(screen.getByAltText("A: out3")).toBeInTheDocument());
+    expect(screen.queryByTestId("sky-frame")).not.toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalled();
   });
 });

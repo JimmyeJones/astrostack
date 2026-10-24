@@ -82,29 +82,6 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
-- **🟡 (Scout 2026-10-24, QA rotation sweep (1)) — Compare's Split and Blink lay two runs of a grown mosaic over
-  each other by screen box, not by sky, so the same star sits ~94 px apart under the divider.** *(Pillar: trust /
-  friendliness — PRIORITY 3, on the grown-canvas frontier; size **M**; severity low-to-moderate — a viewing aid
-  that answers "did it get better?" with two pictures that don't line up; nothing on disk is touched.
-  Confidence: **reproduced** end to end, ungated.)*
-  `frontend/src/routes/Compare.tsx` `Split` puts A's `preview_url` absolutely over B's, both `objectFit:
-  "contain"` in one 640×420 box; `Blink` swaps them in one `<Image h={420} fit="contain">`. Nothing maps one
-  canvas onto the other — only rotation is handled (v0.359.0's North-up turn, whose entry promises "so a Split or a
-  Blink actually lines up"). Scratch repro through the real app: `POST /api/sample {"shape":"mosaic"}`, stack with
-  panels p2/p3 set aside (run 1, canvas 893×341), re-accept and stack again (run 2, 907×615); the WCS point at
-  run 1's centre lands at box (320, 210) in A and (325, 116) in B — **94 px apart, 22 % of the box height**, and
-  the two are drawn at different scales (0.717 vs 0.683 px/px). Both of the Target page's links
-  (`CompareWithLastCard`: "Compare with my last one" and "How far you've come" — first-ever vs now, which on a
-  mosaic shooter's target is almost always a grown canvas) open this page. Side by side is unaffected, and the
-  noise / panels / nights verdicts already stand down on a wider sky (`noiseComparison` `widerSky`).
-  **Fix shape (the FOCUS "grown-canvas rule"):** when the two `canvas_w×canvas_h` differ, place A on B's grid by
-  both masters' WCS — `seestack/render/noisedelta.py` already maps one master's box onto the other's
-  (`pixel_exact`) and is the pattern — accounting for a preview that is cropped or baked North-up
-  (`webapp/preview_orient.recovered_preview_crop` / `baked_north_up_deg`); without a WCS on both, Split and Blink
-  say in one plain sentence that these two pictures cover different sky and fall back to Side by side. Regression
-  test: two runs of differing canvas through the real gallery + the new placement, asserting one sky point lands
-  on one box pixel (± 1); a same-canvas pair must render exactly as today.
-
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
@@ -3614,6 +3591,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.1 **Compare's Split and Blink line up two runs of a grown mosaic by sky — the same star sat ~94 px apart (and at two scales) because both were drawn "contain" in one box; A is now drawn on B's pixel grid through both masters' WCS, and a pair that can't be lined up says so and shows side by side** (`seestack/render/compareplace.place_a_on_b`, `GET …/compare-placement`, `Compare.tsx` `SkyFrame`/`needsSkyPlacement`). Scout's Bugs entry; full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.503.0 **A single field's Target page names the mosaic of the same object he already has — the coaching line and the framing note both said "shoot it in mosaic mode next session" with that mosaic one click away; they now name it and link to it** (`webapp/mosaic_companion.find_mosaic_companion`, `TargetOut.mosaic_companion`, `nextBestMove` framing rung, `FramingVerdictNote`). Dogfood find; entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.44 **After "Combine into one deep target", the Target page's notes describe the target's own stack, not the newer one-night picture the merge carried in — M_31 showed its own 4-sub picture under "This stack combined only 3 frames"** (`merge.CARRIED_FROM_META_PREFIX`, `StackRunOut.carried_in`, `latestStackFirst`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.43 **The dogfood probe no longer reports the header's screen-reader-only "N jobs running" text as a 1 px overflow and a clipped label — two phantom findings on `/` on every pass that caught a job running** (`dogfood_probe.mjs` `overflowingLeaves`/`clippedLabels` → `screenReaderOnly`). Entry in [`SHIPPED.md`](SHIPPED.md).

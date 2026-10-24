@@ -2638,6 +2638,83 @@ async def noise_delta_png(safe: str, request: Request,
                     headers={"Cache-Control": "no-store"})
 
 
+# --- Compare's Split / Blink on a grown canvas -------------------------------
+# Split lays one run's preview over another's and Blink swaps them in one frame;
+# on two runs of one canvas the previews are the same grid, but on a mosaic that
+# grew they are different pieces of sky at different sizes, and drawing both
+# "contain" in one box put the same star ~94 px apart. This answers where A's
+# displayed preview sits on B's, from both masters' WCS
+# (seestack.render.compareplace), so the page can draw them on one sky.
+
+
+def _compare_side(run, north_up: bool):  # noqa: ANN001, ANN202
+    """The :class:`~seestack.render.compareplace.PreviewSide` a run is showing on
+    Compare, or ``None`` when its picture can't be placed: no master or preview
+    on disk, an unreadable preview, or a stored preview whose geometry can't be
+    reconciled with its canvas (:data:`~seestack.previewcrop.UNKNOWN`)."""
+    from seestack.render.compareplace import PreviewSide
+    from webapp.preview_orient import _png_size
+
+    if not run.fits_path or not Path(run.fits_path).exists():
+        return None
+    if not run.preview_path or not Path(run.preview_path).exists():
+        return None
+    size = _png_size(run.preview_path)
+    if size is None:
+        return None
+    crop = recovered_preview_crop(run)
+    if crop == CROP_UNKNOWN:
+        return None
+    baked = baked_north_up_deg(run)
+    view = 0.0
+    if north_up:
+        from seestack.render.thumbnail import preview_north_up_remainder_deg
+
+        # The same remainder ``…/preview?north_up=true`` turns the stored bytes
+        # by, so the placement describes the picture actually on screen.
+        view = preview_north_up_remainder_deg(run.fits_path, already_deg=baked)
+    return PreviewSide(fits_path=run.fits_path, stored_size=size,
+                       baked_deg=baked, crop=crop, view_deg=view)
+
+
+@router.get("/api/targets/{safe}/compare-placement")
+async def compare_placement(safe: str, request: Request, a: int, b: int,
+                            north_up_a: bool = False,
+                            north_up_b: bool = False) -> dict[str, Any]:
+    """Where run ``a``'s displayed preview sits on run ``b``'s, by sky.
+
+    ``north_up_a`` / ``north_up_b`` say which side is showing the on-the-fly
+    North-up view. ``placeable`` is ``false`` — never an error — when either side
+    has no master or preview, a preview's geometry can't be reconciled with its
+    canvas, either master has no usable celestial WCS, or the two share no sky;
+    the page then says so and shows the two side by side. Both paths come out of
+    the project DB, never off the request.
+    """
+    lib, proj = deps.open_target_project(request, safe)
+    try:
+        by_id = {r.id: r for r in proj.iter_stack_runs()}
+    finally:
+        proj.close()
+        lib.close()
+    run_a, run_b = by_id.get(a), by_id.get(b)
+    if run_a is None or run_b is None:
+        raise HTTPException(status_code=404, detail="No such run")
+
+    def _place() -> dict[str, Any]:
+        from seestack.render.compareplace import place_a_on_b
+
+        side_a = _compare_side(run_a, north_up_a)
+        side_b = _compare_side(run_b, north_up_b)
+        if side_a is None or side_b is None:
+            return {"placeable": False}
+        placement = place_a_on_b(side_a, side_b)
+        if placement is None:
+            return {"placeable": False}
+        return {"placeable": True, **placement.as_json()}
+
+    return await run_in_threadpool(_place)
+
+
 # --- Share-ready "zoom clip" -------------------------------------------------
 # A short looping push-in on ONE finished picture, for posting. Unlike the two
 # animations above (the progress reel and the deepening reel, both of which show a
