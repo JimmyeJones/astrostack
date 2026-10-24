@@ -1288,6 +1288,9 @@ export function TargetView() {
                  renders, so the coaching line stops telling a beginner to add
                  time to a picture that is missing most of its object. */
               framing={measuredFraming}
+              /* The mosaic of this object he already has, so "shoot it in
+                 mosaic mode" becomes "keep adding to that one". */
+              mosaicCompanion={target.data?.mosaic_companion}
             />
           ) : null },
           /* "About as clean as your sky allows": when this target's measured noise
@@ -1309,6 +1312,7 @@ export function TargetView() {
                  verdict it has already decided not to act on adds the order
                  instead of prescribing a second next session. */
               coachKind={coachKind}
+              mosaicCompanion={target.data?.mosaic_companion}
             />
           ) : null },
         ]}

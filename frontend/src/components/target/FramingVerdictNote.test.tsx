@@ -11,12 +11,14 @@ import type { NextBestMoveKind } from "./nextBestMove";
 function renderNote(
   qc: QueryClient = new QueryClient(),
   coachKind?: NextBestMoveKind | null,
+  mosaicCompanion?: client.TargetCompanion | null,
 ) {
   return render(
     <MantineProvider>
       <QueryClientProvider client={qc}>
         <MemoryRouter>
-          <FramingVerdictNote safe="M_42" runId={7} coachKind={coachKind} />
+          <FramingVerdictNote safe="M_42" runId={7} coachKind={coachKind}
+            mosaicCompanion={mosaicCompanion} />
         </MemoryRouter>
       </QueryClientProvider>
     </MantineProvider>,
@@ -373,6 +375,49 @@ describe("FramingVerdictNote — the offer tells the truth", () => {
     expect(await screen.findByTestId("framing-mosaic-plan")).toHaveTextContent(
       "About a 3×3 mosaic (9 panels) covers all of it.");
     expect(identify).toHaveBeenCalledWith("M_42");
+  });
+
+  it("names the mosaic of this object he already has", async () => {
+    // "Shoot it in mosaic mode" — but the Seestar's mosaic of it is a separate
+    // target, so the note now says where it is instead of only what to shoot.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(
+      verdict({
+        level: "partial", coverage: 0.15, canvas: "frame",
+        text: "is bigger than your frame — only about 15% of it is in this "
+          + "picture. Shoot it in mosaic mode to capture all of it.",
+      }));
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(null);
+    renderNote(new QueryClient(), null, {
+      safe_name: "M_42_mosaic", name: "M 42 (mosaic)",
+      n_frames_accepted: 300, total_exposure_s: 3 * 3600,
+    });
+
+    const line = await screen.findByTestId("framing-mosaic-companion");
+    expect(line).toHaveTextContent(
+      "You already have a mosaic of Orion Nebula: M 42 (mosaic) — 3.0 h so far. "
+      + "That's the picture to keep adding to.");
+    expect(screen.getByRole("link", { name: "M 42 (mosaic)" }))
+      .toHaveAttribute("href", "/targets/M_42_mosaic");
+  });
+
+  it("says nothing about a companion unless the verdict asks for a mosaic", async () => {
+    const companion = { safe_name: "M_42_mosaic", name: "M 42 (mosaic)",
+      n_frames_accepted: 300, total_exposure_s: 3 * 3600 };
+    vi.spyOn(client.api, "identifyTarget").mockResolvedValue(null);
+    // A well-framed single field…
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(verdict());
+    const { unmount } = renderNote(new QueryClient(), null, companion);
+    expect(await screen.findByText("Nicely framed")).toBeInTheDocument();
+    expect(screen.queryByTestId("framing-mosaic-companion")).not.toBeInTheDocument();
+    unmount();
+    // …and a picture that is already a mosaic.
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue(verdict({
+      level: "partial", coverage: 0.55, canvas: "mosaic",
+      text: "is bigger than this mosaic — only about 55% of it is in this picture.",
+    }));
+    renderNote(new QueryClient(), null, companion);
+    expect(await screen.findByText("It's bigger than this mosaic")).toBeInTheDocument();
+    expect(screen.queryByTestId("framing-mosaic-companion")).not.toBeInTheDocument();
   });
 
   it("says what that grid costs, not only how many panels it is", async () => {

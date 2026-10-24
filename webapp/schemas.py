@@ -55,6 +55,22 @@ class TargetOut(BaseModel):
     # ``field_fulls`` to name how much sky. ``None`` on a single field, an older
     # run with no median, and everywhere ``field_fulls`` is.
     depth_fulls: float | None = None
+    # The mosaic of the same object this library already holds, when this
+    # target is a single field (``webapp.mosaic_companion``). Set by
+    # ``get_target`` only, so the page that tells a single field "shoot it in
+    # mosaic mode" can point at the mosaic he has already shot instead. ``None``
+    # on a mosaic, when there is no such mosaic, on the list endpoint and on an
+    # older backend — the page then reads exactly as before.
+    mosaic_companion: TargetCompanionOut | None = None
+
+
+class TargetCompanionOut(BaseModel):
+    """Another target the Target page links to — just enough to name it."""
+
+    safe_name: str
+    name: str
+    n_frames_accepted: int = 0
+    total_exposure_s: float = 0.0
 
 
 class TargetPatch(BaseModel):

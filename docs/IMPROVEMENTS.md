@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- **Builder 2026-10-24, branch `claude/nice-carson-itbuxk`** — a single-field Target page that says "shoot it in mosaic mode" names the mosaic of the same object the library already holds (`TargetOut.mosaic_companion`, `nextBestMove` framing rung, `FramingVerdictNote`). Found by `--closing --incoming-lag --mosaic --editor` dogfood.
+*No live claims.*
 
 ---
 
@@ -3591,6 +3591,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.0 **A single field's Target page names the mosaic of the same object he already has — the coaching line and the framing note both said "shoot it in mosaic mode next session" with that mosaic one click away; they now name it and link to it** (`webapp/mosaic_companion.find_mosaic_companion`, `TargetOut.mosaic_companion`, `nextBestMove` framing rung, `FramingVerdictNote`). Dogfood find; entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.44 **After "Combine into one deep target", the Target page's notes describe the target's own stack, not the newer one-night picture the merge carried in — M_31 showed its own 4-sub picture under "This stack combined only 3 frames"** (`merge.CARRIED_FROM_META_PREFIX`, `StackRunOut.carried_in`, `latestStackFirst`). Full entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.43 **The dogfood probe no longer reports the header's screen-reader-only "N jobs running" text as a 1 px overflow and a clipped label — two phantom findings on `/` on every pass that caught a job running** (`dogfood_probe.mjs` `overflowingLeaves`/`clippedLabels` → `screenReaderOnly`). Entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.502.42 **Combining folders no longer deletes a folder a stack is still writing into — a stack running on a merged-away source finished "done" into an orphaned `output/` and its picture was lost; the merge now refuses (409, plain-language) while a source has a queued or running job** (`routers/targets.merge_targets`, Scout rotation sweep (4)). Entry in [`SHIPPED.md`](SHIPPED.md).

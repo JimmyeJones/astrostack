@@ -2,7 +2,11 @@ import { useMemo } from "react";
 import { Alert, Anchor, Text } from "@mantine/core";
 import { Link } from "react-router-dom";
 import { IconBulb } from "@tabler/icons-react";
-import { nextBestMove, type NextBestMoveFraming } from "./nextBestMove";
+import {
+  nextBestMove,
+  type NextBestMoveCompanion,
+  type NextBestMoveFraming,
+} from "./nextBestMove";
 import type { GoalDifficulty } from "../../readiness";
 import { softerThanUsual } from "./softStars";
 import type { GrainLevel } from "./grainProjection";
@@ -37,6 +41,7 @@ export function NextBestMoveBadge(
     raggedBorder,
     grainLevel,
     framing,
+    mosaicCompanion,
   }: {
     name: string;
     nFramesUsed: number | null | undefined;
@@ -80,6 +85,11 @@ export function NextBestMoveBadge(
      * absent, or any verdict but a badly-short `partial`, reads exactly as
      * before. */
     framing?: NextBestMoveFraming | null;
+    /** The mosaic of the same object the library already holds
+     * (`Target.mosaic_companion`), so a single field's framing tip names it
+     * rather than prescribing a mosaic he has already shot. Optional — absent
+     * reads exactly as before. */
+    mosaicCompanion?: NextBestMoveCompanion | null;
   },
 ) {
   const tip = useMemo(
@@ -96,9 +106,10 @@ export function NextBestMoveBadge(
         raggedBorder,
         grainLevel,
         framing,
+        mosaicCompanion,
       }),
     [nFramesUsed, integrationS, nUnsolved, runs, fieldFulls, objectType,
-     difficulty, grainVerdict, raggedBorder, grainLevel, framing],
+     difficulty, grainVerdict, raggedBorder, grainLevel, framing, mosaicCompanion],
   );
   if (!tip) return null;
 

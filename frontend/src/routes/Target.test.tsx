@@ -1154,6 +1154,45 @@ describe("TargetView framing verdict", () => {
     expect(tip).not.toMatch(/Add more time/);
   });
 
+  it("points both mosaic-mode notes at the mosaic of this object he already has", async () => {
+    // Found by a `--closing --incoming-lag --mosaic --editor` dogfood pass: the
+    // single field's coaching card and framing note both said "shoot it in
+    // mosaic mode next session" with a mosaic of the same object one click
+    // away in the library. Pins the wiring: `Target.mosaic_companion` has to
+    // reach both of them.
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(
+      mkTarget({
+        total_exposure_s: 10 * 60,
+        mosaic_companion: { safe_name: "M_42_mosaic", name: "M 42 (mosaic)",
+          n_frames_accepted: 300, total_exposure_s: 3 * 3600 },
+      }),
+    );
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ id: 7, total_exposure_s: 10 * 60, n_frames_used: 40 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([mkFrame(1)]);
+    vi.spyOn(client.api, "stackFraming").mockResolvedValue({
+      level: "partial",
+      text: "is bigger than your frame — only about 15% of it is in this picture. "
+        + "Shoot it in mosaic mode to capture all of it.",
+      coverage: 0.15, coverage_pct: 15, off_centre: 0.1, canvas: "frame",
+      object_name: "Orion Nebula", size_arcmin: 85,
+    });
+
+    renderTarget();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("next-best-move").textContent ?? "")
+        .toMatch(/You already have a mosaic of it/));
+    const tip = screen.getByTestId("next-best-move").textContent ?? "";
+    expect(tip).not.toMatch(/Shooting it in mosaic mode/);
+    expect(await screen.findByTestId("framing-mosaic-companion"))
+      .toHaveTextContent(/You already have a mosaic of Orion Nebula: M 42 \(mosaic\)/);
+    for (const a of screen.getAllByRole("link", { name: /M 42 \(mosaic\)/ })) {
+      expect(a).toHaveAttribute("href", "/targets/M_42_mosaic");
+    }
+  });
+
   it("scopes the readiness goal to the canvas it is actually pricing", async () => {
     // Filed as a LEAD by the run that shipped the framing rung, photographed on
     // the same sample: the readiness card answered "how much more do I need?"
