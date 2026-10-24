@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-10-24 (Builder, branch `claude/nice-carson-6iu76a`) — the dogfood probe no longer reports screen-reader-only text as clipped
+
+### v0.502.43 — `scripts/dogfood_probe.mjs` `overflowingLeaves` / `clippedLabels` skip `screenReaderOnly` boxes
+
+**What.** Found on a `scripts/agent-dogfood.sh --deep` pass (the first in a while). Its only two findings were
+`[desktop] /: OVERFLOW <span> 1px box vs 87px content — "1 job running"` and the matching `CLIPPED LABEL`, both on
+Mantine's `VisuallyHidden` span — the 1 px, `clip: rect(0 0 0 0)` box v0.465.3 put inside the header's "N running"
+badge so a screen reader hears the whole phrase. That box is *meant* to be narrower than its text and is never painted,
+so it is not a layout bug; but every pass that sweeps `/` while a job runs (every `--deep` pass — its 1,200-sub load is
+still QC-ing when the pages are probed) printed two phantom findings on the screen the owner opens first, which trains
+a reader to skim past the probe's real ones.
+
+**Fix.** Both probe functions skip an element inside a `position: absolute` box whose computed `clip` is
+`rect(0 0 0 0)` — the sr-only idiom judged by its CSS, not Mantine's class name, so a hand-rolled one is covered too.
+The helper is nested in each function because `page.evaluate` serialises each probe on its own. Tooling only: no app,
+config, schema or on-disk change.
+
+**Tests.** +1 `tests/test_dogfood_probe_sr_only.py`: runs the probe's own function source in real Chromium against a
+page holding Mantine's verbatim `VisuallyHidden` rule (inside a badge and on its own) and a genuinely clipped badge —
+the spoken-only text is never a finding, the clipped badge still is from both checks (fails before: the sr-only span
+reported by both). Skips where Node + Playwright are absent.
+
 ## 2026-10-23 (Scout, branch `claude/beautiful-newton-v9b2h7`) — combining folders no longer deletes a folder a stack is still writing into
 
 ### v0.502.42 — `routers/targets.merge_targets` refuses a busy source (409)
