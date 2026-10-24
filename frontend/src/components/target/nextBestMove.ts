@@ -219,6 +219,20 @@ export interface NextBestMoveInput {
    * verdict under `FRAMING_MAX_COVERAGE` changes anything; omit / null / any
    * other verdict and every phrase below is byte-for-byte what it was. */
   framing?: NextBestMoveFraming | null;
+  /** The mosaic of the same object the library already holds
+   * (`Target.mosaic_companion`). Read only by the framing rung on a single
+   * field: "shoot it in mosaic mode next session" is advice he has usually
+   * already taken, so the rung names that mosaic and links to it instead. Omit
+   * / null and every phrase is byte-for-byte what it was. */
+  mosaicCompanion?: NextBestMoveCompanion | null;
+}
+
+/** The mosaic a single field's framing rung points at — structurally typed so
+ *  the caller can hand over `Target.mosaic_companion` as served. */
+export interface NextBestMoveCompanion {
+  safe_name: string;
+  name: string;
+  total_exposure_s?: number | null;
 }
 
 function finite(v: number | null | undefined): number | null {
@@ -341,7 +355,10 @@ export function framingDepthFirstClause(
  * that one folded. A coaching line that says "see the note you cannot see" is
  * worse than a repeated percentage.
  */
-function framingRung(v: NextBestMoveFraming | null | undefined): NextBestMove | null {
+function framingRung(
+  v: NextBestMoveFraming | null | undefined,
+  companion?: NextBestMoveCompanion | null,
+): NextBestMove | null {
   if (!v || !framingIsFragment(v)) return null;
   const pct = finite(v.coverage_pct);
   if (pct == null) return null;
@@ -357,6 +374,28 @@ function framingRung(v: NextBestMoveFraming | null | undefined): NextBestMove | 
         `${pct}% of it made it in. Adding more panels next session is the ` +
         `biggest win here: more passes over the panels you already have can ` +
         `deepen this picture, but they can't bring the rest of it in.`,
+    };
+  }
+  // He may already have done exactly that: the Seestar files mosaic subs under
+  // their own `_mosaic_sub` folder, which becomes a separate target, so "shoot
+  // it in mosaic mode next session" can be prescribing a session he has shot.
+  // Then the move is to keep building the mosaic he has — name it and link it.
+  const companionName = (companion?.name ?? "").trim();
+  if (companion && companionName && companion.safe_name) {
+    const secs = finite(companion.total_exposure_s);
+    const soFar = secs != null && secs > 0
+      ? `, with ${formatIntegration(secs)} so far` : "";
+    return {
+      kind: "framing",
+      phrase:
+        `A large part of ${it} is still outside this picture — only about ` +
+        `${pct}% of it made it in, and it's bigger than one frame, so more ` +
+        `time here can't bring the rest in. You already have a mosaic of it — ` +
+        `${companionName}${soFar} — so that's the picture to keep adding to.`,
+      action: {
+        label: `Open ${companionName} →`,
+        href: `/targets/${encodeURIComponent(companion.safe_name)}`,
+      },
     };
   }
   return {
@@ -482,7 +521,7 @@ export function nextBestMove(input: NextBestMoveInput): NextBestMove | null {
   //    folder, so switching to mosaic mode starts a *new* target and the hours
   //    added to the narrow field do not carry over. It sits below `soft`
   //    because a refocus tightens the wider session too.
-  const framingMove = framingRung(input.framing);
+  const framingMove = framingRung(input.framing, input.mosaicCompanion);
   if (framingMove) return framingMove;
 
   // The integration-based levers need a known total exposure. Without it, a

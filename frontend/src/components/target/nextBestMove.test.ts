@@ -611,6 +611,53 @@ describe("nextBestMove", () => {
       expect(tip?.phrase).toContain("can't bring the rest in");
     });
 
+    it("points at the mosaic he already has instead of prescribing one", () => {
+      // The Seestar files a mosaic under its own `_mosaic_sub` folder, which is a
+      // separate target — so "shoot it in mosaic mode next session" was advice he
+      // had usually already taken, on a page that never named the result.
+      const companion = { safe_name: "M_42_mosaic", name: "M 42 (mosaic)",
+        total_exposure_s: 3 * HOUR };
+      const tip = nextBestMove({
+        nFramesUsed: 6,
+        integrationS: 60,
+        framing: partial(0.15, "frame"),
+        mosaicCompanion: companion,
+      });
+      expect(tip?.kind).toBe("framing");
+      expect(tip?.phrase).toContain("15%");
+      expect(tip?.phrase).toContain("You already have a mosaic of it");
+      expect(tip?.phrase).toContain("— M 42 (mosaic), with 3.0 h so far — so");
+      expect(tip?.phrase).not.toContain("mosaic mode");
+      expect(tip?.action).toEqual({
+        label: "Open M 42 (mosaic) →", href: "/targets/M_42_mosaic" });
+    });
+
+    it("keeps the mosaic-mode advice without a companion, and on a mosaic", () => {
+      const before = nextBestMove({
+        nFramesUsed: 6, integrationS: 60, framing: partial(0.15, "frame") });
+      for (const mosaicCompanion of [null, undefined,
+        { safe_name: "x", name: "  " }]) {
+        expect(nextBestMove({
+          nFramesUsed: 6, integrationS: 60, framing: partial(0.15, "frame"),
+          mosaicCompanion,
+        })).toEqual(before);
+      }
+      // A mosaic's rung is about more panels, whoever else is in the library.
+      const onMosaic = nextBestMove({
+        nFramesUsed: 21, integrationS: 3 * HOUR, fieldFulls: 4,
+        framing: partial(0.55, "mosaic"),
+        mosaicCompanion: { safe_name: "M_42_mosaic", name: "M 42 (mosaic)" },
+      });
+      expect(onMosaic?.phrase).toContain("more panels");
+      expect(onMosaic?.action).toBeUndefined();
+      // …and with no time on it the sentence just omits the figure.
+      const noTime = nextBestMove({
+        nFramesUsed: 6, integrationS: 60, framing: partial(0.15, "frame"),
+        mosaicCompanion: { safe_name: "m", name: "M 42 (mosaic)", total_exposure_s: 0 },
+      });
+      expect(noTime?.phrase).toContain("— M 42 (mosaic) — so that's");
+    });
+
     it("names more panels, not more passes, on a mosaic with 55% of the object", () => {
       // Fails before: this was `integration`, "another pass or two over the
       // same mosaic" — the opposite instruction to the note below it.

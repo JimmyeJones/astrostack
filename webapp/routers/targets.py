@@ -52,6 +52,7 @@ from webapp.schemas import (
     SetCoverRequest,
     SkippedFolderOut,
     StackHealthOut,
+    TargetCompanionOut,
     TargetCreate,
     TargetOut,
     TargetPatch,
@@ -480,6 +481,7 @@ def cleanup_suggestions(request: Request) -> list[CleanupSuggestionOut]:
 @router.get("/{safe}", response_model=TargetOut)
 def get_target(safe: str, request: Request) -> TargetOut:
     from webapp.field_fulls import target_depth_fulls, target_field_fulls
+    from webapp.mosaic_companion import find_mosaic_companion
 
     lib = deps.open_library(request)
     try:
@@ -503,6 +505,20 @@ def get_target(safe: str, request: Request) -> TargetOut:
                 proj.close()
         except Exception:  # noqa: BLE001
             pass
+        # "Shoot it in mosaic mode" is the page's advice for a single field of
+        # something bigger than one frame — name the mosaic of it he already
+        # has, if any. Registry-only; never allowed to 500 the page.
+        try:
+            companion = find_mosaic_companion(entry, lib.list_targets())
+        except Exception:  # noqa: BLE001
+            companion = None
+        if companion is not None:
+            out.mosaic_companion = TargetCompanionOut(
+                safe_name=companion.safe_name,
+                name=companion.name,
+                n_frames_accepted=companion.n_frames_accepted,
+                total_exposure_s=companion.total_exposure_s,
+            )
         return out
     finally:
         lib.close()
