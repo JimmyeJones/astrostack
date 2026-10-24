@@ -82,6 +82,29 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 (Scout 2026-10-24, QA rotation sweep (1)) — Compare's Split and Blink lay two runs of a grown mosaic over
+  each other by screen box, not by sky, so the same star sits ~94 px apart under the divider.** *(Pillar: trust /
+  friendliness — PRIORITY 3, on the grown-canvas frontier; size **M**; severity low-to-moderate — a viewing aid
+  that answers "did it get better?" with two pictures that don't line up; nothing on disk is touched.
+  Confidence: **reproduced** end to end, ungated.)*
+  `frontend/src/routes/Compare.tsx` `Split` puts A's `preview_url` absolutely over B's, both `objectFit:
+  "contain"` in one 640×420 box; `Blink` swaps them in one `<Image h={420} fit="contain">`. Nothing maps one
+  canvas onto the other — only rotation is handled (v0.359.0's North-up turn, whose entry promises "so a Split or a
+  Blink actually lines up"). Scratch repro through the real app: `POST /api/sample {"shape":"mosaic"}`, stack with
+  panels p2/p3 set aside (run 1, canvas 893×341), re-accept and stack again (run 2, 907×615); the WCS point at
+  run 1's centre lands at box (320, 210) in A and (325, 116) in B — **94 px apart, 22 % of the box height**, and
+  the two are drawn at different scales (0.717 vs 0.683 px/px). Both of the Target page's links
+  (`CompareWithLastCard`: "Compare with my last one" and "How far you've come" — first-ever vs now, which on a
+  mosaic shooter's target is almost always a grown canvas) open this page. Side by side is unaffected, and the
+  noise / panels / nights verdicts already stand down on a wider sky (`noiseComparison` `widerSky`).
+  **Fix shape (the FOCUS "grown-canvas rule"):** when the two `canvas_w×canvas_h` differ, place A on B's grid by
+  both masters' WCS — `seestack/render/noisedelta.py` already maps one master's box onto the other's
+  (`pixel_exact`) and is the pattern — accounting for a preview that is cropped or baked North-up
+  (`webapp/preview_orient.recovered_preview_crop` / `baked_north_up_deg`); without a WCS on both, Split and Blink
+  say in one plain sentence that these two pictures cover different sky and fall back to Side by side. Regression
+  test: two runs of differing canvas through the real gallery + the new placement, asserting one sky point lands
+  on one box pixel (± 1); a same-canvas pair must render exactly as today.
+
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict
