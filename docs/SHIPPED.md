@@ -1,5 +1,41 @@
 # Shipped — the record
 
+## 2026-10-24 (Builder, branch `claude/nice-carson-itbuxk`) — a single field's Target page names the mosaic of it he already has
+
+### v0.503.0 — `webapp/mosaic_companion.find_mosaic_companion`, `TargetOut.mosaic_companion`, `nextBestMove` framing rung, `FramingVerdictNote`
+
+**What.** Found reading a `scripts/agent-dogfood.sh --closing --incoming-lag --mosaic --editor` pass as one paragraph.
+On a single field of something bigger than one frame, two notes on the Target page — the coaching line ("Shooting it
+in mosaic mode next session is the biggest win here") and the framing note ("Shoot it in mosaic mode to capture all
+of it", plus "About a 3×3 mosaic … about 18 h") — prescribe a mosaic. For the owner, a heavy mosaic user, that session
+has usually **already been shot**: the Seestar files mosaic subs under `<T>_mosaic_sub/`, the convention makes that a
+separate `"<T> (mosaic)"` target (kept apart on purpose — the canvases differ), and nothing on the single field's page
+knew it existed. So the page told him to go and do what he had done, and never pointed at the picture it made.
+
+**How.** `GET /api/targets/{safe}` (the detail read only, never the list) gains an additive `mosaic_companion`
+(`safe_name`, `name`, `n_frames_accepted`, `total_exposure_s`) from `find_mosaic_companion` — registry-only, no project
+opened, wrapped so it can never 500 the page. A candidate must be a mosaic by name (`is_mosaic_target_name`), hold an
+accepted sub, and not be a flagged mixed-drop; it is the same object when its name is exactly
+`mosaic_target_name(field)` (the Seestar's folder pair — wins outright) or, failing that, when both plate-solved
+centres are within `SAME_OBJECT_TOL_DEG` (the merge nudge's own "same object" tolerance — covers a renamed pair), the
+deepest first. A mosaic target never gets one. The coaching rung (single field, fragment only — same
+`framingIsFragment` gate) then reads *"…so more time here can't bring the rest in. You already have a mosaic of it —
+M 42 (mosaic), with 3.0 h so far — so that's the picture to keep adding to."* with an **Open M 42 (mosaic) →** action,
+and the framing note (single-field `partial` only) adds *"You already have a mosaic of Orion Nebula: [M 42 (mosaic)] —
+3.0 h so far. That's the picture to keep adding to."* Nothing removed: the verdict sentence, panel plan and cost line
+all stay; the rung's kind is unchanged, so the plateau badge's deference (`coachKind`) is unaffected.
+
+**Upgrade-safe.** One additive, defaulted response field; no config, schema, on-disk, default or threshold change.
+The frontend types it optional, so an older backend reads exactly as before.
+
+**Tests (+11).** `tests/webapp/test_mosaic_companion.py` (+6: the convention's pair through the endpoint, a mosaic gets
+none, a renamed pair by position picks the deepest in tolerance and ignores one 0.7° off, silence for another object's
+mosaic / a second single field / an empty mosaic, not on the list endpoint, name beats a deeper positional match, a
+mixed-drop is never chosen); `nextBestMove.test.ts` (+2), `FramingVerdictNote.test.tsx` (+2), `Target.test.tsx` (+1,
+the wiring to both notes). Fail-before shown by reverting `routers/targets.py` + `routes/Target.tsx`: 2 endpoint tests
+and the wiring test red. **Not reachable by the dogfood samples** — their mosaic is not named by the convention and
+sits off the field's centre — so this is pinned by tests, not a screenshot.
+
 ## 2026-10-24 (Builder, branch `claude/nice-carson-5q6dx6`) — after a Combine, the Target page's notes describe the target's own stack
 
 ### v0.502.44 — `seestack/io/merge.py` `CARRIED_FROM_META_PREFIX`, `StackRunOut.carried_in`, `latestStackFirst`

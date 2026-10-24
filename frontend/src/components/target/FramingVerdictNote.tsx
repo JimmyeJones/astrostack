@@ -2,13 +2,14 @@ import { Alert, Anchor, Group, Text } from "@mantine/core";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
-import { api, type StackFraming } from "../../api/client";
+import { api, type StackFraming, type TargetCompanion } from "../../api/client";
 import {
   recentreCropRect, recentreKeptLabel, recentreRefusalLine,
 } from "../editor/recentreCrop";
 import { cropCoverageFraction } from "../editor/mosaicTrim";
 import { framingDepthFirstClause, type NextBestMoveKind } from "./nextBestMove";
 import { mosaicDepthText } from "../../mosaicEffort";
+import { formatIntegration } from "../../format";
 
 const TONE: Record<StackFraming["level"], { color: string; icon: string }> = {
   centred: { color: "teal", icon: "🎯" },
@@ -79,7 +80,7 @@ export function framingTitle(v: Pick<StackFraming, "level" | "canvas">): string 
  * to drop in unconditionally.
  */
 export function FramingVerdictNote(
-  { safe, runId, coachKind }: {
+  { safe, runId, coachKind, mosaicCompanion }: {
     safe: string;
     runId: number;
     /** The kind of tip `NextBestMoveBadge` is currently showing on the same
@@ -89,6 +90,12 @@ export function FramingVerdictNote(
      * with no coaching card (the editor, History), where the verdict reads
      * exactly as it always has. */
     coachKind?: NextBestMoveKind | null;
+    /** The mosaic of the same object the library already holds
+     * (`Target.mosaic_companion`). On a single field that is bigger than one
+     * frame the verdict says "shoot it in mosaic mode" — and he often already
+     * has, in a separate `_mosaic_sub` target — so the note names it and links
+     * there. Omitted (History, the editor, an older backend) → no line. */
+    mosaicCompanion?: TargetCompanion | null;
   },
 ) {
   const v = useStackFraming(safe, runId);
@@ -142,6 +149,9 @@ export function FramingVerdictNote(
     : null;
   if (!v) return null;
   const tone = TONE[v.level] ?? TONE.centred;
+  const companion = v.level === "partial" && v.canvas !== "mosaic"
+    && mosaicCompanion?.safe_name && mosaicCompanion.name?.trim()
+    ? mosaicCompanion : null;
   const depthFirst = framingDepthFirstClause(v, coachKind);
   // A *disabled* crop op isn't shrinking anything, which `cropCoverageFraction`
   // already knows. An unreadable recipe falls back to making the offer — the old
@@ -184,6 +194,23 @@ export function FramingVerdictNote(
       ) : null}
       {cost ? (
         <Text size="sm" c="dimmed" mt={2} data-testid="framing-mosaic-cost">{cost}</Text>
+      ) : null}
+      {/* "Shoot it in mosaic mode" — unless he already has. The Seestar files a
+          mosaic under its own `_mosaic_sub` folder, which is a separate target,
+          so this page could not see it and kept prescribing a session already
+          shot. Only on a single field's `partial`, the one verdict that says it. */}
+      {companion ? (
+        <Text size="sm" mt={6} data-testid="framing-mosaic-companion">
+          {`You already have a mosaic of ${v.object_name}: `}
+          <Anchor component={Link}
+            to={`/targets/${encodeURIComponent(companion.safe_name)}`}>
+            {companion.name}
+          </Anchor>
+          {companion.total_exposure_s > 0
+            ? ` — ${formatIntegration(companion.total_exposure_s)} so far.`
+            : "."}
+          {" "}That's the picture to keep adding to.
+        </Text>
       ) : null}
       {/* "Re-centre it next session" is only advice you can act on once you know
           which way. Absent on an older backend, or where a re-point isn't the fix. */}

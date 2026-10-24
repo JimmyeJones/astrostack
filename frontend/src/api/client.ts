@@ -509,6 +509,19 @@ export interface Target {
    * far above its median pixel. Absent / null on a single field, an older run
    * with no median and an older backend; `field_fulls` then stands. */
   depth_fulls?: number | null;
+  /** The mosaic of the same object the library already holds, served by the
+   * Target detail endpoint for a single field only — so "shoot it in mosaic
+   * mode" can point at the mosaic he has already shot. Absent / null on a
+   * mosaic, when there is none, on the list endpoint and on an older backend. */
+  mosaic_companion?: TargetCompanion | null;
+}
+
+/** Just enough of another target to name it and link to it. */
+export interface TargetCompanion {
+  safe_name: string;
+  name: string;
+  n_frames_accepted: number;
+  total_exposure_s: number;
 }
 
 export interface MergeSuggestionTarget {
