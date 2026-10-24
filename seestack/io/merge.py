@@ -258,6 +258,17 @@ def carry_target_meta(destination: Project, source: Project) -> tuple[str, ...]:
 # matches it, so the two cannot drift apart.
 _RUN_META_KEY = re.compile(r"^(?P<prefix>.+:)(?P<run_id>\d+)$")
 
+#: ``project_meta`` prefix, keyed by a *destination* run id, stamped on every
+#: picture :func:`carry_stack_runs` brings in; the value is the folder it came
+#: from. A carried run keeps its own ``timestamp_utc``, and the night being folded
+#: in is usually the most recent one, so by date alone it reads as "the latest
+#: stack" of the deep target — a one-night picture the Target page's analysis
+#: notes ("Very few frames were combined", the noise badge, the trend) would then
+#: describe beside the deep picture the merge pinned. This is how a reader tells
+#: the two apart. Registered in ``webapp.run_meta`` like every per-run key, and
+#: it matches :data:`_RUN_META_KEY`, so a target merged on again carries it too.
+CARRIED_FROM_META_PREFIX = "carried_from:"
+
 
 def _per_run_meta(source: Project) -> dict[int, list[tuple[str, str]]]:
     """``{run_id: [(key_prefix, value), …]}`` for ``source``'s per-run annotations."""
@@ -450,6 +461,10 @@ def carry_stack_runs(destination: Project, source: Project, *,
         ))
         for prefix, value in meta.get(run.id if run.id is not None else -1, ()):
             destination.set_meta(f"{prefix}{new_id}", value)
+        # Already carried once (a merge of a merged target)? Keep the folder it
+        # was first made in rather than renaming it after the middle stop.
+        if destination.get_meta(f"{CARRIED_FROM_META_PREFIX}{new_id}") is None:
+            destination.set_meta(f"{CARRIED_FROM_META_PREFIX}{new_id}", tag)
         if dest_id_by_key is not None and run.id is not None:
             offered = source.stack_run_frame_ids(run.id) or ()
             destination.set_stack_run_frames(

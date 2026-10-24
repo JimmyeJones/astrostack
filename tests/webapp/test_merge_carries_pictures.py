@@ -121,3 +121,80 @@ def test_every_registered_per_run_meta_prefix_is_one_the_merge_carries():
         assert m is not None, f"{prefix!r} is not shaped like a per-run key"
         assert m.group("prefix") == prefix
         assert m.group("run_id") == "7"
+
+
+def test_the_run_listing_marks_the_picture_a_merge_carried_in(client, solved_library):
+    """``StackRunOut.carried_in``: the carried night keeps its own (here later)
+    stacking date, so it sorts first in the listing — the flag is how the
+    Target page's "latest stack" notes tell it from the target's own stack
+    (``frontend/src/components/target/latestStack.ts``)."""
+    keeper = client.get("/api/targets").json()[0]["safe_name"]
+    proj = Project.open(_target_dir(solved_library, keeper))
+    try:
+        out = Path(proj.project_dir) / "output"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "own.fits").write_bytes(b"the-keepers-pixels")
+        (out / "own_preview.png").write_bytes(b"the-keepers-preview")
+        own_id = proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc="2026-09-01T04:00:00Z", output_basename="own",
+            fits_path=str(out / "own.fits"), tiff_path=None,
+            preview_path=str(out / "own_preview.png"),
+            n_frames_used=40, canvas_h=10, canvas_w=10,
+            coverage_min=1, coverage_max=40, options_json=json.dumps({}),
+            notes="the keeper's own",
+        ))
+    finally:
+        proj.close()
+    doomed = _second_folder_of_the_same_object(solved_library, keeper)
+
+    r = client.post("/api/targets/merge", json={"into": keeper, "sources": [doomed]})
+    assert r.status_code == 200, r.text
+
+    runs = client.get(f"/api/targets/{keeper}/stack-runs").json()
+    assert [x["notes"] for x in runs] == ["second night", "the keeper's own"]
+    assert runs[0]["carried_in"] is True
+    assert runs[1]["id"] == own_id and runs[1]["carried_in"] is False
+
+    # The mark names the folder the picture was made in…
+    from seestack.io.merge import CARRIED_FROM_META_PREFIX
+    proj = Project.open(_target_dir(solved_library, keeper))
+    try:
+        assert proj.get_meta(f"{CARRIED_FROM_META_PREFIX}{runs[0]['id']}") == doomed
+        assert proj.get_meta(f"{CARRIED_FROM_META_PREFIX}{own_id}") is None
+    finally:
+        proj.close()
+
+
+def test_a_picture_carried_twice_keeps_the_folder_it_was_made_in(tmp_path):
+    """A merged target merged on again: the carried mark travels like every
+    per-run key and is not renamed after the folder in the middle."""
+    from seestack.io.merge import CARRIED_FROM_META_PREFIX, carry_stack_runs
+
+    def _project_with_run(name: str, stamp: str) -> Project:
+        proj = Project.create(tmp_path / name, name)
+        out = Path(proj.project_dir) / "output"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "master.fits").write_bytes(name.encode())
+        (out / "master_preview.png").write_bytes(name.encode())
+        proj.add_stack_run(StackRunRow(
+            id=None, timestamp_utc=stamp, output_basename="master",
+            fits_path=str(out / "master.fits"), tiff_path=None,
+            preview_path=str(out / "master_preview.png"),
+            n_frames_used=3, canvas_h=10, canvas_w=10,
+            coverage_min=1, coverage_max=3, options_json=json.dumps({}),
+            notes=name,
+        ))
+        return proj
+
+    first = _project_with_run("night_1", "2026-09-01T04:00:00Z")
+    middle = _project_with_run("night_2", "2026-09-02T04:00:00Z")
+    last = _project_with_run("deep", "2026-09-03T04:00:00Z")
+    try:
+        assert carry_stack_runs(middle, first).copied == 1
+        assert carry_stack_runs(last, middle).copied == 2
+        marks = {r.notes: last.get_meta(f"{CARRIED_FROM_META_PREFIX}{r.id}")
+                 for r in last.iter_stack_runs()}
+        assert marks == {"deep": None, "night_2": "night_2", "night_1": "night_1"}
+    finally:
+        for p in (first, middle, last):
+            p.close()

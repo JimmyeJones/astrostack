@@ -66,6 +66,7 @@ import { FRAME_COLUMNS, type SortKey } from "../components/target/frameColumns";
 import { replaceFrameInList } from "../components/target/frameCache";
 import { cardGrainProjection } from "../components/target/grainProjection";
 import { IntegrationTrendBadge } from "../components/target/IntegrationTrendBadge";
+import { latestStackFirst } from "../components/target/latestStack";
 import {
   nextBestMove, readinessCanvasScope,
 } from "../components/target/nextBestMove";
@@ -442,7 +443,12 @@ export function TargetView() {
     queryFn: () => api.listFrames(safe, sort, order),
   });
   const runs = useQuery({ queryKey: ["runs", safe], queryFn: () => api.listStackRuns(safe) });
-  const latestRun = runs.data?.[0];  // listStackRuns returns newest first
+  // listStackRuns returns newest first; `noteRuns` is that list with the newest
+  // stack *made for this target* moved to the front, so a picture a Combine
+  // carried in from another folder — which keeps its own, usually later, date —
+  // is not what the notes below call "the latest stack" (`latestStackFirst`).
+  const noteRuns = useMemo(() => latestStackFirst(runs.data), [runs.data]);
+  const latestRun = noteRuns?.[0];
   // *The* picture of this target — the one this page shows, saves, shares and
   // edits. Every other surface (the Library tile, the Best wall, the montage,
   // `gallery._representative_run`) resolves the **pinned cover** first and only
@@ -452,7 +458,7 @@ export function TargetView() {
   // Same precedence as `_representative_run`, including its degrade: a cover
   // whose preview has gone silently falls back to the newest picture.
   //
-  // `latestRun` deliberately stays the newest run: the analysis notes below
+  // `latestRun` deliberately stays the newest stack: the analysis notes below
   // (thin stack, noise badge, "sharpest yet", integration trend) are statements
   // about the *latest* stack, and pinning an old favourite must not make them
   // describe it.
@@ -511,7 +517,7 @@ export function TargetView() {
   // it once a real stack exists (that line reads integration time alone and
   // would just say a weaker version of the same thing), and stays null until
   // then, so a target with no stack sees exactly what it saw before.
-  const grain = useMemo(() => cardGrainProjection(runs.data), [runs.data]);
+  const grain = useMemo(() => cardGrainProjection(noteRuns), [noteRuns]);
 
   // Which "next best move" tip is currently in play (or null when none) — the
   // plateau verdict defers to it so the two never contradict ("add more time"
@@ -522,7 +528,7 @@ export function TargetView() {
         nFramesUsed: latestRun?.n_frames_used,
         integrationS: latestRun?.total_exposure_s,
         nUnsolved: unsolvedCount,
-        softStars: softerThanUsual(runs.data),
+        softStars: softerThanUsual(noteRuns),
         fieldFulls: latestRun?.field_fulls,
         objectType: identity.data?.type,
         difficulty: identity.data?.difficulty,
@@ -537,7 +543,7 @@ export function TargetView() {
         // defer to a tip that is no longer the one on screen.
         framing: measuredFraming,
       })?.kind ?? null,
-    [latestRun, unsolvedCount, runs.data, identity.data, grain, measuredFraming],
+    [latestRun, unsolvedCount, noteRuns, identity.data, grain, measuredFraming],
   );
   // When walk-away Auto-stack is on, it now holds a target back rather than
   // publishing a 1-2 frame single-frame-speckle "master" (see auto_stack_min_frames
@@ -1256,7 +1262,7 @@ export function TargetView() {
               out sharper than any previous stack of this target (self-hides on the
               first run or when it's not a record). */
           { key: "sharpest-yet", priority: NOTICE_PRIORITY.praise, node: latestRun?.has_preview ? (
-            <SharpestYetBadge name={target.data?.name ?? "target"} runs={runs.data} />
+            <SharpestYetBadge name={target.data?.name ?? "target"} runs={noteRuns} />
           ) : null },
           /* "To make this even better": one plain-language coaching line naming the
               single highest-leverage next step (locate more subs / add subs / add
@@ -1268,7 +1274,7 @@ export function TargetView() {
               nFramesUsed={latestRun.n_frames_used}
               integrationS={latestRun.total_exposure_s}
               nUnsolved={unsolvedCount}
-              runs={runs.data}
+              runs={noteRuns}
               fieldFulls={latestRun.field_fulls}
               objectType={identity.data?.type}
               difficulty={identity.data?.difficulty}
@@ -1290,7 +1296,7 @@ export function TargetView() {
               suppressed whenever the coaching above is nudging "add more time" so the
               two never contradict. */
           { key: "integration-trend", priority: NOTICE_PRIORITY.info, node: latestRun?.has_preview ? (
-            <IntegrationTrendBadge runs={runs.data} coachKind={coachKind} />
+            <IntegrationTrendBadge runs={noteRuns} coachKind={coachKind} />
           ) : null },
           /* "Did I frame it well?" — how the finished picture actually caught the
               target, measured from the run's own WCS. Self-hides when the target

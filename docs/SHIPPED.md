@@ -1,5 +1,42 @@
 # Shipped — the record
 
+## 2026-10-24 (Builder, branch `claude/nice-carson-5q6dx6`) — after a Combine, the Target page's notes describe the target's own stack
+
+### v0.502.44 — `seestack/io/merge.py` `CARRIED_FROM_META_PREFIX`, `StackRunOut.carried_in`, `latestStackFirst`
+
+**What.** Found on a `scripts/agent-dogfood.sh --combine --no-site` pass. v0.480.4 kept the deep target's own
+picture on show across a Combine (it pins that picture as the cover, because the carried one-night stack keeps its
+own, usually later, stacking date and would otherwise sort first). The Target page's *analysis* notes never got the
+same protection: they read `latestRun = runs[0]`, so after the merge they all described the carried night. On the
+pass, M_31 showed its own 4-sub picture under **"Very few frames were combined · This stack combined only 3
+frames"** — the 3 being the folded-in night's picture — and the noise badge, "sharpest yet", the coaching line, the
+integration trend, the framing verdict and the calibration / over-trim notes all followed the same wrong run. The
+direction can be worse on real data: a deep target's healthy stack lost its notes to a thin night, or a thin
+target's own warning was hidden behind a deep carried picture.
+
+**Fix.** The merge stamps every picture it carries with a per-run `project_meta` key `carried_from:<new id>` → the
+folder it was made in (registered in `webapp.run_meta`, so deleting the run drops it; shaped like every per-run key,
+so a merged target merged on again carries it, and the first folder's name is kept). `/api/targets/{safe}/stack-runs`
+gains an additive `carried_in: bool`. On the Target page `latestStackFirst` (new
+`frontend/src/components/target/latestStack.ts`) moves the newest run *not* carried in to the front of the list the
+notes read — so `runs[0]` is "the latest stack made for this target" and carried pictures stay priors of the same
+object. When every run was carried in (the target had no picture of its own) the newest run is still the answer; a
+stack made after the Combine is newest and wins as before. The pinned-cover rule ("notes don't follow an old
+favourite") is untouched; in the Combine case the latest own stack *is* the merge-pinned cover, so the thin-stack
+warning may now quote the measured "N subs waiting · restack" remedy beside it.
+
+**Limits.** A merge done before this version left no mark, so its carried pictures still read as the target's own
+until the next stack — the old behaviour, nothing worse. History, Compare-with-last and the Library are unchanged.
+
+**Upgrade-safe (§9).** One additive response field (older frontend ignores it; older backend omits it → every run
+reads as its own) and one new per-run meta key written only by future merges. No config, schema, on-disk-layout or
+default change.
+
+**Tests.** +2 Python in `tests/webapp/test_merge_carries_pictures.py` (the listing marks the carried run and not the
+keeper's own, and the mark names its folder; a picture carried twice keeps its first folder — both fail with the
+stamp removed), +7 `latestStack.test.ts`, +1 rendered in `Target.test.tsx` (the Combine shape: the thin-stack warning
+describes the target's own 3-sub stack and quotes the restack remedy — fails before, the warning never appears).
+
 ## 2026-10-24 (Builder, branch `claude/nice-carson-6iu76a`) — the dogfood probe no longer reports screen-reader-only text as clipped
 
 ### v0.502.43 — `scripts/dogfood_probe.mjs` `overflowingLeaves` / `clippedLabels` skip `screenReaderOnly` boxes

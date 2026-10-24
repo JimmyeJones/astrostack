@@ -1577,6 +1577,11 @@ export interface StackRun {
   // Absent on an older backend, which reads the same as false — nothing to offer.
   has_rejection_map?: boolean;
   is_cover?: boolean;
+  // True when a Combine brought this picture in from another folder of the same
+  // object. It keeps the date it was stacked on, so it can be the newest row
+  // without being a stack made of this target (`latestStackFirst`). Absent on an
+  // older backend, which reads as false.
+  carried_in?: boolean;
   notes: string | null;
   total_exposure_s?: number | null;
   reusable?: boolean;
