@@ -55,6 +55,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from seestack.core.cache import CacheManager
+from seestack.io.fits_loader import load_header
 from seestack.io.ingest import FITS_SUFFIXES, find_fits_files, ingest_files
 from seestack.io.library import UNSORTED_TARGET_NAME, Library
 from seestack.io.project import Project, is_seestar_output_filename
@@ -1504,7 +1505,17 @@ def _ingest_into_target(
     registered frame that lives in that folder (the Seestar's own on-device
     output, mis-ingested by a pre-v0.184.9 scan) is additively rejected so it
     leaves the stack/reference pool.
+
+    **A target is only created once one of its files can actually be read**
+    (:func:`_hold_back_unreadable_new_target`). Otherwise a folder whose every
+    file is damaged — or still a zero-byte copy in flight — minted a target with
+    no frames in it, which then sat on the Library wall as "0/0 frames" and was
+    counted on the Dashboard, for as long as the folder stayed broken.
     """
+    if library.find_target(target_name) is None:
+        held = _hold_back_unreadable_new_target(target_name, files)
+        if held is not None:
+            return held
     entry, proj = library.open_or_create_target(target_name)
     tsr = TargetScanResult(
         target_name=entry.name,
@@ -1545,6 +1556,51 @@ def _ingest_into_target(
         proj.close()
     # Keep the registry's cached counts in step with the project DB.
     library.refresh_target_stats(entry.safe_name)
+    return tsr
+
+
+def _hold_back_unreadable_new_target(
+    target_name: str, files: list[Path],
+) -> TargetScanResult | None:
+    """``None`` when one of ``files`` has a readable header, else what to report.
+
+    Asked only for a target that does not exist yet. It reads headers until the
+    first one parses — on an ordinary new folder that is the first file, so a
+    healthy scan pays one extra header read per *new* target, never per sub. When
+    none parses, no target is created and the files are reported exactly as
+    :func:`ingest_files` would have reported them (a zero-byte file is a
+    still-copying skip, anything else an unreadable error), so the scan's
+    unreadable-subs note and the per-folder record still say which files they
+    are. ``safe_name`` is empty because there is no target page to link to.
+
+    Only reads (AGENTS.md §10). The files are re-tried on every scan, so the
+    target appears the first time one of them is whole.
+    """
+    tsr = TargetScanResult(
+        target_name=target_name, safe_name="", n_frames_found=len(files),
+    )
+    for src in files:
+        src = Path(src)
+        try:
+            if src.stat().st_size == 0:
+                tsr.n_skipped_existing += 1
+                continue
+            load_header(src)
+        except Exception as exc:  # noqa: BLE001 — astropy raises a zoo of exceptions
+            log.warning("could not read header for %s: %s", src, exc)
+            tsr.n_errors += 1
+            if len(tsr.unreadable_examples) < UNREADABLE_EXAMPLES_PER_TARGET:
+                tsr.unreadable_examples.append(src.name)
+            parent = str(src.parent)
+            tsr.unreadable_dirs[parent] = tsr.unreadable_dirs.get(parent, 0) + 1
+            continue
+        return None
+    log.info(
+        "Not creating target %r yet — none of its %d file(s) can be read (%d "
+        "unreadable, %d still copying). Nothing was changed on disk; it is "
+        "re-tried on every scan.",
+        target_name, len(files), tsr.n_errors, tsr.n_skipped_existing,
+    )
     return tsr
 
 

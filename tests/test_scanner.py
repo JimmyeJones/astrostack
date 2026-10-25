@@ -2285,6 +2285,93 @@ def test_a_healthy_folder_names_nothing(tmp_path):
         lib.close()
 
 
+# --- A folder nothing can be read from mints no target -----------------------
+#
+# Found by `agent-dogfood.sh --incoming-lag`: a scan of a folder holding one
+# damaged sub left an "IC 360 · 0/0 frames" card on the Library wall and a
+# second target on the Dashboard, for as long as the folder stayed broken.
+
+def test_a_folder_of_only_unreadable_subs_creates_no_target(tmp_path):
+    src = tmp_path / "incoming" / "IC 360_sub"
+    for i in range(3):
+        _unreadable(src / f"Light_{i + 1:04d}.fit")
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, tmp_path / "incoming")
+        assert lib.list_targets() == []
+        assert not (lib.targets_dir / "IC_360").exists()
+        # Still reported, exactly as ingest would have: the unreadable-subs note
+        # and the per-folder record read these fields.
+        [tsr] = result.targets
+        assert tsr.target_name == "IC 360"
+        assert tsr.safe_name == ""            # no target page to link to
+        assert tsr.n_frames_found == 3
+        assert tsr.n_frames_added == 0
+        assert tsr.n_errors == 3
+        assert tsr.unreadable_examples == [
+            "Light_0001.fit", "Light_0002.fit", "Light_0003.fit"]
+        assert tsr.unreadable_dirs == {str(src): 3}
+        # Reported, never acted on (AGENTS.md §10).
+        assert all(p.stat().st_size == 4096 for p in src.iterdir())
+    finally:
+        lib.close()
+
+
+def test_a_folder_still_copying_creates_no_target_and_no_error(tmp_path):
+    """Zero-byte files are a copy in flight: a skip, as in ``ingest_files``."""
+    src = tmp_path / "incoming" / "M 42_sub"
+    src.mkdir(parents=True)
+    for i in range(2):
+        (src / f"Light_{i:04d}.fit").write_bytes(b"")
+    lib = Library.create(tmp_path / "lib")
+    try:
+        result = scan_and_organize(lib, tmp_path / "incoming")
+        assert lib.list_targets() == []
+        [tsr] = result.targets
+        assert tsr.n_errors == 0
+        assert tsr.n_skipped_existing == 2
+    finally:
+        lib.close()
+
+
+def test_the_target_appears_once_one_of_its_subs_is_readable(tmp_path):
+    src = tmp_path / "incoming" / "IC 360_sub"
+    _unreadable(src / "Light_0001.fit")
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, tmp_path / "incoming")
+        assert lib.list_targets() == []
+        write_seestar_fits(src / "Light_0002.fit", n_stars=10, seed=3)
+        result = scan_and_organize(lib, tmp_path / "incoming")
+        [tsr] = result.targets
+        assert tsr.safe_name == "IC_360"
+        assert tsr.n_frames_added == 1
+        assert tsr.n_errors == 1
+        assert [t.safe_name for t in lib.list_targets()] == ["IC_360"]
+    finally:
+        lib.close()
+
+
+def test_an_existing_target_keeps_reporting_its_unreadable_subs(tmp_path):
+    """Only a *new* target is held back: one that already exists is opened as
+    before, so its unreadable files keep their link to its page."""
+    src = tmp_path / "incoming" / "M 81_sub"
+    src.mkdir(parents=True)
+    write_seestar_fits(src / "Light_0001.fit", n_stars=10, seed=4)
+    lib = Library.create(tmp_path / "lib")
+    try:
+        scan_and_organize(lib, tmp_path / "incoming")
+        (src / "Light_0001.fit").unlink()
+        _unreadable(src / "Light_0002.fit")
+        result = scan_and_organize(lib, tmp_path / "incoming")
+        [tsr] = result.targets
+        assert tsr.safe_name == "M_81"
+        assert tsr.n_errors == 1
+        assert [t.safe_name for t in lib.list_targets()] == ["M_81"]
+    finally:
+        lib.close()
+
+
 def _record_start_then_sleep(log_path: str, seconds: float) -> None:
     """Pool job for the cancel test: note when it started, then take a while."""
     import time
