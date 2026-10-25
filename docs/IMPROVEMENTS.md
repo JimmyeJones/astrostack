@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **Builder 2026-10-25, branch `claude/nice-carson-hqy4xy`** — a folder whose every file is unreadable no longer mints an empty "0/0 frames" target (`scanner._ingest_into_target`), found by `--incoming-lag --no-site --editor`.
 
 ---
 
