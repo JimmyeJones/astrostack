@@ -1057,6 +1057,10 @@ export interface HeldForFiles {
   panelDepth?: number;
   /** How many panels those readable subs are spread over (0 when not a mosaic). */
   panels?: number;
+  /** How many of the mosaic's panels have subs but **none** readable — that part
+   * of the picture would have gone missing. 0 on a single field, on the other
+   * hold reasons, and on a scan recorded before it was measured. */
+  panelsMissing?: number;
 }
 
 /** The per-target sentence under "some of your subs aren't on disk right now".
@@ -1068,6 +1072,11 @@ export interface HeldForFiles {
 export function heldForFilesLine(h: HeldForFiles): string {
   const head = `: ${h.unreadable} of ${h.offered} subs couldn't be read `
     + `(${h.readable} still readable)`;
+  if (h.panelsMissing && h.panelsMissing > 0 && h.panels && h.panels > 1) {
+    return `${head}, and none of the subs on ${h.panelsMissing} of its ${h.panels} `
+      + "panels can be read — that part of the mosaic would have been missing "
+      + "from the picture.";
+  }
   if (h.panelDepth && h.panelDepth > 0) {
     const panels = h.panels && h.panels > 1 ? `${h.panels} panels` : "panels";
     return `${head}, and those are spread over ${panels} — a typical part of the `
@@ -1168,6 +1177,7 @@ export function pipelineSummary(r: Record<string, unknown>): {
           unreadable: Number(o.unreadable ?? 0) || 0,
           panelDepth: Number(o.panel_depth ?? 0) || 0,
           panels: Number(o.panels ?? 0) || 0,
+          panelsMissing: Number(o.panels_missing ?? 0) || 0,
         }))
     : [];
   const heldSettling: HeldSettling[] = Array.isArray(r.auto_stack_held_settling)

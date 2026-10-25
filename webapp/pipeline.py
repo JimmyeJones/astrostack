@@ -3682,11 +3682,19 @@ def _auto_stack_readability_hold(
     the same number by construction) and on the documented ``min_frames <= 1``
     opt-out. The depth can never exceed the count, so this only ever holds a
     target back that today's rule already wanted to publish — never the reverse.
+
+    **A missing panel is asked about on its own** (:func:`_panels_with_nothing_readable`).
+    Neither the count nor the typical depth notices a mosaic panel whose subs are
+    *all* off-line while newer subs on the other panels make up the number, so
+    when a picture already stands and some panel has subs but none readable, the
+    stack is held with ``panels_missing`` beside the readable count.
     """
     proj = lib.open_target(safe)
     try:
         unreadable = 0
         readable_radecs: list[tuple[float | None, float | None]] = []
+        solved_radecs: list[tuple[float | None, float | None]] = []
+        solved_readable: list[bool] = []
         # Five columns, not frames: this runs per target per scan for every
         # target that is otherwise about to stack, and a `FrameRow` would carry
         # each sub's plate-solve header along to answer "is there one?".
@@ -3695,7 +3703,10 @@ def _auto_stack_readability_hold(
                 "ra_center_deg", "dec_center_deg", accepted_only=True):
             if not wcs:
                 continue
-            if first_existing_frame_path(cached, source) is None:
+            ok = first_existing_frame_path(cached, source) is not None
+            solved_radecs.append((ra, dec))
+            solved_readable.append(ok)
+            if not ok:
                 unreadable += 1
             else:
                 readable_radecs.append((ra, dec))
@@ -3714,11 +3725,17 @@ def _auto_stack_readability_hold(
         readable_depth = typical_panel_depth(counts)
         if readable_depth is not None and readable_depth < min_frames:
             depth = {"depth": int(readable_depth), "panels": len(counts)}
+    missing = (_panels_with_nothing_readable(
+        solved_radecs, solved_readable, min_frames)
+        if prior_max is not None else None)
     if readable < min_frames:
         reason = "too few of its subs are readable right now"
     elif depth is not None:
         reason = ("too few of its readable subs land on each panel of the "
                   "mosaic right now")
+    elif missing is not None:
+        reason = ("that would leave part of the mosaic out of the picture "
+                  "this target already has")
     elif prior_max is not None and readable < prior_max:
         reason = "that would be a thinner stack than this target already has"
     else:
@@ -3730,7 +3747,45 @@ def _auto_stack_readability_hold(
     if depth is not None:
         out["panel_depth"] = depth["depth"]
         out["panels"] = depth["panels"]
+    elif missing is not None:
+        out["panels_missing"] = missing["missing"]
+        out["panels"] = missing["panels"]
     return out
+
+
+def _panels_with_nothing_readable(
+        radecs: list[tuple[float | None, float | None]],
+        readable: list[bool], min_frames: int) -> dict[str, int] | None:
+    """``{"missing", "panels"}`` when some mosaic panel has subs but none of
+    them readable, else ``None``.
+
+    The two count questions in :func:`_auto_stack_readability_hold` are about
+    the whole target (``readable < prior_max``) or the *typical* panel, and
+    neither can see a panel that is simply absent: a grown 2x2 stacked at 400
+    whose night-1-only panel's 100 files are off-line, while a newer night added
+    150 to the other three, offers 450 readable subs at a healthy median depth —
+    and the stack quietly publishes a picture with a quarter of it missing.
+
+    Panels are the same :func:`seestack.stack.pointings.pointing_groups` split
+    every per-panel decision in the engine uses, asked of every solved sub
+    (readable or not), with a panel needing ``max(2, min_frames)`` of them to
+    count — the floor that would make it a picture on its own. A single field
+    never splits, so this is ``None`` there and the count rule holds unchanged.
+    """
+    from seestack.stack.pointings import pointing_groups
+
+    labels = pointing_groups(radecs, min_members=max(2, int(min_frames)))
+    if labels is None:
+        return None
+    panels: dict[int, bool] = {}
+    for label, ok in zip(labels, readable, strict=True):
+        if label < 0:
+            continue
+        panels[label] = panels.get(label, False) or ok
+    missing = sum(1 for any_ok in panels.values() if not any_ok)
+    if missing <= 0:
+        return None
+    return {"missing": missing, "panels": len(panels)}
 
 
 # How long a target must go without a new sub before the hands-off chain will

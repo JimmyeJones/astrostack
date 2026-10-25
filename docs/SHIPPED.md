@@ -1,5 +1,27 @@
 # Shipped — the record
 
+## 2026-10-25 (Builder, branch `claude/nice-carson-nryy30`) — the walk-away missing-files hold judges a mosaic per panel
+
+### v0.503.5 — `webapp/pipeline.py` `_auto_stack_readability_hold` → `_panels_with_nothing_readable`
+
+**What.** The Scout's sweep (2) entry (filed reproduced the same day): the hold asked whole-target
+(`readable < prior_best`) and typical-panel-depth questions, and neither sees a panel that is simply absent — a grown
+2×2 stacked at 400 whose night-1-only panel's 100 files are off-line, while a newer night added 150 to the other
+three, offers 450 readable subs at a healthy median depth, and the walk-away stack published (and auto-edited) a
+picture with a quarter of the mosaic missing. Now, when a picture already stands, every solved sub (readable or not)
+is labelled with `pointings.pointing_groups(min_members=max(2, min_frames))` — the same panel split every per-panel
+engine decision uses — and a panel with members but **none** readable holds the stack with a reason of its own
+("…leave part of the mosaic out of the picture…") and `panels_missing` + `panels` beside the counts. The hold keeps
+its discipline: no attempt marker, so the scan after the files return stacks the whole mosaic. A single field never
+splits (`pointing_groups` → `None`), the first stack of a target is never held, and the two existing reasons keep
+precedence, so no earlier hold changes. `GET /api/targets/{safe}/autostack-hold` carries `panels_missing`
+(additive, default 0); the Target page's note (`holdReasonSentence`, and `setAsideOutcomeSentence` now says the
+picture will lack that part if the subs are set aside) and the Jobs page line (`heldForFilesLine`) say it in words.
+**Upgrade.** No config, schema, on-disk or default change; one additive response field (an older scan record reads
+as 0 = say nothing extra). **Tests +3 pytest** (`test_auto_stack_pipeline.py` ×2 — the held 2+2 mosaic fails on the
+pre-fix tree, the first-stack case passes on both by design; `test_autostack_hold.py` ×1) **and +3 vitest**; two
+`toEqual` shape assertions in `Jobs.test.tsx` gained the new `panelsMissing: 0` key.
+
 ## 2026-10-25 (Builder, branch `claude/nice-carson-hqy4xy`) — a folder nothing can be read from stops minting an empty target
 
 ### v0.503.4 — `seestack/io/scanner.py` `_ingest_into_target` → `_hold_back_unreadable_new_target`

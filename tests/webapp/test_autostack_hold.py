@@ -129,3 +129,27 @@ def test_the_mosaic_depth_travels_and_an_older_scans_record_reads_as_unknown(
     old = client.get("/api/targets/M_42/autostack-hold").json()
     assert old["panel_depth"] == 0
     assert old["panels"] == 0
+
+
+def test_a_missing_mosaic_panel_travels_and_an_older_record_reads_as_none(
+    client, solved_library,
+):
+    """``panels_missing`` reaches the Target page beside the panel count; a scan
+    recorded before it existed reads as 0, i.e. "say nothing extra"."""
+    _finished_scan(client, {
+        "auto_stack_held_unreadable": [
+            {"target": "M_42", "offered": 550, "readable": 450, "unreadable": 100,
+             "prior_best": 400, "panels_missing": 1, "panels": 4,
+             "reason": "that would leave part of the mosaic out of the picture…"},
+        ],
+    }, when="2026-08-26T02:00:00Z")
+    b = client.get("/api/targets/M_42/autostack-hold").json()
+    assert b["panels_missing"] == 1 and b["panels"] == 4
+    assert b["panel_depth"] == 0
+
+    _finished_scan(client, {
+        "auto_stack_held_unreadable": [
+            {"target": "M_42", "offered": 10, "readable": 4, "unreadable": 6},
+        ],
+    }, when="2026-08-26T03:00:00Z")
+    assert client.get("/api/targets/M_42/autostack-hold").json()["panels_missing"] == 0

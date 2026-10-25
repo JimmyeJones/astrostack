@@ -315,6 +315,11 @@ class AutoStackHoldOut(BaseModel):
     other reasons, and on a scan recorded by a build before the depth was
     measured — the same "unknown, say nothing extra" default
     :class:`AutoStackThinHoldOut` uses.
+
+    ``panels_missing`` is the other mosaic case: that many panels have subs but
+    **none** readable, so the stack would have left part of the mosaic out of the
+    picture the target already has (``panels`` is then the mosaic's panel count).
+    ``0`` on a single field, on the other reasons, and on an older scan record.
     """
 
     offered: int
@@ -323,6 +328,7 @@ class AutoStackHoldOut(BaseModel):
     reason: str | None = None
     panel_depth: int = 0
     panels: int = 0
+    panels_missing: int = 0
     when_utc: str | None = None
 
 

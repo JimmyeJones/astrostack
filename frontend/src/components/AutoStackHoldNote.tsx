@@ -13,10 +13,21 @@ import { api, type AutoStackHold } from "../api/client";
  * count the app checks and still be spread one-deep over the panels, so the
  * picture they would make is colour speckle — and saying "thinner than the one
  * you already have" of a target that has no picture yet would be a claim about
- * something that does not exist. Pure. */
+ * something that does not exist. The third shape is a **missing panel**: every
+ * count is healthy, but one part of the mosaic has nothing readable at all, so
+ * the picture would have lost that part. Pure. */
 export function holdReasonSentence(h: AutoStackHold): string {
   const depth = h.panel_depth ?? 0;
   const panels = h.panels ?? 0;
+  const missing = h.panels_missing ?? 0;
+  if (missing > 0 && panels > 1) {
+    return (
+      `None of the subs on ${missing} of this mosaic's ${panels} panels can be read `
+      + `right now: stacking without ${missing === 1 ? "it" : "them"} would have left `
+      + "that part of the mosaic out of the picture you already have, so it was "
+      + "left alone."
+    );
+  }
   if (depth > 0 && panels > 1) {
     return (
       `The subs that can still be read are spread across this mosaic's ${panels} panels: `
@@ -34,11 +45,18 @@ export function holdReasonSentence(h: AutoStackHold): string {
 /** What setting the missing subs aside actually buys, which is not the same
  * promise on a mosaic: the readable subs carry on, but a mosaic whose panels are
  * still one sub deep is held by the *thin* guard instead of this one, and the
- * button must not imply otherwise. Pure. */
+ * button must not imply otherwise — nor imply that a panel with nothing
+ * readable will still be in the picture. Pure. */
 export function setAsideOutcomeSentence(h: AutoStackHold): string {
   const depth = h.panel_depth ?? 0;
   const panels = h.panels ?? 0;
+  const missing = h.panels_missing ?? 0;
   const head = `Set them aside and stacking carries on with the ${h.readable} you still have`;
+  if (missing > 0 && panels > 1) {
+    return `${head} — though the picture will then be missing `
+      + `${missing === 1 ? "that part" : "those parts"} of the mosaic until you shoot `
+      + `${missing === 1 ? "it" : "them"} again.`;
+  }
   if (depth > 0 && panels > 1) {
     return `${head} — though a mosaic this thin waits until its panels have more subs.`;
   }
