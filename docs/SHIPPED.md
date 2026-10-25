@@ -1,5 +1,18 @@
 # Shipped — the record
 
+## 2026-10-25 (Builder, branch `claude/nice-carson-wur8iy`) — Channel combine's intro keeps its space
+
+### v0.503.2 — `frontend/src/routes/Combine.tsx` intro copy
+
+**What.** The Channel combine page's intro rendered *"…add a **Luminance** stack for **LRGB**(colour from RGB, detail
+from L)"*: the source broke the line straight after `<b>LRGB</b>`, and JSX drops whitespace that contains a newline
+between an element and text. Now `<b>LRGB</b>{" "}`. Seen on the phone screenshot of a `--calibration --big --editor`
+dogfood pass. Channel combine is deprioritised (AGENTS.md §1) — this is an outright copy bug, not an extension.
+**Swept for the shape:** a grep for a closing tag at end of line followed by a line starting with a word, and for a
+word at end of line followed by an opening inline tag, over every non-test `.tsx` — this was the only hit.
+**Test:** `Combine.test.tsx` asserts the intro's text contains `"LRGB (colour from RGB"`; it fails before the fix
+(received `"…LRGB(colour from RGB…"`). Frontend copy only — no config, schema, on-disk, default or API change.
+
 ## 2026-10-24 (Builder, branch `claude/nice-carson-se97e8`) — Compare's Split and Blink line up a grown mosaic by sky
 
 ### v0.503.1 — `seestack/render/compareplace.place_a_on_b`, `GET /api/targets/{safe}/compare-placement`, `Compare.tsx` `SkyFrame` / `needsSkyPlacement`

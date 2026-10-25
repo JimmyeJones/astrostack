@@ -1,5 +1,22 @@
 # Process notes & QA sweep records
 
+## 2026-10-25 (Builder, branch `claude/nice-carson-wur8iy`) — dogfood `--calibration --big --editor`: one copy bug fixed (v0.503.2), otherwise CLEAN
+
+- **Start:** no open PRs, `main` CI green; suite 8275 passed / 7 skipped on `efea9e66` (xdist `-n 4`, BLAS capped,
+  15m31s). FOCUS: no ungated bug, no open beginner feature — took the last run's "`--calibration --big`".
+- **`--calibration --big --editor`:** both offers found the seeded darks/flats, both masters built (defect scan 31 px,
+  0.020 %), auto-bind applied dark 1 + flat 2 to the field run and the calibration note withdrew. The full-size 2×2
+  (900×600 panels, canvas 1693×1150) is *not* calibrated — the masters are 480×320 — and the Calibration page says so
+  for it ("has no matching master yet"), which is right. All 21 ops re-render on the field **and** the full-size
+  run; full-size check, navigator, split and the Noise-reduction caveat behave; Auto trim 7 %. Nothing overflowing, no
+  console errors. **Not findings, recorded so they are not re-derived:** the single field's coaching still says "shoot
+  it in mosaic mode" beside the full-size mosaic because the sample's name ("Sample: M42 mosaic (2×2, full size)")
+  is not the `"<T> (mosaic)"` convention `find_mosaic_companion` needs before a target is a candidate at all
+  (`is_mosaic_target_name` — the positional match only ranks name-qualified mosaics) — a fixture shape; the owner's
+  `_mosaic_sub/` folders always carry the suffix, and a rename keeps it (`preserve_mosaic_suffix`); "looks like a Star cluster" is the Gaussian-stars
+  sample (see 2026-10-17).
+- **Found by reading the phone screenshots, not the probe:** `/combine`'s intro "LRGB(colour" — fixed as v0.503.2.
+
 ## 2026-10-24 (Scout, branch `claude/beautiful-newton-mkp0sh`) — QA rotation sweep (1), new angle — `/compare`'s Split and Blink on a grown mosaic: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Suite:** 8262 passed / 7 skipped on `e22e2087` (xdist `-n 4`, BLAS capped, 17m04s). **Inbox:** the same four (#878,

@@ -109,7 +109,7 @@ export function CombineView() {
       <Title order={2}>Channel combine</Title>
       <Alert icon={<IconInfoCircle size={16} />} color="violet" variant="light">
         Combine separate mono stacks into one colour image. Assign a stack to each of
-        R/G/B for an <b>RGB</b> composite; add a <b>Luminance</b> stack for <b>LRGB</b>
+        R/G/B for an <b>RGB</b> composite; add a <b>Luminance</b> stack for <b>LRGB</b>{" "}
         (colour from RGB, detail from L). All stacks must share the same canvas — stack
         each filter against a common reference. Stack mono subs with the “Mono / filtered
         subs” option first.
