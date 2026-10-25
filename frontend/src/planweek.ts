@@ -230,6 +230,11 @@ export function targetNightPhrase(
  * Silent in all three cases where there is no tension: no closing plan (an older
  * backend, or nothing leaving — which is most of the year), nothing leaving that
  * is also placed this week, and the headline already naming the leaving target.
+ *
+ * When the headline's own target is leaving too — just later than the one named
+ * here — "unlike the others here" would be false of the very row the reader has
+ * just been told to shoot, so the closing clause names it instead and says which
+ * goes first, in the same soonest-first order the card above ranks them by.
  */
 export function closingWeekNote(
   plan: PlanWeek, closing: SeasonClosing | null | undefined, now: Date,
@@ -237,14 +242,21 @@ export function closingWeekNote(
   const rows = closing?.targets ?? [];
   if (rows.length === 0) return null;
   const headlineSafe = bestNightOfWeek(plan.nights)?.best?.safe;
+  const headlineSeason = rows.find((s) => s.safe === headlineSafe) ?? null;
   for (const season of rows) {       // soonest to leave first, as served
     if (season.safe === headlineSafe) return null;   // the cards already agree
     const night = plan.targets.find((t) => t.safe === season.safe);
     if (!night) continue;
+    let tail = " — and unlike the others here, that one doesn't come round again.";
+    if (headlineSeason) {
+      tail = season.weeks_left < headlineSeason.weeks_left
+        ? ` — ${headlineSeason.name} is leaving too, but this one goes first.`
+        : ` — and, like ${headlineSeason.name}, that one doesn't come round again.`;
+    }
     return `${season.name} is on its way out of your sky — ${weeksLeftPhrase(season.weeks_left)}.`
       + ` Its best night this week is ${weekNightLabelInline(night.date, now,
         nightInProgressDate(plan.nights, now))}`
-      + " — and unlike the others here, that one doesn't come round again.";
+      + tail;
   }
   return null;
 }
