@@ -344,6 +344,31 @@ describe("the week plan and the season that is closing", () => {
       .toBeNull();
   });
 
+  it("doesn't call the headline's own target one of 'the others' when it is leaving too", () => {
+    // The dogfood --closing shape: both targets are on the card above, the
+    // headline names the later-leaving one. Fails before: the note said
+    // "unlike the others here" of a week whose headline target is leaving too.
+    const sooner = closingWeekNote(p, closing([
+      season(),                                               // M 27, 2 weeks
+      season({ safe: "M_31", name: "M 31", weeks_left: 5 }),  // the headline
+    ]), NOW);
+    expect(sooner).toBe(
+      "M 27 is on its way out of your sky — about 2 weeks left."
+      + " Its best night this week is Tuesday"
+      + " — M 31 is leaving too, but this one goes first.");
+    expect(sooner).not.toContain("unlike the others");
+    // A tie on weeks: the card above still lists M 27 first, but "goes first"
+    // would claim more than the countdown says.
+    const tied = closingWeekNote(p, closing([
+      season(),
+      season({ safe: "M_31", name: "M 31" }),
+    ]), NOW);
+    expect(tied).toBe(
+      "M 27 is on its way out of your sky — about 2 weeks left."
+      + " Its best night this week is Tuesday"
+      + " — and, like M 31, that one doesn't come round again.");
+  });
+
   it("names the soonest to leave that is actually placed this week", () => {
     const note = closingWeekNote(p, closing([
       season({ safe: "M_99", name: "M 99", weeks_left: 0 }),   // leaving first, not placed

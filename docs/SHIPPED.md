@@ -1,5 +1,23 @@
 # Shipped — the record
 
+## 2026-10-25 (Builder, branch `claude/nice-carson-9l2b0t`) — the week plan's closing note stops calling a leaving headline "the others"
+
+### v0.503.3 — `frontend/src/planweek.ts` `closingWeekNote`
+
+**What.** On `/tonight`, "Plan my week" adds one sentence when "Shoot these before they're gone" names a target the
+headline doesn't: *"X is on its way out of your sky — … Its best night this week is … — and unlike the others here,
+that one doesn't come round again."* It only stayed silent when the **soonest**-leaving row was the headline. On the
+dogfood `--closing` pass both seeded targets are leaving (4 and 5 weeks) and the headline named the later one, so the
+note said "unlike the others here" of a week whose headline target is on the very card it was reconciling with — false
+of the one row the reader had just been told to shoot. Now, when the headline's target is itself a closing row, the
+tail names it: *"— Y is leaving too, but this one goes first."* when the named target has fewer weeks left, and
+*"— and, like Y, that one doesn't come round again."* on a tie (the card above still lists X first, on its gain
+tie-break, but "goes first" would claim more than the countdown says). Every other case reads exactly as before.
+**Test:** `planweek.test.ts` — both new tails, and that "unlike the others" is gone; fails before the fix (the old tail).
+Frontend copy only — no config, schema, on-disk, default or API change. The rest of that pass
+(`--dithered --closing --editor`: 21 ops re-render on field and dithered run, Auto and taste chips behave, trim 30.7 %
+against a recorded apron of 30.3 %, nothing overflowing, no console errors) was CLEAN.
+
 ## 2026-10-25 (Builder, branch `claude/nice-carson-wur8iy`) — Channel combine's intro keeps its space
 
 ### v0.503.2 — `frontend/src/routes/Combine.tsx` intro copy
