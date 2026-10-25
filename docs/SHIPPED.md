@@ -1,5 +1,31 @@
 # Shipped — the record
 
+## 2026-10-25 (Builder, branch `claude/nice-carson-hqy4xy`) — a folder nothing can be read from stops minting an empty target
+
+### v0.503.4 — `seestack/io/scanner.py` `_ingest_into_target` → `_hold_back_unreadable_new_target`
+
+**What.** `_ingest_into_target` called `library.open_or_create_target` *before* it knew whether any of the unit's
+files could be read. So a folder in `incoming/` whose every file is damaged (or still a zero-byte copy in flight)
+minted a target with no frames: an "IC 360 · 0/0 FRAMES" card on the Library wall and **Targets 2** on the
+Dashboard's headline beside one real target, for as long as the folder stayed broken. Found by
+`agent-dogfood.sh --incoming-lag --no-site --editor`, whose seeding scans a folder holding only its damaged sub.
+Now a target that does **not exist yet** is created only once one of its files has a readable header: the new
+helper reads headers until the first parses (the first file, on any healthy new folder, so one extra header read
+per *new* target, never per sub), and when none does it returns the `TargetScanResult` `ingest_files` would have
+produced (zero-byte → skip, anything else → unreadable error with examples and per-folder counts) with
+`safe_name=""`. So the scan's "couldn't read" note still names the files (the Jobs page already renders a blank
+`safe` as plain text, no dead link), the per-folder unreadable record still subtracts them from the incoming-lag
+count, and the target appears on the first scan after a whole sub lands. An existing target is opened exactly as
+before, so its unreadable files keep their link to its page.
+**Upgrade.** Read-only — nothing is deleted: a library that already holds such an empty target keeps it (removable
+from its page as before); new scans simply stop minting more. No config, schema, on-disk, default or response-shape
+change (`safe` was already a string). **Tests +5** (`tests/test_scanner.py` ×4, `tests/webapp/test_pipeline.py` ×1);
+four fail on the pre-fix tree (worktree check), the fifth — an existing target keeps reporting — passes on both by
+design. One existing test adapted, guard intact: `test_scan_skips_calibration.py::test_an_unreadable_header_ingests_rather_than_guesses`
+used the empty target as its evidence that the calibration rule hands an unreadable folder to ingest; it now asserts
+that on the scan result (the unit is there with every file an error), which still fails if the rule passes it over. The rest of the pass, and the `--empty` first-run pass before it, were CLEAN (21 ops re-render, Auto and
+taste chips behave; the sample's "looks like a Star cluster" is the recorded non-finding).
+
 ## 2026-10-25 (Builder, branch `claude/nice-carson-9l2b0t`) — the week plan's closing note stops calling a leaving headline "the others"
 
 ### v0.503.3 — `frontend/src/planweek.ts` `closingWeekNote`

@@ -171,7 +171,15 @@ def test_an_unreadable_header_ingests_rather_than_guesses(tmp_path: Path) -> Non
 
     result, names = _scan(tmp_path, incoming)
 
-    assert names == ["Something"]
+    # Handed to ingest, not passed over as calibration: ingest tried every file
+    # and reports each as unreadable. (Since v0.503.4 no *target* is minted for
+    # a folder nothing in which can be read — see
+    # ``scanner._hold_back_unreadable_new_target`` — so the evidence that the
+    # folder reached ingest is its scan result, no longer an empty library row.)
+    [tsr] = result.targets
+    assert tsr.target_name == "Something"
+    assert tsr.n_errors == MIN_FRAMES + 1
+    assert names == []
     assert result.skipped_calibration_folders == []
 
 

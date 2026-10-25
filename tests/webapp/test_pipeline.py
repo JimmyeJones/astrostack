@@ -826,6 +826,25 @@ def test_a_half_copied_sub_is_not_reported_as_unreadable(client, data_root):
     assert "unreadable" not in body["result"]
 
 
+def test_a_folder_of_only_unreadable_subs_is_reported_but_makes_no_target(
+        client, data_root):
+    """Found by ``agent-dogfood.sh --incoming-lag``: it used to leave an empty
+    "0/0 frames" target on the Library wall. The report still names the file,
+    with no target page to link to."""
+    _drop_an_unreadable_sub(data_root, "IC 360_sub", "Light_IC 360_10.0s_IRCUT_0001.fit")
+    body = _wait_job(client, client.post("/api/scan", json={}).json()["job_id"])
+    assert body["state"] == "done", body
+    assert body["result"]["unreadable"] == 1
+    assert body["result"]["unreadable_targets"] == [{
+        "target": "IC 360", "safe": "", "n": 1,
+        "examples": ["Light_IC 360_10.0s_IRCUT_0001.fit"],
+    }]
+    names = [t["name"] for t in client.get("/api/targets").json()]
+    assert "IC 360" not in names
+    # …so the Dashboard's headline does not count it either.
+    assert client.get("/api/stats").json()["n_targets"] == len(names)
+
+
 def _build_s30_strip_target(
     data_root: Path, counts, *, side_deg: float, step_deg: float = 2.128 * 0.85,
 ) -> None:

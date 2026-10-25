@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-- **Builder 2026-10-25, branch `claude/nice-carson-hqy4xy`** — a folder whose every file is unreadable no longer mints an empty "0/0 frames" target (`scanner._ingest_into_target`), found by `--incoming-lag --no-site --editor`.
+*No live claims.*
 
 ---
 
@@ -3591,6 +3591,7 @@ AGENTS.md §8. Only the items above need a human's OK first.)_
 
 _Newest first. One line each: what + commit/PR. Entries that had grown to paragraphs were cut to one line on
 2026-09-08; their full text is in [`SHIPPED.md`](SHIPPED.md) under that date's heading — search the version._
+- ✅ v0.503.4 **A folder in `incoming/` whose every file is unreadable (or still copying) no longer mints an empty "0/0 frames" target on the Library wall and the Dashboard count — a new target is created once one sub can be read; the files are still reported** (`seestack/io/scanner.py` `_hold_back_unreadable_new_target`). Dogfood `--incoming-lag` find; entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.503.3 **"Plan my week" no longer says "unlike the others here" of a leaving target when the headline's own target is leaving too — it names the headline and says which goes first** (`frontend/src/planweek.ts` `closingWeekNote`). Dogfood `--closing` find; entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.503.2 **Channel combine's intro said "LRGB(colour from RGB…" with no space — JSX swallowed the line break after `<b>LRGB</b>`** (`frontend/src/routes/Combine.tsx`); dogfood find, entry in [`SHIPPED.md`](SHIPPED.md).
 - ✅ v0.503.1 **Compare's Split and Blink line up two runs of a grown mosaic by sky — the same star sat ~94 px apart (and at two scales) because both were drawn "contain" in one box; A is now drawn on B's pixel grid through both masters' WCS, and a pair that can't be lined up says so and shows side by side** (`seestack/render/compareplace.place_a_on_b`, `GET …/compare-placement`, `Compare.tsx` `SkyFrame`/`needsSkyPlacement`). Scout's Bugs entry; full entry in [`SHIPPED.md`](SHIPPED.md).
