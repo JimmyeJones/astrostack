@@ -740,6 +740,11 @@ export interface AutoStackHold {
    * predates the measurement. */
   panel_depth?: number;
   panels?: number;
+  /** The other **mosaic** case: this many panels have subs but *none* readable,
+   * so the stack would have left that part of the mosaic out of the picture the
+   * target already has (`panels` is then the mosaic's panel count). 0 on a
+   * single field, on the other reasons, and against an older backend. */
+  panels_missing?: number;
   when_utc?: string | null;
 }
 

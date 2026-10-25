@@ -163,6 +163,20 @@ describe("holdReasonSentence / setAsideOutcomeSentence", () => {
       .toContain("thinner, noisier picture");
   });
 
+  it("says a mosaic panel with nothing readable would have gone missing", () => {
+    const h = { offered: 550, readable: 450, unreadable: 100, panels: 4, panels_missing: 1 };
+    expect(holdReasonSentence(h)).toContain("1 of this mosaic's 4 panels");
+    expect(holdReasonSentence(h)).toContain("without it would have left that part");
+    expect(holdReasonSentence({ ...h, panels_missing: 2 })).toContain("without them");
+    // Setting them aside is honest about what the picture then lacks.
+    expect(setAsideOutcomeSentence(h)).toContain("carries on with the 450");
+    expect(setAsideOutcomeSentence(h)).toContain("missing that part of the mosaic");
+    expect(setAsideOutcomeSentence({ ...h, panels_missing: 2 }))
+      .toContain("those parts of the mosaic until you shoot them again");
+    // No trustworthy panel count — the plain sentence, never a half-claim.
+    expect(holdReasonSentence({ ...h, panels: 0 })).toContain("thinner, noisier picture");
+  });
+
   it("names the subs that survive, in both shapes", () => {
     expect(setAsideOutcomeSentence(base)).toContain("carries on with the 4");
     expect(setAsideOutcomeSentence({ ...base, panel_depth: 1, panels: 3 }))

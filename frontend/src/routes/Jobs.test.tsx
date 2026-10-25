@@ -647,6 +647,30 @@ describe("pipelineSummary", () => {
     expect(heldForSubsLine({
       target: "M 31", frames: 8, min: 3, panelDepth: 2, panels: 4,
     })).toContain("only 2 subs on it");
+    // A panel with nothing readable is its own sentence, and a panel count it
+    // can't trust leaves the plain one.
+    expect(heldForFilesLine({
+      target: "M 31", offered: 550, readable: 450, unreadable: 100,
+      panels: 4, panelsMissing: 1,
+    })).toBe(
+      ": 100 of 550 subs couldn't be read (450 still readable), and none of the "
+      + "subs on 1 of its 4 panels can be read — that part of the mosaic would "
+      + "have been missing from the picture.",
+    );
+    expect(heldForFilesLine({
+      target: "M 31", offered: 550, readable: 450, unreadable: 100,
+      panels: 0, panelsMissing: 1,
+    })).toBe(": 100 of 550 subs couldn't be read (450 still readable).");
+  });
+
+  it("carries a missing mosaic panel through the scan summary", () => {
+    const { heldFiles } = pipelineSummary({
+      auto_stack_held_unreadable: [
+        { target: "M 31", offered: 550, readable: 450, unreadable: 100,
+          prior_best: 400, panels_missing: 1, panels: 4 },
+      ],
+    });
+    expect(heldFiles[0]).toMatchObject({ panelsMissing: 1, panels: 4, panelDepth: 0 });
   });
 
   it("words a missing-files hold about the panels when the mosaic is the reason", () => {
@@ -694,7 +718,7 @@ describe("pipelineSummary", () => {
     expect(line).toBe("No new frames · held 1 — some subs aren't on disk.");
     expect(heldFiles).toEqual([
       { target: "M 42", offered: 787, readable: 271, unreadable: 516,
-        panelDepth: 0, panels: 0 },
+        panelDepth: 0, panels: 0, panelsMissing: 0 },
     ]);
   });
 
@@ -704,7 +728,7 @@ describe("pipelineSummary", () => {
     });
     expect(heldFiles).toEqual([
       { target: "X", offered: 0, readable: 0, unreadable: 0,
-        panelDepth: 0, panels: 0 },
+        panelDepth: 0, panels: 0, panelsMissing: 0 },
     ]);
   });
 

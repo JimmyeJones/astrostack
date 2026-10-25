@@ -1707,3 +1707,122 @@ def test_the_scan_loops_stack_decision_builds_no_frame_objects(
     assert mixed is None and depth is None and hold is None
     assert built() == 0, (
         f"built {built()} FrameRow objects deciding whether to auto-stack")
+
+
+def _two_by_two(root, proj) -> list[int]:
+    """Make the fixture target a two-panel mosaic of two subs each.
+
+    ``pointing_groups`` calls a target a mosaic only when two groups each carry
+    two subs, and the fixture has three — so a fourth row is added whose file is
+    a *copy* outside ``incoming/`` (nothing the owner owns is touched). Returns
+    the ids with panel A first: ``[A, B, B, A]``, the panels 1.5° apart.
+    """
+    import shutil
+    from dataclasses import replace
+
+    ids = _solved_ids(proj)
+    assert len(ids) == 3, "fixture shape changed — rebuild the 2+2 below"
+    first = proj.get_frame(ids[0])
+    assert first is not None
+    elsewhere = root / "elsewhere"
+    elsewhere.mkdir()
+    twin = elsewhere / Path(first.source_path).name
+    shutil.copy2(first.source_path, twin)
+    ids.append(proj.add_frame(replace(
+        first, id=None, source_path=str(twin), cached_path=None)))
+    for k, fid in enumerate(ids):
+        proj.update_frame(
+            fid, ra_center_deg=83.6 + (1.5 if k in (0, 3) else 0.0),
+            dec_center_deg=-5.4)
+    return ids
+
+
+def test_a_mosaic_panel_with_no_readable_sub_holds_the_walk_away_stack(
+    solved_library, monkeypatch,
+):
+    """A panel whose files are *all* off-line must not be stacked away.
+
+    The two count questions in the readability hold are whole-target
+    (``readable < prior_best``) or typical-panel ones, and neither sees a panel
+    that is simply absent: here panel A's two subs are both unreadable while
+    panel B's two make up the best run's count of 2 at a depth of 2, so — before
+    the fix — the hold returned ``None`` and the target's newest picture lost
+    part of the mosaic. Owner-scale shape: a grown 2x2 stacked at 400, a newer
+    night adding 150 to three panels while the fourth's 100 files are away.
+
+    After: held, with ``panels_missing`` and the panel count reported, and
+    without an attempt marker — so the scan after the files return stacks it.
+    """
+    calls = _patch_run_stack(monkeypatch)
+    settings = _settings(solved_library).model_copy(
+        update={"auto_stack_min_frames": 2})
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _two_by_two(solved_library, proj)
+            _record_run(proj, n_frames_used=2)   # a picture of A + B stands
+            _unread(proj, [ids[0], ids[3]])      # every file on panel A is away
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe not in summary["auto_stacked"], (
+            "a stack missing a whole panel of the mosaic must not be published")
+        assert summary["auto_stacked"], "the healthy targets must still stack"
+        held = summary.get("auto_stack_held_unreadable") or []
+        entry = next((h for h in held if h["target"] == safe), None)
+        assert entry is not None, "the hold should be reported, not silent"
+        # Every count that used to wave it through is still reported honestly.
+        assert entry["readable"] == 2 and entry["prior_best"] == 2
+        assert entry["unreadable"] == 2
+        assert "panel_depth" not in entry
+        assert entry["panels_missing"] == 1
+        assert entry["panels"] == 2
+        assert "part of the mosaic" in (entry["reason"] or "")
+
+        proj = lib.open_target(safe)
+        try:
+            assert proj.get_meta(pipeline.AUTO_STACK_ATTEMPT_META_KEY) is None
+            _reread(proj, ids)          # the share comes back
+        finally:
+            proj.close()
+        calls.clear()
+        summary2 = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe in summary2["auto_stacked"], (
+            "with panel A's files back the whole mosaic stacks")
+        assert not summary2.get("auto_stack_held_unreadable")
+    finally:
+        lib.close()
+
+
+def test_a_missing_panel_never_holds_a_targets_first_stack(
+    solved_library, monkeypatch,
+):
+    """No picture stands, so there is nothing to protect: the first-stack rule
+    the hold's docstring promises still holds for the per-panel question."""
+    _patch_run_stack(monkeypatch)
+    settings = _settings(solved_library).model_copy(
+        update={"auto_stack_min_frames": 2})
+    lib = Library.open_or_create(solved_library / "library")
+    try:
+        safe = _first_stackable(lib)
+        assert safe is not None
+        proj = lib.open_target(safe)
+        try:
+            ids = _two_by_two(solved_library, proj)
+            _unread(proj, [ids[0], ids[3]])   # panel A away, no prior run
+        finally:
+            proj.close()
+        lib.refresh_target_stats(safe)
+        summary = pipeline._pipeline_body(
+            settings, _FakeJM(), Job(kind="pipeline"), root=None)
+        assert safe in summary["auto_stacked"]
+        assert not summary.get("auto_stack_held_unreadable")
+    finally:
+        lib.close()

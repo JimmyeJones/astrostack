@@ -7,11 +7,7 @@
 
 ## Front of the queue (2026-10-25)
 
-**One ungated bug is open — Builder, take it:** the walk-away "some subs aren't on disk" hold
-(`pipeline._auto_stack_readability_hold`) counts the whole target, so a mosaic panel whose files are all off-line is
-stacked away when a newer night's subs on the other panels make up the number (top of Bugs, 🟡, size S, reproduced).
-
-Recently closed: Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
+**No ungated bug is open.** Recently closed: the walk-away missing-files hold on a mosaic panel (v0.503.5); Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
 progress / Tonight badge); a dogfood pass found and fixed the week plan's same-sky flip (v0.502.41); the Scout's sweep (4) fixed a merge that
 deleted a folder a stack was still writing into (v0.502.42). After that, a Builder with nothing ungated should take a beginner feature from "Features that serve
 real workflows" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), or dogfood (`--mosaic --editor`) and file what it finds.
@@ -30,6 +26,7 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 
 ## Run log (newest first)
 
+*2026-10-25 (Builder, branch `claude/nice-carson-nryy30`) — **v0.503.5: the walk-away missing-files hold now holds a mosaic whose panel has no readable sub** (`pipeline._panels_with_nothing_readable`, `panels_missing`), the Scout's sweep (2) entry; fail-before shown. Baseline suite 8280 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--deep --mosaic`, `--combine --calibration`).*
 *2026-10-25 (Scout, branch `claude/beautiful-newton-1bsiin`) — **QA rotation sweep (2), new angle: the walk-away missing-files hold (`_auto_stack_readability_hold`) judges a mosaic by whole-target count and median depth, so a panel with *no* readable subs is stacked away when a newer night's subs on the other panels make up the number; filed reproduced (top of Bugs).** Inbox: the same four, owner-gated. Dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: that entry. **Rotation: (2) done → next sweep is (3).***
 *2026-10-25 (Builder, branch `claude/nice-carson-hqy4xy`) — **v0.503.4: a folder whose every file is unreadable no longer mints an empty "0/0 frames" target** (`scanner._hold_back_unreadable_new_target`), found by `--incoming-lag --no-site --editor`; that pass and `--empty` otherwise CLEAN. Baseline suite 8275 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--deep --mosaic`, `--combine --calibration`).*
 *2026-10-25 (Builder, branch `claude/nice-carson-9l2b0t`) — **v0.503.3: "Plan my week"'s closing note said "unlike the others here" while the headline's own target was leaving too** (`closingWeekNote`), found by `--dithered --closing --editor`; that pass otherwise CLEAN (trim 30.7 % vs recorded apron 30.3 %). **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--empty`, `--incoming-lag --no-site`).*
@@ -39,7 +36,6 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-10-24 (Builder, branch `claude/nice-carson-itbuxk`) — **v0.503.0: a single field's Target page names the mosaic of the same object he already has** instead of only prescribing "shoot it in mosaic mode" (`TargetOut.mosaic_companion`, `find_mosaic_companion`), found reading `--closing --incoming-lag --mosaic --editor`; that pass otherwise CLEAN. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--calibration --big`, `--dithered`).*
 *2026-10-24 (Builder, branch `claude/nice-carson-5q6dx6`) — **v0.502.44: after a Combine the Target page's "latest stack" notes describe the target's own stack, not the newer carried-in night** (`CARRIED_FROM_META_PREFIX`, `StackRunOut.carried_in`, `latestStackFirst`), found by `--combine --no-site`; that pass otherwise CLEAN (§10 incoming/ byte-identical). **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--closing`, `--incoming-lag`).*
 *2026-10-24 (Builder, branch `claude/nice-carson-6iu76a`) — **v0.502.43: the dogfood probe no longer reports the header's screen-reader-only "N jobs running" text as an overflow + clipped label** (`dogfood_probe.mjs` → `screenReaderOnly`). `--calibration --mosaic --editor` and `--deep` otherwise CLEAN. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--combine`, `--no-site`).*
-*2026-10-23 (Builder, branch `claude/nice-carson-unkvbg`) — **No ungated bug, no open beginner feature: two big-picture dogfood passes, both CLEAN, nothing shipped.** `--mosaic --dithered --editor --restack` and `--mosaic --big --editor` — all 21 ops re-render on the field, the 2×2, the dithered and the full-size runs; full-size check, navigator and Noise-reduction caveat behave; 0 of 16 scale-pair answers moved; trims 8 % (2×2) / 30.7 % (dithered, recorded apron 30.3 %). Suite 8259 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — the Scout's unfiled (4) leads (cache clear / run prune under a running job) were traced and look low-stakes (see `docs/PROCESS-NOTES.md`); otherwise dogfood a flag not run lately (`--calibration`, `--deep`, `--combine`).*
 
 ## Standing frontier
 
