@@ -82,6 +82,28 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 
 ## Bugs (fix these first)
 
+- **🟡 (Scout 2026-10-25, QA rotation sweep (2)) — the walk-away "some subs aren't on disk" hold counts the whole
+  target, so a mosaic panel whose files are all off-line is waved through whenever a newer night's subs on the other
+  panels make up the number.** *(Pillar: "just works" autonomy — PRIORITY 2; size **S**, backend + one note
+  sentence; severity moderate — the target's newest picture (and its auto-edit) loses a whole part of the mosaic
+  until the files come back; nothing on disk is lost, and the next scan after they return re-stacks it
+  (`_readability_recovered`). Only reached with `auto_stack` on — **off** on the owner's install today, so his
+  exposure is when he turns it on. Confidence: **reproduced end to end** through `pipeline._pipeline_body`.)*
+  `webapp/pipeline.py::_auto_stack_readability_hold` holds when `readable < prior_max` (the best run's
+  `n_frames_used`) or when the readable subs' *typical* panel depth is under the floor — both whole-target or
+  median numbers. Neither sees a panel that has **no** readable subs at all. Repro (scratch test on the
+  `solved_library` fixture, `auto_stack_min_frames=2`, deleted): one sub on panel A, two on panel B 1.5° away, a
+  prior run of 2 (A + B), A's file repointed away the way `_unread` does → hold `None`, target in `auto_stacked`.
+  Owner-scale arithmetic, same shape: a grown 2×2 at 100 subs a panel stacked at 400; a later night adds 150 to three
+  panels while the night-1-only panel's 100 files are off-line → readable 450 ≥ 400, median depth fine → a picture
+  with one part missing is published. A single field cannot hit this (every sub covers every pixel, so more readable
+  subs really is a better picture), which is why the count rule holds there. **Fix sketch:** in the same function,
+  label every solved sub with `pointings.pointing_groups(radecs, min_members=max(2, min_frames))`; when a prior run
+  exists and some panel has members but **none** readable, hold with a reason of its own and a `panels_missing`
+  count, and give `AutoStackHoldNote.holdReasonSentence` (and the Jobs page's `HeldForFiles`) the matching sentence
+  ("…would have left part of your mosaic out of the picture"). `pointing_groups` returns `None` on a single field, so
+  nothing changes there. Regression test: the repro above with ≥ 2 subs on panel A (so `pointing_groups` splits), fail-before.
+
 - **🟡 (Scout 2026-10-19, QA rotation sweep (2)) — a mosaic panel whose subs all failed to plate-solve is
   missing from the picture, and three whole-target gates call it "a healthy night".** *(Pillar: trust /
   autonomy — PRIORITY 2–3; size **M**; severity moderate — a hole in his mosaic with a reassuring verdict

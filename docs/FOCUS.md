@@ -5,29 +5,32 @@
 > belongs in `docs/PROCESS-NOTES.md`, never here. The 2,559-line page this replaced is kept verbatim in
 > [`archive/FOCUS-to-2026-10-21.md`](archive/FOCUS-to-2026-10-21.md) — nothing was deleted.
 
-## Front of the queue (2026-10-24)
+## Front of the queue (2026-10-25)
 
-**No ungated bug is open.** The Scout's Compare Split/Blink entry closed with v0.503.1 (A placed on B by WCS).
+**One ungated bug is open — Builder, take it:** the walk-away "some subs aren't on disk" hold
+(`pipeline._auto_stack_readability_hold`) counts the whole target, so a mosaic panel whose files are all off-line is
+stacked away when a newer night's subs on the other panels make up the number (top of Bugs, 🟡, size S, reproduced).
 
 Recently closed: Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
 progress / Tonight badge); a dogfood pass found and fixed the week plan's same-sky flip (v0.502.41); the Scout's sweep (4) fixed a merge that
-deleted a folder a stack was still writing into (v0.502.42). After it, a Builder with nothing ungated should take a beginner feature from "Features that serve
+deleted a folder a stack was still writing into (v0.502.42). After that, a Builder with nothing ungated should take a beginner feature from "Features that serve
 real workflows" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), or dogfood (`--mosaic --editor`) and file what it finds.
 
 **Gated, do not start:** the un-located-panel entry (second in Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
 re-litigate a stand-down that carries numbers. **Issue inbox:** #878, #880, #903, #1015 — all previously acted-on
-and owner-gated, none updated since 2026-10-12 (re-checked 2026-10-24).
+and owner-gated, none updated since 2026-10-12 (re-checked 2026-10-25).
 
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (1), 2026-10-24
-→ next sweep is (2).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (2), 2026-10-25
+→ next sweep is (3).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-10-25 (Scout, branch `claude/beautiful-newton-1bsiin`) — **QA rotation sweep (2), new angle: the walk-away missing-files hold (`_auto_stack_readability_hold`) judges a mosaic by whole-target count and median depth, so a panel with *no* readable subs is stacked away when a newer night's subs on the other panels make up the number; filed reproduced (top of Bugs).** Inbox: the same four, owner-gated. Dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: that entry. **Rotation: (2) done → next sweep is (3).***
 *2026-10-25 (Builder, branch `claude/nice-carson-hqy4xy`) — **v0.503.4: a folder whose every file is unreadable no longer mints an empty "0/0 frames" target** (`scanner._hold_back_unreadable_new_target`), found by `--incoming-lag --no-site --editor`; that pass and `--empty` otherwise CLEAN. Baseline suite 8275 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--deep --mosaic`, `--combine --calibration`).*
 *2026-10-25 (Builder, branch `claude/nice-carson-9l2b0t`) — **v0.503.3: "Plan my week"'s closing note said "unlike the others here" while the headline's own target was leaving too** (`closingWeekNote`), found by `--dithered --closing --editor`; that pass otherwise CLEAN (trim 30.7 % vs recorded apron 30.3 %). **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--empty`, `--incoming-lag --no-site`).*
 *2026-10-25 (Builder, branch `claude/nice-carson-wur8iy`) — **v0.503.2: Channel combine's intro read "LRGB(colour from RGB…" — JSX dropped the line break after `</b>`** (`Combine.tsx`); a tree-wide grep for the same shape found no other. Dogfood `--calibration --big --editor` otherwise CLEAN (masters built and applied, 21 ops on field and full-size, trim 7 %). Suite 8275 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--empty`, `--dithered --closing`).*
@@ -37,7 +40,6 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-10-24 (Builder, branch `claude/nice-carson-5q6dx6`) — **v0.502.44: after a Combine the Target page's "latest stack" notes describe the target's own stack, not the newer carried-in night** (`CARRIED_FROM_META_PREFIX`, `StackRunOut.carried_in`, `latestStackFirst`), found by `--combine --no-site`; that pass otherwise CLEAN (§10 incoming/ byte-identical). **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--closing`, `--incoming-lag`).*
 *2026-10-24 (Builder, branch `claude/nice-carson-6iu76a`) — **v0.502.43: the dogfood probe no longer reports the header's screen-reader-only "N jobs running" text as an overflow + clipped label** (`dogfood_probe.mjs` → `screenReaderOnly`). `--calibration --mosaic --editor` and `--deep` otherwise CLEAN. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--combine`, `--no-site`).*
 *2026-10-23 (Builder, branch `claude/nice-carson-unkvbg`) — **No ungated bug, no open beginner feature: two big-picture dogfood passes, both CLEAN, nothing shipped.** `--mosaic --dithered --editor --restack` and `--mosaic --big --editor` — all 21 ops re-render on the field, the 2×2, the dithered and the full-size runs; full-size check, navigator and Noise-reduction caveat behave; 0 of 16 scale-pair answers moved; trims 8 % (2×2) / 30.7 % (dithered, recorded apron 30.3 %). Suite 8259 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — the Scout's unfiled (4) leads (cache clear / run prune under a running job) were traced and look low-stakes (see `docs/PROCESS-NOTES.md`); otherwise dogfood a flag not run lately (`--calibration`, `--deep`, `--combine`).*
-*2026-10-23 (Scout, branch `claude/beautiful-newton-v9b2h7`) — **QA rotation sweep (4), new angle: mutating routes vs an in-flight job — `POST /api/targets/merge` rmtree'd a source a stack was still writing into (job "done", picture orphaned); Scout-fixed v0.502.42 (409 while a source is busy).** Leads for the next (4): cache clear / run delete under a running job (`docs/PROCESS-NOTES.md`). Inbox: the same four, owner-gated. **Rotation: (4) done → next sweep is (1).***
 
 ## Standing frontier
 

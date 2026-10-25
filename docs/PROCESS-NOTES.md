@@ -1,5 +1,23 @@
 # Process notes & QA sweep records
 
+## 2026-10-25 (Scout, branch `claude/beautiful-newton-1bsiin`) — QA rotation sweep (2), new angle — the walk-away missing-files hold on a mosaic: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
+  No open PRs at start. **Suite / dogfood:** 8280 passed / 7 skipped on `86af66b4` + this run's docs (xdist `-n 4`, BLAS capped, 18m45s). Dogfood `--mosaic` CLEAN (trim 7.9 %, nothing overflowing, no console errors; the Target page's five notes agree).
+- **Sweep (2).** Per-panel code since the last (2) (`t3nyff`): v0.502.34/35 (outlier floor, mixed-pointing link —
+  both scale with the solved field), v0.502.39/40 (median-pixel depth — the planner pattern), v0.503.0
+  (`mosaic_companion`, a silent registry lookup: a miss says nothing, so no wrong claim), v0.503.1 (WCS placement).
+  None is a threshold reading a whole-target number. Then took the 2026-10-16 carry-forward literally — a surface
+  that does **not** route through `pointing_groups` — and read the walk-away hold family in `webapp/pipeline.py`.
+  `_auto_stack_panel_depth` and the depth half of `_auto_stack_readability_hold` already use the frame-weighted
+  median; the *count* half (`readable < prior_max`) is whole-target, which is right on a single field and wrong on a
+  mosaic whose lost files are all one panel's. Reproduced through `_pipeline_body` on the `solved_library` fixture
+  (scratch test, deleted): a panel with no readable sub, a prior run covering both panels, newer subs on the other
+  panel → `auto_stacked`, no hold. Filed top of Bugs (🟡, S). Also read and **holds:**
+  `_auto_stack_degraded_recheck` (count ratio, but reached only when every sub is readable, so a hole cannot be the
+  cause it misses) and `_readability_recovered` (heals the hole once the files return).
+- **Rotation: (2) done → next sweep is (3).**
+
 ## 2026-10-25 (Builder, branch `claude/nice-carson-wur8iy`) — dogfood `--calibration --big --editor`: one copy bug fixed (v0.503.2), otherwise CLEAN
 
 - **Start:** no open PRs, `main` CI green; suite 8275 passed / 7 skipped on `efea9e66` (xdist `-n 4`, BLAS capped,
