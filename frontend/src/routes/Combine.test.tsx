@@ -48,4 +48,13 @@ describe("CombineView", () => {
     const btn = screen.getByRole("button", { name: /Combine/ });
     expect(btn).toBeDisabled();
   });
+
+  it("keeps the space between LRGB and its explanation in the intro", async () => {
+    // JSX drops a line break that sits between a closing tag and text, so
+    // "<b>LRGB</b>⏎(colour…" rendered as "LRGB(colour from RGB…".
+    vi.spyOn(client.api, "listTargets").mockResolvedValue([]);
+    renderView();
+    const intro = await screen.findByText(/colour from RGB/);
+    expect(intro.textContent).toContain("LRGB (colour from RGB");
+  });
 });
