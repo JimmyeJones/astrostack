@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- 🟡 walk-away missing-files hold misses a mosaic panel with no readable sub (`pipeline._auto_stack_readability_hold`) — branch `claude/nice-carson-nryy30`, 2026-10-25.
 
 ---
 
