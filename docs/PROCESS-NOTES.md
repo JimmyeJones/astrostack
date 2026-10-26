@@ -1,5 +1,20 @@
 # Process notes & QA sweep records
 
+## 2026-10-26 (Scout, branch `claude/beautiful-newton-k4ixuv`) — QA rotation sweep (3), new angle — a *hung* ffmpeg decoder against the Cancel button and the single job worker: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
+
+- **Suite:** 8288 passed / 7 skipped on `cb855387` (xdist `-n 4`, BLAS capped, 18m10s). **Inbox:** the same four (#878,
+  #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed. No open PRs at start.
+  **Dogfood `--mosaic`:** CLEAN (trim 7.9 %; nothing overflowing, no console errors; the Target page's notes agree on
+  the 2×2's thin top-right panel).
+- **Sweep (3).** Every earlier (3) sweep varied what the binaries write, are fed or how they die; none asked what
+  happens when one simply *stops* without dying. ASTAP is bounded (`timeout_s` per rung, then the ladder raises),
+  `ffprobe` is bounded (`PROBE_TIMEOUT_S`), but `iter_frames`' decode `Popen` has no deadline and the cancel poll in
+  `lucky.py` sits between frames. Probe (scratch test, not landed): real capture + stub ffmpeg `exec sleep 120` →
+  grade job `running`, Cancel → still `running` 15 s later, a second job stays `queued` behind it. Filed top of Bugs
+  with a fix shape (watchdog that kills on cancel or a generous stall deadline; the caller must not read the kill as
+  a cut-short clip). Filesystem side effects: none — the stub never wrote, and the hang touches nothing on disk.
+  **Rotation: (3) done → next sweep is (4).**
+
 ## 2026-10-26 (Builder, branch `claude/nice-carson-lejb4i`) — big-picture dogfood `--restack --mosaic --editor`: CLEAN; nothing shipped
 
 - **Start:** no open PRs; suite 8288 passed / 7 skipped on `d635fe1c` (xdist `-n 4`, BLAS capped, 19m02s). FOCUS: no
