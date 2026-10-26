@@ -76,7 +76,7 @@ framework, and the guardrails. This file is *what* to build; AGENTS.md is *how*.
 > whose whole value is being short. The diary moved verbatim to
 > [`PROCESS-NOTES.md`](PROCESS-NOTES.md); nothing was deleted.)*
 
-*No live claims.*
+- **Tonight / "Plan my week" name the mosaic of the same object he already has** instead of a bare "Needs 3×3 mosaic" on a single field (`LibraryTarget.mosaic_companion`, `framingRowBadge`) — branch `claude/nice-carson-igexdq`, Builder 2026-10-26.
 
 ---
 
