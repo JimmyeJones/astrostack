@@ -19,7 +19,9 @@ import logging
 import os
 import shutil
 import subprocess
-from collections.abc import Collection, Iterator
+import threading
+import time
+from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +31,33 @@ log = logging.getLogger(__name__)
 
 #: Longest we'll wait for a *probe* (metadata only — it never decodes the file).
 PROBE_TIMEOUT_S = 60
+
+#: Longest :func:`iter_frames` will sit in one read of the decoder's output
+#: before deciding ffmpeg has stopped responding and killing it. Generous on
+#: purpose — a frame normally arrives in milliseconds, and a slow NAS share can
+#: hiccup for tens of seconds and recover — but finite, because the decode is
+#: the one subprocess that otherwise had no deadline at all (ASTAP has
+#: ``timeout_s``, ffprobe has :data:`PROBE_TIMEOUT_S`), and a decoder that never
+#: answers held the single job worker until the container restarted. Only time
+#: spent *waiting on ffmpeg* counts: a slow consumer between frames never trips it.
+DECODE_STALL_TIMEOUT_S = 300.0
+
+#: How often the decode watchdog looks at ``should_cancel`` and the stall clock.
+_WATCHDOG_POLL_S = 0.25
+
+
+class VideoStackCancelled(RuntimeError):
+    """Raised when a video job's ``should_cancel`` goes true.
+
+    Lives here, beside the decode, because :func:`iter_frames` raises it too —
+    a Cancel pressed while ffmpeg is stuck mid-frame has to come out of the
+    read, not wait for a frame that may never arrive.
+    :mod:`seestack.video.lucky` re-exports it under the same name.
+    """
+
+
+class VideoDecoderStalled(RuntimeError):
+    """ffmpeg stopped sending frames for :data:`DECODE_STALL_TIMEOUT_S`."""
 
 
 class VideoToolsMissing(RuntimeError):
@@ -322,6 +351,8 @@ def iter_frames(
     pix_fmt: str | None = None,
     wanted: Collection[int] | None = None,
     cfa: dict[str, str] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+    stall_timeout_s: float = DECODE_STALL_TIMEOUT_S,
 ) -> Iterator[np.ndarray | None]:
     """Stream a capture's frames as ``(H, W, 3)`` uint8 RGB arrays.
 
@@ -382,6 +413,15 @@ def iter_frames(
     that needs each pixel's *own* colour (the lucky stack's Bayer drizzle) reads
     the one phase this generator debayered with instead of guessing a second.
     Left empty for a colour stream.
+
+    **The decode can always be stopped.** A small watchdog thread polls
+    ``should_cancel`` and times each blocking read of ffmpeg's output; when
+    either fires it kills the decoder, which makes the stuck read return, and
+    the generator raises :class:`VideoStackCancelled` or
+    :class:`VideoDecoderStalled` (no bytes for ``stall_timeout_s``). Raising —
+    not ending quietly — is the point: a killed decoder's stream looks exactly
+    like a short clip, and the cut-short path deliberately treats *that* as a
+    finished capture.
     """
     exe = ffmpeg_path()
     if exe is None:
@@ -412,11 +452,18 @@ def iter_frames(
     proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
         cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
+    watchdog = _DecodeWatchdog(proc, should_cancel, stall_timeout_s)
+    watchdog.start()
     try:
         assert proc.stdout is not None
         index = -1
         while True:
+            watchdog.reading_since = time.monotonic()
             buf = proc.stdout.read(frame_bytes)
+            watchdog.reading_since = None
+            # Checked before anything else: a decoder the watchdog killed hands
+            # back a short (or empty) read that must not pass for the clip's end.
+            watchdog.raise_if_tripped(Path(path).name)
             if not buf:
                 break
             if len(buf) < frame_bytes:
@@ -460,11 +507,75 @@ def iter_frames(
                     frame = _demosaic_frame(frame, pattern=pattern)
             yield frame if keep else None
     finally:
+        watchdog.stop()
         if proc.poll() is None:
             proc.kill()
         if proc.stdout is not None:
             proc.stdout.close()
         proc.wait()
+
+
+class _DecodeWatchdog:
+    """Kills a decoder that was cancelled, or that stopped sending bytes.
+
+    ``reading_since`` is set by :func:`iter_frames` around each blocking read
+    (and cleared after), so the stall clock only runs while we are waiting on
+    ffmpeg — never while the consumer is busy with the last frame.
+    """
+
+    def __init__(
+        self,
+        proc: subprocess.Popen,
+        should_cancel: Callable[[], bool] | None,
+        stall_timeout_s: float,
+    ) -> None:
+        self._proc = proc
+        self._should_cancel = should_cancel
+        self._stall_timeout_s = float(stall_timeout_s)
+        self._stopped = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, name="ffmpeg-decode-watchdog", daemon=True,
+        )
+        self.reading_since: float | None = None
+        self.tripped: str | None = None  # "cancelled" | "stalled"
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def stop(self) -> None:
+        # Joined before the caller kills/waits on the process itself, so the two
+        # threads never signal and reap the same child at once.
+        self._stopped.set()
+        self._thread.join()
+
+    def _run(self) -> None:
+        while not self._stopped.wait(_WATCHDOG_POLL_S):
+            reason: str | None = None
+            try:
+                if self._should_cancel is not None and self._should_cancel():
+                    reason = "cancelled"
+            except Exception:  # noqa: BLE001 — a broken callback mustn't kill the guard
+                log.debug("should_cancel raised inside the decode watchdog", exc_info=True)
+            since = self.reading_since
+            if (reason is None and since is not None
+                    and time.monotonic() - since > self._stall_timeout_s):
+                reason = "stalled"
+            if reason is not None:
+                self.tripped = reason
+                if self._proc.poll() is None:
+                    self._proc.kill()
+                return
+
+    def raise_if_tripped(self, name: str) -> None:
+        if self.tripped == "cancelled":
+            raise VideoStackCancelled(f"cancelled while decoding {name}")
+        if self.tripped == "stalled":
+            raise VideoDecoderStalled(
+                f"ffmpeg stopped sending frames from {name} for over "
+                f"{self._stall_timeout_s:.0f} s, so the decode was stopped. The file "
+                f"may be damaged or the share holding it may have stopped responding "
+                f"— try again, or copy the clip somewhere local first."
+            )
 
 
 def _channels_agree(frame: np.ndarray) -> bool:

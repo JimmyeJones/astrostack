@@ -995,3 +995,37 @@ def test_a_still_whose_video_is_gone_is_never_called_stale(client, data_root):
 
     listed = client.get("/api/videos").json()["captures"][0]
     assert listed["result"]["colour_stale"] is False
+
+
+def _stall_ffmpeg(tmp_path: Path, monkeypatch) -> None:
+    """Point the decode at a stub that never sends a frame (the real ffprobe stays)."""
+    exe = tmp_path / "stuck-ffmpeg"
+    exe.write_text("#!/bin/sh\nexec sleep 120\n")
+    exe.chmod(0o755)
+    monkeypatch.setenv("SEESTACK_FFMPEG_PATH", str(exe))
+
+
+def test_cancelling_a_check_whose_decoder_hangs_frees_the_worker(
+    client, data_root, tmp_path, monkeypatch,
+):
+    """A stuck ffmpeg used to ignore Cancel and wedge every job queued behind it."""
+    _drop_capture(data_root)
+    _stall_ffmpeg(tmp_path, monkeypatch)
+    first = client.post("/api/videos/Lunar_video/grade", json={}).json()["job_id"]
+    second = client.post("/api/videos/Lunar_video/grade", json={}).json()["job_id"]
+    import time
+
+    for _ in range(200):
+        if client.get(f"/api/jobs/{first}").json()["state"] == "running":
+            break
+        time.sleep(0.05)
+    assert client.post(f"/api/jobs/{first}/cancel").status_code == 200
+    assert _wait_for_job(client, first)["state"] == "cancelled"
+    # The queued job got the worker (and is cancellable the same way).
+    for _ in range(200):
+        if client.get(f"/api/jobs/{second}").json()["state"] != "queued":
+            break
+        time.sleep(0.05)
+    assert client.get(f"/api/jobs/{second}").json()["state"] == "running"
+    client.post(f"/api/jobs/{second}/cancel")
+    assert _wait_for_job(client, second)["state"] == "cancelled"

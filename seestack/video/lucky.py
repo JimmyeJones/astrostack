@@ -43,7 +43,7 @@ import numpy as np
 from seestack.stack.accumulator import WeightedSumAccumulator
 from seestack.video import drizzle as _drizzle
 from seestack.video.drizzle import LuckyDrizzle
-from seestack.video.ffmpeg import VideoInfo, iter_frames, probe_video
+from seestack.video.ffmpeg import VideoInfo, VideoStackCancelled, iter_frames, probe_video
 
 log = logging.getLogger(__name__)
 
@@ -206,10 +206,6 @@ class LuckyResult:
     def noise_gain(self) -> float:
         """Roughly how much cleaner than a single frame this is (√N)."""
         return math.sqrt(max(1, self.n_stacked))
-
-
-class VideoStackCancelled(RuntimeError):
-    """Raised out of :func:`stack_video` when ``should_cancel`` goes true."""
 
 
 def frame_luma(frame: np.ndarray) -> np.ndarray:
@@ -522,7 +518,7 @@ def grade_video(
     expected = max(1, vinfo.n_frames // stride) if vinfo.n_frames else 0
     for i, frame in enumerate(
         iter_frames(src, stride=stride, width=vinfo.width, height=vinfo.height,
-                    pix_fmt=vinfo.pix_fmt)
+                    pix_fmt=vinfo.pix_fmt, should_cancel=should_cancel)
     ):
         if should_cancel is not None and should_cancel():
             raise VideoStackCancelled("cancelled while grading frames")
@@ -663,7 +659,8 @@ def stack_video(
         # threw away one line later. The frames it *does* keep are decoded and
         # demosaiced exactly as before, so the stacked result is unchanged.
         iter_frames(src, stride=stride, width=vinfo.width, height=vinfo.height,
-                    pix_fmt=vinfo.pix_fmt, wanted=keep_idx, cfa=cfa)
+                    pix_fmt=vinfo.pix_fmt, wanted=keep_idx, cfa=cfa,
+                    should_cancel=should_cancel)
     ):
         if frame is None:
             continue
