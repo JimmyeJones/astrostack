@@ -32,15 +32,34 @@ export function recentreNudgeRowBadge(
 // needed — that is the beginner's very next question, and a panel count is what
 // they actually set in the Seestar app. Falls back to the plain label when there
 // is no plan (no vetted size, or an older backend that doesn't send one).
+//
+// `companion` is the name of a mosaic of the same object the library already
+// holds (`PlannedTarget.mosaic_companion`). The Seestar files mosaic subs in
+// their own `<T>_mosaic_sub/` folder, which becomes its own "<T> (mosaic)"
+// target, so for a heavy mosaic user "Needs 3×3 mosaic" on the single field is
+// usually advice already taken. The verdict still stands — the object really
+// is bigger than this field — but the badge stops prescribing and points at the
+// picture being built, which is what the Target page says too. Only on the
+// `mosaic` level, the same "this field is a fragment" bar the Target page uses.
 export function framingRowBadge(
   framing: FramingHint | null | undefined,
   mosaic?: MosaicPlan | null,
+  companion?: string | null,
 ): { label: string; color: string; tooltip: string } | null {
   if (!framing || framing.level === "fits") return null;
+  const plan = mosaic?.text ? ` ${mosaic.text}` : "";
+  const companionName = (companion ?? "").trim();
+  if (framing.level === "mosaic" && companionName) {
+    return {
+      label: "Mosaic started",
+      color: "blue",
+      tooltip: `This target ${framing.text}${plan} You already have a mosaic of it — `
+        + `${companionName} — so that's the picture to keep adding to.`,
+    };
+  }
   const grid = mosaic ? `${mosaic.cols}×${mosaic.rows} ` : "";
   const label = framing.level === "mosaic" ? `Needs ${grid}mosaic` : "Mosaic for margin";
   const color = framing.level === "mosaic" ? "orange" : "yellow";
-  const plan = mosaic?.text ? ` ${mosaic.text}` : "";
   return { label, color, tooltip: `This target ${framing.text}${plan}` };
 }
 

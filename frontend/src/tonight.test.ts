@@ -308,6 +308,39 @@ describe("framingRowBadge", () => {
     expect(b!.label).toBe("Needs mosaic");
     expect(b!.tooltip).toBe("This target is bigger than one frame.");
   });
+
+  it("points at the mosaic he already has instead of prescribing one", () => {
+    // The Seestar files mosaic subs as their own "<T> (mosaic)" target, so for
+    // a heavy mosaic user "Needs 3×2 mosaic" on the single field is advice
+    // already taken. The verdict and the plan stay in the hover; the label
+    // stops being an orange instruction.
+    const b = framingRowBadge(
+      { level: "mosaic", text: "is bigger than one frame." },
+      { cols: 3, rows: 2, panels: 6, text: "About a 3×2 mosaic (6 panels) covers all of it." },
+      "M 42 (mosaic)",
+    );
+    expect(b!.label).toBe("Mosaic started");
+    expect(b!.color).toBe("blue");
+    expect(b!.tooltip).toBe(
+      "This target is bigger than one frame. About a 3×2 mosaic (6 panels) covers all of it."
+      + " You already have a mosaic of it — M 42 (mosaic) — so that's the picture to keep"
+      + " adding to.",
+    );
+  });
+
+  it("keeps the old badge without a companion, and for a merely tight fit", () => {
+    // No companion (null, blank, or an older backend that sends nothing) is
+    // today's badge exactly; `tight` is not a fragment, so a companion there
+    // changes nothing — the Target page draws the same line.
+    for (const none of [null, undefined, "  "]) {
+      expect(framingRowBadge({ level: "mosaic", text: "is big." }, null, none)!.label)
+        .toBe("Needs mosaic");
+    }
+    const tight = framingRowBadge(
+      { level: "tight", text: "is about as wide as one frame." }, null, "M 42 (mosaic)");
+    expect(tight!.label).toBe("Mosaic for margin");
+    expect(tight!.tooltip).toBe("This target is about as wide as one frame.");
+  });
 });
 
 describe("difficultyRowBadge", () => {

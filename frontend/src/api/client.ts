@@ -89,6 +89,10 @@ export interface PlannedTarget {
   // absent/null when it fits, has no vetted size, or is already a mosaic (older
   // backends omit it — treat as "nothing to say").
   mosaic?: MosaicPlan | null;
+  // On a single field of an object the library also holds as a mosaic, that
+  // mosaic's name — so the framing badge points at the picture being built
+  // instead of prescribing it. Absent on catalog rows and older backends.
+  mosaic_companion?: string | null;
   // "How hard is this target for a Seestar?" — easy/moderate/challenging, for
   // any row the vetted table/type-rule has a verdict for, already-shot ones
   // included (the same object must not lose its verdict the moment you start
@@ -177,6 +181,8 @@ export interface WeekTargetPick {
   // column that says what to point at on each of the nights ahead.
   framing?: FramingHint | null;
   mosaic?: MosaicPlan | null;
+  // The same field `PlannedTarget` carries, from the same library row.
+  mosaic_companion?: string | null;
 }
 
 /** One night of the week ahead, with the best-placed target on it. */

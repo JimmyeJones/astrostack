@@ -358,6 +358,12 @@ class PlannedTarget:
     # → *how big a mosaic?*) while the user is still choosing what to point at.
     # ``None`` when it fits one frame or has no vetted size.
     mosaic: MosaicPlan | None = None
+    # The name of the mosaic of this same object the owner already has
+    # (:attr:`LibraryTarget.mosaic_companion`), carried beside the framing
+    # verdict so "Needs 3×3 mosaic" on a single field can say *you have one —
+    # keep adding to it* rather than prescribe a session he has already shot.
+    # ``None`` on catalog rows, on a mosaic's own row and when there is none.
+    mosaic_companion: str | None = None
     # "How hard is this target for a Seestar?" — easy/moderate/challenging, so a
     # beginner sees the difficulty *while choosing* what to point at, not only
     # after they've shot it. Carried for **both** kinds of row — a library row's
@@ -1311,6 +1317,14 @@ class LibraryTarget:
     # anchor. So the verdict stands down there, which is the caution the
     # original "library rows carry no framing" comment was written for.
     canvas_is_mosaic: bool = False
+    # The display name of a *separate* mosaic target of the same object, when
+    # this one is a single field (:func:`webapp.mosaic_companion.find_mosaic_companion`
+    # — the Seestar files mosaic subs under ``<T>_mosaic_sub/``, which the
+    # convention keeps as its own ``"<T> (mosaic)"`` target). The framing verdict
+    # still stands on this row — the object really is bigger than this field —
+    # but the advice it carries changes from "shoot it in mosaic mode" to "keep
+    # adding to the mosaic you have", which is what the Target page says too.
+    mosaic_companion: str | None = None
 
 
 def plan_tonight(observer: Observer, when_utc: datetime, *,
@@ -1426,6 +1440,8 @@ def plan_tonight(observer: Observer, when_utc: datetime, *,
                 mosaic=(None if t.canvas_is_mosaic
                         else mosaic_plan(t.size_arcmin, t.size_minor_arcmin,
                                          field=field)),
+                mosaic_companion=(None if t.canvas_is_mosaic
+                                  else t.mosaic_companion),
             ))
         else:
             obj: CatalogObject = m["obj"]
@@ -1633,6 +1649,10 @@ class WeekTargetPick:
     #: and on an older backend.
     framing: FramingHint | None = None
     mosaic: MosaicPlan | None = None
+    #: The mosaic of the same object the owner already has, as
+    #: :attr:`PlannedTarget.mosaic_companion` — the same field from the same
+    #: :class:`LibraryTarget`, so the two cards cannot disagree about it.
+    mosaic_companion: str | None = None
 
 
 @dataclass
@@ -1834,6 +1854,8 @@ def plan_week(
                 mosaic=(None if t.canvas_is_mosaic
                         else mosaic_plan(t.size_arcmin, t.size_minor_arcmin,
                                          field=field)),
+                mosaic_companion=(None if t.canvas_is_mosaic
+                                  else t.mosaic_companion),
             )
         plan.nights.append(WeekNight(
             date=label,

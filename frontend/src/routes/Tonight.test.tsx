@@ -312,6 +312,27 @@ describe("TonightView", () => {
       expect(screen.queryByText("Plenty — try something new")).not.toBeInTheDocument();
     });
 
+  it("points a single field at the mosaic of it he already has", async () => {
+    // The row's own framing verdict still stands, but "Needs 3×2 mosaic" is a
+    // session already shot when the library holds "M 31 (mosaic)" — so the
+    // badge names that picture instead of prescribing it.
+    vi.spyOn(client.api, "getTonight").mockResolvedValue(plan({
+      targets: [target({
+        id: "M31", name: "Andromeda Galaxy", already_targeted: true,
+        target_safe: "M_31", frames_accepted: 960, total_exposure_s: 8 * 3600,
+        type: "Galaxy", score: 70, size_arcmin: 178,
+        framing: { level: "mosaic", text: "is bigger than the Seestar's single frame." },
+        mosaic: { cols: 3, rows: 2, panels: 6, text: "About a 3x2 mosaic (6 panels) covers all of it." },
+        mosaic_companion: "M 31 (mosaic)",
+      })],
+    }));
+    renderTonight();
+    await waitFor(() =>
+      expect(screen.getByText(/Andromeda Galaxy/)).toBeInTheDocument());
+    expect(screen.getByText("Mosaic started")).toBeInTheDocument();
+    expect(screen.queryByText("Needs 3×2 mosaic")).not.toBeInTheDocument();
+  });
+
   it("still says 'try something new' on a target that fits its frame",
     async () => {
       // The unscoped case, which is most of the library: nothing about the

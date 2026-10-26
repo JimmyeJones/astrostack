@@ -116,7 +116,7 @@ export function PlanWeekCard({ minAlt }: { minAlt?: number }) {
               // The same helper the tonight table's own rows use, so one object
               // cannot be badged two ways on one page.
               const framing = framingNights.has(n.date)
-                ? framingRowBadge(best.framing, best.mosaic)
+                ? framingRowBadge(best.framing, best.mosaic, best.mosaic_companion)
                 : null;
               return (
                 <Table.Tr key={n.date}>
