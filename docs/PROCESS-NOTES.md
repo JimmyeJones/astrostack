@@ -1,5 +1,19 @@
 # Process notes & QA sweep records
 
+## 2026-10-26 (Builder, branch `claude/nice-carson-lejb4i`) — big-picture dogfood `--restack --mosaic --editor`: CLEAN; nothing shipped
+
+- **Start:** no open PRs; suite 8288 passed / 7 skipped on `d635fe1c` (xdist `-n 4`, BLAS capped, 19m02s). FOCUS: no
+  ungated bug; the Features section has no open beginner item that is not built, declined or owner/data-gated
+  (re-read this run), so took the last run's suggested `--restack --mosaic`.
+- **`--restack --mosaic --editor`:** two runs (3 → 6 subs), reel available and dated by capture, noise-delta
+  pixel-exact (ratio 1.658). Mosaic panel map, `grain_uneven`, `seams_flat` and readiness all name the same thin
+  top-right panel (~30 s vs 1 min) and agree it evens out with more passes. All 21 ops re-render on the field and
+  the 2×2, undo/redo apply, Auto trim 7.9 % with the highlight-hold offer, taste chips (10 live / 2 at-limit) answer
+  as designed. Nothing overflowing, no console errors. **Not findings, already recorded:** the single field still
+  says "shoot it in mosaic mode" because the sample's mosaic name is not the `"<T> (mosaic)"` convention
+  (2026-10-25 entry); "looks like a Star cluster" (2026-10-17); `/life-list [Still to shoot]` 14.5k px phone
+  (v0.492.2, deliberate); the Dashboard's "Plate-solving isn't set up yet" (dogfood ships no ASTAP).
+
 ## 2026-10-25 (Scout, branch `claude/beautiful-newton-1bsiin`) — QA rotation sweep (2), new angle — the walk-away missing-files hold on a mosaic: one bug, filed reproduced. Inbox unchanged. Dogfood `--mosaic` CLEAN.
 
 - **Inbox:** the same four (#878, #880, #903, #1015), none updated since 2026-10-12, all owner-gated — nothing owed.
