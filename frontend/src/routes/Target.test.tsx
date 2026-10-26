@@ -3176,6 +3176,34 @@ describe("TargetView thin-stack warning's next step", () => {
     expect(warn.textContent).not.toMatch(/add more subs/);
   });
 
+  it("still names the waiting subs while a newer sub is unlocated, by the Process button", async () => {
+    // `scripts/agent-dogfood.sh --combine` step 9 (2026-10-26): one more sub
+    // dropped into the folder, not yet solved, beside three located ones the
+    // picture lacks. "Ready to process?" takes the restack card's slot, and the
+    // figure used to vanish with it — fail-before: "then add more subs".
+    vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
+    vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
+      mkRun({ reusable: true, n_frames_used: 3 }),
+    ]);
+    vi.spyOn(client.api, "listFrames").mockResolvedValue([
+      mkFrame(1), mkFrame(2), mkFrame(3),
+      mkFrame(4, { solved: false, ra_center_deg: null, dec_center_deg: null }),
+    ]);
+    vi.spyOn(client.api, "targetNewLight").mockResolvedValue(
+      mkNewLight({ n_new_subs: 3 }));
+
+    renderTarget();
+
+    await screen.findByText("Ready to process?");
+    const warn = await screen.findByTestId("thin-stack-warning");
+    await waitFor(() => expect(warn.textContent).toContain(
+      "You already have 3 more subs accepted and located that this stack didn't use"));
+    expect(warn.textContent).toContain('press "Process target" to fold them in');
+    expect(warn.textContent).not.toMatch(/add more subs/);
+    // The card it names is the one on screen; the Restack card is not.
+    expect(screen.queryByText(/missing from your current picture/)).toBeNull();
+  });
+
   it("keeps the old advice when the picture has everything its target holds", async () => {
     vi.spyOn(client.api, "getTarget").mockResolvedValue(mkTarget());
     vi.spyOn(client.api, "listStackRuns").mockResolvedValue([
