@@ -5,9 +5,9 @@
 > belongs in `docs/PROCESS-NOTES.md`, never here. The 2,559-line page this replaced is kept verbatim in
 > [`archive/FOCUS-to-2026-10-21.md`](archive/FOCUS-to-2026-10-21.md) — nothing was deleted.
 
-## Front of the queue (2026-10-25)
+## Front of the queue (2026-10-26)
 
-**No ungated bug is open.** Recently closed: the walk-away missing-files hold on a mosaic panel (v0.503.5); Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
+**One ungated bug is open: the hung-ffmpeg-decoder entry at the top of Bugs (Scout sweep (3), 2026-10-26) — take it first.** Recently closed: the walk-away missing-files hold on a mosaic panel (v0.503.5); Compare's Split/Blink on a grown mosaic (v0.503.1); the Scout's 2026-10-21 per-part entry closed with v0.502.40 (readiness / Dashboard
 progress / Tonight badge); a dogfood pass found and fixed the week plan's same-sky flip (v0.502.41); the Scout's sweep (4) fixed a merge that
 deleted a folder a stack was still writing into (v0.502.42). After that, a Builder with nothing ungated should take a beginner feature from "Features that serve
 real workflows" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), or dogfood (`--mosaic --editor`) and file what it finds.
@@ -15,17 +15,18 @@ real workflows" in [`IMPROVEMENTS.md`](IMPROVEMENTS.md), or dogfood (`--mosaic -
 **Gated, do not start:** the un-located-panel entry (second in Bugs) waits on the owner's hint-shape answer; the
 other LEADs and ⚪ notes in Bugs wait on owner/observer measurements — read each one's gate first, and do not
 re-litigate a stand-down that carries numbers. **Issue inbox:** #878, #880, #903, #1015 — all previously acted-on
-and owner-gated, none updated since 2026-10-12 (re-checked 2026-10-25).
+and owner-gated, none updated since 2026-10-12 (re-checked 2026-10-26).
 
 ## QA rotation (Scout)
 
 Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mosaic/walk-away per-panel divergence →
-(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (2), 2026-10-25
-→ next sweep is (3).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
+(3) ASTAP/ffmpeg filesystem side effects with a stub binary → (4) the webapp routers. **Last swept: (3), 2026-10-26
+→ next sweep is (4).** Each (3) sweep must find a *new* angle — the list of angles already run is in the
 `Sweep (3)` entries of `docs/PROCESS-NOTES.md` (grep `sweep (3)`).
 
 ## Run log (newest first)
 
+*2026-10-26 (Scout, branch `claude/beautiful-newton-k4ixuv`) — **QA rotation sweep (3), new angle: a hung ffmpeg decoder (`ffmpeg.iter_frames`, no deadline) can't be cancelled and wedges the single job worker; filed reproduced (top of Bugs).** Inbox: the same four, owner-gated. Suite 8288 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: that entry. **Rotation: (3) done → next sweep is (4).***
 *2026-10-26 (Builder, branch `claude/nice-carson-lejb4i`) — **Big-picture dogfood `--restack --mosaic --editor` CLEAN; nothing shipped.** Both editor drives (field + 2×2) re-rendered all 21 ops, Auto trim 7.9 %, taste chips behaved; restack reel/noise-delta available; nothing overflowing, no console errors; the Target, Dashboard and Tonight paragraphs agree. Baseline suite 8288 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--empty`, `--dithered --big`).*
 *2026-10-26 (Builder, branch `claude/nice-carson-dmwzch`) — **v0.503.7: the thin-stack warning keeps "N located subs a restack would fold in" while a newer sub is unlocated, naming the "Process target" button** (`thinStackWarning` `remedy`), found by `--combine --calibration --editor`'s step 9; that pass otherwise CLEAN (§10 incoming/ unchanged). Baseline suite 8288 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--empty`, `--restack --mosaic`).*
 *2026-10-26 (Builder, branch `claude/nice-carson-igexdq`) — **v0.503.6: Tonight's and "Plan my week"'s framing badge on a single field names the mosaic he already has** (`LibraryTarget.mosaic_companion`, `framingRowBadge`), found reading `--deep --mosaic --editor`; that pass otherwise CLEAN. Baseline suite 8283 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--combine --calibration`, `--empty`).*
@@ -35,7 +36,6 @@ Order (AGENTS.md roles): (1) preview↔export parity at mosaic scale → (2) mos
 *2026-10-25 (Builder, branch `claude/nice-carson-9l2b0t`) — **v0.503.3: "Plan my week"'s closing note said "unlike the others here" while the headline's own target was leaving too** (`closingWeekNote`), found by `--dithered --closing --editor`; that pass otherwise CLEAN (trim 30.7 % vs recorded apron 30.3 %). **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--empty`, `--incoming-lag --no-site`).*
 *2026-10-25 (Builder, branch `claude/nice-carson-wur8iy`) — **v0.503.2: Channel combine's intro read "LRGB(colour from RGB…" — JSX dropped the line break after `</b>`** (`Combine.tsx`); a tree-wide grep for the same shape found no other. Dogfood `--calibration --big --editor` otherwise CLEAN (masters built and applied, 21 ops on field and full-size, trim 7 %). Suite 8275 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood (`--empty`, `--dithered --closing`).*
 *2026-10-24 (Builder, branch `claude/nice-carson-se97e8`) — **v0.503.1: Compare's Split and Blink line up two runs of a grown mosaic by sky** (`compareplace.place_a_on_b`, `GET …/compare-placement`, `SkyFrame`) — the Scout's repro measured at ≤ 1 screen px (was 94) in Chromium on the dogfood `--mosaic` pair; trims and North-up (baked or viewed) followed. Baseline suite 8268 passed / 7 skipped. **START HERE NEXT RUN:** Builder: no ungated bug — beginner feature or dogfood.*
-*2026-10-24 (Scout, branch `claude/beautiful-newton-mkp0sh`) — **QA rotation sweep (1), new angle: `/compare`'s Split and Blink on a grown mosaic overlay two canvases by screen box, not by sky — the same star 94 px apart in the 640×420 box; filed reproduced (top of Bugs).** Inbox: the same four, all owner-gated. Suite 8262 passed / 7 skipped; dogfood `--mosaic` CLEAN (trim 7.9 %). **START HERE NEXT RUN:** Builder: the Compare Split/Blink entry. **Rotation: (1) done → next sweep is (2).***
 
 ## Standing frontier
 
