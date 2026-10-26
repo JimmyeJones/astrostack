@@ -118,6 +118,24 @@ describe("PlanWeekCard", () => {
       .toHaveStyle({ minWidth: "max-content" });
   });
 
+  it("names the mosaic he already has instead of prescribing one", async () => {
+    // The week's pick can be a single field whose object the library also holds
+    // as "<T> (mosaic)"; telling him to shoot a mosaic of it is a session he has
+    // already shot. The chip stays (same place, same once-per-target rule) but
+    // says so.
+    vi.spyOn(client.api, "getPlanWeek").mockResolvedValue(plan({
+      nights: [night("2026-09-02", {
+        best: { ...night("2026-09-02").best!, ...MOSAIC, mosaic_companion: "M 31 (mosaic)" },
+      })],
+    }));
+    renderCard();
+    await waitFor(() => expect(screen.getByText("Plan my week")).toBeInTheDocument());
+    expect(screen.getByText("Mosaic started")).toBeInTheDocument();
+    expect(screen.queryByText("Needs 3×3 mosaic")).not.toBeInTheDocument();
+    expect(screen.getByTestId("plan-week-framing").getAttribute("title"))
+      .toContain("You already have a mosaic of it — M 31 (mosaic)");
+  });
+
   it("says it once per target, not once per night", async () => {
     // A week where one target is best-placed on several nights would otherwise
     // stack identical chips down one column — always-on repetition on a card the

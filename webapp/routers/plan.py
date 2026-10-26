@@ -238,6 +238,18 @@ def _library_targets(request: Request) -> list[LibraryTarget]:
 _MOSAIC_CANVAS_FIELD_FULLS = 1.3
 
 
+def _mosaic_companion_name(entry, targets) -> str | None:  # noqa: ANN001
+    """The mosaic companion's display name, or ``None`` — never raises, so a
+    registry oddity costs this row its hint rather than the whole plan."""
+    from webapp.mosaic_companion import find_mosaic_companion
+
+    try:
+        found = find_mosaic_companion(entry, targets)
+    except Exception:  # noqa: BLE001
+        return None
+    return found.name if found is not None else None
+
+
 def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget]:  # noqa: ANN001
     """Build the annotated 'already targeted' rows (see :func:`_library_targets`).
 
@@ -313,6 +325,11 @@ def _annotate_library_targets(lib, targets, night_of=None) -> list[LibraryTarget
             # both of which still want the verdict — and >1 exactly when the
             # newest *stacking* run's canvas spans more sky than one frame.
             canvas_is_mosaic=(field_fulls or 1.0) > _MOSAIC_CANVAS_FIELD_FULLS,
+            # …and when it is a single field, whether the library already has
+            # the mosaic of it — so "Needs 3×3 mosaic" can point at the picture
+            # he is building instead of prescribing it from scratch. Registry
+            # only (no project opened), the same answer the Target page gives.
+            mosaic_companion=_mosaic_companion_name(t, targets),
         ))
     return out
 

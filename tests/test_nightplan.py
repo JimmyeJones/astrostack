@@ -2196,6 +2196,34 @@ def test_the_week_plan_stands_the_verdict_down_on_a_target_already_a_mosaic():
     assert all(p.safe == "M31" and p.score > 0 for p in picks)
 
 
+def test_both_planners_carry_a_single_fields_mosaic_companion():
+    """A single field whose object the library also holds as a mosaic keeps
+    its framing verdict on both cards and gains *which* mosaic, so the badge can
+    point at it; a target already a mosaic drops it with the verdict."""
+    def m31(**kw):  # noqa: ANN003, ANN202
+        return LibraryTarget(safe="M31", name="Andromeda Galaxy", ra_deg=10.68,
+                             dec_deg=41.27, frames_accepted=100,
+                             total_exposure_s=1000.0, size_arcmin=178.0,
+                             size_minor_arcmin=63.0, **kw)
+
+    week = np_plan.plan_week(LONDON, [m31(mosaic_companion="M 31 (mosaic)")],
+                             start_utc=JAN_EVENING, nights=3)
+    picks = [n.best for n in week.nights if n.best is not None]
+    assert picks
+    assert all(p.framing is not None and p.mosaic_companion == "M 31 (mosaic)"
+               for p in picks)
+    tonight = np_plan.plan_tonight(LONDON, JAN_EVENING, include_catalog=False,
+                                   library_targets=[m31(mosaic_companion="M 31 (mosaic)")])
+    assert tonight.targets[0].mosaic_companion == "M 31 (mosaic)"
+
+    done = m31(mosaic_companion="M 31 (mosaic)", canvas_is_mosaic=True)
+    week = np_plan.plan_week(LONDON, [done], start_utc=JAN_EVENING, nights=3)
+    assert all(n.best.mosaic_companion is None for n in week.nights if n.best)
+    tonight = np_plan.plan_tonight(LONDON, JAN_EVENING, include_catalog=False,
+                                   library_targets=[done])
+    assert tonight.targets[0].mosaic_companion is None
+
+
 def test_plan_week_marks_the_night_already_under_way():
     """The flag has to reach the card that prints the number, not stop at the
     window: the week table's first row is the one that disagrees with the

@@ -1,5 +1,36 @@
 # Shipped — the record
 
+## 2026-10-26 (Builder, branch `claude/nice-carson-igexdq`) — the planners point a single field at the mosaic he already has
+
+### v0.503.6 — `LibraryTarget.mosaic_companion`, `PlannedTarget.mosaic_companion`, `WeekTargetPick.mosaic_companion`, `framingRowBadge`
+
+**What.** v0.503.0 taught the single field's *Target page* that the library already holds a mosaic of the same object
+(the Seestar files mosaic subs under `<T>_mosaic_sub/`, which the convention keeps as its own `"<T> (mosaic)"` target),
+so it stopped prescribing a session he has already shot. The two planner cards on `/tonight` — the already-shot row
+and the "Plan my week" pick — never got the same knowledge: on the single field they still badged an orange
+**"Needs 3×3 mosaic"** whose hover reads *"shoot it in mosaic mode to capture all of it"*, on the screen he reads while
+setting the scope up. Found reading a `--deep --mosaic --editor` dogfood pass as one paragraph (that pass was
+otherwise CLEAN — trim 7.9 %, both editor drives clean, no overflow or console error, the 1,200-sub frames table
+windowed).
+
+**How.** `_annotate_library_targets` sets `LibraryTarget.mosaic_companion` from `find_mosaic_companion` (registry-only,
+the Target page's own answer, wrapped so it can never fail the plan); `plan_tonight` and `plan_week` carry it onto
+`PlannedTarget` / `WeekTargetPick` beside the framing verdict, and drop it under the same `canvas_is_mosaic`
+stand-down. `framingRowBadge(framing, mosaic, companion)` then, on the `mosaic` level only (the Target page's
+"fragment" bar), labels the chip **"Mosaic started"** in calm blue with the hover *"This target is bigger than … About
+a 3×3 mosaic covers all of it. You already have a mosaic of it — M 42 (mosaic) — so that's the picture to keep adding
+to."* Nothing removed: the verdict, the grid and the effort line all stay in the hover; `tight`, no companion and an
+older backend are byte-for-byte today's badge.
+
+**Upgrade-safe.** Additive, defaulted fields on two responses; no config, schema, on-disk, default or threshold change.
+
+**Tests (+8).** `tests/webapp/test_plan.py` (+3: the rows carry the Target page's own answer on both endpoints, nothing
+for another object's mosaic, nothing under the mosaic-canvas stand-down — all three fail on the reverted backend),
+`tests/test_nightplan.py` (+1, the engine carries and drops it), `tonight.test.ts` (+2), `PlanWeekCard.test.tsx` (+1),
+`Tonight.test.tsx` (+1). The fixture's week pick turned out to be the mosaic twin (the deeper one), so the single-field
+week pick is pinned at the engine level rather than by a vacuous endpoint loop — caught by asserting the loop was
+non-empty.
+
 ## 2026-10-25 (Builder, branch `claude/nice-carson-nryy30`) — the walk-away missing-files hold judges a mosaic per panel
 
 ### v0.503.5 — `webapp/pipeline.py` `_auto_stack_readability_hold` → `_panels_with_nothing_readable`

@@ -84,7 +84,7 @@ function TargetRow({ t, usualPaceS }: { t: PlannedTarget; usualPaceS?: number | 
   // this owner's own measured pace — the question a beginner actually asks next.
   // Silent for an owner with no pace history yet, and on an older backend.
   const framingBadge = withMosaicEffort(
-    framingRowBadge(t.framing, t.mosaic), t.mosaic, t.type, usualPaceS,
+    framingRowBadge(t.framing, t.mosaic, t.mosaic_companion), t.mosaic, t.type, usualPaceS,
     t.difficulty);
   // "How hard for a Seestar?" so a beginner sees difficulty while choosing, not
   // only after shooting. On every row the bundled catalog has a verdict for,

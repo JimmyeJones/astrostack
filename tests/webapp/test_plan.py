@@ -1484,6 +1484,97 @@ def test_plan_week_stands_the_framing_verdict_down_on_a_mosaic_target(
     assert all(p["safe"] and p["score"] > 0.0 for p in picks)
 
 
+def _add_mosaic_of_m42(data_root, name="M 42 (mosaic)", ra=83.6, dec=-5.4):  # noqa: ANN001, ANN202
+    """A separate mosaic target of the fixture's M 42 — what the Seestar's own
+    ``M_42_mosaic_sub/`` folder becomes under the naming convention."""
+    from seestack.io.library import Library
+    from seestack.io.project import FrameRow
+
+    lib = Library.open_or_create(data_root / "library")
+    try:
+        entry, proj = lib.open_or_create_target(name)
+        try:
+            for i in range(4):
+                proj.add_frame(FrameRow(
+                    source_path=f"/data/incoming/{entry.safe_name}/Light_{i:03d}.fit",
+                    exposure_s=10.0, ra_center_deg=ra, dec_center_deg=dec,
+                ))
+        finally:
+            proj.close()
+        lib.refresh_target_stats(entry.safe_name)
+    finally:
+        lib.close()
+    return entry.safe_name
+
+
+def test_tonight_and_the_week_name_the_mosaic_a_single_field_already_has(
+        client, solved_library):
+    """A single field of something bigger than one frame is told "Needs 3×3
+    mosaic" on both planner cards — but for a heavy mosaic user that session is
+    usually already shot: the Seestar files it as its own ``"<T> (mosaic)"``
+    target. The verdict stays (the object really is bigger than this field);
+    the rows now also carry *which* mosaic he has, the same answer the Target
+    page's ``mosaic_companion`` gives, so the badge can point at it."""
+    mosaic_safe = _add_mosaic_of_m42(solved_library)
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert m42["framing"] is not None and m42["framing"]["level"] == "mosaic"
+    assert m42["mosaic_companion"] == "M 42 (mosaic)"
+    # The same answer the Target page serves for this target.
+    detail = client.get("/api/targets/M_42").json()
+    assert detail["mosaic_companion"]["name"] == m42["mosaic_companion"]
+    # A mosaic is never told it has a mosaic, and catalog rows carry nothing.
+    mosaic_row = next(t for t in body["targets"]
+                      if t["already_targeted"] and t["target_safe"] == mosaic_safe)
+    assert mosaic_row["mosaic_companion"] is None
+    assert all(t["mosaic_companion"] is None for t in body["targets"]
+               if not t["already_targeted"])
+
+    week = client.get("/api/plan/week", params={"when": JAN_EVENING}).json()
+    picks = [n["best"] for n in week["nights"] if n["best"] is not None]
+    assert picks
+    # Every pick carries the field, and it is the same answer the tonight row
+    # for that target gives — the two cards sit on one page. (On this fixture
+    # the week's pick is the mosaic itself, the deeper of the two same-sky
+    # twins; the single-field pick is pinned in `tests/test_nightplan.py`.)
+    rows = {t["target_safe"]: t for t in body["targets"] if t["already_targeted"]}
+    for pick in picks:
+        assert pick["mosaic_companion"] == rows[pick["safe"]]["mosaic_companion"]
+
+
+def test_planner_rows_carry_no_mosaic_companion_without_one(client, solved_library):
+    """No mosaic of this object (or only another object's) → ``None``, so the
+    badge is exactly what it was."""
+    _add_mosaic_of_m42(solved_library, name="M 31 (mosaic)", ra=10.68, dec=41.27)
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    m42 = next(t for t in body["targets"]
+               if t["already_targeted"] and t["target_safe"] == "M_42")
+    assert m42["framing"] is not None
+    assert m42["mosaic_companion"] is None
+
+
+def test_a_mosaic_canvas_carries_no_mosaic_companion(
+        client, solved_library, monkeypatch):
+    """The stand-down that drops the framing verdict on a target already shot
+    as a mosaic drops the companion with it — there is no advice left for it
+    to change."""
+    from webapp.routers import plan as plan_router
+
+    _add_mosaic_of_m42(solved_library)
+    client.put("/api/settings", json={"site_lat": 51.5, "site_lon": -0.13})
+    monkeypatch.setattr(plan_router, "_annotate_library_targets",
+                        _mosaic_canvas(plan_router._annotate_library_targets))
+    body = client.get("/api/plan/tonight", params={"when": JAN_EVENING}).json()
+    assert all(t["mosaic_companion"] is None for t in body["targets"])
+    week = client.get("/api/plan/week", params={"when": JAN_EVENING}).json()
+    assert all(n["best"]["mosaic_companion"] is None
+               for n in week["nights"] if n["best"] is not None)
+
+
 def test_plan_week_without_location_self_hides(client, solved_library):
     """No site configured and no SITELAT in the frames → a clean, empty 200 so
     the card hides itself and the UI can explain why."""
